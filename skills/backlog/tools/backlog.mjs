@@ -17,6 +17,10 @@ import { fileURLToPath } from 'node:url'
 // the call returns, so it never keeps a handle open past main()).
 import { spawnSync } from 'node:child_process'
 
+// `import`'s text half (task-50), in a module of its own so each transformation is provable from a table rather than through a fake API and a git fixture. One
+// direction only: `import-lib.mjs` imports nothing from this file, and nothing from node at all.
+import { IMPORT_BODY_CAP, splitOutcome, renderImportFooter, blobLink, fitBody, importOrder, countersOf } from './import-lib.mjs'
+
 // Section name -> id prefix. Fixed and exported so every later command (ids,
 // board, move) keys off this one map instead of re-deriving prefixes.
 export const SECTIONS = {
@@ -2929,7 +2933,10 @@ export async function main(argv) {
         return e.code
       }
       const { section, status } = importPlace(rel)
-      const id = typeof parsed.data.id === 'string' && parsed.data.id !== '' ? parsed.data.id : rel
+      // The FILENAME is the id, not the frontmatter: `locateItem` resolves every id in this store by matching `<id>-` against directory entries, so the name is
+      // what the rest of the store already agrees on, and a frontmatter `id:` that disagrees with it is a file nothing could find in the first place.
+      const named = /^([a-z]+-\d+)-/.exec(path.basename(rel))
+      const id = named === null ? (typeof parsed.data.id === 'string' && parsed.data.id !== '' ? parsed.data.id : rel) : named[1]
       const kind = typeof parsed.data.kind === 'string' ? parsed.data.kind.trim() : ''
       if (kind !== '' && kind !== 'chore' && kind !== 'debt') {
         console.error(`${id}: kind ${JSON.stringify(kind)} is not chore or debt — fix the frontmatter first`)
@@ -2938,7 +2945,10 @@ export async function main(argv) {
       // An open item with a stamp is somebody's live session, and the import would delete the file out from under it. The same stamp on a `done/` or
       // `out-of-scope/` file is history — the item is closed and nobody is holding it — so it is read past deliberately.
       if (status === 'open' && typeof parsed.data.started === 'string' && parsed.data.started.trim() !== '') inProgress.push(id)
-      plan.push({ id, relPath: rel, section, status, data: parsed.data, body: parsed.body })
+      // A done item's `## Outcome` becomes the closing comment rather than part of the issue body (§8.3): GitHub renders a closing comment as the answer to
+      // "what happened", which is exactly what that section is, and leaving it in the body would say it twice.
+      const split = status === 'done' ? splitOutcome(parsed.body) : { rest: parsed.body, outcome: '' }
+      plan.push({ id, relPath: rel, section, status, created: parsed.data.created, data: parsed.data, body: split.rest, outcome: split.outcome })
     }
     if (inProgress.length > 0) {
       console.error(`${inProgress.length} open item(s) are in progress — stop them first: ${inProgress.join(', ')}`)
@@ -2957,10 +2967,98 @@ export async function main(argv) {
     }
 
     void index
-    void resuming
-    void forms
-    console.error('import: the passes are not implemented yet')
-    return 1
+
+    // --- the marker, then the writes (§8.2) ---------------------------------
+    //
+    // The marker goes down FIRST because the seven item write routes refuse a `files` project, and it is not rewritten on a resume: it is already this
+    // project's committed identity, and re-writing a file to the bytes it already holds is a diff somebody has to read.
+    if (!resuming) writeSourceMarker(backlog, repo)
+    const committable = [`backlog/${SOURCE_MARKER}`]
+    if (forms) {
+      const result = writeIssueForms(root)
+      committable.push(...result.written)
+    }
+    // The write routes gate `project` against the registry by a raw string compare, so a project nobody has registered cannot be written to at all. Best effort
+    // for the reason `init` and `new` use it: a registry this command cannot update is not a reason to refuse an import, and the refusal it would cause instead
+    // arrives from the server with its own sentence.
+    registerBestEffort(root)
+    const project = registryRoot(root)
+
+    const ordered = importOrder(plan)
+    const map = new Map()
+    // One stamp for the whole command, so every synthetic claim this import takes carries the same session identity — they are one session's work, and a claim
+    // per timestamp would read as a different importer for every item.
+    const stamp = new Date().toISOString()
+    const session = `import-${stamp}`
+    // One request a second by default, which is what keeps a whole-store import inside GitHub's secondary rate limits (§8.3). Read once, so the suite can set
+    // `0` and a slow repository can be given more. Reads are not paced — they cost a different budget and this command makes few of them.
+    const paceRaw = Number(process.env.BM_IMPORT_PACE_MS ?? '1000')
+    const paceMs = Number.isFinite(paceRaw) && paceRaw >= 0 ? paceRaw : 1000
+    const pace = () => (paceMs === 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, paceMs)))
+
+    // Which item the next failure names. The operator's copy of this store is still FILES at this point, so the old id is the only name they can act on — an
+    // issue number they have never seen would send them to a tracker to find out what broke.
+    let at = null
+    try {
+      for (const item of ordered) {
+        at = item.id
+
+        const footer = renderImportFooter({ id: item.id, created: item.data.created, tags: item.data.tags, relPath: item.relPath })
+        // The cap is spent on the body, so the footer's length is taken out of it first: the footer is the idempotency key a resume reads, and a body that lost
+        // it to truncation would be re-imported as a second issue.
+        const fitted = fitBody(item.body.trimEnd(), IMPORT_BODY_CAP - footer.length - 2, blobLink(repo, git.sha, item.relPath))
+        const issueBody = fitted.text === '' ? footer : `${fitted.text}\n\n${footer}`
+
+        // `from:` is deliberately NOT sent. The route writes it as a `_From #<n>._` line composed from the OTHER item's issue number, and that number does not
+        // exist yet for half the store — pass 2 writes the line itself, once every id is known.
+        const payload = { project, section: item.section, title: item.data.title, body: issueBody }
+        const kind = typeof item.data.kind === 'string' ? item.data.kind.trim() : ''
+        if (kind !== '') payload.kind = kind
+        // Presence, not truth, exactly as `parseItemForGate` reads the same marker: a `runner-fix:` key with any value but `false` means the human who groomed
+        // the item said it repairs the runner.
+        if ('runner-fix' in item.data && String(item.data['runner-fix']).trim() !== 'false') payload.runnerFix = true
+
+        const created = await apiPost('create', payload)
+        const number = created.number
+        map.set(item.id, number)
+        const ref = `#${number}`
+        await pace()
+
+        // The four counters are a permanent record of work somebody did, and the tracker keeps them in a claim comment (§6.4) — so an item that has any is
+        // given one synthetic claim and that claim is released immediately with the counters billed onto it. Before the close, always: `claim` refuses a closed
+        // issue, and a `done/` item is about to be closed two requests from here.
+        const counters = countersOf(item.data)
+        if (counters !== null) {
+          const claimed = await apiPost('claim', { project, id: ref, phase: 'execute', session })
+          await pace()
+          await apiPost('release', { project, id: ref, commentId: claimed.commentId, session, reason: 'imported', counters })
+          await pace()
+        }
+
+        // Two closed shapes and only one of them needs a request: `create` with `section: 'out-of-scope'` already closed a rejected item `not_planned`, and an
+        // open item is not closed at all. `state done` is what posts the Outcome comment and then closes `completed`, in that order, inside the adapter.
+        if (item.status === 'done') {
+          const closing = { project, id: ref, status: 'done' }
+          if (item.outcome !== '') closing.outcome = item.outcome
+          await apiPost('state', closing)
+          await pace()
+        }
+
+        console.log(`${item.id} → ${ref}${fitted.truncated ? ' (truncated)' : ''}`)
+      }
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      // A 429 carries the reset TIME as its own field, so the line prints what the server said rather than a duration this file worked out — the two disagree
+      // the moment anything is slow, and the operator is going to wait against a clock either way. No retry and no skip: an import that skipped an item would
+      // delete its file at the end with nothing on the tracker carrying it.
+      const resetAt = e.payload && typeof e.payload.resetAt === 'string' ? ` — retry after ${e.payload.resetAt}` : ''
+      console.error(`import stopped at ${at}: ${e.message}${resetAt}`)
+      return e.code
+    }
+
+    void committable
+    console.log(`pass 1 complete — ${map.size} issues`)
+    return 0
   }
 
   // The registry's one removal path, and the only command in this file that

@@ -6,6 +6,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles } from './backlog.mjs'
+import { IMPORT_BODY_CAP } from './import-lib.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
@@ -3577,7 +3578,9 @@ function fakeApi(routes) {
       requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body })
 
       const answer = routes[url.pathname]
-      const resolved = typeof answer === 'function' ? answer(body) : answer
+      // A route function is given the REQUEST as well as the body, because one path answers two verbs: `GET /api/items/body` is an item's Markdown and
+      // `POST /api/items/body` replaces it, and a fake that could not tell them apart would have to answer one of them wrongly.
+      const resolved = typeof answer === 'function' ? answer(body, { method: req.method, query: Object.fromEntries(url.searchParams) }) : answer
       if (resolved === undefined) {
         res.writeHead(404, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: `no fake route for ${url.pathname}` }))
@@ -4610,4 +4613,231 @@ test('import refuses a refactor kind the tracker has no label for, and accepts d
   const ok = importFixture({ items: [TASK_ONE, { relPath: 'refactors/open/ref-4-x.md', text: itemText('id: ref-4\ntitle: X\ncreated: 2026-08-05\nkind: debt', 'why') }] })
   const reached = runWithEnv(ok.dir, { ...process.env, BM_API_PORT: '1' }, 'import', 'github')
   assert.equal(reached.status, 5, reached.stderr)
+})
+
+/**
+ * The routes an import talks to, answering the shapes the real server answers.
+ *
+ * Issue numbers start at `4` and count up per `create`, so a case can name `#4` without first reading the response: the numbers a real repository hands out are
+ * arbitrary, and a fake that mirrored that would make every assertion below a lookup. The fake also HOLDS each issue's Markdown, because pass 2 reads a body
+ * back before patching it — `GET /api/items/body` answers what the `create` (or the last patch) recorded, which is the only way a cross-link rewrite can be
+ * asserted end to end.
+ */
+function githubRoutes({ projectPath = '', repo = 'futin/x', overrides = {} } = {}) {
+  const bodies = new Map()
+  const numbers = []
+  let claims = 0
+  const numberOf = (ref) => Number(String(ref).replace(/^.*#/, ''))
+  const routes = {
+    '/api/items': () => ({
+      body: {
+        items: numbers.map((n) => apiItem({ id: `#${n}`, projectPath, path: `gh:${repo}#${n}`, updated: `2026-09-21T10:00:0${n}Z` })),
+        errors: [],
+      },
+    }),
+    '/api/items/create': (body) => {
+      const number = 4 + numbers.length
+      numbers.push(number)
+      bodies.set(number, body.body)
+      return { body: { id: `#${number}`, urn: `gh:${repo}#${number}`, url: `https://github.com/${repo}/issues/${number}`, number } }
+    },
+    '/api/items/claim': () => ({ body: { commentId: 900 + ++claims, record: {} } }),
+    '/api/items/release': () => ({ body: { ok: true } }),
+    '/api/items/state': () => ({ body: { ok: true, url: `https://github.com/${repo}/issues/1` } }),
+    '/api/items/body': (body, { method, query }) => {
+      if (method === 'GET') return { body: bodies.get(numberOf(query.path)) ?? '' }
+      bodies.set(numberOf(body.id), body.body)
+      return { body: { ok: true, updatedAt: '2026-09-21T10:00:00Z' } }
+    },
+    ...overrides,
+  }
+  return { routes, bodies, numbers }
+}
+
+const posts = (requests, route) => requests.filter((r) => r.method === 'POST' && r.path === `/api/items/${route}`)
+
+/** The four items every pass-1 and pass-2 case works from: two open, one done with counters and an Outcome, one rejected. */
+const importItems = () => [
+  {
+    relPath: 'tasks/open/task-1-one.md',
+    text: itemText('id: task-1\ntitle: one\ncreated: 2026-01-01\ntags: x, y\nrunner-fix: true', 'Blocked on bug-2 and task-99.\n\n```\nsee task-3\n```'),
+  },
+  { relPath: 'bugs/open/bug-2-two.md', text: itemText('id: bug-2\ntitle: two\ncreated: 2026-02-01\nfrom: task-1', '## Cause\n\nc\n\n## Fix\n\nf') },
+  {
+    relPath: 'tasks/done/task-3-three.md',
+    text: itemText('id: task-3\ntitle: three\ncreated: 2026-01-15\nfrom: idea-9\nexecute-elapsed: 120\nexecute-tokens: 3400', '## Plan\n\nplan text\n\n## Outcome\n\nShipped it.'),
+  },
+  { relPath: 'out-of-scope/oos-5-five.md', text: itemText('id: oos-5\ntitle: five\ncreated: 2025-12-01', 'no ids here') },
+]
+
+test('import writes the marker and the forms before its first request, and the probe is that first request', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n')
+  for (const form of FORM_FILES) assert.equal(fs.existsSync(formPath(dir, form)), true, `${form} was not written`)
+  assert.equal(requests[0].method, 'GET')
+  assert.equal(requests[0].path, '/api/items')
+  assert.equal(requests[1].method, 'POST')
+  assert.equal(requests[1].path, '/api/items/create')
+})
+
+test('import --no-forms writes the marker and no issue forms', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github', '--no-forms'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), true)
+  for (const form of FORM_FILES) assert.equal(fs.existsSync(formPath(dir, form)), false, `${form} was written under --no-forms`)
+})
+
+test('import creates issues open-first by created date, then done, then rejected', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(
+    posts(requests, 'create').map((r) => r.body.title),
+    ['one', 'two', 'three', 'five'],
+  )
+})
+
+test('import composes each create from the frontmatter the tracker has a field for, and puts the rest in the footer', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const creates = posts(requests, 'create')
+  const [one, two, , five] = creates.map((r) => r.body)
+
+  assert.equal(one.section, 'tasks')
+  assert.equal(one.runnerFix, true)
+  assert.equal('from' in one, false, 'a create never carries from — the link is a body line pass 2 writes')
+  assert.equal('kind' in one, false)
+  assert.ok(one.body.endsWith('<!-- bm:imported from=task-1 created=2026-01-01 tags=x,y -->\n_Imported from backlog/tasks/open/task-1-one.md_'), one.body.slice(-200))
+  assert.equal('runnerFix' in two, false)
+  assert.equal(five.section, 'out-of-scope')
+  // The label set is the closed eight the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
+  for (const create of creates) assert.equal('labels' in create.body, false)
+  const tagsOutsideFooter = one.body.replace(/<!-- bm:imported[^]*$/, '')
+  assert.equal(/\bx, y\b/.test(tagsOutsideFooter), false, 'the tags line must not survive anywhere but the footer')
+})
+
+test('import lifts a done item’s Outcome out of the body and sends it as the closing comment', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const three = posts(requests, 'create')[2].body
+  assert.equal(three.body.includes('Shipped it.'), false, 'the Outcome belongs in the closing comment, not the issue body')
+  const states = posts(requests, 'state')
+  assert.equal(states.length, 1, 'exactly one state request: done closes with a comment, rejected was closed by create, open is not closed')
+  assert.deepEqual(states[0].body, { project: dir, id: '#6', status: 'done', outcome: 'Shipped it.' })
+})
+
+test('import bills an item’s counters as a released claim, before the issue is closed', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const claims = posts(requests, 'claim')
+  const releases = posts(requests, 'release')
+  assert.equal(claims.length, 1, 'only the item with counters gets a claim')
+  assert.equal(releases.length, 1)
+  assert.equal(claims[0].body.id, '#6')
+  assert.equal(claims[0].body.phase, 'execute')
+  assert.match(claims[0].body.session, /^import-\d{4}-/)
+  assert.equal(releases[0].body.session, claims[0].body.session)
+  assert.equal(releases[0].body.reason, 'imported')
+  assert.equal(releases[0].body.commentId, 901)
+  assert.deepEqual(releases[0].body.counters, { groomElapsed: 0, executeElapsed: 120, groomTokens: 0, executeTokens: 3400 })
+  // `claim` refuses a closed issue, so the pair has to land before the close — asserted as an ORDER, since both requests succeed either way.
+  const forSix = requests.filter((r) => r.method === 'POST').map((r) => r.path.replace('/api/items/', ''))
+  assert.deepEqual(forSix.slice(2), ['create', 'claim', 'release', 'state', 'create'])
+})
+
+test('import cuts an over-cap body at a heading, links the rest at HEAD, and keeps the footer last', async () => {
+  const big = '-'.repeat(500) + '\n\n## A\n' + 'a'.repeat(30000) + '\n\n## B\n' + 'b'.repeat(30000) + '\n\n## C\nCCC-MARKER\n' + 'c'.repeat(10000)
+  const { dir, sha } = importFixture({ items: [{ relPath: 'tasks/open/task-7-big.md', text: itemText('id: task-7\ntitle: big\ncreated: 2026-03-01', big) }] })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const body = posts(requests, 'create')[0].body.body
+  assert.ok(body.length <= IMPORT_BODY_CAP, `body is ${body.length} characters`)
+  assert.ok(body.includes('## B'))
+  assert.equal(body.includes('CCC-MARKER'), false)
+  assert.ok(body.includes(`_Truncated. Full text: https://github.com/futin/x/blob/${sha}/backlog/tasks/open/task-7-big.md_`), 'the truncation link pins files at HEAD')
+  assert.ok(body.endsWith('_Imported from backlog/tasks/open/task-7-big.md_'), 'the footer is appended after the trailer so it always survives')
+  assert.match(out.stdout, /task-7 → #4 \(truncated\)/)
+})
+
+test('import prints the id map as it goes, one line per item', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const lines = out.stdout.split('\n').filter((line) => line.includes(' → #'))
+  assert.deepEqual(lines, ['task-1 → #4', 'bug-2 → #5', 'task-3 → #6', 'oos-5 → #7'])
+})
+
+test('import stops at the first refused request, keeping the marker and every item file', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const before = treeSnapshot(dir)
+  const { routes } = githubRoutes({ projectPath: dir })
+  let creates = 0
+  const created = routes['/api/items/create']
+  routes['/api/items/create'] = (body, req) => {
+    creates += 1
+    return creates === 2 ? { status: 502, body: { error: 'GitHub answered 502' } } : created(body, req)
+  }
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /import stopped at bug-2: GitHub answered 502/)
+  // The marker is the one thing a failure leaves behind, and that is spec §8.2: it had to be written before the first create, and a re-run resumes from it.
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), true)
+  for (const [rel, text] of Object.entries(before)) {
+    if (rel.endsWith('.md')) assert.equal(fs.readFileSync(path.join(dir, rel), 'utf8'), text, `${rel} changed`)
+  }
+  const last = requests[requests.length - 1]
+  assert.equal(last.path, '/api/items/create', 'nothing ran after the refused create')
+})
+
+test('import names the reset time the server sent when a request is rate-limited', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+  routes['/api/items/create'] = () => ({ status: 429, body: { error: 'GitHub rate limit', resetAt: '2026-09-21T11:05:00Z' } })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /import stopped at task-1: GitHub rate limit — retry after 2026-09-21T11:05:00Z/)
+  assert.equal(posts(requests, 'create').length, 1)
+  assert.equal(fs.existsSync(path.join(dir, 'backlog', 'tasks', 'open', 'task-1-one.md')), true)
+})
+
+test('the import pace defaults to one request a second', () => {
+  // A source guard, the shape this repo already uses for the tailnet port: the default cannot be asserted behaviourally without making every case above ten
+  // seconds slower, and the value is what keeps a whole-store import inside GitHub's secondary rate limits.
+  const source = fs.readFileSync(SCRIPT, 'utf8')
+  const line = source.split('\n').find((l) => l.includes('BM_IMPORT_PACE_MS') && l.includes('1000'))
+  assert.ok(line !== undefined, 'no line reads BM_IMPORT_PACE_MS with a default of 1000')
 })
