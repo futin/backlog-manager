@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
+import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { BOARD_TRACKER_POLL_MS } from '../client/src/hooks/useBoard';
 import { TRACKER_POLL_MS } from '../server/src/tracker/poller.service';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
@@ -39,9 +40,9 @@ function item(over: Partial<BacklogItem>): BacklogItem {
   const base: BacklogItem = {
     id: 'bug-1',
     title: 'a files bug',
-    created: '2026-09-01',
+    created: daysAgoDate(2),
     started: '',
-    updated: new Date().toISOString().slice(0, 19) + 'Z',
+    updated: daysAgoStamp(0),
     lastCommit: '',
     phase: '',
     groomElapsed: 0,
@@ -179,7 +180,7 @@ describe('dispatch on a tracker project', () => {
      with no tracker-specific branch anywhere. DISABLED rather than hidden —
      CLAUDE.md's rule — because it is a fact about the item, not the project. */
   it('disables the control for an item a live claim holds', async () => {
-    await renderBoard([item({}), issueItem({ groomed: true, started: new Date().toISOString(), phase: 'groom' })]);
+    await renderBoard([item({}), issueItem({ groomed: true, started: daysAgoStamp(0), phase: 'groom' })]);
 
     const button = within(card('an issue')).getByRole('button', { name: /execute/i });
     expect(button).toBeInTheDocument();

@@ -9,6 +9,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import rawFixture from './fixtures/orchestrator-run.json';
+import { daysAgoDate } from './helpers/dates';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 
@@ -22,7 +23,7 @@ function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'task-1',
     title: 'a task',
-    created: '2026-08-20',
+    created: daysAgoDate(2),
     started: '',
     tags: [],
     updated: '',

@@ -4,9 +4,12 @@ title: Three board fixture tests carry a 2026-08-20 created date and went red wh
 created: 2026-09-21
 tags: tests, fixtures, board, stale
 runner-fix: true
-updated: 2026-09-21T10:50:59Z
+updated: 2026-09-21T13:34:19Z
 groom-elapsed: 356
 groom-tokens: 69561
+started: 2026-09-21T12:38:05Z
+execute-elapsed: 3374
+execute-tokens: 224988
 ---
 
 ## Symptom
@@ -140,3 +143,84 @@ purpose. If a later groom disagrees, the thing to re-check is whether `pnpm test
 
 **Done when.** `pnpm test` is green on a clean `main` on any date, the two clocks are one clock in every jsdom suite, and
 `test/fixture-clock.test.ts` stands as the reason the next person cannot reintroduce it without saying why.
+
+## Outcome
+
+2026-09-21 — fixed as planned, all three parts. The two clocks are one clock in every jsdom suite: `test/helpers/dates.ts` is the single home
+(`daysAgoDate(days)` → `YYYY-MM-DD`, `daysAgoStamp(days)` → second-precision UTC, both reading `Date.now()` at call time so a `beforeEach` fake clock is
+honoured), the three hand-rolled copies in `board.test.tsx`, `archive.test.tsx` and `dialog-escape.test.tsx` are deleted and re-pointed at it, and every
+absolute `created`/`updated`/`lastCommit`/`started` literal in a `*.test.tsx` fixture is now a relative call. `test/fixture-clock.test.ts` is the source guard
+that keeps the class from coming back.
+
+Three literals were kept deliberately, and each says why in its own file rather than in this Outcome alone:
+
+- `item-modal.test.tsx` — the allowlist's one entry: the case asserts `factValue('created')` renders as exactly `'2026-08-20'`, and it renders `ItemModal`
+  directly, never through `leavesBoard`, so nothing there can age off a board.
+- `board.test.tsx`'s `CREATED` — a literal behind a NAME, which the guard's pattern deliberately does not match. Safe only because that suite's fixtures carry
+  `updated: agoISO(0)`, which outranks `created` on `lastTouched`'s first rung; its comment now states that dependency, since it is the whole reason the
+  exception holds.
+- `test/helpers/store.ts` — `created: 2026-08-20` written into real item files for the SERVER suites. Staleness is derived client-side and the server never
+  evaluates it, and the guard scans `*.test.tsx` only, so the literal is not a bomb and was left alone (the plan's own call).
+
+`dispatch-button.test.tsx` needed a third shape: eight `started` sites plus one assertion that compares the rendered text against the fixture's own characters.
+A module-level `const STARTED = daysAgoStamp(24)` solves it — the only module-scope `daysAgo*` call in the tree, deliberate because that file installs no fake
+clock and two calls a second apart would have made the assertion flaky.
+
+### Verification
+
+`pnpm test` — both runners, on the real clock:
+
+```
+Test Suites: 129 passed, 129 total
+Tests:       2119 passed, 2119 total
+
+# tests 683
+# pass 683
+# fail 0
+
+PASS  jest
+PASS  node --test (skills)
+
+pnpm test: both runners passed.
+```
+
+`pnpm run typecheck` — clean, no output past the command echo:
+
+```
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo
+```
+
+The two originally-red suites, before and after, on the real clock:
+
+```
+before:  Test Suites: 2 failed, 2 total   Tests: 3 failed, 54 passed, 57 total
+after:   Test Suites: 2 passed, 2 total   Tests: 57 passed, 57 total
+```
+
+**The date-bomb proof, which is the only check that proves the bomb is gone rather than reset.** A throwaway `--setupFilesAfterEnv` module shifting `Date.now`
+and `new Date()` by +400 days (deliberately NOT committed, and deleted after the run), over the eight suites the plan named plus the rest of the jsdom set —
+14 suites, run against the unfixed tree and then against the fixed one:
+
+```
+unfixed, clock +400d:  Test Suites: 2 failed, 12 passed, 14 total   Tests: 3 failed, 293 passed, 296 total
+fixed,   clock +400d:  Test Suites: 14 passed, 14 total             Tests: 296 passed, 296 total
+```
+
+The three failures at +400 days are the same three case names this bug was filed for, which is what makes the pair a proof rather than a coincidence.
+
+`test/fixture-clock.test.ts` itself: 3 cases passing on the converted tree, and proved red by adding `created: '2026-08-20'` to a scanned, non-allowlisted file
+— it failed naming the site, `"nav.test.tsx:78 — created: '2026-08-20…'"`, and the file was restored.
+
+Contract sweep: 3 sites updated (CLAUDE.md, docs/subsystems/invariants.md, docs/workflows/development.md)
+
+No existing statement was made false by this change — the grep sweep over `*.md`/`*.ts`/`*.mjs`/`*.yml` for `2026-08-20`, `daysAgo` and `test/helpers` found no
+site outside `test/` and this backlog's own historical items that the change contradicts. The three sites above are the documentation triple a new rule owes:
+the CLAUDE.md Conventions bullet, the `invariants.md` section that is the reasoning's one home, and the `development.md` paragraph, in the shape bug-33's
+`listenLoopback` rule already uses. The comments inside `board.test.tsx`, `archive.test.tsx` and `dialog-escape.test.tsx` that described their now-deleted local
+helpers were updated in the diff itself.
+
+Red proof: 4 tests went red with the change reverted
+
+Three of them are the fixture cases — `board-live-cards.test.tsx`'s needs-answers strip case and `dispatch-button.test.tsx`'s two board-wiring cases — red on
+the real clock with the conversion reverted, and red again at +400 days, which is the stronger half. The fourth is `fixture-clock.test.ts`'s own guard case,
+red the moment a literal was reintroduced. No revert was skipped: nothing here is a pure refactor.

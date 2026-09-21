@@ -33,6 +33,7 @@ import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
 import { buildProjectHues } from '../client/src/lib/project-hue';
+import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 
 const READY: AgentsStatus = {
@@ -47,17 +48,16 @@ const READY: AgentsStatus = {
 /* Archive shows an item only once it is stale, Board only while it is fresh —
    the same corpus therefore cannot serve both hosts, so each gets its own
    `updated` stamp. Relative to now for the reason archive.test.tsx states: a
-   literal date changes meaning as the calendar moves past it. */
-const daysAgo = (days: number): string => `${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
+   literal date changes meaning as the calendar moves past it — and since bug-44 from `test/helpers/dates.ts`, which is where that idiom lives. */
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'task-1',
     title: 'a task',
-    created: '2026-08-20',
+    created: daysAgoDate(2),
     started: '',
     tags: [],
-    updated: daysAgo(1),
+    updated: daysAgoStamp(1),
     lastCommit: '',
     phase: '',
     groomElapsed: 0,
@@ -194,7 +194,7 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
   // Archive renders the same two components from the same two independent
   // pieces of state, so the defect is reachable there identically.
   it('closes only the sheet on Archive too', async () => {
-    stubFetch([fakeItem({ updated: daysAgo(90), section: 'bugs', id: 'bug-1', groomed: false })]);
+    stubFetch([fakeItem({ updated: daysAgoStamp(90), section: 'bugs', id: 'bug-1', groomed: false })]);
     render(<ArchiveView />);
     await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
     await userEvent.click(screen.getByText('a task'));

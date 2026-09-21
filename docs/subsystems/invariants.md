@@ -931,6 +931,54 @@ crossed-over connection can fail after the test that made it has settled, making
 only demonstrated source, and if it recurs it is a defect in `scripts/test-all.mjs`'s exit-code handling and earns its own bug rather than a guess recorded here
 as fact.
 
+## A fixture date is relative to the clock the assertion runs under
+
+bug-44. `pnpm test` went red on a clean `main` with nothing changed — three cases across `board-live-cards.test.tsx` and `dispatch-button.test.tsx`, on a tree
+whose last commit touched none of them. The same failure had been seen the day before, noted in task-48's outcome as "a date-bomb in the fixtures", and nothing
+was filed; by the time it was, every orchestrator run on this repo parked at `verify`, because `backlog-orchestrate` §8 makes that exit code the only thing that
+green-lights a merge.
+
+**The mechanism: two clocks that were never the same clock.** A fixture's `created` is an absolute literal, written the day the case was authored. The predicate
+that decides whether the card renders at all reads the REAL clock — `useNow` inside `BoardView`, through `leavesBoard` → `isStale` → `lastTouched`. Nothing
+between them injects an instant, so the literal is not a constant: it is an expiry date, `created + staleDays`, and the case passes only until the machine's
+date crosses it. A fixture with `updated: ''` and `lastCommit: ''` falls to `lastTouched`'s third rung, ages past the default 30 days, leaves the Board for the
+Archive, and the `getByText` that wanted its card starts throwing.
+
+Which literals blow up is decided by the two escape hatches `isStale` already has, which is why only three of the many `2026-08-20` literals in this tree went
+red: `leavesBoard` exempts `section: 'tasks'` outright, and `isStale` returns false for an item a fresh run holds (`runHoldsItem`). So the card that vanished
+was `bug-14` at `merged` — terminal, therefore not held, therefore stale — and, in the other suite, `idea-1`, which no run mentions at all and which was the
+deliberate control in both failing cases. The predicate was working exactly as specified; all five rules above were doing their job. The defect was entirely in
+the fixtures.
+
+**The rule.** `daysAgoDate` and `daysAgoStamp` (`test/helpers/dates.ts`) are the one home for a fixture date, and no `test/*.test.tsx` writes an absolute
+`created`/`updated`/`lastCommit`/`started` literal outside the guard's allowlist. Both read `Date.now()` at CALL time rather than at module load, which is what
+lets a suite install a fake clock in `beforeEach` and still get a date that agrees with it. Two functions rather than one because the shapes are not
+interchangeable — `created` is a `YYYY-MM-DD` date, the other three are second-precision UTC stamps — and the idiom had already been hand-rolled three times
+before this file existed, spelled `daysAgoDate` in `board.test.tsx` (first shape) and `daysAgo` in `archive.test.tsx` and `dialog-escape.test.tsx` (second
+shape). Two near-identical names returning two different shapes is its own trap, so the exported pair keeps the distinction visible. Same "one implementation"
+rule `listenLoopback` follows one section above.
+
+**Pinned by source guard, because behaviour cannot reach it.** `test/fixture-clock.test.ts` reads the source of every `test/*.test.tsx`, comments blanked first,
+and fails on any of the four keys carrying a `YYYY-MM-DD` literal. A behavioural test could not be this guard: a fresh absolute date is green on the day it is
+written and for thirty days afterwards, so the suite that introduces the next one passes every check on the way in — the same argument `supertest-bind.test.ts`
+makes for reading source rather than measuring a bind. A red names the file and line, and the fix is a `daysAgo*` call or an allowlist entry with the reason
+that literal is load-bearing. The allowlist is closed in both directions: an entry whose file no longer carries a literal fails too, because a dead exemption
+would silently cover the next live one.
+
+**Scope, both halves deliberate.** `.tsx` only — the `.ts` suites are node/unit tests that pass `now` explicitly (`item-age.test.ts`, `item-month.test.ts`), and
+an absolute date is the clearer fixture there. Four keys only — a run stage stamp, a project's `createdAt`, a `polledAt` or a stage `anchor` never reaches
+`isStale`, and a guard that flagged them would be routed around on its first red rather than obeyed. `test/helpers/store.ts` writes `created: 2026-08-20` into
+real item files for the server suites and keeps it: staleness is derived in the client and the server never evaluates it.
+
+**What the guard cannot catch, stated so a green is not over-read:** the pattern is a date literal written as a fixture VALUE, so a literal behind a name
+passes. One exists on purpose — `board.test.tsx`'s `CREATED`, which is `<current year>-08-20` because the meta-line assertion pins the rendered string `aug 20`
+and a moving date cannot produce a fixed month. It is safe only because that suite's default `updated` stamp outranks it on rung 1, never because of the name;
+its comment says so. A name is a deliberate act with somewhere to write the reason, and the accidental literal is the one that has actually happened twice.
+
+**Proved against a future clock, not just against today.** The conversion is only worth anything if it removed the class rather than resetting the timer, so it
+was checked by running the jsdom suites under a throwaway `setupFilesAfterEnv` module that shifts `Date` 400 days forward: red before the change (the same three
+cases), green after. The shim is deliberately not committed — a permanently shifted clock would be a third clock, and the guard is the durable half.
+
 ## Loopback bind is the access control (except where noted)
 
 Nothing in this stack has auth in front of it — the item-body route reads every registered project's backlog files straight off disk — so loopback is the access

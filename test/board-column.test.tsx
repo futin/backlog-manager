@@ -8,6 +8,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
+import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { readStyles, ruleBlock } from './helpers/css-rule';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 
@@ -55,11 +56,11 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   const base: BacklogItem = {
     id: 'bug-1',
     title: 'a bug',
-    created: '2026-08-20',
+    created: daysAgoDate(2),
     started: '',
     tags: [],
     // Fresh, so nothing here leaves for Archive on the staleness split.
-    updated: new Date().toISOString(),
+    updated: daysAgoStamp(0),
     lastCommit: '',
     phase: '',
     groomElapsed: 0,

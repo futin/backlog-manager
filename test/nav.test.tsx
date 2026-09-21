@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { App, resolveSection } from '../client/src/App';
+import { daysAgoDate } from './helpers/dates';
 import { SECTIONS } from '../client/src/lib/sections';
 import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { SETTINGS_STORAGE_KEY, clampSettings } from '../client/src/lib/settings';
@@ -74,7 +75,7 @@ const ARCHIVE_MARK = 'Out of scope';
 const ARCHIVE_ITEM = {
   id: 'oos-1',
   title: 'declined thing',
-  created: '2026-08-20',
+  created: daysAgoDate(2),
   started: '',
   updated: '',
   phase: '',
