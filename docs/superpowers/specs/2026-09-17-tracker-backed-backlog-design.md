@@ -101,9 +101,10 @@ carries, as ghosts beside the real items on another machine's board.
 
 ### 3.3 Writers
 
-Two, both in `backlog.mjs`: `connect` (phase 2) writes it for a project that is being connected, `import` (phase 5) writes it as the last step of moving a
-files project over. Neither commits — no skill but `backlog-orchestrate` touches git history — so both end by printing the files to commit, the way
-`backlog-groom` prints its `Groomed on disk only` line. It stays under `backlog/` rather than at the repo root so `backlog.mjs root`, the `missing` check and
+Two, both in `backlog.mjs`: `connect` (phase 2) writes it for a project that is being connected, `import` (phase 5) writes it as the FIRST step of moving a
+files project over (§8.2 — the write routes refuse a `files` project, so nothing could be imported before the marker exists). Neither commits — no skill
+but `backlog-orchestrate` touches git history — so both end by printing the files to commit, the way `backlog-groom` prints its `Groomed on disk only`
+line. It stays under `backlog/` rather than at the repo root so `backlog.mjs root`, the `missing` check and
 every "where is this project's backlog" answer keep one home; after phase 6 the directory holds this one file.
 
 ## 4. The adapter seam — phase 1
@@ -458,20 +459,72 @@ A takeover from another machine starts the item over: the dead machine's worktre
 
 ## 8. Import — phase 5
 
-`backlog.mjs import` in a files project whose `origin` is on GitHub, one shot per project:
+Revised 2026-09-21, ahead of the first real migration (guide-manager), against the code phases 3 and 4 left behind. The 2026-09-17 draft of this section
+wrote the marker LAST and kept the counters in a footer nothing reads; both fell to the survey below. `git log` on this file has the draft.
 
-1. Refuses if a `source.json` already exists, if any item is in progress, or if the server is not running.
-2. Creates one issue per item file, open items first in `created` order, then `done/`, then `out-of-scope/`. Body = the item body plus a footer:
-   `<!-- bm:imported from=task-31 created=2026-09-05 groom-elapsed=… -->` and one readable line naming the file it came from. Labels from section, `kind:` and
-   `runner-fix:`. Done items are closed `completed`; out-of-scope items closed `not_planned`. Content-creating requests are paced at one per second — GitHub's
-   secondary limit is roughly eighty a minute.
-3. Second pass: every `from: <old id>` and in-body mention of an old id is rewritten to `#<n>` through the `body` route. The one wholesale body patch in the
-   design, made before any human has seen the issues.
-4. Writes `backlog/source.json`, deletes the item files, prints the commit instruction.
+`backlog.mjs import github [owner/repo] [--no-forms]` in a files project, one shot per project, through the local API like every other tracker command —
+the token stays in the server, the writes are serialised per item, and every response lands in the poller's cache. Not a server route (the server would
+have to read item files it may not write around, and delete them) and not `gh api` from the CLI (a second token path that bypasses both).
 
-Idempotent through the footer: a re-run after an interruption searches existing issues for `bm:imported from=<id>` and skips those. What is lost: created
-dates become the import time (the footer keeps the original), `lastCommit` history, and the file-level git log — the repo keeps the deleted files in its own
-history.
+### 8.1 Preconditions — refusals, nothing written
+
+Project root, never a linked worktree (the `orchestrate.mjs` refusal, same discriminator). Server up, else exit `5`. `origin` on GitHub or `owner/repo`
+given. **`backlog/` is tracked, clean, and HEAD is reachable from an `origin/*` ref**: §8.3's truncation link pins a blob at HEAD, and "the repo keeps the
+deleted files in its own history" is only true of a history that is on GitHub. No OPEN item carries `started:`; a `started:` left on a `done/` item is a
+stamp nobody `stop`ped and is ignored. The marker decides the mode: absent → fresh import; present beside item files → resume (§8.6); present with no item
+files → refuse, the project is already tracker-backed.
+
+### 8.2 Begin — marker and forms first
+
+Step one writes `backlog/source.json` and, unless `--no-forms`, the issue forms — the same code `connect` runs. **The marker goes first because
+`ItemsService.writerFor` refuses every write route while the marker says `files`** (§6.2); the draft's "write the marker last" could not have made a
+single request. The marker is the transaction's begin and the file deletion (§8.5) its commit; between the two the board shows the tracker's items and
+ignores the files, exactly as it does for any tracker project.
+
+### 8.3 Pass 1 — one issue per item, open first in `created` order, then `done/`, then `out-of-scope/`
+
+Per item, in this order:
+
+1. **Split the body.** `## Outcome` comes out — on a tracker project the outcome is the closing comment (§6.2's `state`), and an imported item should read
+   like a natively closed one. The rest is the issue body, plus a footer: `<!-- bm:imported from=<id> created=<date> tags=<a,b> -->` and one readable line,
+   `_Imported from backlog/<section>/<status>/<file>.md_`. Free-text `tags:` live in that footer and become no label — the label set stays the closed eight
+   (§5.2). `created` dates become the import time; the footer keeps the original.
+2. **Fit the cap.** GitHub caps a body and each comment at 65,536 characters, and the survey found a real item over it (guide-manager `task-1`, 69,883
+   bytes, one section of 58 KB). Keep whole `##` sections from the top while they fit, then append
+   `_Truncated. Full text: https://github.com/<owner>/<repo>/blob/<HEAD sha>/backlog/<section>/<status>/<file>.md_` — §6.6's SHA-pinned link, which is
+   why §8.1 requires HEAD to be pushed.
+3. **`POST create`** with section, title, body, `kind` and `runnerFix`. `from` is NOT sent here: its target's issue number may not exist yet (a promoted
+   idea is `done/`, imported after the open task that cites it), so it is pass 2's job.
+4. **Counters, if any is non-zero:** `POST claim` (`phase: execute`, `session: import-<stamp>`) then `POST release` (`reason: 'imported'`, the four
+   counters verbatim). The mapper reads counters off the newest claim regardless of release (§5.3), so this needs no mapper change and no footer parser.
+   It MUST precede step 5 — `claim` refuses a closed issue — and it leaves the assignee set, as every release does. Only for items that have counters:
+   an item without them gets no synthetic comment.
+5. **Close.** A `done/` item: `POST state done` with the Outcome text as `outcome` (comment, then close `completed`). An `out-of-scope/` item: `create`
+   already closed it `not_planned`.
+6. Record `<old id> → <n>` in memory. Content-creating requests are paced at one per second — GitHub's secondary limit is roughly eighty a minute.
+
+### 8.4 Pass 2 — cross-links
+
+For every imported issue whose body cites an old id — `from:` or a word-bounded `(bug|task|idea|ref)-\d+` anywhere in the text, code fences included —
+rewrite it to `#<n>` from the map; an id the map does not know is left as it was. `from: <id>` becomes the `_From #<n>._` line `create` would have prepended.
+Each rewrite is one `POST body` with `ifUpdatedAt` read from `GET /api/items` (the cache is current: `create` and `state` absorb their own responses) and
+no `runnerFix` key, so the label stays exactly as pass 1 set it. This is the one wholesale body patch in the design, made before any human has seen the
+issues.
+
+### 8.5 Commit — delete the item files
+
+Only once every pass-2 patch has succeeded: the item files are deleted, `backlog/README.md` is left alone, and the tool prints the commit instruction
+naming `source.json`, the forms and the deletions. It never commits — no skill but `backlog-orchestrate` touches git history.
+
+### 8.6 Failure and resume
+
+Any refusal or non-2xx is one stderr line naming the item and the status (a `429` names the reset time) and a non-zero exit with the files and the marker
+both still in place; there is no partial-delete path. A re-run lists the repo's issues once, rebuilds the map from `bm:imported from=<id>` footers, skips
+those items in pass 1 and runs pass 2 over everything — the footer is the idempotency key, and it is why the readable line and the marker are two
+different things.
+
+What is lost: `created` becomes the import time (footer keeps the original), `lastCommit` and the file-level git log (the repo's history keeps the files),
+free-text tags as labels (footer keeps them), and issue numbers never equal file ids — PRs consumed numbers (guide-manager's first import lands at `#4`).
 
 ## 9. Deleting the files path — phase 6
 
@@ -525,6 +578,14 @@ published on the tailnet. So:
 Named when each phase is planned. The protocol's tests (two claimants, lowest id, stale claim released not deleted, holder named in the loser's error) and the
 push-rejected parking case are the ones no later phase may drop.
 
+### 12.4 Phase 5 — import
+
+Node runner, `backlog.test.mjs`, the existing `fakeApi`. Refusals: linked worktree, no server (exit `5`), dirty `backlog/`, HEAD not on `origin/*`, an open
+item with `started:`, a marker with no item files. Order: open → done → out-of-scope by `created`. Outcome split: the text reaches `state.outcome`, never
+the body. Cap: a 70 KB fixture is cut at a `##` boundary and the link carries HEAD's sha and the file's path. Counters: `claim`+`release` only for a
+non-zero item, before `state`. Pass 2: `task-1` → `#4` in the body, `from:` becomes the `_From #n._` line, `ifUpdatedAt` is sent, no `runnerFix` key. Resume:
+a second run skips every footer-matched issue. Files are deleted only when every request answered 2xx.
+
 ## 13. Phases and the tasks they become
 
 The user's pick: idea-12 promotes to the **phase-1 task now**; each later phase is captured as its own task `from: idea-12` when its turn comes, planned
@@ -561,6 +622,14 @@ against the code as it is by then. Each phase is one orchestrator run.
     deliberately provisional — first version, revisit on evidence. The case it does not serve is a reader whose access stops at the tracker. Cost: a dead link
     for that reader, and no plan text visible to anyone who cannot clone the repo.
 
+12. **`import` writes the marker first and deletes the files last** (2026-09-21). The draft had them the other way round, which the write routes' `files`
+    refusal made impossible. Cost: a resume rule (§8.6) instead of an all-or-nothing tool, and a window in which the marker is committed-in-waiting beside
+    files the board no longer reads.
+13. **Imported counters ride a synthetic released claim, not a footer** (2026-09-21). One `claim`+`release` pair per item that has counters, reason
+    `imported`. Cost: two extra writes per such item and an assignee left on it; bought: no footer parser, no mapper change, the board reads them on the next
+    poll.
+14. **An over-cap body is truncated at a heading and links the file at HEAD** (2026-09-21), which is what makes "HEAD pushed" a precondition. Cost: one
+    item's text lives in two places for the length of history; bought: no hand trimming per project and no `import` that fails on one file.
 ## 15. Deferred, on purpose
 
 - A per-project token override for a repo the platform token cannot see.
