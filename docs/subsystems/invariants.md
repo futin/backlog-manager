@@ -322,7 +322,16 @@ to `--abort`". Different commands, different endings, and a run that collapsed t
 **`RunQueueItem.pid` exists because a stop whose driver is already dead must still be able to reach an orphaned executor.** `run.driver` is
 `{ sessionId, at }` and a session id is not a process, so until this nothing anywhere held an address for the child. Written by
 `stage <id> dispatched --pid <p>` through the same `applyQueueItemFields` path `--session` uses, from the pid SKILL.md §4 already writes to
-`logs/<id>.pid` — nothing scans `logs/`, which is why the number has to reach the run file. `cmdAbort` signals it only when the item is non-terminal,
+`<dir>/logs/<id>.pid`. **Since bug-43 that file is the FIRST source and the field is the second** (`resolveItemPid`, beside `pidAlive`): the file is written
+by the same Bash invocation that backgrounds the child, so it is the freshest address that exists, and the run file's copy is made one command later — a
+command the stop gate refuses, which is precisely how a force stop's own run ends up with `pid: null` and a live `claude -p` child. Every failure of the file
+(missing, unreadable, empty, whitespace-only, non-numeric, zero, negative, fractional) falls through to the field and none of them throws, because this runs
+inside a teardown that must reach its worktree removals whatever it finds; the field is kept for the run whose `logs/` a person has cleared by hand. Reading
+a PREVIOUS run's file is impossible: `archiveSidecars` moves the whole of `logs/` into `runs/<stem>/` at the next `init`, and `init` refuses any run still
+reading `running`. The gate was deliberately NOT narrowed to let the `--pid` re-stamp through instead — that helps only the driver alive enough to make the
+call, which is the less dangerous half, and costs a hole in a rule stated in one sentence. A pid that passes all three guards and is signalled is written
+back to `item.pid` before `cmdAbort`'s single `writeRunAtomic`, so `signalledIds` stays reconcilable from `run.json` alone; one that FAILS them is never
+written, since a wrong address is worse than none. `cmdAbort` signals it only when the item is non-terminal,
 `pidAlive(pid)` holds, and `ps -o args= -p <pid>` names a `claude` process: the cheap guard against the pid-reuse TOCTOU `pidAlive`'s own comment documents.
 That last guard's bias is the OPPOSITE of `pidAlive`'s, deliberately — a `ps` that fails or names something else is a decision NOT to signal, because the cost
 of not killing is a stray process a person can find and the cost of killing wrongly is somebody else's work. Mandatory in the TYPE (the compiler is the

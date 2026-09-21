@@ -927,13 +927,15 @@ export interface RunQueueItem {
    * what makes the compiler the fixture checklist — the same argument
    * `BacklogItem.source` carries — so a constructor that could record a pid
    * and does not goes red rather than quietly writing `undefined`. At RUN
-   * TIME, absent and `null` mean the identical thing ("no pid was ever
-   * recorded") and the one reader treats them identically: `cmdAbort` guards
-   * with `Number.isInteger` before it goes anywhere near a signal, so an old
-   * run file reads as "nothing to kill" rather than stranding anything. Do
-   * not add a sanitiser for it the way `base` has one: `base` is
-   * substituted into commands and must have a value, this one is asked
-   * `is there a pid?` and absence is a perfectly good answer.
+   * TIME, absent and `null` mean the identical thing ("this FIELD holds no
+   * pid") and the one reader treats them identically: `resolveItemPid`
+   * guards with `Number.isInteger` before anything goes near a signal, so an
+   * old run file strands nothing. Since bug-43 that is no longer the same as
+   * "nothing to kill" — a `null` here falls through to `<dir>/logs/<id>.pid`,
+   * which is where the address actually is for the run a force stop exists
+   * to clean up. Do not add a sanitiser for it the way `base` has one:
+   * `base` is substituted into commands and must have a value, this one is
+   * asked `is there a pid?` and absence is a perfectly good answer.
    *
    * It exists because `abort` is the run-ending command and, until this, the
    * only thing it could end was the run FILE: a driver killed by hand leaves
@@ -943,6 +945,14 @@ export interface RunQueueItem {
    * only. Read by `cmdAbort` alone, and only behind three guards (the item is
    * non-terminal, `pidAlive`, and `ps` naming a `claude` process) — see that
    * function for why a bare `kill` on a recorded pid is not good enough.
+   *
+   * bug-43 made it the SECOND of two sources rather than the only one, for
+   * the run this whole field exists for: the stop gate refuses the
+   * `stage <id> dispatched --pid <p>` call that writes it, so a force stop's
+   * own run reaches `abort` with `null` here and a live child. `cmdAbort`
+   * resolves `<dir>/logs/<id>.pid` first and writes back here whatever it
+   * actually signalled, which is the one place anything but `stage` writes
+   * this field.
    */
   pid: number | null;
   /** Absolute path of this item's git worktree, or `null` for the same reasons as `sessionId`. */

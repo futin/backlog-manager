@@ -4,9 +4,12 @@ title: A stop that lands between the two stage dispatched calls leaves pid null 
 created: 2026-09-21
 tags: orchestrator, stop, abort, pid
 runner-fix: true
-updated: 2026-09-21T10:42:57Z
+updated: 2026-09-21T12:00:37Z
 groom-elapsed: 279
 groom-tokens: 64415
+started: 2026-09-21T11:35:39Z
+execute-elapsed: 1498
+execute-tokens: 105963
 ---
 
 ## Symptom
@@ -127,3 +130,67 @@ All in `skills/backlog-orchestrate/tools/orchestrate.test.mjs`, beside the exist
   to write `.status`), so the `ps -o args=` guard would refuse it by construction — reaching it needs a different guard *and* a separate decision about killing
   a project's own test suite mid-run. A real gap, and its own item.
 - **Teaching `reconcile` the pid file.** It is a read-only report and signals nothing; the address matters only where a signal is sent.
+
+## Outcome
+
+2026-09-21 — fixed as planned: `cmdAbort` gained the second pid source and the stop gate was left exactly as wide as it was.
+
+`orchestrate.mjs` now carries `dispatchPidPath(dir, itemId)` beside `outcomeFilePath`/`snapshotFilePath`, and `resolveItemPid(dir, item)` beside `pidAlive` —
+the log file first, `item.pid` second, every failure of the file (missing, unreadable, empty, whitespace-only, non-numeric, `0`, negative, fractional)
+falling through rather than throwing. `cmdAbort`'s signal loop takes its pid from the resolver with the three guards unchanged in the same order, and writes
+back to `item.pid` only a pid that passed all three and was signalled, picked up by the single `writeRunAtomic` the command already made. The two comments
+stating the falsified premise (`cmdStage`'s `--pid` flag comment and the stop gate's "about to be killed by `watch`") were rewritten to state the reason that
+actually holds now, and the declined narrowing of the gate is recorded at the gate itself.
+
+Verification, fresh, after every edit:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo
+(exit 0, no diagnostics)
+
+$ pnpm test
+Test Suites: 2 failed, 126 passed, 128 total
+Tests:       3 failed, 2113 passed, 2116 total
+# tests 691
+# pass 691
+# fail 0
+FAIL  jest
+PASS  node --test (skills)
+```
+
+The skills runner — which is where every case in this item lives — is 691/691. The three jest failures are **pre-existing and unrelated**: they are
+`test/dispatch-button.test.tsx` (2) and `test/board-live-cards.test.tsx` (1), all failing on `Unable to find an element with the text: an idea` because the
+fixture dates have aged past the 30-day stale threshold and the cards have left the Board for the Archive. That is bug-44, item 2 of this same run. Proved
+not mine rather than assumed: `shared/types.ts` is the only file this diff touches that jest loads at all, and with it restored to `HEAD` (copy aside,
+`git checkout HEAD --`, run, copy back) the same two suites fail the same three cases —
+
+```
+Test Suites: 2 failed, 2 total
+Tests:       3 failed, 54 passed, 57 total
+```
+
+Contract sweep: 4 sites updated (`skills/backlog-orchestrate/SKILL.md` §4's paragraph under the `--pid` line;
+`docs/subsystems/invariants.md`'s `RunQueueItem.pid` paragraph under the stop anchor; `CLAUDE.md`'s stop invariant; `shared/types.ts`'s `pid` doc comment,
+which the plan did not list and which claimed `Number.isInteger` in `cmdAbort` makes an absent pid mean "nothing to kill" — no longer true, and it is the
+comment a future reader of the type would trust). Swept for and deliberately left standing: the `logs/<id>.pid` mentions in `docs/subsystems/invariants.md`
+§"Why moving a live child's pid file is safe" and `references/recovery.md` (both are about `init`'s exit-`4` lock making the archive move safe, which this
+change does not touch — and that lock is exactly what the resolver relies on to know `<dir>/logs/` belongs to the run being aborted), SKILL.md §797's exit-`10`
+note (about `watch` signalling by the pid it was given, still true), and the `done/` items bug-39, task-31 and idea-8 plus
+`docs/superpowers/specs/2026-09-21-tracker-phase4-live-verification.md`, which are dated records of what was true when written.
+
+Red proof: 3 tests went red with the change reverted — observed before the production code was written, which is stronger than a revert after the fact:
+
+```
+not ok 222 - abort signals a pid that reached only the log file, never the run file
+not ok 223 - the whole of bug-43: the stop gate refuses the --pid call and abort reaches the child anyway
+not ok 224 - the log file wins over a stale recorded pid, and the run file records what was signalled
+# pass 321
+# fail 4
+```
+
+The fourth red was the SKILL.md source guard, failing for a test-side reason (its filter also matched §8's `verify/<id>.pid` launcher, which this item's own
+non-goals exclude); the filter was narrowed to `logs/` and it is green. Four of the nine new cases pass on the shipped code by construction and are recorded
+here rather than claimed as red: the terminal-stage, pid-reuse and garbage-contents cases assert that the *existing* guards still refuse a file-sourced pid
+(there is no behaviour to revert — before the change the file was never read, so they were green for the wrong reason, which is precisely why the end-to-end
+case above exists), and the source guard pins an existing SKILL.md line the tool now depends on rather than a change this diff made.
