@@ -48,7 +48,7 @@ and a bug in a plan then becomes a bug on the branch with nobody positioned to c
 - **`import-lib.mjs` imports nothing from `backlog.mjs`** and `backlog.mjs` imports it. One direction, no cycle. It may import `node:path` and nothing else
   from node — it never touches the filesystem or the network.
 - **Only the driver commits, in the worktree, on `backlog/<id>`.** Each task ends in a commit; commit messages in the repo's imperative style
-  (`feat(task-NN): …`, `test(task-NN): …`, `docs(task-NN): …`), body at 72 columns.
+  (`feat(task-50): …`, `test(task-50): …`, `docs(task-50): …`), body at 72 columns.
 
 ---
 
@@ -160,7 +160,7 @@ node --test skills/backlog/tools/import-lib.test.mjs && pnpm run test:skills
 ```
 Expected: PASS, and `test:skills` reports the new file's cases in its total.
 
-- [ ] **Step 5: Commit** — `feat(task-NN): add import-lib, the pure half of backlog.mjs import`.
+- [ ] **Step 5: Commit** — `feat(task-50): add import-lib, the pure half of backlog.mjs import`.
 
 ---
 
@@ -244,7 +244,7 @@ pnpm run test:skills
 ```
 Expected: PASS.
 
-- [ ] **Step 6: Commit** — `feat(task-NN): add backlog.mjs import — usage and the §8.1 refusals`.
+- [ ] **Step 6: Commit** — `feat(task-50): add backlog.mjs import — usage and the §8.1 refusals`.
 
 ---
 
@@ -326,7 +326,7 @@ Expected: FAIL — the run exits `0` after the probe with no `create` request.
 
 - [ ] **Step 5: Run to verify they pass** — `pnpm run test:skills`. Expected: PASS.
 
-- [ ] **Step 6: Commit** — `feat(task-NN): import pass 1 — marker first, one issue per item, counters as a released claim`.
+- [ ] **Step 6: Commit** — `feat(task-50): import pass 1 — marker first, one issue per item, counters as a released claim`.
 
 ---
 
@@ -377,7 +377,7 @@ Expected: FAIL — the run exits `0` after the probe with no `create` request.
 
 - [ ] **Step 4: Run to verify they pass** — `pnpm run test:skills`. Expected: PASS.
 
-- [ ] **Step 5: Commit** — `feat(task-NN): import pass 2 — rewrite cross-links, then delete the item files`.
+- [ ] **Step 5: Commit** — `feat(task-50): import pass 2 — rewrite cross-links, then delete the item files`.
 
 ---
 
@@ -415,7 +415,7 @@ Expected: FAIL — the run exits `0` after the probe with no `create` request.
 
 - [ ] **Step 4: Run to verify they pass** — `pnpm run test:skills`. Expected: PASS.
 
-- [ ] **Step 5: Commit** — `feat(task-NN): import resumes from bm:imported footers`.
+- [ ] **Step 5: Commit** — `feat(task-50): import resumes from bm:imported footers`.
 
 ---
 
@@ -428,7 +428,7 @@ Expected: FAIL — the run exits `0` after the probe with no `create` request.
   writes in which order (marker and forms, then issues, then deletes the files and prints the commit list), the eight refusals in one sentence each, the
   resume rule (footer), and what is lost (§8.6's last paragraph, one line). Change `connect`'s `(importing those is a later phase's job)` to
   `(that is \`import\`'s job)`.
-- Modify: `docs/subsystems/skills.md` — the CLI paragraph (~L29) gains `and, since task-NN, \`import github [owner/repo] [--no-forms]\`, which moves a files
+- Modify: `docs/subsystems/skills.md` — the CLI paragraph (~L29) gains `and, since task-50, \`import github [owner/repo] [--no-forms]\`, which moves a files
   project's items onto issues through the local API and deletes the files last`; the verb table gains a row `import` whose API-mode cell says `files mode
   ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there`.
 - Modify: `README.md` (~L244–247): one sentence after `Connect one with …`: `Move an existing files project with \`backlog.mjs import github\`; it writes the
@@ -452,7 +452,7 @@ Expected: FAIL — the run exits `0` after the probe with no `create` request.
 
 - [ ] **Step 3: Run the union.** `pnpm test` — both runners green (the jest half has a `claude-rules` test and doc guards that read `CLAUDE.md`).
 
-- [ ] **Step 4: Commit** — `docs(task-NN): document backlog.mjs import — SKILL.md, skills.md, README, invariant`.
+- [ ] **Step 4: Commit** — `docs(task-50): document backlog.mjs import — SKILL.md, skills.md, README, invariant`.
 
 ---
 
@@ -474,7 +474,7 @@ Recorded here so the sequence has one home; every step is the operator's, from a
 - **Spec coverage.** §8.1 → Task 2 (checks 1–9). §8.2 → Task 3 step 1. §8.3 steps 1–6 → Task 3 (split: step 2; footer/cap: step 3 composition; create:
   step 3; counters: step 3; close: step 3; pacing + map: step 3/4). §8.4 → Task 4 steps 1–2. §8.5 → Task 4 step 3. §8.6 → Task 3 step 4 (failure), Task 5
   (resume). §12.4's list: every named case appears in Tasks 2–5. §14.12–14 → Task 6's invariant text. §13 (own task, one run) → the capture that follows.
-- **Placeholders.** None: every step names the file, the behaviour and the cases. `task-NN` in commit messages is the id the capture mints — the one value
+- **Placeholders.** None: every step names the file, the behaviour and the cases. `task-50` in commit messages is the id the capture mints — the one value
   this document cannot know.
 - **Name consistency.** `splitOutcome`, `renderImportFooter`, `parseImportFooter`, `blobLink`, `fitBody`, `rewriteOldIds`, `importOrder`, `countersOf`,
   `IMPORT_BODY_CAP` (Task 1) are the names Tasks 3–5 use; `importFixture`, `githubRoutes`, `itemText`, `commitList` are the test helpers; `importOne`,
