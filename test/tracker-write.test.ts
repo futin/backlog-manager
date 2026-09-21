@@ -772,7 +772,7 @@ describe('heartbeat', () => {
     gh.claim(seeded, 31, 100);
     await sync();
 
-    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100 }).expect(201);
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A' }).expect(201);
     expect(Date.parse(claimIn(100)!.heartbeat)).toBeGreaterThan(Date.parse(seeded.heartbeat));
   });
 
@@ -782,7 +782,7 @@ describe('heartbeat', () => {
     await sync();
 
     const state = { stage: 'merging', queue: [1, 2, 3] };
-    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, state }).expect(201);
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A', state }).expect(201);
     expect(claimIn(100)?.state).toEqual(state);
   });
 
@@ -791,7 +791,7 @@ describe('heartbeat', () => {
     gh.claim(record({ session: 'A', released: { at: new Date().toISOString(), reason: 'stopped', by: 'A' } }), 31, 100);
     await sync();
 
-    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100 }).expect(409);
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A' }).expect(409);
     expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
   });
 });
@@ -810,7 +810,7 @@ describe('heartbeat.finished', () => {
     gh.claim(seeded, 31, 100);
     await sync();
 
-    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, finished: FINISHED }).expect(201);
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A', finished: FINISHED }).expect(201);
     const after = claimIn(100)!;
     expect(after.finished).toEqual(FINISHED);
     expect(after.heartbeat).toBe(seeded.heartbeat);
@@ -823,7 +823,7 @@ describe('heartbeat.finished', () => {
     gh.claim(record({ session: 'A', released: { at: new Date().toISOString(), reason: 'stopped', by: 'A' } }), 31, 100);
     await sync();
 
-    const res = await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100 }).expect(409);
+    const res = await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A' }).expect(409);
     expect(res.body.error).toBe('claim 100 on #31 is released — nothing to heartbeat');
   });
 
@@ -833,7 +833,7 @@ describe('heartbeat.finished', () => {
     gh.claim(seeded, 31, 100);
     await sync();
 
-    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, finished: { ...FINISHED, status: 'paused' } }).expect(201);
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A', finished: { ...FINISHED, status: 'paused' } }).expect(201);
     const after = claimIn(100)!;
     expect(after.finished).toEqual({ ...FINISHED, status: 'paused' });
     expect(Date.parse(after.heartbeat)).toBeGreaterThan(Date.parse(seeded.heartbeat));
@@ -849,11 +849,121 @@ describe('heartbeat.finished', () => {
     gh.claim(record({ session: 'A', released: { at: new Date().toISOString(), reason: 'merged', by: 'A' } }), 31, 100);
     await sync();
 
-    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, finished }).expect(400);
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A', finished }).expect(400);
     expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
     expect(claimIn(100)?.finished).toBeUndefined();
   });
 });
+
+/* =========================================================================
+ * bug-45 — heartbeat authenticates its caller
+ *
+ * `heartbeat` was the one write route that authenticated nobody: any session
+ * could keep any claim fresh. Two harms, and the second is the one that cost a
+ * day. A rival's heartbeats hold the holder's claim live forever, so the
+ * fifteen-minute staleness repair never fires for the issue that needs it
+ * most; and a session that runs `heartbeat` as an "is this claim mine?" oracle
+ * gets a 201 back and concludes it holds an issue another machine is executing
+ * — which is what happened on guide-manager#5, both machines grooming the same
+ * issue with one of them having already lost the race and deleted its comment.
+ *
+ * The rule is `release`'s triple minus its last clause: the HOLDER always, and
+ * the RUN that owns the claim (task-47 §7.6 — a resumed driver has a NEW
+ * session id and the same `runId`, and must keep heartbeating its own items).
+ * Deliberately NOT "anyone once the claim is dead": a stranger reviving a dead
+ * claim is precisely the harm, and retiring one is `claim`'s business, which
+ * the protocol already answers by the lowest live comment id.
+ * ========================================================================= */
+
+describe('heartbeat ownership (bug-45)', () => {
+  it('HO-1: refuses a session that is not the holder, names the holder, and patches nothing', async () => {
+    gh.issue();
+    const seeded = record({ session: 'A', heartbeat: new Date(Date.now() - 60_000).toISOString() });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    const res = await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'B' }).expect(409);
+    expect(res.body.holder.session).toBe('A');
+    expect(claimIn(100)!.heartbeat).toBe(seeded.heartbeat);
+    expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
+  });
+
+  it('HO-2: the holder moves its own heartbeat forward', async () => {
+    gh.issue();
+    const seeded = record({ session: 'A', heartbeat: new Date(Date.now() - 60_000).toISOString() });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A' }).expect(201);
+    expect(Date.parse(claimIn(100)!.heartbeat)).toBeGreaterThan(Date.parse(seeded.heartbeat));
+  });
+
+  it('HO-3: another session of the SAME run takes over — a resumed driver keeps heartbeating its own items', async () => {
+    gh.issue();
+    const seeded = record({ session: 'A', run: RUN, heartbeat: new Date(Date.now() - 60_000).toISOString() });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'B', runId: RUN.runId }).expect(201);
+    expect(Date.parse(claimIn(100)!.heartbeat)).toBeGreaterThan(Date.parse(seeded.heartbeat));
+  });
+
+  it('HO-4: a DIFFERENT run is not a takeover', async () => {
+    gh.issue();
+    const seeded = record({ session: 'A', run: RUN, heartbeat: new Date(Date.now() - 60_000).toISOString() });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'B', runId: 'run-20260101-000000' }).expect(409);
+    expect(claimIn(100)!.heartbeat).toBe(seeded.heartbeat);
+  });
+
+  it('HO-5: a claim with no run at all is never same-run with anything', async () => {
+    gh.issue();
+    const seeded = record({ session: 'A', heartbeat: new Date(Date.now() - 60_000).toISOString() });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'B', runId: RUN.runId }).expect(409);
+    expect(claimIn(100)!.heartbeat).toBe(seeded.heartbeat);
+  });
+
+  it('HO-6: a stranger is refused on a STALE claim too, because reviving it is the harm', async () => {
+    gh.issue();
+    const seeded = record({ session: 'A', heartbeat: new Date(Date.now() - CLAIM_STALE_MS - 60_000).toISOString() });
+    gh.claim(seeded, 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'B' }).expect(409);
+    expect(claimIn(100)!.heartbeat).toBe(seeded.heartbeat);
+  });
+
+  it('HO-7: a stranger cannot stamp finished on another session\'s claim', async () => {
+    gh.issue();
+    const released = { at: '2026-09-19T11:59:00.000Z', reason: 'merged', by: 'A' };
+    gh.claim(record({ session: 'A', released }), 31, 100);
+    await sync();
+
+    await post('heartbeat', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'B',
+      finished: { at: '2026-09-19T12:00:00.000Z', status: 'done' }
+    }).expect(409);
+    expect(claimIn(100)?.finished).toBeUndefined();
+  });
+
+  it('HO-8: a request with no session is a 400 and patches nothing', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100 }).expect(400);
+    expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
+  });
+});
+
 
 /* =========================================================================
  * The credential

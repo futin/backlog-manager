@@ -68,7 +68,7 @@ What each verb does differently, and the three that exist only here:
 | `board`          | `GET /api/items`, filtered to this project's open rows, printed by the same code path                                                              |
 | `move`           | `state`; `--outcome <file>` becomes the closing comment (refused in files mode)                                                                    |
 | `start` / `stop` | the claim protocol. `--as` REQUIRED on `start`; `stop` rediscovers the claim, bills the counters and releases                                      |
-| `heartbeat`      | new — says this session still holds the item. Files mode: exit `1`                                                                                 |
+| `heartbeat`      | new — says this session still holds the item; refused (exit `1`) on another session's claim, naming both sessions (bug-45). Files mode: exit `1`   |
 | `comment`        | new — appends a comment. Files mode: exit `1`                                                                                                      |
 | `body`           | new — groom's body patch, behind `--if-updated-at`. Files mode: exit `1`                                                                           |
 | `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |

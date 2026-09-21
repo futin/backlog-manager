@@ -161,13 +161,18 @@ export class ItemsWriteController {
 
   /** Say the session is still alive; carry the driver's opaque `state` when
    *  given, and `finish`'s `finished` stamp — the one field this route also
-   *  accepts on a RELEASED claim (see `GithubSource.heartbeat`). */
+   *  accepts on a RELEASED claim (see `GithubSource.heartbeat`). `session` is
+   *  required and `runId` optional for the same reasons they are on `release`:
+   *  a heartbeat names its author, and a resumed driver proves itself by its
+   *  run (bug-45). */
   @Post('heartbeat')
   async heartbeat(@Body() body: Record<string, unknown> | undefined): Promise<ClaimResult> {
     const raw = body ?? {};
     const project = required(raw.project, 'project');
     const id = required(raw.id, 'id');
     const commentId = commentIdOf(raw.commentId);
+    const session = required(raw.session, 'session');
+    const runId = runIdOf(raw.runId);
     const finished = claimFinishedOf(raw.finished);
 
     const w = this.writable(this.items.writerFor(project));
@@ -179,7 +184,7 @@ export class ItemsWriteController {
     // tolerantly. `run`, one route over, is the opposite case and is validated
     // field by field for exactly that reason — and so is `finished`, which a
     // derived run's status is decided from.
-    return this.answer(await w.writer.heartbeat(w.project, w.marker, { project, id, commentId, state: raw.state, finished }));
+    return this.answer(await w.writer.heartbeat(w.project, w.marker, { project, id, commentId, session, runId, state: raw.state, finished }));
   }
 
   /** Groom's route — the ONE route that rewrites an item's body (§6.4), behind

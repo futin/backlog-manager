@@ -74,7 +74,8 @@ The commands and flags that exist only here, one line each:
 - `move <id> done|out-of-scope [--outcome <file>]` — the outcome file becomes the issue's closing comment.
 - `start <id> --as groom|execute` takes the item by posting a claim comment; `--as` is required, because the claim records which phase is running.
 - `heartbeat <id>` says this session is still alive. **A claim reads stale after 15 minutes without one**, at which point the next session to contest the item
-  retires it — so heartbeat between long steps.
+  retires it — so heartbeat between long steps. It is NOT a test of whether the item is yours: only the holder may beat, so a heartbeat on somebody else's
+  claim is refused naming both sessions. To ask who holds an item, read `show`'s `claim-session:` and `this-session:` lines.
 - `comment <id> --body <file>` appends a comment without moving anything.
 - `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the issue moved since you read it. Only `backlog-groom` uses it.
 

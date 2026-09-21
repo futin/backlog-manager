@@ -34,7 +34,9 @@ long as that marker does:
   `[orchestrator-run <runId> item <n> of <m> branch backlog/<n> outcome <absolute path>: …]`.
   - **Never run `start`, `stop`, `heartbeat`, `move` or `comment` on the item.** The driver holds the issue's claim for the whole item — it claimed before this
     worktree existed and it releases when the item reaches its terminal stage — and it is the driver that closes the issue. A session that ran any of those
-    five would be contesting a claim its own run already holds, or closing an issue the run has not finished with.
+    five would be contesting a claim its own run already holds, or closing an issue the run has not finished with. Since bug-45 the server refuses a heartbeat
+    from any session but the holder or the claim's own run, so this one would be refused rather than quietly obeyed — the rule is enforced now, not only
+    written down.
   - **Write the whole `## Outcome` to the path the marker names** — the same text, in the same shape, the archiving and failure sections below both describe,
     contract-sweep and red-proof lines included. Write it **whether verification passed or failed**: the run reads that file to decide what happened, and an
     empty one reads as "the session died".

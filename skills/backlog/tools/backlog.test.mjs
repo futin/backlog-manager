@@ -3838,6 +3838,34 @@ test('API mode: show --json carries the urn, the body, updatedAt and the claim',
   assert.equal(parsed.claim.commentId, 100)
 })
 
+/* bug-45, the readable half. `show` already READ the claim — it was in `--json` and nowhere a person or a skill reading the block would see it — so an item
+   that says `started:` looked identical whether this session held it or another machine did. Two keys answer it by comparison, needing no knowledge of the
+   protocol: who holds the claim, and who is asking. Both are always printed, empty when nobody holds it, because a key that disappears is a key a skill has
+   to branch on. */
+test('API mode: show names the claim-s holder and this session, and --json carries this session too', async () => {
+  const { dir } = trackerFixture()
+  const routes = {
+    '/api/items': { body: { items: [apiItem({ projectPath: dir, started: '2026-09-18T10:00:00Z', phase: 'groom' })], errors: [] } },
+    '/api/items/body': { body: '# body\n' },
+    '/api/items/claim': { body: { commentId: 100, record: { v: 1, session: 'e33d0074', phase: 'groom', at: '2026-09-18T10:00:00Z', heartbeat: '2026-09-18T10:05:00Z', counters: {} } } },
+  }
+
+  const { out } = await withApi(routes, async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'show', '31'))
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /claim-session: e33d0074/)
+  assert.match(out.stdout, /this-session: sess-mine/)
+
+  const { out: json } = await withApi(routes, async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'show', '31', '--json'))
+  assert.equal(JSON.parse(json.stdout).session, 'sess-mine')
+
+  // Nobody holds it: both keys are still there, the holder's empty — an absent key would be a second shape for a skill to handle.
+  const { out: free } = await withApi({ ...routes, '/api/items/claim': { body: null } }, async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'show', '31'),
+  )
+  assert.match(free.stdout, /claim-session: \n/)
+  assert.match(free.stdout, /this-session: sess-mine/)
+})
+
 test('API mode: board reads /api/items once and prints only this project-s open rows', async () => {
   const { dir } = trackerFixture()
   const { out, requests } = await withApi(
@@ -3958,12 +3986,14 @@ test('API mode: start reports a lost race with the holder-s session and the age 
         body: { error: '#31 is already in progress (session A)', holder: { session: 'A', heartbeat: '2026-09-18T10:00:00Z', ageMs: 4 * 60 * 1000, commentId: 100 } },
       },
     },
-    async (port) => await runNode(dir, apiEnv(port), 'start', '31', '--as', 'groom'),
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'start', '31', '--as', 'groom'),
   )
 
   assert.equal(out.status, 1)
   assert.match(out.stderr, /session A/)
   assert.match(out.stderr, /heartbeat 4m ago/)
+  // And who THIS session is (bug-45) — without it the reader has the holder's id and no way to tell it apart from their own.
+  assert.match(out.stderr, /this session is sess-mine/)
 })
 
 // The billing semantics `stopItem` already has, reproduced against a claim comment instead of frontmatter: the seeded total plus this session's seconds, into
@@ -4030,11 +4060,36 @@ test('API mode: heartbeat posts the claim-s comment id', async () => {
       '/api/items/claim': { body: { commentId: 100, record: { v: 1, session: 'A', phase: 'groom', at: '2026-09-18T10:00:00Z', heartbeat: '2026-09-18T10:05:00Z', counters: {} } } },
       '/api/items/heartbeat': { status: 201, body: { commentId: 100, record: {} } },
     },
-    async (port) => await runNode(dir, apiEnv(port), 'heartbeat', '31'),
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-beat' }), 'heartbeat', '31'),
   )
 
   assert.equal(out.status, 0)
-  assert.deepEqual(requests.find((r) => r.path === '/api/items/heartbeat').body, { project: dir, id: '#31', commentId: 100 })
+  // `session` is not decoration (bug-45): the route refuses a heartbeat from anyone but the holder, and a CLI that sent none could neither be refused nor
+  // tell a session whether the claim it is beating is its own.
+  assert.deepEqual(requests.find((r) => r.path === '/api/items/heartbeat').body, { project: dir, id: '#31', commentId: 100, session: 'sess-beat' })
+})
+
+/* bug-45. This is the case the incident turned on. A session that had already LOST the race ran `heartbeat` as an "is this claim mine?" oracle, got exit 0
+   back, and groomed an issue another machine was executing. The answer has to be a refusal, and it has to name both sides — the holder, so the reader knows
+   who to wait for, and THIS session, so "is it mine?" is answerable from the one line rather than from a variable nobody prints. */
+test('API mode: heartbeat on another session-s claim is refused, naming the holder and this session', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(
+    {
+      '/api/items/claim': { body: { commentId: 100, record: { v: 1, session: 'e33d0074', phase: 'groom', at: '2026-09-18T10:00:00Z', heartbeat: '2026-09-18T10:05:00Z', counters: {} } } },
+      '/api/items/heartbeat': {
+        status: 409,
+        body: { error: 'claim 100 on #31 belongs to session e33d0074', holder: { session: 'e33d0074', heartbeat: '2026-09-18T10:05:00Z', ageMs: 3 * 60 * 1000, commentId: 100 } },
+      },
+    },
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'heartbeat', '31'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /session e33d0074/)
+  assert.match(out.stderr, /heartbeat 3m ago/)
+  assert.match(out.stderr, /this session is sess-mine/)
+  assert.equal(requests.find((r) => r.path === '/api/items/heartbeat').body.session, 'sess-mine')
 })
 
 test('API mode: comment posts the file-s bytes', async () => {

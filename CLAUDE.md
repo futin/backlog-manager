@@ -135,7 +135,13 @@ any of these — most encode a failure that already happened.
   board force stop's spawned `--abort` could not release the dead driver's claims. `ItemReleaseRequest.runId` is the assertion, a 400 on anything but a
   non-empty string, sent by `trackerRelease` on EVERY release and never by `backlog.mjs stop`; the test is guarded with `typeof`/`length` so a claim with no
   `run` is never same-run with anything, and `isLive` reaches the dead clause first. `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second
-  number. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the newest prior claim and are BILLED by the CLI on
+  number. **A heartbeat names its author too, and the rule there is that triple MINUS its last clause** (bug-45): `ItemHeartbeatRequest.session` is required (a
+  400 without it, like `release`'s), `runId` is the same optional same-run assertion with the same `typeof`/`length` guards, and the check runs BEFORE the
+  released branch, `finished` included — but a DEAD claim does not open to anyone, because reviving one is the harm (a rival's beats hold a claim live forever,
+  so the staleness repair never fires). Retiring a dead claim stays `claim`'s business. And **"is this claim mine?" is answerable from printed output**:
+  `start`'s lost-race line and `heartbeat`'s refusal both end `— this session is <id>`, `show` prints `claim-session:` (empty, never absent, when unheld) and
+  `this-session:`, and `show --json` carries `session`. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the
+  newest prior claim and are BILLED by the CLI on
   release — `--abandon` sends no `counters` key at all, which is not the same as zeros. The mapper reads `started`/`phase` from an UNRELEASED claim without
   consulting its heartbeat ("any stamp, fresh or stale") and the counters from the newest claim regardless of release. Why:
   [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)

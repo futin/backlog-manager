@@ -1975,6 +1975,21 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
 export interface ItemHeartbeatRequest extends ItemWriteRequest {
   id: string;
   commentId: number;
+  /**
+   * Who is beating (bug-45). Required, exactly as `release`'s is: a heartbeat
+   * is an assertion that the CALLER still holds the claim, and a route that
+   * took nobody's name could neither refuse a stranger nor answer the question
+   * "is this claim mine?" — which is what a session on the losing side of a
+   * race asked it, got a 201 for, and went on to groom an issue another
+   * machine was already executing.
+   */
+  session: string;
+  /** The same optional assertion `release` takes — "this is my run's claim" —
+   *  and the reason a RESUMED driver, which has a new session id and the same
+   *  `runId`, keeps heartbeating the items its run already holds (task-47
+   *  §7.6). A bare `runId` rather than the whole `ClaimRun`, for the reason
+   *  `ItemReleaseRequest` states. */
+  runId?: string;
   state?: unknown;
   finished?: ClaimFinished;
 }

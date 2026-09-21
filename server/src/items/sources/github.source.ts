@@ -599,9 +599,37 @@ export class GithubSource implements ItemSource, ItemWriter {
    * comment, not a claim to be alive: `heartbeat` and `state` stay where the
    * release left them (a moved heartbeat would read as the item being worked
    * again) and `released` is never touched, because release is permanent.
+   *
+   * ## Who may beat (bug-45)
+   *
+   * `release`'s triple minus its last clause: the HOLDER always, the RUN that
+   * owns the claim, and NOT "anyone once the claim is dead". The first two
+   * clauses are `release`'s word for word — including the `typeof`/`length`
+   * guards, which are load-bearing there for a reason that applies here
+   * unchanged: a claim with no `run` must never be same-run with anything.
+   *
+   * The dropped clause is the whole point. `release` lets anyone retire a dead
+   * claim because retiring one is tidying; REVIVING one is the harm this route
+   * had — a session heartbeating a rival's claim holds it live forever, so the
+   * fifteen-minute staleness repair never fires for the one issue that needs
+   * it. Retiring a dead claim stays `claim`'s business, answered by the lowest
+   * live comment id.
+   *
+   * The check runs BEFORE the released branch, `finished` included: a stamp is
+   * still a write to somebody else's record. `finish` sends its run's `runId`,
+   * so the driver's own claims pass the same-run clause whether or not their
+   * terminal stage already released them.
    */
   async heartbeat(_project: RegistryProject, marker: SourceMarker, req: ItemHeartbeatRequest): Promise<WriteOutcome<ClaimResult>> {
     return this.editClaim(marker, req.id, req.commentId, (existing, now, number) => {
+      const sameRun = typeof req.runId === 'string' && req.runId.length > 0 && existing.run?.runId === req.runId;
+      if (existing.session !== req.session && !sameRun) {
+        return {
+          refused: 'conflict',
+          error: `claim ${req.commentId} on #${number} belongs to session ${existing.session}`,
+          holder: { session: existing.session, heartbeat: existing.heartbeat, ageMs: ageMsOf(existing.heartbeat, now), commentId: req.commentId }
+        };
+      }
       if (existing.released !== undefined) {
         if (req.finished !== undefined) return { ...existing, finished: req.finished };
         return { refused: 'conflict', error: `claim ${req.commentId} on #${number} is released — nothing to heartbeat` };

@@ -2694,6 +2694,33 @@ same-run filter guards the same shape with `typeof c.record.run?.runId === 'stri
 never same-run with anything: a run has no standing to evict somebody working the item at a terminal. The dead-claim clause outranks the new one and is reached
 first through `isLive`, so a stale claim carrying a foreign `runId` still releases to anybody.
 
+**A heartbeat names its author, and only the holder or its run may beat (bug-45).** `heartbeat` was the one write route that authenticated nobody: the request
+carried no `session`, the type had no field for one, and the adapter asked only whether the claim was released. Two harms, and the second is the one that cost a
+day of two machines' work.
+
+The first is mechanical. A rival's heartbeats keep the HOLDER's claim live forever, so the fifteen-minute staleness repair never fires for the one issue that
+has two sessions on it — the exact case the repair exists for. The second is that a 201 from this route reads as proof of ownership. On guide-manager#5 a
+session lost the race, watched its own comment be deleted (the protocol working exactly as designed), spent forty seconds hunting `~/.claude` for the winner's
+session id, found nothing it could compare against, ran `heartbeat` as an "is this claim mine?" oracle, got exit `0`, wrote "Claim is this session's (heartbeat
+accepted)" and groomed an issue another machine was already executing. Every layer behaved as written; the answer was wrong because nobody had been asked who
+was calling.
+
+So `ItemHeartbeatRequest.session` is required — a 400 with no name, exactly like `release`'s — and `runId` is the same optional assertion `release` takes, with
+the same `typeof`/`length` guards for the same reason. The rule is **`release`'s triple minus its last clause**: the holder always, the RUN that owns the claim,
+and NOT "anyone once the claim is dead". Dropping that clause is the point rather than an oversight. `release` lets anyone retire a dead claim because retiring
+one is tidying; REVIVING one is the harm — a stranger's beat on a stale claim is what makes the staleness repair unreachable. Retiring a dead claim stays
+`claim`'s business, which the protocol already answers by the lowest live comment id. The check runs BEFORE the released branch, `finished` included: a stamp is
+still a write to somebody else's record, and `finish` sends its run's `runId`, so a driver's own claims pass the same-run clause whether or not their terminal
+stage released them first. Both callers name themselves — `backlog.mjs heartbeat` sends `sessionIdentity()`, `orchestrate.mjs`'s `trackerHeartbeat` and
+`trackerFinish` send the driver's session plus `run.runId` — and the CLI renders the 409 rather than letting a bare status reach a skill.
+
+**"Is this claim mine?" has to be answerable without a network call, so three commands print both sides.** The identity half of bug-45, and it is not cosmetic:
+`sessionIdentity()` existed from task-46 and no command had ever printed it, so a session could read a holder's id and have nothing to compare it against — the
+losing session on guide-manager#5 even probed the wrong variable (`CLAUDE_SESSION_ID`, unset) trying to find out. `start`'s lost-race line and `heartbeat`'s
+refusal both end `— this session is <id>`, and `show` prints `claim-session:` and `this-session:` in its frontmatter-shaped block, with `--json` carrying
+`session` beside the `claim` it already returned. `claim-session:` is EMPTY rather than absent on an unheld item: a key that disappears is a second shape every
+reader has to branch on.
+
 **The counters live in the claim, the server seeds and the CLI bills.** Spec §6.4 is explicit that counters never live in the body: the body is the item's text,
 groom rewrites it wholesale, and a number embedded in prose somebody edits in the web UI is a number that silently resets. A claim comment is machine-owned,
 which is the property frontmatter has for a files item. The server seeds a new claim from the newest prior one so that ONE comment is a whole history; the CLI

@@ -1924,6 +1924,14 @@ function claimStateOf(item) {
  * No claim on the item means nothing to heartbeat — an item the run reached
  * before `preflight`, or one whose claim was lost — and that is silence rather
  * than a complaint: there is no failure to report.
+ *
+ * `session` and `runId` are sent for the same reason `trackerRelease` sends
+ * them (bug-45): the route now refuses a beat from anyone but the holder or
+ * the claim's own run, and a driver beating an item it claimed is regularly
+ * NOT the holder — a resumed driver is a new session against the crashed
+ * one's claim. `runId` is what makes it the same RUN, and it is an assertion
+ * the server checks against the claim comment rather than a field it stores,
+ * so another machine's run asserting ours is still a 409.
  */
 function trackerHeartbeat(run, item) {
   if (item.claim === undefined) return;
@@ -1932,6 +1940,8 @@ function trackerHeartbeat(run, item) {
       project: claimProjectOf(run),
       id: claimItemId(item.id),
       commentId: item.claim.commentId,
+      session: sessionIdentity() ?? run.runId,
+      runId: run.runId,
       state: claimStateOf(item)
     });
     if (!res.ok) console.error(`heartbeat for ${item.id} was refused: ${apiErrorText(res, 'the API refused it')}`);
@@ -3530,6 +3540,13 @@ function lastTouchedClaimedItem(run) {
  *
  * A run with no claimed item stamps nothing and says nothing: there is no
  * comment another machine could have found it by, which the Runs page states.
+ *
+ * `session` and `runId` ride along exactly as they do on every other beat
+ * (bug-45). They matter more here than anywhere: `finish` normally runs in a
+ * DIFFERENT session from the one that took the claim — a resumed driver, or
+ * the abort session a board force stop spawns — so `runId` is the only thing
+ * that makes this the same RUN, and without it the last act of a run would be
+ * refused by the route that authenticates a beat.
  */
 function trackerFinish(run, status) {
   const item = lastTouchedClaimedItem(run);
@@ -3539,6 +3556,8 @@ function trackerFinish(run, status) {
       project: claimProjectOf(run),
       id: claimItemId(item.id),
       commentId: item.claim.commentId,
+      session: sessionIdentity() ?? run.runId,
+      runId: run.runId,
       finished: { at: run.updatedAt, status }
     });
     if (!res.ok) console.error(`finished stamp on ${item.id} was refused: ${apiErrorText(res, 'the API refused it')}`);

@@ -2299,8 +2299,14 @@ export async function main(argv) {
         const body = await apiGetText(`/api/items/body?path=${encodeURIComponent(item.path)}`)
         const claim = await apiGet(`/api/items/claim?project=${encodeURIComponent(project)}&id=${encodeURIComponent(wanted)}`)
 
+        /* Who is asking, printed beside who holds the claim (bug-45). `show` was already reading the claim and showing it to nobody: the block said
+           `started:` and `phase:` whether this session held the item or a machine two rooms away did, and the one variable that could tell them apart —
+           `sessionIdentity()` — was never printed by any command. Two sessions on one issue is now the ordinary case, so the answer has to be readable
+           without knowing the protocol exists: compare the two lines. */
+        const session = sessionIdentity()
+
         if (json) {
-          console.log(JSON.stringify({ urn: item.path, item, body, updatedAt: item.updated, claim }))
+          console.log(JSON.stringify({ urn: item.path, item, body, updatedAt: item.updated, claim, session }))
           return 0
         }
 
@@ -2314,6 +2320,10 @@ export async function main(argv) {
         console.log(`updated: ${item.updated}`)
         console.log(`started: ${item.started}`)
         console.log(`phase: ${item.phase}`)
+        // Empty rather than absent when nobody holds the issue: a key that disappears is a second shape for every reader to handle, and `claim-session:` with
+        // nothing after it says "unheld" as plainly as a sentence would.
+        console.log(`claim-session: ${claim === null || claim.record.released !== undefined ? '' : claim.record.session}`)
+        console.log(`this-session: ${session}`)
         console.log(`groom-elapsed: ${item.groomElapsed}`)
         console.log(`execute-elapsed: ${item.executeElapsed}`)
         console.log(`groom-tokens: ${item.groomTokens}`)
@@ -2501,16 +2511,19 @@ export async function main(argv) {
             console.error(`${START_STOP_USAGE}\n\nin a tracker project start needs --as: the claim records which phase is running`)
             return 1
           }
+          const session = sessionIdentity()
           let claimed
           try {
-            claimed = await apiPost('claim', { project, id: wanted, phase, session: sessionIdentity() })
+            claimed = await apiPost('claim', { project, id: wanted, phase, session })
           } catch (e) {
             /* A lost race is reported with the AGE of the holder's heartbeat, which the server computed on its own clock and put in the payload — the CLI
                must not subtract two clocks to get it. The age is the whole of what a reader needs in order to decide what to do: fresh means wait or ask,
                stale past fifteen minutes means claim again and let the protocol retire it. */
             if (e instanceof BacklogError && e.status === 409 && e.payload && e.payload.holder) {
               const h = e.payload.holder
-              console.error(`${wanted} is already in progress (session ${h.session}, heartbeat ${roughAge(h.ageMs)} ago)`)
+              /* Both sides named, always (bug-45). The holder's id alone is unreadable: a session cannot tell whether `e33d0074` is somebody else or
+                 itself, and the one that could not tell went on to groom an issue another machine was executing. */
+              console.error(`${wanted} is already in progress (session ${h.session}, heartbeat ${roughAge(h.ageMs)} ago) — this session is ${session}`)
               return 1
             }
             throw e
@@ -2654,7 +2667,20 @@ export async function main(argv) {
           console.error(`${wanted} is not in progress`)
           return 1
         }
-        await apiPost('heartbeat', { project, id: wanted, commentId: held.commentId })
+        /* The session is sent and the SERVER decides (bug-45), rather than this reproducing `stop`'s local ownership test one command over: a heartbeat is an
+           assertion about a comment on GitHub, and the process holding the token is the only one that can settle it against what is actually there. The
+           refusal is rendered here, naming both sides, because a bare 409 from a command a skill runs between long steps tells the reader nothing. */
+        const session = sessionIdentity()
+        try {
+          await apiPost('heartbeat', { project, id: wanted, commentId: held.commentId, session })
+        } catch (e) {
+          if (e instanceof BacklogError && e.status === 409 && e.payload && e.payload.holder) {
+            const h = e.payload.holder
+            console.error(`${wanted} is held by session ${h.session} (heartbeat ${roughAge(h.ageMs)} ago) — this session is ${session}`)
+            return 1
+          }
+          throw e
+        }
         console.log(`gh:${r.mode.repo}${wanted}`)
         return 0
       }

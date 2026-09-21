@@ -7071,6 +7071,10 @@ test('C-1: finish stamps finished on the last-touched claimed item, and only tha
   assert.equal(beats[0].body.id, '#5');
   assert.equal(beats[0].body.finished.status, 'done');
   const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  /* bug-45: the route refuses a heartbeat from anyone but the holder, and `finish` normally runs in a DIFFERENT session from the one that took the claim —
+     a resumed driver, or the abort session a force stop spawns. `runId` is what makes it the same RUN, exactly as it is on `release`. */
+  assert.equal(beats[0].body.session, 'sess-test');
+  assert.equal(beats[0].body.runId, run.runId);
   assert.equal(beats[0].body.finished.at, run.updatedAt, 'the stamp and the journal name one instant');
 });
 
@@ -7122,10 +7126,17 @@ test('C-4: heartbeat keeps every claim the run still holds alive, and none it re
   );
 
   assert.equal(out.status, 0, out.stderr);
+  const beats = posts(requests, 'heartbeat');
   assert.deepEqual(
-    posts(requests, 'heartbeat').map((r) => r.body.commentId).sort(),
+    beats.map((r) => r.body.commentId).sort(),
     [503, 505],
   );
+  // Every beat names its author and its run (bug-45) — see C-1 for why the run is the load-bearing half.
+  const runId = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId;
+  for (const beat of beats) {
+    assert.equal(beat.body.session, 'sess-test');
+    assert.equal(beat.body.runId, runId);
+  }
 });
 
 // --- bug-40: abort gives every claim it still holds back ---------------------

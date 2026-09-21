@@ -82,7 +82,8 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new tasks "<title>" 
 is what makes a re-groom safe: a body patch that said nothing about the marker would otherwise clear a decision somebody made deliberately. Passing both
 is a usage error, exit `1`, with nothing sent.
 
-**"Already in progress" reads differently here.** The refusal names the holder's session and how long ago its heartbeat was:
+**"Already in progress" reads differently here.** The refusal names the holder's session, how long ago its heartbeat was, and — after `—` — the id of THIS
+session, so the two are comparable without going looking for either (bug-45):
 
 - **Stale past 15 minutes** — the protocol retires it for you the moment you claim. The takeover is `start <id> --as groom` alone; do **not** `stop --abandon`
   first, and do not ask the user. A dead claim is litter, not somebody's property.
@@ -93,7 +94,9 @@ is a usage error, exit `1`, with nothing sent.
 returns, visible to every machine, and an orchestrator run reads it from there. Printing it would send the user looking for a file to `git add` that does not
 exist. The line and its whole section below apply to a files project only.
 
-**Heartbeat between long steps.** A groom that spends ten minutes reading code with no `heartbeat <id>` has a claim another session is entitled to retire.
+**Heartbeat between long steps.** A groom that spends ten minutes reading code with no `heartbeat <id>` has a claim another session is entitled to retire. It
+is not a way to ask whether the item is still yours: only the holder may beat, so a heartbeat on another session's claim is refused naming both of them, and
+`show`'s `claim-session:`/`this-session:` lines are the reading to take.
 
 ## Refusals — rule these out before picking a verdict
 
