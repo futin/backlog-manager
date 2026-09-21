@@ -19,7 +19,7 @@ import { spawnSync } from 'node:child_process'
 
 // `import`'s text half (task-50), in a module of its own so each transformation is provable from a table rather than through a fake API and a git fixture. One
 // direction only: `import-lib.mjs` imports nothing from this file, and nothing from node at all.
-import { IMPORT_BODY_CAP, splitOutcome, renderImportFooter, blobLink, fitBody, importOrder, countersOf } from './import-lib.mjs'
+import { IMPORT_BODY_CAP, splitOutcome, renderImportFooter, blobLink, fitBody, rewriteOldIds, importOrder, countersOf } from './import-lib.mjs'
 
 // Section name -> id prefix. Fixed and exported so every later command (ids,
 // board, move) keys off this one map instead of re-deriving prefixes.
@@ -3056,8 +3056,61 @@ export async function main(argv) {
       return e.code
     }
 
-    void committable
-    console.log(`pass 1 complete — ${map.size} issues`)
+    // --- pass 2: the cross-links (§8.4) -------------------------------------
+    //
+    // A separate pass because a rewrite needs the WHOLE map: `task-1` cites `bug-2`, whose issue did not exist when `task-1`'s body was composed, and an import
+    // that patched as it went would leave every backward reference unresolved. The bodies are read back from the tracker rather than re-composed from the files,
+    // so this pass patches what is actually there — including, on a resume, an issue a previous run created.
+    try {
+      const after = await apiGet('/api/items')
+      const rows = (after.items ?? []).filter((it) => it.projectPath === project)
+      for (const item of ordered) {
+        at = item.id
+        const ref = `#${map.get(item.id)}`
+        const row = rows.find((it) => it.id === ref)
+        // The index is the server's cached view of the repository, so an issue this command just created can be missing from it if the poller has not caught up.
+        // A refusal rather than a re-read: the marker is down and every issue exists, so a re-run resumes from the footers and finishes the job.
+        if (row === undefined) throw new BacklogError(`${ref} is not in the index yet — re-run import to resume`, 1)
+
+        const current = await apiGetText(`/api/items/body?path=${encodeURIComponent(row.path)}`)
+        let next = rewriteOldIds(current, map)
+        // `from:` has no field on an issue, so it becomes the first line of the body. An unmapped source keeps its old id: the FACT that this item came from
+        // something is worth more than the link, and an id somebody can grep the repository's history for is not a dead end.
+        const from = typeof item.data.from === 'string' ? item.data.from.trim() : ''
+        if (from !== '') next = `${map.has(from) ? `_From #${map.get(from)}._` : `_From ${from}._`}\n\n${next}`
+
+        // An unchanged body is not patched. The route posts no comment, but an edit is still an event on somebody's timeline and a new `updatedAt` for every
+        // reader; a no-op edit would say something changed when nothing did.
+        if (next !== current) {
+          await apiPost('body', { project, id: ref, body: next, ifUpdatedAt: row.updated })
+          await pace()
+        }
+      }
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      const resetAt = e.payload && typeof e.payload.resetAt === 'string' ? ` — retry after ${e.payload.resetAt}` : ''
+      console.error(`import stopped at ${at}: ${e.message}${resetAt}`)
+      return e.code
+    }
+
+    // --- the deletion (§8.5) ------------------------------------------------
+    //
+    // Last, and outside both `try` blocks on purpose: every issue exists and every body is final, so the files are now a second copy of items the tracker owns.
+    // A `try/finally` around either pass would be exactly wrong — a failure must leave the files, because the file is the only copy of anything the failed pass
+    // never created. `README.md` and the marker are not item files and are never touched (`backlogItemFiles` is scoped to the nine leaf directories).
+    const deleted = []
+    for (const item of ordered) {
+      fs.unlinkSync(path.join(backlog, item.relPath))
+      deleted.push(`backlog/${item.relPath}`)
+    }
+
+    console.log(`imported ${ordered.length} item(s) into github ${repo}`)
+    // The marker takes effect on the machine running the board, which is not necessarily this one, and the deletions are what stop the files from being read
+    // there — so both halves have to be committed together, and the list is printed bare to be pasted into a `git add`.
+    console.log('')
+    console.log('commit these files — the marker does nothing until the machine running the board has pulled it:')
+    for (const rel of committable) console.log(rel)
+    for (const rel of deleted) console.log(rel)
     return 0
   }
 

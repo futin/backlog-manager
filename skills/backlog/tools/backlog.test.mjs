@@ -4765,8 +4765,8 @@ test('import bills an item’s counters as a released claim, before the issue is
   assert.equal(releases[0].body.commentId, 901)
   assert.deepEqual(releases[0].body.counters, { groomElapsed: 0, executeElapsed: 120, groomTokens: 0, executeTokens: 3400 })
   // `claim` refuses a closed issue, so the pair has to land before the close — asserted as an ORDER, since both requests succeed either way.
-  const forSix = requests.filter((r) => r.method === 'POST').map((r) => r.path.replace('/api/items/', ''))
-  assert.deepEqual(forSix.slice(2), ['create', 'claim', 'release', 'state', 'create'])
+  const writes = requests.filter((r) => r.method === 'POST').map((r) => r.path.replace('/api/items/', ''))
+  assert.deepEqual(writes.slice(2, 7), ['create', 'claim', 'release', 'state', 'create'])
 })
 
 test('import cuts an over-cap body at a heading, links the rest at HEAD, and keeps the footer last', async () => {
@@ -4840,4 +4840,100 @@ test('the import pace defaults to one request a second', () => {
   const source = fs.readFileSync(SCRIPT, 'utf8')
   const line = source.split('\n').find((l) => l.includes('BM_IMPORT_PACE_MS') && l.includes('1000'))
   assert.ok(line !== undefined, 'no line reads BM_IMPORT_PACE_MS with a default of 1000')
+})
+
+test('import rewrites every cross-reference it can resolve, and leaves the ones it cannot', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const patch = posts(requests, 'body').find((r) => r.body.id === '#4')
+  assert.ok(patch !== undefined, 'task-1 cites two ids and must be patched')
+  assert.match(patch.body.body, /Blocked on #5 and task-99\./)
+  assert.match(patch.body.body, /```\nsee #6\n```/)
+  assert.equal(patch.body.ifUpdatedAt, '2026-09-21T10:00:04Z')
+  assert.equal('runnerFix' in patch.body, false, 'a pass-2 patch says nothing about the runner-fix label')
+  // The footer's readable line carries the item's FILENAME, which contains an id; a rewrite that reached it would rename a file nobody can look up.
+  assert.ok(patch.body.body.endsWith('_Imported from backlog/tasks/open/task-1-one.md_'), patch.body.body.slice(-120))
+})
+
+test('import turns a from: key into a body line, linked when the source was imported too', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const bodies = posts(requests, 'body')
+  assert.ok(bodies.find((r) => r.body.id === '#5').body.body.startsWith('_From #4._\n\n'))
+  // idea-9 is not in this store, so the fact survives and only the link is missing.
+  assert.ok(bodies.find((r) => r.body.id === '#6').body.body.startsWith('_From idea-9._\n\n'))
+})
+
+test('import patches nothing for an item whose body did not change', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(
+    posts(requests, 'body').some((r) => r.body.id === '#7'),
+    false,
+    'oos-5 cites no id and has no from — a patch would be a no-op edit on somebody’s timeline',
+  )
+})
+
+test('import deletes the item files last, keeps the store’s own furniture, and prints what to commit', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(backlogItemFiles(backlog), [])
+  assert.equal(fs.existsSync(path.join(backlog, 'README.md')), true)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), true)
+  assert.deepEqual(commitList(out.stdout), [
+    'backlog/source.json',
+    ...FORM_FILES.map((file) => `.github/ISSUE_TEMPLATE/${file}`),
+    'backlog/tasks/open/task-1-one.md',
+    'backlog/bugs/open/bug-2-two.md',
+    'backlog/tasks/done/task-3-three.md',
+    'backlog/out-of-scope/oos-5-five.md',
+  ])
+  assert.match(out.stdout, /imported 4 item\(s\) into github futin\/x/)
+})
+
+test('a pass-2 failure deletes nothing and names the old id', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const before = treeSnapshot(dir)
+  const { routes } = githubRoutes({ projectPath: dir })
+  const answer = routes['/api/items/body']
+  routes['/api/items/body'] = (body, req) =>
+    req.method === 'GET' ? answer(body, req) : { status: 409, body: { error: 'changed since read', updatedAt: '2026-09-21T12:00:00Z' } }
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /import stopped at task-1: changed since read/)
+  for (const [rel, text] of Object.entries(before)) {
+    if (rel.endsWith('.md')) assert.equal(fs.readFileSync(path.join(dir, rel), 'utf8'), text, `${rel} changed`)
+  }
+})
+
+test('pass 2 makes no write but body patches', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const lastCreate = requests.map((r) => r.path).lastIndexOf('/api/items/create')
+  for (const request of requests.slice(lastCreate + 1)) {
+    const isWrite = request.method === 'POST'
+    assert.equal(isWrite && request.path !== '/api/items/body' && request.path !== '/api/items/state', false, `${request.method} ${request.path} ran after pass 1`)
+  }
 })
