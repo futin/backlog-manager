@@ -194,3 +194,47 @@ non-goals exclude); the filter was narrowed to `logs/` and it is green. Four of 
 here rather than claimed as red: the terminal-stage, pid-reuse and garbage-contents cases assert that the *existing* guards still refuse a file-sourced pid
 (there is no behaviour to revert — before the change the file was never read, so they were green for the wrong reason, which is precisely why the end-to-end
 case above exists), and the source guard pins an existing SKILL.md line the tool now depends on rather than a change this diff made.
+
+### Review round 2 — two contract-sweep misses, fixed
+
+The reviewer returned `verdict: fix` with two Important findings, both the same class the sweep above already caught four other sites for: prose still
+stating the premise this change falsified. Both are now corrected, and the contract sweep for this item is therefore **6 sites updated**, the two new ones
+being:
+
+5. `skills/backlog-orchestrate/SKILL.md` §10 Stopping — the "It signals the children" bullet said abort signals "any item still in flight whose pid this run
+   recorded (§4) … never a pid the run did not record itself". That is exactly what this diff falsifies, and it sat in the section §4's new paragraph sends a
+   driver in the stop window to. Rewritten to name `resolveItemPid`'s two sources in precedence order and to say why the run file's field can be null for a
+   live child. What the bullet asserted about safety is kept word for word in substance: only a live process whose command line names `claude` is ever
+   signalled, never a pattern, and never a pid that has not passed all three checks first.
+6. `docs/subsystems/invariants.md` — the stop anchor's `stage` bullet, 17 lines above the `RunQueueItem.pid` paragraph this diff rewrote, gave the falsified
+   premise as the REASON the gate is wide: the re-stamp exemption does not apply because "under a stop that child is about to be killed". It is not; that is
+   the bug. Rewritten to give the replacement reason — the refused `--pid` call costs the kill nothing because `cmdAbort` reads `<dir>/logs/<id>.pid`
+   instead — and to record the declined narrowing. The conclusion is unchanged and still deliberate: the gate refuses **every** transition, no exceptions.
+
+Both were genuine misses. The sweep looked for the noun (`pid`, `logs/<id>.pid`) and found the four sites that name it; these two state the premise without
+naming the field, one of them in a section about the pause gate's re-stamp exemption rather than about pids at all.
+
+Re-verification after the fix (the diff since the review is prose only — two markdown files, neither read by any runner):
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo
+  (clean, no output)
+
+$ pnpm test
+# tests 691
+# pass 691
+# fail 0
+────────────────────────────────────────────────────────────
+FAIL  jest
+PASS  node --test (skills)
+
+$ pnpm run test:jest
+Test Suites: 2 failed, 126 passed, 128 total
+Tests:       3 failed, 2113 passed, 2116 total
+```
+
+The skills runner is 691/691. Jest's 3 failures are the same three, in the same two suites and at the same lines, that the section above proved pre-existing
+by reverting this branch's only jest-visible file (`shared/types.ts`) and re-running: `test/dispatch-button.test.tsx` (2) and `test/board-live-cards.test.tsx`
+(1), all `Unable to find an element with the text: …` — bug-44's fixture date bomb, item 2 of this same run. No new proof was run for this round because the
+round's diff touches no file either jest runner can see.

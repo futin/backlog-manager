@@ -305,8 +305,10 @@ spawn for, never a superset — which is the safe direction, and the only direct
 - `stage` refuses **every** transition with exit `10`, nothing written — wider than the pause gate in both dimensions (every stage, and not only a
   transition). A stop is allowed to abandon a half-finished worktree; that is the whole difference between it and a pause, and `abort`'s existing
   marker-preservation rule (a worktree still carrying an in-progress `phase:` marker is LEFT IN PLACE with an `attention` entry) is what keeps that safe. The
-  re-stamp exemption does not apply either: the pause gate exempts re-stamps so a live child always has its session id recorded, and under a stop that child
-  is about to be killed.
+  re-stamp exemption does not apply either: the pause gate exempts re-stamps so a live child always has its session id recorded, and under a stop the refused
+  `--pid` call costs the kill nothing, because `cmdAbort` reads that child's pid from `<dir>/logs/<id>.pid` instead (bug-43 — the child is NOT already dead
+  or about to be, which is what this sentence used to claim). Narrowing the gate to exempt a same-stage `--pid` re-stamp was weighed there and declined: a
+  second pid source leaves the gate's one rule — every transition, no exceptions — intact.
 - `watch` kills the child **by the pid it was given** and returns `10`. This is the one place in the system that holds a live child's pid, which is why the
   kill belongs here and nowhere else; it is never a pattern, and the signal is `SIGTERM` because the child owns a transcript `usage`/`denials` still read.
   The check runs BEFORE the tick's heartbeat write, so a run being stopped does not have its `updatedAt` pushed forward by the very tick that noticed.
