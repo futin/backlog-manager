@@ -10,6 +10,7 @@ import { DispatchButton } from '../client/src/components/board/DispatchButton';
 import { ItemModal } from '../client/src/components/board/ItemModal';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import rawFixture from './fixtures/orchestrator-run.json';
+import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunStage } from '../shared/types';
 
 /* Plain JSON, so TS widens its string fields to `string` rather than the
@@ -34,11 +35,22 @@ function runFor(ids: string[], stage: RunStage, over: Partial<RunPayload> = {}):
   };
 }
 
+/*
+ * Every `started:` fixture below is this one stamp, and it is RELATIVE (bug-44): `progressBlock` reads any stamp, fresh or stale, so the value is
+ * arbitrary to the block being tested — but a literal here would have been one more fixture date drifting against the real clock, and the case that
+ * asserts the stamp reaches the reason text reads this constant rather than repeating it.
+ *
+ * Module scope, unlike every other `daysAgo*` call in this tree, and deliberately: this file installs no fake clock, nothing here derives anything
+ * from the stamp's AGE, and the one case that asserts it needs the fixture and the expectation to be the same characters — two calls a second apart
+ * would not be.
+ */
+const STARTED = daysAgoStamp(24);
+
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'task-1',
     title: 'a task',
-    created: '2026-08-20',
+    created: daysAgoDate(2),
     started: '',
     tags: [],
     updated: '',
@@ -190,17 +202,17 @@ describe('DispatchButton', () => {
    * marker if nobody does).
    */
   it("disables with the session's reason when a local session already holds the item", () => {
-    render(<DispatchButton item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })} status={READY} onDispatch={() => {}} />);
+    render(<DispatchButton item={fakeItem({ started: STARTED, phase: 'execute' })} status={READY} onDispatch={() => {}} />);
     const btn = screen.getByRole('button', { name: 'execute' });
     expect(btn).toHaveAttribute('aria-disabled', 'true');
     expect(btn).toHaveAttribute('title', expect.stringContaining('executing'));
     const describedBy = btn.getAttribute('aria-describedby');
-    expect(document.getElementById(String(describedBy))).toHaveTextContent('2026-08-28T14:03:07Z');
+    expect(document.getElementById(String(describedBy))).toHaveTextContent(STARTED);
   });
 
   it('dispatches nothing when an in-progress button is clicked', async () => {
     const onDispatch = jest.fn();
-    render(<DispatchButton item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })} status={READY} onDispatch={onDispatch} />);
+    render(<DispatchButton item={fakeItem({ started: STARTED, phase: 'execute' })} status={READY} onDispatch={onDispatch} />);
     await userEvent.click(screen.getByRole('button', { name: 'execute' }));
     expect(onDispatch).not.toHaveBeenCalled();
   });
@@ -214,7 +226,7 @@ describe('DispatchButton', () => {
   it("prefers the session's reason over a run's when an item somehow carries both", () => {
     render(
       <DispatchButton
-        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
+        item={fakeItem({ started: STARTED, phase: 'execute' })}
         status={READY}
         onDispatch={() => {}}
         runBlock="an orchestrator run is working this item (reviewing)"
@@ -231,7 +243,7 @@ describe('DispatchButton', () => {
   it('still names the dashboard, not the session, when the project is invisible too', () => {
     render(
       <DispatchButton
-        item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })}
+        item={fakeItem({ started: STARTED, phase: 'execute' })}
         status={{ ...READY, projectPaths: ['/abs/other'] }}
         onDispatch={() => {}}
       />
@@ -247,7 +259,7 @@ describe('DispatchButton', () => {
      environment had hidden. */
   it('still renders nothing when the environment hides the control, in progress or not', () => {
     const { container } = render(
-      <DispatchButton item={fakeItem({ started: '2026-08-28T14:03:07Z', phase: 'execute' })} status={{ ...READY, enabled: false }} onDispatch={() => {}} />
+      <DispatchButton item={fakeItem({ started: STARTED, phase: 'execute' })} status={{ ...READY, enabled: false }} onDispatch={() => {}} />
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -408,7 +420,7 @@ describe('DispatchButton', () => {
    */
   it.each([
     ['a run claim', { runBlock: 'task-1 is claimed by a run (implementing)' }],
-    ['an in-progress stamp', { item: fakeItem({ started: '2026-08-28T14:03:07Z' }) }],
+    ['an in-progress stamp', { item: fakeItem({ started: STARTED }) }],
     [
       'a run claim over a project-visibility block',
       {
@@ -419,7 +431,7 @@ describe('DispatchButton', () => {
     [
       'an in-progress stamp over a project-visibility block',
       {
-        item: fakeItem({ started: '2026-08-28T14:03:07Z' }),
+        item: fakeItem({ started: STARTED }),
         status: { ...READY, projectPaths: ['/abs/other'] }
       }
     ]

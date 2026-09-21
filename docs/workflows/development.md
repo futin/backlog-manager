@@ -100,6 +100,12 @@ instead — about one request in 1,500 on a loaded machine, which is one unrepro
 the reasoning is in [invariants.md](../subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)). `test/supertest-bind.test.ts`
 fails the suite if a new one forgets.
 
+A jsdom suite's fixture dates are relative, never literal: `daysAgoDate(2)` / `daysAgoStamp(0)` from `test/helpers/dates.ts`, both read at call time. An
+absolute `created` is an expiry date rather than a constant — the card renders until the real clock passes `created + staleDays`, then `leavesBoard` moves the
+item to the Archive and the query that wanted it throws, on a tree nobody touched (bug-44; the reasoning is in
+[invariants.md](../subsystems/invariants.md#a-fixture-date-is-relative-to-the-clock-the-assertion-runs-under)). `test/fixture-clock.test.ts` reads every
+`test/*.test.tsx` and fails on a literal, because a new one is green for thirty days and no behavioural test can be the guard.
+
 ## Failure modes
 
 **Vite won't start.** `esbuild`'s install script was skipped: it has to be named in `allowBuilds` in [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml), and
