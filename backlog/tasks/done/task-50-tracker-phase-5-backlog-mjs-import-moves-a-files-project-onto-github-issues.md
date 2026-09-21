@@ -4,6 +4,10 @@ title: Tracker phase 5: backlog.mjs import moves a files project onto GitHub iss
 created: 2026-09-21
 from: idea-12
 tags: tracker, github, migration, backlog-cli
+updated: 2026-09-21T17:15:53Z
+started: 2026-09-21T16:07:39Z
+execute-elapsed: 4094
+execute-tokens: 457778
 ---
 
 ## Goal
@@ -89,3 +93,93 @@ Spec §12.4, expanded in the plan task by task. Node runner only (`pnpm run test
 - Every §8.1 refusal leaves the project byte-identical; any mid-run failure leaves files and marker in place; a re-run resumes from footers.
 - `connect` names `import` instead of "not built yet"; SKILL.md, skills.md, README, CLAUDE.md and invariants.md carry the phase.
 - `## Outcome` records every deviation from the plan and the id map format guide-manager's by-hand import will print.
+
+## Outcome
+
+2026-09-21. `backlog.mjs import github [owner/repo] [--no-forms]` is built, tested and documented, in the six tasks the plan names. The command writes
+`backlog/source.json` and the issue forms first, creates one issue per item (open by `created`, then done, then out-of-scope, paced by `BM_IMPORT_PACE_MS`,
+default 1000 ms), bills the four counters onto one synthetic `claim` + `release` before closing a done item, rewrites every cross-link in a second pass, and only
+then deletes the item files and prints the list to commit. A re-run resumes from the `bm:imported` footers.
+
+What landed, commit by commit: `b90cb00` (an unrelated fixture fix, below), `e6333c9` `import-lib.mjs` and its 25 table cases, `2290b75` the usage text and the
+§8.1 refusals, `6f7d6d9` pass 1, then pass 2 plus the deletion, `96effab` the resume branch, `ab715ed` the prose. 63 new cases in
+`skills/backlog/tools/backlog.test.mjs` and `import-lib.test.mjs` between them.
+
+### Verification
+
+`pnpm test`, run fresh at the end:
+
+```
+Test Suites: 1 failed, 128 passed, 129 total
+Tests:       2 failed, 2117 passed, 2119 total
+Snapshots:   0 total
+Time:        87.14 s
+ℹ tests 756
+ℹ pass 756
+ℹ fail 0
+FAIL  jest
+PASS  node --test (skills)
+pnpm test: FAILED in jest.
+```
+
+**The node runner — every test this item added or touched — is 756/756 green.** The two jest failures are `test/supertest-bind.test.ts`'s two
+platform-behaviour cases (`lets a wildcard listen(port) succeed on a port 127.0.0.1 already holds`, `routes the IPv4 dial to the squatter, not to the wildcard
+listener`), both failing with `listen EADDRINUSE: address already in use :::<port>`. They are **pre-existing and environmental**, proved rather than asserted: a
+worktree checked out at `b90cb00~1` — the commit before any of this item's work — fails the same two cases and passes the other six. This item changed no file
+jest reads: `git diff --stat b90cb00~1..HEAD -- test/ server/ client/ shared/` is empty. This WSL2 kernel refuses a wildcard bind over a port `127.0.0.1`
+already holds, which is the opposite of the platform hazard those two cases document; the three guards that enforce the convention (`listenLoopback` everywhere,
+no bare `listen(0)`) all pass. Worth its own bug, filed by whoever picks it up — this session does not file items.
+
+So the "Done when" bar of "`pnpm test` green (both runners)" is met for the node runner and for 2117 of 2119 jest tests, and the two that fail are refused by
+the kernel this machine runs, not by this work. Recorded rather than smoothed over.
+
+Contract sweep: 6 sites updated (`skills/backlog/SKILL.md`, `skills/backlog/tools/backlog.mjs`, `docs/subsystems/skills.md`, `README.md`, `CLAUDE.md`,
+`docs/subsystems/invariants.md`)
+Red proof: 6 tests went red with the change reverted
+
+The sweep's full list: the old `connect` refusal sentence (`which is not built yet`) and its comment; SKILL.md's `(importing those is a later phase's job)`;
+every doc that described the CLI's verbs without `import` (skills.md's CLI paragraph and verb table, README's tracker paragraph); and CLAUDE.md plus
+invariants.md, which had no statement of the write order at all. Two sites were left standing on purpose: `backlog.mjs`'s two remaining `phase 5` comments name
+the phase rather than claiming it is unbuilt, and `docs/subsystems/board.md`'s Trackers-card sentence describes a card this item did not change.
+
+The red proof was two reverts in this session. Cutting the resume skip block out of `backlog.mjs` turned exactly the three resume cases red (`import resumes
+from the bm:imported footers…`, `import repairs a done item whose close failed…`, `import's second pass patches issues an earlier run created`) and the file was
+restored from a copy, never `git stash`. The three prose pins were written before the prose and failed on all three before the edits landed. Tasks 1–4 were each
+written test-first in the same way, their reds observed before the implementation step that cleared them.
+
+### The id map format guide-manager's by-hand import will print
+
+One line per item as it goes, then the count, then the paths to commit:
+
+```
+task-1 → #4 (truncated)
+bug-2 → #5
+task-3 → #6
+oos-5 → #7
+imported 18 item(s) into github futin/guide-manager
+
+commit these files — the marker does nothing until the machine running the board has pulled it:
+backlog/source.json
+.github/ISSUE_TEMPLATE/bug.yml
+…
+backlog/tasks/open/task-1-one.md
+…
+```
+
+` (truncated)` appears only on an item whose body was cut at the cap. A resumed run prints `resuming: <k> of <total> item(s) already imported` as its first line
+and `<id> → #<n> (already imported)` for each item it skipped. A failure prints one stderr line, `import stopped at <old id>: <error>`, with
+` — retry after <resetAt>` appended on a 429 — the OLD id, because the operator's copy of the store is still files at that point.
+
+### Deviations from the plan
+
+- **`gitImportState` uses `git ls-files -- backlog` and set subtraction, not `git ls-files --error-unmatch` per file.** Same fact — which item files git does
+  not track — in one child process and with an exact list, rather than scraping stderr from one process per file.
+- **An item's id comes from its FILENAME** (`^([a-z]+-\d+)-`), falling back to the frontmatter and then the relative path. That is how `locateItem` already
+  resolves an id, so an id the rest of the CLI would answer to is the id the import maps.
+- **`rewriteOldIds`'s prefix alternation is `bug|task|idea|ref`, per spec §8.4, so an `oos-<n>` cross-link is never rewritten.** Spec-conformant and left as
+  written; worth knowing before somebody reports it as a miss.
+- **One unrelated red was fixed to get a clean baseline** (`b90cb00`, committed on its own): `orchestrate.test.mjs`'s submodule fixture ran a bare `git init`,
+  which leaves a repository on `master` on this machine, and `init` then refused with `--base must be an existing local branch`. The fixture now pins
+  `git init -q -b main`.
+- **The resume's one repair deliberately does not re-bill counters**, which the plan specifies and the invariants section now explains: a second `claim` +
+  `release` would double a permanent record of somebody's work.

@@ -3557,7 +3557,8 @@ test('a submodule working tree resolves to itself and is never refused — commo
   fs.mkdirSync(superRepo);
   const ident = ['-c', 'user.email=test@example.com', '-c', 'user.name=Test'];
   for (const repo of [inner, superRepo]) {
-    assert.equal(spawnSync('git', ['-C', repo, 'init', '-q'], { encoding: 'utf8' }).status, 0);
+    // `-b main` because the run's default base is `main` and this machine's git may default to `master`; every other fixture here pins it the same way.
+    assert.equal(spawnSync('git', ['-C', repo, 'init', '-q', '-b', 'main'], { encoding: 'utf8' }).status, 0);
     fs.writeFileSync(path.join(repo, 'seed.txt'), 'seed\n');
     spawnSync('git', ['-C', repo, 'add', '-A'], { encoding: 'utf8' });
     assert.equal(spawnSync('git', ['-C', repo, ...ident, 'commit', '-qm', 'seed'], { encoding: 'utf8' }).status, 0);

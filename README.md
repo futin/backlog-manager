@@ -244,7 +244,8 @@ skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/
 A project connected to a tracker takes one detour through that picture and nothing else changes: its items are GitHub issues rather than files, so `backlog.mjs`
 routes every command through the API (which holds `BM_GITHUB_TOKEN` and does the writing) instead of touching `<project>/backlog/*.md`. The board, the skills
 and the orchestrator read exactly the same shapes either way. Connect one with `backlog.mjs connect github <owner>/<repo>`; the stack has to be running for any
-command in a connected project, and a refused connection is exit `5` saying so.
+command in a connected project, and a refused connection is exit `5` saying so. Move an existing files project with `backlog.mjs import github`; it writes the
+marker first, one issue per item, and deletes the files only once every cross-link has been rewritten.
 
 Four seams, one doc each:
 

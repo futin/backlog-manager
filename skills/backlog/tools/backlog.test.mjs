@@ -6,6 +6,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles } from './backlog.mjs'
+import { IMPORT_BODY_CAP } from './import-lib.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
 const run = (cwd, ...args) => spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', cwd })
@@ -3577,7 +3578,9 @@ function fakeApi(routes) {
       requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body })
 
       const answer = routes[url.pathname]
-      const resolved = typeof answer === 'function' ? answer(body) : answer
+      // A route function is given the REQUEST as well as the body, because one path answers two verbs: `GET /api/items/body` is an item's Markdown and
+      // `POST /api/items/body` replaces it, and a fake that could not tell them apart would have to answer one of them wrongly.
+      const resolved = typeof answer === 'function' ? answer(body, { method: req.method, query: Object.fromEntries(url.searchParams) }) : answer
       if (resolved === undefined) {
         res.writeHead(404, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: `no fake route for ${url.pathname}` }))
@@ -4371,4 +4374,707 @@ test('backlog-groom names --runner-fix as the tracker spelling of the marker', (
   assert.match(text, /--no-runner-fix/)
   // The third state, stated where a groomer will read it.
   assert.match(text, /Passing neither leaves the label exactly as it is/)
+})
+
+// --- task-50: import github --------------------------------------------------
+// `import` is the one command that moves a project between sources: it writes the marker, creates one issue per item file through the local API, rewrites every
+// cross-reference, and only then deletes the files. Two properties shape every case below, and both are §8.1's.
+//
+// First, a refusal leaves the project BYTE-IDENTICAL — no marker, no issue forms, no request. Between the marker write and the deletion the project is in a
+// state where the board reads the tracker and the files are ignored, so a refusal that got half way there would hide every item in the store with nothing to
+// say why. Each refusal case therefore snapshots the whole tree and compares it afterwards, rather than asserting on the one file the check is about.
+//
+// Second, the checks run cheap-and-local first and the API probe LAST, because the probe is the only one with an effect on somebody else. The cases assert that
+// ordering the only way it can be asserted from outside: a fixture that is wrong in one way reports THAT way, never the next check's sentence.
+
+/** `---\n<front>\n---\n<body>` — the fixture's item files are hand-shaped strings, never produced by the tool under test. */
+function itemText(front, body) {
+  return `---\n${front.trim()}\n---\n\n${body.trim()}\n`
+}
+
+/**
+ * A committed files-mode store with a GitHub origin, which is the shape every `import` precondition reads.
+ *
+ * `push` writes `refs/remotes/origin/main` by hand with `update-ref`: `git branch -r --contains HEAD` reads remote-tracking refs out of this repository and
+ * nothing else, so a real one can be made without a network and without a second repository. `push: false` is how the "HEAD is not on any origin/* branch"
+ * refusal is reached — the interesting case, since the truncation link in every truncated issue body pins `backlog/` files at that exact commit.
+ */
+function importFixture({ originUrl = 'git@github.com:futin/x.git', items = [], push = true } = {}) {
+  const { dir, backlog } = backlogFixture()
+  fs.mkdirSync(backlog, { recursive: true })
+  fs.writeFileSync(path.join(backlog, 'README.md'), '# Backlog\n')
+  for (const item of items) {
+    const abs = path.join(backlog, item.relPath)
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    fs.writeFileSync(abs, item.text)
+  }
+  const ident = ['-c', 'user.name=t', '-c', 'user.email=t@t']
+  assert.equal(spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf8' }).status, 0)
+  const committed = spawnSync('git', ['-C', dir, ...ident, 'commit', '-qm', 'seed'], { encoding: 'utf8' })
+  assert.equal(committed.status, 0, committed.stderr)
+  if (originUrl !== null) {
+    assert.equal(spawnSync('git', ['-C', dir, 'remote', 'add', 'origin', originUrl], { encoding: 'utf8' }).status, 0)
+  }
+  const sha = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+  if (push) {
+    assert.equal(spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/main', sha], { encoding: 'utf8' }).status, 0)
+  }
+  return { dir, backlog, sha }
+}
+
+/** Every file under a fixture except git's own, as path → contents, so a refusal can be proved to have written nothing. */
+function treeSnapshot(dir) {
+  const seen = {}
+  const walk = (abs, rel) => {
+    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+      if (rel === '' && entry.name === '.git') continue
+      const next = rel === '' ? entry.name : `${rel}/${entry.name}`
+      if (entry.isDirectory()) walk(path.join(abs, entry.name), next)
+      else seen[next] = fs.readFileSync(path.join(abs, entry.name), 'utf8')
+    }
+  }
+  walk(dir, '')
+  return seen
+}
+
+const TASK_ONE = { relPath: 'tasks/open/task-1-one.md', text: itemText('id: task-1\ntitle: One\ncreated: 2026-08-01', '## Plan\n\nDo the thing.') }
+
+test('import with no sub-command prints its own usage', () => {
+  const { dir } = importFixture({ items: [TASK_ONE] })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs import github/)
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import names a platform this tool cannot write to rather than assuming github', () => {
+  const { dir } = importFixture({ items: [TASK_ONE] })
+
+  const out = run(dir, 'import', 'gitlab', 'a/b')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs import github/)
+})
+
+test('import refuses a linked worktree, naming itself and the project root', () => {
+  const { dir } = importFixture({ items: [TASK_ONE] })
+  const worktree = path.join(dir, 'wt')
+  const added = spawnSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', 'side', worktree], { encoding: 'utf8' })
+  assert.equal(added.status, 0, added.stderr)
+
+  const out = run(worktree, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /linked git worktree/)
+  assert.match(out.stderr, /import writes the project's own committed source marker/)
+  assert.ok(out.stderr.includes(dir), `the refusal must name the project root:\n${out.stderr}`)
+})
+
+test('import refuses an explicit files marker rather than overwriting it', () => {
+  const { dir, backlog } = importFixture({
+    items: [TASK_ONE, { relPath: 'source.json', text: '{ "kind": "files" }\n' }],
+  })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /delete it by hand/)
+  assert.ok(out.stderr.includes(path.join(backlog, 'source.json')))
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import refuses a tracker project that has no item files left', () => {
+  const { dir } = importFixture({ items: [{ relPath: 'source.json', text: JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n' }] })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /already tracker-backed/)
+  assert.match(out.stderr, /nothing to import/)
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import sends an empty store to connect, which is the command for it', () => {
+  const { dir } = importFixture({ items: [] })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /connect github/)
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import with no origin and no positional names its own call shape', () => {
+  const { dir } = importFixture({ items: [TASK_ONE], originUrl: null })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  // The sentence names THIS command: a caller told to run `connect github <owner>/<repo>` here would connect the populated store this command exists to move.
+  assert.match(out.stderr, /import github <owner>\/<repo>/)
+})
+
+test('import refuses a dirty backlog and prints the porcelain lines it read', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE] })
+  fs.appendFileSync(path.join(backlog, TASK_ONE.relPath), 'one more line\n')
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /uncommitted changes/)
+  assert.match(out.stderr, / M backlog\/tasks\/open\/task-1-one\.md/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('import refuses an item file git is not tracking, even when the status is clean', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE] })
+  // Excluded rather than merely new, because `status --porcelain` would otherwise catch it first and report the dirty-tree refusal: the case under test is the
+  // one where git is silent and the file would still be deleted at the end with no commit anywhere carrying it.
+  fs.appendFileSync(path.join(dir, '.git', 'info', 'exclude'), 'backlog/bugs/open/bug-9-*.md\n')
+  fs.mkdirSync(path.join(backlog, 'bugs', 'open'), { recursive: true })
+  fs.writeFileSync(path.join(backlog, 'bugs/open/bug-9-nine.md'), itemText('id: bug-9\ntitle: Nine\ncreated: 2026-08-02', '## Fix\n\nfix it'))
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /not tracked by git/)
+  assert.match(out.stderr, /bugs\/open\/bug-9-nine\.md/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('import refuses a HEAD that is on no origin branch, naming the sha the truncation link would pin', () => {
+  const { dir, backlog, sha } = importFixture({ items: [TASK_ONE], push: false })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /not on any origin\/\* branch/)
+  assert.ok(out.stderr.includes(sha.slice(0, 7)), `the refusal must name the sha7:\n${out.stderr}`)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('import refuses an open item somebody is working, and ignores a started stamp on a done one', () => {
+  const inProgress = { relPath: 'tasks/open/task-2-two.md', text: itemText('id: task-2\ntitle: Two\ncreated: 2026-08-03\nstarted: 2026-09-20T10:00:00Z', '## Plan\n\nwork') }
+  const { dir, backlog } = importFixture({ items: [TASK_ONE, inProgress] })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /in progress/)
+  assert.match(out.stderr, /task-2/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+
+  // The same stamp on a `done/` item is history, not a session: that item is closed and nobody is holding it.
+  const done = importFixture({
+    items: [TASK_ONE, { relPath: 'tasks/done/task-3-three.md', text: itemText('id: task-3\ntitle: Three\ncreated: 2026-08-04\nstarted: 2026-09-01T10:00:00Z', '## Plan\n\nwork\n\n## Outcome\n\ndone') }],
+  })
+  const past = runWithEnv(done.dir, { ...process.env, BM_API_PORT: '1' }, 'import', 'github')
+  assert.equal(past.status, 5, past.stderr)
+})
+
+test('import stops at the probe when the stack is not running, and writes no marker', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE] })
+
+  const out = runWithEnv(dir, { ...process.env, BM_API_PORT: '1' }, 'import', 'github')
+
+  assert.equal(out.status, 5)
+  assert.match(out.stderr, /the backlog-manager API is not running/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+  assert.equal(fs.existsSync(path.join(dir, '.github', 'ISSUE_TEMPLATE', 'bug.yml')), false)
+})
+
+test('import refuses a malformed item file by absolute path', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE, { relPath: 'bugs/open/bug-4-four.md', text: 'no frontmatter here\n' }] })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.ok(out.stderr.includes(path.join(backlog, 'bugs/open/bug-4-four.md')), `the refusal must name the file:\n${out.stderr}`)
+})
+
+test('import refuses a refactor kind the tracker has no label for, and accepts debt', () => {
+  const bad = { relPath: 'refactors/open/ref-4-x.md', text: itemText('id: ref-4\ntitle: X\ncreated: 2026-08-05\nkind: cleanup', 'why') }
+  const { dir, backlog } = importFixture({ items: [TASK_ONE, bad] })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /ref-4/)
+  assert.match(out.stderr, /cleanup/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+
+  // `debt` is one of the two the server maps to a label, so the same file with that value reaches the probe.
+  const ok = importFixture({ items: [TASK_ONE, { relPath: 'refactors/open/ref-4-x.md', text: itemText('id: ref-4\ntitle: X\ncreated: 2026-08-05\nkind: debt', 'why') }] })
+  const reached = runWithEnv(ok.dir, { ...process.env, BM_API_PORT: '1' }, 'import', 'github')
+  assert.equal(reached.status, 5, reached.stderr)
+})
+
+/**
+ * The routes an import talks to, answering the shapes the real server answers.
+ *
+ * Issue numbers start at `4` and count up per `create`, so a case can name `#4` without first reading the response: the numbers a real repository hands out are
+ * arbitrary, and a fake that mirrored that would make every assertion below a lookup. The fake also HOLDS each issue's Markdown, because pass 2 reads a body
+ * back before patching it — `GET /api/items/body` answers what the `create` (or the last patch) recorded, which is the only way a cross-link rewrite can be
+ * asserted end to end.
+ */
+function githubRoutes({ projectPath = '', repo = 'futin/x', seed = [], firstNumber = 4, overrides = {} } = {}) {
+  const bodies = new Map()
+  const numbers = []
+  const statuses = new Map()
+  let created = 0
+  let claims = 0
+  const numberOf = (ref) => Number(String(ref).replace(/^.*#/, ''))
+  // Issues a PREVIOUS import created, for the resume cases: the fake holds their bodies, footers included, because the footer is what a resumed run reads to
+  // decide which items already exist.
+  for (const issue of seed) {
+    numbers.push(issue.number)
+    bodies.set(issue.number, issue.body)
+    statuses.set(issue.number, issue.status ?? 'open')
+  }
+  const routes = {
+    '/api/items': () => ({
+      body: {
+        items: numbers.map((n) =>
+          apiItem({ id: `#${n}`, projectPath, path: `gh:${repo}#${n}`, updated: `2026-09-21T10:00:0${n}Z`, status: statuses.get(n) ?? 'open' }),
+        ),
+        errors: [],
+      },
+    }),
+    '/api/items/create': (body) => {
+      const number = firstNumber + created
+      created += 1
+      numbers.push(number)
+      bodies.set(number, body.body)
+      return { body: { id: `#${number}`, urn: `gh:${repo}#${number}`, url: `https://github.com/${repo}/issues/${number}`, number } }
+    },
+    '/api/items/claim': () => ({ body: { commentId: 900 + ++claims, record: {} } }),
+    '/api/items/release': () => ({ body: { ok: true } }),
+    '/api/items/state': () => ({ body: { ok: true, url: `https://github.com/${repo}/issues/1` } }),
+    '/api/items/body': (body, { method, query }) => {
+      if (method === 'GET') return { body: bodies.get(numberOf(query.path)) ?? '' }
+      bodies.set(numberOf(body.id), body.body)
+      return { body: { ok: true, updatedAt: '2026-09-21T10:00:00Z' } }
+    },
+    ...overrides,
+  }
+  return { routes, bodies, numbers }
+}
+
+const posts = (requests, route) => requests.filter((r) => r.method === 'POST' && r.path === `/api/items/${route}`)
+
+/** The four items every pass-1 and pass-2 case works from: two open, one done with counters and an Outcome, one rejected. */
+const importItems = () => [
+  {
+    relPath: 'tasks/open/task-1-one.md',
+    text: itemText('id: task-1\ntitle: one\ncreated: 2026-01-01\ntags: x, y\nrunner-fix: true', 'Blocked on bug-2 and task-99.\n\n```\nsee task-3\n```'),
+  },
+  { relPath: 'bugs/open/bug-2-two.md', text: itemText('id: bug-2\ntitle: two\ncreated: 2026-02-01\nfrom: task-1', '## Cause\n\nc\n\n## Fix\n\nf') },
+  {
+    relPath: 'tasks/done/task-3-three.md',
+    text: itemText('id: task-3\ntitle: three\ncreated: 2026-01-15\nfrom: idea-9\nexecute-elapsed: 120\nexecute-tokens: 3400', '## Plan\n\nplan text\n\n## Outcome\n\nShipped it.'),
+  },
+  { relPath: 'out-of-scope/oos-5-five.md', text: itemText('id: oos-5\ntitle: five\ncreated: 2025-12-01', 'no ids here') },
+]
+
+test('import writes the marker and the forms before its first request, and the probe is that first request', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n')
+  for (const form of FORM_FILES) assert.equal(fs.existsSync(formPath(dir, form)), true, `${form} was not written`)
+  assert.equal(requests[0].method, 'GET')
+  assert.equal(requests[0].path, '/api/items')
+  assert.equal(requests[1].method, 'POST')
+  assert.equal(requests[1].path, '/api/items/create')
+})
+
+test('import --no-forms writes the marker and no issue forms', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github', '--no-forms'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), true)
+  for (const form of FORM_FILES) assert.equal(fs.existsSync(formPath(dir, form)), false, `${form} was written under --no-forms`)
+})
+
+test('import creates issues open-first by created date, then done, then rejected', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(
+    posts(requests, 'create').map((r) => r.body.title),
+    ['one', 'two', 'three', 'five'],
+  )
+})
+
+test('import composes each create from the frontmatter the tracker has a field for, and puts the rest in the footer', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const creates = posts(requests, 'create')
+  const [one, two, , five] = creates.map((r) => r.body)
+
+  assert.equal(one.section, 'tasks')
+  assert.equal(one.runnerFix, true)
+  assert.equal('from' in one, false, 'a create never carries from — the link is a body line pass 2 writes')
+  assert.equal('kind' in one, false)
+  assert.ok(one.body.endsWith('<!-- bm:imported from=task-1 created=2026-01-01 tags=x,y -->\n_Imported from backlog/tasks/open/task-1-one.md_'), one.body.slice(-200))
+  assert.equal('runnerFix' in two, false)
+  assert.equal(five.section, 'out-of-scope')
+  // The label set is the closed eight the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
+  for (const create of creates) assert.equal('labels' in create.body, false)
+  const tagsOutsideFooter = one.body.replace(/<!-- bm:imported[^]*$/, '')
+  assert.equal(/\bx, y\b/.test(tagsOutsideFooter), false, 'the tags line must not survive anywhere but the footer')
+})
+
+test('import lifts a done item’s Outcome out of the body and sends it as the closing comment', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const three = posts(requests, 'create')[2].body
+  assert.equal(three.body.includes('Shipped it.'), false, 'the Outcome belongs in the closing comment, not the issue body')
+  const states = posts(requests, 'state')
+  assert.equal(states.length, 1, 'exactly one state request: done closes with a comment, rejected was closed by create, open is not closed')
+  assert.deepEqual(states[0].body, { project: dir, id: '#6', status: 'done', outcome: 'Shipped it.' })
+})
+
+test('import bills an item’s counters as a released claim, before the issue is closed', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const claims = posts(requests, 'claim')
+  const releases = posts(requests, 'release')
+  assert.equal(claims.length, 1, 'only the item with counters gets a claim')
+  assert.equal(releases.length, 1)
+  assert.equal(claims[0].body.id, '#6')
+  assert.equal(claims[0].body.phase, 'execute')
+  assert.match(claims[0].body.session, /^import-\d{4}-/)
+  assert.equal(releases[0].body.session, claims[0].body.session)
+  assert.equal(releases[0].body.reason, 'imported')
+  assert.equal(releases[0].body.commentId, 901)
+  assert.deepEqual(releases[0].body.counters, { groomElapsed: 0, executeElapsed: 120, groomTokens: 0, executeTokens: 3400 })
+  // `claim` refuses a closed issue, so the pair has to land before the close — asserted as an ORDER, since both requests succeed either way.
+  const writes = requests.filter((r) => r.method === 'POST').map((r) => r.path.replace('/api/items/', ''))
+  assert.deepEqual(writes.slice(2, 7), ['create', 'claim', 'release', 'state', 'create'])
+})
+
+test('import cuts an over-cap body at a heading, links the rest at HEAD, and keeps the footer last', async () => {
+  const big = '-'.repeat(500) + '\n\n## A\n' + 'a'.repeat(30000) + '\n\n## B\n' + 'b'.repeat(30000) + '\n\n## C\nCCC-MARKER\n' + 'c'.repeat(10000)
+  const { dir, sha } = importFixture({ items: [{ relPath: 'tasks/open/task-7-big.md', text: itemText('id: task-7\ntitle: big\ncreated: 2026-03-01', big) }] })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const body = posts(requests, 'create')[0].body.body
+  assert.ok(body.length <= IMPORT_BODY_CAP, `body is ${body.length} characters`)
+  assert.ok(body.includes('## B'))
+  assert.equal(body.includes('CCC-MARKER'), false)
+  assert.ok(body.includes(`_Truncated. Full text: https://github.com/futin/x/blob/${sha}/backlog/tasks/open/task-7-big.md_`), 'the truncation link pins files at HEAD')
+  assert.ok(body.endsWith('_Imported from backlog/tasks/open/task-7-big.md_'), 'the footer is appended after the trailer so it always survives')
+  assert.match(out.stdout, /task-7 → #4 \(truncated\)/)
+})
+
+test('import prints the id map as it goes, one line per item', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const lines = out.stdout.split('\n').filter((line) => line.includes(' → #'))
+  assert.deepEqual(lines, ['task-1 → #4', 'bug-2 → #5', 'task-3 → #6', 'oos-5 → #7'])
+})
+
+test('import stops at the first refused request, keeping the marker and every item file', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const before = treeSnapshot(dir)
+  const { routes } = githubRoutes({ projectPath: dir })
+  let creates = 0
+  const created = routes['/api/items/create']
+  routes['/api/items/create'] = (body, req) => {
+    creates += 1
+    return creates === 2 ? { status: 502, body: { error: 'GitHub answered 502' } } : created(body, req)
+  }
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /import stopped at bug-2: GitHub answered 502/)
+  // The marker is the one thing a failure leaves behind, and that is spec §8.2: it had to be written before the first create, and a re-run resumes from it.
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), true)
+  for (const [rel, text] of Object.entries(before)) {
+    if (rel.endsWith('.md')) assert.equal(fs.readFileSync(path.join(dir, rel), 'utf8'), text, `${rel} changed`)
+  }
+  const last = requests[requests.length - 1]
+  assert.equal(last.path, '/api/items/create', 'nothing ran after the refused create')
+})
+
+test('import names the reset time the server sent when a request is rate-limited', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+  routes['/api/items/create'] = () => ({ status: 429, body: { error: 'GitHub rate limit', resetAt: '2026-09-21T11:05:00Z' } })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /import stopped at task-1: GitHub rate limit — retry after 2026-09-21T11:05:00Z/)
+  assert.equal(posts(requests, 'create').length, 1)
+  assert.equal(fs.existsSync(path.join(dir, 'backlog', 'tasks', 'open', 'task-1-one.md')), true)
+})
+
+test('the import pace defaults to one request a second', () => {
+  // A source guard, the shape this repo already uses for the tailnet port: the default cannot be asserted behaviourally without making every case above ten
+  // seconds slower, and the value is what keeps a whole-store import inside GitHub's secondary rate limits.
+  const source = fs.readFileSync(SCRIPT, 'utf8')
+  const line = source.split('\n').find((l) => l.includes('BM_IMPORT_PACE_MS') && l.includes('1000'))
+  assert.ok(line !== undefined, 'no line reads BM_IMPORT_PACE_MS with a default of 1000')
+})
+
+test('import rewrites every cross-reference it can resolve, and leaves the ones it cannot', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const patch = posts(requests, 'body').find((r) => r.body.id === '#4')
+  assert.ok(patch !== undefined, 'task-1 cites two ids and must be patched')
+  assert.match(patch.body.body, /Blocked on #5 and task-99\./)
+  assert.match(patch.body.body, /```\nsee #6\n```/)
+  assert.equal(patch.body.ifUpdatedAt, '2026-09-21T10:00:04Z')
+  assert.equal('runnerFix' in patch.body, false, 'a pass-2 patch says nothing about the runner-fix label')
+  // The footer's readable line carries the item's FILENAME, which contains an id; a rewrite that reached it would rename a file nobody can look up.
+  assert.ok(patch.body.body.endsWith('_Imported from backlog/tasks/open/task-1-one.md_'), patch.body.body.slice(-120))
+})
+
+test('import turns a from: key into a body line, linked when the source was imported too', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const bodies = posts(requests, 'body')
+  assert.ok(bodies.find((r) => r.body.id === '#5').body.body.startsWith('_From #4._\n\n'))
+  // idea-9 is not in this store, so the fact survives and only the link is missing.
+  assert.ok(bodies.find((r) => r.body.id === '#6').body.body.startsWith('_From idea-9._\n\n'))
+})
+
+test('import patches nothing for an item whose body did not change', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(
+    posts(requests, 'body').some((r) => r.body.id === '#7'),
+    false,
+    'oos-5 cites no id and has no from — a patch would be a no-op edit on somebody’s timeline',
+  )
+})
+
+test('import deletes the item files last, keeps the store’s own furniture, and prints what to commit', async () => {
+  const { dir, backlog } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(backlogItemFiles(backlog), [])
+  assert.equal(fs.existsSync(path.join(backlog, 'README.md')), true)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), true)
+  assert.deepEqual(commitList(out.stdout), [
+    'backlog/source.json',
+    ...FORM_FILES.map((file) => `.github/ISSUE_TEMPLATE/${file}`),
+    'backlog/tasks/open/task-1-one.md',
+    'backlog/bugs/open/bug-2-two.md',
+    'backlog/tasks/done/task-3-three.md',
+    'backlog/out-of-scope/oos-5-five.md',
+  ])
+  assert.match(out.stdout, /imported 4 item\(s\) into github futin\/x/)
+})
+
+test('a pass-2 failure deletes nothing and names the old id', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const before = treeSnapshot(dir)
+  const { routes } = githubRoutes({ projectPath: dir })
+  const answer = routes['/api/items/body']
+  routes['/api/items/body'] = (body, req) =>
+    req.method === 'GET' ? answer(body, req) : { status: 409, body: { error: 'changed since read', updatedAt: '2026-09-21T12:00:00Z' } }
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /import stopped at task-1: changed since read/)
+  for (const [rel, text] of Object.entries(before)) {
+    if (rel.endsWith('.md')) assert.equal(fs.readFileSync(path.join(dir, rel), 'utf8'), text, `${rel} changed`)
+  }
+})
+
+test('pass 2 makes no write but body patches', async () => {
+  const { dir } = importFixture({ items: importItems() })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const lastCreate = requests.map((r) => r.path).lastIndexOf('/api/items/create')
+  for (const request of requests.slice(lastCreate + 1)) {
+    const isWrite = request.method === 'POST'
+    assert.equal(isWrite && request.path !== '/api/items/body' && request.path !== '/api/items/state', false, `${request.method} ${request.path} ran after pass 1`)
+  }
+})
+
+/** A store whose marker is already down and whose item files are still there: an import that stopped part way through, which is the state resume is for. */
+function resumeFixture() {
+  return importFixture({
+    items: [...importItems(), { relPath: 'source.json', text: JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n' }],
+  })
+}
+
+const seededBody = (id, relPath, text) => `${text}\n\n<!-- bm:imported from=${id} created=2026-01-01 -->\n_Imported from backlog/${relPath}_`
+
+const RESUME_SEED = [
+  { number: 4, status: 'open', body: seededBody('task-1', 'tasks/open/task-1-one.md', 'Blocked on bug-2 and task-99.') },
+  // Its close failed last time: the issue exists and is still open, while the file is under `done/`.
+  { number: 6, status: 'open', body: seededBody('task-3', 'tasks/done/task-3-three.md', '## Plan\n\nplan text') },
+]
+
+test('import resumes from the bm:imported footers and creates only what is missing', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /resuming: 2 of 4 item\(s\) already imported/)
+  assert.deepEqual(
+    posts(requests, 'create').map((r) => r.body.title),
+    ['two', 'five'],
+  )
+})
+
+test('import repairs a done item whose close failed, and claims nothing a second time', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const states = posts(requests, 'state')
+  assert.equal(states.length, 1)
+  assert.equal(states[0].body.id, '#6')
+  assert.equal(states[0].body.outcome, 'Shipped it.')
+  // The counters were billed by the run that created the issue; a second claim would double them, and a duplicate is worse than a missing one.
+  assert.equal(posts(requests, 'claim').length, 0)
+  assert.equal(posts(requests, 'release').length, 0)
+})
+
+test('import’s second pass patches issues an earlier run created', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const patch = posts(requests, 'body').find((r) => r.body.id === '#4')
+  assert.ok(patch !== undefined, 'the issue an earlier run created still cites an old id')
+  assert.match(patch.body.body, /Blocked on #8 and task-99\./)
+})
+
+test('import leaves the marker exactly as it found it, and honours --no-forms on a resume', async () => {
+  const { dir, backlog } = resumeFixture()
+  const before = fs.readFileSync(path.join(backlog, 'source.json'), 'utf8')
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github', '--no-forms'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), before)
+  for (const form of FORM_FILES) assert.equal(fs.existsSync(formPath(dir, form)), false)
+})
+
+test('import refuses a repo that disagrees with the marker, before any request', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github', 'futin/other'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /names futin\/x, not futin\/other/)
+  assert.equal(requests.length, 0)
+})
+
+test('a resumed import still deletes every item file last', async () => {
+  const { dir, backlog } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(backlogItemFiles(backlog), [])
+  assert.deepEqual(commitList(out.stdout), [
+    'backlog/source.json',
+    ...FORM_FILES.map((file) => `.github/ISSUE_TEMPLATE/${file}`),
+    'backlog/tasks/open/task-1-one.md',
+    'backlog/bugs/open/bug-2-two.md',
+    'backlog/tasks/done/task-3-three.md',
+    'backlog/out-of-scope/oos-5-five.md',
+  ])
+})
+
+// --- import's prose (task-50) ---------------------------------------------
+//
+// `import` is a one-shot, irreversible-by-hand migration: it deletes a project's whole item store once the issues exist. A session reaching for it reads
+// SKILL.md, not this file, so the command line has to be there in a copyable fence — and the two sentences that said phase 5 did not exist yet have to be
+// gone, because both of them send a reader looking for a command that is now right there.
+const REPO_CLAUDE_MD = fileURLToPath(new URL('../../../CLAUDE.md', import.meta.url))
+
+test('backlog/SKILL.md documents the import command in a copyable fence', () => {
+  const text = fs.readFileSync(BACKLOG_SKILL_MD, 'utf8')
+  const fences = text.split('```').filter((_, i) => i % 2 === 1)
+  assert.ok(
+    fences.some((fence) => fence.includes('import github [owner/repo] [--no-forms]')),
+    'backlog/SKILL.md does not carry the import usage line inside a fenced block',
+  )
+})
+
+test('neither backlog/SKILL.md nor backlog.mjs still calls import a later phase', () => {
+  assert.ok(!fs.readFileSync(BACKLOG_SKILL_MD, 'utf8').includes("later phase's job"), 'backlog/SKILL.md still defers the import to a later phase')
+  assert.ok(!fs.readFileSync(CLI_SOURCES['backlog.mjs'], 'utf8').includes('not built yet'), "backlog.mjs's connect refusal still says import is not built yet")
+})
+
+// The invariant bullet is where a session working anywhere in this repo meets the two rules that make the migration safe: the order the marker and the files
+// are written in, and what makes a re-run resume instead of duplicating.
+test('CLAUDE.md carries the import invariant bullet', () => {
+  const bullets = fs
+    .readFileSync(REPO_CLAUDE_MD, 'utf8')
+    .split('\n- ')
+    .filter((bullet) => bullet.includes('marker first') && bullet.includes('bm:imported'))
+  assert.equal(bullets.length, 1, 'CLAUDE.md has no single invariant bullet naming both `marker first` and `bm:imported`')
 })

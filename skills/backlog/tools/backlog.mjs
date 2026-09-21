@@ -17,6 +17,20 @@ import { fileURLToPath } from 'node:url'
 // the call returns, so it never keeps a handle open past main()).
 import { spawnSync } from 'node:child_process'
 
+// `import`'s text half (task-50), in a module of its own so each transformation is provable from a table rather than through a fake API and a git fixture. One
+// direction only: `import-lib.mjs` imports nothing from this file, and nothing from node at all.
+import {
+  IMPORT_BODY_CAP,
+  splitOutcome,
+  renderImportFooter,
+  parseImportFooter,
+  blobLink,
+  fitBody,
+  rewriteOldIds,
+  importOrder,
+  countersOf,
+} from './import-lib.mjs'
+
 // Section name -> id prefix. Fixed and exported so every later command (ids,
 // board, move) keys off this one map instead of re-deriving prefixes.
 export const SECTIONS = {
@@ -473,6 +487,52 @@ export function backlogItemFiles(backlog) {
     }
   }
   return found.sort()
+}
+
+// The git facts `import` refuses on, read in one place because all three of them are about the same thing: whether the files this command is about to delete are
+// recoverable from the repository afterwards.
+//
+// `dirty` and `untracked` are the two halves of "committed". A modification is caught by `status --porcelain -- backlog`; a file git has never been told about
+// is NOT — the interesting case is one excluded by `.gitignore` or `.git/info/exclude`, where the status is clean and the file would still be deleted at the end
+// with no commit anywhere carrying it. The tracked set is read with one `ls-files -- backlog` and subtracted, rather than one `--error-unmatch` call whose
+// refusal has to be scraped back out of git's stderr: the same fact, one child process either way, and the list of paths is exact instead of parsed.
+//
+// `sha` and `pushed` are about the truncation link. A body over `IMPORT_BODY_CAP` keeps its first whole sections and links the rest at this exact commit, so a
+// commit no remote has is a link that 404s for everybody but this machine — and by then the file it pointed at is deleted. `branch -r --contains HEAD` is the
+// question "does some remote-tracking ref contain this commit", asked of git's own refs rather than of the network, so it costs nothing and works offline.
+function gitImportState(root, files) {
+  const status = spawnSync('git', ['-C', root, 'status', '--porcelain', '--', 'backlog'], { encoding: 'utf8' })
+  const dirty = (status.stdout ?? '').replace(/\n+$/, '')
+
+  const listed = spawnSync('git', ['-C', root, 'ls-files', '--', 'backlog'], { encoding: 'utf8' })
+  const tracked = new Set(
+    (listed.stdout ?? '')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => line.replace(/^backlog\//, '')),
+  )
+  const untracked = files.filter((rel) => !tracked.has(rel))
+
+  const head = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' })
+  const sha = head.status === 0 ? (head.stdout ?? '').trim() : null
+  let pushed = false
+  if (sha !== null) {
+    const contains = spawnSync('git', ['-C', root, 'branch', '-r', '--contains', 'HEAD'], { encoding: 'utf8' })
+    pushed = (contains.stdout ?? '')
+      .split('\n')
+      .map((line) => line.replace(/^[*+ ]+/, '').trim())
+      .some((line) => line.startsWith('origin/'))
+  }
+
+  return { dirty, untracked, sha, pushed }
+}
+
+// Where an item file sits, as the two values every request about it needs: `section` is what `create` maps to a `type:*` label, `status` is what decides whether
+// the issue is closed and how. Read off the relative path rather than off the frontmatter, because the directory IS the status in a files store (CLAUDE.md:
+// "status is the directory, never frontmatter") and `out-of-scope/` is flat, with no open/done pair of its own.
+function importPlace(rel) {
+  const [section, leaf] = rel.split('/')
+  return section === 'out-of-scope' ? { section: 'out-of-scope', status: 'out-of-scope' } : { section, status: leaf }
 }
 
 // The four GitHub issue forms, one per type section, each pre-applying that section's `type:*` label so an issue filed through the web UI arrives already
@@ -1893,6 +1953,7 @@ commands:
   start       mark an open bug or task as in progress
   stop        clear the in-progress marker
   connect     point this project's backlog at a tracker (github)
+  import      move this project's item files onto a tracker (github)
   unregister  drop a project from the board registry by path
 
 tracker projects only (backlog/source.json names github):
@@ -1932,6 +1993,14 @@ const START_STOP_USAGE = `usage: backlog.mjs start <id> [--as groom|execute]
 // platform, GitLab and Jira are named as later platforms in the same spec, and a command that has to grow a second one later would otherwise have to break its
 // own call shape to do it. `owner/repo` is optional (derived from `origin` when absent) and shown in brackets to say so.
 const CONNECT_USAGE = `usage: backlog.mjs connect github [owner/repo] [--no-forms]`
+
+// `import`'s sibling, and the two differ in exactly one thing: `connect` points an EMPTY store at a tracker, `import` moves a populated one onto it. The extra
+// two lines are here because both of this command's surprising properties are things a caller wants to know before it starts rather than after: it needs the
+// stack up for every request it makes, and it deletes item files — at the very end, once every issue exists, but it does delete them.
+const IMPORT_USAGE = `usage: backlog.mjs import github [owner/repo] [--no-forms]
+
+moves every item file under backlog/ onto GitHub issues through the local API, which must be running.
+the item files are deleted only after every issue exists and every cross-reference has been rewritten, and nothing is committed for you.`
 
 // The three verbs that exist only in a tracker project. Each names the routes it needs, which is why they are not in files mode: there is no item file to
 // heartbeat, no timeline to comment on, and a files body is edited by whoever is holding the file.
@@ -2692,15 +2761,16 @@ export async function main(argv) {
       return 1
     }
 
-    // The populated-store refusal. `connect` is for an empty or absent store; a project whose items are already files needs them MOVED to the tracker, which
-    // is `import`'s job (phase 5) and is not built yet. Refusing outright rather than connecting-and-leaving-the-files is the safe direction: the server reads
-    // the marker per request and a connected project contributes no file items at all, so the files would not be deleted, they would simply stop being
-    // visible anywhere — the worst possible failure for a backlog, since nothing would report them missing.
+    // The populated-store refusal. `connect` is for an empty or absent store; a project whose items are already files needs them MOVED to the tracker, which is
+    // `import`'s job — it writes this same marker itself, as its first step, and deletes the files as its last. Refusing outright rather than
+    // connecting-and-leaving-the-files is the safe direction: the server reads the marker per request and a connected project contributes no file items at all,
+    // so the files would not be deleted, they would simply stop being visible anywhere — the worst possible failure for a backlog, since nothing would report
+    // them missing.
     const items = backlogItemFiles(backlog)
     if (items.length > 0) {
       const shown = items.slice(0, 3).join(', ')
       console.error(
-        `${root} still has ${items.length} item file(s) under backlog/ (${shown}${items.length > 3 ? ', …' : ''}) — connect is for an empty or absent store; moving a populated one onto a tracker is \`import\`'s job, which is not built yet`,
+        `${root} still has ${items.length} item file(s) under backlog/ (${shown}${items.length > 3 ? ', …' : ''}) — connect is for an empty or absent store; moving a populated one onto a tracker is \`import\`'s job: run \`backlog.mjs import github\` instead`,
       )
       return 1
     }
@@ -2732,6 +2802,360 @@ export async function main(argv) {
     console.log('')
     console.log('commit these files — the marker does nothing until the machine running the board has pulled it:')
     for (const rel of committable) console.log(rel)
+    return 0
+  }
+
+  // `import github [owner/repo] [--no-forms]` — `connect`'s sibling for a POPULATED store, and the one command in this file that moves a project between
+  // sources (§8). It is also the only one that deletes item files.
+  //
+  // The shape is forced by the server rather than chosen here: the seven item write routes refuse a `files` project (`ItemsService.writerFor`), so the marker
+  // has to be written BEFORE the first `create`. From that moment the board reads the tracker and ignores the files, which is what makes deleting them LAST
+  // free — they are already invisible — and deleting them any earlier unrecoverable, since a pass that never ran is a file nothing has a copy of.
+  //
+  // Nine checks run before anything is written, and the order is the point: cheapest and most local first, the API probe LAST, because the probe is the only
+  // one of them with an effect on anybody outside this process.
+  //
+  //   1. usage                    exit 1 — a platform this build cannot write to, or two repositories
+  //   2. no git root              exit 2 — reused from `resolveRootOrFail`, so "you are not in a repo" reads the same from every command
+  //   3. a linked worktree        exit 1 — the marker belongs to the main tree, exactly as `connect` says
+  //   4. the marker               exit 1 — unreadable, an explicit `files` one, or a `github` one with nothing left to import
+  //   5. an empty store           exit 1 — that is `connect`'s job, and saying so is more use than writing a marker nobody needed
+  //   6. the repo                 exit 1 — positional or derived from `origin`, proved either way: the server interpolates it into an api.github.com path
+  //   7. git state                exit 1 — `backlog/` committed, every item file tracked, HEAD on some `origin/*` ref (see `gitImportState`)
+  //   8. the item files           exit 1 — every one parses, no OPEN item is in progress, no `kind:` the tracker has no label for
+  //   9. the probe                exit 5 — `GET /api/items`, which is how "the stack is up" is decided before the marker goes down
+  if (cmd === 'import') {
+    const platform = argv[1]
+
+    // Flags scanned out of the tail rather than read positionally, for `connect`'s reason: `import github --no-forms` is the derive-from-origin spelling, and
+    // reading argv[2] blindly would refuse the flag as a malformed repository name — a refusal naming the wrong problem.
+    let forms = true
+    const positional = []
+    for (let i = 2; i < argv.length; i++) {
+      if (argv[i] === '--no-forms') forms = false
+      else positional.push(argv[i])
+    }
+    if (platform !== 'github' || positional.length > 1) {
+      console.error(IMPORT_USAGE)
+      return 1
+    }
+
+    const r = resolveRootOrFail()
+    if (!r.ok) return r.code
+    const { root, backlog } = r.resolved
+
+    // `connect`'s refusal, in its words, with this command's name in it: a linked worktree is a temporary checkout that is deleted when its item merges, and
+    // the marker this command writes is committed and pulled by every machine that clones the repository.
+    const worktree = linkedWorktreeInfo(root)
+    if (worktree) {
+      const where = worktree.projectRoot
+        ? `its project root is ${worktree.projectRoot} — re-run this command from there`
+        : `its shared git dir is ${worktree.gitdir}, whose main working tree could not be determined (a bare main repo?) — re-run this command from the project root`
+      console.error(
+        `${worktree.worktree} is a linked git worktree, not a project root; ${where}. import writes the project's own committed source marker, which belongs to the main tree a worktree merges back into`,
+      )
+      return 1
+    }
+
+    const marker = path.join(backlog, SOURCE_MARKER)
+    const mode = sourceMode(backlog)
+    if (mode.kind === 'bad') {
+      console.error(mode.message)
+      return 1
+    }
+    const itemFiles = backlogItemFiles(backlog)
+
+    // Three answers out of the marker, and the middle one is the whole of resume mode: a `github` marker WITH item files left is an import that stopped part
+    // way through, which is a state this command is required to be able to finish rather than a state anybody has to repair by hand.
+    let repo
+    let resuming = false
+    if (mode.kind === 'api') {
+      if (itemFiles.length === 0) {
+        console.error(`${root} is already tracker-backed (${marker} names github ${mode.repo}) — nothing to import`)
+        return 1
+      }
+      resuming = true
+      repo = mode.repo
+      // A positional repo that disagrees with the marker is refused rather than preferred: one of the two is wrong, and guessing which would either import into
+      // somebody else's repository or re-import items that already exist in this one.
+      if (positional[0] !== undefined && positional[0] !== repo) {
+        console.error(`${marker} names ${repo}, not ${positional[0]}`)
+        return 1
+      }
+    } else if (fs.existsSync(marker)) {
+      // `files` with the file present is the EXPLICIT `{"kind":"files"}` marker. Never overwritten in place, by this command or any other: the marker is the
+      // project's committed source identity, and a hand edit is a change the operator can see in a diff.
+      console.error(`already has a source marker: ${marker} — delete it by hand first`)
+      return 1
+    } else {
+      if (itemFiles.length === 0) {
+        console.error(`no item files under ${backlog} — use \`backlog.mjs connect github\` for an empty store`)
+        return 1
+      }
+      repo = positional[0]
+      if (repo === undefined) {
+        const url = originRemoteUrl(root)
+        if (url === null) {
+          console.error(`no owner/repo given and ${root} has no origin remote to derive one from — pass it: backlog.mjs import github <owner>/<repo>`)
+          return 1
+        }
+        repo = parseOriginRepo(url)
+        if (repo === null) {
+          console.error(`no owner/repo given and origin (${url}) is not a github.com remote to derive one from — pass it: backlog.mjs import github <owner>/<repo>`)
+          return 1
+        }
+      }
+      if (!isValidRepo(repo)) {
+        console.error(`not an owner/repo pair: ${JSON.stringify(repo)} — expected one slash, and only letters, digits, dot, dash and underscore either side`)
+        return 1
+      }
+    }
+
+    const git = gitImportState(root, itemFiles)
+    if (git.dirty !== '') {
+      console.error(`backlog/ has uncommitted changes — commit or stash them first:\n${git.dirty}`)
+      return 1
+    }
+    if (git.untracked.length > 0) {
+      console.error(`these item files are not tracked by git: ${git.untracked.join(', ')}`)
+      return 1
+    }
+    if (git.sha === null) {
+      console.error(`${root} has no commits yet — commit backlog/ and push before importing`)
+      return 1
+    }
+    if (!git.pushed) {
+      console.error(`HEAD ${git.sha.slice(0, 7)} is not on any origin/* branch — push first; the truncation link pins files at HEAD`)
+      return 1
+    }
+
+    // Everything the two passes need, read once. A file that cannot be parsed, an item somebody is working and a `kind:` the tracker has no label for are all
+    // refused HERE rather than discovered mid-pass: by then the marker is down, and the fix for each of the three is one line of frontmatter.
+    const plan = []
+    const inProgress = []
+    for (const rel of itemFiles) {
+      const abs = path.join(backlog, rel)
+      let parsed
+      try {
+        parsed = readItemFile(abs)
+      } catch (e) {
+        if (!(e instanceof BacklogError)) throw e
+        console.error(e.message)
+        return e.code
+      }
+      const { section, status } = importPlace(rel)
+      // The FILENAME is the id, not the frontmatter: `locateItem` resolves every id in this store by matching `<id>-` against directory entries, so the name is
+      // what the rest of the store already agrees on, and a frontmatter `id:` that disagrees with it is a file nothing could find in the first place.
+      const named = /^([a-z]+-\d+)-/.exec(path.basename(rel))
+      const id = named === null ? (typeof parsed.data.id === 'string' && parsed.data.id !== '' ? parsed.data.id : rel) : named[1]
+      const kind = typeof parsed.data.kind === 'string' ? parsed.data.kind.trim() : ''
+      if (kind !== '' && kind !== 'chore' && kind !== 'debt') {
+        console.error(`${id}: kind ${JSON.stringify(kind)} is not chore or debt — fix the frontmatter first`)
+        return 1
+      }
+      // An open item with a stamp is somebody's live session, and the import would delete the file out from under it. The same stamp on a `done/` or
+      // `out-of-scope/` file is history — the item is closed and nobody is holding it — so it is read past deliberately.
+      if (status === 'open' && typeof parsed.data.started === 'string' && parsed.data.started.trim() !== '') inProgress.push(id)
+      // A done item's `## Outcome` becomes the closing comment rather than part of the issue body (§8.3): GitHub renders a closing comment as the answer to
+      // "what happened", which is exactly what that section is, and leaving it in the body would say it twice.
+      const split = status === 'done' ? splitOutcome(parsed.body) : { rest: parsed.body, outcome: '' }
+      plan.push({ id, relPath: rel, section, status, created: parsed.data.created, data: parsed.data, body: split.rest, outcome: split.outcome })
+    }
+    if (inProgress.length > 0) {
+      console.error(`${inProgress.length} open item(s) are in progress — stop them first: ${inProgress.join(', ')}`)
+      return 1
+    }
+
+    // The probe, last. It is how "the stack is up" is decided BEFORE the marker goes down — every request after this one needs the API, and a marker written
+    // against a server that is not running is a project whose items are nowhere.
+    let index
+    try {
+      index = await apiGet('/api/items')
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
+
+    // --- the marker, then the writes (§8.2) ---------------------------------
+    //
+    // The marker goes down FIRST because the seven item write routes refuse a `files` project, and it is not rewritten on a resume: it is already this
+    // project's committed identity, and re-writing a file to the bytes it already holds is a diff somebody has to read.
+    if (!resuming) writeSourceMarker(backlog, repo)
+    const committable = [`backlog/${SOURCE_MARKER}`]
+    if (forms) {
+      const result = writeIssueForms(root)
+      committable.push(...result.written)
+    }
+    // The write routes gate `project` against the registry by a raw string compare, so a project nobody has registered cannot be written to at all. Best effort
+    // for the reason `init` and `new` use it: a registry this command cannot update is not a reason to refuse an import, and the refusal it would cause instead
+    // arrives from the server with its own sentence.
+    registerBestEffort(root)
+    const project = registryRoot(root)
+
+    const ordered = importOrder(plan)
+    const map = new Map()
+    // What a resume already found on the tracker, keyed by OLD id: the issue's number, and the status the index reports for it.
+    const resumedStatus = new Map()
+
+    // --- the resume map (§8.6) ----------------------------------------------
+    //
+    // A resume rebuilds the map from the TRACKER, never from anything a previous run wrote down locally: the run that stopped half way through may have died
+    // between two requests, so the only record that survived is the `bm:imported` footer on each issue it managed to create. Every body is read for it, because
+    // the footer is the one place the old id appears — a title, a section and a label all belong to more than one item.
+    if (resuming) {
+      for (const row of (index.items ?? []).filter((it) => it.projectPath === project)) {
+        const oldId = parseImportFooter(await apiGetText(`/api/items/body?path=${encodeURIComponent(row.path)}`))
+        // An issue with no footer is somebody's own issue, filed on the tracker by hand — this import neither created it nor owns it, and reading a number off
+        // it would map an item onto a stranger's work.
+        if (oldId === null) continue
+        map.set(oldId, Number(String(row.id).replace('#', '')))
+        resumedStatus.set(oldId, row.status)
+      }
+      console.log(`resuming: ${map.size} of ${ordered.length} item(s) already imported`)
+    }
+    // One stamp for the whole command, so every synthetic claim this import takes carries the same session identity — they are one session's work, and a claim
+    // per timestamp would read as a different importer for every item.
+    const stamp = new Date().toISOString()
+    const session = `import-${stamp}`
+    // One request a second by default, which is what keeps a whole-store import inside GitHub's secondary rate limits (§8.3). Read once, so the suite can set
+    // `0` and a slow repository can be given more. Reads are not paced — they cost a different budget and this command makes few of them.
+    const paceRaw = Number(process.env.BM_IMPORT_PACE_MS ?? '1000')
+    const paceMs = Number.isFinite(paceRaw) && paceRaw >= 0 ? paceRaw : 1000
+    const pace = () => (paceMs === 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, paceMs)))
+
+    // Which item the next failure names. The operator's copy of this store is still FILES at this point, so the old id is the only name they can act on — an
+    // issue number they have never seen would send them to a tracker to find out what broke.
+    let at = null
+    try {
+      for (const item of ordered) {
+        at = item.id
+
+        // Already on the tracker, so this item's `create` is not made a second time — the footer said so, and a duplicate issue is the one failure a resume
+        // exists to prevent. One repair happens here and nothing else: a `done/` file whose issue is still open is a run that died between `create` and
+        // `state done`, and the close is idempotent from the operator's point of view because the issue carries neither the comment nor the closed state yet.
+        // The counters are deliberately NOT re-billed — `claim`/`release` would add a second copy of them, and a doubled record of work is worse than one that
+        // is merely missing a repair this command cannot detect.
+        if (map.has(item.id)) {
+          const mapped = `#${map.get(item.id)}`
+          if (item.status === 'done' && resumedStatus.get(item.id) === 'open') {
+            const repair = { project, id: mapped, status: 'done' }
+            if (item.outcome !== '') repair.outcome = item.outcome
+            await apiPost('state', repair)
+            await pace()
+          }
+          console.log(`${item.id} → ${mapped} (already imported)`)
+          continue
+        }
+
+        const footer = renderImportFooter({ id: item.id, created: item.data.created, tags: item.data.tags, relPath: item.relPath })
+        // The cap is spent on the body, so the footer's length is taken out of it first: the footer is the idempotency key a resume reads, and a body that lost
+        // it to truncation would be re-imported as a second issue.
+        const fitted = fitBody(item.body.trimEnd(), IMPORT_BODY_CAP - footer.length - 2, blobLink(repo, git.sha, item.relPath))
+        const issueBody = fitted.text === '' ? footer : `${fitted.text}\n\n${footer}`
+
+        // `from:` is deliberately NOT sent. The route writes it as a `_From #<n>._` line composed from the OTHER item's issue number, and that number does not
+        // exist yet for half the store — pass 2 writes the line itself, once every id is known.
+        const payload = { project, section: item.section, title: item.data.title, body: issueBody }
+        const kind = typeof item.data.kind === 'string' ? item.data.kind.trim() : ''
+        if (kind !== '') payload.kind = kind
+        // Presence, not truth, exactly as `parseItemForGate` reads the same marker: a `runner-fix:` key with any value but `false` means the human who groomed
+        // the item said it repairs the runner.
+        if ('runner-fix' in item.data && String(item.data['runner-fix']).trim() !== 'false') payload.runnerFix = true
+
+        const created = await apiPost('create', payload)
+        const number = created.number
+        map.set(item.id, number)
+        const ref = `#${number}`
+        await pace()
+
+        // The four counters are a permanent record of work somebody did, and the tracker keeps them in a claim comment (§6.4) — so an item that has any is
+        // given one synthetic claim and that claim is released immediately with the counters billed onto it. Before the close, always: `claim` refuses a closed
+        // issue, and a `done/` item is about to be closed two requests from here.
+        const counters = countersOf(item.data)
+        if (counters !== null) {
+          const claimed = await apiPost('claim', { project, id: ref, phase: 'execute', session })
+          await pace()
+          await apiPost('release', { project, id: ref, commentId: claimed.commentId, session, reason: 'imported', counters })
+          await pace()
+        }
+
+        // Two closed shapes and only one of them needs a request: `create` with `section: 'out-of-scope'` already closed a rejected item `not_planned`, and an
+        // open item is not closed at all. `state done` is what posts the Outcome comment and then closes `completed`, in that order, inside the adapter.
+        if (item.status === 'done') {
+          const closing = { project, id: ref, status: 'done' }
+          if (item.outcome !== '') closing.outcome = item.outcome
+          await apiPost('state', closing)
+          await pace()
+        }
+
+        console.log(`${item.id} → ${ref}${fitted.truncated ? ' (truncated)' : ''}`)
+      }
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      // A 429 carries the reset TIME as its own field, so the line prints what the server said rather than a duration this file worked out — the two disagree
+      // the moment anything is slow, and the operator is going to wait against a clock either way. No retry and no skip: an import that skipped an item would
+      // delete its file at the end with nothing on the tracker carrying it.
+      const resetAt = e.payload && typeof e.payload.resetAt === 'string' ? ` — retry after ${e.payload.resetAt}` : ''
+      console.error(`import stopped at ${at}: ${e.message}${resetAt}`)
+      return e.code
+    }
+
+    // --- pass 2: the cross-links (§8.4) -------------------------------------
+    //
+    // A separate pass because a rewrite needs the WHOLE map: `task-1` cites `bug-2`, whose issue did not exist when `task-1`'s body was composed, and an import
+    // that patched as it went would leave every backward reference unresolved. The bodies are read back from the tracker rather than re-composed from the files,
+    // so this pass patches what is actually there — including, on a resume, an issue a previous run created.
+    try {
+      const after = await apiGet('/api/items')
+      const rows = (after.items ?? []).filter((it) => it.projectPath === project)
+      for (const item of ordered) {
+        at = item.id
+        const ref = `#${map.get(item.id)}`
+        const row = rows.find((it) => it.id === ref)
+        // The index is the server's cached view of the repository, so an issue this command just created can be missing from it if the poller has not caught up.
+        // A refusal rather than a re-read: the marker is down and every issue exists, so a re-run resumes from the footers and finishes the job.
+        if (row === undefined) throw new BacklogError(`${ref} is not in the index yet — re-run import to resume`, 1)
+
+        const current = await apiGetText(`/api/items/body?path=${encodeURIComponent(row.path)}`)
+        let next = rewriteOldIds(current, map)
+        // `from:` has no field on an issue, so it becomes the first line of the body. An unmapped source keeps its old id: the FACT that this item came from
+        // something is worth more than the link, and an id somebody can grep the repository's history for is not a dead end.
+        const from = typeof item.data.from === 'string' ? item.data.from.trim() : ''
+        if (from !== '') next = `${map.has(from) ? `_From #${map.get(from)}._` : `_From ${from}._`}\n\n${next}`
+
+        // An unchanged body is not patched. The route posts no comment, but an edit is still an event on somebody's timeline and a new `updatedAt` for every
+        // reader; a no-op edit would say something changed when nothing did.
+        if (next !== current) {
+          await apiPost('body', { project, id: ref, body: next, ifUpdatedAt: row.updated })
+          await pace()
+        }
+      }
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      const resetAt = e.payload && typeof e.payload.resetAt === 'string' ? ` — retry after ${e.payload.resetAt}` : ''
+      console.error(`import stopped at ${at}: ${e.message}${resetAt}`)
+      return e.code
+    }
+
+    // --- the deletion (§8.5) ------------------------------------------------
+    //
+    // Last, and outside both `try` blocks on purpose: every issue exists and every body is final, so the files are now a second copy of items the tracker owns.
+    // A `try/finally` around either pass would be exactly wrong — a failure must leave the files, because the file is the only copy of anything the failed pass
+    // never created. `README.md` and the marker are not item files and are never touched (`backlogItemFiles` is scoped to the nine leaf directories).
+    const deleted = []
+    for (const item of ordered) {
+      fs.unlinkSync(path.join(backlog, item.relPath))
+      deleted.push(`backlog/${item.relPath}`)
+    }
+
+    console.log(`imported ${ordered.length} item(s) into github ${repo}`)
+    // The marker takes effect on the machine running the board, which is not necessarily this one, and the deletions are what stop the files from being read
+    // there — so both halves have to be committed together, and the list is printed bare to be pasted into a `git add`.
+    console.log('')
+    console.log('commit these files — the marker does nothing until the machine running the board has pulled it:')
+    for (const rel of committable) console.log(rel)
+    for (const rel of deleted) console.log(rel)
     return 0
   }
 

@@ -28,7 +28,8 @@ from and merges land in. Told to leave branches instead, it stops at a reviewed 
 
 - `skills/backlog/tools/backlog.mjs` — the CLI every skill calls, and the registry's only writer. Since task-45 it also carries `connect github [owner/repo]`,
   which writes a project's committed `backlog/source.json` marker (and, by default, four GitHub issue forms) and touches the registry not at all — the marker is
-  the project's, not the machine's. Since task-46 it has **two modes**, chosen by that marker and nothing else (see below).
+  the project's, not the machine's. Since task-50 it also carries `import github [owner/repo] [--no-forms]`, which moves a files project's items onto issues
+  through the local API and deletes the files last. Since task-46 it has **two modes**, chosen by that marker and nothing else (see below).
 - `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer. Since task-47 it has two modes of its
   own, chosen by the same committed marker `backlog.mjs` reads (see below).
 - `skills/backlog-orchestrate/tools/api-call.mjs` — one HTTP request and nothing else, run by `orchestrate.mjs` with `spawnSync` (task-47). It exists so the
@@ -70,6 +71,7 @@ What each verb does differently, and the three that exist only here:
 | `heartbeat`      | new — says this session still holds the item. Files mode: exit `1`                                                                                 |
 | `comment`        | new — appends a comment. Files mode: exit `1`                                                                                                      |
 | `body`           | new — groom's body patch, behind `--if-updated-at`. Files mode: exit `1`                                                                           |
+| `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |
 
 Ids are `31`, `#31` or this project's own URN, all meaning one issue; a file-shaped id and another repo's URN are each refused with their own sentence. Session
 identity is `CLAUDE_CODE_SESSION_ID`, falling back to `<user>@<host>` — stable across the two processes `start` and `stop` run in.
