@@ -2614,8 +2614,26 @@ losing claim is litter this call chain created seconds ago and nobody has read. 
 counters to prove it — deleting one to tidy up a flag would erase the only evidence that the work happened. The retiring session writes
 `released: { reason: 'stale', by: <itself> }`, so the record even says who retired it.
 
-**Who may release: the holder always, ANYONE once the claim is dead.** The asymmetry is the same rule seen from the other side. A dead claim is not somebody's
-property, and requiring the original session to come back and clear it would wedge an issue on the crash of a process that is never returning.
+**Who may release: the holder always, the RUN that owns the claim, ANYONE once the claim is dead.** The last clause is the same rule seen from the other side. A
+dead claim is not somebody's property, and requiring the original session to come back and clear it would wedge an issue on the crash of a process that is
+never returning.
+
+The middle clause is bug-42's, and it is not a second rule — it is task-47 §7.6's same-run takeover, which `claim` has enforced since phase 4a and `release`
+never learned. `POST /api/agents/stop` records a stop and then spawns a FRESH `/backlog-orchestrate --abort` session; that session takes the run's driver lease
+(`takeOverRun`, before it walks the queue) and then releases every claim the run still holds — as its own session, which under a holder-only rule is a stranger
+to every one of them. So the force stop built for a driver that is dead or hung reinstated the exact state bug-40 removed: an unreleased claim, the
+`in-progress` label, and `started`/`phase` on every machine's board. Going stale does not repair it — the mapper reads `started` off ANY unreleased claim, fresh
+or stale. `ItemReleaseRequest.runId` is the assertion, a bare id rather than the whole `ClaimRun` (`claim` STORES that object; `release` only asks a question
+about one already stored), parsed by `runIdOf` into a 400 on anything but a non-empty string, and sent by `trackerRelease` on EVERY release rather than only
+abort's — a conditional would leave the resumed driver's terminal-stage releases, whose claim comments were posted by the session that crashed, quietly on the
+refused path. `backlog.mjs stop` sends no `runId` and gains no authority.
+
+**The same-run test is `typeof req.runId === 'string' && req.runId.length > 0 && existing.run?.runId === req.runId`, and the two guards are load-bearing.**
+Written as the tempting `existing.run?.runId !== req.runId`, a request with no `runId` against a hand claim with no `run` compares `undefined !== undefined` →
+`false`, the refusal disappears, and any session on the machine could rip a live `backlog.mjs start` out from under the person holding it. `claim`'s own
+same-run filter guards the same shape with `typeof c.record.run?.runId === 'string'` and the two are meant to read alike. A claim with no `run` is therefore
+never same-run with anything: a run has no standing to evict somebody working the item at a terminal. The dead-claim clause outranks the new one and is reached
+first through `isLive`, so a stale claim carrying a foreign `runId` still releases to anybody.
 
 **The counters live in the claim, the server seeds and the CLI bills.** Spec §6.4 is explicit that counters never live in the body: the body is the item's text,
 groom rewrites it wholesale, and a number embedded in prose somebody edits in the web UI is a number that silently resets. A claim comment is machine-owned,
@@ -2736,7 +2754,7 @@ Three more commands publish to the issue, each after the run file is written and
 And **`abort` gives every claim the run still holds back** (bug-40) — the same "still holds" predicate `heartbeat` uses, over the same queue, immediately
 before `abort` delegates to `cmdFinish`. Until bug-40 the only caller of `trackerRelease` was the `stage` path's `CLAIM_RELEASE_STAGES` check, and an abort
 ends the RUN rather than walking each item through a terminal stage, so every claimed item was left with an unreleased claim, the `in-progress` label and the
-assignee still on its issue. Four things this entry pins, because each looks arbitrary from the code alone:
+assignee still on its issue. Five things this entry pins, because each looks arbitrary from the code alone:
 
 - **The reason is `'aborted'`, and it must not be a `RunStage`.** `deriveRemoteRuns` reads a release reason as the item's stage when it happens to be one and
   otherwise falls through to `state.stage`, so this spelling leaves the item's last reported stage intact on every other machine's Runs page.
@@ -2747,6 +2765,11 @@ assignee still on its issue. Four things this entry pins, because each looks arb
 - **The marker-preserved item is released too.** `abort`'s one branch that skips an item's git teardown — a worktree still carrying an in-progress `phase:`
   marker — cannot fire for a tracker item at all (there is no item file for `findItemFilePath` to find), and an item left in place still needs its claim back,
   because the run that held it is over either way. A files run makes no request on any path, since `trackerRelease` returns immediately with no `claim`.
+- **`takeOverRun` runs BEFORE the release loop, and that order is load-bearing** (bug-42). The abort session is not the holder of any of these claims — the
+  driver that posted them is, and on the path this exists for it is dead — so each release is authorised by `runId` alone, the "the RUN that owns the claim"
+  clause above. Taking the run's lease first is what makes that assertion true at the moment it is made; moving the releases above the lease take would turn it
+  into a lie. Until bug-42 gave `release` that clause, every one of these releases came back a 409 and bug-40's fix was proved only for the one caller a
+  holder-only check admits: the driver releasing its own claims.
 
 **Why this was worth a bug rather than the non-goal task-48 recorded it as.** The non-goal's stated rationale was that leftover claims "go stale on their own
 in 15 minutes". That is true of the claim protocol's CONTEST rule and false of the board: the mapper fills `BacklogItem.started` from any unreleased claim,

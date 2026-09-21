@@ -141,7 +141,9 @@ export class ItemsWriteController {
   }
 
   /** Give it back, billing the counters the CALLER computed — the CLI is the
-   *  biller, here as in `stopItem`. */
+   *  biller, here as in `stopItem`. `runId` (bug-42) is the optional assertion
+   *  "this is my run's claim", which is how an abort session that is not the
+   *  holder releases a live claim — see `runIdOf` and `GithubSource.release`. */
   @Post('release')
   async release(@Body() body: Record<string, unknown> | undefined): Promise<ClaimResult> {
     const raw = body ?? {};
@@ -151,9 +153,10 @@ export class ItemsWriteController {
     const session = required(raw.session, 'session');
     const reason = required(raw.reason, 'reason');
     const counters = countersOf(raw.counters);
+    const runId = runIdOf(raw.runId);
 
     const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters }));
+    return this.answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters, runId }));
   }
 
   /** Say the session is still alive; carry the driver's opaque `state` when
@@ -389,6 +392,29 @@ function claimFinishedOf(value: unknown): ClaimFinished | undefined {
     throw new HttpException({ error: `finished.status must be one of ${CLAIM_FINISHED_STATUSES.join(', ')}` }, 400);
   }
   return { at: raw.at, status: raw.status as ClaimFinishedStatus };
+}
+
+/**
+ * `ItemReleaseRequest.runId`, or `undefined` when the caller sent none
+ * (bug-42) — the run asserting it owns the claim it is releasing.
+ *
+ * A 400 rather than a dropped field, for exactly the reason `claimRunOf`'s
+ * comment gives about `run`: this is a field the SERVER BRANCHES on, and a
+ * silently dropped one turns an authorised release into a refusal nobody can
+ * explain — the abort session would be told the claim is held by a session
+ * that no longer exists, with nothing anywhere naming the value that was
+ * thrown away.
+ *
+ * Trimmed like every other string on these routes, and an empty one is the
+ * same mistake as a missing one rather than a value: the adapter's same-run
+ * test requires a non-empty string, so accepting `''` here would only move
+ * the silent no-match one layer down.
+ */
+function runIdOf(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (trimmed === '') throw new HttpException({ error: 'runId must be a non-empty string' }, 400);
+  return trimmed;
 }
 
 function countersOf(value: unknown): ClaimCounters | undefined {

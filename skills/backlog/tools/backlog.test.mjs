@@ -3983,6 +3983,9 @@ test('API mode: stop bills the elapsed seconds on top of the claim-s seeded coun
   const release = requests.find((r) => r.path === '/api/items/release')
   assert.equal(release.body.commentId, 100)
   assert.equal(release.body.reason, 'stopped')
+  // bug-42 gave `release` a second authority — the RUN that owns the claim — and a hand stop is deliberately not in it. `backlog.mjs` sends no `runId`,
+  // so the only claim it can ever release is one it holds itself or one that is already dead; its own client-side refusal above stays the first gate.
+  assert.ok(!('runId' in release.body), 'a hand stop must never assert run authority')
   // 10 seeded + 90 this session, with a second of tolerance for the clock between the two lines above.
   assert.ok(Math.abs(release.body.counters.groomElapsed - 100) <= 1, `billed ${release.body.counters.groomElapsed}`)
 })

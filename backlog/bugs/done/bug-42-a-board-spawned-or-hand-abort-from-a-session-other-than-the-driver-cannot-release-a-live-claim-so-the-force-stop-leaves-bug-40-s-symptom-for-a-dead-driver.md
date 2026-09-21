@@ -4,9 +4,12 @@ title: A board-spawned or hand --abort from a session other than the driver cann
 created: 2026-09-21
 tags: tracker, github, orchestrator, claims, abort, stop
 runner-fix: true
-updated: 2026-09-21T10:36:21Z
+updated: 2026-09-21T11:17:52Z
 groom-elapsed: 295
 groom-tokens: 76286
+started: 2026-09-21T10:53:55Z
+execute-elapsed: 1437
+execute-tokens: 133368
 ---
 
 ## Symptom
@@ -155,3 +158,85 @@ plus O-2 are what prove it.
 
 `docs/superpowers/specs/2026-09-21-tracker-phase4-live-verification.md` is a record of an observation and is **not** rewritten — it is where this bug came
 from, and its "fix direction" paragraph is already the direction taken.
+
+## Outcome
+
+2026-09-21. Fixed as planned, with no deviation from the Fix section. `release` gained the middle clause of the triple — **the holder always, the RUN that
+owns the claim, ANYONE once the claim is dead** — and the orchestrator's CLI now proves the assertion on every release it sends.
+
+Server: `ItemReleaseRequest` gained `runId?: string` (`shared/types.ts`); `items-write.controller.ts` parses it through a new `runIdOf` beside
+`commentIdOf`/`countersOf` (absent → `undefined`, a non-empty trimmed string → itself, anything else → 400 `runId must be a non-empty string`) and passes it
+to the adapter; `GithubSource.release`'s live-claim refusal gained the third escape, `sameRun` written with the `typeof`/`length` guards the plan specified,
+so a claim carrying no `run` is never same-run with anything. CLI: `trackerRelease` sends `runId: run.runId` unconditionally — not only on the abort path —
+and `cmdAbort`'s release loop now states in its own comment that `takeOverRun` running first is load-bearing, because that is what makes the assertion true
+at the moment it is made.
+
+Nothing else changed: `heartbeat` still checks no session, `backlog.mjs stop` still sends no `runId` and gains no authority, the dead-claim clause still
+outranks the new one through `isLive`, and `released.by` is still the releasing session rather than an impersonation of the holder.
+
+### Verification
+
+`pnpm run typecheck` — clean, no output.
+
+Jest, everything but the two suites bug-44 already owns:
+
+```
+$ npx jest --runInBand --testPathIgnorePatterns 'board-live-cards|dispatch-button'
+Test Suites: 126 passed, 126 total
+Tests:       2059 passed, 2059 total
+```
+
+Node runner (`pnpm run test:skills`), in full:
+
+```
+1..683
+# tests 683
+# pass 683
+# fail 0
+# duration_ms 161428.971708
+```
+
+`pnpm test` itself reports `FAIL jest` on three cases, and all three are **bug-44**, not this work: `board-live-cards.test.tsx`'s needs-answers strip case
+and `dispatch-button.test.tsx`'s two board-wiring cases, whose fixtures carry a `2026-08-20` `created` and expired when the real clock crossed the 30-day
+stale window. Proved pre-existing rather than assumed — a detached worktree at `HEAD`, without any of this work, fails the same three:
+
+```
+$ git worktree add --detach /tmp/bug42-clean HEAD && cd /tmp/bug42-clean
+$ npx jest test/board-live-cards.test.tsx test/dispatch-button.test.tsx --runInBand
+Test Suites: 2 failed, 2 total
+Tests:       3 failed, 54 passed, 57 total
+```
+
+Contract sweep: 4 sites updated (CLAUDE.md's claim-protocol invariant; `docs/subsystems/invariants.md`'s **Who may release** paragraph, rewritten as the
+triple with the `undefined === undefined` trap named; a fifth bullet on the same file's bug-40 `abort` entry, for the `takeOverRun`-before-releases ordering,
+which had no prose home at all; `docs/subsystems/api.md`'s `release` row, now carrying `runId?`). One site left standing on purpose:
+`docs/superpowers/specs/2026-09-21-tracker-phase4-live-verification.md` §Test 3 still states the old two-clause rule, because it is a dated record of what
+was observed that day and its "fix direction" paragraph is the direction this fix took — rewriting it would erase the evidence this bug came from. The Fix
+section says the same.
+
+Red proof: 7 tests went red with the change reverted, across five reverted variants, each isolating one half of the fix (file copied aside and restored —
+never `git stash`):
+
+- **the `sameRun` escape removed** → `lets the RUN that owns the claim release another session-s LIVE claim` red (409, not 201). The bug itself.
+- **the naive `existing.run?.runId !== req.runId` predicate** → `refuses another session-s LIVE claim and patches nothing` red — the pre-existing regression
+  pin, left unedited for exactly this. The `undefined === undefined` trap the plan predicted, caught by the case the plan did not expect to catch it (it
+  named R-3; R-3 is green under the naive form, because a request that DOES carry a `runId` never compares two `undefined`s).
+- **over-broad `sameRun` (any non-empty `runId` is authority)** → `refuses a release asserting a DIFFERENT runId` and `is never same-run with a live HAND
+  claim` both red.
+- **`runIdOf` unwired** (a plain `typeof` cast, the silently-dropped-field variant) → `400s a runId that is not a non-empty string` red.
+- **`trackerRelease` sending no `runId`** → both node-runner cases red: `stage merged reads the counters, closes the issue, then releases` and `bug-40: abort
+  releases every claim the run still holds`.
+
+Two added cases are deliberately not in that count, with reasons. `lets anyone release a DEAD claim even while asserting a foreign runId` pins ORDERING —
+`isLive` reaches the dead-claim clause before the new one — and stays green under every variant above, because no part of this change can make it fail; it
+exists so a future edit that tests `runId` ahead of freshness goes red. `a hand stop must never assert run authority` (`backlog.test.mjs`) pins an ABSENCE:
+there is no production change to revert, since the fix deliberately did not touch `backlog.mjs`; it goes red the day somebody adds `runId` there.
+
+### Carried
+
+No browser check, as the Fix section decided: the defect's visible face needs a live GitHub issue holding an unreleased claim from a killed driver, and no
+fixture path renders that locally. bug-43 (abort's second pid source) and bug-44 (the fixture date bomb) stay open and untouched — bug-44 is why `pnpm test`
+is red on `main` today.
+
+This is a `runner-fix: true` item and it changes `orchestrate.mjs`, so it is inert for the next orchestrator run until it is pushed and `pnpm run
+plugin:sync` has run.

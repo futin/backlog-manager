@@ -1930,15 +1930,30 @@ export interface ItemClaimRequest extends ItemWriteRequest {
   run?: ClaimRun;
 }
 
-/** `POST /api/items/release`. `counters` are the CLI's totals, written
- *  verbatim: the CLI is the biller (it holds the transcript and the clock), and
- *  the server never computes a counter of its own. */
+/**
+ * `POST /api/items/release`. `counters` are the CLI's totals, written
+ * verbatim: the CLI is the biller (it holds the transcript and the clock), and
+ * the server never computes a counter of its own.
+ *
+ * `runId` (bug-42) is the run ASSERTING it owns this claim — the middle clause
+ * of "the holder always, the RUN that owns the claim, ANYONE once the claim is
+ * dead". Nothing writes it into the record; one line in `GithubSource.release`
+ * compares it against the claim's stored `run.runId`, which is how a
+ * `/backlog-orchestrate --abort` spawned by `POST /api/agents/stop` releases
+ * claims its own run took while the driver that posted them is dead.
+ *
+ * Deliberately a bare `runId` rather than the whole `ClaimRun` that `claim`
+ * takes: `claim` STORES the object, `release` only asks a question about one
+ * already stored, and a second validated blob would be a second place
+ * `ClaimRun`'s shape has to be kept true.
+ */
 export interface ItemReleaseRequest extends ItemWriteRequest {
   id: string;
   commentId: number;
   session: string;
   reason: string;
   counters?: ClaimCounters;
+  runId?: string;
 }
 
 /** `POST /api/items/heartbeat`. `state` is the `ClaimState` task-47's driver

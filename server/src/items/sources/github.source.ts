@@ -511,18 +511,44 @@ export class GithubSource implements ItemSource, ItemWriter {
    * them would be a second implementation of billing, in the process with the
    * least information about what happened.
    *
-   * Who may release: the holder always; ANYONE once the claim is dead. That
-   * asymmetry is the same rule `claim` enforces from the other side — a stale
-   * claim is not somebody's property, it is litter, and requiring the original
-   * session to come back and clear it would wedge an issue on the crash of a
-   * process that is never coming back.
+   * Who may release: **the holder always, the RUN that owns the claim, ANYONE
+   * once the claim is dead.** The last clause is the same rule `claim`
+   * enforces from the other side — a stale claim is not somebody's property,
+   * it is litter, and requiring the original session to come back and clear it
+   * would wedge an issue on the crash of a process that is never coming back.
+   *
+   * The MIDDLE clause is bug-42's, and it is not a new concept: it is
+   * task-47 §7.6's same-run takeover, which `claim` has enforced since phase
+   * 4a and this route never learned. `POST /api/agents/stop` records a stop
+   * and then spawns a FRESH `/backlog-orchestrate --abort` session; that
+   * session takes the run's driver lease (`takeOverRun`, before it walks the
+   * queue) and then releases every claim the run still holds — as its own
+   * session, which under the holder-only rule is a stranger to every one of
+   * those claims. So the force stop built for a driver that is dead or hung
+   * left exactly the state bug-40 removed: an unreleased claim, the
+   * `in-progress` label, and `started`/`phase` on every machine's board. The
+   * claim going stale does not repair it — the mapper reads `started` off ANY
+   * unreleased claim, fresh or stale.
    */
   async release(_project: RegistryProject, marker: SourceMarker, req: ItemReleaseRequest): Promise<WriteOutcome<ClaimResult>> {
     return this.editClaim(marker, req.id, req.commentId, (existing, now, number) => {
       if (existing.released !== undefined) {
         return { refused: 'conflict', error: `claim ${req.commentId} on #${number} is already released` };
       }
-      if (isLive(existing, now) && existing.session !== req.session) {
+      /* The `typeof` and `length` guards are load-bearing, not ceremony.
+         Written as the tempting `existing.run?.runId !== req.runId`, a request
+         with no `runId` against a HAND claim with no `run` compares
+         `undefined !== undefined` → `false`, the refusal disappears, and any
+         session on the machine could rip a live `backlog.mjs start` out from
+         under the person holding it. `claim`'s own same-run filter guards the
+         same shape with `typeof c.record.run?.runId === 'string'`, and the two
+         are meant to read alike.
+
+         So a claim with no `run` is never same-run with anything — the same
+         sentence `claim` makes about a hand claim, for the same reason: a run
+         has no standing to evict somebody working the item at a terminal. */
+      const sameRun = typeof req.runId === 'string' && req.runId.length > 0 && existing.run?.runId === req.runId;
+      if (isLive(existing, now) && existing.session !== req.session && !sameRun) {
         return {
           refused: 'conflict',
           error: `#${number} is held by session ${existing.session}`,

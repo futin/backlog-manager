@@ -2023,11 +2023,27 @@ function trackerRelease(run, item, reason, counters = undefined) {
     // the newest thing on the issue, rather than after a close has put a
     // comment on it.
     const billed = counters === undefined ? claimCountersFor(run, item) : counters;
+    /* `runId` is sent UNCONDITIONALLY, not only on the abort path (bug-42).
+       Every release this function sends is a run releasing a claim its own run
+       took, so the assertion is always true — and the server needs it whenever
+       the releasing SESSION is not the one that posted the claim comment. That
+       is the abort session's case, and equally the resumed driver's: an item
+       reaching a terminal stage after a resume is released by a session that
+       is not the one whose crash the resume replaced. A conditional would
+       leave that second case quietly on the path the server refuses.
+
+       It is an assertion the server CHECKS, not a field it stores: it must
+       equal the `run.runId` inside the claim comment, so a second machine's
+       run asserting ours is still a 409. */
     const payload = {
       project: claimProjectOf(run),
       id: claimItemId(item.id),
       commentId: item.claim.commentId,
+      // Deliberately NOT the holder's session — the release records who
+      // actually did it, and `released.by` would otherwise impersonate a
+      // driver that may well be dead.
       session: sessionIdentity() ?? run.runId,
+      runId: run.runId,
       reason
     };
     // Omitted rather than sent as zeros when the read failed — see
@@ -4796,6 +4812,15 @@ function cmdAbort() {
   // is one stderr line and this command still exits 0 having written
   // `{"status":"aborted"}` — `run.json` is the journal of record and the
   // claim is a published copy.
+  //
+  // bug-42: the ORDER above is load-bearing and not merely historical. This
+  // session is not the holder of any of these claims — the driver that posted
+  // them is, and on the path this exists for it is dead — so each release is
+  // authorised by `runId` alone, the server's "the RUN that owns the claim"
+  // clause. `takeOverRun` ran at the top of this command, so the session
+  // making that assertion demonstrably holds the run's lease by the time it
+  // makes it. Moving these releases above the lease take would turn the
+  // assertion into a lie.
   if (projectSource(projectRoot) === 'github') {
     for (const item of run.queue) {
       if (item.claim !== undefined && !CLAIM_RELEASE_STAGES.has(item.stage)) trackerRelease(run, item, 'aborted');

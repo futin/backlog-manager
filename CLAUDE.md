@@ -130,7 +130,11 @@ any of these — most encode a failure that already happened.
   what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`); `GithubSource.claim` is the one implementation of taking one. The sequence
   is list · post · settle (`settleMs`, 1 s) · list · UNION, and the union is what decides — never the second list alone, because GitHub's comment listing is
   eventually consistent. A LOSER deletes its own comment; a claim that merely went STALE is released (`released: { reason: 'stale' }`), never deleted, because
-  it is the permanent record of work somebody did and carries the counters to prove it. `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second
+  it is the permanent record of work somebody did and carries the counters to prove it. **Who may release is a triple: the holder always, the RUN that owns the
+  claim, ANYONE once the claim is dead** (bug-42) — the middle clause is task-47 §7.6's same-run takeover, which `claim` enforced and `release` did not, so a
+  board force stop's spawned `--abort` could not release the dead driver's claims. `ItemReleaseRequest.runId` is the assertion, a 400 on anything but a
+  non-empty string, sent by `trackerRelease` on EVERY release and never by `backlog.mjs stop`; the test is guarded with `typeof`/`length` so a claim with no
+  `run` is never same-run with anything, and `isLive` reaches the dead clause first. `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second
   number. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the newest prior claim and are BILLED by the CLI on
   release — `--abandon` sends no `counters` key at all, which is not the same as zeros. The mapper reads `started`/`phase` from an UNRELEASED claim without
   consulting its heartbeat ("any stamp, fresh or stale") and the counters from the newest claim regardless of release. Why:

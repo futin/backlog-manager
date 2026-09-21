@@ -6611,6 +6611,10 @@ test('stage merged reads the counters, closes the issue, then releases — in th
   assert.equal(tail[1].body.status, 'done');
   assert.equal(tail[1].body.outcome, outcomeText);
   assert.equal(tail[2].body.reason, 'merged');
+  // bug-42: EVERY release this run sends asserts the run that owns the claim, not only abort's. `trackerRelease` adds the key unconditionally, because a
+  // conditional would leave the resumed-driver case — an item released at a terminal stage whose claim comment was posted by the session that crashed —
+  // quietly on the path the server refuses.
+  assert.equal(tail[2].body.runId, JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).runId);
   // Read counters (1/2/3/4) plus this run's bill: 812345 ms floors to 812 s,
   // and 208 + 52893 + 204362 tokens are billed while the 15,155,855 CACHE
   // READS are not — the same set `backlog.mjs stop` bills for a files item.
@@ -6959,7 +6963,7 @@ test('C-4: heartbeat keeps every claim the run still holds alive, and none it re
 // this run was about to hand back.
 
 test('bug-40: abort releases every claim the run still holds, reason aborted, before it finishes the run', async (t) => {
-  const { home, project } = await seededTrackerRun(t, [
+  const { home, project, runId } = await seededTrackerRun(t, [
     { id: '3', stage: 'reviewing', claim: 503 },
     { id: '5', stage: 'needs-answers', claim: 505 },
     { id: '7', stage: 'merged', claim: 507 },
@@ -6996,6 +7000,12 @@ test('bug-40: abort releases every claim the run still holds, reason aborted, be
     // Billed the ordinary way, through `claimCountersFor` — an abort is not
     // `backlog.mjs stop --abandon`'s dead-interval case.
     assert.deepEqual(r.body.counters, { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 });
+    // bug-42: the assertion that makes the release AUTHORISED. This session is not the claim's holder — the driver that posted the comment is, and on
+    // the path this exists for it is dead — so without a `runId` naming the run whose lease `takeOverRun` just took, the server refuses every one of
+    // these and the item keeps its unreleased claim, its `in-progress` label and its disabled dispatch control on every machine.
+    assert.equal(r.body.runId, runId);
+    // …and it claims run authority WITHOUT impersonating the holder: `session` stays this session's, so `released.by` records who actually did it.
+    assert.equal(r.body.session, 'sess-test');
   }
 
   const order = requests.filter((r) => r.method === 'POST' && ['/api/items/release', '/api/items/heartbeat'].includes(r.path)).map((r) => r.path);

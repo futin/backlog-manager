@@ -654,6 +654,115 @@ describe('release', () => {
     await sync();
     await post('release', { project: trackerPath, id: '#31', commentId: 999, session: 'A', reason: 'stopped' }).expect(404);
   });
+
+  /* -------------------------------------------------------------------------
+   * bug-42 — the middle clause of the triple: **the holder always, the RUN that owns the claim, ANYONE once the claim is dead.**
+   *
+   * `claim` has known the same-run takeover since task-47 §7.6 and `release` never learned it, so a `/backlog-orchestrate --abort` spawned by
+   * `POST /api/agents/stop` — a session that took the run's driver lease and is therefore the run, but is NOT the claim's holder — was refused every
+   * release it sent. With the driver dead (the case a force stop exists for) nothing ever released the claim: it went stale and stayed unreleased, and
+   * the mapper fills `started` off any unreleased claim, so the item's dispatch control stayed disabled on every machine until a person edited the
+   * comment by hand.
+   *
+   * The case above this comment ('refuses another session-s LIVE claim and patches nothing') is deliberately left unedited as the regression pin for a
+   * caller that sends no `runId` at all — `backlog.mjs stop` is that caller, and it gains no authority here.
+   * ------------------------------------------------------------------------- */
+
+  it('lets the RUN that owns the claim release another session-s LIVE claim', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-progress' }] });
+    gh.claim(record({ session: 'A', run: RUN }), 31, 100);
+    await sync();
+
+    const res = await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'B',
+      runId: RUN.runId,
+      reason: 'aborted'
+    }).expect(201);
+
+    // `by` is the RELEASING session, not the holder — the honest record of who actually did it, and the reason the fix does not impersonate the driver.
+    expect(res.body.record.released).toMatchObject({ reason: 'aborted', by: 'B' });
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'aborted', by: 'B' });
+    // The rest of the route is unchanged: the label still comes off. Asserted on the CALL, because an outcome-only assertion passes for a route that
+    // skipped the request entirely.
+    expect(gh.matching('/labels/in-progress', 'DELETE')).toHaveLength(1);
+  });
+
+  /* The clause that keeps it a narrow authority rather than an open door: another machine's run has no more standing here than any other stranger. */
+  it('refuses a release asserting a DIFFERENT runId, and patches nothing', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', run: RUN }), 31, 100);
+    await sync();
+
+    const res = await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'B',
+      runId: 'run-20260919-999999',
+      reason: 'aborted'
+    }).expect(409);
+
+    expect(res.body.holder.session).toBe('A');
+    expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
+  });
+
+  /* The `undefined === undefined` trap, and the reason the predicate carries a `typeof` and a `length` guard rather than the tempting
+     `existing.run?.runId !== req.runId`: written that way, a hand claim with no `run` and a request with no `runId` compare equal, the refusal
+     disappears, and any session on the machine could rip a live `backlog.mjs start` out from under the person holding it. `claim`'s own same-run filter
+     guards the same shape the same way, and the two should read alike. */
+  it('is never same-run with a live HAND claim, which carries no run at all', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+
+    const res = await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'B',
+      runId: RUN.runId,
+      reason: 'aborted'
+    }).expect(409);
+
+    expect(res.body.holder.session).toBe('A');
+    expect(claimIn(100)?.released).toBeUndefined();
+  });
+
+  /* A 400 rather than a dropped field, for the reason `claimRunOf` gives about `run`: the SERVER branches on this one, and a silently dropped value
+     turns an authorised release into a refusal nobody can explain. */
+  it('400s a runId that is not a non-empty string, and reaches GitHub not at all', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', run: RUN }), 31, 100);
+    await sync();
+
+    const bad = await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'B', runId: 7, reason: 'aborted' }).expect(400);
+    expect(bad.body.error).toContain('runId');
+    await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'B', runId: '   ', reason: 'aborted' }).expect(400);
+
+    // Answered before the adapter is reached at all.
+    expect(gh.calls).toEqual([]);
+  });
+
+  /* "Anyone once the claim is dead" outranks the new clause and is reached first, through `isLive` — so a stale claim carrying a foreign `runId` still
+     releases to anybody. Ordering, not a new rule. */
+  it('lets anyone release a DEAD claim even while asserting a foreign runId', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', heartbeat: new Date(Date.now() - CLAIM_STALE_MS - 1).toISOString(), run: RUN }), 31, 100);
+    await sync();
+
+    await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'B',
+      runId: 'run-20260919-999999',
+      reason: 'stopped'
+    }).expect(201);
+    expect(claimIn(100)?.released?.by).toBe('B');
+  });
 });
 
 describe('heartbeat', () => {
