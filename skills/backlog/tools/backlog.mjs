@@ -19,7 +19,17 @@ import { spawnSync } from 'node:child_process'
 
 // `import`'s text half (task-50), in a module of its own so each transformation is provable from a table rather than through a fake API and a git fixture. One
 // direction only: `import-lib.mjs` imports nothing from this file, and nothing from node at all.
-import { IMPORT_BODY_CAP, splitOutcome, renderImportFooter, blobLink, fitBody, rewriteOldIds, importOrder, countersOf } from './import-lib.mjs'
+import {
+  IMPORT_BODY_CAP,
+  splitOutcome,
+  renderImportFooter,
+  parseImportFooter,
+  blobLink,
+  fitBody,
+  rewriteOldIds,
+  importOrder,
+  countersOf,
+} from './import-lib.mjs'
 
 // Section name -> id prefix. Fixed and exported so every later command (ids,
 // board, move) keys off this one map instead of re-deriving prefixes.
@@ -2966,8 +2976,6 @@ export async function main(argv) {
       return e.code
     }
 
-    void index
-
     // --- the marker, then the writes (§8.2) ---------------------------------
     //
     // The marker goes down FIRST because the seven item write routes refuse a `files` project, and it is not rewritten on a resume: it is already this
@@ -2986,6 +2994,25 @@ export async function main(argv) {
 
     const ordered = importOrder(plan)
     const map = new Map()
+    // What a resume already found on the tracker, keyed by OLD id: the issue's number, and the status the index reports for it.
+    const resumedStatus = new Map()
+
+    // --- the resume map (§8.6) ----------------------------------------------
+    //
+    // A resume rebuilds the map from the TRACKER, never from anything a previous run wrote down locally: the run that stopped half way through may have died
+    // between two requests, so the only record that survived is the `bm:imported` footer on each issue it managed to create. Every body is read for it, because
+    // the footer is the one place the old id appears — a title, a section and a label all belong to more than one item.
+    if (resuming) {
+      for (const row of (index.items ?? []).filter((it) => it.projectPath === project)) {
+        const oldId = parseImportFooter(await apiGetText(`/api/items/body?path=${encodeURIComponent(row.path)}`))
+        // An issue with no footer is somebody's own issue, filed on the tracker by hand — this import neither created it nor owns it, and reading a number off
+        // it would map an item onto a stranger's work.
+        if (oldId === null) continue
+        map.set(oldId, Number(String(row.id).replace('#', '')))
+        resumedStatus.set(oldId, row.status)
+      }
+      console.log(`resuming: ${map.size} of ${ordered.length} item(s) already imported`)
+    }
     // One stamp for the whole command, so every synthetic claim this import takes carries the same session identity — they are one session's work, and a claim
     // per timestamp would read as a different importer for every item.
     const stamp = new Date().toISOString()
@@ -3002,6 +3029,23 @@ export async function main(argv) {
     try {
       for (const item of ordered) {
         at = item.id
+
+        // Already on the tracker, so this item's `create` is not made a second time — the footer said so, and a duplicate issue is the one failure a resume
+        // exists to prevent. One repair happens here and nothing else: a `done/` file whose issue is still open is a run that died between `create` and
+        // `state done`, and the close is idempotent from the operator's point of view because the issue carries neither the comment nor the closed state yet.
+        // The counters are deliberately NOT re-billed — `claim`/`release` would add a second copy of them, and a doubled record of work is worse than one that
+        // is merely missing a repair this command cannot detect.
+        if (map.has(item.id)) {
+          const mapped = `#${map.get(item.id)}`
+          if (item.status === 'done' && resumedStatus.get(item.id) === 'open') {
+            const repair = { project, id: mapped, status: 'done' }
+            if (item.outcome !== '') repair.outcome = item.outcome
+            await apiPost('state', repair)
+            await pace()
+          }
+          console.log(`${item.id} → ${mapped} (already imported)`)
+          continue
+        }
 
         const footer = renderImportFooter({ id: item.id, created: item.data.created, tags: item.data.tags, relPath: item.relPath })
         // The cap is spent on the body, so the footer's length is taken out of it first: the footer is the idempotency key a resume reads, and a body that lost

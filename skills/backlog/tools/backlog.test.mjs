@@ -4623,20 +4623,32 @@ test('import refuses a refactor kind the tracker has no label for, and accepts d
  * back before patching it — `GET /api/items/body` answers what the `create` (or the last patch) recorded, which is the only way a cross-link rewrite can be
  * asserted end to end.
  */
-function githubRoutes({ projectPath = '', repo = 'futin/x', overrides = {} } = {}) {
+function githubRoutes({ projectPath = '', repo = 'futin/x', seed = [], firstNumber = 4, overrides = {} } = {}) {
   const bodies = new Map()
   const numbers = []
+  const statuses = new Map()
+  let created = 0
   let claims = 0
   const numberOf = (ref) => Number(String(ref).replace(/^.*#/, ''))
+  // Issues a PREVIOUS import created, for the resume cases: the fake holds their bodies, footers included, because the footer is what a resumed run reads to
+  // decide which items already exist.
+  for (const issue of seed) {
+    numbers.push(issue.number)
+    bodies.set(issue.number, issue.body)
+    statuses.set(issue.number, issue.status ?? 'open')
+  }
   const routes = {
     '/api/items': () => ({
       body: {
-        items: numbers.map((n) => apiItem({ id: `#${n}`, projectPath, path: `gh:${repo}#${n}`, updated: `2026-09-21T10:00:0${n}Z` })),
+        items: numbers.map((n) =>
+          apiItem({ id: `#${n}`, projectPath, path: `gh:${repo}#${n}`, updated: `2026-09-21T10:00:0${n}Z`, status: statuses.get(n) ?? 'open' }),
+        ),
         errors: [],
       },
     }),
     '/api/items/create': (body) => {
-      const number = 4 + numbers.length
+      const number = firstNumber + created
+      created += 1
       numbers.push(number)
       bodies.set(number, body.body)
       return { body: { id: `#${number}`, urn: `gh:${repo}#${number}`, url: `https://github.com/${repo}/issues/${number}`, number } }
@@ -4936,4 +4948,102 @@ test('pass 2 makes no write but body patches', async () => {
     const isWrite = request.method === 'POST'
     assert.equal(isWrite && request.path !== '/api/items/body' && request.path !== '/api/items/state', false, `${request.method} ${request.path} ran after pass 1`)
   }
+})
+
+/** A store whose marker is already down and whose item files are still there: an import that stopped part way through, which is the state resume is for. */
+function resumeFixture() {
+  return importFixture({
+    items: [...importItems(), { relPath: 'source.json', text: JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n' }],
+  })
+}
+
+const seededBody = (id, relPath, text) => `${text}\n\n<!-- bm:imported from=${id} created=2026-01-01 -->\n_Imported from backlog/${relPath}_`
+
+const RESUME_SEED = [
+  { number: 4, status: 'open', body: seededBody('task-1', 'tasks/open/task-1-one.md', 'Blocked on bug-2 and task-99.') },
+  // Its close failed last time: the issue exists and is still open, while the file is under `done/`.
+  { number: 6, status: 'open', body: seededBody('task-3', 'tasks/done/task-3-three.md', '## Plan\n\nplan text') },
+]
+
+test('import resumes from the bm:imported footers and creates only what is missing', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /resuming: 2 of 4 item\(s\) already imported/)
+  assert.deepEqual(
+    posts(requests, 'create').map((r) => r.body.title),
+    ['two', 'five'],
+  )
+})
+
+test('import repairs a done item whose close failed, and claims nothing a second time', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const states = posts(requests, 'state')
+  assert.equal(states.length, 1)
+  assert.equal(states[0].body.id, '#6')
+  assert.equal(states[0].body.outcome, 'Shipped it.')
+  // The counters were billed by the run that created the issue; a second claim would double them, and a duplicate is worse than a missing one.
+  assert.equal(posts(requests, 'claim').length, 0)
+  assert.equal(posts(requests, 'release').length, 0)
+})
+
+test('import’s second pass patches issues an earlier run created', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const patch = posts(requests, 'body').find((r) => r.body.id === '#4')
+  assert.ok(patch !== undefined, 'the issue an earlier run created still cites an old id')
+  assert.match(patch.body.body, /Blocked on #8 and task-99\./)
+})
+
+test('import leaves the marker exactly as it found it, and honours --no-forms on a resume', async () => {
+  const { dir, backlog } = resumeFixture()
+  const before = fs.readFileSync(path.join(backlog, 'source.json'), 'utf8')
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github', '--no-forms'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), before)
+  for (const form of FORM_FILES) assert.equal(fs.existsSync(formPath(dir, form)), false)
+})
+
+test('import refuses a repo that disagrees with the marker, before any request', async () => {
+  const { dir } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github', 'futin/other'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /names futin\/x, not futin\/other/)
+  assert.equal(requests.length, 0)
+})
+
+test('a resumed import still deletes every item file last', async () => {
+  const { dir, backlog } = resumeFixture()
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(backlogItemFiles(backlog), [])
+  assert.deepEqual(commitList(out.stdout), [
+    'backlog/source.json',
+    ...FORM_FILES.map((file) => `.github/ISSUE_TEMPLATE/${file}`),
+    'backlog/tasks/open/task-1-one.md',
+    'backlog/bugs/open/bug-2-two.md',
+    'backlog/tasks/done/task-3-three.md',
+    'backlog/out-of-scope/oos-5-five.md',
+  ])
 })
