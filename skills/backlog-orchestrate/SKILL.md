@@ -647,8 +647,12 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stag
 ```
 
 A re-stamp of the stage the item already occupies, exactly like the `--session` line further down, so the pause gate lets it through. It is the same number
-`watch --pid` reads, put somewhere an `--abort` arriving **after** this driver is gone can still find it: nothing scans `logs/`, so without this the run file
-holds no address for the child at all and a force stop cannot reach an orphaned executor. Run it on the retry line in §5 too.
+`watch --pid` reads, put where `status --json` and anyone reading the run can see it. Run it on the retry line in §5 too.
+
+It is the **second** copy of that number, not the only one (bug-43). A stop landing between the `echo $!` above and this line refuses this call with exit `10`
+— the stop gate refuses every transition — and the child is still reachable, because `--abort` reads `<dir>/logs/<id>.pid` itself and prefers it to the run
+file's copy. So a refusal here costs a field on the run file and nothing more: do not retry it, do not work around it, go to §10. What the tool now depends on
+is the `echo $!` line writing **that exact path**; renaming it would blind `abort` silently.
 
 Both lines in **one** Bash invocation — each invocation gets its own shell, so `$!` is only readable in the call that backgrounded the child; that is why the
 pid goes straight into a file. `exec` matters too: it makes the pid you recorded the `claude` process itself rather than a wrapper shell around it, and `watch`
@@ -1546,8 +1550,10 @@ things are worth knowing before you run it:
 
 - **It will not be refused on the lease.** `abort` takes the run over on the strength of the stop request itself, even from a driver the run file still reads
   as alive. That is what a stop is for: the run file's freshness measures the FILE, never the process.
-- **It signals the children.** Any item still in flight whose pid this run recorded (§4) is sent `SIGTERM` first, and only a live process whose command line
-  names `claude` — never a pattern, never a pid the run did not record itself.
+- **It signals the children.** Any item still in flight is sent `SIGTERM` first, at whichever pid `resolveItemPid` answers with — `<dir>/logs/<id>.pid` if
+  the launcher wrote one, else the pid the run file recorded (§4). It is deliberately not "a pid this run recorded": a stop landing in §4's window refuses
+  the `--pid` call, so the run file's field can be null for a child that is very much alive, which is the whole of bug-43. What is signalled is still only a
+  live process whose command line names `claude` — never a pattern, and never a pid that has not passed all three checks first.
 - **A worktree carrying an in-progress marker is still left in place**, with an `attention` entry naming it. A stop may abandon an item; it may not destroy
   uncommitted work.
 

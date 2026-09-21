@@ -2148,6 +2148,18 @@ function snapshotFilePath(dir, itemId) {
   return path.join(dir, 'items', `${itemId}.md`);
 }
 
+// bug-43: the dispatched child's pid, at the name SKILL.md's launcher writes
+// it under. Unlike the two above, this file is written by the SKILL rather
+// than by this tool — `echo $! > "<dir>/logs/<id>.pid"`, in the same Bash
+// invocation that backgrounds the child, because `$!` is only readable in the
+// call that backgrounded it. Named here, in one place, because `cmdAbort` now
+// DEPENDS on it: until bug-43 nothing read `logs/` at all, so a rename in
+// SKILL.md's prose was free. `orchestrate.test.mjs` guards the seam from the
+// other side by asserting both launch lines still write this exact name.
+function dispatchPidPath(dir, itemId) {
+  return path.join(dir, 'logs', `${itemId}.pid`);
+}
+
 const SNAPSHOT_USAGE = 'usage: orchestrate.mjs snapshot <itemId>';
 
 /**
@@ -2925,8 +2937,15 @@ function cmdStage(argv) {
   // bug-39: the dispatched child's process id, written through the same
   // `applyQueueItemFields` path `--session` uses. §4's dispatch already
   // records this number into `logs/<id>.pid` for `watch --pid`; this is that
-  // same number put somewhere an abort arriving AFTER the driver is gone can
-  // still read it, which `logs/` alone is not (nothing scans it).
+  // same number put where `status --json` and a person reading the run can
+  // see it.
+  //
+  // bug-43 demoted this from the only address an abort has to the SECOND copy
+  // of one: `cmdAbort` now resolves a pid through `resolveItemPid`, which
+  // reads `dispatchPidPath` first and falls back to this field. It had to,
+  // because the stop gate above refuses THIS call — so the field stays null
+  // for exactly the run a force stop exists to clean up. Do not restore any
+  // claim that `logs/` is a place nothing reads.
   let pidArg;
   let worktree;
   let branch;
@@ -3039,10 +3058,20 @@ function cmdStage(argv) {
   // worktree still carries an in-progress `phase:` marker is LEFT IN PLACE
   // with an `attention` entry naming it, rather than force-removed.
   //
-  // It is not restricted to a transition either, because a re-stamp's own
-  // justification does not apply: the pause gate exempts re-stamps so that a
-  // live `claude -p` child always has its session id recorded, and under a
-  // stop that child is about to be killed by `watch` (or is already gone).
+  // It is not restricted to a transition either, and bug-43 replaced the
+  // reason rather than narrowing the gate. The original reason was that under
+  // a stop the child "is about to be killed by `watch` (or is already gone)"
+  // — false, and the falsification is the whole of bug-43: `watch` kills the
+  // child only while a live driver is polling it, and a force stop exists
+  // precisely for the run whose driver is not. What holds now is that the
+  // re-stamp this refuses is no longer load-bearing: the pid a killed child
+  // needs to be reachable by reaches `abort` through `<dir>/logs/<id>.pid`
+  // (`resolveItemPid`), written before this call and surviving its refusal,
+  // so refusing it costs a field on the run file rather than the child's
+  // address. Narrowing the gate to exempt a re-stamp was considered and
+  // declined: it would only help the driver that survives long enough to make
+  // the call, which is the less dangerous half, at the cost of a hole in a
+  // rule currently stated in one sentence.
   if (stopRequestEffective(control, run)) {
     throw new OrchestrateError(
       `a stop was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. End the run with \`--abort\` (SKILL.md §10, "Stopping").`,
@@ -3729,6 +3758,46 @@ function pidAlive(pid) {
   const probe = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' });
   if (probe.error || probe.status !== 0 || !probe.stdout) return true;
   return !isZombieStatState(probe.stdout);
+}
+
+// bug-43: where `abort` gets an item's pid from, and the precedence between
+// its two sources.
+//
+// `<dir>/logs/<id>.pid` FIRST. That file is written by the same Bash
+// invocation that backgrounds the child, so it is the freshest address that
+// exists for this item's live child, and the run file's copy is only ever a
+// copy of it made one command later — a command the stop gate refuses, which
+// is the hole this closes. The two can disagree only when a `stage --pid` was
+// refused after a relaunch rewrote the file, and there the run file names a
+// child that has already exited (a retry line runs only once `watch` has
+// returned on the previous one). It cannot be a PREVIOUS run's file:
+// `archiveSidecars` moves the whole of `logs/` into `runs/<stem>/` at the
+// next `init`, and `init` refuses any run still reading `running`, so
+// `<dir>/logs/` always belongs to the run being aborted.
+//
+// `item.pid` second, for the run whose `logs/` a person has cleared by hand.
+//
+// Every failure of the file — missing, unreadable, empty, whitespace-only,
+// non-numeric, zero, negative, fractional — is "no answer from the file" and
+// falls through to the field, never a throw. That is the posture the rest of
+// `abort` takes toward sidecar evidence, and it matters more here than
+// elsewhere: this runs inside a teardown that must reach its worktree
+// removals whatever it finds on disk. `Number` rather than `parseInt` on
+// purpose — `parseInt('12abc')` is 12, and a pid is either the whole of the
+// file's contents or not a pid at all.
+//
+// The three guards in `cmdAbort` are unchanged and apply to whatever this
+// returns: a number that came out of a file has earned them at least as much
+// as one that came out of the run file.
+function resolveItemPid(dir, item) {
+  let fromFile;
+  try {
+    fromFile = Number(fs.readFileSync(dispatchPidPath(dir, item.id), 'utf8').trim());
+  } catch {
+    fromFile = NaN;
+  }
+  if (Number.isInteger(fromFile) && fromFile > 0) return fromFile;
+  return Number.isInteger(item.pid) && item.pid > 0 ? item.pid : null;
 }
 
 // Pulls the session id out of the FIRST `{"type":"system","subtype":
@@ -4699,14 +4768,26 @@ function cmdAbort() {
      journal of record. */
   for (const item of run.queue) {
     if (RECONCILE_TERMINAL_STAGES.has(item.stage)) continue;
-    const pid = item.pid;
-    if (!Number.isInteger(pid) || pid <= 0) continue;
+    // bug-43: two sources, the log file first — see `resolveItemPid` for why
+    // the file outranks the field, and why an item staged `dispatched` with
+    // `pid: null` is the normal shape of the run this command exists for
+    // rather than a run with no child.
+    const pid = resolveItemPid(dir, item);
+    if (pid === null) continue;
     if (!pidAlive(pid)) continue;
     const probe = spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' });
     if (probe.error || probe.status !== 0 || !/claude/.test(probe.stdout ?? '')) continue;
     try {
       process.kill(pid, 'SIGTERM');
       signalledIds.push(`${item.id} (pid ${pid})`);
+      // The journal of record holds the address that was actually used, so
+      // `signalledIds` stays reconcilable from `run.json` alone after this
+      // process is gone. Written here rather than above the guards on
+      // purpose: a number that FAILED them is what `--pid`'s own validation
+      // calls worse than no pid at all, and recording it would put a wrong
+      // address in the field deliberately. Picked up by the single
+      // `writeRunAtomic` at the end of this command.
+      item.pid = pid;
     } catch (e) {
       console.error(`abort: could not signal pid ${pid} for ${item.id} (${e.message}) — continuing`);
     }

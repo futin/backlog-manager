@@ -305,8 +305,10 @@ spawn for, never a superset — which is the safe direction, and the only direct
 - `stage` refuses **every** transition with exit `10`, nothing written — wider than the pause gate in both dimensions (every stage, and not only a
   transition). A stop is allowed to abandon a half-finished worktree; that is the whole difference between it and a pause, and `abort`'s existing
   marker-preservation rule (a worktree still carrying an in-progress `phase:` marker is LEFT IN PLACE with an `attention` entry) is what keeps that safe. The
-  re-stamp exemption does not apply either: the pause gate exempts re-stamps so a live child always has its session id recorded, and under a stop that child
-  is about to be killed.
+  re-stamp exemption does not apply either: the pause gate exempts re-stamps so a live child always has its session id recorded, and under a stop the refused
+  `--pid` call costs the kill nothing, because `cmdAbort` reads that child's pid from `<dir>/logs/<id>.pid` instead (bug-43 — the child is NOT already dead
+  or about to be, which is what this sentence used to claim). Narrowing the gate to exempt a same-stage `--pid` re-stamp was weighed there and declined: a
+  second pid source leaves the gate's one rule — every transition, no exceptions — intact.
 - `watch` kills the child **by the pid it was given** and returns `10`. This is the one place in the system that holds a live child's pid, which is why the
   kill belongs here and nowhere else; it is never a pattern, and the signal is `SIGTERM` because the child owns a transcript `usage`/`denials` still read.
   The check runs BEFORE the tick's heartbeat write, so a run being stopped does not have its `updatedAt` pushed forward by the very tick that noticed.
@@ -322,7 +324,16 @@ to `--abort`". Different commands, different endings, and a run that collapsed t
 **`RunQueueItem.pid` exists because a stop whose driver is already dead must still be able to reach an orphaned executor.** `run.driver` is
 `{ sessionId, at }` and a session id is not a process, so until this nothing anywhere held an address for the child. Written by
 `stage <id> dispatched --pid <p>` through the same `applyQueueItemFields` path `--session` uses, from the pid SKILL.md §4 already writes to
-`logs/<id>.pid` — nothing scans `logs/`, which is why the number has to reach the run file. `cmdAbort` signals it only when the item is non-terminal,
+`<dir>/logs/<id>.pid`. **Since bug-43 that file is the FIRST source and the field is the second** (`resolveItemPid`, beside `pidAlive`): the file is written
+by the same Bash invocation that backgrounds the child, so it is the freshest address that exists, and the run file's copy is made one command later — a
+command the stop gate refuses, which is precisely how a force stop's own run ends up with `pid: null` and a live `claude -p` child. Every failure of the file
+(missing, unreadable, empty, whitespace-only, non-numeric, zero, negative, fractional) falls through to the field and none of them throws, because this runs
+inside a teardown that must reach its worktree removals whatever it finds; the field is kept for the run whose `logs/` a person has cleared by hand. Reading
+a PREVIOUS run's file is impossible: `archiveSidecars` moves the whole of `logs/` into `runs/<stem>/` at the next `init`, and `init` refuses any run still
+reading `running`. The gate was deliberately NOT narrowed to let the `--pid` re-stamp through instead — that helps only the driver alive enough to make the
+call, which is the less dangerous half, and costs a hole in a rule stated in one sentence. A pid that passes all three guards and is signalled is written
+back to `item.pid` before `cmdAbort`'s single `writeRunAtomic`, so `signalledIds` stays reconcilable from `run.json` alone; one that FAILS them is never
+written, since a wrong address is worse than none. `cmdAbort` signals it only when the item is non-terminal,
 `pidAlive(pid)` holds, and `ps -o args= -p <pid>` names a `claude` process: the cheap guard against the pid-reuse TOCTOU `pidAlive`'s own comment documents.
 That last guard's bias is the OPPOSITE of `pidAlive`'s, deliberately — a `ps` that fails or names something else is a decision NOT to signal, because the cost
 of not killing is a stray process a person can find and the cost of killing wrongly is somebody else's work. Mandatory in the TYPE (the compiler is the

@@ -4917,6 +4917,188 @@ test('abort leaves a TERMINAL item\'s recorded pid alone, however alive that pid
 });
 
 
+// --- bug-43: abort's SECOND pid source, `<dir>/logs/<id>.pid` -------------
+// The window bug-39 left open: a stop landing after the first `stage <id>
+// dispatched` and before the `--pid` call completes leaves `RunQueueItem.pid`
+// null while a `claude -p` child is running, because the stop gate refuses
+// every call — and `cmdAbort` had exactly one pid source, the run file. The
+// number was never lost: SKILL.md's launcher writes it to `<dir>/logs/<id>.
+// pid` in the same Bash invocation that backgrounds the child, before the
+// refusable call. These cases pin that abort now reads that file, prefers it,
+// and subjects it to the same three guards a recorded pid gets.
+
+// The pid file SKILL.md's dispatch line writes, at the name the tool now
+// reads. Written through `seedSidecar` so the path is composed exactly the
+// way every other sidecar in this suite is, rather than by a second copy of
+// the `<dir>/logs/` convention.
+function seedPidFile(home, project, itemId, body) {
+  return seedSidecar(home, project, `logs/${itemId}.pid`, body);
+}
+
+test('abort signals a pid that reached only the log file, never the run file', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const child = spawnFakeClaude(t, home);
+
+  // The FIRST of SKILL.md's two dispatch calls, and the only one that
+  // survived the window: no `--pid` anywhere, so the run file's copy is null.
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  seedPidFile(home, project, 'task-5', `${child.pid}\n`);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].pid, null, 'the run file was supposed to have no pid');
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /signalled 1 live session\(s\)/);
+  assert.match(out.stdout, new RegExp(`task-5 \\(pid ${child.pid}\\)`));
+  const [, signal] = await once(child, 'exit');
+  assert.equal(signal, 'SIGTERM');
+});
+
+test('the whole of bug-43: the stop gate refuses the --pid call and abort reaches the child anyway', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const child = spawnFakeClaude(t, home);
+
+  // Exactly the observed sequence: first call, then the stop lands, then the
+  // `--pid` call. The gate and the fallback have to be proved to COMPOSE —
+  // either half alone is green on the shipped code for the wrong reason.
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  seedPidFile(home, project, 'task-5', String(child.pid));
+  effectiveStop(home, project);
+
+  const refused = run(project, home, 'stage', 'task-5', 'dispatched', '--pid', String(child.pid));
+  assert.equal(refused.status, 10, refused.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].pid, null, 'a refused stage wrote the pid anyway');
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /signalled 1 live session\(s\)/);
+  const [, signal] = await once(child, 'exit');
+  assert.equal(signal, 'SIGTERM');
+});
+
+test('the log file wins over a stale recorded pid, and the run file records what was signalled', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  // A: the child the run file knows about, recorded through `--pid` and then
+  // dead — the shape a relaunch leaves behind when the `stage --pid` after it
+  // was refused. B: the live child the relaunch actually started, whose
+  // number is in the file the launcher rewrote.
+  const a = spawnFakeClaude(t, home);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b', '--pid', String(a.pid)).status, 0);
+  a.kill('SIGKILL');
+  await once(a, 'exit');
+
+  const b = spawnFakeClaude(t, home);
+  seedPidFile(home, project, 'task-5', String(b.pid));
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, new RegExp(`task-5 \\(pid ${b.pid}\\)`));
+  const [, signal] = await once(b, 'exit');
+  assert.equal(signal, 'SIGTERM');
+  assert.equal(
+    JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].pid,
+    b.pid,
+    'the journal of record still names the pid that was not signalled'
+  );
+});
+
+test("abort leaves a TERMINAL item's log-file pid alone, however alive it is", (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const child = spawnFakeClaude(t, home);
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'merged').status, 0);
+  seedPidFile(home, project, 'task-5', String(child.pid));
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /signalled 0 live session\(s\)/);
+  assert.equal(child.killed, false);
+});
+
+test('the pid-reuse guard still binds a pid that came out of the log file', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  // A live process the OS handed this number to after the child exited. A
+  // file-sourced pid gets the `ps -o args=` guard for exactly the reason a
+  // recorded one does — the file is no fresher than the last relaunch.
+  const stranger = spawn('sleep', ['30'], { stdio: 'ignore' });
+  t.after(() => {
+    try {
+      stranger.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  });
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  seedPidFile(home, project, 'task-5', String(stranger.pid));
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /signalled 0 live session\(s\)/);
+  assert.equal(stranger.killed, false);
+});
+
+test('unreadable contents in the pid file are no answer, never an error', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+
+  // Every shape a half-written, hand-cleared or truncated file can take. None
+  // is a throw: the posture the rest of abort takes toward sidecar evidence.
+  for (const body of ['nope', '', '   \n', '0', '-1', '12.5']) {
+    assert.equal(run(project, home, 'init', '--project', project).status, 0, `init failed for ${JSON.stringify(body)}`);
+    assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+    seedPidFile(home, project, 'task-5', body);
+
+    const out = run(project, home, 'abort');
+    assert.equal(out.status, 0, `${JSON.stringify(body)}: ${out.stderr}`);
+    assert.match(out.stdout, /signalled 0 live session\(s\)/, `${JSON.stringify(body)} was treated as a pid`);
+  }
+});
+
+test('a recorded pid is still signalled when the log file holds garbage — the fallback', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const child = spawnFakeClaude(t, home);
+
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b', '--pid', String(child.pid)).status, 0);
+  seedPidFile(home, project, 'task-5', 'nope');
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, new RegExp(`task-5 \\(pid ${child.pid}\\)`));
+  const [, signal] = await once(child, 'exit');
+  assert.equal(signal, 'SIGTERM');
+});
+
+test('SKILL.md still writes the pid to the file abort reads, on both launch lines', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  // A prose edit that renamed this file would blind `abort` silently — no
+  // behavioural test in this suite reads SKILL.md's launcher, and the tool
+  // now depends on the name. Two occurrences: §4's dispatch and §5's retry,
+  // the same pair `dispatchNames()` asserts for `exec claude -p`.
+  // `logs/` only: §8's `verify/<id>.pid` is a DIFFERENT file holding a
+  // deliberately different thing (the wrapper `sh`, not a `claude` process),
+  // and abort's `ps` guard refuses it by construction — see the item's own
+  // non-goals.
+  const lines = text.split('\n').filter((l) => l.trim().startsWith('echo $!') && l.includes('logs/'));
+  assert.equal(lines.length, 2, `expected two \`echo $! > .../logs/<id>.pid\` lines, found ${lines.length}`);
+  for (const line of lines) {
+    assert.match(line, /echo \$! > "<dir>\/logs\/<id>\.pid"/, `launcher does not write the pid file abort reads: ${line}`);
+  }
+});
+
 // --- bug-28: the per-item execute session is named ------------------------
 // Every other session this system spawns carries a `-n` display name
 // (`orchestrate <project>`, `bl <project> <id>`, `resume <project>`,

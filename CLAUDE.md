@@ -408,7 +408,10 @@ any of these — most encode a failure that already happened.
   `abort`'s marker-preservation rule keeps safe), `watch` kills the child **by the pid it was given** and returns `10`, and `takeOverRun(dir, run, force)`
   gains a REQUIRED third parameter — `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`, so a resume can still never steal a live run.
   `RunQueueItem.pid` is written by `stage <id> dispatched --pid <p>` and signalled by `cmdAbort` only behind three guards (non-terminal, `pidAlive`, and
-  `ps -o args=` naming a `claude` process). No sixth `RunStatus`, no `--force` flag, no server-side kill. Why:
+  `ps -o args=` naming a `claude` process) — and since bug-43 that field is the SECOND pid source, because the stop gate refuses the very call that writes
+  it: `resolveItemPid` reads `<dir>/logs/<id>.pid` first (written by SKILL.md's launcher before the refusal, garbage in it falling through rather than
+  throwing), falls back to the field, and writes back only a pid it actually signalled. The gate was not narrowed instead. No sixth `RunStatus`, no `--force`
+  flag, no server-side kill. Why:
   [invariants.md](docs/subsystems/invariants.md#a-stop-is-the-control-files-second-kind-and-nothing-resumes-a-stopped-run)
 - **A resume is serialized at three layers, and only the third one can refuse a resume this app never asked for** (bug-19). (1) The board's Resume control has a
   synchronous in-flight guard and its mark ends on `running` **and `fresh`**. (2) `AgentsService.resume()` takes `WatchdogEntry.resumeSpawnAt` synchronously
