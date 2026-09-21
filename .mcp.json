@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "playwright": {
-      "command": "npx",
-      "args": ["@playwright/mcp@latest", "--headless", "--isolated", "--browser", "chromium"],
+      "command": "bash",
+      "args": [
+        "-c",
+        "# Headless-only gate: Playwright costs ~25 tool definitions in every session's\n# context floor and the desktop app never drives a browser. Claude Code has no\n# per-source switch, but the command is ours -- exit before exec and the server\n# registers with no tools. Env is inherited down the whole spawn chain, so a\n# `claude -p` launched from a desktop session skips it too; that is deliberate.\n# Inline rather than a script file because this file also ships in the installed\n# plugin (root files ride the sparse checkout) and loads there in EVERY project,\n# where a ${PWD}-relative path would point at the wrong repo.\nif [ \"$BM_PLAYWRIGHT\" != \"1\" ]; then\n  [ \"$CLAUDE_CODE_ENTRYPOINT\" = \"claude-desktop\" ] && exit 0\n  [ -n \"$CLAUDE_CODE_DESKTOP_APP_VERSION\" ] && exit 0\nfi\nexec npx @playwright/mcp@latest --headless --isolated --browser chromium"
+      ],
       "env": {
         "LD_LIBRARY_PATH": "${HOME}/.local/playwright-libs/root/usr/lib/x86_64-linux-gnu"
       }
