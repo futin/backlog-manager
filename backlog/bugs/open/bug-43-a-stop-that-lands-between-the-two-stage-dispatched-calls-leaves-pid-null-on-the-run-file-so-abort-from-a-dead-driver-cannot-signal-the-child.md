@@ -3,6 +3,10 @@ id: bug-43
 title: A stop that lands between the two stage dispatched calls leaves pid null on the run file, so abort from a dead driver cannot signal the child
 created: 2026-09-21
 tags: orchestrator, stop, abort, pid
+runner-fix: true
+updated: 2026-09-21T10:42:57Z
+groom-elapsed: 279
+groom-tokens: 64415
 ---
 
 ## Symptom
@@ -31,9 +35,95 @@ from `recovery.md` before its own `abort`.
 
 ## Cause
 
-The pid reaches the run file through a transition the stop gate refuses, and `abort` has no second source for it. `logs/<id>.pid` is written by the driver
-before the refused call, so the fact exists on disk and the tool does not look there.
+Two decisions that are each right on their own, and a window in which they compose into a hole.
+
+**The pid reaches the run file through a call the stop gate refuses.** `cmdStage`'s stop gate is deliberately wider than the pause gate beside it — every
+stage, and every call rather than only a transition — so the `--pid` line, which is by construction a re-stamp of the stage the item already occupies, is
+refused with exit `10` like anything else. The comment justifying that width states the reason the pause gate's re-stamp exemption does not carry over: under
+a stop "that child is about to be killed by `watch` (or is already gone)". That premise is what this bug falsifies. `watch` kills the child only while a live
+driver is polling it, and a force stop exists precisely for the case where the driver is not — `POST /api/agents/stop` accepts a run that is `running` fresh
+**or stale**, and then spawns an abort session whose whole job is to reach what the dead driver left behind.
+
+**`cmdAbort` has exactly one pid source, and it is the run file.** Its signal loop reads `item.pid`, and an item carrying `null` is skipped by the
+`Number.isInteger` guard before the three real guards are ever reached — silently, with no warning and no second look. That is what produced
+`abort: signalled 0 live session(s)` twice on 2026-09-21 while a `claude -p` child was still working inside a worktree the same abort then removed.
+
+The number was never actually lost. `<dir>/logs/<id>.pid` is written by `echo $! > …` in the same Bash invocation that backgrounds the child (SKILL.md §4, and
+§5's retry line — reused by every fix loop — writes the same name), so it is on disk **before** the refused call, it is refreshed by every relaunch of that
+item's child, and it survives the driver entirely. Nothing reads it, and that is a stated design decision rather than an oversight: SKILL.md §4 and
+`invariants.md`'s `RunQueueItem.pid` paragraph both say "nothing scans `logs/`, which is why the number has to reach the run file". Bug-39 built the run-file
+copy on the assumption that the driver would always be able to write it; the stop gate is the one thing in the system that stops it, and bug-39 added both.
+
+So the window is wider than the two-call gap the Symptom describes. It is **any** stop landing after the first `stage <id> dispatched` succeeds and before the
+`--pid` call completes — including the driver simply being killed in that gap and never making the call at all, which leaves no exit `10` anywhere to explain
+the `null` afterwards. It reopens on every retry and fix-loop relaunch, since each one re-spawns a child and re-runs the same refusable `--pid` line.
 
 ## Fix
 
-unknown
+Give `cmdAbort` the second pid source the fact on disk already offers, and leave the stop gate exactly as wide as it is.
+
+**Read `<dir>/logs/<id>.pid`, and prefer it to the run file's copy.** That file is written by the same invocation that spawns the child, so it is always the
+freshest address for that item's live child and the run-file copy is only ever a copy of it. The two can only disagree when a `stage --pid` was refused after
+a relaunch rewrote the file, and in that case the run file names a child that has already exited (a retry line runs only once `watch` has returned on the
+previous one). It cannot be a *previous run's* file: `archiveSidecars` moves the whole of `logs/` into `runs/<stem>/` at the next `init`, and `init` refuses
+any run still reading `running` with exit `4` — so `<dir>/logs/` always belongs to the run being aborted (`invariants.md`, "Why moving a live child's pid file
+is safe").
+
+1. **`orchestrate.mjs` — a path helper**, beside `outcomeFilePath`/`snapshotFilePath` and in the same shape: `dispatchPidPath(dir, itemId)` →
+   `<dir>/logs/<itemId>.pid`. One place names the file the tool now depends on.
+2. **`orchestrate.mjs` — a resolver**, `resolveItemPid(dir, item)`: read and trim `dispatchPidPath`, `Number(...)` it, and return it when it is a positive
+   integer; otherwise fall back to `item.pid` when *that* is a positive integer; otherwise `null`. Unreadable, empty, whitespace-only and non-numeric contents
+   are all "no answer from the file", never a throw — the same posture the rest of `abort` takes toward sidecar evidence. The fallback is kept for the run
+   whose `logs/` a person has cleared by hand.
+3. **`orchestrate.mjs` — `cmdAbort`'s signal loop** takes its pid from `resolveItemPid(dir, item)` instead of `item.pid`. **The three guards are unchanged, in
+   the same order and with the same bias** (non-terminal by `RECONCILE_TERMINAL_STAGES`, `pidAlive`, then `ps -o args= -p <pid>` naming a `claude` process) —
+   a number that came out of a file deserves them at least as much as one that came out of the run file, and the `ps` guard is what keeps a stale file from
+   ever signalling a stranger.
+4. **`orchestrate.mjs` — record what was signalled.** When the signalled pid came from the file, set `item.pid` to it before the `writeRunAtomic(dir, run)`
+   that `cmdAbort` already makes, so the journal of record holds the address that was actually used and `signalledIds` stays reconcilable from `run.json`
+   alone. Only on a pid that passed all three guards and was signalled: a number that failed them is exactly what `--pid`'s own validation comment calls worse
+   than no pid at all, and writing it would put a wrong address in the field on purpose.
+5. **`orchestrate.mjs` — correct the two comments that state the falsified premise**, or the next reader re-derives the wrong reason from them. The stop gate's
+   comment must say the gate stays wide *because* abort no longer depends on a driver call for the address (rather than because `watch` will handle the
+   child), and `cmdStage`'s `--pid` comment must stop claiming `logs/` is a place nothing can read.
+6. **`skills/backlog-orchestrate/SKILL.md` §4** — the paragraph under the `--pid` line currently reads "nothing scans `logs/`, so without this the run file
+   holds no address for the child at all and a force stop cannot reach an orphaned executor". That is no longer true and is the sentence a future edit would
+   trust. Rewrite it: the call still runs and is still wanted (it is what `status --json` and a person reading the run show), but it is now the *second* copy —
+   a stop landing in this window refuses it with exit `10` and the child is still reachable, because `abort` reads the pid file the line above already wrote.
+   The dispatch and retry lines themselves do not change.
+7. **`docs/subsystems/invariants.md`** — the `RunQueueItem.pid` paragraph under the stop anchor gains the second source, the precedence (file first), and the
+   reason the gate was *not* narrowed instead. **`CLAUDE.md`**'s stop invariant gains the same clause in one sentence: the pid is written by
+   `stage <id> dispatched --pid <p>` and, when the stop gate refused that call, resolved by `cmdAbort` from `<dir>/logs/<id>.pid`.
+
+### Test cases
+
+All in `skills/backlog-orchestrate/tools/orchestrate.test.mjs`, beside the existing bug-39 abort cases, reusing `orchFixture`, `seedReadyTask`, `run`,
+`runFile`, `seedSidecar` and `spawnFakeClaude` (the fake is what makes the `ps … claude` guard pass without a real session).
+
+- **A pid that reached only the file is signalled.** Stage an item `dispatched --worktree /w --branch b` with **no** `--pid`, seed `logs/<id>.pid` with a live
+  fake-claude pid. `abort` exits `0`, stdout matches `signalled 1 live session(s)` and names `<id> (pid <n>)`, and the child exits on `SIGTERM`.
+- **The whole bug, end to end, through the real gate.** Same setup, but write the stop control file after the first `stage <id> dispatched` and then assert
+  `stage <id> dispatched --pid <n>` exits `10` with `queue[].pid` still `null` — and that `abort` signals the child anyway. The gate and the fallback have to
+  be proved to compose; either half alone is green on the shipped code for the wrong reason.
+- **The file wins over a stale run-file pid.** Record fake-claude A with `--pid`, kill it and await its exit, put live fake-claude B's pid in `logs/<id>.pid`.
+  Stdout names B's number, B takes the `SIGTERM`, and the run file's `pid` reads B afterwards (case 4).
+- **The three guards still bind a file-sourced pid.** Terminal stage (`merged`) with a live pid in the file → `signalled 0`, child still alive. A live
+  **non-claude** process's pid in the file (a plain `sleep 30`, as the existing pid-reuse case does) → `signalled 0`, `killed === false`.
+- **Garbage in the file is not an error.** `nope`, empty, whitespace-only, `0` and `-1` each give `signalled 0` and exit `0`; with a valid `item.pid` also
+  recorded, the recorded one is still signalled — the fallback of case 2.
+- **The existing bug-39 cases stay green unmodified** — a recorded pid with no file present is still signalled, and a terminal item's recorded pid is still
+  left alone.
+- **A source guard on the seam.** SKILL.md must still write the pid to the name the tool now reads: assert `echo $! > "<dir>/logs/<id>.pid"` appears on both
+  headless launch lines (§4's dispatch and §5's retry — two occurrences, the same count the existing `dispatchNames()` guard asserts for `exec claude -p`). A
+  prose edit that renames that file would otherwise blind `abort` silently, and no behavioural test in this suite reads SKILL.md's launcher.
+
+### Non-goals, each considered and declined
+
+- **Narrowing the stop gate** so a same-stage `--pid` re-stamp is let through. It fixes only the shape where the driver survives long enough to make the call,
+  which is the *less* dangerous half — the driver that is killed in the same window never makes it at all, and that is the case a force stop is for. It buys
+  nothing the file fallback does not already buy, and costs a hole in a rule currently stated in one sentence ("`stage` refuses EVERY transition with exit
+  `10`"). The gate stays as written.
+- **`verify/<id>.pid` as a third source.** That pid is deliberately the wrapper `sh`, not a `claude` process (SKILL.md §8 omits `exec` so the wrapper survives
+  to write `.status`), so the `ps -o args=` guard would refuse it by construction — reaching it needs a different guard *and* a separate decision about killing
+  a project's own test suite mid-run. A real gap, and its own item.
+- **Teaching `reconcile` the pid file.** It is a read-only report and signals nothing; the address matters only where a signal is sent.
