@@ -2895,6 +2895,55 @@ handles — a person types the number, a skill's prose says `#31`, and the board
 repository are each refused with their own sentence: the first is a habit carried across from a files project, the second is a caller asking this project's
 credential to write somewhere else.
 
+## `import` writes the marker first and deletes the files last
+
+Task-50, spec §8 — phase 5 of the tracker-backed direction, and the phase where a project stops having item files at all.
+`backlog.mjs import github [owner/repo] [--no-forms]` moves a whole `backlog/` store onto GitHub issues through the local API, in one shot, and the ORDER of its
+two writes to the repository is the entire design: the marker goes down first, the item files are deleted last, and everything else happens between them.
+
+**The marker cannot go anywhere but first.** Every request `import` makes is one of the seven existing item write routes, and `ItemsService.writerFor` answers
+`files` — a 400 reading `this project's items are files — the skills write them directly` — for a project whose marker does not yet say `github`. The 2026-09-17
+draft of this design had the marker written LAST, on the reasonable-sounding argument that a project should not claim to be tracker-backed until its issues exist;
+that draft could not have worked at all, because the first `create` it made would have been refused by the server it was talking to. This is not a bug that
+shipped and was fixed. It is a design that the phase-3 guard made impossible, which is a better outcome and worth recording as one: the invariant "the server is
+the only writer of a tracker project's items, and it refuses a files project" did the work here that a test would otherwise have had to.
+
+**The deletion is the transaction's commit.** It runs after pass 2, outside both `try` blocks, and nothing else in the command deletes anything. That ordering is
+what makes every failure recoverable by re-running: a refusal from §8.1 leaves the project byte-identical, and a failure part way through leaves the marker, the
+issues created so far, and EVERY item file — including the files of items whose issues were never created, which are at that moment the only copy of them
+anywhere. A `try/finally` around either pass would be exactly wrong for that reason. The command never commits and never pushes: the marker and the deletions are
+one change on the repository and have to be staged together by a person who can read the printed list.
+
+**The footer is the idempotency key, and it lives on the tracker.** Each issue body ends with `<!-- bm:imported from=<id> created=<date> tags=<tags> -->` and a
+readable `_Imported from backlog/<path>_` line. A re-run rebuilds `old id → #n` by reading each indexed issue's body and parsing that comment, prints
+`resuming: <k> of <total> item(s) already imported`, and skips those items in pass 1. Two properties make this the right place for the record. It survives a crash
+that killed the importing process between two requests, which a local file would not; and it cannot disagree with the tracker, because it IS on the tracker. **The
+comment and the readable line are two different things** and only the comment is ever parsed — the line is for a human reading the issue, and rewording it is a
+prose change, while rewording the comment would break every resume. An issue with no footer is skipped when the map is built: it is somebody's own issue, filed by
+hand, and taking a number off it would map an item onto a stranger's work.
+
+The resume does exactly ONE repair, and the boundary is deliberate: a `done/` file whose issue the index still reports as `open` is a run that died between
+`create` and `state done`, so the close is made again. The counters are NOT re-billed. A second `claim` + `release` pair would add a second permanent record of
+the same work, and a doubled record is worse than a missing repair — the counters are evidence, and evidence that double-counts is not conservative, it is wrong.
+
+**Counters ride one synthetic claim, released immediately, BEFORE the close** (spec §14.13). The four counters live in a claim comment (§6.4) and nowhere else, so
+an item carrying any of them is given a claim whose session is `import-<stamp>` and which is released at once with `reason: 'imported'` and the counters billed
+onto it. The order is forced from the other side: `claim` refuses a closed issue, and a `done/` item is closed two requests later. The cost accepted here is one
+extra comment per item that has counters, which is the cheapest of the options weighed — the alternatives were putting the counters in the body (they would be
+invisible to every reader that knows where counters live) or dropping them (losing the only record of how long somebody spent).
+
+**An over-cap body is cut at a `## ` boundary and links the full file at HEAD** (spec §14.14). `IMPORT_BODY_CAP` is 65,000, under GitHub's 65,536, and `fitBody`
+keeps whole `##` segments from the top and appends `_Truncated. Full text: <SHA-pinned blob link>_`. Whole sections rather than a character count, because a body
+stopping mid-sentence reads as corruption while one that ends after its last whole section and says so reads as what it is. The footer's length is subtracted from
+the cap before fitting, so the footer always survives — a body that lost it to truncation would be re-imported as a duplicate issue by the next resume. The link
+is what makes two of §8.1's refusals load-bearing: the link pins `backlog/<path>` at HEAD's sha, so HEAD has to be on some `origin/*` ref (otherwise the link
+404s for everyone else) and `backlog/` has to be clean (otherwise the link shows bytes that differ from what was imported).
+
+**Three things are lost, and saying which is the point.** A body over the cap keeps only its leading sections plus the link. `tags:` survive in the footer alone,
+because the tracker's label set is the closed eight of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the
+repository — the issue's date is its `created` frontmatter, not the commit that filed it. None of the three is recoverable from the tracker, which is why the
+files' history is worth keeping in git rather than deleting the whole `backlog/` directory.
+
 <!-- docs-sync:
   sources:
     - server/src

@@ -114,7 +114,37 @@ the marker does nothing until it is committed and the machine running the board 
 
 It refuses rather than guesses: inside a linked worktree, outside a git repository, with no
 `owner/repo` argument and no GitHub `origin` to take one from, on a project that still has item files
-under `backlog/` (importing those is a later phase's job), and on a project that already has a marker.
+under `backlog/` (that is `import`'s job), and on a project that already has a marker.
+
+## Moving an existing project onto GitHub
+
+`connect` is for an empty store. A project whose items are already files is moved by `import`, which is a one-shot migration of the whole `backlog/` store:
+
+```bash
+node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" import github [owner/repo] [--no-forms]
+```
+
+The order is the whole design. It writes `backlog/source.json` and the issue forms FIRST, because the server refuses every item write to a project whose marker
+still says `files`. Then one issue per item, open items by `created` then done then out-of-scope, one request a second (`BM_IMPORT_PACE_MS`): each body keeps the
+item's own text and gains a `bm:imported` footer carrying the old id, the `created` date and the `tags:`. An item with any of the four counters is given one
+synthetic claim which is released immediately with those counters billed onto it, before the item is closed — a claim cannot be taken on a closed issue. A done
+item's `## Outcome` becomes its closing comment rather than part of the body. Then a second pass rewrites every cross-link (`bug-2` becomes `#5`, `from:` becomes
+a `_From #4._` line) now that every number is known. Only then are the item files deleted, and the files to commit are printed — the marker and the deletions are
+one change and have to be committed together. It never commits and never pushes.
+
+It refuses rather than guesses, and each refusal leaves the project exactly as it found it: inside a linked worktree; outside a git repository; on an unreadable
+marker, an explicit `{"kind":"files"}` marker, or a `github` marker with no item files left to move (already done); on a store with no item files at all (that is
+`connect`); with no `owner/repo` argument and no GitHub `origin` to take one from; with uncommitted or untracked changes under `backlog/`, or a HEAD that is on no
+`origin/*` branch (the truncation link below pins files at HEAD, so HEAD has to be pushed); on a malformed item file, a refactor whose `kind:` is neither `chore`
+nor `debt`, or an OPEN item with a `started:` stamp — somebody is working it. Exit `5` means the stack is not running; nothing has been written.
+
+A failure mid-run stops at the item it names, writes nothing further and deletes nothing. Run the same command again: `import` reads the `bm:imported` footer off
+every issue on the tracker, skips the items it finds there, closes a `done/` item whose issue is still open, and carries on. The footer is the whole record — it
+is on the tracker, where a crash cannot lose it.
+
+Three things do not survive the move. A body over GitHub's 65,536-character cap is cut at a `## ` heading boundary and gains a line linking the full file at
+HEAD. `tags:` live in the footer only, since the tracker's label set is a closed eight. And the file's git history stays in the repository — the issue is dated
+by its `created` frontmatter, not by the commit that filed it.
 
 ## Next
 

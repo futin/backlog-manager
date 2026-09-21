@@ -2761,15 +2761,16 @@ export async function main(argv) {
       return 1
     }
 
-    // The populated-store refusal. `connect` is for an empty or absent store; a project whose items are already files needs them MOVED to the tracker, which
-    // is `import`'s job (phase 5) and is not built yet. Refusing outright rather than connecting-and-leaving-the-files is the safe direction: the server reads
-    // the marker per request and a connected project contributes no file items at all, so the files would not be deleted, they would simply stop being
-    // visible anywhere — the worst possible failure for a backlog, since nothing would report them missing.
+    // The populated-store refusal. `connect` is for an empty or absent store; a project whose items are already files needs them MOVED to the tracker, which is
+    // `import`'s job — it writes this same marker itself, as its first step, and deletes the files as its last. Refusing outright rather than
+    // connecting-and-leaving-the-files is the safe direction: the server reads the marker per request and a connected project contributes no file items at all,
+    // so the files would not be deleted, they would simply stop being visible anywhere — the worst possible failure for a backlog, since nothing would report
+    // them missing.
     const items = backlogItemFiles(backlog)
     if (items.length > 0) {
       const shown = items.slice(0, 3).join(', ')
       console.error(
-        `${root} still has ${items.length} item file(s) under backlog/ (${shown}${items.length > 3 ? ', …' : ''}) — connect is for an empty or absent store; moving a populated one onto a tracker is \`import\`'s job, which is not built yet`,
+        `${root} still has ${items.length} item file(s) under backlog/ (${shown}${items.length > 3 ? ', …' : ''}) — connect is for an empty or absent store; moving a populated one onto a tracker is \`import\`'s job: run \`backlog.mjs import github\` instead`,
       )
       return 1
     }
