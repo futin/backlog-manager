@@ -23,6 +23,7 @@ import type {
   RunStage,
   StartingRun
 } from '../shared/types';
+import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 
 /*
  * Every clock-dependent fixture here is RELATIVE to the moment the suite runs,
@@ -35,10 +36,12 @@ import type {
  * The one exception is the month-grouping case below, which needs three
  * DIFFERENT months and therefore builds its stamps by walking backwards from
  * today — see its own comment.
+ *
+ * `daysAgoStamp` was this file's own `daysAgo` until bug-44 gave the idiom one home in `test/helpers/dates.ts`; the rename is the point of the move,
+ * because `board.test.tsx` spelled its date-only sibling `daysAgoDate` and two near-identical names returning two different shapes is its own trap.
  */
-const daysAgo = (days: number): string => `${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`;
-const STALE = daysAgo(90);
-const FRESH = daysAgo(1);
+const STALE = daysAgoStamp(90);
+const FRESH = daysAgoStamp(1);
 
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   // Annotated, not inferred: without a contextual type the object literal's
@@ -47,7 +50,7 @@ function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   const base: BacklogItem = {
     id: 'bug-1',
     title: 'a bug',
-    created: '2026-01-05',
+    created: daysAgoDate(200),
     started: '',
     tags: [],
     // Stale by default — this is the Archive suite, so the interesting fixture
@@ -342,9 +345,9 @@ describe('ArchiveView', () => {
     const items = [
       // Deliberately not in date order in the fixture, so the assertion is
       // about the grouping rather than about the fetch order surviving.
-      fakeItem({ id: 'bug-2', title: 'middle', updated: daysAgo(75) }),
-      fakeItem({ id: 'bug-3', title: 'oldest', updated: daysAgo(110) }),
-      fakeItem({ id: 'bug-1', title: 'newest', updated: daysAgo(40) })
+      fakeItem({ id: 'bug-2', title: 'middle', updated: daysAgoStamp(75) }),
+      fakeItem({ id: 'bug-3', title: 'oldest', updated: daysAgoStamp(110) }),
+      fakeItem({ id: 'bug-1', title: 'newest', updated: daysAgoStamp(40) })
     ];
     await renderArchive(items);
 
@@ -374,7 +377,7 @@ describe('ArchiveView', () => {
      */
     const items = [
       fakeItem({ id: 'oos-1', title: 'no stamps at all', section: 'out-of-scope', status: 'terminal', groomed: null, created: '', updated: '' }),
-      fakeItem({ id: 'oos-2', title: 'dated rejection', section: 'out-of-scope', status: 'terminal', groomed: null, updated: daysAgo(40) })
+      fakeItem({ id: 'oos-2', title: 'dated rejection', section: 'out-of-scope', status: 'terminal', groomed: null, updated: daysAgoStamp(40) })
     ];
     await renderArchive(items);
 

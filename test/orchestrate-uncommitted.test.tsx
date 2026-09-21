@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
+import { daysAgoDate } from './helpers/dates';
 import type { BacklogItem } from '../shared/types';
 
 /**
@@ -24,7 +25,7 @@ function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
   const base: BacklogItem = {
     id: 'task-1',
     title: 'a task',
-    created: '2026-08-20',
+    created: daysAgoDate(2),
     started: '',
     tags: [],
     updated: '',

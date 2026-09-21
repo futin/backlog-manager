@@ -8,6 +8,7 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { buildProjectHues } from '../client/src/lib/project-hue';
+import { daysAgoDate } from './helpers/dates';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
 
@@ -30,9 +31,14 @@ import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, Orchestrat
  * `CREATED` carries the current year for the same reason: `formatCreated` drops
  * the year only when it matches now's, so a hard-coded 2026 would silently
  * start asserting the wrong string on 1 January.
+ *
+ * `CREATED` is also the one fixture date in this tree that is deliberately NOT a `daysAgo*` call (bug-44), because the meta-line assertion below pins
+ * the rendered string `aug 20` and a moving date cannot produce a fixed month. What makes that safe is the `updated` stamp two lines down, not luck:
+ * `lastTouched` reads `updated` first, so the fixed month never reaches `isStale` and no card here can age off the Board. Change that default and this
+ * constant becomes a date-bomb of exactly the kind `test/fixture-clock.test.ts` exists to prevent — which that guard cannot see, since it scans for a
+ * date literal written as a fixture value and this one is behind a name.
  */
 const agoISO = (ms: number): string => `${new Date(Date.now() - ms).toISOString().slice(0, 19)}Z`;
-const daysAgoDate = (days: number): string => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const CREATED = `${new Date().getUTCFullYear()}-08-20`;
 
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
@@ -80,7 +86,7 @@ const ITEMS: ItemsIndex = {
     fakeItem({}),
     fakeItem({ id: 'bug-2', title: 'groomed bug', groomed: true, started: agoISO(3 * 60 * 60 * 1000) }),
     fakeItem({ id: 'task-1', title: 'a task', section: 'tasks', project: 'beta', projectPath: '/abs/beta', groomed: true }),
-    fakeItem({ id: 'task-9', title: 'finished task', section: 'tasks', status: 'done', groomed: true, started: '2026-08-01' }),
+    fakeItem({ id: 'task-9', title: 'finished task', section: 'tasks', status: 'done', groomed: true, started: daysAgoDate(50) }),
     fakeItem({ id: 'idea-1', title: 'an idea', section: 'ideas', groomed: null }),
     fakeItem({ id: 'oos-1', title: 'declined thing', section: 'out-of-scope', status: 'terminal', groomed: null }),
     // Task 2: one open refactor with a known kind, one with a value the badge

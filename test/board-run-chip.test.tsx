@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 
 import { App } from '../client/src/App';
 import BoardView from '../client/src/components/board/BoardView';
+import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { RunChip, runChipReading } from '../client/src/components/board/RunChip';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, StartingRun } from '../shared/types';
@@ -232,10 +233,10 @@ describe('BoardView: the run chip', () => {
   const ITEM: BacklogItem = {
     id: 'bug-1',
     title: 'a bug',
-    created: '2026-08-20',
+    created: daysAgoDate(2),
     started: '',
     tags: [],
-    updated: new Date().toISOString(),
+    updated: daysAgoStamp(0),
     lastCommit: '',
     phase: '',
     groomElapsed: 0,

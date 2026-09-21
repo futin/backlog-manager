@@ -7,12 +7,13 @@ import '@testing-library/jest-dom';
 
 import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
+import { daysAgoDate } from './helpers/dates';
 import type { AgentPlan, BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
   id: 'task-12',
   title: 'Add CSP',
-  created: '2026-08-20',
+  created: daysAgoDate(2),
   started: '',
   tags: [],
   updated: '',

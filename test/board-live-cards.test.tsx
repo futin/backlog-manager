@@ -8,6 +8,7 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import { liveBarFor } from '../client/src/components/board/ItemCard';
 import rawFixture from './fixtures/orchestrator-run.json';
+import { daysAgoDate } from './helpers/dates';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage, RunWatchdog } from '../shared/types';
 
 /**
@@ -84,7 +85,7 @@ describe('BoardView: card live strips', () => {
     const base: BacklogItem = {
       id: 'task-14',
       title: 'wire the heartbeat',
-      created: '2026-08-20',
+      created: daysAgoDate(2),
       started: '',
       tags: [],
       updated: '',
@@ -436,7 +437,7 @@ describe('BoardView: card live strips', () => {
   it('treats parked as attention: amber, and above running work in the column', async () => {
     stub(
       [alphaRun([{ ...entry('task-14'), id: 'task-30', stage: 'parked' as RunStage, stageAt: { parked: agoISO(20 * MIN) } }, entry('task-14')])],
-      [task('task-30', 'parked item', { created: '2026-08-01' }), task('task-14', 'wire the heartbeat', { created: '2026-08-20' })]
+      [task('task-30', 'parked item', { created: daysAgoDate(5) }), task('task-14', 'wire the heartbeat', { created: daysAgoDate(2) })]
     );
     await renderBoard();
     const bar = await waitFor(() => {
@@ -515,11 +516,11 @@ describe('BoardView: card live strips', () => {
     stub(
       [alphaRun([entry('task-21'), entry('task-14')])],
       [
-        task('task-21', 'needs an answer', { created: '2026-08-01' }),
-        task('task-14', 'orchestrator has it', { created: '2026-08-05' }),
-        task('task-30', 'hand-run', { created: '2026-08-10', started: agoISO(HOUR) }),
-        task('task-40', 'idle newest', { created: '2026-08-20' }),
-        task('task-41', 'idle older', { created: '2026-08-15' })
+        task('task-21', 'needs an answer', { created: daysAgoDate(20) }),
+        task('task-14', 'orchestrator has it', { created: daysAgoDate(16) }),
+        task('task-30', 'hand-run', { created: daysAgoDate(11), started: agoISO(HOUR) }),
+        task('task-40', 'idle newest', { created: daysAgoDate(1) }),
+        task('task-41', 'idle older', { created: daysAgoDate(6) })
       ]
     );
     await renderBoard();
@@ -540,10 +541,10 @@ describe('BoardView: card live strips', () => {
     stub(
       [alphaRun([entry('task-21'), entry('task-14')], { fresh: false })],
       [
-        task('task-21', 'needs an answer', { created: '2026-08-01' }),
-        task('task-14', 'orchestrator has it', { created: '2026-08-05' }),
-        task('task-40', 'idle newest', { created: '2026-08-20' }),
-        task('task-41', 'idle older', { created: '2026-08-15' })
+        task('task-21', 'needs an answer', { created: daysAgoDate(20) }),
+        task('task-14', 'orchestrator has it', { created: daysAgoDate(16) }),
+        task('task-40', 'idle newest', { created: daysAgoDate(1) }),
+        task('task-41', 'idle older', { created: daysAgoDate(6) })
       ]
     );
     await renderBoard();
