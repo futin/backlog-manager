@@ -11,3 +11,4 @@ paths: ["skills/**", "agents/**"]
 - Before changing files here, read docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status
 - Before changing files here, read docs/subsystems/invariants.md#pnpm-test-is-the-union-of-both-runners
 - Before changing files here, read docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up
+- Before changing files here, read docs/subsystems/invariants.md#every-skill-cli-exits-through-processexitcode-never-processexit
