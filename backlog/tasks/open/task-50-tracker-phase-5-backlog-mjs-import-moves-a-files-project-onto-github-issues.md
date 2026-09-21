@@ -38,7 +38,11 @@ Shape, in one screen:
    `started:`; probe `GET /api/items` (exit `5`). Then marker + forms (unless `--no-forms`) + `registerBestEffort`.
 3. **Pass 1**, open by `created` → done → out-of-scope: split `## Outcome` (done items only), fit cap, `POST create` (never `from`), then for items with any
    non-zero counter `POST claim` (`phase: execute`, `session: import-<stamp>`) + `POST release` (`reason: 'imported'`, counters) BEFORE `POST state done`
-   (`claim` refuses a closed issue). Paced `BM_IMPORT_PACE_MS` (default 1000; tests set 0).
+   (`claim` refuses a closed issue). `state done` is the ONLY `state` call: the server comments the Outcome and closes `completed`; an out-of-scope
+   item is already closed `not_planned` by `create`. No `create` body carries `labels` — the label set is the closed eight, so `tags:` live in the
+   footer only, and a refactor `kind:` other than `chore`/`debt` is refused in the preconditions. Any non-2xx is ONE stderr line
+   `import stopped at <old id>: <error>`, a 429 appending ` — retry after <resetAt>`, then stop: no retry, no skip, no partial delete. Paced
+   `BM_IMPORT_PACE_MS` (default 1000; tests set 0).
 4. **Pass 2**: read every imported body back, `rewriteOldIds` with the map, `from:` → `_From #<n>._` (unmapped → `_From <id>._`), `POST body` with
    `ifUpdatedAt` from `GET /api/items` and no `runnerFix`, only when the body changed.
 5. **Delete** item files (never `README.md`, never the marker) only after every pass-2 request answered 2xx; print `<old> → #<n>` lines and the
@@ -61,11 +65,13 @@ Spec §12.4, expanded in the plan task by task. Node runner only (`pnpm run test
   bugs before tasks on ties, numeric ids); counters (all-zero → `null`, absent keys `0`, non-integer throws naming the key).
 - Refusals (`backlog.test.mjs`, each asserting no marker, files byte-identical, no request): usage, wrong tracker, linked worktree, explicit `files`
   marker, `github` marker with no files, no marker with no files, no origin, dirty `backlog/`, gitignored-untracked item, HEAD not on `origin/*` (names
-  sha7), open item with `started:` (a done item's is ignored), malformed file, port 1 → exit `5`.
+  sha7), open item with `started:` (a done item's is ignored), `kind: cleanup` on a refactor (names id and value), malformed file, port 1 → exit `5`.
 - Pass 1: probe first then `create`; order of `create` titles; request shapes (`runnerFix` only when set, no `from`, no `kind` when absent,
   `section: 'out-of-scope'`, exact footer); Outcome reaches `state.outcome` and not the body; sequence `create, claim, release, state` for the one item
   with counters and no `claim` for any other; cap case with the fixture's real sha and footer after trailer; stdout map lines; a 502 on the second
-  `create` → `import stopped at bug-2`, marker present, files intact, no further request; source guard for `BM_IMPORT_PACE_MS` default `1000`.
+  `create` → `import stopped at bug-2`, marker present, files intact, no further request; a 429 `{error, resetAt}` on the first `create` → stderr
+  `import stopped at task-1: <error> — retry after <resetAt>`, nothing deleted, no further request; exactly one `state` request in the run and none
+  for the out-of-scope or open issues; `'labels' in body === false` for every `create`; source guard for `BM_IMPORT_PACE_MS` default `1000`.
 - Pass 2: `bug-2` → `#5` in a body, fence rewritten, `ifUpdatedAt` equals the row's `updated`, `'runnerFix' in body === false`; `_From #4._` and
   `_From idea-9._`; no `POST body` when nothing changes; footer survives; deletion + `commitList(stdout)` exact list; a 409 → exit `1`, nothing deleted,
   stderr names the OLD id; no create/state/claim/release after pass 1.

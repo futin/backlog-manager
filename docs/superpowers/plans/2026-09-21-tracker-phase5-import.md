@@ -42,6 +42,22 @@ and a bug in a plan then becomes a bug on the branch with nobody positioned to c
 - **The footer `<!-- bm:imported from=<id> … -->` is the idempotency key** (§8.6). The readable `_Imported from …_` line is for humans and is never parsed.
 - **Content-creating requests are paced** at one per second (`create`, `claim`, `release`, `state`, `body`) — §8.3 step 6. The interval is
   `BM_IMPORT_PACE_MS`, default `1000`, read once per command, so the suite sets `0`. Reads (`GET /api/items`, `GET /api/items/body`) are not paced.
+- **Closing is two shapes and `state` is called for exactly one of them** (§8.3 step 5). A `done/` item: `POST state` with `status: 'done'` and the
+  Outcome text as `outcome` — the server posts the comment and then closes the issue `completed`, in that order, in `GithubSource.state`. An
+  `out-of-scope/` item: `POST create` with `section: 'out-of-scope'` ALREADY closes it `not_planned` in the same call (`GithubSource.create`), so no
+  `state` request is ever made for it — and none for an open item. `import` never names a `state_reason` itself; the adapter owns that mapping.
+- **Every non-2xx is a `WriteRefusal` the controller already mapped, and `import` renders it as ONE stderr line and stops.** The five statuses are the
+  controller's (`items-write.controller.ts`): `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · `upstream` 502. The line is
+  `import stopped at <old id>: <payload.error>`; for a 429 the payload carries `resetAt` as a SEPARATE field, so the line appends ` — retry after <resetAt>`
+  and the CLI never composes a duration. There is no retry loop, no skip-and-continue, and **no partial-delete path**: deletion is one loop that runs only
+  after pass 2 returns, so a failure anywhere before it deletes nothing, and there is no branch that deletes "the files whose issues exist". Exit `1` for
+  every one of the five; `5` only for a transport failure (`API_DOWN_CODE`).
+- **`tags:` become no label, and the `create` route gains no `labels` field.** The tracker's label set is a closed eight (`TRACKER_LABELS`,
+  `server/src/tracker/labels.ts`: four `type:*`, two `kind:*`, `runner-fix`, `in-progress`), created by the poller's bootstrap; `ItemCreateRequest` has
+  `section` (→ the type label), `kind` (→ `kind:chore`/`kind:debt`, any other value a 400) and `runnerFix` (→ `runner-fix`), and that is the whole
+  vocabulary. Free-text tags survive in the footer's `tags=` key only (§8.3 step 1, decision Q5 of the 2026-09-21 brainstorm). A `refactors` item whose
+  `kind:` is neither `chore` nor `debt` is refused in the preconditions, before anything is written — a 400 mid-pass would stop the import with the marker
+  already down, for a fix that is one frontmatter line.
 - **Bodies are capped below GitHub's 65,536 characters** with named headroom: `IMPORT_BODY_CAP = 65000`, one constant in `import-lib.mjs`, with a comment
   saying the headroom is for pass 2 (a `_From #n._` line and id rewrites that can grow, `ref-9` → `#123`).
 - **New prose wraps at 160 columns.** Comments explain *why*, at the density the file already has.
@@ -197,6 +213,8 @@ no request made:
      `origin/` → else `HEAD <sha7> is not on any origin/* branch — push first; the truncation link pins files at HEAD`, exit `1`. Keep the full sha for Task 3.
 8. Every item file parses (`readItemFile`; the first malformed one is the refusal, path-prefixed as it already is). Any file under a `*/open/` directory with
    a non-empty `started:` → `<n> open item(s) are in progress — stop them first: <ids>`, exit `1`. A `started:` on a `done/` or `out-of-scope/` file is ignored.
+   A file whose `kind:` is present and not `chore` or `debt` → `<id>: kind "<value>" is not chore or debt — fix the frontmatter first`, exit `1` (the
+   server would 400 it; refusing here keeps the marker up).
 9. Probe: `apiGet('/api/items')`. Transport failure → exit `5` with the existing message. Keep the payload — Task 5 reads it.
 
 Only after all nine does anything get written (Task 3).
@@ -224,6 +242,8 @@ Only after all nine does anything get written (Task 3).
       proceeds past this check (assert by reaching the exit-5 probe against port 1).
   12. Everything valid, port 1 → exit `5`, existing message, no marker written.
   13. A malformed item file (no leading `---`) → exit `1`, stderr contains the file's absolute path.
+  14. `refactors/open/ref-4-x.md` with `kind: cleanup` → exit `1`, stderr contains `ref-4` and `cleanup`; the same file with `kind: debt` proceeds to the
+      port-1 probe (exit `5`).
 
 - [ ] **Step 3: Run to verify they fail**
 
@@ -274,12 +294,14 @@ consumes.
      `parseItemForGate` uses). NEVER a `from` key. Record `number` from the response; `map.set(id, number)`.
    - `counters = countersOf(data)`; when non-null: `POST claim` `{ project, id: '#<n>', phase: 'execute', session: 'import-<stamp>' }` → `commentId`, then
      `POST release` `{ project, id: '#<n>', commentId, session: 'import-<stamp>', reason: 'imported', counters }`.
-   - `status === 'done'` → `POST state` `{ project, id: '#<n>', status: 'done', outcome }` (`outcome` omitted when `''`). `out-of-scope` → nothing more;
-     `create` closed it.
+   - `status === 'done'` → `POST state` `{ project, id: '#<n>', status: 'done', outcome }` (`outcome` omitted when `''`); the server comments and then
+     closes `completed`. `status === 'out-of-scope'` → nothing more: `create` with `section: 'out-of-scope'` closed it `not_planned`. `status === 'open'`
+     → nothing more.
    - Print one stdout line per item as it lands: `<id> → #<n>` (and ` (truncated)` when `fitted.truncated`).
    - Sleep `BM_IMPORT_PACE_MS` after each content-creating request.
-4. Any `BacklogError` mid-pass: stderr `import stopped at <id>: <server's sentence>` (a `429`'s sentence already names the reset time — copy it, do not
-   compose one), exit with the error's code (`5` for a lost connection, else `1`). Files and marker stay. Nothing is deleted in this task at all — Task 4
+4. Any `BacklogError` mid-pass: stderr `import stopped at <id>: <payload.error>`, and when `err.payload.resetAt` is a string (the 429 shape) the line
+   continues ` — retry after <resetAt>` — the TIME the controller sent, never a duration the CLI worked out. Exit with the error's code (`5` for a lost
+   connection, else `1`). One line, then stop: no retry, no skip. Files and marker stay. Nothing is deleted in this task at all — Task 4
    adds the deletion, so at the end of Task 3 a successful run still exits `0` with the files in place and a stdout line `pass 1 complete — <k> issues`.
 
 - [ ] **Step 1: Extend `fakeApi`** so a route function is called as `answer(body, { method, query })` — the existing routes ignore the second argument, so
@@ -296,8 +318,11 @@ consumes.
   2. **Order.** The `create` requests' `title`s are, in order: `one` (task-1, open, oldest), `two` (bug-2, open), `three` (task-3, done), `five` (oos).
   3. **Request shapes.** task-1's `create` body has `section: 'tasks'`, `runnerFix: true`, no `from` key, no `kind` key, and its `body` ends with the exact
      footer `<!-- bm:imported from=task-1 created=2026-01-01 tags=x,y -->\n_Imported from backlog/tasks/open/task-1-one.md_`. bug-2's has no `runnerFix` key.
-     oos-5's has `section: 'out-of-scope'`.
-  4. **Outcome split.** task-3's `create` body does not contain `Shipped it.`; the `state` request for `#6` has `status: 'done'` and `outcome: 'Shipped it.'`.
+     oos-5's has `section: 'out-of-scope'`. NO `create` request has a `labels` key (`'labels' in body === false` for all four), and task-1's `x, y` tags
+     appear nowhere in its request except inside the footer's `tags=x,y`.
+  4. **Outcome split, and who gets closed how.** task-3's `create` body does not contain `Shipped it.`; the `state` request for `#6` has `status: 'done'`
+     and `outcome: 'Shipped it.'`. Exactly ONE `state` request is made in the whole run — none names `#7` (oos, closed by `create`) and none names `#4`
+     or `#5` (open).
   5. **Counters, and their position.** The request sequence for task-3 is exactly `create`, `claim`, `release`, `state` (filter `requests` by `id === '#6'`
      plus the create); `claim` has `phase: 'execute'` and a `session` matching `/^import-\d{4}-/`; `release` has the same `session`, `reason: 'imported'`,
      `counters: { groomElapsed: 0, executeElapsed: 120, groomTokens: 0, executeTokens: 3400 }`. No `claim`/`release` request names any other id.
@@ -309,7 +334,10 @@ consumes.
   8. **Failure keeps everything.** `/api/items/create` answers `{ status: 502, body: { error: 'GitHub answered 502' } }` on the SECOND call → exit `1`,
      stderr contains `import stopped at bug-2` and `GitHub answered 502`, the marker EXISTS (written first, per spec), all four item files are byte-identical,
      and no request of any kind follows the failing `create` (the run stopped).
-  9. **Pacing is read from the environment.** With `BM_IMPORT_PACE_MS` unset the suite would take ~10 s; assert instead that the constant's default is `1000`
+  9. **A 429 names the reset time.** `/api/items/create` answers `{ status: 429, body: { error: 'GitHub rate limit', resetAt: '2026-09-21T11:05:00Z' } }`
+     on the first call → exit `1`, stderr contains `import stopped at task-1: GitHub rate limit — retry after 2026-09-21T11:05:00Z`, marker present, no
+     file deleted, no further request.
+  10. **Pacing is read from the environment.** With `BM_IMPORT_PACE_MS` unset the suite would take ~10 s; assert instead that the constant's default is `1000`
      by reading `backlog.mjs`'s source for the literal `BM_IMPORT_PACE_MS` and `1000` on the same line (a source guard, the same shape the repo already uses
      for `5177`).
 
@@ -473,7 +501,9 @@ Recorded here so the sequence has one home; every step is the operator's, from a
 
 - **Spec coverage.** §8.1 → Task 2 (checks 1–9). §8.2 → Task 3 step 1. §8.3 steps 1–6 → Task 3 (split: step 2; footer/cap: step 3 composition; create:
   step 3; counters: step 3; close: step 3; pacing + map: step 3/4). §8.4 → Task 4 steps 1–2. §8.5 → Task 4 step 3. §8.6 → Task 3 step 4 (failure), Task 5
-  (resume). §12.4's list: every named case appears in Tasks 2–5. §14.12–14 → Task 6's invariant text. §13 (own task, one run) → the capture that follows.
+  (resume). §12.4's list: every named case appears in Tasks 2–5. §14.12–14 → Task 6's invariant text. The three decisions folded in on 2026-09-21 after
+  review — close mapping (§8.3 step 5), refusal rendering (§8.6, `WriteRefusal`), and labels (Q5) — each has a Global Constraints bullet and a Task 2/3
+  case. §13 (own task, one run) → the capture that follows.
 - **Placeholders.** None: every step names the file, the behaviour and the cases. `task-50` in commit messages is the id the capture mints — the one value
   this document cannot know.
 - **Name consistency.** `splitOutcome`, `renderImportFooter`, `parseImportFooter`, `blobLink`, `fitBody`, `rewriteOldIds`, `importOrder`, `countersOf`,
