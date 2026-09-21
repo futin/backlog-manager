@@ -4372,3 +4372,242 @@ test('backlog-groom names --runner-fix as the tracker spelling of the marker', (
   // The third state, stated where a groomer will read it.
   assert.match(text, /Passing neither leaves the label exactly as it is/)
 })
+
+// --- task-50: import github --------------------------------------------------
+// `import` is the one command that moves a project between sources: it writes the marker, creates one issue per item file through the local API, rewrites every
+// cross-reference, and only then deletes the files. Two properties shape every case below, and both are §8.1's.
+//
+// First, a refusal leaves the project BYTE-IDENTICAL — no marker, no issue forms, no request. Between the marker write and the deletion the project is in a
+// state where the board reads the tracker and the files are ignored, so a refusal that got half way there would hide every item in the store with nothing to
+// say why. Each refusal case therefore snapshots the whole tree and compares it afterwards, rather than asserting on the one file the check is about.
+//
+// Second, the checks run cheap-and-local first and the API probe LAST, because the probe is the only one with an effect on somebody else. The cases assert that
+// ordering the only way it can be asserted from outside: a fixture that is wrong in one way reports THAT way, never the next check's sentence.
+
+/** `---\n<front>\n---\n<body>` — the fixture's item files are hand-shaped strings, never produced by the tool under test. */
+function itemText(front, body) {
+  return `---\n${front.trim()}\n---\n\n${body.trim()}\n`
+}
+
+/**
+ * A committed files-mode store with a GitHub origin, which is the shape every `import` precondition reads.
+ *
+ * `push` writes `refs/remotes/origin/main` by hand with `update-ref`: `git branch -r --contains HEAD` reads remote-tracking refs out of this repository and
+ * nothing else, so a real one can be made without a network and without a second repository. `push: false` is how the "HEAD is not on any origin/* branch"
+ * refusal is reached — the interesting case, since the truncation link in every truncated issue body pins `backlog/` files at that exact commit.
+ */
+function importFixture({ originUrl = 'git@github.com:futin/x.git', items = [], push = true } = {}) {
+  const { dir, backlog } = backlogFixture()
+  fs.mkdirSync(backlog, { recursive: true })
+  fs.writeFileSync(path.join(backlog, 'README.md'), '# Backlog\n')
+  for (const item of items) {
+    const abs = path.join(backlog, item.relPath)
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    fs.writeFileSync(abs, item.text)
+  }
+  const ident = ['-c', 'user.name=t', '-c', 'user.email=t@t']
+  assert.equal(spawnSync('git', ['-C', dir, 'add', '-A'], { encoding: 'utf8' }).status, 0)
+  const committed = spawnSync('git', ['-C', dir, ...ident, 'commit', '-qm', 'seed'], { encoding: 'utf8' })
+  assert.equal(committed.status, 0, committed.stderr)
+  if (originUrl !== null) {
+    assert.equal(spawnSync('git', ['-C', dir, 'remote', 'add', 'origin', originUrl], { encoding: 'utf8' }).status, 0)
+  }
+  const sha = spawnSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+  if (push) {
+    assert.equal(spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/main', sha], { encoding: 'utf8' }).status, 0)
+  }
+  return { dir, backlog, sha }
+}
+
+/** Every file under a fixture except git's own, as path → contents, so a refusal can be proved to have written nothing. */
+function treeSnapshot(dir) {
+  const seen = {}
+  const walk = (abs, rel) => {
+    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+      if (rel === '' && entry.name === '.git') continue
+      const next = rel === '' ? entry.name : `${rel}/${entry.name}`
+      if (entry.isDirectory()) walk(path.join(abs, entry.name), next)
+      else seen[next] = fs.readFileSync(path.join(abs, entry.name), 'utf8')
+    }
+  }
+  walk(dir, '')
+  return seen
+}
+
+const TASK_ONE = { relPath: 'tasks/open/task-1-one.md', text: itemText('id: task-1\ntitle: One\ncreated: 2026-08-01', '## Plan\n\nDo the thing.') }
+
+test('import with no sub-command prints its own usage', () => {
+  const { dir } = importFixture({ items: [TASK_ONE] })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs import github/)
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import names a platform this tool cannot write to rather than assuming github', () => {
+  const { dir } = importFixture({ items: [TASK_ONE] })
+
+  const out = run(dir, 'import', 'gitlab', 'a/b')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs import github/)
+})
+
+test('import refuses a linked worktree, naming itself and the project root', () => {
+  const { dir } = importFixture({ items: [TASK_ONE] })
+  const worktree = path.join(dir, 'wt')
+  const added = spawnSync('git', ['-C', dir, 'worktree', 'add', '-q', '-b', 'side', worktree], { encoding: 'utf8' })
+  assert.equal(added.status, 0, added.stderr)
+
+  const out = run(worktree, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /linked git worktree/)
+  assert.match(out.stderr, /import writes the project's own committed source marker/)
+  assert.ok(out.stderr.includes(dir), `the refusal must name the project root:\n${out.stderr}`)
+})
+
+test('import refuses an explicit files marker rather than overwriting it', () => {
+  const { dir, backlog } = importFixture({
+    items: [TASK_ONE, { relPath: 'source.json', text: '{ "kind": "files" }\n' }],
+  })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /delete it by hand/)
+  assert.ok(out.stderr.includes(path.join(backlog, 'source.json')))
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import refuses a tracker project that has no item files left', () => {
+  const { dir } = importFixture({ items: [{ relPath: 'source.json', text: JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n' }] })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /already tracker-backed/)
+  assert.match(out.stderr, /nothing to import/)
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import sends an empty store to connect, which is the command for it', () => {
+  const { dir } = importFixture({ items: [] })
+  const before = treeSnapshot(dir)
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /connect github/)
+  assert.deepEqual(treeSnapshot(dir), before)
+})
+
+test('import with no origin and no positional names its own call shape', () => {
+  const { dir } = importFixture({ items: [TASK_ONE], originUrl: null })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  // The sentence names THIS command: a caller told to run `connect github <owner>/<repo>` here would connect the populated store this command exists to move.
+  assert.match(out.stderr, /import github <owner>\/<repo>/)
+})
+
+test('import refuses a dirty backlog and prints the porcelain lines it read', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE] })
+  fs.appendFileSync(path.join(backlog, TASK_ONE.relPath), 'one more line\n')
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /uncommitted changes/)
+  assert.match(out.stderr, / M backlog\/tasks\/open\/task-1-one\.md/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('import refuses an item file git is not tracking, even when the status is clean', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE] })
+  // Excluded rather than merely new, because `status --porcelain` would otherwise catch it first and report the dirty-tree refusal: the case under test is the
+  // one where git is silent and the file would still be deleted at the end with no commit anywhere carrying it.
+  fs.appendFileSync(path.join(dir, '.git', 'info', 'exclude'), 'backlog/bugs/open/bug-9-*.md\n')
+  fs.mkdirSync(path.join(backlog, 'bugs', 'open'), { recursive: true })
+  fs.writeFileSync(path.join(backlog, 'bugs/open/bug-9-nine.md'), itemText('id: bug-9\ntitle: Nine\ncreated: 2026-08-02', '## Fix\n\nfix it'))
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /not tracked by git/)
+  assert.match(out.stderr, /bugs\/open\/bug-9-nine\.md/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('import refuses a HEAD that is on no origin branch, naming the sha the truncation link would pin', () => {
+  const { dir, backlog, sha } = importFixture({ items: [TASK_ONE], push: false })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /not on any origin\/\* branch/)
+  assert.ok(out.stderr.includes(sha.slice(0, 7)), `the refusal must name the sha7:\n${out.stderr}`)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('import refuses an open item somebody is working, and ignores a started stamp on a done one', () => {
+  const inProgress = { relPath: 'tasks/open/task-2-two.md', text: itemText('id: task-2\ntitle: Two\ncreated: 2026-08-03\nstarted: 2026-09-20T10:00:00Z', '## Plan\n\nwork') }
+  const { dir, backlog } = importFixture({ items: [TASK_ONE, inProgress] })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /in progress/)
+  assert.match(out.stderr, /task-2/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+
+  // The same stamp on a `done/` item is history, not a session: that item is closed and nobody is holding it.
+  const done = importFixture({
+    items: [TASK_ONE, { relPath: 'tasks/done/task-3-three.md', text: itemText('id: task-3\ntitle: Three\ncreated: 2026-08-04\nstarted: 2026-09-01T10:00:00Z', '## Plan\n\nwork\n\n## Outcome\n\ndone') }],
+  })
+  const past = runWithEnv(done.dir, { ...process.env, BM_API_PORT: '1' }, 'import', 'github')
+  assert.equal(past.status, 5, past.stderr)
+})
+
+test('import stops at the probe when the stack is not running, and writes no marker', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE] })
+
+  const out = runWithEnv(dir, { ...process.env, BM_API_PORT: '1' }, 'import', 'github')
+
+  assert.equal(out.status, 5)
+  assert.match(out.stderr, /the backlog-manager API is not running/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+  assert.equal(fs.existsSync(path.join(dir, '.github', 'ISSUE_TEMPLATE', 'bug.yml')), false)
+})
+
+test('import refuses a malformed item file by absolute path', () => {
+  const { dir, backlog } = importFixture({ items: [TASK_ONE, { relPath: 'bugs/open/bug-4-four.md', text: 'no frontmatter here\n' }] })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.ok(out.stderr.includes(path.join(backlog, 'bugs/open/bug-4-four.md')), `the refusal must name the file:\n${out.stderr}`)
+})
+
+test('import refuses a refactor kind the tracker has no label for, and accepts debt', () => {
+  const bad = { relPath: 'refactors/open/ref-4-x.md', text: itemText('id: ref-4\ntitle: X\ncreated: 2026-08-05\nkind: cleanup', 'why') }
+  const { dir, backlog } = importFixture({ items: [TASK_ONE, bad] })
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /ref-4/)
+  assert.match(out.stderr, /cleanup/)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+
+  // `debt` is one of the two the server maps to a label, so the same file with that value reaches the probe.
+  const ok = importFixture({ items: [TASK_ONE, { relPath: 'refactors/open/ref-4-x.md', text: itemText('id: ref-4\ntitle: X\ncreated: 2026-08-05\nkind: debt', 'why') }] })
+  const reached = runWithEnv(ok.dir, { ...process.env, BM_API_PORT: '1' }, 'import', 'github')
+  assert.equal(reached.status, 5, reached.stderr)
+})
