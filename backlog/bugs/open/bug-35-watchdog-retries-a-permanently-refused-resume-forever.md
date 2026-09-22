@@ -3,9 +3,11 @@ id: bug-35
 title: Watchdog retries a permanently-refused resume forever
 created: 2026-09-16
 tags: watchdog, orchestrator
-updated: 2026-09-20T12:28:53Z
+updated: 2026-09-22T11:43:19Z
 groom-elapsed: 175
 groom-tokens: 52535
+started: 2026-09-22T11:43:19Z
+phase: execute
 ---
 
 ## Symptom
