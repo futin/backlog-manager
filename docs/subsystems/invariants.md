@@ -866,6 +866,31 @@ The two named scripts stay the single copy of what each runner runs — `test-al
 
 The script has no test of its own on purpose: `scripts/test-all.test.mjs` would match `test:skills`'s own glob and spawn the whole suite from inside the suite.
 
+### Where a test file sits decides which runner executes it
+
+The union above is a statement about the one word `pnpm test`; this one is about the file. Each runner finds its suites by a glob and nothing else — jest's
+`testMatch` is `test/**/*.test.ts(x)`, `test:skills` is `node --test skills/*/tools/*.test.mjs scripts/*.test.mjs` — so a test file runs if and only if its
+path matches one of the three, and a file that matches none is not skipped in any way a gate can see: it is a file no runner opens, green by absence,
+indistinguishable at `pnpm test` from a file never written. That has happened in its most literal form: `test:skills` was first spelled
+`node --test skills/backlog/tools/`, node treated the bare directory as a module, and the script ran no tests at all (`e1f58e4`, 2026-08-26). The glob pair
+is the fix, and it names files by shape on purpose — which is why placement is stated as a convention every session loads rather than left to the globs:
+they cannot report what they did not match, so the path has to be right by construction.
+
+"Flat in `test/`" is convention rather than mechanism — jest's glob would descend — and it is kept so that the two subdirectories that do exist,
+`test/helpers/` and `test/fixtures/`, read as "not suites" from the path alone. The node side is the mirror image: `skills/*/tools/*.test.mjs` does not
+descend, so there the same property is enforced rather than kept. `backlog-retro`'s suite is split in two — `retro.test.mjs` for the CLI, spawned as a child
+process, and `retro-lib.test.mjs` for the modules under `tools/lib/` — and BOTH sit at the `tools/` level for exactly this reason:
+`tools/lib/retro-lib.test.mjs` would read as the natural home, match neither glob, and never run, with no red anywhere to say so.
+
+Cases that pin a skill's PROSE — `backlog-groom`'s stamp order and its closing `Groomed on disk only` line, `backlog-execute`'s pre-review checks and the
+`agents/backlog-reviewer.md` half that reads them — have no suite of their own to sit in: those two skills ship a `SKILL.md` and no `tools/`, and `agents/` is
+not under `skills/` at all, so nothing they own is within the node runner's reach. They live in `skills/backlog/tools/backlog.test.mjs`, which is within it,
+rather than in a `tools/` directory invented to hold a test for a skill that has no tool. The `Groomed on disk only` cases go one step further and assert
+`skills/backlog-orchestrate/SKILL.md`'s half of the seam in that same suite although orchestrate has `orchestrate.test.mjs` of its own, because the rule is
+two skills agreeing on one sentence, and a suite that reads only one half is green while the halves drift apart; the reviewer/execute pair is the same shape.
+Reading another skill's file as text is not importing it — no module edge is created — so the "one skill's `tools/` may never import another's" rule (the
+reason `linkedWorktreeInfo` exists twice, in the registry section above) is untouched.
+
 ## A supertest suite listens once, on `127.0.0.1`, through `listenLoopback`
 
 bug-33. A full `pnpm test` occasionally reported **exactly one** failed test out of ~1500, always a supertest assertion, always green on the very next run of
@@ -2266,8 +2291,8 @@ can introduce, and `test/claude-rules.test.ts` fails naming any file that has no
 third copy, free to drift from both CLAUDE.md and this file, and `backlog-execute`'s contract sweep would have had to visit it. Three TIERS is not that. Each
 tier says something the other two do not — the headline that the rule exists and what it forbids, the mechanism how it is implemented, this file why — and
 `test/claude-rules.test.ts` pins the seams: a rule file is bullets and nothing else, each anchored into this file exactly once; CLAUDE.md's linked headlines and
-the rule files' bullets are one multiset with one home per anchor, headlines byte-equal; a linked CLAUDE.md bullet is a headline and a link, and an unlinked one
-is at most 80 words, so mechanism cannot creep back into CLAUDE.md by either door. Because tier two states contract, the contract sweep visits
+the rule files' bullets are one multiset with one home per anchor, headlines byte-equal; a linked CLAUDE.md bullet is a headline and a link, and any other one
+is at most 80 words, so mechanism cannot creep back into CLAUDE.md by any door. Because tier two states contract, the contract sweep visits
 `.claude/rules/*.md` — the one cost the pointer design declined, paid knowingly.
 
 ### How this was measured
@@ -2346,6 +2371,10 @@ dropped one was proven present in it. After: **242 lines / 25,174 bytes**, rough
 context panel in a fresh session. The nine rule files total 61,892 bytes and load only on a read of a file under their `paths:`. Left in place, deliberately:
 the twelve unlinked bullets (each under 60 words) and the two plain Conventions bullets — among them the "tests are flat in `test/`" paragraph, some 330 words
 of mechanism with no anchor to home it under, a candidate for a later move once it has one.
+
+Later the same day the paragraph got its anchor — § "Where a test file sits decides which runner executes it", under the `pnpm test` union — and
+moved into `tests.md` behind a one-line headline; guard 3 now caps a plain bullet at the same 80 words as an unlinked bold one, so the door it sat behind is
+shut. CLAUDE.md after that move: **232 lines / 23,633 bytes**, roughly 9.3k tokens by the same ratio, still to be confirmed against the panel.
 
 ### The end-to-end check, in this repo
 
