@@ -18,7 +18,13 @@ paths: ["server/src/tracker/**"]
   released branch, `finished` included — but a DEAD claim does not open to anyone, because reviving one is the harm (a rival's beats hold a claim live forever,
   so the staleness repair never fires). Retiring a dead claim stays `claim`'s business. And **"is this claim mine?" is answerable from printed output**:
   `start`'s lost-race line and `heartbeat`'s refusal both end `— this session is <id>`, `show` prints `claim-session:` (empty, never absent, when unheld) and
-  `this-session:`, and `show --json` carries `session`. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the
+  `this-session:`, and `show --json` carries `session`. **A claim also says WHERE its holder is** (bug-46): `ClaimRecord.host` is `<user>@<host>`, optional
+  because every stored claim predates it, absent meaning "the machine was not recorded" and NEVER "local". It is sent by whichever CLI took the claim
+  (`hostIdentity()` in `backlog.mjs` and again in `orchestrate.mjs` — a skill's `tools/` may never import another's) and never derived server-side, because
+  the server may be in the compose stack where `os.hostname()` is a container id; `session` is NOT widened to carry it, since three checks compare `session`
+  raw. `renderClaim` says `session <s> on <host> holds this issue …` when one is present and today's sentence byte-for-byte when it is not, the `holder` of
+  all three 409s carries `host`, and `show` prints `claim-host:`/`this-host:`. A refusal that has no holder host degrades WHOLE — it names neither machine —
+  because naming ours beside their blank invites the reading that a claim nothing local accounts for is litter. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the
   newest prior claim and are BILLED by the CLI on
   release — `--abandon` sends no `counters` key at all, which is not the same as zeros. The mapper reads `started`/`phase` from an UNRELEASED claim without
   consulting its heartbeat ("any stamp, fresh or stale") and the counters from the newest claim regardless of release. Why:

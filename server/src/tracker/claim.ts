@@ -63,9 +63,19 @@ export interface ParsedClaim {
  * still ends with the line a human scans for.
  */
 export function renderClaim(record: ClaimRecord): string {
+  /* The host clause is bug-46's, and it is the half of this line a PERSON
+     reads: a session id names a transcript on one machine, so a reader on any
+     other machine is told who holds the issue in the one vocabulary they
+     cannot look up. `<user>@<host>` they can.
+
+     Absent, the sentence is today's byte for byte — no empty clause, no
+     `unknown`. Every claim written before this field has no host, and a word
+     like `unknown` is one a session can argue with, where nothing said is
+     nothing to argue with. */
+  const where = record.host === undefined ? '' : ` on ${record.host}`;
   const human =
     record.released === undefined
-      ? `session ${record.session} holds this issue (${record.phase}) since ${record.at}`
+      ? `session ${record.session}${where} holds this issue (${record.phase}) since ${record.at}`
       : `released ${record.released.reason} at ${record.released.at}`;
   return `${CLAIM_MARKER}\n\n\`\`\`json\n${JSON.stringify(record, null, 2)}\n\`\`\`\n\n${human}\n`;
 }

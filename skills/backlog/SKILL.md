@@ -75,7 +75,9 @@ The commands and flags that exist only here, one line each:
 - `start <id> --as groom|execute` takes the item by posting a claim comment; `--as` is required, because the claim records which phase is running.
 - `heartbeat <id>` says this session is still alive. **A claim reads stale after 15 minutes without one**, at which point the next session to contest the item
   retires it — so heartbeat between long steps. It is NOT a test of whether the item is yours: only the holder may beat, so a heartbeat on somebody else's
-  claim is refused naming both sessions. To ask who holds an item, read `show`'s `claim-session:` and `this-session:` lines.
+  claim is refused naming both sessions. To ask who holds an item, read `show`'s `claim-session:`/`claim-host:` and `this-session:`/`this-host:` lines. A
+  holder on another machine is the ordinary case, not litter: an empty `claim-host:` means the claim was written before machines were recorded, never that
+  the holder is on this one.
 - `comment <id> --body <file>` appends a comment without moving anything.
 - `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the issue moved since you read it. Only `backlog-groom` uses it.
 

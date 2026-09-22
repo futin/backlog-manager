@@ -11,7 +11,9 @@ paths: ["server/src/items/**"]
   None of those four makes a network request. `FilesSource` has no `writer` at all, and that absence IS the rule. The adapter answers a VALUE for every
   failure (`WriteRefusal`), and the controller is the only layer mapping one to a status: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited`
   429 · anything else 502. `heartbeat` also takes `finished: { at, status }` (task-48), validated field by field and accepted on a RELEASED claim, where it
-  sets `finished` and nothing else — `finish` stamps a claim its terminal stage already released. `GithubSource` keeps a `Map<urn, Promise>` so two local sessions never race on one item, and every response is absorbed into the
+  sets `finished` and nothing else — `finish` stamps a claim its terminal stage already released. `claim` takes an optional `host` (bug-46), validated by
+  `optional()` as a non-empty string or a 400 naming the field: absent is a value (a caller that sends none writes no `host` key at all), but a blank or a
+  non-string is a mistake worth hearing about. It is never derived here — a hostname read in the compose stack is a container id. `GithubSource` keeps a `Map<urn, Promise>` so two local sessions never race on one item, and every response is absorbed into the
   poller's cache — but a write never moves `polledAt`, because nothing was polled. The token stays in the process; no response carries it. An eighth route,
   `GET /api/items/claim`, is a READ (unguarded like every other GET) and exists because `start` and `stop` are two processes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-seven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)

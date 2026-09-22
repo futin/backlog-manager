@@ -3950,7 +3950,10 @@ test('API mode: start posts claim with the session identity and prints the urn, 
   )
 
   assert.equal(out.status, 0)
-  assert.deepEqual(requests[0].body, { project: dir, id: '#31', phase: 'groom', session: 'sess-abc' })
+  // `host` is bug-46's and is asserted for its SHAPE one test down; here the point is that the claim POST carries these keys and no others.
+  const { host, ...rest } = requests[0].body
+  assert.deepEqual(rest, { project: dir, id: '#31', phase: 'groom', session: 'sess-abc' })
+  assert.equal(typeof host, 'string')
   assert.match(out.stdout, /^gh:futin\/x#31\n/)
   assert.match(out.stdout, /claim 100/)
   assert.match(out.stdout, /heartbeat #31 between long steps/)
@@ -3994,6 +3997,81 @@ test('API mode: start reports a lost race with the holder-s session and the age 
   assert.match(out.stderr, /heartbeat 4m ago/)
   // And who THIS session is (bug-45) — without it the reader has the holder's id and no way to tell it apart from their own.
   assert.match(out.stderr, /this session is sess-mine/)
+})
+
+/* bug-46. A claim published a session id and nothing else, and a session id names a transcript on exactly one machine — so the one check a reader on another
+   machine can run ("is there a session by that id here?") answers no for every foreign claim, live or dead, and that no was read as proof of death. The host
+   is what the CLI knows and the server must not derive: the server may be in the compose stack, where `os.hostname()` is a container id. */
+test('API mode: start sends the host beside the session, as user@host', async () => {
+  const { dir } = trackerFixture()
+  const { requests } = await withApi({ '/api/items/claim': { status: 201, body: { commentId: 1, record: {} } } }, async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'start', '31', '--as', 'groom'),
+  )
+
+  assert.match(requests[0].body.host, /^[^@]+@.+$/)
+  // The session stays the identity and is NOT widened into it: three sites compare it raw.
+  assert.equal(requests[0].body.session, 'sess-mine')
+})
+
+test('API mode: start names both machines when the holder-s claim recorded one', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi(
+    {
+      '/api/items/claim': {
+        status: 409,
+        body: {
+          error: '#31 is already in progress (session A)',
+          holder: { session: 'A', host: 'futin@linux-box', heartbeat: '2026-09-18T10:00:00Z', ageMs: 4 * 60 * 1000, commentId: 100 },
+        },
+      },
+    },
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'start', '31', '--as', 'groom'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /session A on futin@linux-box, heartbeat 4m ago/)
+  assert.match(out.stderr, /this session is sess-mine on [^@\s]+@\S+/)
+})
+
+/* And degrades to the old line, whole, when the holder recorded no host — never to `on unknown`, and never to naming OUR host beside their blank. The reader
+   is comparing two sides: a line that says where we are and says nothing about them invites exactly the inference this bug is made of. */
+test('API mode: start prints today-s refusal line when the holder recorded no host', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi(
+    {
+      '/api/items/claim': {
+        status: 409,
+        body: { error: '#31 is already in progress (session A)', holder: { session: 'A', heartbeat: '2026-09-18T10:00:00Z', ageMs: 4 * 60 * 1000, commentId: 100 } },
+      },
+    },
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'start', '31', '--as', 'groom'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.equal(out.stderr.trim(), '#31 is already in progress (session A, heartbeat 4m ago) — this session is sess-mine')
+})
+
+test('API mode: show names the machine beside each session, empty when the claim recorded none', async () => {
+  const { dir } = trackerFixture()
+  const claim = (record) => ({
+    '/api/items': { body: { items: [apiItem({ projectPath: dir, started: '2026-09-18T10:00:00Z', phase: 'groom' })], errors: [] } },
+    '/api/items/body': { body: '# body\n' },
+    '/api/items/claim': { body: { commentId: 100, record } },
+  })
+  const held = { v: 1, session: 'e33d0074', phase: 'groom', at: '2026-09-18T10:00:00Z', heartbeat: '2026-09-18T10:05:00Z', counters: {} }
+
+  const { out } = await withApi(claim({ ...held, host: 'futin@linux-box' }), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'show', '31'),
+  )
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /claim-host: futin@linux-box/)
+  assert.match(out.stdout, /this-host: [^@\s]+@\S+/)
+
+  // Empty rather than absent, the rule `claim-session:` already follows: a key that disappears is a second shape for every skill to handle.
+  const { out: hostless } = await withApi(claim(held), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'show', '31'),
+  )
+  assert.match(hostless.stdout, /claim-host: \n/)
 })
 
 // The billing semantics `stopItem` already has, reproduced against a claim comment instead of frontmatter: the seeded total plus this session's seconds, into

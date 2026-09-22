@@ -6694,6 +6694,36 @@ test('a claim held by another run skips the item and says whose it is, exit 0', 
   assert.equal(posts(requests, 'release').length, 0);
 });
 
+/* bug-46. The driver is a CLI like `backlog.mjs`, and it publishes claims other machines read: a session id names a transcript on exactly one host, so a
+   claim carrying only that tells a reader elsewhere nothing they can check. The host rides beside it — sent by the CLI, never derived by the server, which
+   may be in the compose stack where `os.hostname()` is a container id. */
+test('the preflight claim carries the machine it was taken on, and a refusal names the holder-s', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+  });
+  assert.match(posts(requests, 'claim')[0].body.host, /^[^@\s]+@\S+$/);
+
+  const held = {
+    '/api/items/claim': (_body, _url, method) =>
+      method === 'GET'
+        ? { body: null }
+        : {
+            status: 409,
+            body: { error: '#3 is already in progress', holder: { session: 'other-machine', host: 'futin@mac', heartbeat: '…', ageMs: 42_000, commentId: 7 } },
+          },
+  };
+  const { home: home2, project: project2 } = trackerFixture(t);
+  await withApi(claimRoutes(project2, held), async (port) => {
+    assert.equal((await runApi(project2, home2, port, 'init', '--project', project2)).status, 0);
+    assert.equal((await runApi(project2, home2, port, 'stage', '3', 'preflight')).status, 0);
+  });
+  const written = JSON.parse(fs.readFileSync(runFile(home2, project2), 'utf8'));
+  assert.match(written.queue[0].note, /^claimed elsewhere \(session other-machine on futin@mac, heartbeat 42s ago\)/);
+});
+
 test('every stage after preflight publishes the queue item onto the claim', async (t) => {
   const { home, project } = trackerFixture(t);
 

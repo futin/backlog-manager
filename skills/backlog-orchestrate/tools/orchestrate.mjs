@@ -779,6 +779,13 @@ function sessionIdentity() {
   return trimmed === '' ? null : trimmed;
 }
 
+// WHERE this driver is (bug-46), for the claim protocol. Its own two lines rather than an import: a skill's `tools/` may never import another's, so the
+// duplication with `backlog.mjs`'s `hostIdentity` is the rule rather than a shortcut. Sent beside the session, never folded into it — the session id is an
+// equality key three separate checks compare raw.
+function hostIdentity() {
+  return `${os.userInfo().username}@${os.hostname()}`;
+}
+
 // The lease a run file carries, or `null` for one that carries none.
 // **Absent means unclaimed, never locked**: every run file written before this
 // feature existed lacks the key, and a missing field must never be able to
@@ -2094,6 +2101,10 @@ function trackerClaim(run, item) {
     id: claimItemId(item.id),
     phase: 'execute',
     session: sessionIdentity() ?? run.runId,
+    // CLI-sent, never derived server-side: the server may be running in the
+    // compose stack, where `os.hostname()` is a container id rather than the
+    // machine anybody is sitting at.
+    host: hostIdentity(),
     run: claimRunOf(run)
   });
   if (res.ok) return { won: true, commentId: res.data.commentId };
@@ -2101,7 +2112,11 @@ function trackerClaim(run, item) {
   const holder = res.data !== null && typeof res.data === 'object' ? res.data.holder : undefined;
   if (holder !== undefined && holder !== null) {
     const age = Number.isFinite(holder.ageMs) ? `${Math.round(holder.ageMs / 1000)}s` : 'unknown';
-    return { won: false, note: `claimed elsewhere (session ${holder.session}, heartbeat ${age} ago)` };
+    /* The holder's machine when the claim recorded one, and nothing where it did not (bug-46) — the note is read off a board by somebody deciding whether
+       the item was really taken, and a session id alone is the one identifier they cannot check. Absent stays absent rather than becoming `unknown`: it
+       means the claim predates the field, not that the holder is local. */
+    const where = typeof holder.host === 'string' && holder.host.trim() !== '' ? ` on ${holder.host}` : '';
+    return { won: false, note: `claimed elsewhere (session ${holder.session}${where}, heartbeat ${age} ago)` };
   }
   throw new OrchestrateError(`claiming ${claimItemId(item.id)} was refused: ${apiErrorText(res, 'the API refused it')}`, EXIT_API_REFUSED);
 }
