@@ -1390,10 +1390,15 @@ a file `orchestrate.mjs` wrote and is iterated by `aggregateRuns`, `ArchiveView`
 exhaustiveness site, where a separate field reaches only what opts in.
 
 An entry dies on any of **three** rules: a run in the same payload matches the project AND its `startedAt` parses to at or after `requestedAt` — **`startedAt`,
-not "a run.json exists"**, since `cmdInit` archives the old file and writes a new one, so a project that has ever run always has one; or the entry is older than
+not "a run.json exists"**, since `cmdInit` archives the old file and writes a new one, so a project that has ever run always has one. "A run in the same
+payload" means `runs` OR `remote` (bug-51): a board-started run whose driver ran on another machine writes no run file here, so before that only the timeout
+could retire its mark, and the board stayed blocked for fifteen minutes after the run had started and ended. That leaves "remote runs ride beside `runs`"
+intact — it governs what `runs` holds, and this rule asks only whether a run started. Or the entry is older than
 `RUN_STALE_MS`, the app's one freshness number, reused rather than joined by a second; or **a run for that project already reads `status: 'running'`, fresh or
 crashed** (bug-21) — keyed on that status exactly, never on `!fresh` and never on "a run file exists", because `cmdInit` archives a `done`, `aborted`, `failed`
-or `paused` file before writing the next one, so a project holding any of those can legitimately start a new run and must keep its placeholder.
+or `paused` file before writing the next one, so a project holding any of those can legitimately start a new run and must keep its placeholder. Rule 3 reads
+LOCAL runs only, on purpose: it holds because `init` refuses a local `running` file, and another machine's run blocks no `init` here (two machines on one
+tracker project must not block each other), so a remote run already in flight must not strip the placeholder of a local spawn that can still land.
 
 Rule 3 used to be a render-time filter in `BoardView` guarding one thing (two strips for one project); it is server-side because the four gates below all need
 it and the server's own lock can read it from nowhere else.
@@ -1401,7 +1406,10 @@ it and the server's own lock can read it from nowhere else.
 It is `mark`ed from `AgentsController` **after** the awaited spawn, beside `arm()` and for the same layering reason, so a failed spawn leaves no ghost; `runs()`
 calls the pure `list()` and `OrchestratorController.runs()` calls the mutating `sweep()`, the same pure/mutating seam `annotate()`/`observe()` already keep,
 both deferring to one shared predicate. Correctness never depends on the sweep — `list` re-applies all three rules every call, so an unswept map leaks at most
-one entry per project and never lies, which is what makes `AgentsService`'s own direct `runs()` calls safe without one.
+one entry per project and never lies, which is what makes `AgentsService`'s own direct `runs()` calls safe without one. The one exception is bug-51's remote
+half: `OrchestratorService` cannot be handed the remote runs (`RemoteRunsService` depends on it), so only the controller passes them, and a direct caller sees
+such a mark until the next GET sweeps it. It errs toward blocking, and the GET that tells the board the project is free is the request whose sweep frees the
+lock behind it.
 
 The board reads `starting` straight, with **no client-side filter**: rule 3 is what rules out the collision that filter existed for — a placeholder drawn beside
 a `running` run file's own row — and keeping a second expression beside it that merely agreed is the shape `watchdogStoodDown` and `isStale` are each one

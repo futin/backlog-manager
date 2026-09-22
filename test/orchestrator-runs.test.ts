@@ -7,12 +7,13 @@ import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
+import { RemoteRunsService } from '../server/src/orchestrator/remote-runs.service';
 import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { OrchestratorRun } from '../shared/types';
+import type { OrchestratorRun, RemoteRun } from '../shared/types';
 
 // Same translation orchestrator-shapes.test.ts already does: the fixture is
 // plain JSON (no `as const`), so TS would otherwise widen its string fields
@@ -486,5 +487,31 @@ describe('GET /api/orchestrator/runs', () => {
     await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
 
     expect(starting.list([])).toEqual([]);
+  });
+
+  it('a run that ran remotely retires the mark on one GET, for the payload AND for the direct callers (bug-51)', async () => {
+    // The run another machine drove has no file here, so the only place it
+    // exists is `remote` — stubbed at the service, because deriving one from
+    // claim comments is remote-runs.util's own suite and not this one's.
+    const starting = app.get(StartingRunsService);
+    starting.mark(fixture.project);
+    const remote: RemoteRun = {
+      ...fixture,
+      status: 'aborted',
+      startedAt: new Date(Date.now() + 1_000).toISOString(),
+      fresh: false,
+      remote: true,
+      repo: 'owner/repo'
+    };
+    jest.spyOn(app.get(RemoteRunsService), 'list').mockReturnValue([remote]);
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.remote).toHaveLength(1);
+    expect(res.body.starting).toEqual([]);
+    // AgentsService's RUN_IN_PROGRESS lock reads `OrchestratorService.runs()`
+    // directly, which never sees a remote run. It is freed by the SWEEP the
+    // GET above ran, so a board that has just been told the project is free
+    // is not then 409'd by the lock behind it.
+    expect(app.get(OrchestratorService).runs().starting).toEqual([]);
   });
 });

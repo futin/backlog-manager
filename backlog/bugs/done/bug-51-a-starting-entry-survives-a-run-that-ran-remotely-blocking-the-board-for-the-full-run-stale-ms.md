@@ -2,6 +2,10 @@
 id: bug-51
 title: A starting entry survives a run that ran remotely, blocking the board for the full RUN_STALE_MS
 created: 2026-09-22
+updated: 2026-09-22T19:03:36Z
+started: 2026-09-22T18:52:02Z
+execute-elapsed: 694
+execute-tokens: 72462
 ---
 
 ## Symptom
@@ -71,3 +75,43 @@ keep passing unchanged.
 
 `test/orchestrator-starting.test.ts` covers the four cases above, and a board that launched a run which ran remotely frees its controls as soon as that run is
 visible, not fifteen minutes later.
+
+## Outcome
+
+2026-09-22. Cause confirmed against the live code: `expired()` asked both run-shaped questions of `realRuns` only, and a run another machine drove never
+reaches that array. `StartingRunsService.list`/`sweep` now take a third argument, `remoteRuns` (default `[]`, after `now` so every existing call keeps its
+shape), and rule 1 (started at/after the mark) considers local and remote runs alike. `OrchestratorController.runs()` reads `remoteRuns.list()` first, then
+re-filters `payload.starting` and sweeps against both, with one shared `now`.
+
+Two deliberate decisions:
+
+- **Rule 3 (`running`) stays LOCAL-only.** It holds because `init` refuses a local `running` file; another machine's run blocks no `init` here (spec §7.4),
+  so a remote run already in flight must not strip the placeholder of a local spawn that can still land. Pinned by its own test.
+- **Remote runs are threaded from the controller only.** `OrchestratorService` cannot be handed them — `RemoteRunsService` already injects it, so that would be
+  a cycle. `AgentsService`'s direct `runs()` callers (the RUN_IN_PROGRESS starting lock at `agents.service.ts:653`, dispatch gates) therefore see a
+  remote-retired mark until the next GET sweeps it. That errs toward blocking, and the GET that tells the board the project is free is the same request whose
+  sweep frees the lock — pinned by the controller test, which asserts `OrchestratorService.runs().starting` is empty after one GET.
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo
+(clean)
+
+$ pnpm run test:jest
+Test Suites: 129 passed, 129 total
+Tests:       2188 passed, 2188 total
+
+$ pnpm test   (node half)
+# tests 779
+# pass 779
+# fail 0
+```
+
+Contract sweep: 4 sites updated (server/src/orchestrator/orchestrator.controller.ts — the "starting sweep reads `runs` alone" and "safe without a sweep of
+their own" comments; server/src/orchestrator/starting-runs.service.ts — class comment's "correctness never depends on the sweep"; .claude/rules/dispatch-watchdog.md
+— the three-rules bullet; docs/subsystems/invariants.md — rule 1, rule 3 and the sweep paragraph of "A board-started run is visible before its run file exists")
+Red proof: 6 tests went red with the change reverted (predicate's remote half removed → 2 service evict cases + the controller case; controller reverted to
+the local-only sweep → the controller case; remote match widened to ignore project/startedAt → the two "keeps" cases; rule 3 widened to remote → the
+remote-running "keeps" case)

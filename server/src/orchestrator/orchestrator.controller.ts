@@ -40,26 +40,37 @@ export class OrchestratorController {
     // path.
     this.watchdogState.observe(payload);
     // task-14's own half of that same split, in the same position and for
-    // the identical reason: `OrchestratorService.runs()` called the PURE
-    // `list()` to build `payload.starting`, and this is the mutation that
-    // actually deletes what that filter hid. Placed after the payload is
-    // finished, so the response is decided by a pure function and the prune
-    // is visibly a separate concern.
+    // the identical reason: the PURE `list()` builds `payload.starting`, and
+    // `sweep()` below is the mutation that actually deletes what that filter
+    // hid. The response is decided by a pure function and the prune is
+    // visibly a separate concern.
     //
-    // Nothing about the response depends on this line — `list()` re-applies
+    // Nothing about the response depends on the sweep — `list()` re-applies
     // every eviction rule on every call, so a map nobody ever swept leaks at
-    // most one entry per project and never reports a stale one. That is what
-    // makes AgentsService's own direct `runs()` calls (the RUN_IN_PROGRESS
-    // lock, `resume()`) safe without a sweep of their own.
-    this.starting.sweep(payload.runs);
+    // most one entry per project. AgentsService's own direct `runs()` calls
+    // (the RUN_IN_PROGRESS lock, `resume()`) need no sweep of their own for
+    // any rule a run FILE answers; the one they do lean on it for is the
+    // remote-run case below, and there they err toward blocking.
+    //
     // Other machines' runs (task-48), set HERE and never inside `runs()`: the
     // service is the run-state directory's reader and fills `remote: []`, so
     // its direct callers — the RUN_IN_PROGRESS lock and `resume()` — never see
     // another machine's run. That is what keeps two machines draining one
-    // tracker project from blocking each other (spec §7.4). Set after the two
-    // calls above on purpose too: the watchdog and the starting sweep read
-    // `runs` alone, and a remote run has nothing for either of them to do.
-    payload.remote = this.remoteRuns.list();
+    // tracker project from blocking each other (spec §7.4).
+    //
+    // Read BEFORE the starting pair, since bug-51: a board-started run whose
+    // driver ran on another machine appears only here, and it is as good an
+    // answer to "has the run this mark was for started" as a run file. So the
+    // payload's `starting` is re-filtered against both, and the sweep deletes
+    // what that filter hid — which is also what frees the direct callers above,
+    // since they never see a remote run themselves. One `now` for both halves,
+    // so they decide at the same instant. The watchdog still reads `runs`
+    // alone: a remote run has nothing for it to do.
+    const remote = this.remoteRuns.list();
+    const now = Date.now();
+    payload.starting = this.starting.list(payload.runs, now, remote);
+    this.starting.sweep(payload.runs, now, remote);
+    payload.remote = remote;
     return payload;
   }
 
