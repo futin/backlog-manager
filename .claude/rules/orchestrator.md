@@ -120,7 +120,9 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `RunQueueItem.pid` is written by `stage <id> dispatched --pid <p>` and signalled by `cmdAbort` only behind three guards (non-terminal, `pidAlive`, and
   `ps -o args=` naming a `claude` process) — and since bug-43 that field is the SECOND pid source, because the stop gate refuses the very call that writes
   it: `resolveItemPid` reads `<dir>/logs/<id>.pid` first (written by SKILL.md's launcher before the refusal, garbage in it falling through rather than
-  throwing), falls back to the field, and writes back only a pid it actually signalled. The gate was not narrowed instead. No sixth `RunStatus`, no `--force`
+  throwing), falls back to the field, and writes back only a pid it actually signalled. The session id gets the same second source the other way round
+  (bug-52): `resolveItemSessionId` keeps any recorded `sessionId` and only fills an empty one from `<dir>/logs/<id>.jsonl`, over the whole queue, a bad file
+  reading as no answer. The gate was not narrowed instead. No sixth `RunStatus`, no `--force`
   flag, no server-side kill. Why:
   [invariants.md](docs/subsystems/invariants.md#a-stop-is-the-control-files-second-kind-and-nothing-resumes-a-stopped-run)
 - **A session's cost is recorded per transcript, and a transcript's identity is its file name, not its session id** (task-27).

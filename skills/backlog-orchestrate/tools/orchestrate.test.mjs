@@ -5138,6 +5138,109 @@ test('SKILL.md still writes the pid to the file abort reads, on both launch line
   }
 });
 
+// --- bug-52: abort's session-id source, `<dir>/logs/<id>.jsonl` -----------
+// The same hole bug-43 closed for the pid, one sidecar over. A stop that lands inside the dispatch block refuses the second `stage --pid` with `10`, so `watch`
+// never runs, and `watch` was the only reader of the child's init event — `abort` finalised the run with `sessionId: null` while the id sat in the log the
+// launcher had already written. These cases pin that abort now reads that file, never overwrites a recorded id with it, and treats every bad shape as no
+// answer rather than an error.
+
+// The child's stream-json log, at the name SKILL.md's launcher redirects stdout to. Through `seedSidecar` for the reason `seedPidFile` is.
+function seedDispatchLog(home, project, itemId, body) {
+  return seedSidecar(home, project, `logs/${itemId}.jsonl`, body);
+}
+
+// The shape observed on run-20260922-144041: a few `system` lines, the init event among them, each newline-terminated because the child had closed the file.
+function initLog(sessionId) {
+  return (
+    [
+      { type: 'system', subtype: 'hook_started' },
+      { type: 'system', subtype: 'init', session_id: sessionId },
+      { type: 'assistant', message: { content: [] } }
+    ]
+      .map((e) => JSON.stringify(e))
+      .join('\n') + '\n'
+  );
+}
+
+test('abort harvests the session id a dispatched child wrote only to its log (bug-52)', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+  seedDispatchLog(home, project, 'task-5', initLog('6924d9fa-4f8b-4d9e-b644-2b36b55efa54'));
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].sessionId, null, 'the run file was supposed to have no session id');
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.equal(after.queue[0].sessionId, '6924d9fa-4f8b-4d9e-b644-2b36b55efa54', 'the id on disk was left unread');
+});
+
+test('a missing, empty or init-less log leaves sessionId null and abort still ends the run (bug-52)', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+
+  // `null` is "no file at all"; the rest are every shape a log a child died early in can take, including a directory where the file should be (a read that
+  // throws, not one that returns nothing) and an init line with no trailing newline, which `findSessionIdInJsonl` reads as a partial write and skips.
+  for (const body of [null, 'dir', '', 'not json\n', `${JSON.stringify({ type: 'system', subtype: 'hook_started' })}\n`, JSON.stringify({ type: 'system', subtype: 'init', session_id: 'partial' })]) {
+    const label = JSON.stringify(body);
+    assert.equal(run(project, home, 'init', '--project', project).status, 0, `init failed for ${label}`);
+    assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+    if (body === 'dir') fs.mkdirSync(path.join(projStateDir(home, project), 'logs', 'task-5.jsonl'), { recursive: true });
+    else if (body !== null) seedDispatchLog(home, project, 'task-5', body);
+
+    const out = run(project, home, 'abort');
+    assert.equal(out.status, 0, `${label}: ${out.stderr}`);
+    const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+    assert.equal(after.status, 'aborted', label);
+    assert.equal(after.queue[0].sessionId, null, `${label} produced a session id`);
+  }
+});
+
+test('a session id the run file already carries is not overwritten by the log (bug-52)', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b', '--session', 'recorded-by-watch').status, 0);
+  seedDispatchLog(home, project, 'task-5', initLog('a-different-id'));
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].sessionId, 'recorded-by-watch');
+});
+
+test('SKILL.md still sends the dispatched child\'s stdout to the log abort reads (bug-52)', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  // The session-id twin of the pid-file seam test above. ONE line, not two: §5's retry redirects to `<id>-retry-<n>.jsonl`, and a retry's id reaches the run
+  // file through that retry's own `watch`, so abort reads only the first dispatch's log.
+  const lines = text.split('\n').filter((l) => l.includes('exec claude -p') && l.includes('> "<dir>/logs/<id>.jsonl"'));
+  assert.equal(lines.length, 1, `expected one launch line redirecting to "<dir>/logs/<id>.jsonl", found ${lines.length}`);
+});
+
+test("aborting a later item harvests its id and leaves an earlier item's recorded id alone (bug-52)", (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'First task');
+  seedReadyTask(project, 'task-6', 'Second task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  // task-5 ran its whole course and `watch` recorded its id; task-6 is the item the stop landed in. task-5's log is seeded with a DIFFERENT id so a harvest
+  // that ran over every item regardless of what it already held would show up here, not only a harvest that skipped task-6.
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w5', '--branch', 'b5', '--session', 'early-session').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'merged').status, 0);
+  seedDispatchLog(home, project, 'task-5', initLog('not-the-early-session'));
+  assert.equal(run(project, home, 'stage', 'task-6', 'dispatched', '--worktree', '/w6', '--branch', 'b6').status, 0);
+  seedDispatchLog(home, project, 'task-6', initLog('late-session'));
+
+  const out = run(project, home, 'abort');
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const byId = (id) => after.queue.find((q) => q.id === id);
+  assert.equal(byId('task-5').sessionId, 'early-session', "the earlier item's id did not survive");
+  assert.equal(byId('task-6').sessionId, 'late-session', "the stopped item's id was left in its log");
+});
+
+
 // --- bug-28: the per-item execute session is named ------------------------
 // Every other session this system spawns carries a `-n` display name
 // (`orchestrate <project>`, `bl <project> <id>`, `resume <project>`,

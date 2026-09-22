@@ -196,6 +196,9 @@ an unreleased claim comment, the `in-progress` label and the assignee, and the i
 claim going stale entitles the next run to contest it but does not clear what the board reads. A failed release is one stderr line and never fails the abort.
 A files run makes no request at all. (For an item stranded by an abort from an older build, `backlog.mjs stop <id> --abandon` releases its claim by hand.)
 
+Before any of that, it fills in every queue item's empty `sessionId` from `<dir>/logs/<id>.jsonl` (bug-52) — a stop inside the dispatch block never reaches
+`watch`, which was the only other reader of the child's init event. A recorded id is never replaced, and a missing or unreadable log leaves the field null.
+
 Then it sets the run to `aborted` and prints a one-line summary of three counts: what it removed, how many branches it kept because their items were `branched`,
 and what it left in place with a marker.
 

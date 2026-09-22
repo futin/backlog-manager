@@ -1548,7 +1548,7 @@ even if you tried.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
 ```
 
-Read `references/recovery.md`'s abort section first, as always — abort's order of operations is its entire safety property, and it is unchanged here. Three
+Read `references/recovery.md`'s abort section first, as always — abort's order of operations is its entire safety property, and it is unchanged here. Four
 things are worth knowing before you run it:
 
 - **It will not be refused on the lease.** `abort` takes the run over on the strength of the stop request itself, even from a driver the run file still reads
@@ -1557,6 +1557,8 @@ things are worth knowing before you run it:
   the launcher wrote one, else the pid the run file recorded (§4). It is deliberately not "a pid this run recorded": a stop landing in §4's window refuses
   the `--pid` call, so the run file's field can be null for a child that is very much alive, which is the whole of bug-43. What is signalled is still only a
   live process whose command line names `claude` — never a pattern, and never a pid that has not passed all three checks first.
+- **It recovers the session id the same way.** The same stop never reaches `watch`, the only other reader of the child's init event, so an item whose run file
+  still says `sessionId: null` gets it from `<dir>/logs/<id>.jsonl` (bug-52). A recorded id is never replaced, and a missing or init-less log leaves it null.
 - **A worktree carrying an in-progress marker is still left in place**, with an `attention` entry naming it. A stop may abandon an item; it may not destroy
   uncommitted work.
 

@@ -313,7 +313,8 @@ spawn for, never a superset — which is the safe direction, and the only direct
   kill belongs here and nowhere else; it is never a pattern, and the signal is `SIGTERM` because the child owns a transcript `usage`/`denials` still read.
   The check runs BEFORE the tick's heartbeat write, so a run being stopped does not have its `updatedAt` pushed forward by the very tick that noticed.
   **What that early return must not take with it is the session id** (bug-50, the sibling of bug-43's null pid): the same tick may have just read the child's
-  `system`/`init` event, and there is no later tick to read it again — `stage --session` is the only other writer of that field and the run is ending. So the
+  `system`/`init` event, and there is no later tick to read it again — `stage --session` never runs again and the run is ending (bug-52's abort harvest
+  fills an empty field, but only from the first dispatch's `logs/<id>.jsonl`, never a retry's). So the
   stop path persists a freshly-discovered id in a write of its own, skipping the `updatedAt` bump rather than the whole write. The distinction is what the
   ordering was protecting: freshness is read by `takeOverRun` to decide whether an abort from elsewhere is refused, and a session id is read by nothing that
   branches, so recording it costs that protection nothing. The write is best-effort, like the `SIGTERM` above it — a run file that cannot be written is not a
@@ -345,6 +346,16 @@ That last guard's bias is the OPPOSITE of `pidAlive`'s, deliberately — a `ps` 
 of not killing is a stray process a person can find and the cost of killing wrongly is somebody else's work. Mandatory in the TYPE (the compiler is the
 fixture checklist) and absent from every run file written before bug-39, which do not contradict: the one reader guards with `Number.isInteger` before it goes
 anywhere near a signal.
+
+**`abort` harvests the session id from `<dir>/logs/<id>.jsonl` the way it harvests the pid from the file beside it (bug-52).** The stop that lands inside §4's
+dispatch block refuses the second `stage --pid` with `10`, so the driver goes straight to recovery and `watch` — until this, the only reader of the child's
+`system`/`init` event — never runs. Every such run ended `sessionId: null` with the id sitting unread in a file the launcher had already written, and
+`retro.mjs`, which resolves cost and transcript by that id, had nothing to resolve. `resolveItemSessionId` reverses `resolveItemPid`'s precedence, and the
+reversal is the design: a pid file is rewritten by a relaunch so its copy is freshest, while a recorded session id was itself read out of a transcript this run
+dispatched and cannot be superseded by the first dispatch's log — so the field wins whenever it is set, and the file is read only when it is empty. It runs
+over the WHOLE queue, terminal items included, because an id is a record rather than an address to act on. Every failure of the file is "no answer", never a
+throw, for the teardown reason above. `finish --status paused` was weighed and deliberately left out: a park is decided from `watch`'s own exits, so the
+parked item's tick has normally already read the id, and one harvest at the exit that needs it beats a second copy on an exit that usually would not.
 
 **The sweeper's own branch is an early return placed AFTER `fresh` and BEFORE the stand-down branch.** After `fresh`, because a stopped run still heartbeating
 is a run whose driver has not noticed yet — it will, within one `watch` tick. Before the stand-down branch, because a stop is a stronger refusal than either

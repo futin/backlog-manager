@@ -2190,6 +2190,14 @@ function dispatchPidPath(dir, itemId) {
   return path.join(dir, 'logs', `${itemId}.pid`);
 }
 
+// bug-52: the dispatched child's stream-json log, the pid file's sibling — SKILL.md's §4 dispatch line redirects the child's stdout here, and `watch` is
+// handed this path as `--jsonl`. Only that one line: §5's retry writes `<id>-retry-<n>.jsonl` instead, and its id reaches the run file through the retry's
+// own `watch`. Named here for the reason `dispatchPidPath` is — `cmdAbort` reads it, so a rename in SKILL.md's prose is no longer free, and
+// `orchestrate.test.mjs` asserts the dispatch line still writes this exact name.
+function dispatchJsonlPath(dir, itemId) {
+  return path.join(dir, 'logs', `${itemId}.jsonl`);
+}
+
 const SNAPSHOT_USAGE = 'usage: orchestrate.mjs snapshot <itemId>';
 
 /**
@@ -3839,6 +3847,25 @@ function resolveItemPid(dir, item) {
   return Number.isInteger(item.pid) && item.pid > 0 ? item.pid : null;
 }
 
+// bug-52: the session-id half of what `resolveItemPid` does for the pid, with the precedence the other way round — and the reason it is reversed is the
+// whole design. A pid file can be rewritten by a relaunch, so the freshest copy wins. A session id cannot be superseded that way: the run file's copy was
+// written by `stage --session` or a `watch` tick, both of which read it out of a transcript this run dispatched, and a retry's id lives in its own
+// `<id>-retry-<n>.jsonl`, not in the file read here. So a recorded id is always at least as good as anything this file could say, and is never overwritten;
+// the file is read only when the field is empty, which is every stop that landed before `watch`'s first tick — the dispatch-block stop never reaches `watch`
+// at all, because the second `stage --pid` refuses with `10`.
+//
+// Every failure of the file — missing, a directory, empty, no init event, the init event on an unterminated last line — is "no answer" and leaves the field
+// null, never a throw, for `resolveItemPid`'s reason: this runs inside a teardown that must reach its worktree removals whatever it finds on disk.
+// `findSessionIdInJsonl` is `watch`'s own parser, reused rather than copied, so the two readers cannot disagree about what an init event looks like.
+function resolveItemSessionId(dir, item) {
+  if (typeof item.sessionId === 'string' && item.sessionId !== '') return item.sessionId;
+  try {
+    return findSessionIdInJsonl(dispatchJsonlPath(dir, item.id));
+  } catch {
+    return null;
+  }
+}
+
 // Pulls the session id out of the FIRST `{"type":"system","subtype":
 // "init",...}` event in a `claude -p --output-format stream-json`
 // transcript, tolerating a partial trailing line: the file is being
@@ -4237,8 +4264,9 @@ function cmdWatch(argv) {
         /* already gone, or not ours any more — the exit code below is what the caller acts on */
       }
       /* bug-50, the sibling of bug-43's null pid: this tick may be the one that FIRST read the child's session id out of the jsonl, and returning here would
-         discard a fact already read off disk — there is no later tick, and `stage --session` (the only other writer of the field) never runs again on a run
-         that is ending. So the id is persisted on the way out, as its own write.
+         discard a fact already read off disk — there is no later tick, and `stage --session` never runs again on a run that is ending. So the id is
+         persisted on the way out, as its own write. (Since bug-52 `cmdAbort` also fills an EMPTY field from `logs/<id>.jsonl`, but only the dispatch's own
+         log — this write is still the one that holds for a `watch` pointed at any other file, a retry's among them.)
 
          The `updatedAt` bump is deliberately NOT repeated: that is the one property the early return above exists to protect, since `takeOverRun` reads the
          run's freshness to decide whether an abort from elsewhere is refused, and a stop that pushed it forward would extend the window in which the abort
@@ -4789,6 +4817,16 @@ function cmdAbort() {
   const preservedIds = [];
   const keptBranchIds = [];
   const signalledIds = [];
+
+  // bug-52: recover every item's session id before anything else in this command reads the item — the claim releases below among them. Over the whole
+  // queue rather than the non-terminal items the signal loop walks: an id is a record of which session did the work, not an address to act on, so a finished
+  // item with an empty field has as much to recover as the stopped one, and `resolveItemSessionId` never replaces an id already recorded. Picked up by the
+  // single `writeRunAtomic` at the end of this command.
+  //
+  // `finish --status paused` deliberately does NOT do this, and `cmdFinish` stays a pure status write. A park is decided from `watch`'s own exits, so the
+  // parked item's tick has normally already read the id; abort is the exit that ends a run on the path where `watch` never ran at all — the stop inside the
+  // dispatch block. One harvest at the one exit that needs it, rather than a second copy on an exit that usually would not.
+  for (const item of run.queue) item.sessionId = resolveItemSessionId(dir, item);
 
   /* bug-39: end the CHILDREN before the teardown touches their worktrees.
      Until this, `abort` ended the run FILE and nothing else — a driver killed

@@ -2,6 +2,10 @@
 id: bug-52
 title: abort never harvests the session id from logs/<id>.jsonl, so a stopped item keeps sessionId null even though the child wrote it
 created: 2026-09-22
+updated: 2026-09-22T19:14:48Z
+started: 2026-09-22T19:05:28Z
+execute-elapsed: 560
+execute-tokens: 68145
 ---
 
 ## Symptom
@@ -77,3 +81,45 @@ and the field is usually already set. Pick one; do not add a second half-answer.
 - a run file that already carries a `sessionId` is not overwritten by a different id read from the log
 - test cases live in `skills/backlog-orchestrate/tools/orchestrate.test.mjs` beside the tool, per the node-runner convention, and cover the three above
   plus a two-item queue where an earlier item's id must survive the abort of a later one
+
+## Outcome
+
+2026-09-22 — Cause confirmed live: `cmdAbort` recovered the pid from `logs/<id>.pid` (bug-43) but nothing on the abort path read `logs/<id>.jsonl`, and
+`findSessionIdInJsonl` was reachable only from `cmdWatch`. Fixed by adding `dispatchJsonlPath` (beside `dispatchPidPath`) and `resolveItemSessionId` (beside
+`resolveItemPid`) in `orchestrate.mjs`, and a harvest loop at the top of `cmdAbort` — before the signal loop, the teardown and the tracker claim releases —
+that sets every queue item's `sessionId` to the recorded value if one is set, otherwise to what `findSessionIdInJsonl` finds in `<dir>/logs/<id>.jsonl`,
+otherwise `null`. Any read failure (missing, a directory, empty, no init event, an unterminated init line) is caught and reads as no answer. It runs over the
+whole queue, not only non-terminal items: an id is a record, not an address, and a recorded one is never replaced.
+
+Decision on `finish --status paused`: it does NOT harvest, and `cmdFinish` stays a pure status write. A park is decided from `watch`'s own exits, so the parked
+item's tick has normally already read the id; abort is the exit that ends a run on the path where `watch` never ran. Recorded in the code comment,
+`docs/subsystems/invariants.md` and here.
+
+Scope left on purpose: only the first dispatch's `logs/<id>.jsonl` is read, not `<id>-retry-<n>.jsonl` — a retry's id reaches the run file through that
+retry's own `watch`, and bug-50's stop-tick write still covers a `watch` pointed at any other file (its comment now says so).
+
+Tests (`skills/backlog-orchestrate/tools/orchestrate.test.mjs`, the `bug-52` block after the bug-43 cases): harvest from the log; missing / directory / empty /
+non-JSON / init-less / unterminated-init log leaves `null` and still ends `aborted`; a recorded id is not overwritten; two-item queue where a merged item's
+recorded id survives while the stopped later item's id is harvested; SKILL.md seam test that the §4 launch line still redirects to `"<dir>/logs/<id>.jsonl"`.
+
+```
+$ node --test --test-name-pattern="bug-52" skills/backlog-orchestrate/tools/orchestrate.test.mjs
+# pass 5
+# fail 0
+
+$ pnpm test
+Test Suites: 129 passed, 129 total
+Tests:       2188 passed, 2188 total
+# tests 784
+# pass 784
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ pnpm run typecheck
+typecheck exit 0
+```
+
+Contract sweep: 7 sites updated (skills/backlog-orchestrate/tools/orchestrate.mjs bug-50 comment "`stage --session` (the only other writer of the field)", docs/subsystems/invariants.md bug-50 bullet same claim + new bug-52 paragraph, .claude/rules/orchestrator.md abort mechanism, skills/backlog-orchestrate/SKILL.md abort section "Three things" → "Four" + bullet, skills/backlog-orchestrate/references/recovery.md abort walk, shared/types.ts `RunQueueItem.sessionId` doc)
+Red proof: 4 tests went red with the change reverted — harvest loop removed: "abort harvests the session id…" and "aborting a later item…" red; recorded-id early return removed: "a session id the run file already carries…" and "aborting a later item…" red; try/catch removed: "a missing, empty or init-less log…" red. The SKILL.md seam test pins existing launcher text, not a production change, so it has nothing to revert.

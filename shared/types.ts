@@ -916,6 +916,10 @@ export interface RunQueueItem {
    * dispatch and for an item skipped before dispatch (`needs-answers` from a
    * preflight question, or `ungroomed`) — those two exits never reach the
    * point where a session would exist to record.
+   *
+   * Written by `stage --session` and by `watch`, and — since bug-52 — filled
+   * by `abort` from `<dir>/logs/<id>.jsonl` when still `null`, because a stop
+   * inside the dispatch block never reaches `watch`. Never overwritten there.
    */
   sessionId: string | null;
   /**
