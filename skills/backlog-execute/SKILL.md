@@ -145,10 +145,38 @@ That writes a `started: <UTC timestamp>` line and a `phase: execute` line into t
 to bill either of them against. The board app renders the marker as an amber bar across the top of the card, reading how long the work has been going, so anyone
 looking at the board can see what's being worked without asking. It is not a status: the item is still open, still in `<section>/open/`.
 
-Exit `1` here means the item can't be started, and the message says which: already in progress (someone is on it — say so and stop rather than working it
-twice), already done, or out of scope. Don't work around it.
+Exit `1` here means the item can't be started, and the message says which. Two of the three are one-liners: **already done** and **out of scope** both mean the
+item's lifecycle has already ended, so there is nothing here to work — say which and stop, and don't work around either. The third gets a subsection of its own,
+below, because it is the one a session talks itself past.
 
 Clear it if you walk away without archiving — see below.
+
+### Losing the claim race ends this session's work on this item
+
+`already in progress` is the third cause, and it is not a variant of the other two: the item is workable, it is just not this session's to work. Losing the race
+**ends this session's work on this item**. Report the holder and stop — that is the whole of what this session does next.
+
+Do **not** schedule a retry, do **not** wait out the staleness window, and do **not** do read-only work "while waiting". In the run that produced this rule the
+wait was two full test-suite runs and three drafted files, all discarded, and the claim was never taken in the end. The next attempt is a person's decision, not
+the session's.
+
+The reasoning that gets a session here is always the same one, and it is worth saying outright why it fails: **a session id you cannot find on this machine is
+not evidence the holder is dead.** A session id names a transcript under `~/.claude/projects/` on exactly one host, so `ls` and `ps` answer "no" for every claim
+taken on another machine, live or dead (bug-46) — which is the expected reading of a foreign claim, not a discovery about it. The heartbeat age the refusal
+already printed is the only liveness evidence that exists.
+
+This holds under a completion-shaped prompt too. "Work it through to verification, then archive the item" is an instruction about the item, and a lost claim
+means the item is not this session's to work — so the instruction is answered by reporting that, not by acquiring the item some other way.
+
+**In a tracker project** the refusal names both sides, because a tracker is where two machines meet:
+
+> `#5 is already in progress (session <theirs> on <their host>, heartbeat 12s ago) — this session is <mine> on <my host> — losing the race ends this session's work on this item`
+
+Read it the two ways `backlog-groom`'s "Already in progress" section reads it — one refusal, one reading, so the two skills say one thing about one line:
+
+- **Fresh heartbeat** — somebody is working it right now, on this machine or another one. Stop. Everything above is this case.
+- **Stale past fifteen minutes** — the protocol retires it the moment you claim, so re-run `start` alone and it succeeds. Do **not** `stop --abandon` first:
+  that clears a marker, and this claim is not yours to clear.
 
 ## Dispatch
 

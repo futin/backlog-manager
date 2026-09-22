@@ -2546,14 +2546,19 @@ export async function main(argv) {
             claimed = await apiPost('claim', { project, id: wanted, phase, session, host: hostIdentity() })
           } catch (e) {
             /* A lost race is reported with the AGE of the holder's heartbeat, which the server computed on its own clock and put in the payload — the CLI
-               must not subtract two clocks to get it. The age is the whole of what a reader needs in order to decide what to do: fresh means wait or ask,
-               stale past fifteen minutes means claim again and let the protocol retire it. */
+               must not subtract two clocks to get it. The age is the evidence a reader decides on: fresh means somebody is working it right now, stale past
+               fifteen minutes means claim again and let the protocol retire it. Evidence alone was not enough — see the rule appended below. */
             if (e instanceof BacklogError && e.status === 409 && e.payload && e.payload.holder) {
               const h = e.payload.holder
               /* Both sides named, always (bug-45). The holder's id alone is unreadable: a session cannot tell whether `e33d0074` is somebody else or
                  itself, and the one that could not tell went on to groom an issue another machine was executing. */
               const sides = refusalSides(h.host, session)
-              console.error(`${wanted} is already in progress (session ${h.session}${sides.theirs}, heartbeat ${roughAge(h.ageMs)} ago) — this session is ${sides.mine}`)
+              /* The rule rides on the line, not in the skill's prose alone (bug-47): this is the one sentence a losing session reliably reads, whatever
+                 skill is driving it or none, and an age with no rule beside it reads as a countdown to when the item becomes takeable. */
+              console.error(
+                `${wanted} is already in progress (session ${h.session}${sides.theirs}, heartbeat ${roughAge(h.ageMs)} ago) — this session is ${sides.mine}` +
+                  ` — losing the race ends this session's work on this item`,
+              )
               return 1
             }
             throw e

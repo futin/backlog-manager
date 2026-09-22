@@ -185,8 +185,8 @@ marker is this" is exactly the kind of question only they can answer.
 
 Then, by their answer:
 
-- **A session is live on it.** Stop, and say so. No verdict, no edit, no `move` — the way `backlog-execute` answers the mirror case ("someone is on it — say so
-  and stop rather than working it twice"). Groom has more reason to stop than execute does, not less: a Reject replaces the item's whole body and relocates the
+- **A session is live on it.** Stop, and say so. No verdict, no edit, no `move` — the way `backlog-execute` answers the mirror case, under its own heading:
+  "Losing the claim race ends this session's work on this item". Groom has more reason to stop than execute does, not less: a Reject replaces the item's whole body and relocates the
   file, so working over a live session here doesn't merely duplicate effort, it destroys in-flight state.
 - **The stamp is stale** (case 2 or 3 — and case 2 is exactly the state "If the session ends without a verdict" below exists to prevent, so it is a state this
   skill knows it can produce). Once the user confirms it, take the marker over properly:

@@ -2984,6 +2984,90 @@ test('backlog-reviewer reads both lines and calls a missing pair Important', () 
   )
 })
 
+// --- bug-47: losing the claim race ends this session's work on the item ------
+//
+// The clause was never missing. `## Mark it in progress` carried it as a
+// parenthetical inside a run-on sentence listing three unrelated exit-`1`
+// causes, so it read with no more weight than "already done" — and a hand-run
+// session read straight past it: it computed when the holder's claim would go
+// stale, queued a re-claim for that moment, and filled the wait with two full
+// test-suite runs and three drafted files, all discarded.
+//
+// So these pin SHAPE, not presence. The whole defect was a rule that was
+// present and unreadable, and a suite asserting only `includes` would have
+// passed over the bug it exists to catch: the first test below asserts the rule
+// has left the list it was buried in, and the list still names the two causes
+// that genuinely are one-liners.
+const LOST_RACE_HEADING = "### Losing the claim race ends this session's work on this item"
+
+// Heading to the next level-2 heading: the subsection sits under `## Mark it in
+// progress`, so `## Dispatch` terminates it. Whitespace-collapsed for `flat`'s
+// reason — the file is hard-wrapped prose and a re-wrap changes nothing a
+// session reads.
+const executeSection = (heading) => {
+  const raw = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  const at = raw.indexOf(heading)
+  assert.notEqual(at, -1, `backlog-execute/SKILL.md no longer has a "${heading}" section`)
+  const end = raw.indexOf('\n## ', at)
+  return raw.slice(at, end === -1 ? raw.length : end).replace(/\s+/g, ' ')
+}
+
+test('backlog-execute gives the lost claim race its own subsection, out of the exit-1 list', () => {
+  const raw = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8')
+  const exit1 = raw.indexOf('Exit `1` here means')
+  const heading = raw.indexOf(LOST_RACE_HEADING)
+  assert.notEqual(exit1, -1, 'backlog-execute/SKILL.md lost the exit `1` reading of `start`')
+  assert.notEqual(heading, -1, `backlog-execute/SKILL.md lost "${LOST_RACE_HEADING}"`)
+  assert.ok(exit1 < heading, 'the lost-race subsection no longer follows the exit `1` sentence it was lifted out of')
+
+  // The exit-`1` sentence keeps the two causes that are genuinely one-liners
+  // and hands the third to the subsection. If the parenthetical comes back,
+  // the rule is back to carrying the weight of "already done".
+  const sentence = raw.slice(exit1, heading).replace(/\s+/g, ' ')
+  assert.ok(!/working it twice/.test(sentence), 'the lost-race rule is a parenthetical inside the exit `1` list again')
+  for (const cause of ['already done', 'out of scope']) {
+    assert.ok(sentence.includes(cause), `the exit \`1\` sentence no longer names its "${cause}" cause`)
+  }
+})
+
+test('backlog-execute forbids waiting out a foreign claim, in as many words', () => {
+  // One assertion per rule, naming the rule rather than the string, so a
+  // failure says which half was lost. Every needle here is a thing the session
+  // in the bug actually did, or the belief that let it: a rule that does not
+  // name the behaviour by name is the rule that was already there.
+  const section = executeSection(LOST_RACE_HEADING)
+  const RULES = [
+    ["ends this session's work on this item", 'the rule itself — a lost race is terminal for this session'],
+    ['Report the holder and stop', 'what to do instead'],
+    ['schedule a retry', 'the retry the losing session queued for the staleness deadline'],
+    ['wait out the staleness window', 'the wait itself, named'],
+    ['read-only work', 'the work the wait was filled with'],
+    ["a person's decision, not the session's", 'who owns the next attempt'],
+    ['is not evidence the holder is dead', 'the enabling belief, from bug-46'],
+    ['heartbeat age', 'the only liveness evidence that exists for a foreign claim'],
+    ['Work it through to verification', 'the completion-shaped prompt this holds under'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+})
+
+test('backlog-execute reads the tracker refusal the same two ways backlog-groom does', () => {
+  // One refusal, one reading. Groom's half is pinned by its own suite above;
+  // this asserts execute states the same two cases with the same verdicts, so
+  // a session that loaded either skill acts the same way on the same line.
+  const section = executeSection(LOST_RACE_HEADING)
+  const RULES = [
+    ['heartbeat 12s ago', 'the refusal quoted, so a reader matches it to the line they just saw'],
+    ['fifteen minutes', 'the staleness window the two cases split on'],
+    ['`stop --abandon`', 'the stale case names the takeover it must NOT do first'],
+    ['re-run `start`', 'the stale case names what it does instead'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `backlog-execute/SKILL.md lost the rule: ${rule} (${needle})`)
+  }
+})
+
 // --- task-44: the orchestrator hands the reviewer its base -------------------
 //
 // Another two-files-one-contract seam, the same shape as the pair above and
@@ -4048,7 +4132,36 @@ test('API mode: start prints today-s refusal line when the holder recorded no ho
   )
 
   assert.equal(out.status, 1)
-  assert.equal(out.stderr.trim(), '#31 is already in progress (session A, heartbeat 4m ago) — this session is sess-mine')
+  assert.equal(
+    out.stderr.trim(),
+    "#31 is already in progress (session A, heartbeat 4m ago) — this session is sess-mine — losing the race ends this session's work on this item",
+  )
+})
+
+/* bug-47. This line is the ONE sentence a losing session reliably reads — whichever skill is driving it, or none — and it carried a heartbeat age and no
+   rule. An age plus a readable `CLAIM_STALE_MS` is a deadline computable to the second, and a deadline with nothing said about it reads as a countdown: the
+   session that produced this bug scheduled a re-claim for the moment the window closed and worked through the wait. The age STAYS — it is exactly what a
+   person deciding whether to wait thirty seconds or walk away needs, and removing it stops nothing, since `show --json` prints the same heartbeat. What the
+   line was missing is the rule, so the two now travel together and neither can be read without the other. */
+test('API mode: start-s lost-race refusal ends with the rule, and still carries the age', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi(
+    {
+      '/api/items/claim': {
+        status: 409,
+        body: {
+          error: '#31 is already in progress (session A)',
+          holder: { session: 'A', host: 'futin@linux-box', heartbeat: '2026-09-18T10:00:00Z', ageMs: 4 * 60 * 1000, commentId: 100 },
+        },
+      },
+    },
+    async (port) => await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'start', '31', '--as', 'execute'),
+  )
+
+  assert.equal(out.status, 1)
+  // Both halves, asserted separately: the rule is worthless without the evidence, and the evidence is what this bug is made of without the rule.
+  assert.match(out.stderr, /heartbeat 4m ago/)
+  assert.match(out.stderr, /— losing the race ends this session's work on this item$/m)
 })
 
 test('API mode: show names the machine beside each session, empty when the claim recorded none', async () => {

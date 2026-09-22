@@ -2808,7 +2808,7 @@ has no host degrades whole, naming neither machine: a line that says where we ar
 **"Is this claim mine?" has to be answerable without a network call, so three commands print both sides.** The identity half of bug-45, and it is not cosmetic:
 `sessionIdentity()` existed from task-46 and no command had ever printed it, so a session could read a holder's id and have nothing to compare it against — the
 losing session on guide-manager#5 even probed the wrong variable (`CLAUDE_SESSION_ID`, unset) trying to find out. `start`'s lost-race line and `heartbeat`'s
-refusal both end `— this session is <id>`, and `show` prints `claim-session:` and `this-session:` in its frontmatter-shaped block, with `--json` carrying
+refusal both carry `— this session is <id>` — on `start` the rule bug-47 appended follows it rather than ending the line — and `show` prints `claim-session:` and `this-session:` in its frontmatter-shaped block, with `--json` carrying
 `session` beside the `claim` it already returned. `claim-session:` is EMPTY rather than absent on an unheld item: a key that disappears is a second shape every
 reader has to branch on. Bug-46 puts `claim-host:` and `this-host:` beside them under the same empty-never-absent rule, and adds nothing to `--json`: the claim
 object it already returns carries `host` on its own, and the reader's own machine is something a reader can ask their own OS for — unlike a session id, which

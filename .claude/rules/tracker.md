@@ -17,8 +17,8 @@ paths: ["server/src/tracker/**"]
   400 without it, like `release`'s), `runId` is the same optional same-run assertion with the same `typeof`/`length` guards, and the check runs BEFORE the
   released branch, `finished` included — but a DEAD claim does not open to anyone, because reviving one is the harm (a rival's beats hold a claim live forever,
   so the staleness repair never fires). Retiring a dead claim stays `claim`'s business. And **"is this claim mine?" is answerable from printed output**:
-  `start`'s lost-race line and `heartbeat`'s refusal both end `— this session is <id>`, `show` prints `claim-session:` (empty, never absent, when unheld) and
-  `this-session:`, and `show --json` carries `session`. **A claim also says WHERE its holder is** (bug-46): `ClaimRecord.host` is `<user>@<host>`, optional
+  `start`'s lost-race line and `heartbeat`'s refusal both carry `— this session is <id>` — on `start` the rule bug-47 appended follows it rather than ending
+  the line — `show` prints `claim-session:` (empty, never absent, when unheld) and `this-session:`, and `show --json` carries `session`. **A claim also says WHERE its holder is** (bug-46): `ClaimRecord.host` is `<user>@<host>`, optional
   because every stored claim predates it, absent meaning "the machine was not recorded" and NEVER "local". It is sent by whichever CLI took the claim
   (`hostIdentity()` in `backlog.mjs` and again in `orchestrate.mjs` — a skill's `tools/` may never import another's) and never derived server-side, because
   the server may be in the compose stack where `os.hostname()` is a container id; `session` is NOT widened to carry it, since three checks compare `session`

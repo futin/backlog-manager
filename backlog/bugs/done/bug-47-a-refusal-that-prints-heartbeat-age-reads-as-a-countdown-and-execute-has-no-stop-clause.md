@@ -3,9 +3,12 @@ id: bug-47
 title: a refusal that prints heartbeat age reads as a countdown, and backlog-execute has no stop clause for a live foreign claim
 created: 2026-09-21
 tags: tracker, claim, skills, backlog-execute
-updated: 2026-09-21T20:30:26Z
+updated: 2026-09-22T09:02:19Z
 groom-elapsed: 268
 groom-tokens: 53957
+started: 2026-09-22T08:48:02Z
+execute-elapsed: 857
+execute-tokens: 83327
 ---
 
 ## Symptom
@@ -130,3 +133,62 @@ walk away, and removing it does not stop a determined session recomputing the de
 losing the claim ends the session's work on that item, and the next attempt is a person's decision, not the session's. Related:
 [bug-46](bug-46-a-claim-names-a-session-id-and-no-host-so-another-machines-live-claim-reads-as-litter.md) — B only felt entitled to wait because it had
 concluded the holder was dead.
+
+## Outcome
+
+2026-09-22 — fixed as groomed, all three edits, and the sweep turned up a fourth site the Fix had not anticipated.
+
+**1. `skills/backlog-execute/SKILL.md`.** The exit-`1` parenthetical is gone. The sentence now handles only the two causes that genuinely are one-liners
+(already done, out of scope) and hands the third to a subsection of its own, `### Losing the claim race ends this session's work on this item`, whose heading is
+the rule. The subsection states, in these words: losing the race ends this session's work on this item and the next step is to report the holder and stop; do
+not schedule a retry, do not wait out the staleness window, do not do read-only work "while waiting" (naming what the wait in this bug actually cost — two full
+test-suite runs and three drafted files, all discarded); a session id you cannot find on this machine is not evidence the holder is dead, because a session id
+names a transcript on exactly one host (bug-46) and the heartbeat age is the only liveness evidence there is; and the rule holds under a completion-shaped
+prompt, because "work it through to verification" is an instruction about the item and a lost claim means the item is not this session's to work.
+
+**2. The same subsection reads the tracker refusal explicitly**, quoting the line as printed and splitting it the two ways `backlog-groom`'s "Already in
+progress" section splits it — fresh heartbeat means stop, stale past fifteen minutes means re-run `start` alone and *not* `stop --abandon` first. One refusal,
+one reading, stated by both skills.
+
+**3. `skills/backlog/tools/backlog.mjs`.** `start`'s tracker refusal now ends `— losing the race ends this session's work on this item`. The heartbeat age
+stays, as grooming decided. The comment above the call said the age was "the whole of what a reader needs in order to decide what to do"; that was the belief
+this bug is made of, so it was rewritten to say the age is the evidence and the rule now rides beside it.
+
+**Not in the Fix, found by the sweep:** `skills/backlog-groom/SKILL.md` quoted edit 1's deleted parenthetical verbatim — "the way `backlog-execute` answers the
+mirror case (\"someone is on it — say so and stop rather than working it twice\")" — a sentence that would have pointed at text no longer in the file. It now
+cites the new heading instead. Two docs (`.claude/rules/tracker.md`, `docs/subsystems/invariants.md`) said `start`'s lost-race line and `heartbeat`'s refusal
+"both end `— this session is <id>`"; `start`'s no longer ends there, so both now say the two lines *carry* that clause and that on `start` the rule follows it.
+
+Verification — `pnpm test`:
+
+```
+Test Suites: 1 failed, 128 passed, 129 total
+Tests:       2 failed, 2146 passed, 2148 total
+ℹ tests 767
+ℹ pass 767
+ℹ fail 0
+FAIL  jest
+PASS  node --test (skills)
+```
+
+The two jest failures are `test/supertest-bind.test.ts` › "lets a wildcard listen(port) succeed on a port 127.0.0.1 already holds" and "routes the IPv4 dial to
+the squatter, not to the wildcard listener" — the WSL-kernel cases that have been red on this machine since before this branch existed. They are unrelated to
+this diff by construction: that suite imports `server/src/app.module`, `server/src/registry/registry.service` and `test/helpers/app` and nothing else, none of
+which this change touches. The skills runner, which is where every test in this change lives, is 767/767 green; `skills/backlog/tools/backlog.test.mjs` alone is
+329/329.
+
+Contract sweep: 3 sites updated (skills/backlog-groom/SKILL.md, .claude/rules/tracker.md, docs/subsystems/invariants.md)
+
+Left standing on purpose: the refusal line is also quoted in `backlog/bugs/done/bug-45-*.md` and `bug-46-*.md`, which are records of what the line said when
+those bugs were fixed, not statements about what it says now — updating them would falsify the history they exist to hold. A stale copy of
+`skills/backlog-groom/SKILL.md` also lives under `.worktrees/task-47/`; that is another tree and outside this session's write scope.
+
+Red proof: 5 tests went red with the change reverted
+
+The three new prose tests (`backlog-execute gives the lost claim race its own subsection, out of the exit-1 list`, `… forbids waiting out a foreign claim, in as
+many words`, `… reads the tracker refusal the same two ways backlog-groom does`) all failed with the old parenthetical restored in `SKILL.md`. Both tool tests
+(`API mode: start-s lost-race refusal ends with the rule, and still carries the age`, and the existing `… prints today-s refusal line when the holder recorded
+no host`, whose exact-equality assertion this change updates) failed with the appended clause removed from `backlog.mjs`. Each revert was a file copy restored
+afterwards, never `git stash`.
+
+Note for publishing: this edits `skills/`, so nothing reaches a running session until the work is committed, pushed, and `pnpm run plugin:sync` has run.
