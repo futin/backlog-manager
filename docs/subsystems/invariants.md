@@ -2782,12 +2782,40 @@ still a write to somebody else's record, and `finish` sends its run's `runId`, s
 stage released them first. Both callers name themselves — `backlog.mjs heartbeat` sends `sessionIdentity()`, `orchestrate.mjs`'s `trackerHeartbeat` and
 `trackerFinish` send the driver's session plus `run.runId` — and the CLI renders the 409 rather than letting a bare status reach a skill.
 
+**A claim says WHERE its holder is, because a session id is the one identifier a remote reader cannot resolve (bug-46).** `ClaimRecord.session` is
+`CLAUDE_CODE_SESSION_ID`, which names a transcript under `~/.claude/projects` on exactly one host — and for phase 3 that was the whole of what a claim
+published about a holder. So the one check a reader on another machine can actually run, looking for that session locally, answers "no" for every foreign
+claim, live or dead. Both questions have the same answer shape, the second is the one that gets asked, and its "no" was read as the first one's. On
+guide-manager#5 a session on the mac lost the race, received the correct refusal with `heartbeat 12s ago` in it, went looking for a better answer than the one
+it had, found no transcript, concluded "litter from a claim-race experiment", and scheduled itself to take the item the moment the staleness window expired —
+while the Linux machine was mid-execute on it. The false negative is worst in exactly the case the protocol exists for: a claim whose holder is on the OTHER
+machine is the only kind a lock is needed for at all.
+
+`host` is `<user>@<host>`, optional, and **absent means "the machine was not recorded", never "local"** — a reader must not be able to infer that a hostless
+claim is its own. No `v: 2` for it: `parseClaim` accepts `v: 1` and passes unknown fields through, so an old build ignores the field and a new build reading an
+old claim says less rather than throwing, the precedent `run` and `state` set. And `session` is not widened into `<session>@<host>`, because it is an equality
+key — `stop`'s holder check, `heartbeat`'s and `release`'s author tests and `claim`'s same-run takeover all compare it raw — so a composite value would stop
+matching across a version gap and a new build could not release a claim an old build wrote. The identity and the address are two fields precisely so one of
+them can change shape without breaking the other.
+
+It is **sent by the CLI and never derived by the server**, which is the one line of this that looks like an accident and is not: the server may be running in
+the compose stack, where `os.hostname()` is a container id rather than the machine anybody is sitting at. `backlog.mjs` and `orchestrate.mjs` each carry their
+own two-line `hostIdentity()` — a skill's `tools/` may never import another's, so the duplication is the rule rather than a shortcut.
+
+What it buys is narrow and worth stating: **the removal of a false NEGATIVE, not new proof of life.** Liveness evidence was never missing — the refusal said
+`heartbeat 12s ago`, which is the answer — and a hostname is still just a string a determined session can rationalise around. What stops being true is that "I
+cannot find this session" is evidence of death. That is also why an absent host prints as NOTHING rather than as `unknown`: an empty value reads as "not
+recorded" the way an empty `claim-session:` reads as "unheld", where `unknown` is a word a session can argue with. For the same reason a refusal whose holder
+has no host degrades whole, naming neither machine: a line that says where we are beside a blank where they are invites the very inference this bug is made of.
+
 **"Is this claim mine?" has to be answerable without a network call, so three commands print both sides.** The identity half of bug-45, and it is not cosmetic:
 `sessionIdentity()` existed from task-46 and no command had ever printed it, so a session could read a holder's id and have nothing to compare it against — the
 losing session on guide-manager#5 even probed the wrong variable (`CLAUDE_SESSION_ID`, unset) trying to find out. `start`'s lost-race line and `heartbeat`'s
 refusal both end `— this session is <id>`, and `show` prints `claim-session:` and `this-session:` in its frontmatter-shaped block, with `--json` carrying
 `session` beside the `claim` it already returned. `claim-session:` is EMPTY rather than absent on an unheld item: a key that disappears is a second shape every
-reader has to branch on.
+reader has to branch on. Bug-46 puts `claim-host:` and `this-host:` beside them under the same empty-never-absent rule, and adds nothing to `--json`: the claim
+object it already returns carries `host` on its own, and the reader's own machine is something a reader can ask their own OS for — unlike a session id, which
+is why bug-45 had to print that one.
 
 **The counters live in the claim, the server seeds and the CLI bills.** Spec §6.4 is explicit that counters never live in the body: the body is the item's text,
 groom rewrites it wholesale, and a number embedded in prose somebody edits in the web UI is a number that silently resets. A claim comment is machine-owned,

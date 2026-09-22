@@ -1105,6 +1105,82 @@ describe('claim.run', () => {
   });
 });
 
+/* ==========================================================================
+ * bug-46 — the claim says WHERE its holder is
+ *
+ * A session id names a transcript under `~/.claude/projects` on exactly one
+ * machine, so it is the one identifier a reader on another machine cannot
+ * resolve. The check they can actually run answers "no" for every foreign
+ * claim, live or dead — and that "no" gets read as proof the holder is dead.
+ * `host` is what makes "made elsewhere" a readable answer.
+ * ========================================================================= */
+
+describe('claim.host', () => {
+  it('writes the host into the claim comment when the caller sent one', async () => {
+    gh.issue();
+    await sync();
+    const res = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A', host: 'futin@mac' }).expect(201);
+
+    // The COMMENT is the claim — a reader on another machine has only that.
+    expect(claimIn(res.body.commentId)?.host).toBe('futin@mac');
+    expect(gh.comments.get(res.body.commentId)?.body).toContain('session A on futin@mac holds this issue');
+  });
+
+  /* The negative every pre-bug-46 caller rests on: no key at all, not an empty
+     string and not `unknown`. Absent means "the machine was not recorded", and
+     a reader must not be able to mistake it for "local". */
+  it('writes no host key at all when the caller sent none', async () => {
+    gh.issue();
+    await sync();
+    const res = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A' }).expect(201);
+    expect('host' in (claimIn(res.body.commentId) ?? {})).toBe(false);
+  });
+
+  it('names the holder-s host in the claim refusal', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', host: 'futin@linux-box' }), 31, 100);
+    await sync();
+
+    const res = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'B', host: 'futin@mac' }).expect(409);
+    expect(res.body.holder.session).toBe('A');
+    expect(res.body.holder.host).toBe('futin@linux-box');
+  });
+
+  it('names the holder-s host in the release refusal', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', host: 'futin@linux-box' }), 31, 100);
+    await sync();
+
+    const res = await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'B', reason: 'stopped' }).expect(409);
+    expect(res.body.holder.host).toBe('futin@linux-box');
+  });
+
+  it('names the holder-s host in the heartbeat refusal', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'A', host: 'futin@linux-box' }), 31, 100);
+    await sync();
+
+    const res = await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'B' }).expect(409);
+    expect(res.body.holder.host).toBe('futin@linux-box');
+  });
+
+  /* The shape rule `session` already follows: present means a non-empty
+     string. A caller that sent a number or a blank has made a mistake worth
+     hearing about, rather than one that silently publishes nothing. */
+  it('400s a host that is not a non-empty string, and reaches GitHub not at all', async () => {
+    gh.issue();
+    await sync();
+
+    const blank = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A', host: '   ' }).expect(400);
+    expect(blank.body.error).toContain('host');
+
+    const wrongType = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A', host: 7 }).expect(400);
+    expect(wrongType.body.error).toContain('host');
+
+    expect(gh.matching('/issues/31/comments', 'POST')).toEqual([]);
+  });
+});
+
 describe('body.runnerFix', () => {
   it('adds the label with the patch, and adding it twice is still one label', async () => {
     const issue = gh.issue();

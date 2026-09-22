@@ -78,6 +78,39 @@ describe('renderClaim / parseClaim', () => {
     expect(renderClaim(r)).toContain('released stale at 2026-09-18T12:01:00.000Z');
   });
 
+  /* bug-46. A session id names a transcript on exactly one machine, so it is
+     the one identifier a reader on another machine cannot resolve — and the
+     check they CAN run — a listing of `~/.claude/projects` for that id —
+     answers "no" for every
+     foreign claim, live or dead. The host is what turns that "no" back into
+     "made elsewhere" rather than "dead". */
+  it('names the host in the human sentence when the record carries one', () => {
+    expect(renderClaim(record({ host: 'futin@mac' }))).toContain(
+      'session A on futin@mac holds this issue (groom) since 2026-09-18T11:50:00.000Z'
+    );
+  });
+
+  /* Byte for byte, not merely "similar": every claim written before bug-46 has
+     no host, and a hostless one must read exactly as it always did rather than
+     acquiring an empty clause a reader has to interpret. */
+  it('leaves the sentence exactly as it was when no host was recorded', () => {
+    expect(renderClaim(record()).endsWith('session A holds this issue (groom) since 2026-09-18T11:50:00.000Z\n')).toBe(true);
+  });
+
+  it('round-trips a record carrying a host', () => {
+    const r = record({ host: 'futin@linux-box' });
+    expect(parseClaim(comment({ body: renderClaim(r) }))).toEqual(r);
+  });
+
+  /* No `v: 2` for this field: a claim an older build wrote parses here with
+     `host` simply absent, and absent means "the machine was not recorded" —
+     never "local", which is the inference this whole bug is about. */
+  it('parses a v-1 claim with no host key, leaving host undefined', () => {
+    const parsed = parseClaim(comment());
+    expect(parsed?.host).toBeUndefined();
+    expect(parsed?.session).toBe('A');
+  });
+
   it('answers null for a comment with no marker', () => {
     expect(parseClaim(comment({ body: 'just a conversation comment' }))).toBeNull();
   });

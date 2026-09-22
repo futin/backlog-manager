@@ -830,6 +830,28 @@ function sessionIdentity(env = process.env) {
   return `${os.userInfo().username}@${os.hostname()}`
 }
 
+// WHERE this session is, for the claim protocol (bug-46). `<user>@<host>` — the identifier a reader on ANOTHER machine can act on, which a session id is
+// precisely not: it names a transcript under `~/.claude/projects` on exactly one host, so the only check a remote reader can run ("is there a session by that
+// id here?") answers no for every foreign claim, live or dead, and that no gets read as proof of death.
+//
+// Deliberately NOT folded into `sessionIdentity`, whose return value is compared for equality in three places (`stop`'s holder check, and the server's
+// heartbeat and release author tests): a composite identity would stop matching across a version gap, so a new build could not release a claim an old build
+// wrote. The host rides BESIDE the identity, never inside it.
+function hostIdentity() {
+  return `${os.userInfo().username}@${os.hostname()}`
+}
+
+// The two halves of a refusal that names a holder, decided in one place so the three sites cannot drift apart (bug-46).
+//
+// When the claim recorded a machine, both sides are named — that comparison is the whole answer a reader needs. When it did not, the line degrades to the one
+// it always printed, INCLUDING this session's half: a sentence that says where we are beside a blank where they are invites exactly the inference this bug is
+// made of, that a claim nothing local can account for is litter. Absence has to read as "the machine was not recorded", and the only way to say that is to
+// say nothing about machines at all.
+function refusalSides(holderHost, session) {
+  if (typeof holderHost !== 'string' || holderHost.trim() === '') return { theirs: '', mine: session }
+  return { theirs: ` on ${holderHost}`, mine: `${session} on ${hostIdentity()}` }
+}
+
 // Read a file the caller named, as bytes, for the flags that carry an item's text (`--body`, `--outcome`). Its own helper so every one of them reports a
 // missing file the same way — and so none of them silently sends an empty body, which for `body` would blank an issue.
 function readTextFile(file, flag) {
@@ -2322,8 +2344,13 @@ export async function main(argv) {
         console.log(`phase: ${item.phase}`)
         // Empty rather than absent when nobody holds the issue: a key that disappears is a second shape for every reader to handle, and `claim-session:` with
         // nothing after it says "unheld" as plainly as a sentence would.
-        console.log(`claim-session: ${claim === null || claim.record.released !== undefined ? '' : claim.record.session}`)
+        const heldClaim = claim === null || claim.record.released !== undefined ? null : claim.record
+        console.log(`claim-session: ${heldClaim === null ? '' : heldClaim.session}`)
+        // And WHERE, when the claim recorded it (bug-46) — empty for a claim written before that field existed, which means "the machine was not recorded"
+        // and never "this one". `this-host:` is always filled: a session always knows its own machine.
+        console.log(`claim-host: ${heldClaim === null ? '' : (heldClaim.host ?? '')}`)
         console.log(`this-session: ${session}`)
+        console.log(`this-host: ${hostIdentity()}`)
         console.log(`groom-elapsed: ${item.groomElapsed}`)
         console.log(`execute-elapsed: ${item.executeElapsed}`)
         console.log(`groom-tokens: ${item.groomTokens}`)
@@ -2514,7 +2541,9 @@ export async function main(argv) {
           const session = sessionIdentity()
           let claimed
           try {
-            claimed = await apiPost('claim', { project, id: wanted, phase, session })
+            // `host` beside the session, never inside it (bug-46): the server must not derive one, because it may be running in the compose stack where
+            // `os.hostname()` is a container id rather than the machine anybody is sitting at.
+            claimed = await apiPost('claim', { project, id: wanted, phase, session, host: hostIdentity() })
           } catch (e) {
             /* A lost race is reported with the AGE of the holder's heartbeat, which the server computed on its own clock and put in the payload — the CLI
                must not subtract two clocks to get it. The age is the whole of what a reader needs in order to decide what to do: fresh means wait or ask,
@@ -2523,7 +2552,8 @@ export async function main(argv) {
               const h = e.payload.holder
               /* Both sides named, always (bug-45). The holder's id alone is unreadable: a session cannot tell whether `e33d0074` is somebody else or
                  itself, and the one that could not tell went on to groom an issue another machine was executing. */
-              console.error(`${wanted} is already in progress (session ${h.session}, heartbeat ${roughAge(h.ageMs)} ago) — this session is ${session}`)
+              const sides = refusalSides(h.host, session)
+              console.error(`${wanted} is already in progress (session ${h.session}${sides.theirs}, heartbeat ${roughAge(h.ageMs)} ago) — this session is ${sides.mine}`)
               return 1
             }
             throw e
@@ -2545,7 +2575,9 @@ export async function main(argv) {
         const session = sessionIdentity()
         const ageMs = Math.max(0, Date.now() - Date.parse(held.record.heartbeat))
         if (held.record.session !== session && ageMs < CLAIM_STALE_MS) {
-          console.error(`${wanted} is held by session ${held.record.session} (heartbeat ${roughAge(ageMs)} ago) — not this one`)
+          console.error(
+            `${wanted} is held by session ${held.record.session}${refusalSides(held.record.host, session).theirs} (heartbeat ${roughAge(ageMs)} ago) — not this one`,
+          )
           return 1
         }
 
@@ -2676,7 +2708,8 @@ export async function main(argv) {
         } catch (e) {
           if (e instanceof BacklogError && e.status === 409 && e.payload && e.payload.holder) {
             const h = e.payload.holder
-            console.error(`${wanted} is held by session ${h.session} (heartbeat ${roughAge(h.ageMs)} ago) — this session is ${session}`)
+            const sides = refusalSides(h.host, session)
+            console.error(`${wanted} is held by session ${h.session}${sides.theirs} (heartbeat ${roughAge(h.ageMs)} ago) — this session is ${sides.mine}`)
             return 1
           }
           throw e

@@ -4,9 +4,12 @@ title: a claim names a session id and no host, so a session on another machine r
 created: 2026-09-21
 tags: tracker, claim, multi-machine
 runner-fix: true
-updated: 2026-09-21T20:30:25Z
+updated: 2026-09-22T08:44:01Z
 groom-elapsed: 267
 groom-tokens: 53957
+started: 2026-09-22T08:05:52Z
+execute-elapsed: 2289
+execute-tokens: 257424
 ---
 
 ## Symptom
@@ -134,3 +137,53 @@ No browser check: nothing here is rendered.
 Adding a host is not the whole answer on its own — a hostname is still just a string to a reader on a different machine, and a session that wants to take an
 item can rationalise around any label. What it buys is the removal of a false NEGATIVE: today "I cannot find this session" is evidence of death, and it must
 stop being that. Related: [bug-47](bug-47-a-refusal-that-prints-heartbeat-age-reads-as-a-countdown-and-execute-has-no-stop-clause.md).
+
+## Outcome
+
+2026-09-22 — fixed as planned, all eight steps. `ClaimRecord` gained an optional `host` (`<user>@<host>`), written by whichever CLI took the claim and echoed
+everywhere a holder is named; `session` was not widened, because three checks compare it raw. `ItemClaimRequest.host` is validated by a new `optional()` helper
+in `items-write.controller.ts` — a non-empty string or a 400 naming the field — and is never derived server-side, since a hostname read inside the compose
+stack is a container id. `GithubSource.claim` writes the key only when the request carried one, and the `holder` payload of all three 409s (claim, release,
+heartbeat) now carries `host`. `renderClaim` says `session <s> on <host> holds this issue (<phase>) since <at>` when a host is present and today's sentence
+byte-for-byte when it is not. `backlog.mjs` and `orchestrate.mjs` each grew their own two-line `hostIdentity()` (a skill's `tools/` may never import another's)
+and send it on their claim POSTs; `backlog.mjs`'s three refusal sites go through one `refusalSides()` helper, so a refusal whose holder recorded no host
+degrades WHOLE and names neither machine — naming ours beside their blank invites exactly the reading this bug is made of. `show` prints `claim-host:` and
+`this-host:` beside the session lines, empty rather than absent.
+
+Verification — `pnpm run typecheck`, then both test runners:
+
+```
+TSC EXIT 0
+
+$ pnpm run test:skills
+ℹ tests 763
+ℹ pass 763
+ℹ fail 0
+
+$ pnpm run test:jest
+Test Suites: 1 failed, 128 passed, 129 total
+Tests:       2 failed, 2146 passed, 2148 total
+
+  ● the platform behaviour this helper exists for › lets a wildcard listen(port) succeed on a port 127.0.0.1 already holds
+  ● the platform behaviour this helper exists for › routes the IPv4 dial to the squatter, not to the wildcard listener
+```
+
+Those two are the known WSL-kernel environmental failures in `test/supertest-bind.test.ts` — red on a pristine tree before any of this work, and untouched by
+it.
+
+Contract sweep: 7 sites updated (docs/subsystems/api.md, docs/subsystems/skills.md, docs/subsystems/invariants.md, .claude/rules/tracker.md,
+.claude/rules/items.md, skills/backlog/SKILL.md, skills/backlog-groom/SKILL.md)
+
+Red proof: 11 tests went red with the change reverted
+
+Per file, reverting only the production files that test file pins: `skills/backlog/tools/backlog.test.mjs` 4 red, `orchestrate.test.mjs` 1 red,
+`test/tracker-write.test.ts` 5 red, `test/tracker-claim.test.ts` 1 red. Four of the new cases stay green under their revert, deliberately, and each guards an
+omission rather than an addition: `renderClaim`'s no-host sentence (it would go red if the new branch appended ` on undefined`), the two `parseClaim`
+round-trip cases (parse passes unknown fields through, which is the property being pinned), and "writes no `host` key when the caller sent none". A fifth,
+`API mode: start posts claim with the session identity …`, predates this fix and was updated to destructure `host` out of its exact-body assertion; it is
+counted among the 4 red above.
+
+Note for whoever picks up [bug-47](bug-47-a-refusal-that-prints-heartbeat-age-reads-as-a-countdown-and-execute-has-no-stop-clause.md): its §Fix quotes the
+refusal line as `#5 is already in progress (session <s> on <host>, heartbeat 12s ago) — this session is <mine>`. That is now what the line prints, except that
+the trailing half also carries this session's machine (`— this session is <mine> on <myhost>`), and both halves drop their machine together when the holder's
+claim recorded none.

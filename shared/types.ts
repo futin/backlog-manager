@@ -1694,6 +1694,30 @@ export interface ClaimRecord {
    *  has none. Never a GitHub login — two sessions on one machine under one
    *  account are two claimants, and the login cannot tell them apart. */
   session: string;
+  /**
+   * WHERE the holder is — `<user>@<host>`, written by whichever CLI took the
+   * claim (bug-46). Never derived server-side: this server may be running in
+   * the compose stack, where `os.hostname()` is a container id rather than the
+   * machine anybody is sitting at.
+   *
+   * Optional because every claim stored before this field existed has none,
+   * and **absent means "the machine was not recorded", never "local"** — a
+   * reader must not infer that a hostless claim is its own. That inference is
+   * the whole bug: `session` alone names a transcript under
+   * `~/.claude/projects` on exactly one host, so the one check a remote reader
+   * can actually run answers "no" for every foreign claim, live or dead, and
+   * the "no" gets read as proof of death.
+   *
+   * No `v: 2` for it: `parseClaim` accepts `v: 1` and passes unknown fields
+   * through, so an old build ignores `host` and a new build reading an old
+   * claim says less rather than throwing — the precedent `run` and `state`
+   * set. And `session` is NOT widened to carry it: three sites compare
+   * `session` raw (`stop`'s holder check, `heartbeat`'s and `release`'s author
+   * tests, `claim`'s same-run takeover), so a composite value would stop
+   * matching across a version gap — a new build could not release a claim an
+   * old build wrote.
+   */
+  host?: string;
   /** Which skill phase is running, the same vocabulary `BacklogItem.phase`
    *  carries and for the same reason: it decides which pair of counters a
    *  `release` bills into. */
@@ -1928,6 +1952,17 @@ export interface ItemClaimRequest extends ItemWriteRequest {
   phase: 'groom' | 'execute';
   session: string;
   /**
+   * The machine the claiming session is on (bug-46), written verbatim into
+   * `ClaimRecord.host`. **CLI-sent, never derived here**: this server may be
+   * running in the compose stack, where `os.hostname()` is a container id
+   * rather than the machine anybody is sitting at.
+   *
+   * Absent for any caller that does not send one, which is every build older
+   * than this one — validated as a non-empty string when present, the shape
+   * rule `session` already follows.
+   */
+  host?: string;
+  /**
    * The orchestrator run taking the claim (task-47), written verbatim into
    * `ClaimRecord.run`. Absent for a skill claim — `backlog.mjs start` sends no
    * `run` key at all, and that is what makes a hand claim un-takeoverable.
@@ -2049,6 +2084,10 @@ export interface ClaimRefused {
   error: string;
   holder: {
     session: string;
+    /** Where the holder is, when the claim recorded it (bug-46). Absent means
+     *  the claim was written before this field existed — never that the holder
+     *  is on the reader's own machine. */
+    host?: string;
     heartbeat: string;
     ageMs: number;
     commentId: number;

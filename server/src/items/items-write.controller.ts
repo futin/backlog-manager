@@ -134,10 +134,11 @@ export class ItemsWriteController {
       throw new HttpException({ error: 'phase must be groom or execute' }, 400);
     }
     const session = required(raw.session, 'session');
+    const host = optional(raw.host, 'host');
     const run = claimRunOf(raw.run);
 
     const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.claim(w.project, w.marker, { project, id, phase, session, run }));
+    return this.answer(await w.writer.claim(w.project, w.marker, { project, id, phase, session, host, run }));
   }
 
   /** Give it back, billing the counters the CALLER computed — the CLI is the
@@ -295,6 +296,23 @@ function text(value: unknown): string {
 function required(value: unknown, field: string): string {
   const trimmed = text(value);
   if (trimmed === '') throw new HttpException({ error: `${field} is required` }, 400);
+  return trimmed;
+}
+
+/**
+ * A field that may be absent, but must be a non-empty string when it is there
+ * — `host`'s rule (bug-46), which is `required`'s minus the requirement.
+ *
+ * The middle case is the one worth the helper: a caller that sent `host: 7` or
+ * `host: '  '` has made a mistake, and answering 400 says so where dropping
+ * the field would publish a claim that is silently missing the one thing this
+ * field exists to carry. `undefined` is the only value that means "did not
+ * send one", so a `null` is a 400 too.
+ */
+function optional(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = text(value);
+  if (trimmed === '') throw new HttpException({ error: `${field} must be a non-empty string` }, 400);
   return trimmed;
 }
 

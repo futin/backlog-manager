@@ -361,6 +361,12 @@ export class GithubSource implements ItemSource, ItemWriter {
       // claim from a run's. Keeping the two spellings identical means the
       // comment and the response say the same thing.
       if (req.run !== undefined) record.run = req.run;
+      // `host` the same way and for the same reason (bug-46): written only
+      // when the caller sent one, so a claim from a build that does not send
+      // it carries no `host` key at all — and absent stays readable as "the
+      // machine was not recorded" rather than becoming an empty string a
+      // reader has to interpret.
+      if (req.host !== undefined) record.host = req.host;
       const posted = await this.client.createComment(repo, number, renderClaim(record), { token });
       if (posted.status !== 201 || posted.data === null) return { ok: false as const, refusal: refusalFor(posted) };
       const mine = posted.data;
@@ -442,6 +448,11 @@ export class GithubSource implements ItemSource, ItemWriter {
             error: `#${number} is already in progress (session ${holder.record.session})`,
             holder: {
               session: holder.record.session,
+              // bug-46: the refusal is read on a machine that is not the
+              // holder's, which is the only case a lock is needed for at all.
+              // The session id alone is the one identifier that reader cannot
+              // resolve; `host` is the one they can.
+              host: holder.record.host,
               heartbeat: holder.record.heartbeat,
               ageMs: ageMsOf(holder.record.heartbeat, now),
               commentId: holder.commentId
@@ -552,7 +563,7 @@ export class GithubSource implements ItemSource, ItemWriter {
         return {
           refused: 'conflict',
           error: `#${number} is held by session ${existing.session}`,
-          holder: { session: existing.session, heartbeat: existing.heartbeat, ageMs: ageMsOf(existing.heartbeat, now), commentId: req.commentId }
+          holder: { session: existing.session, host: existing.host, heartbeat: existing.heartbeat, ageMs: ageMsOf(existing.heartbeat, now), commentId: req.commentId }
         };
       }
       return {
@@ -627,7 +638,7 @@ export class GithubSource implements ItemSource, ItemWriter {
         return {
           refused: 'conflict',
           error: `claim ${req.commentId} on #${number} belongs to session ${existing.session}`,
-          holder: { session: existing.session, heartbeat: existing.heartbeat, ageMs: ageMsOf(existing.heartbeat, now), commentId: req.commentId }
+          holder: { session: existing.session, host: existing.host, heartbeat: existing.heartbeat, ageMs: ageMsOf(existing.heartbeat, now), commentId: req.commentId }
         };
       }
       if (existing.released !== undefined) {

@@ -82,13 +82,17 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new tasks "<title>" 
 is what makes a re-groom safe: a body patch that said nothing about the marker would otherwise clear a decision somebody made deliberately. Passing both
 is a usage error, exit `1`, with nothing sent.
 
-**"Already in progress" reads differently here.** The refusal names the holder's session, how long ago its heartbeat was, and — after `—` — the id of THIS
-session, so the two are comparable without going looking for either (bug-45):
+**"Already in progress" reads differently here.** The refusal names the holder's session and the machine it is on, how long ago its heartbeat was, and —
+after `—` — the id and machine of THIS session, so the two are comparable without going looking for either (bug-45, bug-46). A claim recorded before bug-46,
+or by a build that does not send one, has no machine to name: there the line degrades whole and names neither side's, because "their session, nowhere" printed
+beside "ours, here" is exactly the reading this skill must not take. Either way:
 
 - **Stale past 15 minutes** — the protocol retires it for you the moment you claim. The takeover is `start <id> --as groom` alone; do **not** `stop --abandon`
   first, and do not ask the user. A dead claim is litter, not somebody's property.
 - **Live** — that is another session working right now, on this machine or another one. This is the three-way question this skill has always asked the user,
-  unchanged, and the answer is theirs.
+  unchanged, and the answer is theirs. **A holder you cannot find locally is not a dead holder** (bug-46): a session id names a transcript under
+  `~/.claude/projects/` on exactly one host, so `ls` and `ps` answer "no" for every claim taken on another machine, live or dead. The heartbeat age in the
+  refusal is the liveness evidence; the holder's machine, when the claim records one, is why the local search was always going to come up empty.
 
 **`Groomed on disk only` is NOT printed for a tracker project.** There is nothing on disk and nothing to commit: the groom is on GitHub the moment the call
 returns, visible to every machine, and an orchestrator run reads it from there. Printing it would send the user looking for a file to `git add` that does not
@@ -96,7 +100,7 @@ exist. The line and its whole section below apply to a files project only.
 
 **Heartbeat between long steps.** A groom that spends ten minutes reading code with no `heartbeat <id>` has a claim another session is entitled to retire. It
 is not a way to ask whether the item is still yours: only the holder may beat, so a heartbeat on another session's claim is refused naming both of them, and
-`show`'s `claim-session:`/`this-session:` lines are the reading to take.
+`show`'s `claim-session:`/`claim-host:` and `this-session:`/`this-host:` lines are the reading to take.
 
 ## Refusals — rule these out before picking a verdict
 
