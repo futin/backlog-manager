@@ -577,6 +577,28 @@ describe('release', () => {
   });
 
   /**
+   * The one release that DOES unassign (bug-49's sibling). A session torn down
+   * mid-item passes through no terminal stage, so the assignee it was given by
+   * winning the claim records nothing that happened — the work did not finish,
+   * and the issue goes on reading as owned by somebody who is gone. An abort is
+   * the one reason that says exactly this, which is why the rule keys on it
+   * rather than on every release: after `stopped`, `merged` or `imported`, the
+   * assignee is a true record of who did the work and stays.
+   */
+  it('an aborted release clears the assignee the claim set, unlike every other reason', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-progress' }], assignees: [{ login: 'futin' }] });
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+
+    await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'A', reason: 'aborted' }).expect(201);
+
+    expect(gh.issues.get(31)?.assignees).toEqual([]);
+    // The claim comment is still the record of who held it — unassigning takes
+    // nothing away that the timeline does not keep.
+    expect(claimIn(100)?.released?.reason).toBe('aborted');
+  });
+
+  /**
    * The 404 the item's Test cases name by hand: "`removeLabel`'s 404 answers
    * `status: 404` (the poller/writer treats it as success — assert THAT in the
    * writer suite, not here)". `test/tracker-client-write.test.ts` pins the

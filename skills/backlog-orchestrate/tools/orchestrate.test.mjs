@@ -6724,6 +6724,26 @@ test('the preflight claim carries the machine it was taken on, and a refusal nam
   assert.match(written.queue[0].note, /^claimed elsewhere \(session other-machine on futin@mac, heartbeat 42s ago\)/);
 });
 
+/* The driver publishes the same machine name `backlog.mjs` does, because the server's release clause compares the two strings for equality: a run that
+   claimed as `<user>@<host>` while a hand `abort` on the same box claimed as the nickname could not release its own item. Set in the environment, read in
+   both tools, and blank reads as unset in both. */
+test('the preflight claim carries BM_MACHINE_NAME when the machine has been given a name', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const before = process.env.BM_MACHINE_NAME;
+  process.env.BM_MACHINE_NAME = 'linux-box';
+  t.after(() => {
+    if (before === undefined) delete process.env.BM_MACHINE_NAME;
+    else process.env.BM_MACHINE_NAME = before;
+  });
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+  });
+
+  assert.equal(posts(requests, 'claim')[0].body.host, 'linux-box');
+});
+
 test('every stage after preflight publishes the queue item onto the claim', async (t) => {
   const { home, project } = trackerFixture(t);
 

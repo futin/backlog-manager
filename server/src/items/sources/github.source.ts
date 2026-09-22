@@ -627,9 +627,33 @@ export class GithubSource implements ItemSource, ItemWriter {
          `if (removed.status !== 200) return refusal` here would break every
          release of an already-clean claim with nothing going red. */
       await this.client.removeLabel(repo, number, 'in-progress', { token });
-      // The assignee is deliberately left alone. It records who last worked the
-      // issue, which stays true after they stop, and clearing it would throw
-      // away the one field a person scanning the repo's issue list can see.
+
+      /* The assignee is left alone by every reason but ONE, and the exception
+         is `aborted` (bug-49's sibling).
+
+         Ordinarily it records who last worked the issue, which stays true after
+         they stop, and clearing it would throw away the one field a person
+         scanning the repo's issue list can see. An abort says something else:
+         the session was torn down without passing through a terminal stage, so
+         the assignee it was handed for WINNING the claim records no work at
+         all, while the issue goes on reading as owned by a machine that is
+         gone. That is the same false signal the `in-progress` label above is
+         removed for, arriving through the other field the claim writes.
+
+         Keyed on the reason rather than on the release, because the reason is
+         the only thing that distinguishes "stopped holding it" from "never
+         finished": `stopped`, `merged` and `imported` all leave a true record.
+         `aborted` is the word `orchestrate.mjs abort` and `backlog.mjs abort`
+         both already write, so there is no new vocabulary here to keep in step.
+
+         The result is ignored for the same reason `removeLabel`'s is, and the
+         cache is updated when it is not: by this point the claim comment is
+         already edited and the release HAS happened, so a failure here must not
+         report it as one that did not. */
+      if (req.reason === 'aborted') {
+        const unassigned = await this.client.updateIssue(repo, number, { assignees: [] }, { token });
+        if (unassigned.status === 200 && unassigned.data !== null) this.poller.absorbIssue(repo, unassigned.data);
+      }
     });
   }
 

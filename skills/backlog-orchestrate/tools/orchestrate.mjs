@@ -782,7 +782,12 @@ function sessionIdentity() {
 // WHERE this driver is (bug-46), for the claim protocol. Its own two lines rather than an import: a skill's `tools/` may never import another's, so the
 // duplication with `backlog.mjs`'s `hostIdentity` is the rule rather than a shortcut. Sent beside the session, never folded into it — the session id is an
 // equality key three separate checks compare raw.
-function hostIdentity() {
+// `BM_MACHINE_NAME` overrides it, for the reason and with the blank-is-unset rule `backlog.mjs`'s copy states in full. It is read HERE as well as there
+// because the two tools claim on the same machine and the server's release clause compares the strings for equality: a driver that published the hostname
+// while a hand `abort` published the nickname could not release its own run's claim.
+function hostIdentity(env = process.env) {
+  const nickname = env.BM_MACHINE_NAME;
+  if (typeof nickname === 'string' && nickname.trim() !== '') return nickname.trim();
   return `${os.userInfo().username}@${os.hostname()}`;
 }
 

@@ -837,7 +837,20 @@ function sessionIdentity(env = process.env) {
 // Deliberately NOT folded into `sessionIdentity`, whose return value is compared for equality in three places (`stop`'s holder check, and the server's
 // heartbeat and release author tests): a composite identity would stop matching across a version gap, so a new build could not release a claim an old build
 // wrote. The host rides BESIDE the identity, never inside it.
-function hostIdentity() {
+// `BM_MACHINE_NAME` overrides both halves, and it is a PRIVACY setting before it is a cosmetic one: a claim comment on a PUBLIC repository publishes this
+// string to everybody, and the default spells out the OS username and the machine's real hostname — which on this author's laptop is a router-assigned UUID
+// that says nothing to a person and plenty to a stranger. A name the owner of the box chose reads better to the next person AND discloses only what they
+// picked. Hashing would hide the same thing and cost the readability bug-46 added the field for; a digest is a word no reader can act on.
+//
+// Blank reads as unset, deliberately: `ClaimRecord.host` says absence means "the machine was not recorded", so an empty setting has to degrade to the default
+// rather than put a claim on the board held by the empty string.
+//
+// Read from the environment and nowhere else, exactly as `BM_API_PORT` and `BM_REGISTRY_FILE` are. `orchestrate.mjs`'s own `hostIdentity` reads the SAME
+// variable and must keep doing so: the two tools write claims on one machine, and the server's release clause compares those strings for equality, so a
+// machine that answered two different names could not release its own driver's claim by hand.
+function hostIdentity(env = process.env) {
+  const nickname = env.BM_MACHINE_NAME
+  if (typeof nickname === 'string' && nickname.trim() !== '') return nickname.trim()
   return `${os.userInfo().username}@${os.hostname()}`
 }
 

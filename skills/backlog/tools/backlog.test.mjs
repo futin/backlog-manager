@@ -4187,6 +4187,52 @@ test('API mode: show names the machine beside each session, empty when the claim
   assert.match(hostless.stdout, /claim-host: \n/)
 })
 
+/* ---------------------------------------------------------------------------
+ * `BM_MACHINE_NAME` — the name this machine publishes.
+ *
+ * `hostIdentity()` is written onto a claim comment, and on a PUBLIC repository that comment publishes the OS username and the hostname of every machine that
+ * ever touches an item. The nickname is the machine's own answer to "who are you" — chosen by the person who owns the box, compared for equality exactly as
+ * `<user>@<host>` was, and readable to the next person the way a digest would not be.
+ *
+ * It is read where `BM_API_PORT` and `BM_REGISTRY_FILE` are read, from the environment and nowhere else, and it changes NOTHING when it is unset.
+ * --------------------------------------------------------------------------- */
+
+test('API mode: BM_MACHINE_NAME is the machine a claim names, in place of <user>@<host>', async () => {
+  const { dir } = trackerFixture()
+  const claim = {
+    '/api/items': { body: { items: [apiItem({ projectPath: dir })], errors: [] } },
+    '/api/items/body': { body: '# body\n' },
+    '/api/items/claim': { body: null },
+  }
+
+  const { out } = await withApi(claim, async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine', BM_MACHINE_NAME: 'laptop' }), 'show', '31'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /this-host: laptop\n/)
+  // The username must not survive anywhere in the output: publishing it is the whole thing the nickname exists to stop.
+  assert.ok(!out.stdout.includes(os.userInfo().username), 'a nicknamed machine must not print its OS username')
+})
+
+test('API mode: a blank BM_MACHINE_NAME falls back to <user>@<host> rather than naming nobody', async () => {
+  const { dir } = trackerFixture()
+  const claim = {
+    '/api/items': { body: { items: [apiItem({ projectPath: dir })], errors: [] } },
+    '/api/items/body': { body: '# body\n' },
+    '/api/items/claim': { body: null },
+  }
+
+  const { out } = await withApi(claim, async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine', BM_MACHINE_NAME: '   ' }), 'show', '31'),
+  )
+
+  assert.equal(out.status, 0)
+  // An empty machine name is the state `ClaimRecord.host`'s own doc refuses to invent a word for: absence must mean "not recorded", so a blank setting has to
+  // read as no setting at all rather than as a claim held by the empty string.
+  assert.match(out.stdout, new RegExp(`this-host: ${os.userInfo().username}@`))
+})
+
 // The billing semantics `stopItem` already has, reproduced against a claim comment instead of frontmatter: the seeded total plus this session's seconds, into
 // the bucket the claim's own `phase` names.
 test('API mode: stop bills the elapsed seconds on top of the claim-s seeded counters', async () => {

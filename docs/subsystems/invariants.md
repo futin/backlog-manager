@@ -2736,6 +2736,30 @@ The plan for task-46 wrote the first listing as happening AFTER the post. It is 
 after our own post would have to come from the cache (up to a poll interval stale) or force a second edit of the comment just written. Listing first costs
 nothing — two listings either way — and the union still spans both, so the race semantics are untouched.
 
+**The machine a claim names is a name the machine's owner chose, when there is one.** `hostIdentity()` defaults to `<user>@<host>`, which is what bug-46
+needed: the one identifier a reader on another box can act on. On a PUBLIC repository that same string is published to everybody, and it spells out the OS
+username and the machine's real hostname — on the laptop this was noticed on, a router-assigned UUID that tells a person nothing and a stranger something.
+`BM_MACHINE_NAME` replaces it, blank reading as unset so the default survives an empty setting rather than putting a claim on the board held by the empty
+string.
+
+Hashing was the obvious alternative and is the wrong one. Only `session` and `host` are compared by equality, so those two COULD be digests and arbitration
+would still converge — but `heartbeat` and `at` are arithmetic (`isLive`) and `counters` are summed, so a hash cannot touch the rest of the record, and
+digesting the host destroys exactly the readability the field was added for. A bare digest of `user@host` is brute-forced in seconds (the input space is a
+handful of names), so hiding anything real would need an HMAC with a secret every machine shares — key distribution for a lock whose whole virtue is that it
+needs no shared infrastructure. A chosen nickname discloses only what its owner picked and stays a word the next person can read.
+
+Read from the environment and nowhere else, as `BM_API_PORT` is, and read in BOTH tools. That second half is not symmetry for its own sake: `backlog.mjs` and
+`orchestrate.mjs` both write claims on one machine, and the server's `sameHost` clause compares the two strings raw, so a machine that published the nickname
+from one tool and the hostname from the other could not release its own driver's claim by hand.
+
+**An aborted release clears the assignee; every other reason keeps it.** Winning a claim SETS the assignee, so it does double duty: a courtesy to a person
+scanning the issue list, and — unavoidably — a second in-progress signal beside the label. After `stopped`, `merged` or `imported` the first reading is the
+true one and the field stays, because it is the only record of who did the work that is visible without opening the issue. After `aborted` neither reading
+holds: the session was torn down mid-item, so it records no work, and what a reader sees is an issue owned by a machine that is gone. That is the same false
+signal `in-progress` is removed for, arriving through the other field the protocol writes, so it comes off with it — and nothing is lost, because the claim
+comment keeps the whole history either way. Keying on the reason rather than on the release is what keeps the two cases apart, and `aborted` is a word both
+`abort` commands already write.
+
 **A loser DELETES its own comment; a stale claim is RELEASED, never deleted.** That distinction is the whole reason a claim is a comment rather than a flag. A
 losing claim is litter this call chain created seconds ago and nobody has read. A stale claim is the permanent record of work somebody did, carrying the
 counters to prove it — deleting one to tidy up a flag would erase the only evidence that the work happened. The retiring session writes

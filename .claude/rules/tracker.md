@@ -22,7 +22,11 @@ paths: ["server/src/tracker/**"]
   mtime is at or after the claim's heartbeat — a check that is meaningful ONLY because the host refusal already ran, since on a foreign machine an absent
   transcript is bug-46's false negative. In files mode `abort` is exit 1 naming `stop <id> --abandon`. The split is billing's, for billing's reason (the CLI
   holds the clock and the transcripts), and the boundary it draws is a MISTAKE one, not a security one: `stop` has always sent a caller-supplied `session`.
-  `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second number. **A heartbeat names its author too, and the rule there is the holder or the claim's
+  `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second number. **Every release removes `in-progress`; exactly one reason also clears the
+  ASSIGNEE, and it is `aborted`** — the claim SETS the assignee when it wins, so after a session torn down mid-item that field records no work while still
+  reading as ownership, which is the same false signal the label is removed for arriving through the other field the protocol writes. `stopped`, `merged` and
+  `imported` keep it, because there it is a true record of who did the work. The `updateIssue(assignees: [])` result is ignored exactly as `removeLabel`'s is
+  (the comment is already edited, so the release HAS happened) and the cache absorbs the issue when it succeeds. **A heartbeat names its author too, and the rule there is the holder or the claim's
   own run, and nobody else** (bug-45): `ItemHeartbeatRequest.session` is required (a 400 without it, like `release`'s), `runId` is the same optional same-run
   assertion with the same `typeof`/`length` guards, and the check runs BEFORE the
   released branch, `finished` included — but a DEAD claim does not open to anyone, because reviving one is the harm (a rival's beats hold a claim live forever,
@@ -30,7 +34,10 @@ paths: ["server/src/tracker/**"]
   `start`'s lost-race line and `heartbeat`'s refusal both carry `— this session is <id>` — on `start` the rule bug-47 appended follows it rather than ending
   the line — `show` prints `claim-session:` (empty, never absent, when unheld) and `this-session:`, and `show --json` carries `session`. **A claim also says WHERE its holder is** (bug-46): `ClaimRecord.host` is `<user>@<host>`, optional
   because every stored claim predates it, absent meaning "the machine was not recorded" and NEVER "local". It is sent by whichever CLI took the claim
-  (`hostIdentity()` in `backlog.mjs` and again in `orchestrate.mjs` — a skill's `tools/` may never import another's) and never derived server-side, because
+  (`hostIdentity()` in `backlog.mjs` and again in `orchestrate.mjs` — a skill's `tools/` may never import another's) — **`BM_MACHINE_NAME` overrides it in
+  BOTH tools, and a blank one reads as unset**, because a claim comment on a public repository publishes whatever this returns and the default spells out the
+  OS username and the real hostname; the two copies must read the same variable, since the server's `sameHost` clause compares the strings for equality and a
+  machine answering two names could not release its own driver's claim — and never derived server-side, because
   the server may be in the compose stack where `os.hostname()` is a container id; `session` is NOT widened to carry it, since three checks compare `session`
   raw. `renderClaim` says `session <s> on <host> holds this issue …` when one is present and today's sentence byte-for-byte when it is not, the `holder` of
   all three 409s carries `host`, and `show` prints `claim-host:`/`this-host:`. A refusal that has no holder host degrades WHOLE — it names neither machine —
