@@ -866,6 +866,31 @@ The two named scripts stay the single copy of what each runner runs — `test-al
 
 The script has no test of its own on purpose: `scripts/test-all.test.mjs` would match `test:skills`'s own glob and spawn the whole suite from inside the suite.
 
+### Where a test file sits decides which runner executes it
+
+The union above is a statement about the one word `pnpm test`; this one is about the file. Each runner finds its suites by a glob and nothing else — jest's
+`testMatch` is `test/**/*.test.ts(x)`, `test:skills` is `node --test skills/*/tools/*.test.mjs scripts/*.test.mjs` — so a test file runs if and only if its
+path matches one of the three, and a file that matches none is not skipped in any way a gate can see: it is a file no runner opens, green by absence,
+indistinguishable at `pnpm test` from a file never written. That has happened in its most literal form: `test:skills` was first spelled
+`node --test skills/backlog/tools/`, node treated the bare directory as a module, and the script ran no tests at all (`e1f58e4`, 2026-08-26). The glob pair
+is the fix, and it names files by shape on purpose — which is why placement is stated as a convention every session loads rather than left to the globs:
+they cannot report what they did not match, so the path has to be right by construction.
+
+"Flat in `test/`" is convention rather than mechanism — jest's glob would descend — and it is kept so that the two subdirectories that do exist,
+`test/helpers/` and `test/fixtures/`, read as "not suites" from the path alone. The node side is the mirror image: `skills/*/tools/*.test.mjs` does not
+descend, so there the same property is enforced rather than kept. `backlog-retro`'s suite is split in two — `retro.test.mjs` for the CLI, spawned as a child
+process, and `retro-lib.test.mjs` for the modules under `tools/lib/` — and BOTH sit at the `tools/` level for exactly this reason:
+`tools/lib/retro-lib.test.mjs` would read as the natural home, match neither glob, and never run, with no red anywhere to say so.
+
+Cases that pin a skill's PROSE — `backlog-groom`'s stamp order and its closing `Groomed on disk only` line, `backlog-execute`'s pre-review checks and the
+`agents/backlog-reviewer.md` half that reads them — have no suite of their own to sit in: those two skills ship a `SKILL.md` and no `tools/`, and `agents/` is
+not under `skills/` at all, so nothing they own is within the node runner's reach. They live in `skills/backlog/tools/backlog.test.mjs`, which is within it,
+rather than in a `tools/` directory invented to hold a test for a skill that has no tool. The `Groomed on disk only` cases go one step further and assert
+`skills/backlog-orchestrate/SKILL.md`'s half of the seam in that same suite although orchestrate has `orchestrate.test.mjs` of its own, because the rule is
+two skills agreeing on one sentence, and a suite that reads only one half is green while the halves drift apart; the reviewer/execute pair is the same shape.
+Reading another skill's file as text is not importing it — no module edge is created — so the "one skill's `tools/` may never import another's" rule (the
+reason `linkedWorktreeInfo` exists twice, in the registry section above) is untouched.
+
 ## A supertest suite listens once, on `127.0.0.1`, through `listenLoopback`
 
 bug-33. A full `pnpm test` occasionally reported **exactly one** failed test out of ~1500, always a supertest assertion, always green on the very next run of
@@ -2266,8 +2291,8 @@ can introduce, and `test/claude-rules.test.ts` fails naming any file that has no
 third copy, free to drift from both CLAUDE.md and this file, and `backlog-execute`'s contract sweep would have had to visit it. Three TIERS is not that. Each
 tier says something the other two do not — the headline that the rule exists and what it forbids, the mechanism how it is implemented, this file why — and
 `test/claude-rules.test.ts` pins the seams: a rule file is bullets and nothing else, each anchored into this file exactly once; CLAUDE.md's linked headlines and
-the rule files' bullets are one multiset with one home per anchor, headlines byte-equal; a linked CLAUDE.md bullet is a headline and a link, and an unlinked one
-is at most 80 words, so mechanism cannot creep back into CLAUDE.md by either door. Because tier two states contract, the contract sweep visits
+the rule files' bullets are one multiset with one home per anchor, headlines byte-equal; a linked CLAUDE.md bullet is a headline and a link, and any other one
+is at most 80 words, so mechanism cannot creep back into CLAUDE.md by any door. Because tier two states contract, the contract sweep visits
 `.claude/rules/*.md` — the one cost the pointer design declined, paid knowingly.
 
 ### How this was measured
@@ -2347,6 +2372,10 @@ context panel in a fresh session. The nine rule files total 61,892 bytes and loa
 the twelve unlinked bullets (each under 60 words) and the two plain Conventions bullets — among them the "tests are flat in `test/`" paragraph, some 330 words
 of mechanism with no anchor to home it under, a candidate for a later move once it has one.
 
+Later the same day the paragraph got its anchor — § "Where a test file sits decides which runner executes it", under the `pnpm test` union — and
+moved into `tests.md` behind a one-line headline; guard 3 now caps a plain bullet at the same 80 words as an unlinked bold one, so the door it sat behind is
+shut. CLAUDE.md after that move: **232 lines / 23,633 bytes**, roughly 9.3k tokens by the same ratio, still to be confirmed against the panel.
+
 ### The end-to-end check, in this repo
 
 With the four pointer files in place, cwd this repo's `task-35` worktree, a `claude -p` session told to read one orchestrator file:
@@ -2362,13 +2391,26 @@ matcher treats `dir/**` as "the directory and everything under it".
 
 ### What the suite pins, and why it passes on nothing
 
-`test/claude-rules.test.ts` reads `.claude/rules/*.md` as source: every file declares a non-empty `paths:`; every `docs/subsystems/invariants.md#…` anchor
-resolves to a real `##`/`###` heading (with the slugifier itself checked against a heading known to round-trip, so a broken slugifier cannot pass by matching
-nothing against nothing); every glob matches at least one tracked file _today_, because a pattern that matches nothing is a rule that never fires and fails
-silently forever; every body line is a pointer; no file exceeds 25 lines.
+`test/claude-rules.test.ts` reads `.claude/rules/*.md` and CLAUDE.md as SOURCE — no YAML parser, no glob library; the frontmatter under test is one inline
+array a parser would hand back verbatim, and a multi-line `paths:` list deliberately reads as empty and fails the first case loudly, because nobody has proved
+the loader accepts that shape. Six guards run over the real tree. Every file declares a non-empty `paths:`, because a rule file without one loads at
+`session_start` in every session. Every `docs/subsystems/invariants.md#…` anchor a rule file cites resolves to a real `##`/`###` heading of this file, with the
+slugifier itself checked against a heading known to round-trip, so a broken slugifier cannot pass by matching nothing against nothing. Every glob matches at
+least one file _today_ — tracked or untracked-but-not-ignored, since a rule arriving in the same commit as the directory it scopes is the ordinary way a rule
+arrives — because a pattern that matches nothing is a rule that never fires and fails silently forever; the matcher is hand-rolled over the three shapes the
+files use (`dir/**`, which also names the directory itself, `dir/*.ts`, a literal path). Then the three tier guards the split added: a rule file is bullets
+and nothing else, each citing exactly one anchor; CLAUDE.md's linked headlines and the rule files' bullets are the same multiset of (anchor, headline), with
+one home per anchor; and a linked CLAUDE.md bullet is a headline and a link, while any other bullet — bold-led or plain, the plain shape since 2026-09-22 — is
+at most 80 words. The parsers both tiers are read through (`test/helpers/rule-tiers.ts`) are pinned on string fixtures first, in the same file, for the same
+reason the slugifier is: a parser that produced nothing would match nothing against nothing and pass every guard while asserting exactly zero.
 
-It passes **vacuously** on an absent or empty directory, and that is deliberate: P3 could have come back negative, in which case the correct deliverable was
-zero rule files and a recorded negative. A guard that went red in that world would have made the honest outcome look like a failure.
+"Passes on nothing" is now history, kept because the reason it changed is the point. Under task-35's pointer design the suite passed **vacuously** on an
+absent or empty directory, and that was deliberate: P3 could have come back negative, in which case the correct deliverable was zero rule files and a recorded
+negative, and a guard that went red in that world would have made the honest outcome look like a failure. The split changed what an empty directory means.
+CLAUDE.md now carries only the headline of every Why-linked rule, and the mechanism lives in the rule files alone — so zero rule files is no longer "nothing to
+guard" but "every rule's mechanism is missing", and the same-set guard says so, naming each headline it cannot find a home for. That is the one case that goes
+red on an empty `.claude/rules/`; the others still pass on it, and `ruleFilesIn` still answers `[]` for an absent directory, pinned by one case, so an absent
+directory fails at the guard that has something to say and not at a crash in the ones that do not.
 
 ## Settings is two pages, the page is the scope
 
