@@ -141,7 +141,13 @@ Plain `pnpm test` in this shell fails 8 node cases (`orchestrate.test.mjs` 346, 
 reading `actual: 'aj_macbook'`: `BM_MACHINE_NAME` is exported from `~/.zshenv` on this machine and those tests do not isolate it. Pre-existing and unrelated —
 this change touches no file under `skills/` — and 794/794 with the variable unset, above.
 
-Live check not run: it needs both machines on the fixed build and a repeated race on a tracker issue (the item's "Done when" second half).
+Live check, 2026-09-22 — passed. Both machines raced `futin/guide-manager#5` from their boards. The Mac run `run-20260922-213302` claimed first
+(`c5784526438`) and kept it; the Linux run `run-20260922-213421` posted `c5784546034` at 21:34:38, lost (`#5 skipped`) and deleted its comment — GitHub no
+longer listed it at 21:34:44. The Mac board still showed the loser as a remote run, and `/api/items/claim` still answered with it, until 21:35:00, then dropped
+both, and the claim route answered `c5784526438`. That is ~16 s from the first 5 s monitor sample, which fits the 10 s `RECONCILE_GRACE_MS` plus one poll tick
+and is within the item's "~15 s" at that sampling granularity. The Linux board stayed consistent throughout. One setup note: the Mac stack's `nest start --watch`
+had not picked up the merge (the bind-mounted watcher missed git's writes), so the first attempt ran the old build; `docker compose restart server` fixed it,
+checked by `reconcileClaimedIssues` appearing in `/app/dist/server/src/tracker/poller.service.js`.
 
 Contract sweep: 4 sites updated (`docs/subsystems/api.md` — "two conditional requests per connected repo" per tick; `.claude/rules/tracker.md` tracker-cache
 bullet; `docs/subsystems/invariants.md` tracker-cache section; `forgetComment`'s and `RepoState.comments`' doc comments in `server/src/tracker/poller.service.ts`,
