@@ -868,14 +868,15 @@ export class AgentsService {
     //
     // UNCODED, like the resume lock below and for the same reason:
     // `RUN_IN_PROGRESS_CODE` means "a run is alive right now", which both
-    // callers treat as a silent success. This one needs a person to act
-    // (cancel the stop), so it must not be swallowed.
+    // callers treat as a silent success. This one needs a person to read it
+    // — a stopped run is over, and its work is a new run's — so it must not
+    // be swallowed.
     if (run.stopRequested) {
       throw new HttpException(
         {
           error:
-            `run ${run.runId} has a stop request on file — nothing resumes a stopped run. Cancel the stop first ` +
-            'if this run should carry on; otherwise let it end.'
+            `run ${run.runId} has a stop request on file — nothing resumes a stopped run. ` +
+            'Let it end, and start a new run for the work that is left.'
         },
         409
       );
@@ -1135,9 +1136,12 @@ export class AgentsService {
    *
    * It is `pause()`'s sibling in every other respect — same refusal (a
    * `running` run, fresh or stale alike, and a stale one is the case this
-   * whole bug is about), same strict `cancel === true`, same independence
-   * from `BM_AGENTS`: recording the fact must work on a machine whose
-   * launcher is off, and the spawn half simply does not happen there.
+   * whole bug is about), same independence from `BM_AGENTS`: recording the
+   * fact must work on a machine whose launcher is off, and the spawn half
+   * simply does not happen there. What it does NOT share is the `cancel`
+   * direction (bug-53): a stop has already happened by the time this method
+   * returns, so there is nothing to withdraw, and the controller refuses
+   * `cancel: true` before this method is reached.
    *
    * **Why this is not `pause` with a flag.** A pause is read at two dispatch
    * gates and deliberately cannot strand half-finished work; a stop refuses
@@ -1145,7 +1149,7 @@ export class AgentsService {
    * decided the run should end rather than finish its item. Widening pause
    * would make every pause do the second thing. Two keys, one file.
    */
-  async stop(project: string, cancel: boolean): Promise<StopResult> {
+  async stop(project: string): Promise<StopResult> {
     // Read fresh, the same posture `pause()` takes and for the same reason:
     // the runId this request is pinned to has to be the run going right now.
     const run = this.orchestrator.runs().runs.find((r) => r.project === project);
@@ -1156,16 +1160,6 @@ export class AgentsService {
       // gate. Every other status is refused with one uncoded message: a run
       // that is `done`, `aborted`, `failed` or `paused` has already stopped.
       throw new HttpException({ error: 'no running run to stop for this project' }, 409);
-    }
-
-    if (cancel) {
-      // The same delete a pause cancel makes, on the same one file — a
-      // project has one control fact, and withdrawing it is withdrawing it
-      // whichever kind it was. Nothing is spawned: cancelling a stop is
-      // asking for the run to CARRY ON, which is `resume`'s job and not this
-      // route's to do implicitly.
-      clearPauseRequest(project);
-      return { stopRequested: stopRequestEffective(readPauseRequest(project), run), abortSession: null, abortRefused: null };
     }
 
     writePauseRequest(project, run.runId, new Date(), controlHome(), 'stop');

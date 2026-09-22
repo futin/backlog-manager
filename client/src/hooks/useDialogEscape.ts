@@ -21,6 +21,12 @@ import { useEffect, useRef } from 'react';
  * this module changed for that — which is the point of a stack whose entries
  * are removed by identity.
  *
+ * One entry is not a dialog at all, and it is not one of the three: bug-53's
+ * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens. It paints no
+ * scrim and floats over nothing, but it calls this hook while it is drawn,
+ * because the rule is about who owns the key — a listener of its own would run
+ * beside this one, and one press would close it and the dialog under it.
+ *
  * They stay `window` listeners rather than becoming element handlers because
  * none of these overlays traps focus (each one's own comment says so): Escape
  * has to work wherever focus happens to sit, including on the card button that

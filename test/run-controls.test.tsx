@@ -14,7 +14,7 @@ import type { OrchestratorRun } from '../shared/types';
 
 const fixture = rawFixture as OrchestratorRun;
 
-/** The five calls this component can make, all stubbed — every case here is
+/** The four calls this component can make, all stubbed — every case here is
  *  about what the component decides, never about what the API answers. */
 jest.mock('../client/src/lib/agents', () => {
   const actual = jest.requireActual('../client/src/lib/agents');
@@ -26,8 +26,7 @@ jest.mock('../client/src/lib/agents', () => {
     // bug-39. The default answer is the SUCCEEDING one — a stop recorded and
     // an abort session started — so a case about a refusal has to arrange it
     // rather than inherit it.
-    stopOrchestrate: jest.fn(() => Promise.resolve({ stopRequested: true, abortSession: 'sess-abort', abortRefused: null })),
-    cancelStopOrchestrate: jest.fn(() => Promise.resolve({ stopRequested: false, abortSession: null, abortRefused: null }))
+    stopOrchestrate: jest.fn(() => Promise.resolve({ stopRequested: true, abortSession: 'sess-abort', abortRefused: null }))
   };
 });
 
@@ -37,7 +36,6 @@ const agents = jest.requireMock('../client/src/lib/agents') as {
   cancelPauseOrchestrate: jest.Mock;
   resumeOrchestrate: jest.Mock;
   stopOrchestrate: jest.Mock;
-  cancelStopOrchestrate: jest.Mock;
 };
 
 const OPEN_GATE = { canResume: true, blockedReason: null };
@@ -128,7 +126,7 @@ describe('RunControls — what renders, by run', () => {
    * accepts. A `paused` run does not: it has already stopped, and the route
    * refuses it.
    */
-  const ALL_CONTROLS = ['run-controls-pause', 'run-controls-cancel', 'run-controls-stop', 'run-controls-cancel-stop', 'run-controls-resume'];
+  const ALL_CONTROLS = ['run-controls-pause', 'run-controls-cancel', 'run-controls-stop', 'run-controls-resume'];
 
   it.each([
     ['a fresh running run', { status: 'running' as const, fresh: true, pauseRequested: false }, ['run-controls-pause', 'run-controls-stop']],
@@ -414,69 +412,126 @@ describe('RunControls — the crashed run', () => {
 });
 
 /**
- * bug-39 — the Stop control, and the readings a stopped run carries.
+ * bug-39 — the Stop control, and the readings a stopped run carries — and bug-53, which put a confirmation between the click and the request and took the
+ * `Cancel stop` chip away.
  *
- * The rendering rules are covered by the exact-control-set table at the top
- * of this file and by `test/watchdog-coupling.test.tsx`'s stop leg (no Resume
- * under a stop, whatever the sweeper's state). What is left here is the
- * BEHAVIOUR: which call each control makes, what the head says once a stop is
- * on file, and how the one fact no later poll can re-supply — a refused
- * `--abort` spawn — reaches the reader.
+ * The rendering rules are covered by the exact-control-set table at the top of this file and by `test/watchdog-coupling.test.tsx`'s stop leg (no Resume
+ * under a stop, whatever the sweeper's state). What is left here is the BEHAVIOUR: that the first click asks rather than acts, which call the accepted
+ * confirmation makes, what the head says once a stop is on file, and how the one fact no later poll can re-supply — a refused `--abort` spawn — reaches
+ * the reader.
  */
 describe('RunControls — the stop', () => {
-  it('sends a stop for a fresh run and reports the change to its host', async () => {
+  /** The confirmation's three handles. One helper so a case cannot open it through anything but the Stop chip a person actually clicks. */
+  async function openConfirm(): Promise<void> {
+    await userEvent.click(screen.getByTestId('run-controls-stop'));
+  }
+
+  /**
+   * bug-53's first half, and the one that matters: a stop abandons the item in flight, removes its worktree and branch and ends the run for good, and
+   * before this fix one click did all of that. The click now asks, and the asking makes no request — the call COUNT is the assertion, because a
+   * confirmation drawn beside a request that already went out would look exactly like this one.
+   */
+  it('asks before stopping — the first click draws a confirmation and makes no request', async () => {
     const onChanged = renderControls({ status: 'running', fresh: true });
 
-    await userEvent.click(screen.getByTestId('run-controls-stop'));
+    await openConfirm();
 
+    expect(screen.getByTestId('run-controls-stop-confirm')).toBeInTheDocument();
+    expect(agents.stopOrchestrate).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  /* The confirmation names the consequences in the run's own terms — the item it will abandon by id, and that nothing brings the run back — because
+     "Are you sure?" is the confirmation people click through without reading. */
+  it('names the item in flight and says the run cannot be resumed', async () => {
+    renderControls({ status: 'running', fresh: true });
+
+    await openConfirm();
+
+    const inFlight = inFlightItemId(runFor().queue);
+    expect(inFlight).not.toBeNull();
+    const text = screen.getByTestId('run-controls-stop-confirm').textContent ?? '';
+    expect(text).toContain(inFlight as string);
+    expect(text).toMatch(/worktree and branch/);
+    expect(text).toMatch(/cannot be resumed/);
+  });
+
+  it('keeps the run when the confirmation is dismissed, and makes no request', async () => {
+    const onChanged = renderControls({ status: 'running', fresh: true });
+
+    await openConfirm();
+    await userEvent.click(screen.getByTestId('run-controls-stop-confirm-dismiss'));
+
+    expect(screen.queryByTestId('run-controls-stop-confirm')).toBeNull();
+    // Back to the resting row, Stop included, so a person who changed their mind can still change it back.
+    expect(screen.getByTestId('run-controls-stop')).toBeInTheDocument();
+    expect(agents.stopOrchestrate).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  /* Escape is `useDialogEscape`'s, like every other dismissal in this app (bug-23's one owner): the confirmation joins the stack while it is drawn,
+     so a press closes it and nothing under it. */
+  it('dismisses the confirmation on Escape, and makes no request', async () => {
+    renderControls({ status: 'running', fresh: true });
+
+    await openConfirm();
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.queryByTestId('run-controls-stop-confirm')).toBeNull();
+    expect(agents.stopOrchestrate).not.toHaveBeenCalled();
+  });
+
+  /* The safe answer holds the focus, so a stray Enter after the click keeps the run rather than ending it. */
+  it('focuses the dismissal, not the stop', async () => {
+    renderControls({ status: 'running', fresh: true });
+
+    await openConfirm();
+
+    expect(screen.getByTestId('run-controls-stop-confirm-dismiss')).toHaveFocus();
+  });
+
+  it('sends exactly one stop once the confirmation is accepted, and reports the change to its host', async () => {
+    const onChanged = renderControls({ status: 'running', fresh: true });
+
+    await openConfirm();
+    await userEvent.click(screen.getByTestId('run-controls-stop-confirm-accept'));
+
+    expect(agents.stopOrchestrate).toHaveBeenCalledTimes(1);
     expect(agents.stopOrchestrate).toHaveBeenCalledWith(fixture.project);
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith('stop'));
   });
 
   /**
-   * A crashed run is the case this bug was filed about, and the control has to
-   * reach the same call from that branch — a Stop that only existed on a
-   * heartbeating run would be absent from precisely the runs that cannot be
-   * ended any other way.
+   * A crashed run is the case bug-39 was filed about, and the control has to reach the same call from that branch — a Stop that only existed on a
+   * heartbeating run would be absent from precisely the runs that cannot be ended any other way. Through the same confirmation: a dead heartbeat
+   * does not make the worktree it would abandon any less real.
    */
-  it('sends a stop for a crashed run too', async () => {
+  it('asks, then sends a stop, for a crashed run too', async () => {
     renderControls({ status: 'running', fresh: false });
 
-    await userEvent.click(screen.getByTestId('run-controls-stop'));
+    await openConfirm();
+    expect(agents.stopOrchestrate).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByTestId('run-controls-stop-confirm-accept'));
 
     expect(agents.stopOrchestrate).toHaveBeenCalledWith(fixture.project);
   });
 
-  it('says the run is being ended, and offers only the withdrawal', () => {
+  /**
+   * bug-53's second half. By the time a run reads `stopRequested`, the request that recorded it has already awaited the `--abort` spawn — the child
+   * is signalled, the worktree is going — so there is nothing left to withdraw, and a control offering to is a promise the server cannot keep. The
+   * note stays; no control of any kind is drawn beside it.
+   */
+  it('says the run is being ended, and offers no control at all', () => {
     renderControls({ status: 'running', fresh: true, stopRequested: true });
 
     expect(screen.getByTestId('run-controls-stop-note')).toHaveTextContent('Stopping');
-    expect(screen.getByTestId('run-controls-cancel-stop')).toBeInTheDocument();
-    // Not a second Stop, and not a Pause: the run is already ending, and a
-    // pause would be asking a run that is stopping to stop more politely.
-    expect(screen.queryByTestId('run-controls-stop')).toBeNull();
-    expect(screen.queryByTestId('run-controls-pause')).toBeNull();
-  });
-
-  it('withdraws the request through the cancel call, not the pause one', async () => {
-    const onChanged = renderControls({ status: 'running', fresh: true, stopRequested: true });
-
-    await userEvent.click(screen.getByTestId('run-controls-cancel-stop'));
-
-    expect(agents.cancelStopOrchestrate).toHaveBeenCalledWith(fixture.project);
-    // The two control files are one file, but the two ROUTES are not
-    // interchangeable: cancelling a stop through `pause`'s cancel would
-    // 409 on a run this one accepts.
-    expect(agents.cancelPauseOrchestrate).not.toHaveBeenCalled();
-    await waitFor(() => expect(onChanged).toHaveBeenCalledWith('cancel-stop'));
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
   });
 
   /**
-   * `abortRefused` is the one thing this component learns that no later poll
-   * can tell it: a refusal starts nothing and writes nothing, so there is
-   * nothing on disk for the runs payload to report. It is rendered from the
-   * click's own answer, beside the withdrawal, and it names the command a
-   * person can run instead.
+   * `abortRefused` is the one thing this component learns that no later poll can tell it: a refusal starts nothing and writes nothing, so there is
+   * nothing on disk for the runs payload to report. It is rendered from the click's own answer, beside the stopping note, and it names the command
+   * a person can run instead.
    */
   it('renders the refusal sentence the stop click came back with', async () => {
     agents.stopOrchestrate.mockResolvedValueOnce({
@@ -488,23 +543,23 @@ describe('RunControls — the stop', () => {
       <RunControls run={runFor({ status: 'running', fresh: true })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />
     );
 
-    await userEvent.click(screen.getByTestId('run-controls-stop'));
-    // The host's next poll turns the run into a stop-requested one, which is
-    // the state the refusal is drawn in — the same component instance, so the
+    await openConfirm();
+    await userEvent.click(screen.getByTestId('run-controls-stop-confirm-accept'));
+    // The host's next poll turns the run into a stop-requested one, which is the state the refusal is drawn in — the same component instance, so the
     // note it learned from the click survives the re-render.
     rerender(<RunControls run={runFor({ status: 'running', fresh: true, stopRequested: true })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId('run-controls-abort-refused')).toHaveTextContent('--abort'));
   });
 
-  /* bug-19's layer 1 again, over the branch bug-39 added: the guard is
-     `act`'s, so a branch that dispatched around it would fail this row and no
-     other. Two POSTs would be two `--abort` spawns into one run. */
-  it('fires exactly one stop for two clicks', () => {
+  /* bug-19's layer 1 again, over the branch bug-39 added and on the control bug-53 moved it to: the guard is `act`'s, so an accept that dispatched
+     around it would fail this row and no other. Two POSTs would be two `--abort` spawns into one run. */
+  it('fires exactly one stop for two clicks on the accept', async () => {
     agents.stopOrchestrate.mockImplementation(() => new Promise<void>(() => {}));
     render(<RunControls run={runFor({ status: 'running', fresh: true })} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
 
-    doubleClick(screen.getByTestId('run-controls-stop'));
+    await openConfirm();
+    doubleClick(screen.getByTestId('run-controls-stop-confirm-accept'));
 
     expect(agents.stopOrchestrate).toHaveBeenCalledTimes(1);
   });

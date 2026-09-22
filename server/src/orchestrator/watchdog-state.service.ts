@@ -149,10 +149,11 @@ export interface WatchdogEntry {
    * the shape `disabledLogged` above has. It is NOT a record that a stop was
    * ever requested: `stopRequested` is derived per request from the control
    * file, and this flag only answers "have I already said so in the log".
-   * Never cleared, unlike `exhaustedLogged`: a stop is withdrawn by deleting
-   * the control file, and the next thing the sweeper does with this entry is
-   * spawn — which logs a line of its own — so there is no second, genuinely
-   * new stop of the same run for a cleared flag to re-announce.
+   * Never cleared, unlike `exhaustedLogged`: a stop has no withdrawal on the
+   * board since bug-53, and the one way its file can still go — pause's
+   * `cancel`, or a hand delete — leaves the next thing the sweeper does with
+   * this entry a spawn, which logs a line of its own, so there is no second,
+   * genuinely new stop of the same run for a cleared flag to re-announce.
    */
   stoppedLogged: boolean;
 }

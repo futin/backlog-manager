@@ -2393,6 +2393,12 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-chip-flat { border-color: transparent; background: none }
 .ui-chip-flat:hover:not(:disabled) { background: var(--strip-hi) }
 .ui-chip-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline2)) }
+/* `Confirm` (bug-53) — the question and its two answers, drawn in the row the clicked control came from rather than floating over it (§8.7: nothing
+   else on this board floats). Full `--ink` for the question rather than `.run-controls-note`'s quiet `--ink2`: that tone says "a state, not an alert",
+   and this one IS asking for attention. It wraps rather than holding one line, because it names an item id and the consequences, and a Watchdog row is
+   narrower than the detail sheet's head. */
+.ui-confirm { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.ui-confirm-text { font-size: 12px; color: var(--ink); max-width: 52ch }
 /* `[aria-disabled]`, not `:disabled`, and it is a second state rather than a
    duplicate of the rule above: a natively disabled button leaves the tab order
    and the accessibility tree's interactive surface, and two of this board's

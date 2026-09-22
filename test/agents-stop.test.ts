@@ -200,17 +200,38 @@ describe('POST /api/agents/stop', () => {
     expect(body).not.toHaveProperty('ids');
   });
 
-  it('deletes the request on cancel, spawning nothing', async () => {
+  /**
+   * bug-53 — a stop cannot be withdrawn, and the route says so rather than
+   * pretending. By the time a `cancel` could arrive, the request that recorded
+   * the stop has already awaited the `--abort` spawn, so deleting the control
+   * file would restore no child, no worktree, no branch and no run. Refused
+   * with a 409 rather than dropped from the body, because an old client still
+   * sends `cancel: true` from a `Cancel stop` chip, and a route that ignored
+   * the flag would read that click as a SECOND stop — a second `--abort` spawn
+   * into a run that is already ending.
+   */
+  it('refuses cancel: true, leaving the stop on file and spawning nothing', async () => {
     writeRun(runningRun());
     await post({ project: projectPath }).expect(200);
     sent = [];
 
-    const res = await post({ project: projectPath, cancel: true }).expect(200);
+    const res = await post({ project: projectPath, cancel: true }).expect(409);
 
-    expect(res.body).toEqual({ stopRequested: false, abortSession: null, abortRefused: null });
-    expect(readPauseRequest(projectPath, controlRoot)).toBeNull();
-    // Cancelling a stop asks for the run to CARRY ON, which is a resume and
-    // belongs to the person rather than to this route.
+    expect(res.body.error).toMatch(/cannot be withdrawn/);
+    // Uncoded: RUN_IN_PROGRESS_CODE reads as a silent success to both of its
+    // readers, and this is a refusal a person has to read.
+    expect(res.body.code).toBeUndefined();
+    expect(readPauseRequest(projectPath, controlRoot)?.kind).toBe('stop');
+    expect(spawns()).toHaveLength(0);
+  });
+
+  /* Refused before the run is looked up: "a stop cannot be withdrawn" is true
+     of every run, so a project with none gets the same answer rather than the
+     no-run 409 that would suggest a withdrawal might work on another. */
+  it('refuses cancel: true the same way for a project with no run', async () => {
+    const res = await post({ project: projectPath, cancel: true }).expect(409);
+
+    expect(res.body.error).toMatch(/cannot be withdrawn/);
     expect(spawns()).toHaveLength(0);
   });
 
@@ -317,7 +338,7 @@ describe('POST /api/agents/stop', () => {
     expect(res.body.error).toMatch(/stop request/);
     // Uncoded, unlike the fresh-run refusal: both callers treat
     // RUN_IN_PROGRESS_CODE as a silent success, and this one needs a person
-    // to cancel the stop.
+    // to read it — a stopped run is over, and its work is a new run's.
     expect(res.body.code).toBeUndefined();
   });
 });

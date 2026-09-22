@@ -265,7 +265,7 @@ sweeper's inputs. This is that fact, in the one channel that already travels ser
 
 **`PauseRequest.kind` is `'pause' | 'stop'`, and absent means `'pause'`.** Every control file written before bug-39 lacks the key and means exactly what it
 has always meant. One control fact per project stays ONE FILE: a stop overwrites a pause, a pause overwrites a stop, last write wins in both directions, and
-`cancel` deletes either. Two files would be two facts to reconcile and the reconciliation would be a third rule nobody reads. An unrecognised `kind` is
+pause's `cancel` deletes either — `stop` itself has none (bug-53, below). Two files would be two facts to reconcile and the reconciliation would be a third rule nobody reads. An unrecognised `kind` is
 DROPPED rather than refusing the file, which makes it read as a pause — the safe direction, since the worst a misread stop can then do is stop at a boundary
 instead of immediately.
 
@@ -274,8 +274,7 @@ the same reason `pauseRequestEffective` was already duplicated). `stopRequestEff
 `requestedAt` post-dates `unpausedAt ?? startedAt` — plus `kind === 'stop'`. A stop is NOT a stronger pause: if the pause predicate also answered `true`, the
 run would take the cooperative path (`finish --status paused`) for a request whose whole point is that the cooperative path is not reaching it.
 
-**`POST /api/agents/stop`** is `pause`'s exact sibling — `SameOriginPostGuard`, `@HttpCode(200)`, body rebuilt field by field, `cancel === true` the only form
-honoured, independent of `BM_AGENTS` (recording the fact must work on a machine whose launcher is off), and refused unless the project has a `running` run,
+**`POST /api/agents/stop`** is `pause`'s sibling — `SameOriginPostGuard`, `@HttpCode(200)`, body rebuilt field by field, independent of `BM_AGENTS` (recording the fact must work on a machine whose launcher is off), and refused unless the project has a `running` run,
 **fresh or stale alike**, because a stale `running` run is the case this bug is about. Where it differs: it then attempts ONE spawn, through the gate
 `resume()` uses, of `/backlog-orchestrate --abort`.
 
@@ -283,6 +282,14 @@ honoured, independent of `BM_AGENTS` (recording the fact must work on a machine 
 `{ stopRequested, abortSession, abortRefused }`, and a gate refusal or a spawn failure is not an error — the request is on disk, the sweeper is already
 standing down on it and `abort` will already take the lease on the strength of it, so the refusal rides back in `abortRefused` naming the one command a person
 can run instead. A 5xx here would tell a caller the stop did not land when the half that matters did.
+
+**A stop cannot be withdrawn, so it asks first (bug-53).** The route's `cancel: true` was copied from pause's along with the rest of its shape, and the board
+drew it as a `Cancel stop` chip — but a pause is a REQUEST the run honours at the next boundary, so withdrawing it genuinely returns the run to where it was,
+while a stop is an ACT that completes inside the request recording it: `stop()` awaits the `--abort` spawn before it returns, so by the time any withdrawal
+could arrive the child is signalled and the worktree is going. Deleting the control file then restored nothing and read as an undo. So `cancel: true` is a
+409, refused before the run is looked up, rather than dropped from the body — an old client still sends it, and a route that ignored the flag would read that
+click as a second stop, a second `--abort` into a run already ending. The protection moved to the only place it can work, BEFORE the request: the Stop chip
+opens `ui/Confirm`, which names the item it abandons and says the run cannot be resumed, and only its accept sends the POST.
 
 **The spawn is unconditional, not "only for a stale run", and that IS the force stop.** If the real driver is alive, the abort session's `takeOverRun` write
 evicts it: its next command hits `assertDriver`, exits `7`, and stops immediately. That is the lease working as designed rather than being worked around,
@@ -1545,6 +1552,11 @@ Since task-40 the three do not call the hook themselves either: the two overlay 
 sheets', and each calls `useDialogEscape` once, so a fourth surface opened through either shell joins the stack by construction rather than by remembering to.
 The count is still three because the shells have three composers, and `test/dialog-escape.test.tsx` mounts all three together to prove the ranking holds across
 them.
+
+One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens, drawn inline in
+the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to one composer and nothing else floating. It calls
+`useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
+stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the

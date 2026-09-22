@@ -566,10 +566,11 @@ export interface PauseResult {
  * `abortSession` is the id of the `/backlog-orchestrate --abort` session the
  * route spawned, or `null` when it spawned none. `abortRefused` carries the
  * refusal's own sentence when that happened, and `null` otherwise — the two
- * are never both non-null, and a `cancel` answers `null` for both because it
- * spawns nothing. A gate refusal is deliberately NOT an error status here:
- * the request is on disk, so the honest answer is a 200 that says what did
- * and did not happen, plus the one command a person can run instead.
+ * are never both non-null. There is no `cancel` answer any more (bug-53): the
+ * route refuses one with a 409, because a stop cannot be withdrawn. A gate
+ * refusal is deliberately NOT an error status here: the request is on disk,
+ * so the honest answer is a 200 that says what did and did not happen, plus
+ * the one command a person can run instead.
  */
 export interface StopResult {
   stopRequested: boolean;

@@ -2,6 +2,10 @@
 id: bug-53
 title: Stop ends a run on one unconfirmed click and then offers a Cancel stop that cannot undo it
 created: 2026-09-22
+updated: 2026-09-22T19:42:09Z
+started: 2026-09-22T19:17:45Z
+execute-elapsed: 1464
+execute-tokens: 143519
 ---
 
 ## Symptom
@@ -87,3 +91,41 @@ Do NOT add a "resume a stopped run" path as compensation. A stopped run is over;
 - the decided behaviour of `POST /api/agents/stop` with `cancel: true` is asserted, whichever was chosen
 - test cases live in `test/run-controls.test.tsx` for the four client cases and `test/agents-stop.test.ts` for the route, both flat in `test/` per the
   jest convention
+
+## Outcome
+
+2026-09-22 — fixed. Cause confirmed live against the code: `stopControl`'s `onClick` called `stopOrchestrate` directly, and the `stopRequested` branch drew a
+`flat` `Cancel stop` over a stop whose `--abort` spawn `stop()` had already awaited.
+
+**Stop asks first.** New primitive `client/src/components/ui/Confirm.tsx`: the clicked chip is replaced IN PLACE by the question and two answers — not a
+modal, because DESIGN.md §8.7 keeps `Modal` to one composer and nothing else floating, and a box over the Runs page would cover the run it asks about. The
+question names the item in flight, says its worktree and branch are removed and that the run cannot be resumed; `Stop run` (`danger`) sends the one POST
+through `act` (bug-19's guard unchanged), `Keep running` (`flat`) holds the focus, and it and Escape send nothing. Escape goes through `useDialogEscape`, so
+the confirmation is topmost while drawn and closes alone; it is documented as a stack entry that is NOT one of the three dialogs, which keeps the
+`dialog-count-docs` count true.
+
+**`Cancel stop` is gone**, with `cancelStopOrchestrate` and the `'cancel-stop'` member of `RunControlsChange`. A stop-requested run shows the `Stopping` note
+(and the refused-abort sentence, when there is one) and no control at all.
+
+**Server decision: `POST /api/agents/stop` with `cancel: true` is a 409**, uncoded, `a stop cannot be withdrawn — …`, refused in the controller before the
+run lookup. Chosen over dropping the flag because an old client still sends it, and a route that ignored it would read that click as a SECOND stop — a second
+`--abort` spawn. `AgentsService.stop(project)` lost its `cancel` parameter. A string `'true'` is still a stop, as before. `clearPauseRequest` is untouched;
+pause's own cancel still deletes the control file of either kind. The resume refusal no longer says "Cancel the stop first" — it says to start a new run.
+
+Verification (`pnpm test`, then `pnpm run typecheck`):
+
+```
+Test Suites: 129 passed, 129 total
+Tests:       2194 passed, 2194 total
+Snapshots:   0 total
+# tests 784
+# suites 0
+# pass 784
+# fail 0
+typecheck exit 0
+```
+
+Not checked in a browser: no live run was available to click Stop on, so the look of the inline confirmation is covered by the tests and the CSS alone.
+
+Contract sweep: 12 files updated (.claude/DESIGN.md §8.4.1 and §8.7, .claude/rules/board.md, .claude/rules/orchestrator.md, docs/subsystems/invariants.md stop and Escape entries, docs/subsystems/board.md ×2, docs/subsystems/api.md, shared/types.ts `StopResult`, client/src/lib/agents.ts, client/src/hooks/useDialogEscape.ts, client/src/components/ui/Modal.tsx, server/src/orchestrator/watchdog-state.service.ts, and the resume refusal in server/src/agents/agents.service.ts). Left standing on purpose: `backlog/bugs/open/bug-54-…md` still says "`stop(cancel: true)` is untouched … clears the control file and spawns nothing" in its Done-when — another item's plan, which is groom's to edit, not execute's; bug-54 needs a re-groom line saying `cancel: true` is now a 409. `docs/superpowers/` plans that mention `Cancel stop` are historical records and were not rewritten.
+Red proof: 23 tests went red with the change reverted (10 stop cases in test/run-controls.test.tsx and 10 stop-leg rows in test/watchdog-coupling.test.tsx with both client halves reverted; 2 cases in test/agents-stop.test.ts with the controller refusal disabled; 1 case in test/dialog-escape.test.tsx with Confirm on its own `window` listener instead of `useDialogEscape`). Pause's own `Cancel` case (`cancels a pending pause`) was already present and stays green.

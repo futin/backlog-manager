@@ -415,6 +415,10 @@ export async function cancelPauseOrchestrate(project: string): Promise<PauseResu
  * The 200 body carries THREE facts, not one — the request landed, and
  * separately whether an `--abort` session was started for it. The caller
  * renders the second only when it is a refusal; see `StopResult`.
+ *
+ * It has no withdrawal half, unlike pause (bug-53): by the time this resolves
+ * the `--abort` spawn has already been awaited, so there is nothing a
+ * `cancel` could undo, and the route refuses one with a 409.
  */
 export async function stopOrchestrate(project: string): Promise<StopResult> {
   return unwrap<StopResult>(
@@ -422,20 +426,6 @@ export async function stopOrchestrate(project: string): Promise<StopResult> {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project })
-    })
-  );
-}
-
-/** The withdrawal half of `stopOrchestrate` above — `cancel: true` is the only
- *  form the server honours (a string `'true'` is read as a stop), so it is a
- *  literal here rather than anything derived from a caller. It spawns nothing:
- *  cancelling a stop asks for the run to carry on, which is `resume`'s job. */
-export async function cancelStopOrchestrate(project: string): Promise<StopResult> {
-  return unwrap<StopResult>(
-    await fetch('/api/agents/stop', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ project, cancel: true })
     })
   );
 }

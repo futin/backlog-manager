@@ -28,9 +28,11 @@ import { useNarrow } from '../../hooks/useNarrow';
  * none of them.** `useDialogEscape` is called HERE rather than by the item
  * modal, which is what keeps bug-23's rule — one owner, a LIFO stack, the
  * topmost dialog closes — true of every surface that opens through this shell
- * without each of them having to remember it. Three callers of that hook
- * remain (this, and `FormSheet`'s two sheets); the run drawer left the stack
- * outright with task-37.
+ * without each of them having to remember it. Three dialogs reach that hook
+ * (this, and `FormSheet`'s two sheets); the run drawer left the stack
+ * outright with task-37. `ui/Confirm` calls it too (bug-53) and is not a
+ * dialog: it draws inline, which is how the Stop can ask first without this
+ * shell gaining a second composer.
  *
  * `useNarrow` is the single authority for the 700 px shape, called rather than
  * restated as an `@media` rule of this family's own: under it the panel goes

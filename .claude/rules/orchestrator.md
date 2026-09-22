@@ -105,9 +105,9 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   left with task-37 and landed in task-38 on `RunControls`, drawn in the Runs detail sheet's head and in the Watchdog page's Watching rows. Why:
   [invariants.md](docs/subsystems/invariants.md#a-pause-request-is-a-file-the-server-writes-and-the-tool-reads)
 - **A stop is the control file's SECOND `kind`, and nothing resumes a stopped run** (bug-39). `PauseRequest.kind` is `'pause' | 'stop'` and **absent means
-  `'pause'`**; one control fact per project stays one file (a stop overwrites a pause and back, `cancel` deletes either); the two predicates are DISJOINT on
+  `'pause'`**; one control fact per project stays one file (a stop overwrites a pause and back, pause's `cancel` deletes either); the two predicates are DISJOINT on
   both sides, `stopRequestEffective` being the pause predicate's two clauses plus `kind === 'stop'`. `POST /api/agents/stop` is `pause`'s sibling — guarded,
-  `cancel === true` only, independent of `BM_AGENTS`, `running` fresh **or stale** — and then attempts ONE `/backlog-orchestrate --abort` spawn: recording the
+  `cancel: true` refused 409 before the run lookup (bug-53: a stop cannot be withdrawn), independent of `BM_AGENTS`, `running` fresh **or stale** — and then attempts ONE `/backlog-orchestrate --abort` spawn: recording the
   fact and ending the run are two outcomes and only the first is guaranteed, so a gate refusal is a 200 carrying `abortRefused`, never an error. The spawn is
   unconditional, because a live driver is evicted by the abort session's own `takeOverRun` write. `stopRequested` rides the runs payload beside
   `pauseRequested`, derived from the SAME control-file read, and **both the sweeper and `RunControls` read that one field** — it is deliberately NOT a third

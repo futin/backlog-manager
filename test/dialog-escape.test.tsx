@@ -31,6 +31,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { ItemModal } from '../client/src/components/board/ItemModal';
 import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
+import { Confirm } from '../client/src/components/ui/Confirm';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
@@ -344,5 +345,33 @@ describe('useDialogEscape', () => {
 
     expect(fresh).toHaveBeenCalledTimes(1);
     expect(stale).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * bug-53's `ui/Confirm` — a stack entry that is not a dialog. It paints no scrim, so nothing on screen says it outranks what is open under it, and a
+ * `window` listener of its own would fire beside the stack's: one press would dismiss the question AND close the item modal it was asked over. Mounted
+ * last, it is topmost, and Escape is its alone; once it is gone the key goes back to the modal.
+ */
+describe('the inline confirmation on the stack', () => {
+  const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
+
+  it('takes Escape from the dialog under it, and hands it back when it goes', async () => {
+    stubFetch([fakeItem()]);
+    const closeModal = jest.fn();
+    const dismiss = jest.fn();
+    render(<ItemModal item={fakeItem()} hues={HUES} onClose={closeModal} />);
+    const confirm = render(
+      <Confirm label="confirm stop" testId="confirm" acceptLabel="Stop run" dismissLabel="Keep running" onAccept={jest.fn()} onDismiss={dismiss}>
+        End this run now?
+      </Confirm>
+    );
+
+    await userEvent.keyboard('{Escape}');
+    expect([dismiss.mock.calls.length, closeModal.mock.calls.length]).toEqual([1, 0]);
+
+    confirm.unmount();
+    await userEvent.keyboard('{Escape}');
+    expect(closeModal).toHaveBeenCalledTimes(1);
   });
 });

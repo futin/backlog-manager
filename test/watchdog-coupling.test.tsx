@@ -124,11 +124,11 @@ describe('the Resume stand-down verdict', () => {
     render(<RunControls run={run} gate={OPEN_GATE} resuming={false} onChanged={jest.fn()} />);
 
     expect(screen.queryByTestId('run-controls-resume')).toBeNull();
-    // What it offers instead is the withdrawal, and only that: a stopped run
-    // has nothing to pause and no second stop to ask for.
-    expect(screen.getByTestId('run-controls-cancel-stop')).toBeInTheDocument();
-    expect(screen.queryByTestId('run-controls-stop')).toBeNull();
-    expect(screen.queryByTestId('run-controls-pause')).toBeNull();
+    // What it offers instead is nothing at all (bug-53): a stopped run has
+    // nothing to pause, no second stop to ask for, and no stop to withdraw —
+    // the `--abort` session the stop spawned is already ending it.
+    expect(screen.getByTestId('run-controls-stop-note')).toBeInTheDocument();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
   });
 
   /**

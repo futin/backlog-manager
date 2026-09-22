@@ -305,15 +305,25 @@ export class AgentsController {
 
   /**
    * `POST /api/agents/stop` (bug-39) — record that a person ended this
-   * project's run, and try to end it, or withdraw that request with
-   * `cancel: true`.
+   * project's run, and try to end it.
    *
-   * The exact sibling of `pause` above, field for field and guard for guard:
-   * `project` trimmed and required, `cancel === true` the only form honoured
-   * (here too `cancel` is the direction that undoes a human's decision, and
-   * here too a string `'true'` is not one), `@HttpCode(200)` because nothing
-   * is created in the sense a 201 promises, and independent of `BM_AGENTS`
+   * The sibling of `pause` above, field for field and guard for guard:
+   * `project` trimmed and required, `@HttpCode(200)` because nothing is
+   * created in the sense a 201 promises, and independent of `BM_AGENTS`
    * because recording the fact must work on a machine whose launcher is off.
+   *
+   * **Except that a stop has no `cancel` (bug-53).** `cancel: true` is a 409,
+   * refused here before the run is even looked up, because "a stop cannot be
+   * withdrawn" is true of every run: by the time a withdrawal could arrive,
+   * the request that recorded the stop has already awaited the `--abort`
+   * spawn, so deleting the control file would restore no child, no worktree,
+   * no branch and no run. Refused rather than ignored, because an old client
+   * still sends it from a `Cancel stop` chip, and a route that dropped the
+   * flag would read that click as a second stop — a second `--abort` spawn
+   * into a run already ending. Strict `=== true` as before, so a string
+   * `'true'` is still a stop: it never was a withdrawal. Uncoded, because
+   * `RUN_IN_PROGRESS_CODE` reads as a silent success to both of its readers
+   * and this is a refusal a person has to read.
    *
    * Where it is NOT pause's sibling: this route may spawn a session, so
    * unlike pause it is not "the one that starts nothing". Nothing is armed
@@ -328,7 +338,10 @@ export class AgentsController {
   async stop(@Body() body: { project?: unknown; cancel?: unknown } | undefined): Promise<StopResult> {
     const project = typeof body?.project === 'string' ? body.project.trim() : '';
     if (project === '') throw new HttpException({ error: 'project is required' }, 400);
-    return this.agents.stop(project, body?.cancel === true);
+    if (body?.cancel === true) {
+      throw new HttpException({ error: 'a stop cannot be withdrawn — the run is already being ended; start a new run for the work that is left' }, 409);
+    }
+    return this.agents.stop(project);
   }
 
   /**

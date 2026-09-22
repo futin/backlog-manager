@@ -95,7 +95,8 @@ The one module that calls anything outbound, and every POST in it is guarded by 
 - `POST /api/agents/pause` — writes the pause request a live run reads back at its dispatch gates.
 - `POST /api/agents/stop` — writes a STOP request to the same one control file (`kind: 'stop'`) and then attempts one `/backlog-orchestrate --abort` spawn.
   Accepts a `running` run fresh or stale alike; the body says what landed (`stopRequested`) and, separately, what became of the spawn (`abortSession` /
-  `abortRefused`), because only the first of the two is guaranteed.
+  `abortRefused`), because only the first of the two is guaranteed. `cancel: true` is a 409 (bug-53): a stop cannot be withdrawn — the spawn has already
+  been awaited by the time one could arrive — and ignoring the flag instead would read an old client's `Cancel stop` as a second stop.
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it
   owns, plus the four server-side knobs behind it.
 - `GET /api/agents/merge-check` — a local, read-only look at whether a project's main tree is in a state that can receive a merge.

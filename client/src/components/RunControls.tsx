@@ -1,15 +1,16 @@
 import { useRef, useState } from 'react';
 
-import { ApiError, cancelPauseOrchestrate, cancelStopOrchestrate, pauseOrchestrate, resumeOrchestrate, stopOrchestrate } from '../lib/agents';
+import { ApiError, cancelPauseOrchestrate, pauseOrchestrate, resumeOrchestrate, stopOrchestrate } from '../lib/agents';
 import { isTerminalStage } from '../lib/run-time';
 import { isCrashed } from '../lib/run-watchdog';
 import { Chip } from './ui/Chip';
+import { Confirm } from './ui/Confirm';
 import { watchdogStoodDown } from '../../../shared/agent';
 import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
 import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../shared/types';
 
 /**
- * RunControls — Pause / Cancel / Resume for one orchestrator run (task-17).
+ * RunControls — Pause / Cancel / Stop / Resume for one orchestrator run (task-17).
  *
  * **Why one component, at the top level of `components/`.** Two surfaces
  * hosted these controls: the board's run drawer and the Runs view's detail
@@ -65,8 +66,9 @@ export type RunControlsRun = Pick<OrchestratorRun, 'status' | 'project'> & {
    * bug-39 — a person has asked for this run to END. Read verbatim off the
    * runs payload, never re-derived, and it outranks every other reading this
    * component makes: while it holds, no Resume is drawn in ANY branch, the
-   * sweeper is standing down on the same one boolean, and the only control
-   * offered is the one that withdraws the request.
+   * sweeper is standing down on the same one boolean, and no control is
+   * offered at all — bug-53: the stop has already happened by the time this
+   * reads `true`, so there is nothing left to withdraw.
    *
    * It is deliberately not folded into `watchdogStoodDown`: that predicate
    * being TRUE is what makes the crashed branch OFFER a Resume, so a stop
@@ -86,7 +88,7 @@ export type RunControlsRun = Pick<OrchestratorRun, 'status' | 'project'> & {
 
 /** Which call a completed click made — the hosts react differently to a
  *  resume (they also mark the poll) than to the other two. */
-export type RunControlsChange = 'pause' | 'cancel' | 'resume' | 'stop' | 'cancel-stop';
+export type RunControlsChange = 'pause' | 'cancel' | 'resume' | 'stop';
 
 /**
  * The item the run is working right now, or `null` when it is between items
@@ -154,6 +156,13 @@ export function RunControls({
    * and the run is still stopped — the half that matters is on disk.
    */
   const [abortNote, setAbortNote] = useState<string | null>(null);
+  /**
+   * bug-53 — the Stop chip was clicked and the confirmation is drawn in its
+   * place. Nothing has been sent: the click only asks, and the request goes out
+   * from the confirmation's accept alone. Plain state, not a ref — nothing
+   * races on it, and the row has to re-render to swap the chip for the question.
+   */
+  const [confirmingStop, setConfirmingStop] = useState(false);
 
   const act = (kind: RunControlsChange, call: () => Promise<unknown>): void => {
     if (busyRef.current) return;
@@ -260,29 +269,55 @@ export function RunControls({
    * is the case this bug was filed about: a driver killed by hand leaves one
    * for fifteen minutes, during which nothing could end it.
    *
-   * `variant` is left at the default accent, unlike Pause's cancel: this one
-   * IS destructive — it abandons whatever worktree the run is mid-way through
-   * — and a control that ends work must read like one.
+   * **The click asks; only the answer acts (bug-53).** A stop abandons the item
+   * in flight, removes its worktree and branch, and ends the run for good — and
+   * for a whole release it did all of that on one click, at Pause's size, one
+   * pixel-miss from it. So the chip opens `ui/Confirm` in its own place, naming
+   * those consequences in the run's terms, and the request goes out from the
+   * accept alone; the dismissal and Escape both make no request at all. The
+   * confirmation is closed BEFORE the request is sent, and that is safe because
+   * the guard against a second one is `act`'s ref, not the confirmation's
+   * presence (bug-19's layer 1 — the accept goes through `act` like every other
+   * branch).
    *
-   * Through `act` like every other branch (bug-19's layer 1). The result is
-   * read inside the call rather than in `onChanged`, because `abortRefused`
-   * is the one thing this component learns that no later poll can tell it.
+   * `variant` is left at the default accent, unlike Pause's cancel: this one
+   * IS destructive, and a control that ends work must read like one — the
+   * confirmation's own accept goes further, to `danger`.
+   *
+   * The result is read inside the call rather than in `onChanged`, because
+   * `abortRefused` is the one thing this component learns that no later poll
+   * can tell it.
    */
-  const stopControl = (): JSX.Element => (
-    <Chip
-      size={28}
-      data-testid="run-controls-stop"
-      title="end this run now — the item in flight is abandoned"
-      onClick={() =>
-        act('stop', async () => {
-          const result = await stopOrchestrate(run.project);
-          setAbortNote(result.abortRefused);
-        })
-      }
-    >
-      Stop
-    </Chip>
-  );
+  const stopControl = (): JSX.Element => {
+    if (confirmingStop) {
+      const inFlight = inFlightItemId(run.queue);
+      return (
+        <Confirm
+          label="confirm stop"
+          testId="run-controls-stop-confirm"
+          acceptLabel="Stop run"
+          dismissLabel="Keep running"
+          onDismiss={() => setConfirmingStop(false)}
+          onAccept={() => {
+            setConfirmingStop(false);
+            act('stop', async () => {
+              const result = await stopOrchestrate(run.project);
+              setAbortNote(result.abortRefused);
+            });
+          }}
+        >
+          {inFlight === null
+            ? 'End this run now? It cannot be resumed — the work left is a new run.'
+            : `End this run now? ${inFlight} is abandoned, its worktree and branch are removed, and the run cannot be resumed.`}
+        </Confirm>
+      );
+    }
+    return (
+      <Chip size={28} data-testid="run-controls-stop" title="end this run now — asks first, then abandons the item in flight" onClick={() => setConfirmingStop(true)}>
+        Stop
+      </Chip>
+    );
+  };
 
   /**
    * bug-39, and it outranks every branch below it: a person has asked for this
@@ -296,9 +331,15 @@ export function RunControls({
    * stopped run the click would also race the `--abort` session this stop
    * already spawned.
    *
-   * What is left is the withdrawal. `Cancel stop` clears the same control file
-   * a `Cancel` clears; it does NOT restart anything, because asking a stopped
-   * run to carry on is a Resume and belongs to the person, not to this click.
+   * And no withdrawal either (bug-53). This branch used to draw a `Cancel
+   * stop` chip, copied from Pause's `Cancel` along with the rest of the
+   * control's shape — but a pause is a REQUEST the run honours later, and a
+   * stop is an ACT: the request that recorded it already awaited the `--abort`
+   * spawn before this field could read `true`, so the child is signalled and
+   * the worktree is going. Deleting the control file then restored nothing and
+   * read as an undo. What is left is the note, and the one fact the click
+   * learned that no poll can re-supply. Starting the work again is a new run,
+   * which the board already offers.
    */
   if (run.stopRequested) {
     return (
@@ -306,25 +347,6 @@ export function RunControls({
         <span className="run-controls-note" data-testid="run-controls-stop-note">
           Stopping — this run is being ended
         </span>
-        {/* `flat` for the same reason Pause's Cancel is flat (DESIGN.md
-            §8.4.1): withdrawing a request destroys nothing, and a control
-            that is not destructive must not read as one. */}
-        <Chip
-          size={28}
-          variant="flat"
-          data-testid="run-controls-cancel-stop"
-          onClick={() =>
-            act('cancel-stop', async () => {
-              await cancelStopOrchestrate(run.project);
-              // Cleared with the request it describes: a refusal to spawn an
-              // abort for a stop nobody is making any more is not a fact
-              // anyone can act on.
-              setAbortNote(null);
-            })
-          }
-        >
-          Cancel stop
-        </Chip>
         {abortNote === null ? null : (
           <span className="run-controls-note" data-testid="run-controls-abort-refused">
             {abortNote}

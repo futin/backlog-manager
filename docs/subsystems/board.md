@@ -106,7 +106,7 @@ queue:
    function with `null` and gets `Merge into the base branch`; `null` there means "no base is knowable", never `main`.
 
 Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
-call `useDialogEscape` for whatever they wrap.
+call `useDialogEscape` for whatever they wrap. `ui/Confirm` (bug-53) joins the same stack while it is drawn and is not a dialog — see the detail sheet below.
 
 ### What leaves the Board
 
@@ -170,8 +170,9 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
 - **The detail sheet** shows the selected run whole: a head with the project, the run id and `RunControls` (Pause, Cancel with its `Pausing after <id>` note,
   Stop beside both — and on a crashed run too, which is the run a person most needs to end — Resume for a paused run, and Resume for a crashed one exactly
-  when `watchdogStoodDown` says the sweeper will not. A run with a stop on file drops to the `Stopping` reading plus `Cancel stop`, and offers no Resume in
-  any branch); then the facts strip, the mode and question
+  when `watchdogStoodDown` says the sweeper will not. Stop asks first (bug-53): the chip is replaced in place by `ui/Confirm` naming the item it abandons and
+  saying the run cannot be resumed, and only its `Stop run` sends the request — `Keep running` and Escape send nothing. A run with a stop on file drops to the
+  `Stopping` reading and offers no control at all — no withdrawal, because the `--abort` session has already been spawned, and no Resume in any branch); then the facts strip, the mode and question
   notes, the chip row, `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with its stage chip, its `RowTime` reading, its
   seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
