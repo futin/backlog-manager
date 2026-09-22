@@ -522,7 +522,8 @@ export class GithubSource implements ItemSource, ItemWriter {
    * them would be a second implementation of billing, in the process with the
    * least information about what happened.
    *
-   * Who may release: **the holder always, the RUN that owns the claim, ANYONE
+   * Who may release: **the holder always, the RUN that owns the claim, the
+   * HOST that holds the claim once it can show the session is gone, ANYONE
    * once the claim is dead.** The last clause is the same rule `claim`
    * enforces from the other side — a stale claim is not somebody's property,
    * it is litter, and requiring the original session to come back and clear it
@@ -540,6 +541,30 @@ export class GithubSource implements ItemSource, ItemWriter {
    * `in-progress` label, and `started`/`phase` on every machine's board. The
    * claim going stale does not repair it — the mapper reads `started` off ANY
    * unreleased claim, fresh or stale.
+   *
+   * The THIRD clause is bug-48's, and it is the same argument one party over:
+   * a hand-run session killed mid-item passes through no terminal stage
+   * either, and none of the other three clauses can speak for it. The holder
+   * is gone; a hand claim carries no `run` by construction, deliberately, so a
+   * run can never evict a person at a terminal; and the claim is LIVE, because
+   * `heartbeat` was re-stamped seconds before the kill. So the item read as in
+   * progress on every machine for a full `CLAIM_STALE_MS`, with no command
+   * anywhere to clear it and nothing to do but edit the comment by hand — the
+   * very thing the protocol exists to make unnecessary.
+   *
+   * What the clause asserts is `ClaimRecord.host`, and **that is all this
+   * server can check**: it can see neither the caller's filesystem nor its
+   * process table, so the PROOF that the holding session is actually gone
+   * lives in `backlog.mjs abort`, which compares the holder's transcript mtime
+   * against the claim's heartbeat before it ever posts here. The split is the
+   * one billing already follows, for the same reason — the CLI is the side
+   * holding the clock and the transcripts. And it is a MISTAKE boundary rather
+   * than a security one: `stop` has always sent a caller-supplied `session`
+   * that this route compares against the record, and the holder's id is
+   * printed in the refusal, so a caller determined to release somebody else's
+   * claim could always have done it. The question a clause here can answer is
+   * not "can this be forged" but "is the caller in a position to KNOW", and
+   * that is a question about which machine it is running on.
    */
   async release(_project: RegistryProject, marker: SourceMarker, req: ItemReleaseRequest): Promise<WriteOutcome<ClaimResult>> {
     return this.editClaim(marker, req.id, req.commentId, (existing, now, number) => {
@@ -559,7 +584,18 @@ export class GithubSource implements ItemSource, ItemWriter {
          sentence `claim` makes about a hand claim, for the same reason: a run
          has no standing to evict somebody working the item at a terminal. */
       const sameRun = typeof req.runId === 'string' && req.runId.length > 0 && existing.run?.runId === req.runId;
-      if (isLive(existing, now) && existing.session !== req.session && !sameRun) {
+      /* bug-48's clause, guarded exactly like `sameRun` directly above and for
+         the same reason: written as the tempting `existing.host !== req.host`,
+         a request with no `host` against a claim written before that field
+         existed compares `undefined !== undefined` → `false`, the refusal
+         disappears, and every pre-bug-46 claim on the tracker becomes
+         releasable by any caller that sends no `host` at all.
+
+         So a claim with no `host` is never same-host with anything — which is
+         `ClaimRecord.host`'s own sentence, that absence means "the machine was
+         not recorded" and NEVER "the reader's own". */
+      const sameHost = typeof req.host === 'string' && req.host.length > 0 && existing.host === req.host;
+      if (isLive(existing, now) && existing.session !== req.session && !sameRun && !sameHost) {
         return {
           refused: 'conflict',
           error: `#${number} is held by session ${existing.session}`,

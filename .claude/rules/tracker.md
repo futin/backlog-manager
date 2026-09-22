@@ -8,13 +8,23 @@ paths: ["server/src/tracker/**"]
   what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`); `GithubSource.claim` is the one implementation of taking one. The sequence
   is list · post · settle (`settleMs`, 1 s) · list · UNION, and the union is what decides — never the second list alone, because GitHub's comment listing is
   eventually consistent. A LOSER deletes its own comment; a claim that merely went STALE is released (`released: { reason: 'stale' }`), never deleted, because
-  it is the permanent record of work somebody did and carries the counters to prove it. **Who may release is a triple: the holder always, the RUN that owns the
-  claim, ANYONE once the claim is dead** (bug-42) — the middle clause is task-47 §7.6's same-run takeover, which `claim` enforced and `release` did not, so a
-  board force stop's spawned `--abort` could not release the dead driver's claims. `ItemReleaseRequest.runId` is the assertion, a 400 on anything but a
-  non-empty string, sent by `trackerRelease` on EVERY release and never by `backlog.mjs stop`; the test is guarded with `typeof`/`length` so a claim with no
-  `run` is never same-run with anything, and `isLive` reaches the dead clause first. `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second
-  number. **A heartbeat names its author too, and the rule there is that triple MINUS its last clause** (bug-45): `ItemHeartbeatRequest.session` is required (a
-  400 without it, like `release`'s), `runId` is the same optional same-run assertion with the same `typeof`/`length` guards, and the check runs BEFORE the
+  it is the permanent record of work somebody did and carries the counters to prove it. **Who may release is a quadruple: the holder always, the RUN that owns
+  the claim, the HOST that holds the claim once it can show the session is gone, ANYONE once the claim is dead** (bug-42, bug-48) — the second clause is task-47
+  §7.6's same-run takeover, which `claim` enforced and `release` did not, so a board force stop's spawned `--abort` could not release the dead driver's claims.
+  `ItemReleaseRequest.runId` is the assertion, a 400 on anything but a non-empty string, sent by `trackerRelease` on EVERY release and never by `backlog.mjs
+  stop`; the test is guarded with `typeof`/`length` so a claim with no `run` is never same-run with anything, and `isLive` reaches the dead clause first. **The
+  THIRD clause is bug-48's, and it is split across the two processes**: the server checks `sameHost` and nothing else — `ItemReleaseRequest.host`, validated by
+  `optional()` like `claim`'s, guarded with the same `typeof`/`length` so a claim with no `host` is never same-host with anything — while the PROOF that the
+  holder is gone belongs to `backlog.mjs abort <id>`, the only sender of that field, because the server can see neither the caller's filesystem nor its process
+  table. `abort` releases with `reason: 'aborted'` (bug-40's word, the same event) and NO `counters` key, and refuses unless all three hold: the claim's `host`
+  is non-empty and equals `hostIdentity()` (a hostless claim is refused, never assumed local); the claim is unreleased and live (a dead one exits 0 saying the
+  next `start` retires it, and makes no request); and `holdingSessionEvidence` finds no transcript for the holder's session under `<configDir>/projects/` whose
+  mtime is at or after the claim's heartbeat — a check that is meaningful ONLY because the host refusal already ran, since on a foreign machine an absent
+  transcript is bug-46's false negative. In files mode `abort` is exit 1 naming `stop <id> --abandon`. The split is billing's, for billing's reason (the CLI
+  holds the clock and the transcripts), and the boundary it draws is a MISTAKE one, not a security one: `stop` has always sent a caller-supplied `session`.
+  `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second number. **A heartbeat names its author too, and the rule there is the holder or the claim's
+  own run, and nobody else** (bug-45): `ItemHeartbeatRequest.session` is required (a 400 without it, like `release`'s), `runId` is the same optional same-run
+  assertion with the same `typeof`/`length` guards, and the check runs BEFORE the
   released branch, `finished` included — but a DEAD claim does not open to anyone, because reviving one is the harm (a rival's beats hold a claim live forever,
   so the staleness repair never fires). Retiring a dead claim stays `claim`'s business. And **"is this claim mine?" is answerable from printed output**:
   `start`'s lost-race line and `heartbeat`'s refusal both carry `— this session is <id>` — on `start` the rule bug-47 appended follows it rather than ending

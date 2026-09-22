@@ -2741,11 +2741,12 @@ losing claim is litter this call chain created seconds ago and nobody has read. 
 counters to prove it — deleting one to tidy up a flag would erase the only evidence that the work happened. The retiring session writes
 `released: { reason: 'stale', by: <itself> }`, so the record even says who retired it.
 
-**Who may release: the holder always, the RUN that owns the claim, ANYONE once the claim is dead.** The last clause is the same rule seen from the other side. A
+**Who may release: the holder always, the RUN that owns the claim, the HOST that holds the claim once it can show the session is gone, ANYONE once the claim is
+dead.** The last clause is the same rule seen from the other side. A
 dead claim is not somebody's property, and requiring the original session to come back and clear it would wedge an issue on the crash of a process that is
 never returning.
 
-The middle clause is bug-42's, and it is not a second rule — it is task-47 §7.6's same-run takeover, which `claim` has enforced since phase 4a and `release`
+The second clause is bug-42's, and it is not a second rule — it is task-47 §7.6's same-run takeover, which `claim` has enforced since phase 4a and `release`
 never learned. `POST /api/agents/stop` records a stop and then spawns a FRESH `/backlog-orchestrate --abort` session; that session takes the run's driver lease
 (`takeOverRun`, before it walks the queue) and then releases every claim the run still holds — as its own session, which under a holder-only rule is a stranger
 to every one of them. So the force stop built for a driver that is dead or hung reinstated the exact state bug-40 removed: an unreleased claim, the
@@ -2762,6 +2763,44 @@ same-run filter guards the same shape with `typeof c.record.run?.runId === 'stri
 never same-run with anything: a run has no standing to evict somebody working the item at a terminal. The dead-claim clause outranks the new one and is reached
 first through `isLive`, so a stale claim carrying a foreign `runId` still releases to anybody.
 
+**The third clause is bug-48's, and what it adds is a FACT, not a permission.** A hand-run session killed mid-item — the machine stopped, the terminal closed,
+anything that is not a terminal stage — passes through no terminal stage either, so it releases nothing, and then every clause above answers about somebody who
+no longer exists. The holder is gone. A hand claim carries no `run` by construction, deliberately, so a run can never evict a person at a terminal. And the
+claim is LIVE, because `heartbeat` was re-stamped seconds before the kill — the fifteen minutes are not a grace period anybody chose for this case, they are
+`CLAIM_STALE_MS` doing its ordinary job on a claim whose holder died between beats. The item then reads as in progress on every machine, its dispatch control
+disabled everywhere, with no command anywhere to run: the only options were to wait out the window or delete the comment on GitHub by hand, which destroys the
+record of the work and the counters that prove it. The orchestrator has exactly this path and it works — `orchestrate.mjs abort` releases with
+`reason: 'aborted'` (bug-40) — and every word of that reasoning applies to a person. What a person did not have was something to assert: a run publishes a
+`runId`, a durable name for the thing that is gone, checkable by a process that is not the dead one, while a hand session published only `session`, which
+bug-46 shows cannot be resolved by anybody but the machine it was minted on. So the missing verb was blocked on the missing field, and bug-46 landing is what
+made this executable.
+
+**The assertion is the HOST, and it is split across two processes because only one of them holds the evidence.** The server's half is `sameHost` alone —
+`ItemReleaseRequest.host`, validated by the same `optional()` that `claim`'s `host` uses, and compared under the same `typeof`/`length` guards as `runId` for
+the identical reason: written as `existing.host !== req.host`, a request with no `host` against a pre-bug-46 claim with no `host` compares
+`undefined !== undefined` → `false` and the refusal disappears for every old claim on the tracker. A claim with no `host` is never same-host with anything,
+which is `ClaimRecord.host`'s own sentence that absence means "the machine was not recorded" and never "the reader's own". The other half — the proof that the
+holding session is actually gone — belongs to `backlog.mjs abort <id>`, the only sender of that field, because the server can see neither the caller's
+filesystem nor its process table. That is the same split billing already has, for the same reason: the CLI is the side holding the clock and the transcripts.
+
+**`abort` refuses unless three things hold, and the order matters.** The claim's `host` must be non-empty and equal this machine's `hostIdentity()` — a
+cross-machine claim is refused naming BOTH hosts, and a hostless one is refused rather than assumed local. The claim must be unreleased and live — a released
+one has nothing to abort, and a dead one needs no abort at all, so that case exits `0` saying the next `start` retires it and makes no request. And
+`holdingSessionEvidence` must find no transcript for the holder's session under `<configDir>/projects/` whose mtime is at or after the claim's heartbeat: a
+transcript written no earlier than the beat means that session is the one beating, and it is alive. **That last check is meaningful only because the host check
+already ran**, and the asymmetry with bug-46 is the whole point — on a machine that did not mint the session, an absent transcript is bug-46's false negative
+and proves nothing at all. A session with no `CLAUDE_CODE_SESSION_ID` has no transcript and passes trivially, which is correct: such a claim's `session` is
+`<user>@<host>`, a person at a terminal on this host, and that person is the one running `abort`.
+
+Rejected, each for its own reason. **A `--force` flag, or a clause letting any caller name the holder**: the clause with no proof attached, assertable from a
+machine that cannot possibly know, which is the shape bug-46 exists to stop being persuasive. **Host equality with no liveness check**: cheaper, and it would
+let a second session on the same laptop take an item out from under the person holding it at a terminal — the check is what makes `abort` a repair rather than
+a seizure. **Shortening `CLAIM_STALE_MS` for hand claims**: backwards, since the alias exists so a hand claim can be given a LONGER window, nothing
+heartbeating a hand groom automatically. **A remote path for a machine that is switched off**: the honest answer is the fifteen minutes, because a machine that
+cannot answer cannot prove anything. And the boundary all of this draws is a MISTAKE boundary, not a security one — `stop` has always sent a caller-supplied
+`session` that the server compares against the record, and the holder's id is printed in the refusal, so a determined caller could always have released
+somebody else's claim. The question a clause can answer is not "can this be forged" but "is the caller in a position to KNOW".
+
 **A heartbeat names its author, and only the holder or its run may beat (bug-45).** `heartbeat` was the one write route that authenticated nobody: the request
 carried no `session`, the type had no field for one, and the adapter asked only whether the claim was released. Two harms, and the second is the one that cost a
 day of two machines' work.
@@ -2774,9 +2813,11 @@ accepted)" and groomed an issue another machine was already executing. Every lay
 was calling.
 
 So `ItemHeartbeatRequest.session` is required — a 400 with no name, exactly like `release`'s — and `runId` is the same optional assertion `release` takes, with
-the same `typeof`/`length` guards for the same reason. The rule is **`release`'s triple minus its last clause**: the holder always, the RUN that owns the claim,
-and NOT "anyone once the claim is dead". Dropping that clause is the point rather than an oversight. `release` lets anyone retire a dead claim because retiring
-one is tidying; REVIVING one is the harm — a stranger's beat on a stale claim is what makes the staleness repair unreachable. Retiring a dead claim stays
+the same `typeof`/`length` guards for the same reason. The rule is **the holder always, the RUN that owns the claim, and nobody else** — `release`'s quadruple
+minus its last two clauses, and the same reason drops both. NOT "anyone once the claim is dead", and NOT "the host that can show the session is gone": each of
+those is about ending a claim, and there is no reason to end one through the beat route when `release` is right there. `release` lets anyone retire a dead claim
+because retiring one is tidying; REVIVING one is the harm — a stranger's beat on a stale claim is what makes the staleness repair unreachable. Retiring a dead
+claim stays
 `claim`'s business, which the protocol already answers by the lowest live comment id. The check runs BEFORE the released branch, `finished` included: a stamp is
 still a write to somebody else's record, and `finish` sends its run's `runId`, so a driver's own claims pass the same-run clause whether or not their terminal
 stage released them first. Both callers name themselves — `backlog.mjs heartbeat` sends `sessionIdentity()`, `orchestrate.mjs`'s `trackerHeartbeat` and

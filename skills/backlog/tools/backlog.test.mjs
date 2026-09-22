@@ -4244,6 +4244,165 @@ test('API mode: stop on an item with no live claim is exit 1 and releases nothin
   assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
 })
 
+/* ---------------------------------------------------------------------------
+ * bug-48 — `abort`, the human sibling of `orchestrate.mjs abort`.
+ *
+ * A hand-run session killed mid-item passes through no terminal stage, so it releases nothing, and the old release triple answered about nobody who still
+ * exists: the holder is gone, a hand claim carries no `run` by construction, and the claim is fresh because `heartbeat` was re-stamped seconds before the
+ * kill. The item then read as in progress on every machine for fifteen minutes with no command anywhere to clear it.
+ *
+ * The PROOF that the holder is gone is this CLI's, not the server's — the server can see neither the caller's filesystem nor its process table — so the
+ * three refusals below are where the narrowness lives, and they are what these cases pin.
+ * --------------------------------------------------------------------------- */
+
+/** What `hostIdentity()` computes inside the child: the same `<user>@<host>` this process would compute, since the child runs here. */
+const THIS_HOST = `${os.userInfo().username}@${os.hostname()}`
+
+/** A live claim held by a session that is not this one, on a machine the case names. */
+const abortableClaim = (over = {}) => ({
+  '/api/items/claim': {
+    body: {
+      commentId: 100,
+      record: {
+        v: 1,
+        session: 'sess-gone',
+        host: THIS_HOST,
+        phase: 'execute',
+        at: new Date(Date.now() - 600_000).toISOString(),
+        heartbeat: new Date().toISOString(),
+        counters: { groomElapsed: 0, executeElapsed: 40, groomTokens: 0, executeTokens: 900 },
+        ...over,
+      },
+    },
+  },
+  '/api/items/release': { status: 201, body: { commentId: 100, record: {} } },
+})
+
+test('API mode: abort releases a live claim whose holding session is gone from THIS machine', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(abortableClaim(), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting' }), 'abort', '31'),
+  )
+
+  assert.equal(out.status, 0)
+  const release = requests.find((r) => r.path === '/api/items/release')
+  assert.ok(release, 'abort must release the claim')
+  assert.equal(release.body.commentId, 100)
+  // The same word `orchestrate.mjs abort` writes (bug-40), because it is the same event: a session torn down without passing through a terminal stage.
+  assert.equal(release.body.reason, 'aborted')
+  assert.equal(release.body.session, 'sess-aborting')
+  // The assertion the server's fourth clause is decided on — and never a `runId`, which a person at a terminal has no standing to claim.
+  assert.equal(release.body.host, THIS_HOST)
+  assert.ok(!('runId' in release.body), 'a hand abort must never assert run authority')
+  // `--abandon`'s rule, for `--abandon`'s reason: the stretch between the last heartbeat and the kill is not work anybody did, and zeros would erase what
+  // every earlier session accumulated. The key's ABSENCE is the assertion, not that it is zero.
+  assert.ok(!('counters' in release.body), 'counters must be absent, never zeroed')
+})
+
+// The mtime comparison, in the direction that matters: a transcript that stopped being written BEFORE the heartbeat was stamped is not evidence that the
+// session writing it is the one beating — it is evidence of the opposite.
+test('API mode: abort proceeds when the holder-s transcript is older than the heartbeat', async () => {
+  const { dir } = trackerFixture()
+  const { config, projects } = transcriptFixture()
+  const file = writeTranscript(projects, 'proj-a', 'sess-gone.jsonl', [])
+  const old = Date.now() - 600_000
+  fs.utimesSync(file, old / 1000, old / 1000)
+
+  const { requests } = await withApi(abortableClaim(), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting', CLAUDE_CONFIG_DIR: config }), 'abort', '31'),
+  )
+
+  assert.ok(requests.find((r) => r.path === '/api/items/release'), 'a transcript older than the beat must not refuse')
+})
+
+/* The check that makes `abort` a repair rather than a seizure. Without it, a second session on the same laptop could take an item out from under the
+   person holding it at a terminal. */
+test('API mode: abort refuses while a transcript for the holding session is at or after the heartbeat', async () => {
+  const { dir } = trackerFixture()
+  const { config, projects } = transcriptFixture()
+  const beat = new Date(Date.now() - 60_000).toISOString()
+  const file = writeTranscript(projects, 'proj-a', 'sess-gone.jsonl', [])
+  const fresh = Date.now()
+  fs.utimesSync(file, fresh / 1000, fresh / 1000)
+
+  const { out, requests } = await withApi(abortableClaim({ heartbeat: beat }), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting', CLAUDE_CONFIG_DIR: config }), 'abort', '31'),
+  )
+
+  assert.equal(out.status, 1)
+  // The file and its mtime are named, because "something is still running" with no evidence attached is exactly the unanswerable refusal this bug is about.
+  assert.match(out.stderr, /sess-gone\.jsonl/)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+/* Cross-machine is refused and the message says the honest thing. There is deliberately no remote path: a machine that cannot answer cannot prove
+   anything, and the fifteen-minute window is the protocol's own repair for exactly that case. */
+test('API mode: abort refuses a claim held on another machine, naming both hosts', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(abortableClaim({ host: 'futin@other-box' }), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting' }), 'abort', '31'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /futin@other-box/)
+  assert.ok(out.stderr.includes(THIS_HOST), `this machine must be named too: ${out.stderr}`)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+// A claim written before bug-46 recorded no machine, and absence means "the machine was not recorded", never "this one" — so there is nothing here to
+// assert same-host on, and the server would refuse the release anyway.
+test('API mode: abort refuses a claim that recorded no host at all', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(abortableClaim({ host: undefined }), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting' }), 'abort', '31'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /recorded no machine/)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+test('API mode: abort on a released claim is exit 1 and releases nothing', async () => {
+  const { dir } = trackerFixture()
+  const routes = abortableClaim()
+  routes['/api/items/claim'].body.record.released = { at: new Date().toISOString(), reason: 'stopped', by: 'sess-gone' }
+
+  const { out, requests } = await withApi(routes, async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting' }), 'abort', '31'),
+  )
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /not in progress/)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+/* A dead claim needs no abort at all: the next `start` retires it, which is the protocol's own repair. Exit 0, because the caller's goal — the item is
+   not blocking anybody — is already true, and a release nobody needed would only add a second record of a session that did nothing. */
+test('API mode: abort on a DEAD claim makes no request and says the next start retires it', async () => {
+  const { dir } = trackerFixture()
+  const { out, requests } = await withApi(abortableClaim({ heartbeat: new Date(Date.now() - 16 * 60 * 1000).toISOString() }), async (port) =>
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting' }), 'abort', '31'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /start/)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+// The fourth verb that exists only in a tracker project, refused in files mode the way the other three are: the command IS known, it just has no meaning
+// against a store on disk — and the files store's equivalent already exists.
+test('files mode: abort is a usage refusal naming stop --abandon', async () => {
+  const { dir, backlog } = backlogFixture()
+  run(dir, 'init')
+  fs.writeFileSync(path.join(backlog, 'bugs', 'open', 'bug-1-a.md'), '---\nid: bug-1\ntitle: a\ncreated: 2026-09-01\n---\n\nbody\n')
+
+  const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'abort', 'bug-1'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /stop <id> --abandon|stop bug-1 --abandon/)
+  assert.deepEqual(requests, [])
+})
+
 test('API mode: heartbeat posts the claim-s comment id', async () => {
   const { dir } = trackerFixture()
   const { out, requests } = await withApi(

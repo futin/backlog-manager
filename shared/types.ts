@@ -1980,9 +1980,11 @@ export interface ItemClaimRequest extends ItemWriteRequest {
  * verbatim: the CLI is the biller (it holds the transcript and the clock), and
  * the server never computes a counter of its own.
  *
- * `runId` (bug-42) is the run ASSERTING it owns this claim — the middle clause
- * of "the holder always, the RUN that owns the claim, ANYONE once the claim is
- * dead". Nothing writes it into the record; one line in `GithubSource.release`
+ * `runId` (bug-42) is the run ASSERTING it owns this claim — the SECOND clause
+ * of "the holder always, the RUN that owns the claim, the HOST that holds the
+ * claim once it can show the session is gone, ANYONE once the claim is dead"
+ * (the third is bug-48's `host`, directly below). Nothing writes it into the
+ * record; one line in `GithubSource.release`
  * compares it against the claim's stored `run.runId`, which is how a
  * `/backlog-orchestrate --abort` spawned by `POST /api/agents/stop` releases
  * claims its own run took while the driver that posted them is dead.
@@ -1999,6 +2001,37 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
   reason: string;
   counters?: ClaimCounters;
   runId?: string;
+  /**
+   * The machine the RELEASING caller is on (bug-48) — the fourth clause of the
+   * release rule: **the holder always, the RUN that owns the claim, the HOST
+   * that holds the claim once it can show the session is gone, ANYONE once the
+   * claim is dead.**
+   *
+   * A hand-run session killed mid-item passes through no terminal stage, so it
+   * releases nothing, and every clause of the old triple then answers about
+   * somebody who no longer exists: the holder is gone, a hand claim carries no
+   * `run` by construction (so a run can never evict a person at a terminal),
+   * and `isLive` is true because `heartbeat` was re-stamped seconds before the
+   * kill. The item reads as in progress on every machine for a full
+   * `CLAIM_STALE_MS` with no command anywhere to clear it.
+   *
+   * Same shape and same validation as `runId` — a 400 on a present non-string,
+   * and `typeof`/`length` guards at the comparison so a request with no `host`
+   * against a claim with no `host` never compares `undefined === undefined`
+   * into a match. **A claim with no `host` is never same-host with anything**,
+   * the sentence `run` already carries, for the reason `ClaimRecord.host`
+   * gives: absence means "the machine was not recorded", never "this one".
+   *
+   * **The PROOF that the holder is gone is the CLI's, not this server's.** The
+   * server can see neither the caller's filesystem nor its process table, so
+   * its clause is `sameHost` alone; `backlog.mjs abort` runs the liveness check
+   * where the evidence is — the holding session's transcript under
+   * `<configDir>/projects/` — exactly as billing lives on the CLI side because
+   * that is where the clock and the transcript are. That is a MISTAKE boundary
+   * rather than a security one: `stop` has always let a caller send any
+   * `session` it likes, and the holder's id is printed in the refusal.
+   */
+  host?: string;
 }
 
 /** `POST /api/items/heartbeat`. `state` is the `ClaimState` task-47's driver

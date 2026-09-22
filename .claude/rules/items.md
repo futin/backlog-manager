@@ -13,9 +13,12 @@ paths: ["server/src/items/**"]
   429 · anything else 502. `heartbeat` also takes `finished: { at, status }` (task-48), validated field by field and accepted on a RELEASED claim, where it
   sets `finished` and nothing else — `finish` stamps a claim its terminal stage already released. `claim` takes an optional `host` (bug-46), validated by
   `optional()` as a non-empty string or a 400 naming the field: absent is a value (a caller that sends none writes no `host` key at all), but a blank or a
-  non-string is a mistake worth hearing about. It is never derived here — a hostname read in the compose stack is a container id. `GithubSource` keeps a `Map<urn, Promise>` so two local sessions never race on one item, and every response is absorbed into the
-  poller's cache — but a write never moves `polledAt`, because nothing was polled. The token stays in the process; no response carries it. An eighth route,
-  `GET /api/items/claim`, is a READ (unguarded like every other GET) and exists because `start` and `stop` are two processes. Why:
+  non-string is a mistake worth hearing about. It is never derived here — a hostname read in the compose stack is a container id. `release` takes the same
+  optional `host` through the same `optional()` (bug-48), as the assertion behind the release rule's third clause; the liveness proof that makes it narrow lives
+  in `backlog.mjs abort`, never here, because this process can see neither the caller's filesystem nor its process table. `GithubSource` keeps a `Map<urn,
+  Promise>` so two local sessions never race on one item, and every response is absorbed into the poller's cache — but a write never moves `polledAt`, because
+  nothing was polled. The token stays in the process; no response carries it. An eighth route, `GET /api/items/claim`, is a READ (unguarded like every other
+  GET) and exists because `start` and `stop` are two processes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-seven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **A project's source is a committed marker, resolved per request, and an `unsupported` one never falls back to `files`.** `resolveSource`
   (`server/src/items/sources/resolve.util.ts`) reads `backlog/source.json` per request, caches nothing, and answers `missing` / `files` / `tracker` /

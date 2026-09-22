@@ -89,10 +89,15 @@ beside "ours, here" is exactly the reading this skill must not take. Either way:
 
 - **Stale past 15 minutes** — the protocol retires it for you the moment you claim. The takeover is `start <id> --as groom` alone; do **not** `stop --abandon`
   first, and do not ask the user. A dead claim is litter, not somebody's property.
-- **Live** — that is another session working right now, on this machine or another one. This is the three-way question this skill has always asked the user,
+- **Live, held on ANOTHER machine** — that is another session working right now. This is the three-way question this skill has always asked the user,
   unchanged, and the answer is theirs. **A holder you cannot find locally is not a dead holder** (bug-46): a session id names a transcript under
   `~/.claude/projects/` on exactly one host, so `ls` and `ps` answer "no" for every claim taken on another machine, live or dead. The heartbeat age in the
   refusal is the liveness evidence; the holder's machine, when the claim records one, is why the local search was always going to come up empty.
+- **Live, held on THIS machine by a session that is gone** — a session killed mid-item releases nothing, so its claim stays live for the rest of the fifteen
+  minutes with nobody behind it. This is the one case a session may take the item back, because this is the one machine that can check:
+  `abort <id>` releases the claim with `reason: 'aborted'`, keeping its counters, and then `start <id> --as groom` succeeds. It refuses unless the claim's host
+  is this one AND the holder's transcript shows no write since the last beat, so a live neighbour on this laptop is safe from it. Do not reach for it on the
+  bullet above: on a foreign claim an unfindable session id is bug-46's false negative, and `abort` refuses that claim anyway.
 
 **`Groomed on disk only` is NOT printed for a tracker project.** There is nothing on disk and nothing to commit: the groom is on GitHub the moment the call
 returns, visible to every machine, and an orchestrator run reads it from there. Printing it would send the user looking for a file to `git add` that does not

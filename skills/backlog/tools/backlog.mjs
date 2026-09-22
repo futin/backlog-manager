@@ -1550,6 +1550,46 @@ export function transcriptFiles(projectsRoot, sessionId) {
   return files
 }
 
+// Where this machine's transcripts live. One derivation for the two readers of that tree — `sessionTokensSince` bills from it and `holdingSessionEvidence`
+// dates it — because a second spelling of the same path is how one of them silently stops looking where the other looks.
+function claudeProjectsRoot(env) {
+  const configDir = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude')
+  return path.join(configDir, 'projects')
+}
+
+// Evidence that the session holding a claim is STILL RUNNING on this machine (bug-48) — the proof `abort` needs before it releases a claim that is not its
+// own, and the reason the SERVER's half of the new clause is `sameHost` alone: a process on another host can see neither of the two things this reads.
+//
+// The evidence is a transcript for the holder's session under `<configDir>/projects/` — the directory `transcriptFiles` already scans — whose mtime is at or
+// after the claim's heartbeat stamp. Present means a session on this host wrote to its transcript no earlier than the beat, i.e. it is the one beating.
+// Absent, or older than the beat, means the session that wrote that heartbeat is not writing here any more.
+//
+// **The asymmetry with bug-46 is the whole point.** The absence of a local transcript is MEANINGLESS on a machine that did not mint the session — that is
+// exactly bug-46's false negative, where the one check a remote reader can run answers "no" for every foreign claim, live or dead, and the "no" gets read as
+// proof of death. It becomes meaningful here only because `abort`'s first refusal has already established that this machine is the one the claim was made
+// on, so a running holder's transcript would have to be here.
+//
+// A session with no `CLAUDE_CODE_SESSION_ID` has no transcript at all and so passes this check trivially. That is correct rather than a hole: such a claim's
+// `session` is `<user>@<host>` — a person at a terminal on this host — and the person at that terminal is who is running `abort`.
+//
+// `{ file, at }` for the first transcript that is evidence, or `null`. An unreadable file or directory is not evidence, the same tolerance every other
+// reader of that tree has: nothing about a directory this tool does not own may throw here.
+export function holdingSessionEvidence(session, heartbeatISO, env = process.env) {
+  const beat = Date.parse(heartbeatISO)
+  if (!Number.isFinite(beat)) return null
+
+  for (const file of transcriptFiles(claudeProjectsRoot(env), session)) {
+    let mtimeMs
+    try {
+      mtimeMs = fs.statSync(file).mtimeMs
+    } catch {
+      continue
+    }
+    if (mtimeMs >= beat) return { file, at: new Date(mtimeMs).toISOString() }
+  }
+  return null
+}
+
 // One transcript file's records, or `null` if the file could not be read at
 // all. The null is load-bearing and different from `[]`: a file that exists but
 // cannot be read means the count would be an undercount, and an undercount
@@ -1690,8 +1730,7 @@ export function sessionTokensSince(startedISO, stampISO, env = process.env, warn
     return null
   }
 
-  const configDir = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude')
-  const files = transcriptFiles(path.join(configDir, 'projects'), sessionId)
+  const files = transcriptFiles(claudeProjectsRoot(env), sessionId)
   if (files.length === 0) {
     warn(`backlog: no transcript found for session ${sessionId} — recording no token count`)
     return null
@@ -1980,6 +2019,7 @@ commands:
 
 tracker projects only (backlog/source.json names github):
   heartbeat   say this session still holds an item
+  abort       release a live claim this machine's own dead session left behind
   comment     append a comment to an item
   body        replace an item's body (groom's only write)`
 
@@ -2027,6 +2067,10 @@ the item files are deleted only after every issue exists and every cross-referen
 // The three verbs that exist only in a tracker project. Each names the routes it needs, which is why they are not in files mode: there is no item file to
 // heartbeat, no timeline to comment on, and a files body is edited by whoever is holding the file.
 const HEARTBEAT_USAGE = `usage: backlog.mjs heartbeat <id>`
+// `abort`'s only argument is the item, deliberately: there is no `--force`, and no flag naming the holder. Everything this verb is allowed to assert it
+// works out for itself from the claim and from this machine — see the command block below for why an assertion a caller could type would be the shape
+// bug-46 exists to stop being persuasive.
+const ABORT_USAGE = `usage: backlog.mjs abort <id>`
 const COMMENT_USAGE = `usage: backlog.mjs comment <id> --body <file>`
 const BODY_USAGE = `usage: backlog.mjs body <id> --body <file> --if-updated-at <iso> [--runner-fix | --no-runner-fix]`
 
@@ -2631,7 +2675,112 @@ export async function main(argv) {
     return 0
   }
 
-  /* The three verbs that exist only in a tracker project (task-46, Decision 2 of the item). Each one exists because one of §6.2's routes needs a caller:
+  /* `abort <id>` — the human sibling of `orchestrate.mjs abort` (bug-48), and the fourth verb that exists only in a tracker project.
+     It sits beside `start`/`stop` rather than with the three below because it is a claim verb: it releases, and it releases somebody else's claim.
+
+     A hand-run session killed mid-item — the machine stopped, the terminal closed, anything that is not a terminal stage — passes through NO terminal stage,
+     so it releases nothing. Every clause of the release rule then answers about somebody who no longer exists: the holder is gone, a hand claim carries no
+     `run` by construction (deliberately, so a run can never evict a person at a terminal), and the claim is LIVE because `heartbeat` was re-stamped seconds
+     before the kill. The item reads as in progress on every machine for a full fifteen minutes, its dispatch control disabled everywhere, with nothing to do
+     but wait or delete the comment by hand — which destroys the record of the work and the counters that prove it.
+
+     The server's new clause is `sameHost`, and **the PROOF behind it is this command's**. The server can see neither this filesystem nor this process table,
+     so the three refusals below are where the narrowness lives; they run in the order the evidence gets cheaper to trust, and the HOST check comes before
+     the transcript check because the transcript check is meaningless without it (see `holdingSessionEvidence`).
+
+     There is deliberately no `--force`, no flag naming the holder and no remote path. The first two are the fourth clause with no proof attached, assertable
+     from a machine that cannot possibly know — the shape bug-46 exists to stop being persuasive. The third is honest about its limit: a machine that is
+     switched off cannot prove anything, and the fifteen-minute window is the protocol's own repair for exactly that case. */
+  if (cmd === 'abort') {
+    const id = argv[1]
+    if (!id) {
+      console.error(ABORT_USAGE)
+      return 1
+    }
+
+    const r = requireStore()
+    if (!r.ok) return r.code
+
+    // Refused in files mode the way the three verbs below are, and for the same reason: the command IS known, it just has no meaning against a store on
+    // disk. There is no claim there to release — the marker is a `started:` line in the item file — and the files store's equivalent already exists.
+    if (r.mode.kind !== 'api') {
+      console.error(`files projects have no claim to abort: the marker is a \`started:\` line in the item file, and \`stop ${id} --abandon\` already clears it`)
+      return 1
+    }
+
+    try {
+      const project = registryRoot(r.resolved.root)
+      const wanted = trackerId(id, r.mode.repo)
+
+      const held = await apiGet(`/api/items/claim?project=${encodeURIComponent(project)}&id=${encodeURIComponent(wanted)}`)
+      // A released claim has nothing to abort, and neither has an issue nobody holds. Same sentence `stop` prints for the same state.
+      if (held === null || held.record.released !== undefined) {
+        console.error(`${wanted} is not in progress`)
+        return 1
+      }
+
+      /* A DEAD claim needs no abort at all: the next `start` retires it, which is the protocol's own repair path and the one `claim`'s step 5 already runs.
+         Exit 0 and no request, because the caller's actual goal — the item is not blocking anybody — is already true, and a release nobody needed would
+         only add a second record of a session that did nothing. */
+      const ageMs = Math.max(0, Date.now() - Date.parse(held.record.heartbeat))
+      if (ageMs >= CLAIM_STALE_MS) {
+        console.log(`${wanted} was last beaten ${roughAge(ageMs)} ago, so the claim is already dead — the next start retires it and there is nothing to abort`)
+        return 0
+      }
+
+      /* Refusal 1: this machine has to be the one the claim was made on. A claim that recorded no machine at all is the pre-bug-46 shape, and absence there
+         means "the machine was not recorded" and never "this one" — so there is nothing to compare and nothing this command may conclude. Both refusals name
+         what failed, and the cross-machine one names BOTH hosts, because "held elsewhere" with only one side printed is the reading bug-46 is made of. */
+      const claimHost = typeof held.record.host === 'string' ? held.record.host.trim() : ''
+      if (claimHost === '') {
+        console.error(
+          `${wanted} recorded no machine (a claim taken before claims carried one) — abort cannot tell whether its session is gone: wait out the 15 min window`,
+        )
+        return 1
+      }
+      if (claimHost !== hostIdentity()) {
+        console.error(
+          `${wanted} is held on ${claimHost} and this session is on ${hostIdentity()} — run abort there, or wait out the 15 min window`,
+        )
+        return 1
+      }
+
+      /* Refusal 2: nothing may show the holding session still running here. Without this, `abort` is a seizure rather than a repair — a second session on
+         this same laptop could take an item out from under the person holding it at a terminal, which is the one thing host equality alone cannot stop. */
+      const alive = holdingSessionEvidence(held.record.session, held.record.heartbeat)
+      if (alive !== null) {
+        console.error(
+          `${wanted} is held by session ${held.record.session}, which is still writing here: ${alive.file} was touched ${alive.at}, at or after the claim's` +
+            ` heartbeat ${held.record.heartbeat} — not aborting a session that is running`,
+        )
+        return 1
+      }
+
+      /* `reason: 'aborted'` — the word `orchestrate.mjs abort` settled on in bug-40, because this is the same event: a session torn down without passing
+         through a terminal stage. `host` is the assertion the server's fourth clause is decided on, and NO `counters` key is sent at all — `--abandon`'s
+         rule, for `--abandon`'s reason: the stretch between the last heartbeat and the kill is not work anybody did, and zeros would erase what every
+         earlier session on this item accumulated. No `runId` either: a person at a terminal has no run to speak for. */
+      await apiPost('release', {
+        project,
+        id: wanted,
+        commentId: held.commentId,
+        session: sessionIdentity(),
+        reason: 'aborted',
+        host: hostIdentity(),
+      })
+
+      console.log(`gh:${r.mode.repo}${wanted}`)
+      console.log(`claim ${held.commentId} released as aborted — its counters are left exactly as they were`)
+      return 0
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
+  }
+
+  /* Three more verbs that exist only in a tracker project (task-46, Decision 2 of the item) — `abort` directly above is the fourth, and stands apart
+     because it is a claim verb rather than a route with no caller. Each of these three exists because one of §6.2's routes needs a caller:
      execute's failure-path Outcome (`comment`), groom's body patch (`body`), and liveness (`heartbeat`).
 
      In files mode each is exit 1 with its own sentence rather than a shared "unknown command", because the command IS known — it just has no meaning against a

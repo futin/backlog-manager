@@ -3,9 +3,12 @@ id: bug-48
 title: a hand-run session killed mid-item leaves a fresh claim nobody can release, and there is no human equivalent of the orchestrator's abort
 created: 2026-09-21
 tags: tracker, claim, cli
-updated: 2026-09-21T20:37:35Z
+updated: 2026-09-22T11:24:34Z
 groom-elapsed: 215
 groom-tokens: 24442
+started: 2026-09-22T09:07:04Z
+execute-elapsed: 8250
+execute-tokens: 88353
 ---
 
 ## Symptom
@@ -157,3 +160,41 @@ The shape of the fix is the open question and grooming's to settle. A fourth cla
 a rule that exists to stop exactly that; a `--force` flag is the same thing spelled differently. The alternative is that this is not a claim problem at all but a
 liveness one — the claim is only unreleasable because nothing on the tracker can tell a reader that the holding machine is gone, which is
 [bug-46](bug-46-a-claim-names-a-session-id-and-no-host-so-another-machines-live-claim-reads-as-litter.md)'s missing host by another route. Groom the two together.
+
+## Outcome
+
+2026-09-22 — fixed as the Fix specifies, in four places: `ItemReleaseRequest.host` (`shared/types.ts`), the `optional()` validation on the `release` route
+(`server/src/items/items-write.controller.ts`), the `sameHost` clause in `GithubSource.release`'s live-claim guard
+(`server/src/items/sources/github.source.ts`), and the new `backlog.mjs abort <id>` verb with its three refusals and the `holdingSessionEvidence` transcript
+check that backs the host assertion (`skills/backlog/tools/backlog.mjs`). `sameHost` is guarded by `typeof`/`length` exactly like `sameRun`, so a claim that
+recorded no host is never same-host with anything. The release carries `reason: 'aborted'` and no `counters` key at all, so the claim's original counters
+survive. No remote path and no `--force`, as the Fix's rejected alternatives require.
+
+Verification — `pnpm test` (both runners) and `pnpm run typecheck`:
+
+```
+Test Suites: 1 failed, 128 passed, 129 total
+Tests:       2 failed, 2151 passed, 2153 total
+
+ℹ tests 775
+ℹ pass 775
+ℹ fail 0
+
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo   (clean)
+```
+
+The two jest failures are `test/supertest-bind.test.ts` › "the platform behaviour this helper exists for" — the two wildcard-bind cases this WSL kernel has
+failed since before this branch existed. `test/supertest-bind.test.ts` is not touched by this item's diff. Every suite this item does touch is green:
+`test/tracker-write.test.ts` 82/82, `test/claude-rules.test.ts` 16/16, `node --test skills/backlog/tools/backlog.test.mjs` 337/337.
+
+Contract sweep: 7 sites updated (`docs/subsystems/invariants.md` — the **Who may release** paragraph rewritten as a quadruple plus the rejected alternatives,
+and the heartbeat-ownership paragraph restated as "the quadruple minus its last two clauses"; `.claude/rules/tracker.md` and `.claude/rules/items.md` — triple →
+quadruple; `docs/subsystems/skills.md` — the new `abort` row in the verb table; `skills/backlog-groom/SKILL.md` and `skills/backlog-execute/SKILL.md` — the
+third reading of a live claim, naming `abort`; `test/tracker-write.test.ts` — the stale "release's triple minus its last clause" header comment on the
+heartbeat-ownership block)
+
+Red proof: 11 tests went red with the change reverted (drop `&& !sameHost` from the live-claim guard → 2 red in `test/tracker-write.test.ts`; disable the
+`abort` command block → 8 red in `skills/backlog/tools/backlog.test.mjs`; make `holdingSessionEvidence` always answer `null` → 1 red, the refusal that will not
+abort a session still writing here)
+
+`skills/` changed, so this does nothing on this machine until it is committed, pushed, and `pnpm run plugin:sync` has run.

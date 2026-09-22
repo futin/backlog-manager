@@ -172,11 +172,15 @@ means the item is not this session's to work — so the instruction is answered 
 
 > `#5 is already in progress (session <theirs> on <their host>, heartbeat 12s ago) — this session is <mine> on <my host> — losing the race ends this session's work on this item`
 
-Read it the two ways `backlog-groom`'s "Already in progress" section reads it — one refusal, one reading, so the two skills say one thing about one line:
+Read it the three ways `backlog-groom`'s "Already in progress" section reads it — one refusal, one reading, so the two skills say one thing about one line:
 
-- **Fresh heartbeat** — somebody is working it right now, on this machine or another one. Stop. Everything above is this case.
+- **Fresh heartbeat, held on ANOTHER machine** — somebody is working it right now. Stop. Everything above is this case.
+- **Fresh heartbeat, held on THIS machine by a session that is gone** — the only case where a session may take the item back, because this is the one machine
+  that can check: `abort <id>` releases the claim, and then `start` succeeds. It refuses unless the claim's host is this one AND the holder's transcript shows
+  no write since the last beat, so a live neighbour on this laptop is safe from it. Never reach for it because a session id is unfindable — that is the
+  paragraph above, and on a foreign claim it is bug-46's false negative.
 - **Stale past fifteen minutes** — the protocol retires it the moment you claim, so re-run `start` alone and it succeeds. Do **not** `stop --abandon` first:
-  that clears a marker, and this claim is not yours to clear.
+  that clears a marker, and this claim is not yours to clear. `abort` is not for this case either, and says so.
 
 ## Dispatch
 

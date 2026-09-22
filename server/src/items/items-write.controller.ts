@@ -144,7 +144,12 @@ export class ItemsWriteController {
   /** Give it back, billing the counters the CALLER computed — the CLI is the
    *  biller, here as in `stopItem`. `runId` (bug-42) is the optional assertion
    *  "this is my run's claim", which is how an abort session that is not the
-   *  holder releases a live claim — see `runIdOf` and `GithubSource.release`. */
+   *  holder releases a live claim — see `runIdOf` and `GithubSource.release`.
+   *  `host` (bug-48) is its human sibling, "this is my MACHINE's claim", which
+   *  is how `backlog.mjs abort` clears a fresh claim left by a session killed
+   *  mid-item — validated by the same `optional` the `claim` route's `host`
+   *  uses, since it is the same field answering a question about the same
+   *  record. */
   @Post('release')
   async release(@Body() body: Record<string, unknown> | undefined): Promise<ClaimResult> {
     const raw = body ?? {};
@@ -155,9 +160,10 @@ export class ItemsWriteController {
     const reason = required(raw.reason, 'reason');
     const counters = countersOf(raw.counters);
     const runId = runIdOf(raw.runId);
+    const host = optional(raw.host, 'host');
 
     const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters, runId }));
+    return this.answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters, runId, host }));
   }
 
   /** Say the session is still alive; carry the driver's opaque `state` when

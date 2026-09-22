@@ -58,7 +58,7 @@ whose items live on GitHub.
 The stack has to be running: there is no offline queue, because a write parked on one laptop would be a second source of truth invisible to every other machine.
 A refused connection is **exit `5`**, a new code, naming the port and both ways to start the stack.
 
-What each verb does differently, and the three that exist only here:
+What each verb does differently, and the four that exist only here:
 
 | Verb             | API mode                                                                                                                                           |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -69,6 +69,7 @@ What each verb does differently, and the three that exist only here:
 | `move`           | `state`; `--outcome <file>` becomes the closing comment (refused in files mode)                                                                    |
 | `start` / `stop` | the claim protocol. `--as` REQUIRED on `start`; `stop` rediscovers the claim, bills the counters and releases                                      |
 | `heartbeat`      | new — says this session still holds the item; refused (exit `1`) on another session's claim, naming both sessions and, when the claim recorded one, both machines (bug-45, bug-46). Files mode: exit `1` |
+| `abort`          | new — releases a LIVE claim this machine's own dead session left behind (bug-48): refused unless the claim's `host` equals `hostIdentity()` and no transcript for the holder wrote at or after its heartbeat; releases with `reason: 'aborted'` and no `counters`. A dead claim exits `0` saying the next `start` retires it. Files mode: exit `1`, naming `stop <id> --abandon` |
 | `comment`        | new — appends a comment. Files mode: exit `1`                                                                                                      |
 | `body`           | new — groom's body patch, behind `--if-updated-at`. Files mode: exit `1`                                                                           |
 | `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |

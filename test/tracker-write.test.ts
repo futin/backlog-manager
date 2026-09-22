@@ -656,7 +656,7 @@ describe('release', () => {
   });
 
   /* -------------------------------------------------------------------------
-   * bug-42 — the middle clause of the triple: **the holder always, the RUN that owns the claim, ANYONE once the claim is dead.**
+   * bug-42 — the run clause: **the holder always, the RUN that owns the claim, ANYONE once the claim is dead** (bug-48 later made it a quadruple).
    *
    * `claim` has known the same-run takeover since task-47 §7.6 and `release` never learned it, so a `/backlog-orchestrate --abort` spawned by
    * `POST /api/agents/stop` — a session that took the run's driver lease and is therefore the run, but is NOT the claim's holder — was refused every
@@ -763,6 +763,119 @@ describe('release', () => {
     }).expect(201);
     expect(claimIn(100)?.released?.by).toBe('B');
   });
+
+  /* -------------------------------------------------------------------------
+   * bug-48 — the FOURTH clause: **the holder always, the RUN that owns the claim, the HOST that holds the claim once it can show the session is gone,
+   * ANYONE once the claim is dead.**
+   *
+   * A hand-run session killed mid-item passes through no terminal stage, so it releases nothing — and every clause of the old triple then answers about
+   * somebody who no longer exists: the holder is gone, a hand claim carries no `run` by construction, and `isLive` is true because `heartbeat` was
+   * re-stamped seconds before the kill. The item read as in progress on every machine for a full fifteen minutes with no command anywhere to clear it.
+   *
+   * The server's half of the clause is `sameHost` ALONE. It cannot see the caller's filesystem or process table, so the proof that the holding session is
+   * actually gone lives in `backlog.mjs abort`, where the transcripts and the clock are — exactly as billing does, and for the same reason. That is a
+   * MISTAKE boundary rather than a security one: `stop` already lets a caller send any `session` it likes, and the holder's id is printed in the refusal.
+   * ------------------------------------------------------------------------- */
+
+  it('lets the HOST that holds the claim release another session-s LIVE claim', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-progress' }] });
+    gh.claim(record({ session: 'sess-gone', host: 'futin@linux-box' }), 31, 100);
+    await sync();
+
+    const res = await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'sess-aborting',
+      host: 'futin@linux-box',
+      reason: 'aborted'
+    }).expect(201);
+
+    // `by` is the ABORTING session, never the holder — the same honest record bug-42's clause writes, for the same reason.
+    expect(res.body.record.released).toMatchObject({ reason: 'aborted', by: 'sess-aborting' });
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'aborted', by: 'sess-aborting' });
+    // Nothing else in `release` moves: the label still comes off, asserted on the CALL rather than the outcome.
+    expect(gh.matching('/labels/in-progress', 'DELETE')).toHaveLength(1);
+  });
+
+  /* The clause that keeps it a repair rather than an open door: a machine that is not the one the claim was made on cannot know anything about the
+     holder, which is bug-46's whole finding read from the other side. */
+  it('refuses a release asserting a DIFFERENT host, and patches nothing', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'sess-gone', host: 'futin@linux-box' }), 31, 100);
+    await sync();
+
+    const res = await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'sess-aborting',
+      host: 'futin@other-box',
+      reason: 'aborted'
+    }).expect(409);
+
+    expect(res.body.holder.session).toBe('sess-gone');
+    expect(res.body.holder.host).toBe('futin@linux-box');
+    expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
+  });
+
+  /* The `undefined === undefined` trap again, one field over, and guarded the same way `sameRun` is: written as the tempting
+     `existing.host !== req.host`, a request with no `host` against a claim written before that field existed compares equal and the refusal disappears
+     for every pre-bug-46 claim on the tracker. **A claim with no `host` is never same-host with anything** — absence means "the machine was not
+     recorded", never "this one", which is the sentence `ClaimRecord.host` already carries. */
+  it('is never same-host with a claim that recorded no host at all', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'sess-gone' }), 31, 100);
+    await sync();
+
+    const res = await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'sess-aborting',
+      host: 'futin@linux-box',
+      reason: 'aborted'
+    }).expect(409);
+
+    expect(res.body.holder.session).toBe('sess-gone');
+    expect(claimIn(100)?.released).toBeUndefined();
+  });
+
+  /* A 400 rather than a dropped field, the rule `runId` already follows on this route and `host` follows on `claim`: the SERVER branches on it, and a
+     silently dropped value turns an authorised abort into a refusal naming a session that no longer exists. */
+  it('400s a host that is not a non-empty string, and reaches GitHub not at all', async () => {
+    gh.issue();
+    gh.claim(record({ session: 'sess-gone', host: 'futin@linux-box' }), 31, 100);
+    await sync();
+
+    const bad = await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'B', host: 7, reason: 'aborted' }).expect(400);
+    expect(bad.body.error).toContain('host');
+    await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'B', host: '   ', reason: 'aborted' }).expect(400);
+
+    // Answered before the adapter is reached at all.
+    expect(gh.calls).toEqual([]);
+  });
+
+  /* `abort` sends no `counters` key at all — `--abandon`'s rule, for `--abandon`'s reason: the stretch between the last heartbeat and the kill is not
+     work anybody did, and zeros would erase what every earlier session accumulated. */
+  it('keeps the claim-s original counters when a host-authorised abort sends none', async () => {
+    gh.issue();
+    const counters = { groomElapsed: 9, executeElapsed: 8, groomTokens: 7, executeTokens: 6 };
+    gh.claim(record({ session: 'sess-gone', host: 'futin@linux-box', counters }), 31, 100);
+    await sync();
+
+    await post('release', {
+      project: trackerPath,
+      id: '#31',
+      commentId: 100,
+      session: 'sess-aborting',
+      host: 'futin@linux-box',
+      reason: 'aborted'
+    }).expect(201);
+
+    expect(claimIn(100)?.counters).toEqual(counters);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'aborted', by: 'sess-aborting' });
+  });
 });
 
 describe('heartbeat', () => {
@@ -867,12 +980,14 @@ describe('heartbeat.finished', () => {
  * — which is what happened on guide-manager#5, both machines grooming the same
  * issue with one of them having already lost the race and deleted its comment.
  *
- * The rule is `release`'s triple minus its last clause: the HOLDER always, and
- * the RUN that owns the claim (task-47 §7.6 — a resumed driver has a NEW
- * session id and the same `runId`, and must keep heartbeating its own items).
- * Deliberately NOT "anyone once the claim is dead": a stranger reviving a dead
- * claim is precisely the harm, and retiring one is `claim`'s business, which
- * the protocol already answers by the lowest live comment id.
+ * The rule is `release`'s quadruple minus its last TWO clauses: the HOLDER
+ * always, and the RUN that owns the claim (task-47 §7.6 — a resumed driver has
+ * a NEW session id and the same `runId`, and must keep heartbeating its own
+ * items). Deliberately NOT "anyone once the claim is dead", and NOT bug-48's
+ * "the host that can show the session is gone": both are about ENDING a claim,
+ * and a stranger reviving a dead one is precisely the harm here. Retiring one
+ * is `claim`'s business, which the protocol already answers by the lowest live
+ * comment id.
  * ========================================================================= */
 
 describe('heartbeat ownership (bug-45)', () => {
