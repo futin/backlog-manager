@@ -170,8 +170,9 @@ Add, as behaviour with the exact cases the implementer writes:
    extracting the first bold span, so a headline that happens to wrap compares equal to one that does not (one does today: the resume-coupling headline at
    `CLAUDE.md:464` closes its bold span on the continuation line). The two multisets are equal — same anchors, same headlines byte for byte,
    same counts — and every anchor's rule-file bullets all sit in ONE file. Cases: the real tree passes; an anchor present in CLAUDE.md and no rule file fails
-   naming it (this is the case that goes red against today's tree, on eleven orphans); an anchor in two rule files fails naming both; a headline edited on one
-   side only fails naming the anchor.
+   naming it (this is the case that goes red against today's tree — on all 66, because today's rule files carry pointers, not bullets; the eleven orphans
+   are the subset that would still fail after a naive pointer-to-bullet upgrade); an anchor in two rule files fails naming both; a headline edited on one side
+   only fails naming the anchor.
 3. **CLAUDE.md carries headlines, not mechanism.** Join each `- **` bullet's continuation lines and collapse whitespace. A bullet with a `Why:` link must match
    exactly `- **<headline>** Why: [invariants.md](docs/subsystems/invariants.md#<anchor>)` and nothing more. A bullet without a `Why:` link is at most 80 words
    (whitespace-separated tokens).

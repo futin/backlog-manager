@@ -106,8 +106,10 @@ code" in the abstract, you are reviewing "does this change do what the item said
    condition inverted, state written in one place and read in another that no longer agrees, a rename that missed a call site. Where you claim something is
    wrong, name the input or state that makes it wrong — a finding a reader cannot reproduce from your own sentence is a hunch, and hunches belong in the
    report's Minor section, not in a `fix` verdict.
-2. **The repo's own invariants.** Read `<worktree>/CLAUDE.md` and work through its **Invariants** section against the diff; follow it into
-   `docs/subsystems/invariants.md` when an entry points there. These encode failures that already happened in this repo, which makes breaking one a Critical
+2. **The repo's own invariants.** Read `<worktree>/CLAUDE.md` and work through its **Invariants** section — the headlines — against the diff, and for each
+   file the diff touches read the `.claude/rules/*.md` whose `paths:` covers it: that is where each headline's mechanism is, and a rule file loads on a `Read`
+   while you are reading a diff, so open them yourself. Follow either into `docs/subsystems/invariants.md` when an entry points there. These encode failures
+   that already happened in this repo, which makes breaking one a Critical
    finding by default even when the code "works" — a single-writer rule, a derived-never-stored rule, or a "never do X" that this diff quietly does. This is the
    check most easily skipped and the one a generic reviewer never performs at all, which is precisely why it is second and not last.
 3. **Test adequacy.** Do the new tests pin the behaviour the plan promised, or do they pin the implementation that happens to exist? A test that would still

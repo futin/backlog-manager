@@ -185,8 +185,9 @@ In a hand session that same tree may hold unrelated in-flight changes — scope 
 prints.
 
 **1. Contract sweep.** List every rule sentence, identifier, number, path, flag, command and default the diff changed or removed. For each, search the
-repository for its _old_ form **outside the diff** — `CLAUDE.md`, `docs/`, `README*`, compose and env files, `skills/**/*.md`, `agents/*.md`, code comments and
-JSDoc, test names and test descriptions. `grep -rn` on the old spelling is the whole technique; the work is in listing what changed, not in searching for it.
+repository for its _old_ form **outside the diff** — `CLAUDE.md`, `.claude/rules/*.md`, `docs/`, `README*`, compose and env files, `skills/**/*.md`,
+`agents/*.md`, code comments and JSDoc, test names and test descriptions. `grep -rn` on the old spelling is the whole technique; the work is in listing what
+changed, not in searching for it.
 
 The sweep is over the repository's text, not over the diff, because the site that now lies is always in a file the diff did not touch — that is precisely why it
 survived to review. Update every site the change makes false. Where you leave one standing on purpose, record it in `## Outcome` with the reason: a reviewer who

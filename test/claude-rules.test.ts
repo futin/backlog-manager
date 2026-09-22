@@ -1,30 +1,55 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { anchorsOf, compareTiers, freeProse, headlineOf, joinWrapped, splitBullets, tierOne, tierTwo, wordCount } from './helpers/rule-tiers';
 
 /**
- * `.claude/rules/*.md` are pointers into `docs/subsystems/invariants.md`, injected
- * into a session the moment it touches a file under the rule's `paths:` glob. Every
- * property this suite asserts fails silently in production if it breaks: a rule with
- * no `paths:` is loaded into EVERY session at launch (a context-floor increase for
- * all of them, the one failure mode task-35 must never introduce); an anchor that no
- * longer resolves lands the reader at the top of a 3,000-line file; a glob that
- * matches nothing never fires at all and nothing ever says so.
+ * `.claude/rules/*.md` hold the MECHANISM tier of this repo's rules: each file is the one home of the full bullet — headline, how the rule is implemented,
+ * its `Why:` link — for every rule scoped to the file's `paths:` glob, and is injected into a session the moment it reads a file under that glob. CLAUDE.md
+ * keeps only the headline and the link (tier one, loaded by every session); `docs/subsystems/invariants.md` keeps the reasoning (tier three). The split is
+ * docs/superpowers/specs/2026-09-22-claude-md-three-tiers-design.md; the parsers both tiers are read through are `test/helpers/rule-tiers.ts`.
  *
- * The suite reads the files as SOURCE, the way `test/csp.test.ts` and
- * `test/compose-env.test.ts` read config files — there is no YAML parser in the
- * dependency tree, and the frontmatter under test is one inline array a parser would
- * hand back verbatim anyway.
+ * Every property this suite asserts fails silently in production if it breaks: a rule with no `paths:` is loaded into EVERY session at launch (a
+ * context-floor increase for all of them, the one failure mode task-35 must never introduce); an anchor that no longer resolves lands the reader at the top
+ * of a 3,000-line file; a glob that matches nothing never fires at all and nothing ever says so; mechanism that creeps back into CLAUDE.md is paid for by
+ * every session, chat or headless, and nobody notices a file getting longer; a headline edited on one side only drifts the two tiers apart with no reader
+ * positioned to see both. The three tier guards catch the last two: a rule file is bullets and nothing else, each anchored exactly once; tier one and tier
+ * two are the same multiset of (anchor, headline) with one home per anchor; a linked CLAUDE.md bullet is a headline and a link and an unlinked one is short.
  *
- * It passes vacuously on an absent or empty directory ON PURPOSE. task-35's gate had
- * a real negative outcome — probe P3 could have come back saying path-scoped rules
- * never reach a linked worktree, in which case the correct deliverable was zero rule
- * files. This suite has to stay green in that world, so "no files" is a pass that
- * reports zero, never a failure.
+ * The suite reads the files as SOURCE, the way `test/csp.test.ts` and `test/compose-env.test.ts` read config files — there is no YAML parser in the
+ * dependency tree, and the frontmatter under test is one inline array a parser would hand back verbatim anyway.
+ *
+ * `ruleFilesIn` still answers `[]` for an absent directory, and one case pins that, but the suite as a whole is no longer vacuous on an empty
+ * `.claude/rules/` ON PURPOSE: task-35's pointer design had to stay green in the world where probe P3 came back negative and zero rule files was the right
+ * deliverable, whereas under the three tiers a CLAUDE.md that carries linked headlines with no rule file behind them is missing its mechanism, and the
+ * tier guard says so by name.
  */
 const REPO_ROOT = join(__dirname, '..');
 const RULES_DIR = join(REPO_ROOT, '.claude', 'rules');
 const INVARIANTS_REL = 'docs/subsystems/invariants.md';
+const CLAUDE_MD = readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
+
+/**
+ * Tier one's line shape, exactly: the headline's bold span, one space, `Why:`, one space, the link, end of bullet. Anything after the link — a clause, a
+ * second bold span, a sentence of mechanism — is what the split moved out of CLAUDE.md and what must not come back. Applied to the JOINED bullet, so a
+ * headline that wraps at 160 columns compares like one that does not.
+ */
+const HEADLINE_ONLY = /^- \*\*(.+?)\*\* Why: \[invariants\.md\]\(docs\/subsystems\/invariants\.md#[\w-]+\)$/;
+
+/** The most words a bold-led CLAUDE.md bullet may carry without a `Why:` link — the side door that would let mechanism back in by dropping the link. */
+const UNLINKED_WORD_CAP = 80;
+
+/**
+ * Tier one's offenders, from the text of a CLAUDE.md: a linked bullet that is more than a headline and a link, or an unlinked bullet over the cap. A
+ * function over text so the same predicate runs on the real file and on the fixture that proves it can see both shapes.
+ */
+function tierOneOffenders(claudeMd: string): string[] {
+  const tiers = tierOne(claudeMd);
+  return [
+    ...tiers.linked.filter((b) => !HEADLINE_ONLY.test(b.joined)).map((b) => `${b.line}: ${b.joined.slice(0, 80)}`),
+    ...tiers.unlinked.filter((b) => b.words > UNLINKED_WORD_CAP).map((b) => `${b.line}: ${b.words} words`)
+  ];
+}
 
 type RuleFile = {
   name: string;
@@ -68,6 +93,11 @@ function bodyStart(file: RuleFile): number {
   if (file.lines[0] !== '---') return 0;
   const close = file.lines.indexOf('---', 1);
   return close === -1 ? 0 : close + 1;
+}
+
+/** The rule file's body — everything after its frontmatter — as one string, the shape the tier parsers take. */
+function bodyOf(file: RuleFile): string {
+  return file.lines.slice(bodyStart(file)).join('\n');
 }
 
 /**
@@ -174,6 +204,81 @@ function trackedFiles(): string[] {
   return [...seen];
 }
 
+/*
+ * The guards below are only as good as the parsers they read the two tiers through, and a parser that produced nothing would match nothing against nothing
+ * and pass every guard while asserting exactly zero. So the parsers are pinned first, on strings, with the shapes the real files carry: wrapped bullets,
+ * a second bold span inside the mechanism, a `Why:` link on the continuation line.
+ */
+describe('rule-tiers helpers', () => {
+  it('joinWrapped folds continuation lines into one line', () => {
+    expect(joinWrapped('- **A\n  b** c\n  d')).toBe('- **A b** c d');
+  });
+
+  it('splitBullets starts a bullet at a column-0 dash and ends it at a blank, a heading or the next start', () => {
+    const bullets = splitBullets('intro\n- one\n  cont\n- two\n\n- three\n# h\n- four');
+    expect(bullets.map((b) => b.raw)).toEqual(['- one\n  cont', '- two', '- three', '- four']);
+    expect(bullets.map((b) => b.line)).toEqual([2, 4, 6, 8]);
+  });
+
+  it('headlineOf takes the first bold span of a bold-led bullet and nothing else', () => {
+    expect(headlineOf('- **A** rest')).toBe('A');
+    expect(headlineOf('- **A** and **B**')).toBe('A');
+    expect(headlineOf('- plain')).toBeNull();
+    expect(headlineOf('- **open')).toBeNull();
+    expect(headlineOf('- **`code` and text** x')).toBe('`code` and text');
+  });
+
+  it('anchorsOf lists every invariants.md anchor in order', () => {
+    expect(anchorsOf('x docs/subsystems/invariants.md#a-b y docs/subsystems/invariants.md#c_d')).toEqual(['a-b', 'c_d']);
+    expect(anchorsOf('none')).toEqual([]);
+  });
+
+  it('wordCount counts whitespace-separated tokens after the dash', () => {
+    expect(wordCount('- **A b** c d')).toBe(4);
+  });
+
+  it('tierOne reads from ## Invariants to the end of the file and sorts bullets by shape', () => {
+    const text = [
+      '## Layout',
+      '- **Layout** bullet docs/subsystems/invariants.md#x',
+      '## Invariants',
+      'intro sentence',
+      '- **L** mechanism Why: [invariants.md](docs/subsystems/invariants.md#l)',
+      '- **U** short',
+      '- plain one',
+      '## Conventions',
+      '- **C** Why: [invariants.md](docs/subsystems/invariants.md#c)'
+    ].join('\n');
+    const tiers = tierOne(text);
+    expect(tiers.linked.map((b) => b.headline)).toEqual(['L', 'C']);
+    expect(tiers.unlinked.map((b) => b.headline)).toEqual(['U']);
+    expect(tiers.plain.map((b) => b.raw)).toEqual(['- plain one']);
+    expect(() => tierOne('no heading here')).toThrow(/no ## Invariants heading/);
+  });
+
+  it('freeProse reports a line that is neither heading, bullet start nor continuation', () => {
+    expect(freeProse('# h\n\n- **A** x\n  cont\nStray sentence.\n- **B** y', 5)).toEqual([{ line: 9, text: 'Stray sentence.' }]);
+  });
+
+  it('compareTiers names what is missing on either side and an anchor homed twice', () => {
+    const b = (anchor: string, headline: string) => ({ raw: '', joined: '', headline, anchors: [anchor], words: 0, line: 0 });
+    expect(
+      compareTiers([b('X', 'H1'), b('Y', 'H2'), b('Y', 'H2')], [{ file: 'a', bullets: [b('X', 'H1'), b('Y', 'H2')] }])
+    ).toEqual({ missingInRules: ['Y\tH2'], missingInClaude: [], multiHomed: [] });
+    expect(
+      compareTiers([b('X', 'H1')], [
+        { file: 'a', bullets: [b('X', 'H1')] },
+        { file: 'b', bullets: [b('X', 'H1')] }
+      ])
+    ).toEqual({ missingInRules: [], missingInClaude: ['X\tH1'], multiHomed: ['X → a, b'] });
+    expect(compareTiers([b('X', 'H1')], [{ file: 'a', bullets: [b('X', 'H1 ')] }])).toEqual({
+      missingInRules: ['X\tH1'],
+      missingInClaude: ['X\tH1 '],
+      multiHomed: []
+    });
+  });
+});
+
 describe('.claude/rules', () => {
   it('every rule file declares a non-empty paths: list', () => {
     const offenders = RULES.filter((file) => pathsOf(file).length === 0).map((f) => f.name);
@@ -211,26 +316,55 @@ describe('.claude/rules', () => {
     expect(dead).toEqual([]);
   });
 
-  it('rule files are pointers only — no second copy of the reasoning', () => {
-    const prose: string[] = [];
+  it('a rule file is bullets and nothing else, every one anchored into invariants.md exactly once', () => {
+    // The three failure shapes — a stray paragraph, a bullet with no link, a bullet with two — are pinned on fixtures by the `freeProse` and `anchorsOf`
+    // cases above; this case is the real tree.
+    const offenders: string[] = [];
     for (const file of RULES) {
-      const body = file.lines.slice(bodyStart(file));
-      body.forEach((line, i) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) return;
-        if (trimmed.includes(INVARIANTS_REL) || trimmed.includes('CLAUDE.md')) return;
-        prose.push(`${file.name}:${bodyStart(file) + i + 1}: ${trimmed.slice(0, 60)}`);
-      });
+      const body = bodyOf(file);
+      const first = bodyStart(file) + 1;
+      for (const prose of freeProse(body, first)) offenders.push(`${file.name}:${prose.line}: ${prose.text.slice(0, 60)}`);
+      for (const bullet of tierTwo(body, first)) {
+        if (bullet.anchors.length !== 1) {
+          offenders.push(`${file.name}: ${bullet.headline ?? bullet.joined.slice(0, 60)} cites ${bullet.anchors.length} anchors`);
+        }
+      }
     }
-    expect(prose).toEqual([]);
+    expect(offenders).toEqual([]);
   });
 
-  it('no rule file exceeds 25 lines', () => {
-    const long = RULES.filter((f) => f.lines.length > 25).map((f) => `${f.name} (${f.lines.length})`);
-    expect(long).toEqual([]);
+  it('CLAUDE.md headlines and rule-file bullets are the same set, one home per anchor', () => {
+    const one = tierOne(CLAUDE_MD).linked;
+    const two = RULES.map((file) => ({
+      file: file.name,
+      bullets: tierTwo(bodyOf(file), bodyStart(file) + 1).filter((b) => b.headline !== null)
+    }));
+    expect(compareTiers(one, two)).toEqual({ missingInRules: [], missingInClaude: [], multiHomed: [] });
   });
 
-  it('passes vacuously when there is no rules directory', () => {
+  it('a linked CLAUDE.md bullet is a headline and a link, and an unlinked one is short', () => {
+    expect(tierOneOffenders(CLAUDE_MD)).toEqual([]);
+  });
+
+  it('the tier-one predicate sees trailing mechanism and an over-cap unlinked bullet, and forgives a wrapped headline', () => {
+    const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ');
+    const fixture = [
+      '## Invariants',
+      '- **H** Why: [invariants.md](docs/subsystems/invariants.md#a)',
+      '- **H2** Why: [invariants.md](docs/subsystems/invariants.md#b) More.',
+      '- **H3',
+      '  tail** Why:',
+      '  [invariants.md](docs/subsystems/invariants.md#c)',
+      `- **${words(UNLINKED_WORD_CAP)}**`,
+      `- **${words(UNLINKED_WORD_CAP + 1)}**`
+    ].join('\n');
+    expect(tierOneOffenders(fixture)).toEqual([
+      '3: - **H2** Why: [invariants.md](docs/subsystems/invariants.md#b) More.',
+      `8: ${UNLINKED_WORD_CAP + 1} words`
+    ]);
+  });
+
+  it('ruleFilesIn answers an empty list for an absent directory', () => {
     expect(ruleFilesIn(join(REPO_ROOT, '.claude', 'rules-does-not-exist'))).toEqual([]);
   });
 });
