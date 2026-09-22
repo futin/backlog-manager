@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
+import { claimsByIssue } from './claim';
 import { GithubClient, isRepo, type GithubComment, type GithubIssue } from './github.client';
 import { TRACKER_LABELS, TRACKER_LABEL_NAMES } from './labels';
 import { githubToken } from './token.util';
@@ -58,6 +59,22 @@ export const TRACKER_POLL_MS = 15_000;
  *  GitHub's own guidance is to wait at least a minute (spec §5.1). */
 export const SECONDARY_BACKOFF_MS = 60_000;
 
+/**
+ * How young a cached comment has to be for the per-issue reconcile to keep it
+ * when GitHub's list of that issue's comments does not show it (bug-55).
+ *
+ * GitHub's comment listing is eventually consistent — it is why the claim
+ * protocol lists twice and unions the two — so a claim this process
+ * `absorbComment`-ed a second ago can legitimately be absent from a list made
+ * now, and dropping it would draw an item as free while a session holds it.
+ * Not the protocol's one-second `settleMs`: that is how long one machine waits
+ * between two of ITS OWN reads, whereas this compares a GitHub-stamped
+ * `created_at` against THIS machine's clock, so it has to absorb clock skew as
+ * well as replication lag. Ten seconds is under one poll interval, so a
+ * genuinely deleted young comment is kept for at most one extra tick.
+ */
+export const RECONCILE_GRACE_MS = 10_000;
+
 /** The connection state of one repo, as `ProjectSummary.access` spells it. */
 export type Access = NonNullable<SourceSummary['access']>;
 
@@ -71,7 +88,13 @@ interface RepoState {
   issues: Map<number, GithubIssue>;
   /** Comments by id. Written since phase 2; read since task-46 by `comments()`
    *  below, which is what the claim protocol maps an item's `started`/`phase`
-   *  and counters from. */
+   *  and counters from.
+   *
+   *  Filled by the repository-wide `since` read, which can ADD and EDIT but
+   *  never delete: a deleted comment is simply not mentioned by any later
+   *  response. Deletions reach this map two ways — `forgetComment`, for the
+   *  loser THIS process deleted, and the per-issue reconcile in `syncRepo`,
+   *  for every other machine's (bug-55). */
   comments: Map<number, GithubComment>;
   /** The newest issue `updated_at` seen, sent as the next ISSUES poll's
    *  `since`. `null` before the first sync, which is what makes that sync a
@@ -97,6 +120,19 @@ interface RepoState {
   commentsHwm: string | null;
   issuesEtag: string | null;
   commentsEtag: string | null;
+  /**
+   * The per-issue reconcile's memory (bug-55): for each issue it re-checked on
+   * the last tick, the ETag of that issue's comment list and the ids the list
+   * held. The ids are what make a `304` usable rather than merely cheap — it
+   * means "the list is still exactly THIS", so the reconcile runs against the
+   * remembered list instead of being skipped, and a comment the cache gained
+   * from elsewhere since (a grace-kept one, or one the repo-wide read caught
+   * between its creation and its deletion) is still judged against it.
+   *
+   * Pruned every tick to the issues being re-checked, so an issue whose last
+   * unreleased claim is gone costs neither a request nor an entry.
+   */
+  issueChecks: Map<number, { etag: string | null; ids: ReadonlySet<number> }>;
   polledAt: string | null;
   access: Access;
   detail: string | null;
@@ -308,11 +344,15 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    * Drop one comment from the cache — the deletion half, for the ONE thing the
    * protocol deletes: a claim that lost the race, seconds after posting it.
    *
-   * Needed because the poller's comment read is conditional and incremental
+   * The poller's repository-wide comment read is conditional and incremental
    * (`since` plus an ETag), so a comment that no longer exists is never
-   * mentioned again by any later response: without this, a losing claim would
-   * sit in the cache being counted as a live claim by the mapper until the
-   * process restarted.
+   * mentioned again by any later response. The per-issue reconcile in
+   * `syncRepo` catches that within a tick for ANY deletion — including a loser
+   * deleted by another machine's server, which never reaches this method
+   * (bug-55) — so this is no longer the only thing standing between a deleted
+   * claim and a permanent ghost. It stays as the zero-latency path for the
+   * deletion this process made itself: the next board read is right at once,
+   * not after the next poll.
    */
   forgetComment(repo: string, commentId: number): void {
     this.repos.get(repo)?.comments.delete(commentId);
@@ -428,6 +468,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
         commentsHwm: null,
         issuesEtag: null,
         commentsEtag: null,
+        issueChecks: new Map(),
         polledAt: null,
         access: 'ok',
         detail: null,
@@ -514,9 +555,121 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       }
     }
 
+    // Only once BOTH repo-wide reads succeeded (a failure returned above), so
+    // the reconcile judges a cache that is as current as the repo-wide stream
+    // can make it. It returns `false` when it hit a failure, which has already
+    // been recorded as this repo's `access` — and a rate-limited repo must not
+    // go on to spend requests on labels either.
+    if (!(await this.reconcileClaimedIssues(repo, token, state))) return;
+
     // The bootstrap, after the first sync that proved the repo is readable
     // (spec §5.2). Phase 2's one write to GitHub.
     if (!state.labelsEnsured) await this.ensureLabels(repo, token, state);
+  }
+
+  /**
+   * Re-read the comments of every issue the cache holds an UNRELEASED claim on,
+   * and let that fresh list be the truth for that issue (bug-55).
+   *
+   * The repo-wide read above can never see a deletion — `since` returns what
+   * was created or edited, and a deleted comment is neither — so a claim that
+   * lost the race and was deleted by ANOTHER machine's server sat in this cache
+   * for good: a phantom remote run, an `executing` card, and the answer
+   * `readClaim` gave. Fixed here, in the one bag all three read, rather than in
+   * each reader. A reader-side "ignore a claim with a lower live rival" was
+   * weighed and rejected: once the winner releases, the ghost is the lowest
+   * unreleased claim and is drawn as the holder again — and the cache itself
+   * would still be wrong.
+   *
+   * **Cost.** Only issues with an unreleased claim are asked about, so a repo
+   * with nothing running costs zero extra requests, and each re-check is
+   * conditional on the last one's ETag, so a quiet held issue is a `304` —
+   * which GitHub does not count against the hourly budget. The spec's
+   * two-requests-per-tick arithmetic (`TRACKER_POLL_MS`) is therefore unchanged
+   * for everything but the budget-free `304`s and the tick after a claim moves.
+   *
+   * **Absent means deleted — except when young.** A cached comment on the issue
+   * that the list does not carry is dropped, unless its `created_at` is within
+   * `RECONCILE_GRACE_MS` of the moment the request was sent: GitHub's listing
+   * is eventually consistent, and a claim this process absorbed a second ago
+   * may not be in a list made now.
+   *
+   * **Upsert without the mark.** Every listed comment is written into the
+   * cache, as `absorbComments` does, but `commentsHwm` is NOT moved: it belongs
+   * to the repo-wide stream alone, and the task-46 incident that field's doc
+   * describes is exactly what a mark shared between two streams re-opens.
+   *
+   * Returns `false` on the first failed response — already recorded by
+   * `handleFailure` — leaving that issue's cached comments untouched and asking
+   * about no further issue this tick: a rate limit must not be hammered by the
+   * remaining issues. A `404` is NOT a failure here: the issue was deleted or
+   * transferred, so its comments are gone too, and it reconciles as an empty
+   * list. (Every other `404` in this file means the REPO is unreadable, which
+   * the repo-wide reads that just succeeded rule out.)
+   */
+  private async reconcileClaimedIssues(repo: string, token: string, state: RepoState): Promise<boolean> {
+    const claimed: number[] = [];
+    for (const [number, claims] of claimsByIssue(state.comments.values())) {
+      if (claims.some((c) => c.record.released === undefined)) claimed.push(number);
+    }
+    claimed.sort((a, b) => a - b);
+    for (const number of state.issueChecks.keys()) {
+      if (!claimed.includes(number)) state.issueChecks.delete(number);
+    }
+
+    for (const number of claimed) {
+      const prior = state.issueChecks.get(number);
+      const sentAt = Date.now();
+      const first = await this.client.issueComments(repo, number, { token, etag: prior?.etag ?? null });
+
+      let listed: GithubComment[] = [];
+      let check: { etag: string | null; ids: ReadonlySet<number> };
+      if (first.status === 304) {
+        // An ETag is only ever sent from a remembered check, so `prior` is
+        // there; the guard is for the type, and skips rather than guesses.
+        if (prior === undefined) continue;
+        check = prior;
+      } else if (first.status === 404) {
+        check = { etag: null, ids: new Set() };
+      } else {
+        if (this.handleFailure(state, first)) return false;
+        if (first.status !== 200) continue;
+        // Paginated to the END before anything is deleted: a partial list
+        // would read every comment on the unread pages as deleted.
+        let page = first;
+        let complete = true;
+        for (;;) {
+          if (Array.isArray(page.data)) listed.push(...page.data);
+          if (page.next === null) break;
+          const nextPage = await this.client.page<GithubComment[]>(page.next, { token });
+          if (this.handleFailure(state, nextPage)) return false;
+          if (nextPage.status !== 200) {
+            complete = false;
+            break;
+          }
+          page = nextPage;
+        }
+        if (!complete) continue;
+        listed = listed.filter((c) => typeof c?.id === 'number');
+        check = { etag: first.etag, ids: new Set(listed.map((c) => c.id)) };
+      }
+
+      // `claimsFor`'s membership rule — the `issue_url` SUFFIX, so #31 never
+      // matches #310 — over every cached comment, claim or not: an attention
+      // comment on a deleted issue is as gone as a claim on it.
+      const suffix = `/issues/${number}`;
+      const young = sentAt - RECONCILE_GRACE_MS;
+      for (const comment of [...state.comments.values()]) {
+        if (typeof comment.issue_url !== 'string' || !comment.issue_url.endsWith(suffix)) continue;
+        if (check.ids.has(comment.id)) continue;
+        // An unparseable `created_at` is NaN, and NaN is never young.
+        if (Date.parse(comment.created_at) > young) continue;
+        state.comments.delete(comment.id);
+      }
+      for (const comment of listed) state.comments.set(comment.id, comment);
+      state.issueChecks.set(number, check);
+    }
+    return true;
   }
 
   /** Upsert by issue number, dropping pull requests, and move the high-water

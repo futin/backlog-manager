@@ -2684,6 +2684,17 @@ comment again. Nothing read the cache before task-46, so the gap had been harmle
 started reading it, it meant a held item drawn as free and a claim the CLI could not give back. Pagination is the same rule one step on: the issues loop always
 followed `Link` and the comments read did not, so a claim past the first page was lost the same way.
 
+**A deletion is invisible to that stream, so every claimed issue is reconciled on its own (bug-55).** `since` returns what was created or edited, and a
+deleted comment is neither, so no repo-wide response can ever say one is gone. `forgetComment` covered the one deletion the protocol makes — a loser removing
+its own claim — but only on the machine that made it: on 2026-09-22 two machines raced for one issue twice, the protocol picked the right winner both times, and
+both times the loser's deleted claim stayed in the WINNER's cache as a `running`, `fresh` remote run, an `executing` card and the answer `GET /api/items/claim`
+gave, until the process restarted. Each tick now re-reads the comments of every issue the cache holds an unreleased claim on — conditionally, so a quiet held
+issue is a budget-free `304`, and not at all when nothing is held — and a cached comment on that issue the list does not carry is dropped, unless it is younger
+than `RECONCILE_GRACE_MS`, because the listing is eventually consistent and a claim absorbed a second ago may not be in it yet. Fixing the one bag all three
+readers share was chosen over each reader filtering: "ignore a claim with a lower live rival" draws the ghost as the holder again the moment the winner
+releases, since it is then the lowest unreleased claim. A periodic full resync was rejected too — a ghost would live a whole resync period, at a cost that
+scales with the repo's comment count rather than with what is held.
+
 That is also why `readClaim` does not trust a cache MISS. A miss means "this process has not seen it", never "nobody holds it" — a server that started after
 the claim, or a second machine's server, has every right to one — so it falls back to a single fresh per-issue read. The cache stays the fast path and the
 common one; the fallback is what makes the answer safe to act on.

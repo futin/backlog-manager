@@ -33,6 +33,8 @@ export interface Call {
   method: string;
   url: string;
   body: Record<string, unknown> | undefined;
+  /** The conditional-request header, when the caller sent one (bug-55). */
+  ifNoneMatch?: string;
 }
 
 export interface FakeIssue {
@@ -74,6 +76,30 @@ export class FakeGithub {
 
   /** Comment ids this fake will omit from the NEXT per-issue list only. */
   hideFromFirstList = new Set<number>();
+
+  /**
+   * Comment ids this fake omits from EVERY per-issue list, while the comment
+   * itself still exists (bug-55). The standing form of `hideFromFirstList`, for
+   * the poller's reconcile rather than the protocol's settle window: it is how a
+   * case says "GitHub's listing has not caught up with a comment that was just
+   * posted" for as many ticks as it likes.
+   */
+  hideFromIssueLists = new Set<number>();
+
+  /** The mirror image: ids omitted from the REPOSITORY-WIDE comment read only
+   *  (bug-55), so a case can hand the poller a comment through its per-issue
+   *  reconcile alone and ask what that did to the repo-wide high-water mark. */
+  hideFromRepoStream = new Set<number>();
+
+  /**
+   * One answer that pre-empts the router for a matching request, then removes
+   * itself (bug-55). The fake otherwise only ever answers the way a healthy
+   * GitHub does; this is how a case makes ONE request fail — a rate limit on
+   * the poller's per-issue read, say — without teaching the router a failure
+   * mode per endpoint. `headers` are sent verbatim, so an
+   * `x-ratelimit-remaining: 0` reaches the client's rate bookkeeping.
+   */
+  failNext: { fragment: string; status: number; headers?: Record<string, string> } | null = null;
 
   /** Rows per page. GitHub's own maximum is 100; a case that wants to prove a
    *  caller follows `Link` lowers this to 1. */
@@ -134,16 +160,22 @@ export class FakeGithub {
   fetch: typeof fetch = (async (url: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET';
     const body = init?.body === undefined ? undefined : (JSON.parse(String(init.body)) as Record<string, unknown>);
-    this.calls.push({ method, url, body });
-    const { status, payload, next } = this.route(method, url, body);
-    return new Response(payload === undefined ? null : JSON.stringify(payload), {
-      status,
-      // `Link` is how this API paginates, and the client reads `rel="next"` off
-      // it — so a fake that never sends one can never exercise a caller's page
-      // loop. Task-46's review caught a poller that dropped every comment past
-      // the first page precisely because nothing here ever asked for a second.
-      headers: next === undefined ? undefined : { link: `<${next}>; rel="next"` }
-    });
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    this.calls.push({ method, url, body, ifNoneMatch: headers['if-none-match'] });
+    if (this.failNext !== null && url.includes(this.failNext.fragment)) {
+      const failure = this.failNext;
+      this.failNext = null;
+      return new Response(JSON.stringify({ message: 'failed on purpose' }), { status: failure.status, headers: failure.headers });
+    }
+    const { status, payload, next, etag } = this.route(method, url, body, headers['if-none-match']);
+    const out: Record<string, string> = {};
+    // `Link` is how this API paginates, and the client reads `rel="next"` off
+    // it — so a fake that never sends one can never exercise a caller's page
+    // loop. Task-46's review caught a poller that dropped every comment past
+    // the first page precisely because nothing here ever asked for a second.
+    if (next !== undefined) out.link = `<${next}>; rel="next"`;
+    if (etag !== undefined) out.etag = etag;
+    return new Response(status === 304 || payload === undefined ? null : JSON.stringify(payload), { status, headers: out });
   }) as unknown as typeof fetch;
 
   /**
@@ -170,14 +202,19 @@ export class FakeGithub {
     return { status: 200, payload: slice, next: more ? nextUrl : undefined };
   }
 
-  private route(method: string, url: string, body: Record<string, unknown> | undefined): { status: number; payload?: unknown; next?: string } {
+  private route(
+    method: string,
+    url: string,
+    body: Record<string, unknown> | undefined,
+    ifNoneMatch?: string
+  ): { status: number; payload?: unknown; next?: string; etag?: string } {
     const path = url.replace('https://api.github.com', '').split('?')[0];
 
     if (path === '/user') return { status: 200, payload: { login: 'futin' } };
     if (path === `/repos/${FAKE_REPO}/labels`) return { status: 200, payload: TRACKER_LABELS.map((l) => ({ name: l.name })) };
 
     // The repository-wide comment read the poller makes.
-    if (path === `/repos/${FAKE_REPO}/issues/comments`) return this.page([...this.comments.values()], url);
+    if (path === `/repos/${FAKE_REPO}/issues/comments`) return this.page([...this.comments.values()].filter((c) => !this.hideFromRepoStream.has(c.id)), url);
 
     if (path === `/repos/${FAKE_REPO}/issues`) {
       if (method === 'GET') return this.page([...this.issues.values()], url);
@@ -199,8 +236,18 @@ export class FakeGithub {
         const paging = url.includes('bm_page=');
         if (!paging) this.listCount++;
         const hide = this.listCount === 1 && !paging ? this.hideFromFirstList : new Set<number>();
-        const rows = [...this.comments.values()].filter((c) => c.issue_url.endsWith(`/issues/${number}`) && !hide.has(c.id));
-        return this.page(rows, url);
+        const rows = [...this.comments.values()].filter(
+          (c) => c.issue_url.endsWith(`/issues/${number}`) && !hide.has(c.id) && !this.hideFromIssueLists.has(c.id)
+        );
+        // An ETag over the whole list, the way GitHub's is a digest of the
+        // response (bug-55): the poller's per-issue reconcile sends it back as
+        // `if-none-match`, and a `304` must mean "this list has not changed" —
+        // ids AND edits, so an in-place claim rewrite is a new tag. Only on this
+        // endpoint: the protocol never sends one here, and giving the
+        // repo-wide reads a tag would move every other suite's request counts.
+        const etag = `"${rows.map((c) => `${c.id}@${c.updated_at}`).sort().join(',')}"`;
+        if (!paging && ifNoneMatch === etag) return { status: 304, etag };
+        return { ...this.page(rows, url), etag };
       }
       const id = this.nextComment++;
       this.comments.set(id, {

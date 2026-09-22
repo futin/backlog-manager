@@ -207,8 +207,13 @@ export class GithubClient {
    *  the way `issues` is: this returns a page and its `next` link, and the
    *  caller follows the cursor with `page()`. A per-issue read rather than the
    *  repository-wide one the poller makes, because the protocol has to see the
-   *  comments posted in the last second, which no cache can promise. */
-  async issueComments(repo: string, number: number, opts: { token: string }): Promise<GithubResponse<GithubComment[]>> {
+   *  comments posted in the last second, which no cache can promise.
+   *
+   *  Also the poller's per-issue reconcile (bug-55), which is why it takes the
+   *  optional `etag` its two repo-wide siblings take: the poller re-checks every
+   *  claimed issue on every tick, and a conditional read makes a quiet one a
+   *  `304`. The protocol never passes one — it must see a fresh list. */
+  async issueComments(repo: string, number: number, opts: { token: string; etag?: string | null }): Promise<GithubResponse<GithubComment[]>> {
     const bad = refuseRepo<GithubComment[]>(repo, this.rate);
     if (bad !== null) return bad;
     return this.request<GithubComment[]>('GET', `${API}/repos/${repo}/issues/${number}/comments?per_page=100`, opts);
