@@ -211,18 +211,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)
 - **A jsdom suite's fixture dates are relative to the clock the assertion runs under**
   Why: [invariants.md](docs/subsystems/invariants.md#a-fixture-date-is-relative-to-the-clock-the-assertion-runs-under)
-- Tests are flat in `test/`, `*.test.ts` / `*.test.tsx`; component suites opt into jsdom with a `@jest-environment jsdom` docblock. Skill tests live next to the
-  tool they cover (`skills/*/tools/*.test.mjs`) and run under node's own test runner, not jest — but `pnpm test` runs both runners, via `scripts/test-all.mjs`.
-  The split is which runner executes a file, not which ones one word covers; see the Invariants entry. Cases that pin a **skill's prose** rather than a tool
-  live in `skills/backlog/tools/backlog.test.mjs` too (`backlog-groom`'s stamp order and its closing `Groomed on disk only` line, `backlog-execute`'s pre-review
-  checks and the `agents/backlog-reviewer.md` half that reads them): that glob is the node runner's only reach into `skills/` — the other half of the pair,
-  `scripts/*.test.mjs`, covers `scripts/` and nothing else — and none of those files sits beside a `tools/` directory. The one exception is deliberate — the
-  `Groomed on disk only` cases assert `skills/backlog-orchestrate/SKILL.md`'s half of that seam too, in this suite rather than in `orchestrate.test.mjs`,
-  because the rule is two skills agreeing on one sentence and a suite that reads only one half cannot catch them drifting apart; the reviewer/execute pair is
-  the same shape. They read the other file, never import it — the "one skill's `tools/` may never import another's" rule is untouched. `backlog-retro` splits
-  its suite in two — `retro.test.mjs` (the CLI, spawned as a child process) and `retro-lib.test.mjs` (the modules under `tools/lib/`) — and BOTH sit at the
-  `tools/` level on purpose: `test:skills`'s globs are `skills/*/tools/*.test.mjs` and `scripts/*.test.mjs`, so a file under `tools/lib/` matches neither and
-  would never be run, which is the same as not existing.
+- **Tests are flat in `test/` under jest and beside the tool they cover under node; the node globs do not descend, so a suite one level deeper never runs**
+  Why: [invariants.md](docs/subsystems/invariants.md#where-a-test-file-sits-decides-which-runner-executes-it)
 
 <!-- docs-sync:
   sources:

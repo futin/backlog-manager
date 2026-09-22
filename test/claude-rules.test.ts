@@ -14,7 +14,8 @@ import { anchorsOf, compareTiers, freeProse, headlineOf, joinWrapped, splitBulle
  * of a 3,000-line file; a glob that matches nothing never fires at all and nothing ever says so; mechanism that creeps back into CLAUDE.md is paid for by
  * every session, chat or headless, and nobody notices a file getting longer; a headline edited on one side only drifts the two tiers apart with no reader
  * positioned to see both. The three tier guards catch the last two: a rule file is bullets and nothing else, each anchored exactly once; tier one and tier
- * two are the same multiset of (anchor, headline) with one home per anchor; a linked CLAUDE.md bullet is a headline and a link and an unlinked one is short.
+ * two are the same multiset of (anchor, headline) with one home per anchor; a linked CLAUDE.md bullet is a headline and a link, and a bullet without a
+ * link — bold-led or plain — is short.
  *
  * The suite reads the files as SOURCE, the way `test/csp.test.ts` and `test/compose-env.test.ts` read config files — there is no YAML parser in the
  * dependency tree, and the frontmatter under test is one inline array a parser would hand back verbatim anyway.
@@ -36,18 +37,21 @@ const CLAUDE_MD = readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
  */
 const HEADLINE_ONLY = /^- \*\*(.+?)\*\* Why: \[invariants\.md\]\(docs\/subsystems\/invariants\.md#[\w-]+\)$/;
 
-/** The most words a bold-led CLAUDE.md bullet may carry without a `Why:` link — the side door that would let mechanism back in by dropping the link. */
+/**
+ * The most words a CLAUDE.md bullet may carry without a `Why:` link, bold-led or plain — the two side doors that would let mechanism back in: drop the link,
+ * or drop the bold as well. The second door is not hypothetical: the "tests are flat" paragraph sat behind it at ~330 words until 2026-09-22.
+ */
 const UNLINKED_WORD_CAP = 80;
 
 /**
- * Tier one's offenders, from the text of a CLAUDE.md: a linked bullet that is more than a headline and a link, or an unlinked bullet over the cap. A
- * function over text so the same predicate runs on the real file and on the fixture that proves it can see both shapes.
+ * Tier one's offenders, from the text of a CLAUDE.md: a linked bullet that is more than a headline and a link, or a bullet with no link — bold-led or plain —
+ * over the cap. A function over text so the same predicate runs on the real file and on the fixture that proves it can see all three shapes.
  */
 function tierOneOffenders(claudeMd: string): string[] {
   const tiers = tierOne(claudeMd);
   return [
     ...tiers.linked.filter((b) => !HEADLINE_ONLY.test(b.joined)).map((b) => `${b.line}: ${b.joined.slice(0, 80)}`),
-    ...tiers.unlinked.filter((b) => b.words > UNLINKED_WORD_CAP).map((b) => `${b.line}: ${b.words} words`)
+    ...[...tiers.unlinked, ...tiers.plain].filter((b) => b.words > UNLINKED_WORD_CAP).map((b) => `${b.line}: ${b.words} words`)
   ];
 }
 
@@ -342,11 +346,11 @@ describe('.claude/rules', () => {
     expect(compareTiers(one, two)).toEqual({ missingInRules: [], missingInClaude: [], multiHomed: [] });
   });
 
-  it('a linked CLAUDE.md bullet is a headline and a link, and an unlinked one is short', () => {
+  it('a linked CLAUDE.md bullet is a headline and a link, and a bullet without a link is short', () => {
     expect(tierOneOffenders(CLAUDE_MD)).toEqual([]);
   });
 
-  it('the tier-one predicate sees trailing mechanism and an over-cap unlinked bullet, and forgives a wrapped headline', () => {
+  it('the tier-one predicate sees trailing mechanism and an over-cap bullet of either unlinked shape, and forgives a wrapped headline', () => {
     const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ');
     const fixture = [
       '## Invariants',
@@ -356,11 +360,14 @@ describe('.claude/rules', () => {
       '  tail** Why:',
       '  [invariants.md](docs/subsystems/invariants.md#c)',
       `- **${words(UNLINKED_WORD_CAP)}**`,
-      `- **${words(UNLINKED_WORD_CAP + 1)}**`
+      `- **${words(UNLINKED_WORD_CAP + 1)}**`,
+      `- ${words(UNLINKED_WORD_CAP)}`,
+      `- ${words(UNLINKED_WORD_CAP + 1)}`
     ].join('\n');
     expect(tierOneOffenders(fixture)).toEqual([
       '3: - **H2** Why: [invariants.md](docs/subsystems/invariants.md#b) More.',
-      `8: ${UNLINKED_WORD_CAP + 1} words`
+      `8: ${UNLINKED_WORD_CAP + 1} words`,
+      `10: ${UNLINKED_WORD_CAP + 1} words`
     ]);
   });
 
