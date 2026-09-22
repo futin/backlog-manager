@@ -2,6 +2,10 @@
 id: bug-50
 title: A stop landing on the tick that discovers the child's session id drops that id
 created: 2026-09-22
+updated: 2026-09-22T15:28:39Z
+started: 2026-09-22T15:17:02Z
+execute-elapsed: 697
+execute-tokens: 63252
 ---
 
 ## Symptom
@@ -60,3 +64,52 @@ difference from line 4243's write is that the `updatedAt` bump is skipped, which
 Do bug-52 first. If bug-52's abort-side harvest lands, this fix becomes a narrowing rather than a rescue — the id would be recovered from `logs/<id>.jsonl` at
 abort time anyway — so the open question to answer in the implementation is whether this is still worth its own write at all, or whether the honest resolution
 is to close this as covered. Answer that with bug-52's change in front of you; do not assume either way now.
+
+## Outcome
+
+2026-09-22 — fixed as written, and the open question the Fix left is answered: **still worth its own write.** bug-52 has not landed (it is still in
+`backlog/bugs/open/`, and nothing in `cmdAbort` reads `logs/<id>.jsonl`), so there is no abort-side harvest for this to be a narrowing of. Even once bug-52
+lands the two are not redundant in one direction that matters: this write puts the id on the run file at the moment the stop is observed, so a driver that is
+itself killed between the stop and the `--abort` — the case bug-52's harvest cannot cover, because the harvest runs inside the abort that never happens — still
+leaves the id recorded. Closing this as covered was the alternative and it was declined on that evidence, not on preference.
+
+The change is in `cmdWatch`'s stop branch (`skills/backlog-orchestrate/tools/orchestrate.mjs`): after the `process.kill` attempt and before
+`return EXIT_STOP_REQUESTED`, a freshly-discovered `newlyFoundSessionId` is applied through the existing `applyQueueItemFields` + `writeRunAtomic` pair, with
+the `run.updatedAt = nowISO()` bump deliberately not repeated — that bump is the one property the early return exists to protect, since `takeOverRun` reads the
+run's freshness to decide whether an abort from elsewhere is refused. The write is wrapped in a try/catch that prints one stderr line, in the same spirit as the
+`SIGTERM` above it: a run file that cannot be written is not a reason to withhold exit `10` from a caller whose child has already been signalled.
+
+Verification — `pnpm run test:skills` (node runner, the suite this tool's tests live in):
+
+```
+ℹ tests 779
+ℹ suites 0
+ℹ pass 779
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 108317.65242
+```
+
+`pnpm run test:jest` was run too: 128 of 129 suites pass, 2152 of 2154 tests. The two reds are `test/supertest-bind.test.ts`'s platform cases
+(`listen EADDRINUSE: address already in use :::<port>`), which fail on this WSL kernel independently of any branch work and are unrelated to this change — no
+file this diff touches is read by that suite.
+
+Contract sweep: 3 sites updated (`.claude/rules/orchestrator.md` — the stop bullet's `watch` clause now says the tick also persists a just-read session id with
+`updatedAt` untouched; `docs/subsystems/invariants.md` — the reasoning under "A stop is the control file's second kind", why the early return may drop the
+freshness bump but not the id; `skills/backlog-orchestrate/SKILL.md` §4's `exit 10` bullet — a stopped run may now carry the id, which is what §10's
+`resume-session` / `redispatch-after-stop` split turns on). Checked and left standing: `skills/backlog-orchestrate/references/recovery.md`'s
+`redispatch-after-stop` clause ("no session id was ever recorded, so there is nothing to resume") — still exactly true, just reached less often;
+`shared/types.ts`'s `RunQueueItem.sessionId` comment, which describes when the field is null and is unchanged by this; and prettier's pre-existing formatting
+drift in both `orchestrate.mjs` and `orchestrate.test.mjs`, which is present at HEAD and was not reflowed here.
+
+Red proof: 1 test went red with the change reverted — run before the fix existed, which is how it was written:
+
+```
+✖ a stop on the tick that first reads the session id persists that id, without bumping updatedAt (bug-50)
+  AssertionError [ERR_ASSERTION]: the discovered session id was dropped with the stack frame
+  + actual - expected
+  + null
+  - 'a1b2c3d4-5e6f-4a1b-8c2d-9f0e1a2b3c4d'
+```

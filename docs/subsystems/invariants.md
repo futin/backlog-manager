@@ -312,6 +312,12 @@ spawn for, never a superset — which is the safe direction, and the only direct
 - `watch` kills the child **by the pid it was given** and returns `10`. This is the one place in the system that holds a live child's pid, which is why the
   kill belongs here and nowhere else; it is never a pattern, and the signal is `SIGTERM` because the child owns a transcript `usage`/`denials` still read.
   The check runs BEFORE the tick's heartbeat write, so a run being stopped does not have its `updatedAt` pushed forward by the very tick that noticed.
+  **What that early return must not take with it is the session id** (bug-50, the sibling of bug-43's null pid): the same tick may have just read the child's
+  `system`/`init` event, and there is no later tick to read it again — `stage --session` is the only other writer of that field and the run is ending. So the
+  stop path persists a freshly-discovered id in a write of its own, skipping the `updatedAt` bump rather than the whole write. The distinction is what the
+  ordering was protecting: freshness is read by `takeOverRun` to decide whether an abort from elsewhere is refused, and a session id is read by nothing that
+  branches, so recording it costs that protection nothing. The write is best-effort, like the `SIGTERM` above it — a run file that cannot be written is not a
+  reason to withhold exit `10` from a caller whose child has already been signalled.
 - `abort` may TAKE the lease. `takeOverRun(dir, run, force)` gained a **required third parameter, no default** — `runClaimBlock`'s rule for `starting`
   (bug-21), for the identical reason: a default would let a future caller silently opt out. `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`
   unchanged, so a resume can still never steal a live run. A recorded control-file request is evidence of a human act that passed the origin guard, which is

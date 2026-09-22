@@ -796,7 +796,9 @@ that file itself, and why `status --json` is where the session id is read back f
 - **exit `1`** — a problem with this call: a missing `.jsonl` after the first interval, or one that cannot be read at all. The session may still be running; do
   not assume it died. Inspect the worktree and the `.err` file before deciding anything.
 - **exit `10`** — a stop was requested for this run (bug-39). `watch` has already signalled the child by the pid you gave it, so the session is ending. Do
-  **not** call `watch` again and do not stage anything: every `stage` transition now refuses with the same `10`. Go straight to §10, _Stopping_.
+  **not** call `watch` again and do not stage anything: every `stage` transition now refuses with the same `10`. If that last tick had just read the child's
+  init event, the session id is already on the run file — recorded on the way out (bug-50), so §10's recovery can still tell a resumable session from an item
+  that never got one. Go straight to §10, _Stopping_.
 
 ## 5. Inspect what the session left behind
 

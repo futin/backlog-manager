@@ -113,8 +113,10 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `pauseRequested`, derived from the SAME control-file read, and **both the sweeper and `RunControls` read that one field** — it is deliberately NOT a third
   input to `watchdogStoodDown`, whose being TRUE is what makes the board OFFER a Resume, so the coupling's biconditional narrows to an implication in the safe
   direction. In the tool: `stage` refuses EVERY transition with exit `10` (wider than the pause gate in both dimensions — a stop may abandon a worktree, which
-  `abort`'s marker-preservation rule keeps safe), `watch` kills the child **by the pid it was given** and returns `10`, and `takeOverRun(dir, run, force)`
-  gains a REQUIRED third parameter — `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`, so a resume can still never steal a live run.
+  `abort`'s marker-preservation rule keeps safe), `watch` kills the child **by the pid it was given**, persists a session id that same tick just read out of
+  the jsonl — its own write, `updatedAt` deliberately untouched, because the early return exists to protect freshness and a session id is not one (bug-50) —
+  and returns `10`, and `takeOverRun(dir, run, force)` gains a REQUIRED third parameter — `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`,
+  so a resume can still never steal a live run.
   `RunQueueItem.pid` is written by `stage <id> dispatched --pid <p>` and signalled by `cmdAbort` only behind three guards (non-terminal, `pidAlive`, and
   `ps -o args=` naming a `claude` process) — and since bug-43 that field is the SECOND pid source, because the stop gate refuses the very call that writes
   it: `resolveItemPid` reads `<dir>/logs/<id>.pid` first (written by SKILL.md's launcher before the refusal, garbage in it falling through rather than

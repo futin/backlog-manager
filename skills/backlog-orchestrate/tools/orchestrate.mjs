@@ -4236,6 +4236,23 @@ function cmdWatch(argv) {
       } catch {
         /* already gone, or not ours any more — the exit code below is what the caller acts on */
       }
+      /* bug-50, the sibling of bug-43's null pid: this tick may be the one that FIRST read the child's session id out of the jsonl, and returning here would
+         discard a fact already read off disk — there is no later tick, and `stage --session` (the only other writer of the field) never runs again on a run
+         that is ending. So the id is persisted on the way out, as its own write.
+
+         The `updatedAt` bump is deliberately NOT repeated: that is the one property the early return above exists to protect, since `takeOverRun` reads the
+         run's freshness to decide whether an abort from elsewhere is refused, and a stop that pushed it forward would extend the window in which the abort
+         that ends this run is turned away. A session id is not a freshness signal and no predicate branches on it, so writing it costs that protection
+         nothing. Best-effort in the same spirit as the kill above: a run file that cannot be written is not a reason to withhold EXIT_STOP_REQUESTED from a
+         caller whose child has already been signalled. */
+      if (newlyFoundSessionId !== null) {
+        try {
+          applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId });
+          writeRunAtomic(dir, run);
+        } catch (e) {
+          console.error(`could not record ${itemId}'s session id ${newlyFoundSessionId} before stopping: ${e.message}`);
+        }
+      }
       console.error(`a stop was requested for this run — signalled pid ${pid} and stopped watching ${itemId}. End the run with \`--abort\` (SKILL.md §10, "Stopping").`);
       return EXIT_STOP_REQUESTED;
     }

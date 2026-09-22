@@ -4808,6 +4808,44 @@ test('watch returns 10 and signals the pid it was given, rather than the budget 
   assert.equal(signal, 'SIGTERM');
 });
 
+// bug-50, the sibling of bug-43's null pid: the stop branch sits deliberately ABOVE the heartbeat write, so the tick that notices a stop does not push
+// `updatedAt` forward. A freshly-read session id is not a freshness signal though, and returning with it in a local variable threw away a fact already read off
+// disk, with no later tick to re-read it — `stage --session` is the only other writer and the run is over. STREAM_INIT's FIRST line is the init event, so this
+// watch's very first tick both discovers the id and sees the stop: exactly the one-tick window no hand-timed abort ever managed to land in.
+test('a stop on the tick that first reads the session id persists that id, without bumping updatedAt (bug-50)', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-5', 'dispatched', '--worktree', '/w', '--branch', 'b').status, 0);
+
+  const before = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const queued = (state) => state.queue.find((q) => q.id === 'task-5');
+  assert.equal(queued(before).sessionId, null, 'the fixture already carried a session id, so this case would pass without the fix');
+
+  // A process THIS TEST started, never a pattern, and alive so the stop has a real pid to signal.
+  const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+  t.after(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* already gone — the SIGTERM the stop sent got there first */
+    }
+  });
+
+  effectiveStop(home, project);
+
+  const out = run(project, home, 'watch', 'task-5', '--pid', String(child.pid), '--jsonl', STREAM_INIT, '--interval-ms', '1000', '--budget-ms', '30000');
+  assert.equal(out.status, 10, out.stderr);
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(queued(after).sessionId, 'a1b2c3d4-5e6f-4a1b-8c2d-9f0e1a2b3c4d', 'the discovered session id was dropped with the stack frame');
+  // The property the early return exists to protect, and the whole reason this rescue is its own write: `takeOverRun` reads this freshness to decide whether
+  // an abort from elsewhere is refused, so the write must leave `updatedAt` exactly where the stop found it.
+  assert.equal(after.updatedAt, before.updatedAt, 'the stop tick pushed updatedAt forward');
+  // Nothing else moved — a stop is not a transition, and the item is still the dispatched one `--abort` will finalise.
+  assert.equal(queued(after).stage, 'dispatched');
+});
+
 test('stage <id> dispatched --pid records the pid, and a later stage without the flag leaves it alone', (t) => {
   const { home, project } = orchFixture(t);
   seedReadyTask(project, 'task-5', 'Some task');
