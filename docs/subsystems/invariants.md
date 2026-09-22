@@ -2367,14 +2367,17 @@ sessions that edit those files and paid for by every session that does not.
 The split moved each Why-linked bullet, as verbatim lines, into exactly one rule file — `orchestrator` 17, `dispatch-watchdog` 13, `board` 11, `items` 5,
 `tracker` 3, `skills` 9, and three new scopes that no glob had reached: `security` 2 (the server edge), `scripts` 2, `tests` 3 — and left the headline and
 link in CLAUDE.md. One duplicate (the `backlog.mjs` … `exit 5` rule, stated twice) was folded into its fuller copy after every backtick span and number in the
-dropped one was proven present in it. After: **242 lines / 25,174 bytes**, roughly 9.9k tokens at the same bytes-per-token ratio — to be confirmed against the
-context panel in a fresh session. The nine rule files total 61,892 bytes and load only on a read of a file under their `paths:`. Left in place, deliberately:
+dropped one was proven present in it. After: **242 lines / 25,174 bytes**, roughly 9.9k tokens at the same bytes-per-token ratio — never measured; the move
+below superseded it the same day. The nine rule files total 61,892 bytes and load only on a read of a file under their `paths:`. Left in place, deliberately:
 the twelve unlinked bullets (each under 60 words) and the two plain Conventions bullets — among them the "tests are flat in `test/`" paragraph, some 330 words
 of mechanism with no anchor to home it under, a candidate for a later move once it has one.
 
 Later the same day the paragraph got its anchor — § "Where a test file sits decides which runner executes it", under the `pnpm test` union — and
 moved into `tests.md` behind a one-line headline; guard 3 now caps a plain bullet at the same 80 words as an unlinked bold one, so the door it sat behind is
-shut. CLAUDE.md after that move: **232 lines / 23,633 bytes**, roughly 9.3k tokens by the same ratio, still to be confirmed against the panel.
+shut. CLAUDE.md after that move: **232 lines / 23,633 bytes**. Confirmed against the panel in a fresh session later that day: the panel's "Memory files"
+line read **9,707 tokens**, and that bucket is the two CLAUDE.md files plus the auto-memory index — the global file (5,801 bytes) and the index (172 bytes)
+account for roughly 1.5k of it, so **this file costs about 8.2k tokens per session**, down from ~28k. The bytes-per-token ratio moved from 2.55 to about 2.9,
+because what left was the backtick-dense mechanism prose and what stayed is headline plus link.
 
 ### The end-to-end check, in this repo
 
