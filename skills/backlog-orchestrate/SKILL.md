@@ -76,7 +76,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `4`  | lock held: a `run.json` still marked `running` (fresh _or_ stale) refusing a plain `init`                                                                                                                                                                                          |
 | `5`  | `verify` only: nothing resolvable to verify with                                                                                                                                                                                                                                   |
 | `6`  | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; go to §10, _Pausing_                                                                                                                                         |
-| `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ |
+| `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ — or, for `abort`, one another session is **already aborting** (bug-54), which a stop does not override: inspect no worktree, end the turn |
 | `8`  | **tracker projects only** — the backlog-manager API is not running. **Nothing is written.** Start the stack (`pnpm run dev` or `pnpm run docker:up`) and retry the same command; a files project can never see this code                                              |
 | `9`  | **tracker projects only** — an API refusal this command could not absorb (no token, a 502 from GitHub, a 400 naming a field). **Nothing is written.** Not a call to fix and retry: park the item with the server's own sentence in the detail                         |
 | `10` | a **stop** was requested for this run: `stage` refuses **every** transition with it, and `watch` returns it after signalling the child. **Nothing is written** by the `stage` refusal; go to §10, _Stopping_                                                   |
@@ -84,8 +84,10 @@ The tool's exit codes, which the rest of this file quotes constantly:
 `6`, `7` and `10` are the codes whose reaction is neither a fix nor a retry, which is exactly why none of them is a `1`. A `1` means "this call was wrong". A `6` means
 "this call was right and the run is being asked to stop": never retry it, never work around it, go to §10. A `7` means "this call was right and this session is
 no longer the one driving this run": another `--resume` session claimed it, and two sessions past that point both stage-write one `run.json` and both end in a
-merge into the base. Stop — do not retry, do not re-claim, do not finish the run. (That prohibition is about a session refused mid-run. It does not touch `--abort`,
-which opens by taking the run over on purpose: see `references/recovery.md`.) A `10` means "a person ended this run": it is `6`'s sibling and not `6` itself,
+merge into the base. Stop — do not retry, do not re-claim, do not finish the run. (That prohibition is about a session refused mid-run. It does not stop `--abort` taking a
+_driver's_ lease, which it opens by doing on purpose: see `references/recovery.md`. A live _abort's_ lease is the one lease `--abort` respects — one board Stop
+reaches a live run twice, through this driver's `watch` and through the session the server spawns, and whichever `abort` comes second gets `7` while the first
+runs, or a one-line no-op `0` once it has finished.) A `10` means "a person ended this run": it is `6`'s sibling and not `6` itself,
 because a pause stops at the next item boundary and a stop stops **now**, abandoning whatever item is in flight. Never retry it, never work around it — go to
 §10, _Stopping_, which is `--abort` and not `finish`. `references/recovery.md` has the whole of the lease, including the `claim` a
 resume opens with.
@@ -1548,11 +1550,12 @@ even if you tried.
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
 ```
 
-Read `references/recovery.md`'s abort section first, as always — abort's order of operations is its entire safety property, and it is unchanged here. Four
+Read `references/recovery.md`'s abort section first, as always — abort's order of operations is its entire safety property, and it is unchanged here. Five
 things are worth knowing before you run it:
 
-- **It will not be refused on the lease.** `abort` takes the run over on the strength of the stop request itself, even from a driver the run file still reads
-  as alive. That is what a stop is for: the run file's freshness measures the FILE, never the process.
+- **It will not be refused on a driver's lease.** `abort` takes the run over on the strength of the stop request itself, even from a driver the run file still
+  reads as alive. That is what a stop is for: the run file's freshness measures the FILE, never the process. The one lease it respects is another abort's —
+  see the last bullet.
 - **It signals the children.** Any item still in flight is sent `SIGTERM` first, at whichever pid `resolveItemPid` answers with — `<dir>/logs/<id>.pid` if
   the launcher wrote one, else the pid the run file recorded (§4). It is deliberately not "a pid this run recorded": a stop landing in §4's window refuses
   the `--pid` call, so the run file's field can be null for a child that is very much alive, which is the whole of bug-43. What is signalled is still only a
@@ -1561,6 +1564,10 @@ things are worth knowing before you run it:
   still says `sessionId: null` gets it from `<dir>/logs/<id>.jsonl` (bug-52). A recorded id is never replaced, and a missing or init-less log leaves it null.
 - **A worktree carrying an in-progress marker is still left in place**, with an `attention` entry naming it. A stop may abandon an item; it may not destroy
   uncommitted work.
+- **An `abort` that exits `7` saying the run is already being aborted means another session is ending this run** (bug-54). The board's Stop also spawns an
+  `--abort` session, so one stop always reaches a live run twice, and the tool lets exactly one of them tear anything down. Do **not** read, `git status` or
+  otherwise inspect any worktree — the other abort is emptying it, and what you would see is its teardown, not the child's work. Report that session's id,
+  from the refusal, and end the turn. An `abort` that prints `already aborted` and exits `0` is the same fact arriving late: nothing was done, end the turn.
 
 Then summarise as _Finishing_ does — what merged or branched, what was abandoned mid-flight and where its worktree is — and end the turn. Do not ping and do
 not ask whether to continue: the person who stopped the run is already looking at the surface they stopped it from.

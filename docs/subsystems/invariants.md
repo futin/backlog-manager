@@ -295,6 +295,19 @@ opens `ui/Confirm`, which names the item it abandons and says the run cannot be 
 evicts it: its next command hits `assertDriver`, exits `7`, and stops immediately. That is the lease working as designed rather than being worked around,
 which is also why this route needs no pid for the driver and no kill channel to one.
 
+**So one stop reaches a live run twice, and the TOOL — not this route — is where the two are reconciled** (bug-54). A live driver's `watch` returns `10` and
+the driver runs its own `--abort`, while the spawned session runs another; before bug-54 nothing told them apart, `--abort` being exempt from the lease on
+purpose, and on 2026-09-22 the spawned session read the driver's teardown in progress (`git status`: 51 deletions, no additions) as evidence about the
+child's work. Gating the spawn here on a live-looking `driver.at` was rejected: the client draws no second Stop once `stopRequested` is true, so a driver
+that dies between the skipped spawn and its next `watch` tick would leave a `running` run with a stop on file that no surface can end, and closing that needs
+a re-stop control and a stale-stop respawn rule — three layers to save one redundant session. Instead `abort` marks the lease it takes
+(`driver.aborting`, equal to its `at`), and a second abort from another identified session refuses with exit `7` on a mark fresher than `RUN_STALE_MS`, before
+writing anything; one on a run already `aborted` is a one-line no-op `0`. A stop's `force` overrides a driver's lease and never an abort's, because a stop is
+on file for both aborts. The same session, a hand-run terminal and a stale mark are the three exemptions: finishing your own interrupted abort, the person at
+the keyboard being the authority, and an abort that died mid-way not locking the run for longer than any other lease does. There is no lock under the
+read-modify-write; the two aborts arrive ~25s apart and a doubled abort stays safe, so a lock is not bought. `test/agents-stop.test.ts` pins the spawn
+staying unconditional for a fresh run with a named driver, so a server-side liveness gate cannot come back without the re-stop control it needs.
+
 **`stopRequested: boolean` joins `pauseRequested` on the runs payload** — mandatory, derived per request from the SAME single control-file read (which is what
 makes the two mutually exclusive rather than merely usually so), stored nowhere, and `false` for a remote row. **Both sides read that one field; neither
 re-derives it, and it is deliberately NOT a third input to `watchdogStoodDown`.** That predicate answers "will the sweeper spawn", and the board renders its
@@ -330,7 +343,9 @@ spawn for, never a superset — which is the safe direction, and the only direct
   (bug-21), for the identical reason: a default would let a future caller silently opt out. `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`
   unchanged, so a resume can still never steal a live run. A recorded control-file request is evidence of a human act that passed the origin guard, which is
   exactly the evidence the tool has no other way to get — and deliberately not a `--force` flag, which every automated caller could reach for. It also
-  un-strands the hand-run terminal: the refusal's condition is `driver.sessionId !== me` and a person typing the command has `me === null`.
+  un-strands the hand-run terminal: the refusal's condition is `driver.sessionId !== me` and a person typing the command has `me === null`. bug-54 added a
+  **required fourth, `aborting`**, for the same no-default reason: `cmdAbort` passes `true` and its lease carries `driver.aborting`, `cmdClaim` passes `false`
+  and its lease never does.
 
 **Exit `10` is `6`'s sibling and not `6` itself.** A `6` means "stop at the next item boundary, then `finish --status paused`"; a `10` means "stop now and go
 to `--abort`". Different commands, different endings, and a run that collapsed them would finish the very item a person asked it to abandon.

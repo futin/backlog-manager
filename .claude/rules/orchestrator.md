@@ -109,14 +109,17 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   both sides, `stopRequestEffective` being the pause predicate's two clauses plus `kind === 'stop'`. `POST /api/agents/stop` is `pause`'s sibling — guarded,
   `cancel: true` refused 409 before the run lookup (bug-53: a stop cannot be withdrawn), independent of `BM_AGENTS`, `running` fresh **or stale** — and then attempts ONE `/backlog-orchestrate --abort` spawn: recording the
   fact and ending the run are two outcomes and only the first is guaranteed, so a gate refusal is a 200 carrying `abortRefused`, never an error. The spawn is
-  unconditional, because a live driver is evicted by the abort session's own `takeOverRun` write. `stopRequested` rides the runs payload beside
+  unconditional, because a live driver is evicted by the abort session's own `takeOverRun` write — and the second `--abort` that a live driver's own `watch`
+  exit `10` produces is refused by the TOOL, not the route (bug-54): `abort` writes `driver.aborting` (equal to `at`) on the lease it takes, and another
+  identified session's abort exits `7` on a mark fresher than `RUN_STALE_MS`, before any write, signal or git; on an already-`aborted` run it is a one-line
+  no-op `0`. The stop's `force` never overrides an abort's lease; the same session, `me === null` and a stale mark are exempt. `stopRequested` rides the runs payload beside
   `pauseRequested`, derived from the SAME control-file read, and **both the sweeper and `RunControls` read that one field** — it is deliberately NOT a third
   input to `watchdogStoodDown`, whose being TRUE is what makes the board OFFER a Resume, so the coupling's biconditional narrows to an implication in the safe
   direction. In the tool: `stage` refuses EVERY transition with exit `10` (wider than the pause gate in both dimensions — a stop may abandon a worktree, which
   `abort`'s marker-preservation rule keeps safe), `watch` kills the child **by the pid it was given**, persists a session id that same tick just read out of
   the jsonl — its own write, `updatedAt` deliberately untouched, because the early return exists to protect freshness and a session id is not one (bug-50) —
-  and returns `10`, and `takeOverRun(dir, run, force)` gains a REQUIRED third parameter — `cmdAbort` passes the stop's verdict, `cmdClaim` passes `false`,
-  so a resume can still never steal a live run.
+  and returns `10`, and `takeOverRun(dir, run, force, aborting)` has REQUIRED third and fourth parameters — `cmdAbort` passes the stop's verdict and `true`,
+  `cmdClaim` passes `false` twice, so a resume can still never steal a live run and never writes an abort mark.
   `RunQueueItem.pid` is written by `stage <id> dispatched --pid <p>` and signalled by `cmdAbort` only behind three guards (non-terminal, `pidAlive`, and
   `ps -o args=` naming a `claude` process) — and since bug-43 that field is the SECOND pid source, because the stop gate refuses the very call that writes
   it: `resolveItemPid` reads `<dir>/logs/<id>.pid` first (written by SKILL.md's launcher before the refusal, garbage in it falling through rather than

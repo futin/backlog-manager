@@ -907,7 +907,15 @@ const CLAIM_USAGE = 'usage: orchestrate.mjs claim';
 // so a person typing the command was refused where `assertDriver` — same file,
 // same lease — deliberately warns and proceeds. With a stop on file, `me ===
 // null` no longer refuses.
-function takeOverRun(dir, run, force) {
+//
+// bug-54 added the FOURTH, `aborting`, required for `force`'s reason: `true`
+// from `cmdAbort` alone, it stamps the lease this write takes as an ABORT's
+// lease — `driver.aborting`, the same instant as `driver.at`. That mark is what
+// lets a second abort tell "another session is already ending this run" from
+// "another session is driving it", which `force` cannot: a stop is on file in
+// both. `cmdAbort` reads the mark before calling here; this function only
+// writes it, and a `claim` lease never carries one.
+function takeOverRun(dir, run, force, aborting) {
   const me = sessionIdentity();
   const driver = runDriver(run);
   if (!force && driver !== null && driver.sessionId !== me && run.status === 'running' && isFresh(run.updatedAt)) {
@@ -926,7 +934,7 @@ function takeOverRun(dir, run, force) {
   // `null` for an unidentified caller rather than a placeholder string: a
   // hand-run terminal cannot hold a lease, and writing a made-up id would let
   // it lock out the very session that comes to recover the run afterwards.
-  run.driver = me === null ? null : { sessionId: me, at };
+  run.driver = me === null ? null : aborting ? { sessionId: me, at, aborting: at } : { sessionId: me, at };
   run.updatedAt = at;
   writeRunAtomic(dir, run);
   if (me === null) {
@@ -945,7 +953,7 @@ function cmdClaim(argv) {
   // `false`, never a stop's verdict: a resume must never be able to take a
   // live run over. See `takeOverRun`'s own comment for why only `abort` gets
   // the escape hatch.
-  const at = takeOverRun(dir, run, false);
+  const at = takeOverRun(dir, run, false, false);
 
   /* task-47, and only for a tracker project: taking the RUN over is not the
      same as taking its ITEMS over. Each in-flight item's issue carries a claim
@@ -4802,6 +4810,53 @@ function cmdAbort() {
   const projectRoot = resolveProjectRoot();
   const dir = projectDir(orchHome(), projectRoot);
   const run = readRun(dir);
+
+  /* bug-54: one board Stop reaches a live run TWICE — the server spawns an
+     `--abort` session unconditionally (the only thing that ends a run whose
+     driver is dead), and the live driver's `watch` returns `10` and runs its
+     own. Each is right on its own, and nothing reconciled them: observed on
+     2026-09-22, the spawned session ran `git status` on a worktree the
+     driver's abort was halfway through removing, read "51 deletions" as the
+     child's work, and made its call on that. The server cannot gate its spawn
+     without stranding a run whose driver dies after the stop (the client
+     draws no second Stop once one is on file), so the TOOL excludes itself,
+     in two halves, both before this command writes anything:
+
+       - a run already `aborted` is finished with. A late second abort used
+         to re-run the teardown and `finish`; now it says so in one line and
+         touches nothing — no write, no signal, no git.
+       - a `running` run whose lease is a FRESH abort's, taken by another
+         identified session, is being ended right now. Exit `7`, whose meaning
+         is already "this call was right, another session holds this run". The
+         `force` a stop gives the takeover below overrides a DRIVER's lease,
+         never an abort's — a stop is on file for both aborts, so it cannot be
+         what separates them.
+
+     Three exemptions, each deliberate. The SAME session proceeds, so an abort
+     that lost its process mid-teardown can finish its own work. A hand-run
+     terminal (`me === null`) proceeds, because a person at the keyboard is the
+     authority SKILL.md says a stuck run is never refused to, and nothing
+     automated has a null identity. A mark past `RUN_STALE_MS` is an abort that
+     died, and no longer refuses — the window every other lease uses, rather
+     than a second one. There is no lock under any of this: two aborts whose
+     reads land in the same few milliseconds could both see no mark. They
+     arrive ~25s apart in practice, and a doubled abort is still safe. */
+  if (run.status === 'aborted') {
+    const lease = runDriver(run);
+    const by = lease === null ? 'by an unidentified session' : `by session ${lease.sessionId}, since ${lease.at}`;
+    console.log(`abort: run ${run.runId} is already aborted (${by}) — nothing to do`);
+    return 0;
+  }
+  const me = sessionIdentity();
+  const lease = runDriver(run);
+  if (run.status === 'running' && me !== null && lease !== null && lease.sessionId !== me && typeof lease.aborting === 'string' && isFresh(lease.aborting)) {
+    throw new OrchestrateError(
+      `run ${run.runId} is already being aborted by session ${lease.sessionId} (since ${lease.aborting}) — another session is ending this run. ` +
+        'Stop immediately: write nothing, do not read, `git status` or otherwise inspect any worktree, and end the turn.',
+      EXIT_FOREIGN_DRIVER
+    );
+  }
+
   // A takeover, not an assertion — see `takeOverRun` for why abort of all
   // commands may not be refused on a dead session's lease. It also has to be a
   // real write rather than an in-memory pass: `cmdFinish` below re-reads the
@@ -4811,7 +4866,8 @@ function cmdAbort() {
   // still believes in. Read here rather than inside `takeOverRun` so the
   // control file has exactly one reader per command and the parameter states,
   // at the call site, which commands are allowed the escape hatch.
-  takeOverRun(dir, run, stopRequestEffective(readPauseRequest(run.project), run));
+  // bug-54: `true` — the lease this takes is an abort's, and says so.
+  takeOverRun(dir, run, stopRequestEffective(readPauseRequest(run.project), run), true);
 
   const removedIds = [];
   const preservedIds = [];
@@ -4910,7 +4966,7 @@ function cmdAbort() {
           `since removing it would destroy uncommitted work this tool has no way to save first. Run ` +
           `\`backlog.mjs stop ${item.id}\` in ${item.worktree} to bill the dead interval and clear the marker, ` +
           `then remove the worktree (\`git -C ${projectRoot} worktree remove ${item.worktree}\`) and branch ` +
-          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand or via a fresh abort.`
+          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand — a second abort on this run finds it aborted and does nothing.`
       });
       preservedIds.push(item.id);
       continue;

@@ -167,7 +167,9 @@ that is the honest record, not a failure to chase.
 ### `--abort`
 
 **Run `abort` first. Clear markers afterwards, and only for the items abort names.** The order is the whole safety property of this section, so it comes before
-the commands:
+the commands. **Nothing under `.worktrees/` is read before `abort` has returned** — no `git status`, no `ls`, no diff. The worktree you would be reading may
+be another abort's teardown in progress (bug-54): on 2026-09-22 a session ran `git status` on one 5–10s before its own `abort`, saw 51 deletions and no
+additions, and took the other abort emptying the directory for the child's work. The tool cannot refuse a read made before it is called.
 
 ```bash
 node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
@@ -175,9 +177,17 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abor
 
 No `claim` before it, deliberately: `abort` takes the run over itself, as its first write. A crashed run's driver lease belongs to the session that died, and
 abort is the command whose whole premise is that that session is gone — so the lease may not be allowed to refuse it (a refused abort leaves the run `running`
-forever, and `init` refuses a `running` run file with exit `4`, which locks the project out of the orchestrator entirely). The one thing abort still refuses is
+forever, and `init` refuses a `running` run file with exit `4`, which locks the project out of the orchestrator entirely). The first thing abort still refuses is
 a run that is `running`, FRESH and led by another session, which is not a crashed run at all but a live one somebody else is driving: pause it from the board
 first — a pause needs no lease — and abort the paused run.
+
+**An `abort` that exits `7` saying the run is already being aborted is the other refusal, and the one a board Stop always produces** (bug-54). The Stop spawns an
+`--abort` session and a live driver's `watch` returns `10` into its own, so one stop reaches a live run twice. Whichever `abort` takes the lease first marks
+it as an abort's (`driver.aborting`), and a second abort from another identified session refuses on a mark younger than fifteen minutes — before it writes,
+signals or runs any git. A stop on file does not override it: a stop overrides a _driver's_ lease, never an abort's. **Inspect no worktree, report the session
+the refusal names, and end the turn.** Once the first abort has finished, a late one prints `already aborted` and exits `0` having done nothing — the same
+fact, with the same reaction. Three callers are never refused by the mark: the session that took it (an abort that lost its process can finish its own work),
+a hand-run terminal with no `CLAUDE_CODE_SESSION_ID`, and anyone at all once the mark is older than fifteen minutes (that abort died mid-way).
 
 `abort` walks the queue, and for each item it asks one question of the disk: does this item's worktree copy still carry an in-progress `phase:` marker?
 

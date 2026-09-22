@@ -170,6 +170,28 @@ describe('POST /api/agents/stop', () => {
   });
 
   /**
+   * bug-54 pins what the server KEEPS. A fresh run naming a driver is the one
+   * that driver is about to end itself — its `watch` returns `10` and it runs
+   * `--abort` — and the spawned session is then redundant, refused by
+   * `orchestrate.mjs abort`'s own mark. Gating the spawn here instead would
+   * strand a run whose driver dies after the stop lands, because the client
+   * draws no second Stop once one is on file. So the spawn stays
+   * unconditional; a liveness gate reintroduced here must come with a re-stop
+   * control, and this case is what makes that a decision rather than a drift.
+   */
+  it('spawns the --abort session even for a fresh run whose driver is live', async () => {
+    const now = new Date().toISOString();
+    writeRun(runningRun({ updatedAt: now, driver: { sessionId: 'sess-driver', at: now } }));
+
+    const res = await post({ project: projectPath }).expect(200);
+
+    expect(res.body).toEqual({ stopRequested: true, abortSession: 'sess-abort', abortRefused: null });
+    expect(spawns()).toHaveLength(1);
+    const call = (global.fetch as jest.Mock).mock.calls.find(([url]: [string]) => String(url).endsWith('/api/spawn'));
+    expect(JSON.parse(String((call?.[1] as RequestInit).body)).prompt).toBe('/backlog-orchestrate --abort');
+  });
+
+  /**
    * The case this whole bug is about. A driver killed by hand leaves a run
    * that is `running` with a dead heartbeat for fifteen minutes, and until
    * bug-39 nothing could end it: `abort` refused on the dead session's lease,

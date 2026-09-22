@@ -4746,6 +4746,8 @@ test('abort takes the lease from a FRESH run another session drives when a stop 
   const after = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(after.status, 'aborted');
   assert.equal(after.driver.sessionId, 'sess-b');
+  // bug-54: a plain driver lease is still one abort may take, and the lease it takes is an abort's.
+  assert.equal(after.driver.aborting, after.driver.at);
 });
 
 test('a stop un-strands the hand-run terminal, whose session identity is null', (t) => {
@@ -4774,6 +4776,199 @@ test('claim still exits 7 on a fresh run another session drives, stop on file or
   // The escape hatch is abort's alone. A resume taking a live run over on the
   // strength of a stop would be the resume fighting the stop.
   assert.equal(runAs('sess-b', project, home, 'claim').status, 7);
+});
+
+// --- bug-54: an abort marks the lease it takes, and a second abort respects it --
+// One board Stop reaches a run twice: the server spawns an `--abort` session (the only thing that ends a run whose driver is dead), and a live driver's
+// `watch` returns `10` and runs its own. Before this, nothing reconciled the two — the spawned session read the other abort's teardown in progress as
+// evidence about the child's work. The first abort now writes `aborting` on the lease it takes, and a second, identified abort refuses on a fresh mark
+// with `7` before it writes anything, or — once the first has finished — reads `aborted` and does nothing at all.
+
+// A `running` run leased to `sessionId`, with one dispatched item whose worktree and branch really exist, so a refused abort can be seen to have run no
+// teardown.
+function abortFixture(t, sessionId) {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-26', 'Some task');
+  commitEverything(project, 'seed');
+  assert.equal(runAs(sessionId, project, home, 'init', '--project', project).status, 0);
+  const worktree = path.join(project, '.worktrees', 'task-26');
+  assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', worktree, '-b', 'backlog/task-26', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  const staged = runAs(sessionId, project, home, 'stage', 'task-26', 'dispatched', '--worktree', worktree, '--branch', 'backlog/task-26');
+  assert.equal(staged.status, 0, staged.stderr);
+  return { home, project, worktree, file: runFile(home, project) };
+}
+
+// The lease an abort in progress leaves behind, written by hand so a case can put it on any session with any age.
+function markAborting(file, sessionId, at) {
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+  body.driver = { sessionId, at, aborting: at };
+  body.updatedAt = new Date().toISOString();
+  fs.writeFileSync(file, JSON.stringify(body, null, 2));
+}
+
+function branchExists(project, branch) {
+  return spawnSync('git', ['-C', project, 'branch', '--list', branch], { encoding: 'utf8' }).stdout.trim() !== '';
+}
+
+test('bug-54: abort marks the lease it takes with aborting, and claim never does', (t) => {
+  const { home, project, file } = abortFixture(t, 'sess-a');
+
+  const out = runAs('sess-a', project, home, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.driver.sessionId, 'sess-a');
+  // One clock reading for both: the mark names the instant the lease was taken.
+  assert.equal(after.driver.aborting, after.driver.at);
+
+  // A paused run whose lease still carries a mark: claim writes a lease of its own, and that lease is a driver's, never an abort's.
+  const other = orchFixture(t);
+  seedReadyTask(other.project, 'task-5', 'Some task');
+  assert.equal(runAs('sess-a', other.project, other.home, 'init', '--project', other.project).status, 0);
+  assert.equal(runAs('sess-a', other.project, other.home, 'finish', '--status', 'paused').status, 0);
+  const pausedFile = runFile(other.home, other.project);
+  const paused = JSON.parse(fs.readFileSync(pausedFile, 'utf8'));
+  paused.driver = { ...paused.driver, aborting: paused.driver.at };
+  fs.writeFileSync(pausedFile, JSON.stringify(paused, null, 2));
+
+  const claimed = runAs('sess-b', other.project, other.home, 'claim');
+
+  assert.equal(claimed.status, 0, claimed.stderr);
+  const lease = JSON.parse(fs.readFileSync(pausedFile, 'utf8')).driver;
+  assert.equal(lease.sessionId, 'sess-b');
+  assert.equal('aborting' in lease, false, 'claim wrote an abort mark');
+});
+
+test('bug-54: a live abort mark refuses a second identified abort with 7, writing nothing and running no git', (t) => {
+  const { home, project, worktree, file } = abortFixture(t, 'sess-a');
+  markAborting(file, 'sess-a', new Date().toISOString());
+  const before = fs.readFileSync(file, 'utf8');
+
+  const out = runAs('sess-b', project, home, 'abort');
+
+  assert.equal(out.status, 7, out.stderr);
+  assert.match(out.stderr, /sess-a/);
+  assert.match(out.stderr, /already being aborted/);
+  assert.match(out.stderr, /worktree/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused abort wrote to the run file');
+  assert.equal(fs.existsSync(worktree), true, 'a refused abort removed the worktree');
+  assert.equal(branchExists(project, 'backlog/task-26'), true, 'a refused abort deleted the branch');
+});
+
+test('bug-54: a stop on file does not let abort override an ABORT lease — only a driver lease', (t) => {
+  const { home, project, worktree, file } = abortFixture(t, 'sess-a');
+  markAborting(file, 'sess-a', new Date().toISOString());
+  effectiveStop(home, project);
+  const before = fs.readFileSync(file, 'utf8');
+
+  const out = runAs('sess-b', project, home, 'abort');
+
+  assert.equal(out.status, 7, out.stderr);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a refused abort wrote to the run file');
+  assert.equal(fs.existsSync(worktree), true);
+  assert.equal(branchExists(project, 'backlog/task-26'), true);
+});
+
+test('bug-54: an abort mark older than RUN_STALE_MS is a dead abort, and the next one takes over', (t) => {
+  const { home, project, file } = abortFixture(t, 'sess-a');
+  markAborting(file, 'sess-a', new Date(Date.now() - RUN_STALE_MS - 60_000).toISOString());
+  effectiveStop(home, project);
+
+  const out = runAs('sess-b', project, home, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.equal(after.driver.sessionId, 'sess-b');
+});
+
+test('bug-54: a hand-run abort is never refused by the abort mark', (t) => {
+  const { home, project, file } = abortFixture(t, 'sess-a');
+  markAborting(file, 'sess-a', new Date().toISOString());
+  effectiveStop(home, project);
+
+  const out = runAs(null, project, home, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stderr, /lease/i);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).status, 'aborted');
+});
+
+test('bug-54: the session whose abort holds the mark can re-run its own abort to the end', (t) => {
+  const { home, project, file } = abortFixture(t, 'sess-a');
+  markAborting(file, 'sess-a', new Date().toISOString());
+  effectiveStop(home, project);
+
+  const out = runAs('sess-a', project, home, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).status, 'aborted');
+});
+
+test('bug-54: abort on an already-aborted run is a no-op — one line, exit 0, nothing written, no git', (t) => {
+  const { home, project, file } = abortFixture(t, 'sess-a');
+  assert.equal(runAs('sess-a', project, home, 'abort').status, 0);
+  // Re-create the branch the first abort deleted: a second abort that re-ran the teardown would delete it again, so its survival is the proof that no
+  // git command ran.
+  assert.equal(spawnSync('git', ['-C', project, 'branch', 'backlog/task-26', 'HEAD'], { encoding: 'utf8' }).status, 0);
+  const before = fs.readFileSync(file, 'utf8');
+  const runId = JSON.parse(before).runId;
+
+  const out = runAs('sess-b', project, home, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.stdout.trim().split('\n').length, 1, out.stdout);
+  assert.match(out.stdout, new RegExp(`${runId}.*already aborted`));
+  assert.match(out.stdout, /sess-a/);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'a no-op abort wrote to the run file');
+  assert.equal(branchExists(project, 'backlog/task-26'), true, 'a no-op abort ran the teardown');
+});
+
+test('bug-54: spawned abort first — the driver then stands down on watch (7) and its own abort is the no-op', (t) => {
+  const { home, project, file } = abortFixture(t, 'sess-d');
+  effectiveStop(home, project);
+  assert.equal(runAs('sess-s', project, home, 'abort').status, 0);
+  const before = fs.readFileSync(file, 'utf8');
+
+  const watched = runAs('sess-d', project, home, 'watch', 'task-26', '--pid', '999999', '--jsonl', path.join(home, 'none.jsonl'), '--interval-ms', '10', '--budget-ms', '50');
+  assert.equal(watched.status, 7, watched.stderr);
+  const aborted = runAs('sess-d', project, home, 'abort');
+  assert.equal(aborted.status, 0, aborted.stderr);
+  assert.match(aborted.stdout, /already aborted/);
+
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'the stood-down driver wrote to the run file');
+});
+
+test('bug-54: SKILL.md §10 Stopping and recovery.md\'s --abort both tell an abort refused with 7 to inspect no worktree', () => {
+  // The tool refuses the second abort; it cannot refuse a `git status` made before that abort is called, which is the read the observed run made. Only
+  // the prose reaches that, so the prose is pinned.
+  const skill = fs.readFileSync(SKILL_MD, 'utf8');
+  const stopping = skill.slice(skill.indexOf('### Stopping'), skill.indexOf('### `--resume` and `--abort`'));
+  assert.match(stopping, /exits `7` saying the run is already being aborted/);
+  assert.match(stopping, /inspect any worktree/);
+  const recovery = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8');
+  const abortSection = recovery.slice(recovery.indexOf('### `--abort`'));
+  assert.match(abortSection, /exits `7` saying the run is already being aborted/);
+  assert.match(abortSection, /Inspect no worktree/);
+  assert.match(abortSection, /Nothing under `\.worktrees\/` is read before `abort` has returned/);
+});
+
+test('bug-54: spawned abort still running — the driver\'s abort and its stage both exit 7, not 10', (t) => {
+  const { home, project, worktree, file } = abortFixture(t, 'sess-d');
+  effectiveStop(home, project);
+  markAborting(file, 'sess-s', new Date().toISOString());
+  const before = fs.readFileSync(file, 'utf8');
+
+  const aborted = runAs('sess-d', project, home, 'abort');
+  assert.equal(aborted.status, 7, aborted.stderr);
+  assert.match(aborted.stderr, /sess-s/);
+  // The lease is checked before the stop, so the driver learns it is no longer the driver rather than that a stop is on file.
+  const staged = runAs('sess-d', project, home, 'stage', 'task-26', 'reviewing');
+  assert.equal(staged.status, 7, staged.stderr);
+
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'the stood-down driver wrote to the run file');
+  assert.equal(fs.existsSync(worktree), true);
+  assert.equal(branchExists(project, 'backlog/task-26'), true);
 });
 
 test('watch returns 10 and signals the pid it was given, rather than the budget elapsing', async (t) => {

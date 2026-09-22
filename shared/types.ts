@@ -1253,8 +1253,15 @@ export interface OrchestratorRun {
    * **Optional, and absent means unclaimed rather than locked.** Every run
    * file written before this existed lacks it, and a missing field must never
    * be able to strand a run.
+   *
+   * `aborting` (bug-54) is present only on a lease `orchestrate.mjs abort`
+   * took, and equals its `at`: it is how a second abort — one board Stop
+   * reaches a live run twice, once through the driver's `watch` and once
+   * through the session the server spawns — sees that another session is
+   * already ending the run and refuses with exit `7`. `claim` never writes it.
+   * The server reads the run file but does nothing with this field.
    */
-  driver?: { sessionId: string; at: string } | null;
+  driver?: { sessionId: string; at: string; aborting?: string } | null;
   queue: RunQueueItem[];
   attention: RunAttention[];
 }
