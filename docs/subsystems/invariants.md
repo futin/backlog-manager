@@ -2391,13 +2391,26 @@ matcher treats `dir/**` as "the directory and everything under it".
 
 ### What the suite pins, and why it passes on nothing
 
-`test/claude-rules.test.ts` reads `.claude/rules/*.md` as source: every file declares a non-empty `paths:`; every `docs/subsystems/invariants.md#…` anchor
-resolves to a real `##`/`###` heading (with the slugifier itself checked against a heading known to round-trip, so a broken slugifier cannot pass by matching
-nothing against nothing); every glob matches at least one tracked file _today_, because a pattern that matches nothing is a rule that never fires and fails
-silently forever; every body line is a pointer; no file exceeds 25 lines.
+`test/claude-rules.test.ts` reads `.claude/rules/*.md` and CLAUDE.md as SOURCE — no YAML parser, no glob library; the frontmatter under test is one inline
+array a parser would hand back verbatim, and a multi-line `paths:` list deliberately reads as empty and fails the first case loudly, because nobody has proved
+the loader accepts that shape. Six guards run over the real tree. Every file declares a non-empty `paths:`, because a rule file without one loads at
+`session_start` in every session. Every `docs/subsystems/invariants.md#…` anchor a rule file cites resolves to a real `##`/`###` heading of this file, with the
+slugifier itself checked against a heading known to round-trip, so a broken slugifier cannot pass by matching nothing against nothing. Every glob matches at
+least one file _today_ — tracked or untracked-but-not-ignored, since a rule arriving in the same commit as the directory it scopes is the ordinary way a rule
+arrives — because a pattern that matches nothing is a rule that never fires and fails silently forever; the matcher is hand-rolled over the three shapes the
+files use (`dir/**`, which also names the directory itself, `dir/*.ts`, a literal path). Then the three tier guards the split added: a rule file is bullets
+and nothing else, each citing exactly one anchor; CLAUDE.md's linked headlines and the rule files' bullets are the same multiset of (anchor, headline), with
+one home per anchor; and a linked CLAUDE.md bullet is a headline and a link, while any other bullet — bold-led or plain, the plain shape since 2026-09-22 — is
+at most 80 words. The parsers both tiers are read through (`test/helpers/rule-tiers.ts`) are pinned on string fixtures first, in the same file, for the same
+reason the slugifier is: a parser that produced nothing would match nothing against nothing and pass every guard while asserting exactly zero.
 
-It passes **vacuously** on an absent or empty directory, and that is deliberate: P3 could have come back negative, in which case the correct deliverable was
-zero rule files and a recorded negative. A guard that went red in that world would have made the honest outcome look like a failure.
+"Passes on nothing" is now history, kept because the reason it changed is the point. Under task-35's pointer design the suite passed **vacuously** on an
+absent or empty directory, and that was deliberate: P3 could have come back negative, in which case the correct deliverable was zero rule files and a recorded
+negative, and a guard that went red in that world would have made the honest outcome look like a failure. The split changed what an empty directory means.
+CLAUDE.md now carries only the headline of every Why-linked rule, and the mechanism lives in the rule files alone — so zero rule files is no longer "nothing to
+guard" but "every rule's mechanism is missing", and the same-set guard says so, naming each headline it cannot find a home for. That is the one case that goes
+red on an empty `.claude/rules/`; the others still pass on it, and `ruleFilesIn` still answers `[]` for an absent directory, pinned by one case, so an absent
+directory fails at the guard that has something to say and not at a crash in the ones that do not.
 
 ## Settings is two pages, the page is the scope
 
