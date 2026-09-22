@@ -1689,6 +1689,31 @@ a resumed session to reach its first heartbeat is ninety seconds on a good day (
 the incident this design responds to was itself an overload event, so a resume spawned into the same overload can take several minutes just to run its first
 command.
 
+**bug-35 keeps that half and adds the ledger it was missing.** "The cap counts successes only" is the right answer to an outage and the wrong answer to a
+refusal that can never clear, and nothing in the original rule distinguished the two: a dashboard with remote answers switched off, a revoked token, a project
+the dashboard no longer lists — each answers 409 forever, none of them starts a session, so `attempts` never moved, `watchdogExhausted` read false for as long
+as the run stayed crashed, and the sweeper's only exit was unreachable. Observed as 17 identical `failed` lines over 5h20m, one every twenty minutes, a third
+of the fifty-entry event ring spent saying the same thing while the crashed run they were about to save sat there unresumed and the `stopped`, `spawned` and
+`recovered` lines that would have explained any of it were pushed out. The loop was stable rather than thundering — grace held it to one call per window — which
+is why it survived a whole design review: it cost little and simply never terminated.
+
+So a refusal now moves a SECOND counter, `WatchdogEntry.consecutiveFailures`, and `watchdogFailing(consecutiveFailures, maxAttempts)` is its derivation beside
+`watchdogExhausted`. Three choices in that sentence are load-bearing. **Two counters, not one**, because a refused spawn starting no session is a fact about
+cost: `attempts` is the number of live resume sessions this sweeper has launched, each one a real claim on the run, and a person who raises "Give up after"
+after one genuine attempt and one outage must get the attempt they asked for rather than a slot an outage already spent. **One cap, not a second setting**,
+because the number on that field reads "Give up after" and a person setting it to 3 has said how many times the sweeper may ASK — not how many of those asks
+the dashboard has to accept for the number to mean anything — and it gives a stalled run the same re-entry an exhausted one has, through a control the operator
+already knows. **A rung of its own, not a reuse of `exhausted`**, because `attempts` is 0 in this state and `exhausted`'s line would read "exhausted after 0
+attempts — resume by hand": true, useless, and silent about the refusal that is the actual reason nobody is coming. `'stalled'` is a ninth `WatchdogEventKind`,
+ranked last of the three rungs and logged once per condition behind `stalledLogged`, and its line carries `lastError` because the `failed` events that would
+otherwise explain it are exactly what the next fifty events push out.
+
+The counter is zeroed by anything that proves the run of refusals is over — a spawn that returned a session id, the run heartbeating again, a person's own
+resume from the board — so a transient outage leaves no ceiling behind for the next crash. The `fresh` case clears it on the BRANCH rather than inside the
+`recovered` guard: that guard needs `attempts > 0`, and a run of pure refusals has spent none, so the one state this field exists for would have been precisely
+the state that never cleared it. `noteBoardResume` clears it for a reason worth stating separately — the stand-down exists to ask a person to act, and a person
+who acts must not be asked again for the same reason the moment their resumed session takes its usual ninety seconds to heartbeat.
+
 ### The Resume coupling: the board offers a hand resume exactly when the sweeper will not
 
 This is the load-bearing rule of the whole feature, and for the length of one branch it was enforced by nothing but two comments.
@@ -1709,10 +1734,16 @@ So the rule is now one function, `watchdogStoodDown` (`shared/agent.ts`), called
 the only caller for two merges, and task-38 restored it where §8.4.1 says it belongs: **`RunControls` (`client/src/components/RunControls.tsx`)**, drawn in the
 Runs detail sheet's head. That component is also the Watchdog page's Resume (§8.4.2) — the same component rather than a second control agreeing with it, which
 is why `WatchdogMonitor.tsx` does NOT call the predicate and must not start to: two surfaces, one caller. `test/watchdog-coupling.test.tsx`'s reader-list case
-is what holds that, and it is written as an exact set precisely so a third caller cannot be added quietly. Its two inputs are single implementations for the
+is what holds that, and it is written as an exact set precisely so a third caller cannot be added quietly. Its inputs are single implementations for the
 same reason. `WatchdogStateService.spawningEnabled(config)` is the one answer to "may the watchdog spawn" — it fills the wire's `RunWatchdog.enabled` AND is
 what the sweeper's own gate calls, rather than the sweeper re-testing `config.enabled` under an env check made separately in `sweep()`; that was the second copy
 of a vocabulary, and CLAUDE.md's `isAgentAction` invariant already says which copy goes stale. And `exhausted` is **derived**, never stored — see below.
+
+**bug-35 makes it three inputs, and `failing` is required with no default.** A default would be an opt-out: a caller that left it off would put the board back
+to offering Resume on precisely the runs the sweeper stands down for, which is the coupling failing open — the one direction it must never fail in. The
+compiler is what enforces that, and the one call site it was meant to break is `visit()`'s own object literal. The table in `test/helpers/watchdog-coupling.ts`
+gained a `consecutiveFailures` column and three rows for it, the middle one being the bug's own state: three refusals against a cap of three with `attempts`
+still 0, hand-checked `standsDown: true`, a verdict the shipped code answered `false` to forever.
 
 **bug-39 narrows the biconditional to an implication, in the safe direction.** A stop request suppresses BOTH sides: the sweeper returns before it reaches
 this predicate at all, and `RunControls` draws no Resume in any branch. So "offers a Resume" is now a SUBSET of "the sweeper will not spawn", never a

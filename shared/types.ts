@@ -1500,7 +1500,17 @@ export type WatchdogPhase = 'off' | 'idle' | 'armed';
  * the identical reason — the event log is a ring buffer and cannot answer
  * "did I already say this".
  */
-export type WatchdogEventKind = 'armed' | 'idle' | 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled' | 'stopped';
+/**
+ * `'stalled'` (bug-35) is the ninth: the sweeper standing down because this
+ * run's resumes have been REFUSED `maxAttempts` times in a row, which is a
+ * different fact from `'exhausted'` and deliberately not a reuse of it. Both
+ * the Activity list and the strip render exhaustion as `exhausted after
+ * ${attempts} attempts`, and the state this kind reports is reached with
+ * `attempts` still at 0 — not one refusal started a session — so that sentence
+ * would be false exactly when it mattered. Logged once per condition behind
+ * its own flag, like the three above it.
+ */
+export type WatchdogEventKind = 'armed' | 'idle' | 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled' | 'stopped' | 'stalled';
 
 /**
  * One line of the watchdog's own history — entirely separate from a run
@@ -1550,6 +1560,15 @@ export const WATCHDOG_EVENT_CAP = 50;
  * while this field still said it had given up — see `watchdogExhausted`'s own
  * comment for the failure that produced, and `watchdogStoodDown` for why the
  * board and the sweeper must agree about this field to the letter.
+ *
+ * `failures`/`failing` (bug-35) are that pair's sibling over the other
+ * counter: resumes REFUSED in a row since the last one that started a session,
+ * and whether that count has reached the same `maxAttempts` ceiling. Derived
+ * at the same single place from the same single config read, for the same
+ * reason — a `POST /api/agents/watchdog/config` landing between two reads must
+ * never be able to publish `failing: true` beside numbers that contradict it.
+ * Both are required rather than optional: the compiler is the fixture
+ * checklist here, exactly as it is for `BacklogItem.source`.
  */
 export interface RunWatchdog {
   enabled: boolean;
@@ -1559,6 +1578,8 @@ export interface RunWatchdog {
   lastSessionId: string | null;
   lastError: string | null;
   exhausted: boolean;
+  failures: number;
+  failing: boolean;
 }
 
 /**

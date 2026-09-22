@@ -2417,7 +2417,9 @@ describe('RunsView · shape D (task-38)', () => {
           lastSpawnAt: null,
           lastSessionId: null,
           lastError: null,
-          exhausted: true
+          exhausted: true,
+          failures: 0,
+          failing: false
         }
       }
     ];

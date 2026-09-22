@@ -3,11 +3,12 @@ id: bug-35
 title: Watchdog retries a permanently-refused resume forever
 created: 2026-09-16
 tags: watchdog, orchestrator
-updated: 2026-09-22T11:43:19Z
+updated: 2026-09-22T16:13:46Z
 groom-elapsed: 175
 groom-tokens: 52535
-started: 2026-09-22T11:43:19Z
-phase: execute
+started: 2026-09-22T15:33:57Z
+execute-elapsed: 2389
+execute-tokens: 346142
 ---
 
 ## Symptom
@@ -162,3 +163,53 @@ in jsdom by the suites above, which is where every other watchdog rendering in t
 No `runner-fix:` marker, also deliberately: the code is under `server/src/agents/`, but the marker exists so the *rest of a run* is not executed by the version
 being repaired, and a server change cannot take effect inside a run that is already going — the process holding the broken watchdog is not restarted by a merge.
 Hoisting this item would buy nothing.
+
+## Outcome
+
+2026-09-22 — fixed as Shape 1, the consecutive-failure ceiling, with no new setting. `WatchdogEntry` gained `consecutiveFailures` (spawns refused since the
+last one that started a session) and `stalledLogged`; `shared/agent.ts` gained `watchdogFailing(consecutiveFailures, maxAttempts)` beside `watchdogExhausted`
+and `watchdogStoodDown` took `failing` as a required third property — which is what broke `visit()`'s object literal at compile time, the one call site that
+had to be revisited. `RunWatchdog` carries `failures`/`failing`, filled in `annotate()` from the same single config read `exhausted` already used;
+`WatchdogEventKind` gained a ninth member, `stalled`, and `watchdogClause` a clause between `!enabled` and `lastError`. The counter is incremented in
+`spawn()`'s catch and zeroed by the three things that prove the refusals are over: a spawn that returned a session id, the run heartbeating again (on the
+`fresh` branch itself, not inside the `recovered` guard, which needs `attempts > 0` a run of pure refusals never has), and `noteBoardResume`.
+
+The `failed` event's detail changed with it: `(not counted)` was true and read as "this costs nothing and will be retried", which is right for an outage and
+wrong for a refusal that can never clear. It now reads `(<n>/<max> in a row; no session started, so the attempt cap is untouched)`, so the ceiling is visible
+in the feed before it arrives rather than only once.
+
+Verified — `pnpm test` (both runners) and `pnpm run typecheck`:
+
+```
+Test Suites: 129 passed, 129 total
+Tests:       2182 passed, 2182 total
+# tests 779
+# pass 779
+# fail 0
+PASS  jest
+PASS  node --test (skills)
+pnpm test: both runners passed.
+
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo
+```
+
+The behaviour the bug describes, as the sweep case now pins it: three refusals against `maxAttempts: 3` leave `attempts` at `0` and stop the asking — the
+fourth and fifth ticks make no `resume` call at all (`dash.spawns()` stays at 3, taken from the stub rather than from the log) and add no further `failed`
+line, while exactly one `stalled` event says why. Raising "Give up after" to 4 revives the run through the same path an exhausted one re-enters by.
+
+Contract sweep: 6 sites updated (CLAUDE.md — the "only a success counts against the cap" headline now names both ledgers; .claude/rules/dispatch-watchdog.md —
+the same headline byte-equal plus the mechanism for the two counters, the three rungs and the three resets; .claude/rules/board.md — the coupling's inputs are
+three, not two; docs/subsystems/invariants.md — the reasoning, under the existing "Grace" and "Resume coupling" headings so the cited anchors still resolve;
+.claude/DESIGN.md §8.4.2 — "never while the sweeper still has attempts" was false for a stalled run; client/src/lib/run-watchdog.ts — the CLAUDE.md headline
+it quotes verbatim). Four test sites carried the old wording or an exhaustive literal and were updated with the production change: the three
+`toContain('not counted')` assertions in watchdog-sweep, `upsert`'s zeroed-entry literal and `annotate`'s zeroed-defaults literal in watchdog-state, and four
+`RunWatchdog` fixtures the two new required fields broke (run-controls, runs-view, watchdog-monitor ×2). Left standing on purpose: the historical records under
+`docs/superpowers/plans/`, `docs/superpowers/specs/` and `backlog/*/done/` that quote the old `(not counted)` line or the old two-input rule — those are dated
+accounts of what was decided then, and rewriting them would erase the state this fix was made against. `invariants.md`'s "`'stopped'` is an eighth
+`WatchdogEventKind`" is also left: it is a statement about bug-39's addition and stays true with a ninth beside it.
+
+Red proof: 7 tests went red with the change reverted — each production change reverted on its own through a file copy, never `git stash`, and restored after.
+`consecutiveFailures += 1` removed → the sweep's ceiling case fails (5 spawn calls instead of 3, the endless loop itself). The `fresh`-branch reset removed →
+the reset case fails. `noteBoardResume`'s reset removed → the same case fails on its second half. `failing` forced to `false` in `visit()`'s
+`watchdogStoodDown` call → the ceiling case fails. `annotate()`'s pair hard-coded to `0`/`false` → both new watchdog-state cases fail. `watchdogFailing`'s `>=`
+weakened to `>` → the `agents-shared` table and the coupling table fail (3 cases). `watchdogClause`'s new clause removed → the `run-watchdog` case fails.

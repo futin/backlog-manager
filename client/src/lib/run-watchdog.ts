@@ -110,6 +110,12 @@ export function watchdogClause(w: RunWatchdog | undefined, now: number = Date.no
   if (w === undefined) return '';
   if (w.exhausted) return `watchdog: exhausted after ${w.attempts} — resume by hand`;
   if (!w.enabled) return 'watchdog: off — resume by hand';
+  // bug-35 — ABOVE the `lastError` clause, which it subsumes: every refusal
+  // counted here also wrote `lastError`, so the older reading would go on
+  // printing the last refusal's sentence and never say the sweeper has
+  // stopped asking. Below `off` and `exhausted` for the ranking this whole
+  // ladder follows — the most permanent fact about the run wins.
+  if (w.failing) return `watchdog: resume refused ${w.failures}× — resume by hand`;
   if (w.lastError !== null) return `watchdog: resume failed: ${w.lastError}`;
   if (w.attempts > 0) {
     const clock = w.lastSpawnAt === null ? null : formatClock(w.lastSpawnAt);
@@ -210,11 +216,11 @@ export function sweepFraction(status: WatchdogStatus, now: number): number | nul
  *
  * `lastSpawnAt` is the right origin even when that spawn FAILED, and
  * deliberately so: the server starts the grace clock on ANY spawn attempt
- * (CLAUDE.md's "Any spawn attempt starts the grace clock; only a success
- * counts against the cap"), precisely so a dashboard that is down is asked
- * once per window rather than once per tick. A card that measured from the
- * last SUCCESSFUL spawn would promise a retry the sweeper is not going to
- * make.
+ * (CLAUDE.md's "Any spawn attempt starts the grace clock; a success counts
+ * against the attempt cap and a refusal against the refusal ceiling"),
+ * precisely so a dashboard that is down is asked once per window rather than
+ * once per tick. A card that measured from the last SUCCESSFUL spawn would
+ * promise a retry the sweeper is not going to make.
  *
  * `null` when no attempt has been made or the stamp will not parse —
  * distinct from `0`, which means a window opened and has since closed. The
@@ -250,6 +256,11 @@ export const WATCHDOG_KIND_GLYPH: Record<WatchdogEventKind, string> = {
   // `‖` pause bars beside it: the two are different requests and a reader
   // scanning the feed must be able to tell them apart at a glance.
   stopped: '■',
+  // bug-35 — an octagon, read as the traffic sign it is: the sweeper has
+  // stopped asking. Deliberately not `⚠`, which `exhausted` holds, since the
+  // two stand-downs are reached by different counters and a reader scanning
+  // the feed has to be able to tell which one this run hit.
+  stalled: '⊘',
   armed: '◉',
   idle: '○'
 };
@@ -270,6 +281,11 @@ export const WATCHDOG_KIND_TONE: Record<WatchdogEventKind, WatchdogKindTone> = {
   failed: 'bad',
   exhausted: 'warn',
   disabled: 'warn',
+  // bug-35 — amber for the reason the two above it are: the sentence ends in
+  // "resume by hand", so a person has to act. Not `bad`, which belongs to
+  // `failed`: one refusal is news about an attempt, and this is news about
+  // the sweeper having stopped making them.
+  stalled: 'warn',
   // `muted`, not `warn`: amber means a human must act, and a stop is a human
   // who already HAS. The sweeper standing down on a stop is the requested
   // outcome, not news the reader has to do something about.

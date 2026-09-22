@@ -300,7 +300,9 @@ describe('WatchdogMonitor', () => {
       lastSpawnAt: new Date(NOW - 120_000).toISOString(),
       lastSessionId: 'sess-1',
       lastError: null,
-      exhausted: false
+      exhausted: false,
+      failures: 0,
+      failing: false
     };
     await renderMonitor(
       watchdogStatus({ phase: 'armed', watching: ['run-1'] }),
@@ -347,7 +349,9 @@ describe('WatchdogMonitor', () => {
       lastSpawnAt: new Date(NOW - 720_000).toISOString(),
       lastSessionId: 'sess-1',
       lastError: null,
-      exhausted: false
+      exhausted: false,
+      failures: 0,
+      failing: false
     };
     await renderMonitor(watchdogStatus({ phase: 'armed', watching: ['run-1'] }), [
       liveRun({ fresh: false, updatedAt: new Date(NOW - 1_020_000).toISOString(), watchdog: annotation })

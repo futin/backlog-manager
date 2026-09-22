@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { readAgentsConfig } from '../agents/config.util';
 import { readWatchdogConfig, watchdogEnvOff } from './watchdog-config.util';
-import { watchdogExhausted } from '../../../shared/agent';
+import { watchdogExhausted, watchdogFailing } from '../../../shared/agent';
 import { WATCHDOG_EVENT_CAP } from '../../../shared/types';
 import type {
   OrchestratorRun,
@@ -106,10 +106,43 @@ export interface WatchdogEntry {
    * the dashboard was briefly down.
    */
   resumeSpawnAt: string | null;
+  /**
+   * bug-35 — resumes REFUSED in a row since the last one that actually
+   * started a session, and the second counter in this file measured against
+   * the single `maxAttempts` cap.
+   *
+   * Two counters rather than one because a refused spawn and a spent attempt
+   * are different events with different consequences, and the field above is
+   * only ever moved by the second: `attempts` counts sessions this sweeper
+   * STARTED, each of which is a live claim on the run and a real cost, so a
+   * spawn the dashboard refused must not consume one — that is not a
+   * bookkeeping nicety, it is why a person who raises "Give up after" after
+   * one genuine attempt and one outage gets the attempt they asked for.
+   *
+   * The consequence of keeping only that counter is what this field exists to
+   * fix: a refusal that can never succeed (remote answers switched off, a
+   * revoked token, a project the dashboard no longer lists) moved NOTHING,
+   * so `watchdogExhausted` stayed false forever and the sweeper re-asked
+   * every grace window for as long as the run stayed crashed — 17 identical
+   * `failed` lines over 5h20m in the field, a third of the event ring, while
+   * the run it was trying to save sat unresumed.
+   *
+   * Reset to 0 by anything that proves the refusals are over — a spawn that
+   * started a session, the run heartbeating again, a person's own resume —
+   * so a transient outage never leaves a ceiling behind for the next crash.
+   */
+  consecutiveFailures: number;
   lastSessionId: string | null;
   lastError: string | null;
   recovered: boolean;
   exhaustedLogged: boolean;
+  /**
+   * bug-35's once-per-condition guard, the same shape `exhaustedLogged` has
+   * and cleared in the same place for the same reason: raising the cap makes
+   * a stalled run a subject again, and its NEXT run of refusals is a new
+   * fact the strip has to be able to say.
+   */
+  stalledLogged: boolean;
   disabledLogged: boolean;
   /**
    * bug-39 — the once-per-condition guard for the `stopped` line, exactly
@@ -187,12 +220,14 @@ export class WatchdogStateService {
         attempts: 0,
         lastSpawnAt: null,
         resumeSpawnAt: null,
+        consecutiveFailures: 0,
         lastSessionId: null,
         lastError: null,
         recovered: false,
         exhaustedLogged: false,
         disabledLogged: false,
-        stoppedLogged: false
+        stoppedLogged: false,
+        stalledLogged: false
       };
       this.entries.set(runId, entry);
     }
@@ -327,6 +362,12 @@ export class WatchdogStateService {
     // 3`, a sentence the board renders verbatim and a person then acts on.
     const config = readWatchdogConfig();
     const attempts = entry?.attempts ?? 0;
+    // bug-35's pair reads the same single config and the same single reading
+    // of its own counter, for the identical reason: `failing` is the sentence
+    // the strip renders beside `failures`, so publishing them from two reads
+    // would let the board say "resume refused 2× — resume by hand" against a
+    // cap the operator had just raised to 4.
+    const failures = entry?.consecutiveFailures ?? 0;
     return {
       enabled: this.spawningEnabled(config),
       attempts,
@@ -334,7 +375,9 @@ export class WatchdogStateService {
       lastSpawnAt: entry?.lastSpawnAt ?? null,
       lastSessionId: entry?.lastSessionId ?? null,
       lastError: entry?.lastError ?? null,
-      exhausted: watchdogExhausted(attempts, config.maxAttempts)
+      exhausted: watchdogExhausted(attempts, config.maxAttempts),
+      failures,
+      failing: watchdogFailing(failures, config.maxAttempts)
     };
   }
 

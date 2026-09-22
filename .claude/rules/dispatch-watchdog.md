@@ -64,8 +64,16 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   on the board's own runs reads, a boot-time scan, a successful `orchestrate`/`resume` spawn (wired in `AgentsController`, never `AgentsService`) and every
   `POST /api/agents/watchdog/config` save, which calls `arm()` and then an unawaited `tick()`. A run started by typing the trigger with the board never opened
   is never watched. Why: [invariants.md](docs/subsystems/invariants.md#armed-idle-off)
-- **Any spawn attempt starts the grace clock; only a success counts against the cap.** `exhausted` is decided before grace. A board resume is a spawn attempt
-  too (`WatchdogService.noteBoardResume`, called from the controller BEFORE `arm()`): grace yes, cap no. Why:
+- **Any spawn attempt starts the grace clock; a success counts against the attempt cap and a refusal against the refusal ceiling, which is the same number.**
+  `exhausted` is decided before grace. A board resume is a spawn attempt too (`WatchdogService.noteBoardResume`, called from the controller BEFORE `arm()`):
+  grace yes, cap no. Two counters on `WatchdogEntry`, both measured against `config.maxAttempts` and neither stored as a verdict — `attempts` (sessions
+  STARTED, moved only by a spawn that returned a session id) and bug-35's `consecutiveFailures` (spawns REFUSED since the last one that started a session).
+  `watchdogExhausted` and `watchdogFailing` (`shared/agent.ts`) are the two derivations, both read by `visit()` and by `annotate()`, which publishes
+  `attempts`/`exhausted` and `failures`/`failing` from ONE config read. `failing` is a third REQUIRED input to `watchdogStoodDown`, so the stand-down ladder
+  has three rungs — `off`, then `exhausted`, then `stalled`, a ninth `WatchdogEventKind` logged once per condition behind `stalledLogged` and never a reuse of
+  `exhausted` (whose line would read "exhausted after 0 attempts"). `consecutiveFailures` is zeroed by anything proving the refusals are over: a spawn that
+  started a session, the run heartbeating again (on the `fresh` branch itself, NOT inside the `recovered` guard, which needs `attempts > 0`), and
+  `noteBoardResume`. Raising "Give up after" revives a stalled run exactly as it revives an exhausted one. Why:
   [invariants.md](docs/subsystems/invariants.md#grace-any-attempt-starts-the-clock-only-a-success-counts)
 - **Every agents POST is guarded by content-type and origin** (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the access control.
   `test/agents-origin-guard.test.ts`'s route list is where the guarded set lives, never a count in prose. Absent `Origin` stays allowed; the guard compares host

@@ -18,6 +18,8 @@ function watchdog(over: Partial<RunWatchdog> = {}): RunWatchdog {
     lastSessionId: null,
     lastError: null,
     exhausted: false,
+    failures: 0,
+    failing: false,
     ...over
   };
 }
@@ -98,6 +100,25 @@ describe('watchdogClause', () => {
 
   it('reads "off — resume by hand" over a pending lastError too', () => {
     expect(watchdogClause(watchdog({ enabled: false, lastError: 'busy' }))).toBe('watchdog: off — resume by hand');
+  });
+
+  it('reads "resume refused N× — resume by hand" once the refusals reach the ceiling', () => {
+    // bug-35's own state, and the reason this clause sits ABOVE the
+    // `lastError` one it subsumes: every one of those refusals wrote
+    // `lastError`, so the older reading would print the last refusal's
+    // sentence forever and never say that the sweeper has stopped asking.
+    // `attempts: 0` is not a contradiction here — not one refusal started a
+    // session.
+    expect(watchdogClause(watchdog({ attempts: 0, failures: 3, failing: true, lastError: 'remote answers are off in the dashboard' }))).toBe(
+      'watchdog: resume refused 3× — resume by hand'
+    );
+  });
+
+  it('reads "exhausted" over a failing run, keeping the existing order', () => {
+    // Both can hold at once — a run that spent its cap and was then refused
+    // three times more — and `exhausted` stays the more permanent fact, the
+    // ordering this clause already applies to `off` and `lastError`.
+    expect(watchdogClause(watchdog({ attempts: 2, maxAttempts: 2, exhausted: true, failures: 3, failing: true }))).toBe('watchdog: exhausted after 2 — resume by hand');
   });
 
   it('reads "exhausted" even when the sweeper has since been disabled', () => {
@@ -285,7 +306,8 @@ describe('the kind records', () => {
     exhausted: true,
     recovered: true,
     disabled: true,
-    stopped: true
+    stopped: true,
+    stalled: true
   };
   const kinds = Object.keys(every) as WatchdogEventKind[];
 
@@ -308,6 +330,9 @@ describe('the kind records', () => {
     expect(WATCHDOG_KIND_TONE.failed).toBe('bad');
     expect(WATCHDOG_KIND_TONE.exhausted).toBe('warn');
     expect(WATCHDOG_KIND_TONE.disabled).toBe('warn');
+    // bug-35 — a third kind that ends in "resume by hand", so it carries that
+    // group's amber: a state needing a person, not a failure of this run.
+    expect(WATCHDOG_KIND_TONE.stalled).toBe('warn');
     expect(WATCHDOG_KIND_TONE.armed).toBe('muted');
     expect(WATCHDOG_KIND_TONE.idle).toBe('muted');
   });

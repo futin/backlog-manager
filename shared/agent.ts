@@ -694,6 +694,38 @@ export function watchdogExhausted(attempts: number, maxAttempts: number): boolea
 }
 
 /**
+ * The same question over the OTHER counter (bug-35): has this run been refused
+ * so many times in a row that the sweeper should stop asking and let a person
+ * act?
+ *
+ * `attempts` above counts resume spawns that returned a session id, which is
+ * the right thing to cap while a failure is TRANSIENT — a dashboard that was
+ * briefly restarting should not spend a cap slot, because the next tick may
+ * well succeed. It is the wrong thing to cap on when the refusal is terminal
+ * until a human acts (remote answers switched off, a misconfigured
+ * `BM_AGENTS`, the dashboard down): not one of those refusals starts a
+ * session, so `attempts` never moves, `watchdogExhausted` never becomes true,
+ * and the sweeper re-asks every grace window for as long as the run stays
+ * crashed. Observed on one run for 5h20m and 17 identical `failed` lines —
+ * a third of the event ring, which is where the evidence of every other run
+ * lived.
+ *
+ * `consecutiveFailures` is therefore counted separately and measured against
+ * the SAME `maxAttempts`, deliberately not a second setting: "Give up after
+ * N" is already the number a person sets for exactly this question, and the
+ * re-entry path is the one they already know — raising it lets a stood-down
+ * run be tried again, through the same code an exhausted one re-enters by.
+ * (`CLAIM_STALE_MS` aliases `RUN_STALE_MS` for the same reason.)
+ *
+ * `>=` rather than `===`, and a one-liner beside its sibling above, for that
+ * sibling's own reason: a person reading the board must be able to check the
+ * sentence against the two numbers printed beside it.
+ */
+export function watchdogFailing(consecutiveFailures: number, maxAttempts: number): boolean {
+  return consecutiveFailures >= maxAttempts;
+}
+
+/**
  * Has the watchdog stood down for this run — i.e. will its next tick decline
  * to spawn a resume of its own?
  *
@@ -723,7 +755,15 @@ export function watchdogExhausted(attempts: number, maxAttempts: number): boolea
  *
  * `exhausted` is the DERIVED value above, never a stored flag — see it for
  * the other half of the same Critical.
+ *
+ * `failing` (bug-35) is the third condition and is a REQUIRED property with no
+ * default, the rule `runClaimBlock` follows for `starting`. A default would let
+ * a future caller silently opt out of a stand-down condition and put the board
+ * back to offering Resume while the sweeper still spawns — the one state this
+ * predicate exists to make unreachable — and it would do it by omission, which
+ * is the failure mode no reviewer catches. Widening it instead breaks every
+ * call site that has not been considered, which is the intent.
  */
-export function watchdogStoodDown(w: { enabled: boolean; exhausted: boolean }): boolean {
-  return w.exhausted || !w.enabled;
+export function watchdogStoodDown(w: { enabled: boolean; exhausted: boolean; failing: boolean }): boolean {
+  return w.exhausted || w.failing || !w.enabled;
 }

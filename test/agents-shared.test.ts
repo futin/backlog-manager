@@ -18,7 +18,9 @@ import {
   queueItemIs,
   resumeGate,
   runClaimBlock,
-  runHoldsItem
+  runHoldsItem,
+  watchdogFailing,
+  watchdogStoodDown
 } from '../shared/agent';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
@@ -888,5 +890,46 @@ describe('runClaimBlock over a tracker item', () => {
 
     expect(runClaimBlock(item, [run], [])).toBe('an orchestrator run is working this item (dispatched)');
     expect(runClaimBlock(item, [{ ...run, project: '/abs/elsewhere' }], [])).toBeNull();
+  });
+});
+
+/* bug-35 — the cap a REFUSED resume is measured against. `watchdogExhausted`
+   counts sessions the sweeper started, so a resume the dashboard refuses for a
+   reason only a person can clear (remote answers off, a misconfigured
+   `BM_AGENTS`, the dashboard down) never moved it and the sweeper retried
+   every grace window forever. This predicate is that cap's sibling over the
+   other counter, and it is written the same way and for the same reason: a
+   person reading the board must be able to check the sentence against the two
+   numbers printed beside it. */
+describe('watchdogFailing', () => {
+  it.each([
+    [0, 3, false],
+    [2, 3, false],
+    // The bug's own state: three refusals in a row against a cap of three,
+    // with `attempts` still 0 because not one of them started a session.
+    [3, 3, true],
+    // `>=`, not `===`, for the reason `watchdogExhausted` uses it: lowering
+    // "Give up after" while a run is failing must not step over the ceiling.
+    [4, 3, true],
+    // The raised-cap re-entry — the same escape hatch an exhausted run has.
+    [3, 4, false]
+  ])('is %p >= %p → %p', (failures, maxAttempts, expected) => {
+    expect(watchdogFailing(failures, maxAttempts)).toBe(expected);
+  });
+});
+
+/* The third stand-down condition, and the reason it is a REQUIRED property
+   rather than one defaulting to `false`: the board renders its hand-Resume
+   control on this predicate being true, so a caller that silently opted out of
+   the new condition would put the board back to offering Resume while the
+   sweeper was still spawning — the one thing this predicate exists to
+   prevent. */
+describe('watchdogStoodDown over a failing run', () => {
+  it('stands down on refusals alone, with the attempt cap untouched', () => {
+    expect(watchdogStoodDown({ enabled: true, exhausted: false, failing: true })).toBe(true);
+  });
+
+  it('keeps spawning while the refusals are still under the ceiling', () => {
+    expect(watchdogStoodDown({ enabled: true, exhausted: false, failing: false })).toBe(false);
   });
 });

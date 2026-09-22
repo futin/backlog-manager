@@ -7,7 +7,7 @@ import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { readWatchdogConfig, watchdogEnvOff } from '../orchestrator/watchdog-config.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import type { WatchdogEntry } from '../orchestrator/watchdog-state.service';
-import { watchdogExhausted, watchdogStoodDown } from '../../../shared/agent';
+import { watchdogExhausted, watchdogFailing, watchdogStoodDown } from '../../../shared/agent';
 import type { OrchestratorRunsPayload, WatchdogStatus } from '../../../shared/types';
 
 /**
@@ -341,9 +341,20 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     //    "the resume worked" rather than "a healthy run stayed healthy".
     if (run.fresh) {
       const entry = this.state.entry(run.runId);
-      if (entry && entry.attempts > 0 && !entry.recovered) {
-        entry.recovered = true;
-        this.push(run, 'recovered', 'run fresh again — standing down');
+      if (entry) {
+        // bug-35 — a live run is proof that whatever the refusals were about
+        // is no longer this run's problem, so the ceiling goes with them.
+        // Cleared on the BRANCH, not inside the `recovered` guard below:
+        // that guard needs `attempts > 0`, and a run of refusals starts no
+        // sessions at all, so the one state this field exists for would be
+        // exactly the one state that never cleared it — the run would go
+        // healthy, crash again an hour later and stand down on its first
+        // tick, against a count of failures from before it recovered.
+        entry.consecutiveFailures = 0;
+        if (entry.attempts > 0 && !entry.recovered) {
+          entry.recovered = true;
+          this.push(run, 'recovered', 'run fresh again — standing down');
+        }
       }
       return;
     }
@@ -384,10 +395,12 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
       return;
     }
 
-    // 2 & 3. The two stand-down states: the watchdog is off (the user's
-    //    Settings toggle, or either env switch), or the cap is spent.
-    //    Watching continues in both and the crashed run is still reported;
-    //    only the spawn is withheld.
+    // 2 & 3. The stand-down states — two in design §2.2, three since bug-35:
+    //    the watchdog is off (the user's Settings toggle, or either env
+    //    switch), the attempt cap is spent, or the refusals have reached that
+    //    same number without a single session having started. Watching
+    //    continues in all three and the crashed run is still reported; only
+    //    the spawn is withheld.
     //
     //    Both values come from ONE implementation each, shared with the
     //    board rather than restated here. `spawningEnabled(config)`
@@ -408,9 +421,19 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     //    both sides read the same sentence. `test/watchdog-coupling.test.ts`
     //    and this suite's own table case drive the two halves from one table
     //    of states so a change to either goes red.
+    //
+    //    bug-35 added the THIRD member of that pair, and it is measured
+    //    against the same `config.maxAttempts` the second one is: the number
+    //    on the Settings field reads "Give up after", and a person who sets
+    //    it to 3 has said how many times this sweeper may ask — not how many
+    //    of those asks the dashboard has to accept for the number to mean
+    //    anything. One cap, two counters (see `WatchdogEntry` for why the
+    //    counters cannot be one), and so one re-entry: raising the field
+    //    revives a stalled run exactly as it revives an exhausted one.
     const enabled = this.state.spawningEnabled(config);
     const exhausted = watchdogExhausted(entry.attempts, config.maxAttempts);
-    if (watchdogStoodDown({ enabled, exhausted })) {
+    const failing = watchdogFailing(entry.consecutiveFailures, config.maxAttempts);
+    if (watchdogStoodDown({ enabled, exhausted, failing })) {
       // WHICH of the two it is decides only which line gets logged, never
       // whether this returns. `off` is reported ahead of `exhausted` when
       // both hold, preserving the order the two separate steps had: an
@@ -429,9 +452,25 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
           entry.disabledLogged = true;
           this.push(run, 'disabled', 'watchdog off — resume by hand');
         }
-      } else if (!entry.exhaustedLogged) {
-        entry.exhaustedLogged = true;
-        this.push(run, 'exhausted', `exhausted after ${entry.attempts} attempts — resume by hand`);
+      } else if (exhausted) {
+        if (!entry.exhaustedLogged) {
+          entry.exhaustedLogged = true;
+          this.push(run, 'exhausted', `exhausted after ${entry.attempts} attempts — resume by hand`);
+        }
+      } else if (!entry.stalledLogged) {
+        // bug-35's rung, ranked LAST of the three for the same reason `off`
+        // is ranked first: it is the weakest claim of the three, and the
+        // other two are each a fact a person can act on directly. It is a
+        // rung of its own rather than a reuse of `exhausted` because the
+        // sentence differs where it matters — "exhausted after 0 attempts"
+        // is what `exhausted`'s line would say here, which is both true and
+        // useless, and says nothing about the refusal that is the actual
+        // reason nobody is coming. The last error is carried into the line
+        // because it is the only thing in the ring buffer that will still be
+        // there in an hour: the `failed` events this run of refusals wrote
+        // are exactly what the next fifty events push out.
+        entry.stalledLogged = true;
+        this.push(run, 'stalled', `resume refused ${entry.consecutiveFailures}× in a row — resume by hand (last: ${entry.lastError})`);
       }
       return;
     }
@@ -445,6 +484,12 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     // silence. The guard tracks the condition; it is not a record that the
     // run was ever exhausted at all.
     entry.exhaustedLogged = false;
+    // bug-35's guard is cleared in the same breath and by the same argument:
+    // past the branch above means this run is not standing down as of this
+    // tick's config read, which for a stalled run means the cap was raised,
+    // and a run that goes on to be refused the larger number of times too
+    // has to be able to say so a second time.
+    entry.stalledLogged = false;
 
     // 4. Grace. Measured from the last spawn ATTEMPT, success or failure
     //    alike — see the class comment for why the two share one clock.
@@ -536,6 +581,15 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     entry.lastSpawnAt = new Date().toISOString();
     entry.lastSessionId = sessionId;
     entry.lastError = null;
+    // bug-35 — a person has just done the thing the stand-down asked them to
+    // do, so the refusal count that produced the ask is spent. Without this
+    // the run stands down again the instant the hand-resumed session fails to
+    // heartbeat in time, and the operator is asked to resume a second time
+    // for the same reason they already acted on. It is the cap's own
+    // "grace yes, cap no" split read the right way round: this is not an
+    // attempt the sweeper made, but it IS evidence the run of refusals is
+    // over, which is the only thing this counter measures.
+    entry.consecutiveFailures = 0;
     this.push(run, 'spawned', `resumed by hand from the board → session ${sessionId} (not counted against the cap)`);
   }
 
@@ -548,6 +602,12 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
     try {
       const { sessionId } = await this.agents.resume(run.project, 'watchdog');
       entry.attempts += 1;
+      // bug-35 — the refusals are over: whatever was answering 409 is
+      // answering with a session id now, so the ceiling resets and the next
+      // refusal to arrive is the first of a new run of them rather than the
+      // fourth of an old one. Zeroed rather than decremented, because the
+      // field counts refusals *in a row* and this one broke the row.
+      entry.consecutiveFailures = 0;
       entry.lastSessionId = sessionId;
       entry.lastError = null;
       this.push(run, 'spawned', `spawned resume ${entry.attempts}/${maxAttempts} → session ${sessionId}`);
@@ -558,12 +618,29 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
       // and the sweeper would then stop watching precisely because something
       // went wrong — the failure mode it exists to prevent, one level up.
       // `attempts` is untouched: a refused spawn started no session.
+      //
+      // bug-35 — but it is not untracked either, and the event says which of
+      // the two counters moved. "(not counted)" on its own was true and
+      // read, to every operator who saw it, as "this costs nothing and will
+      // be retried" — which was exactly right for the outage it was written
+      // for and exactly wrong for a refusal that can never clear. The line
+      // now carries both numbers, so a reader watching the feed can see the
+      // ceiling coming rather than only being told about it once.
+      entry.consecutiveFailures += 1;
       entry.lastError = resumeErrorMessage(e);
-      this.push(run, 'failed', `resume failed: ${entry.lastError} (not counted)`);
+      this.push(
+        run,
+        'failed',
+        `resume failed: ${entry.lastError} (${entry.consecutiveFailures}/${maxAttempts} in a row; no session started, so the attempt cap is untouched)`
+      );
     }
   }
 
-  private push(run: OrchestratorRunsPayload['runs'][number], kind: 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled' | 'stopped', detail: string): void {
+  private push(
+    run: OrchestratorRunsPayload['runs'][number],
+    kind: 'spawned' | 'failed' | 'exhausted' | 'recovered' | 'disabled' | 'stopped' | 'stalled',
+    detail: string
+  ): void {
     this.state.push({ project: run.project, runId: run.runId, kind, detail });
   }
 }

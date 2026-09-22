@@ -308,7 +308,9 @@ describe('RunControls — the crashed run', () => {
         lastSpawnAt: null,
         lastSessionId: null,
         lastError: null,
-        exhausted: false
+        exhausted: false,
+        failures: 0,
+        failing: false
       },
       ...over
     });

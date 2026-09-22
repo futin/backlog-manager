@@ -1,4 +1,4 @@
-import { watchdogExhausted } from '../../shared/agent';
+import { watchdogExhausted, watchdogFailing } from '../../shared/agent';
 import type { RunWatchdog } from '../../shared/types';
 
 /**
@@ -40,6 +40,13 @@ export interface CouplingRow {
   configEnabled: boolean;
   /** Resume sessions the sweeper has actually started for this run. */
   attempts: number;
+  /**
+   * bug-35 — resumes REFUSED in a row since the last one that started a
+   * session. A different counter from `attempts` measured against the same
+   * cap, and the distinction is the whole bug: a refusal starts no session, so
+   * it moves this and never that.
+   */
+  consecutiveFailures: number;
   /** The cap those attempts are measured against — `WatchdogConfig.maxAttempts`,
    *  which a person can move in Settings at any time, which is the entire
    *  reason `exhausted` may not be stored. */
@@ -55,24 +62,24 @@ export interface CouplingRow {
 export const COUPLING_ROWS: readonly CouplingRow[] = [
   // Still trying: the sweeper has not spawned yet, so grace is not holding it
   // back either — it spawns, and a Resume button would be the second spawn.
-  { name: 'enabled, nothing spent yet', configEnabled: true, attempts: 0, maxAttempts: 2, standsDown: false },
+  { name: 'enabled, nothing spent yet', configEnabled: true, attempts: 0, consecutiveFailures: 0, maxAttempts: 2, standsDown: false },
   // Mid-cap: one attempt made, one left. Same answer, and the state the
   // strip's "attempt 1/2 spawned" clause describes.
-  { name: 'enabled, one attempt of two spent', configEnabled: true, attempts: 1, maxAttempts: 2, standsDown: false },
+  { name: 'enabled, one attempt of two spent', configEnabled: true, attempts: 1, consecutiveFailures: 0, maxAttempts: 2, standsDown: false },
   // The cap, exactly reached — the state that renders "exhausted after 2 —
   // resume by hand", which is the sentence the Resume control belongs to.
-  { name: 'enabled, cap reached', configEnabled: true, attempts: 2, maxAttempts: 2, standsDown: true },
+  { name: 'enabled, cap reached', configEnabled: true, attempts: 2, consecutiveFailures: 0, maxAttempts: 2, standsDown: true },
   // Past the cap: reachable by LOWERING "Give up after" while a run is
   // crashed, so `>=` rather than `===` is the comparison that matters.
-  { name: 'enabled, cap lowered below attempts already spent', configEnabled: true, attempts: 3, maxAttempts: 2, standsDown: true },
+  { name: 'enabled, cap lowered below attempts already spent', configEnabled: true, attempts: 3, consecutiveFailures: 0, maxAttempts: 2, standsDown: true },
   // The user's toggle off. Watching continues and the crashed run is still
   // reported; only the spawn is withheld, which is what makes the strip's
   // "off — resume by hand" an honest offer rather than a race.
-  { name: 'watchdog off, nothing spent', configEnabled: false, attempts: 0, maxAttempts: 2, standsDown: true },
+  { name: 'watchdog off, nothing spent', configEnabled: false, attempts: 0, consecutiveFailures: 0, maxAttempts: 2, standsDown: true },
   // Both at once: still one answer, and the sweeper logs `disabled` rather
   // than `exhausted` for it (off is reported ahead of the cap — see
   // `visit()`).
-  { name: 'watchdog off and cap reached', configEnabled: false, attempts: 2, maxAttempts: 2, standsDown: true },
+  { name: 'watchdog off and cap reached', configEnabled: false, attempts: 2, consecutiveFailures: 0, maxAttempts: 2, standsDown: true },
   // **The row the whole-branch review's Critical was about.** A run that was
   // exhausted at `maxAttempts: 1` and whose operator then did the obvious
   // thing the strip invited — raised "Give up after" — is NOT exhausted any
@@ -80,7 +87,25 @@ export const COUPLING_ROWS: readonly CouplingRow[] = [
   // tick and starts spawning again, so the board must stop offering the
   // button in the same instant. It did not, for as long as `exhausted` was a
   // flag written once and never cleared.
-  { name: 'enabled, cap raised above the attempts already spent', configEnabled: true, attempts: 1, maxAttempts: 3, standsDown: false }
+  { name: 'enabled, cap raised above the attempts already spent', configEnabled: true, attempts: 1, consecutiveFailures: 0, maxAttempts: 3, standsDown: false },
+  // bug-35's three rows, and the counter they move is the one `attempts` does
+  // not: every refusal here started no session, so `attempts` stays 0 through
+  // all three and the cap they are measured against is reached by the other
+  // number entirely.
+  //
+  // Under the ceiling: the dashboard may simply have been restarting, and the
+  // next tick may well succeed — the transient case the original rule was
+  // written for, and still the right answer.
+  { name: 'enabled, two refusals of three in a row', configEnabled: true, attempts: 0, consecutiveFailures: 2, maxAttempts: 3, standsDown: false },
+  // **The bug's own state, and the row whose absence let it ship.** Three
+  // refusals in a row against a cap of three, `attempts` still 0 — so
+  // `watchdogExhausted` reads false, the sweeper's only exit was unreachable,
+  // and it re-asked every grace window for as long as the run stayed crashed.
+  { name: 'enabled, refusals reach the ceiling with no session ever started', configEnabled: true, attempts: 0, consecutiveFailures: 3, maxAttempts: 3, standsDown: true },
+  // The raised-cap re-entry, exactly as for exhaustion: "Give up after" is
+  // one number and it governs both counters, so raising it lets a stalled run
+  // be tried again through the path a person already knows.
+  { name: 'enabled, cap raised above the refusals already counted', configEnabled: true, attempts: 0, consecutiveFailures: 3, maxAttempts: 4, standsDown: false }
 ];
 
 /**
@@ -103,6 +128,8 @@ export function rowWatchdog(row: CouplingRow): RunWatchdog {
     lastSpawnAt: null,
     lastSessionId: null,
     lastError: null,
-    exhausted: watchdogExhausted(row.attempts, row.maxAttempts)
+    exhausted: watchdogExhausted(row.attempts, row.maxAttempts),
+    failures: row.consecutiveFailures,
+    failing: watchdogFailing(row.consecutiveFailures, row.maxAttempts)
   };
 }

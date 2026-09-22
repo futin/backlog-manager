@@ -187,7 +187,7 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **The watchdog is armed only while some `run.json` says `running`.** Why: [invariants.md](docs/subsystems/invariants.md#armed-idle-off)
 - **`useOrchestratorRuns` polls while any run is `running`, fresh or not**
   Why: [invariants.md](docs/subsystems/invariants.md#a-crashed-run-renders-as-crashed-never-as-nothing)
-- **Any spawn attempt starts the grace clock; only a success counts against the cap.**
+- **Any spawn attempt starts the grace clock; a success counts against the attempt cap and a refusal against the refusal ceiling, which is the same number.**
   Why: [invariants.md](docs/subsystems/invariants.md#grace-any-attempt-starts-the-clock-only-a-success-counts)
 - **The board offers a hand resume exactly when the watchdog will not spawn one — absent a stop request, which suppresses both sides — and that is one function,
   not two agreeing expressions.**

@@ -105,6 +105,11 @@ describe('WatchdogStateService', () => {
       // fresh entry — an entry that came into existence holding one would
       // refuse the very resume that created it.
       resumeSpawnAt: null,
+      // bug-35: the refusal counter, which a fresh entry has none of — and
+      // which is a SECOND counter rather than a reading of `attempts` above,
+      // because a refused spawn starts no session and so may never consume
+      // one of the attempts a person budgeted.
+      consecutiveFailures: 0,
       lastSessionId: null,
       lastError: null,
       recovered: false,
@@ -112,7 +117,9 @@ describe('WatchdogStateService', () => {
       disabledLogged: false,
       // bug-39: the `stopped` line's once-per-condition guard, unset like
       // every other log flag on a fresh entry.
-      stoppedLogged: false
+      stoppedLogged: false,
+      // bug-35's own guard, beside it and for the same reason.
+      stalledLogged: false
     });
   });
 
@@ -153,7 +160,12 @@ describe('WatchdogStateService', () => {
       lastSpawnAt: null,
       lastSessionId: null,
       lastError: null,
-      exhausted: false
+      exhausted: false,
+      // bug-35: a crashed run nobody has been refused a resume for yet — the
+      // pair reads zero and false for exactly the same reason `attempts` and
+      // `exhausted` do above.
+      failures: 0,
+      failing: false
     });
   });
 
@@ -226,6 +238,47 @@ describe('WatchdogStateService', () => {
     // The two numbers the sentence is built from ride the same record, out of
     // the same single config read, so a reader can always check it.
     expect(result?.attempts).toBe(2);
+    expect(result?.maxAttempts).toBe(3);
+  });
+
+  // bug-35, at the same layer and in the same shape: the refusal counter is
+  // published beside its own derived verdict, and the verdict is derived from
+  // the config read at annotate time rather than stored on the entry. The
+  // board draws a Resume control on this boolean too — `watchdogStoodDown`
+  // takes `failing` as a third required input — so a stored one would
+  // reproduce the Critical the case above pins, for the other counter.
+  it("annotate reflects an entry's refusals and derives failing from them against the current cap", () => {
+    process.env.BM_AGENTS = 'on';
+    const service = new WatchdogStateService();
+    const entry = service.upsert('run-1', '/p');
+    // Two refusals against the default cap of 2, and NO attempt spent —
+    // which is the whole state: every one of those spawns was refused, so
+    // none of them started a session.
+    entry.consecutiveFailures = 2;
+
+    const result = service.annotate(fakeRun({ runId: 'run-1', status: 'running', fresh: false }));
+
+    expect(result?.failures).toBe(2);
+    expect(result?.failing).toBe(true);
+    // The counter the cap used to be read from, still zero — the two are
+    // published side by side precisely so a reader can tell these apart.
+    expect(result?.attempts).toBe(0);
+    expect(result?.exhausted).toBe(false);
+  });
+
+  it('annotate reports failing: false once maxAttempts is raised past the refusals counted', () => {
+    process.env.BM_AGENTS = 'on';
+    const file = process.env.BM_WATCHDOG_FILE as string;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ maxAttempts: 3 }));
+
+    const service = new WatchdogStateService();
+    service.upsert('run-1', '/p').consecutiveFailures = 2;
+
+    const result = service.annotate(fakeRun({ runId: 'run-1', status: 'running', fresh: false }));
+
+    expect(result?.failing).toBe(false);
+    expect(result?.failures).toBe(2);
     expect(result?.maxAttempts).toBe(3);
   });
 

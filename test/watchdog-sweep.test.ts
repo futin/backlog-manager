@@ -622,7 +622,11 @@ describe('watchdog sweeper', () => {
     // about one comparison. `lastSpawnAt` stays null, so grace never fires
     // and the only thing that can withhold a spawn here is the rule under
     // test.
-    if (row.attempts > 0) state().upsert(fixture.runId, projectPath).attempts = row.attempts;
+    if (row.attempts > 0 || row.consecutiveFailures > 0) {
+      const seeded = state().upsert(fixture.runId, projectPath);
+      seeded.attempts = row.attempts;
+      seeded.consecutiveFailures = row.consecutiveFailures;
+    }
 
     // Read straight off `OrchestratorService.runs()` — the object the
     // endpoint serializes — rather than over HTTP, deliberately: the
@@ -638,6 +642,132 @@ describe('watchdog sweeper', () => {
     await svc().tick();
 
     expect(dash.spawns()).toHaveLength(row.standsDown ? 0 : 1);
+  });
+
+  // --- 7e (bug-35): a refusal that can never clear on its own ---------------
+  //
+  // The defect end to end, driven through the real refusal path rather than a
+  // stubbed service: the dashboard answers `/api/spawn` with a 409, which
+  // `AgentsService.resume()` relays as an `HttpException` and `spawn()`'s
+  // catch turns into a `failed` event. Not one of those refusals starts a
+  // session, so `attempts` never moves — and until this fix that made
+  // `watchdogExhausted` permanently false and the sweeper's only exit
+  // unreachable. Observed in the field as 17 identical `failed` lines over
+  // 5h20m, a third of the event ring, while the crashed run sat unresumed.
+  //
+  // The red proof here is the CALL COUNT taken from the dashboard stub, not
+  // the event log: today's code makes one spawn call per tick forever, so an
+  // assertion that only counted events would go green the moment the log
+  // stopped growing, for a sweeper still hammering the dashboard.
+
+  it('stops asking after maxAttempts refusals in a row, and resumes again once the cap is raised', async () => {
+    const dash = stubDashboard({ spawn: { ok: false, status: 409, body: { error: 'remote answers are off in the dashboard' } } });
+    writeConfig({ maxAttempts: 3 });
+    await createApp();
+    writeRun(crashedRun(projectPath));
+
+    for (let i = 0; i < 3; i++) {
+      await svc().tick();
+      // Past grace AND past bug-19's resume lock, so the only thing that can
+      // withhold the next spawn is the rule under test.
+      rewind(state().entry(fixture.runId)!, 16 * 60 * 1000);
+    }
+
+    const entry = state().entry(fixture.runId)!;
+    expect(entry.consecutiveFailures).toBe(3);
+    // The counter the cap used to be read from, untouched by every one of
+    // those refusals — which is the bug in one assertion.
+    expect(entry.attempts).toBe(0);
+    expect(dash.spawns()).toHaveLength(3);
+    // Nothing is logged yet, and that is the same shape exhaustion has: the
+    // ceiling is REACHED by the third refusal and DETECTED by the tick after
+    // it, because the stand-down branch runs before the spawn, not after.
+    expect(kinds('stalled')).toHaveLength(0);
+
+    // The tick that detects it: one `stalled` line, and no fourth call.
+    await svc().tick();
+    rewind(state().entry(fixture.runId)!, 16 * 60 * 1000);
+
+    expect(dash.spawns()).toHaveLength(3);
+    expect(kinds('stalled')).toHaveLength(1);
+    expect(kinds('stalled')[0].detail).toContain('resume refused 3× in a row');
+    // Never reported as exhaustion — `attempts` is 0, so "exhausted after 0
+    // attempts" would be the line, which is true and tells a reader nothing.
+    expect(kinds('exhausted')).toHaveLength(0);
+
+    // Two further ticks: still no call, no fourth `failed` line, and still
+    // exactly one `stalled` — the once-per-condition guard holding.
+    await svc().tick();
+    rewind(state().entry(fixture.runId)!, 16 * 60 * 1000);
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(3);
+    expect(kinds('failed')).toHaveLength(3);
+    expect(kinds('stalled')).toHaveLength(1);
+
+    // The re-entry a person is invited to: raise "Give up after", and the run
+    // is tried again through the same path an exhausted one re-enters by.
+    writeConfig({ maxAttempts: 4 });
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/spawn')) return { ok: true, status: 200, json: () => Promise.resolve({ sessionId: 'sess-ok' }) } as Response;
+      return {
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve(
+            url.endsWith('/api/management')
+              ? { projects: [{ dirName: '-abs-alpha', path: projectPath, name: '-abs-alpha', lastActiveMs: 1 }] }
+              : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
+          )
+      } as Response;
+    }) as jest.Mock;
+    rewind(state().entry(fixture.runId)!, 16 * 60 * 1000);
+
+    await svc().tick();
+
+    const after = state().entry(fixture.runId)!;
+    expect(after.attempts).toBe(1);
+    // Cleared by the spawn that finally started a session: the refusals are
+    // over, and the next one to arrive is the first of a new run of them.
+    expect(after.consecutiveFailures).toBe(0);
+    expect(kinds('spawned')).toHaveLength(1);
+  });
+
+  // --- 7f (bug-35): the two events that prove the refusal has cleared -------
+  //
+  // A person clicking the control this stand-down exists to reveal must not
+  // have to click it twice, and a run that comes back on its own must not
+  // carry a ceiling into its next crash.
+
+  it('clears the refusal count when the run recovers, and when a person resumes from the board', async () => {
+    const dash = stubDashboard({ spawn: { ok: false, status: 409, body: { error: 'remote answers are off in the dashboard' } } });
+    await createApp();
+    writeRun(crashedRun(projectPath));
+
+    await svc().tick();
+    rewind(state().entry(fixture.runId)!, 16 * 60 * 1000);
+    await svc().tick();
+    expect(state().entry(fixture.runId)?.consecutiveFailures).toBe(2);
+    expect(dash.spawns()).toHaveLength(2);
+
+    // The run heartbeats again. `recovered` needs `attempts > 0` to be logged
+    // at all, and none of these refusals started a session — so this asserts
+    // the counter is cleared on the branch itself, not on the event.
+    writeRun(freshRun(projectPath));
+    await svc().tick();
+    expect(state().entry(fixture.runId)?.consecutiveFailures).toBe(0);
+
+    // And the hand resume: crash it again, refuse once more, then record a
+    // board resume the way `AgentsController.resume` does.
+    writeRun(crashedRun(projectPath));
+    rewind(state().entry(fixture.runId)!, 16 * 60 * 1000);
+    await svc().tick();
+    expect(state().entry(fixture.runId)?.consecutiveFailures).toBe(1);
+
+    svc().noteBoardResume(projectPath, 'sess-by-hand');
+
+    expect(state().entry(fixture.runId)?.consecutiveFailures).toBe(0);
   });
 
   /**
@@ -662,7 +792,11 @@ describe('watchdog sweeper', () => {
     await createApp();
     const run = crashedRun(projectPath);
     writeRun(run);
-    if (row.attempts > 0) state().upsert(fixture.runId, projectPath).attempts = row.attempts;
+    if (row.attempts > 0 || row.consecutiveFailures > 0) {
+      const seeded = state().upsert(fixture.runId, projectPath);
+      seeded.attempts = row.attempts;
+      seeded.consecutiveFailures = row.consecutiveFailures;
+    }
     // Written through the server's own writer, against this run's id and
     // stamped now — the two clauses the predicate checks — so the case cannot
     // pass on a request the tool would have judged ineffective.
@@ -731,7 +865,7 @@ describe('watchdog sweeper', () => {
     const failed = kinds('failed');
     expect(failed).toHaveLength(1);
     expect(failed[0].detail).toContain('busy');
-    expect(failed[0].detail).toContain('not counted');
+    expect(failed[0].detail).toContain('the attempt cap is untouched');
   });
 
   // --- 8b (bug-26): the sweeper reads the seam's wording, not `fetch failed`
@@ -765,7 +899,7 @@ describe('watchdog sweeper', () => {
     const failed = kinds('failed');
     expect(failed).toHaveLength(1);
     expect(failed[0].detail).toContain('ECONNREFUSED');
-    expect(failed[0].detail).toContain('not counted');
+    expect(failed[0].detail).toContain('the attempt cap is untouched');
   });
 
   // --- 9: grace covers failures too -----------------------------------------
@@ -813,7 +947,7 @@ describe('watchdog sweeper', () => {
     const failed = kinds('failed');
     expect(failed).toHaveLength(1);
     expect(failed[0].detail).toContain('already started');
-    expect(failed[0].detail).toContain('not counted');
+    expect(failed[0].detail).toContain('the attempt cap is untouched');
   });
 
   // --- 9c (bug-19, review round 1): a sweep must not drop the resume lock ---

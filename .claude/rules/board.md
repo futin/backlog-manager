@@ -51,8 +51,10 @@ paths: ["client/src/**"]
   function, not two agreeing expressions.** `watchdogStoodDown`
   (`shared/agent.ts`) is read by `watchdog.service.ts`'s `visit()` and by whichever surface offers the click — `RunStrip` until task-37, NOTHING in between, and
   `RunControls` from task-38, which is ONE reader for both surfaces that offer it (the Runs detail head and the Watchdog page's rows draw the same component, so
-  `WatchdogMonitor` must never call the predicate itself). `test/watchdog-coupling.test.tsx`'s reader list is an exact set for that reason. Its inputs
-  `spawningEnabled()` and `watchdogExhausted` (`attempts >= maxAttempts`, DERIVED, never stored) are single implementations too. Pinned by
+  `WatchdogMonitor` must never call the predicate itself). `test/watchdog-coupling.test.tsx`'s reader list is an exact set for that reason. Its three inputs
+  `spawningEnabled()`, `watchdogExhausted` (`attempts >= maxAttempts`) and bug-35's `watchdogFailing` (`consecutiveFailures >= maxAttempts`) are single
+  implementations too, all three DERIVED and never stored; `failing` is a REQUIRED property with no default, so a caller cannot opt out of the third and put
+  the board back to offering Resume while the sweeper still spawns. Pinned by
   `test/watchdog-coupling.test.tsx` and `test/watchdog-sweep.test.ts` driving both sides from one table of hand-checked verdicts. Why:
   [invariants.md](docs/subsystems/invariants.md#the-resume-coupling-the-board-offers-a-hand-resume-exactly-when-the-sweeper-will-not)
 - **The launch sheet's model/effort pickers seed from Settings, never the last launch** (`dispatchDefaultModel` / `dispatchDefaultEffort` in
