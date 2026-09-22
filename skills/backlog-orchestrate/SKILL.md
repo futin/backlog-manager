@@ -425,7 +425,8 @@ issue**, which is one more reason it is always your own words and never a quote 
 
 **Not answered, `questionMode: decide`** → decide each question yourself, then record what you decided:
 
-1. Answer every question, using the item, the repo's `CLAUDE.md` and the code as it actually is. Prefer the smallest answer that lets the plan proceed.
+1. Answer every question, using the item, the repo's `CLAUDE.md`, the `.claude/rules/` files scoped to the files in play, and the code as it actually is.
+   Prefer the smallest answer that lets the plan proceed.
 2. Write those answers into the item body through the **same** path an answered question takes — "Writing an answer into the item" below, inside the worktree,
    in step 4. That is what makes the answer ride the branch into the base and show up in the item's own diff, instead of living only in a run file nobody reads.
 3. Record the pairs on the queue item, so the archive can answer months later whether this item's plan was written by a human or filled in by the runner:

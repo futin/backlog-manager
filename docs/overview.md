@@ -12,7 +12,7 @@ touch an item file, and each file that holds state has exactly one writer.
 | doc                                                  | what it is                                                                                                              |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | [README.md](../README.md)                            | the human front door — what this is, quick start, the surfaces                                                          |
-| [CLAUDE.md](../CLAUDE.md)                            | the normative index: one line per rule, for anyone (or anything) working in this repo                                   |
+| [CLAUDE.md](../CLAUDE.md)                            | the normative index: one headline per rule — mechanism in `.claude/rules/`, reasoning in `subsystems/invariants.md`     |
 | [subsystems/api.md](subsystems/api.md)               | the Nest side: what each module owns, which reads are cached and which must never be                                    |
 | [subsystems/board.md](subsystems/board.md)           | the client: the four surfaces, and what the browser derives rather than fetches                                         |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
@@ -21,9 +21,10 @@ touch an item file, and each file that holds state has exactly one writer.
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes                                 |
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
 
-`.claude/rules/` sits beside that table rather than in it: six path-scoped pointer files that a session loads automatically when it reads a file under their
-`paths:` glob, each one line per anchor into `subsystems/invariants.md` and no prose of its own. They are guarded by `test/claude-rules.test.ts` rather than by
-`/docs-sync`, because what can rot in them is a dead anchor or a glob that matches nothing — both mechanical checks.
+`.claude/rules/` sits beside that table rather than in it: nine path-scoped files that a session loads automatically when it reads a file under their `paths:`
+glob, each the one home of the mechanism text for the rules scoped to its paths — CLAUDE.md keeps the headlines, `subsystems/invariants.md` the reasoning. They
+are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot in them is mechanical: a dead anchor, a glob that matches nothing,
+a headline that no longer matches CLAUDE.md's, an anchor homed in two files or in none.
 
 Deliberately not tracked, and each for a stated reason in [`.docs-sync.yml`](.docs-sync.yml): `backlog/` (the store's own items and README), `docs/superpowers/`
 (specs, plans, decision logs), `audits/` (dated findings), and `skills/` + `agents/` — those are the product, not documentation about it.
@@ -90,8 +91,9 @@ An install is a copy of the pushed `HEAD`, never the working tree; see [workflow
 
 ### Where the rules live
 
-[CLAUDE.md](../CLAUDE.md) carries every rule as one normative line, and [subsystems/invariants.md](subsystems/invariants.md) carries the reasoning for the ones
-that need more than that. If the two ever disagree, the code and its tests decide — but the disagreement itself is a bug worth fixing in the same sitting.
+[CLAUDE.md](../CLAUDE.md) carries every rule as one normative headline; the rule's mechanism lives in exactly one `.claude/rules/*.md` file, loaded when a
+session reads a file under its scope; and [subsystems/invariants.md](subsystems/invariants.md) carries the reasoning. If the tiers ever disagree, the code and
+its tests decide — but the disagreement itself is a bug worth fixing in the same sitting.
 
 <!-- docs-sync:
   sources:

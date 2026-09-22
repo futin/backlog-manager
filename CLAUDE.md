@@ -45,7 +45,8 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   `untyped`/assignee/link-out, and the item modal's age beside the cached body — all derived in `lib/tracker.ts`, plus the read-only `Trackers` card on Shared
   Settings. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
-  cite its subsection in a header comment. Not a `.claude/rules/` file — those pin to `invariants.md` anchors only.
+  cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into
+  `invariants.md`.
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate` and the run/watchdog predicates both sides must agree on), `theme.css`
   (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`, `skills/backlog-execute/`, `skills/backlog-orchestrate/`, `skills/backlog-retro/` — the
@@ -55,8 +56,9 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   board, not by typing the trigger into a terminal.** → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge.
-- `.claude/rules/` — six path-scoped pointer files, injected into a session the moment it reads a file under their `paths:` glob. Each is one line per anchor
-  into `docs/subsystems/invariants.md` and nothing else; the reasoning has one home and this is not it.
+- `.claude/rules/` — nine path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
+  mechanism text for the rules scoped to its paths; CLAUDE.md keeps each rule's headline, `docs/subsystems/invariants.md` its reasoning. Guarded by
+  `test/claude-rules.test.ts`: bullets only, each anchored exactly once, one home per anchor, headlines byte-equal with the ones below.
 - `backlog/` — this repo's own backlog, self-registered like any project.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](docs/workflows/publishing.md)), `test-all.mjs`
   (`pnpm test`, → [docs/workflows/development.md](docs/workflows/development.md)) and `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper).
@@ -64,8 +66,9 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
 
 ## Invariants
 
-Each entry is the rule; its `Why:` link is the reasoning, in [docs/subsystems/invariants.md](docs/subsystems/invariants.md). Read that section before changing
-any of these — most encode a failure that already happened.
+Each entry is a rule's HEADLINE. Its mechanism lives in the `.claude/rules/*.md` file scoped to the files it governs — loaded the moment a session reads one
+of them, and to be opened by hand before editing through any other route (`Write`, `codegraph_explore`) — and its `Why:` link is the reasoning, in
+[docs/subsystems/invariants.md](docs/subsystems/invariants.md). Read both before changing any of these — most encode a failure that already happened.
 
 - **`skills/` is the plugin skill root**; never duplicate it under `.claude/skills/` — that loads the same skills twice and drifts.
 - **`~/.backlog-manager/registry.json` has exactly one writer**
@@ -198,7 +201,7 @@ any of these — most encode a failure that already happened.
 - **"Queue wait is not work."** Why: [invariants.md](docs/subsystems/invariants.md#queue-wait-is-not-work)
 - **A session's cost is recorded per transcript, and a transcript's identity is its file name, not its session id**
   Why: [invariants.md](docs/subsystems/invariants.md#a-sessions-cost-is-recorded-per-transcript-and-a-transcripts-identity-is-its-file-name)
-- **Every `.claude/rules/` file carries `paths:` and is a pointer, never a second copy of the reasoning.**
+- **Every `.claude/rules/` file carries `paths:` and is the one home of its rules' mechanism — never the reasoning.**
   Why: [invariants.md](docs/subsystems/invariants.md#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35)
 
 ## Conventions

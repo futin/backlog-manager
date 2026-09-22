@@ -2254,16 +2254,21 @@ rewrite. Absent that, growth alone does not.
 
 ## Path-scoped `.claude/rules` reach a headless run in a linked worktree (task-35)
 
-Every file under `.claude/rules/` carries a `paths:` glob and is a **pointer** — one line per anchor into this file, never a second copy of the reasoning. Both
-halves are load-bearing, and both were measured rather than assumed.
+Every file under `.claude/rules/` carries a `paths:` glob and is the **one home of the mechanism** for the rules scoped to it — CLAUDE.md keeps each rule's
+headline and `Why:` link, this file keeps the reasoning (the 2026-09-22 split, below; until then the rule files were pointers into this file and CLAUDE.md
+carried the mechanism). Both halves are load-bearing, and both were measured rather than assumed.
 
 **Why `paths:` is mandatory.** A rule file with no frontmatter is loaded at `session_start`, in _every_ session, whether or not it is relevant — a permanent
-context-floor increase on all of them. That is exactly what the pointers must not cost, so an always-loaded rule file is the one failure mode this mechanism can
-introduce, and `test/claude-rules.test.ts` fails naming any file that has no non-empty `paths:` list.
+context-floor increase on all of them. That is exactly what the rule files must not cost, so an always-loaded rule file is the one failure mode this mechanism
+can introduce, and `test/claude-rules.test.ts` fails naming any file that has no non-empty `paths:` list.
 
-**Why pointers only.** CLAUDE.md is the normative index and this file is the single copy of the reasoning. A rule file that restated a rule would be a third
-statement of it, free to drift from both — and `backlog-execute`'s contract sweep would then have to visit it. A pointer states no contract, so the sweep needs
-no change; the same suite fails any body line that mentions neither this file nor CLAUDE.md.
+**Why one home for the mechanism.** Three STATEMENTS of one rule was the drift the pointer design avoided: a rule file that restated a rule would have been a
+third copy, free to drift from both CLAUDE.md and this file, and `backlog-execute`'s contract sweep would have had to visit it. Three TIERS is not that. Each
+tier says something the other two do not — the headline that the rule exists and what it forbids, the mechanism how it is implemented, this file why — and
+`test/claude-rules.test.ts` pins the seams: a rule file is bullets and nothing else, each anchored into this file exactly once; CLAUDE.md's linked headlines and
+the rule files' bullets are one multiset with one home per anchor, headlines byte-equal; a linked CLAUDE.md bullet is a headline and a link, and an unlinked one
+is at most 80 words, so mechanism cannot creep back into CLAUDE.md by either door. Because tier two states contract, the contract sweep visits
+`.claude/rules/*.md` — the one cost the pointer design declined, paid knowingly.
 
 ### How this was measured
 
@@ -2321,8 +2326,26 @@ rule did not); one ran `Grep` and `Glob` over `src/`. The trigger surface is a f
 
 P5 — in this repo, `codegraph_explore` returned the verbatim source of `server/src/orchestrator/orchestrator.service.ts` with the `Read` tool never used, and
 the log holds the two `session_start` lines and no `path_glob_match`. This is the one negative with teeth: CLAUDE.md tells sessions to reach for CodeGraph
-_before_ `Read`, so a session that follows this repo's own guidance can edit a file whose rule never fired. The pointers are a floor, not a guarantee —
-CLAUDE.md remains the surface that every session loads unconditionally, which is why no rule is moved out of it.
+_before_ `Read`, so a session that follows this repo's own guidance can edit a file whose rule never fired. The rule files are a floor, not a guarantee —
+CLAUDE.md remains the surface that every session loads unconditionally, which is why every rule's HEADLINE stays in it: a session that never loads the
+mechanism still knows the rule exists and where it is read, the Invariants intro tells it to open the rule file by hand before editing through `Write` or
+`codegraph_explore`, and the reviewer is told to read the matching rule files against every diff.
+
+### The 2026-09-22 split
+
+Measured on 2026-09-22, after `fb00e7e` (2026-09-07) had already cut every bullet to "statement, single implementation, contract numbers, link": CLAUDE.md was
+540 lines / 71,333 bytes, and the desktop app's context panel priced the two CLAUDE.md files at 29.6k tokens with the global one about 1.5k of that — **roughly
+28k tokens per session for this file**, before a word was typed. 430 of the 540 lines were the Invariants section; 66 of its 78 bold-led bullets ended in a
+`Why:` link, and those 66 held 8,187 of the section's 8,456 words. Compression had reached the limit of its shape: what remained was mechanism, needed by the
+sessions that edit those files and paid for by every session that does not.
+
+The split moved each Why-linked bullet, as verbatim lines, into exactly one rule file — `orchestrator` 17, `dispatch-watchdog` 13, `board` 11, `items` 5,
+`tracker` 3, `skills` 9, and three new scopes that no glob had reached: `security` 2 (the server edge), `scripts` 2, `tests` 3 — and left the headline and
+link in CLAUDE.md. One duplicate (the `backlog.mjs` … `exit 5` rule, stated twice) was folded into its fuller copy after every backtick span and number in the
+dropped one was proven present in it. After: **242 lines / 25,174 bytes**, roughly 9.9k tokens at the same bytes-per-token ratio — to be confirmed against the
+context panel in a fresh session. The nine rule files total 61,892 bytes and load only on a read of a file under their `paths:`. Left in place, deliberately:
+the twelve unlinked bullets (each under 60 words) and the two plain Conventions bullets — among them the "tests are flat in `test/`" paragraph, some 330 words
+of mechanism with no anchor to home it under, a candidate for a later move once it has one.
 
 ### The end-to-end check, in this repo
 
