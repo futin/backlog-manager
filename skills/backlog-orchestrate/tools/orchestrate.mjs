@@ -2089,6 +2089,66 @@ function trackerRelease(run, item, reason, counters = undefined) {
 }
 
 /**
+ * Put `orchestrator:queued` on, or take it off, each of `items`' issues —
+ * the run's PLAN made visible on the tracker, so a person on another machine
+ * reading the issue list can see which items a live run means to reach before
+ * any of them is claimed (spec 2026-09-23-orchestrator-queued-label §3).
+ *
+ * Advisory, and so best-effort in the strongest sense this file has (§3.2):
+ * the label is not state the run ever reads back — no gate, queue builder or
+ * claim looks at it — so a write that did not land costs a reader one wrong
+ * hint, where failing or parking over it would trade real work for that
+ * hint. This function never throws and never changes a command's exit code.
+ *
+ * Three shapes of failure, reported differently on purpose:
+ *
+ *   * **A refusal** (non-2xx) is one line per item, naming it: the next item
+ *     may well succeed, and whoever reads stderr wants to know which issue
+ *     still carries the wrong label.
+ *   * **The stack being down** (`EXIT_API_DOWN`) is ONE line for the whole
+ *     batch, and the loop stops. Every later request would fail the same way,
+ *     and a `finish` sweep over a twelve-item queue printing twelve copies of
+ *     "the API is not running" buries the one line that matters.
+ *   * **Anything else the helper throws** (it could not be spawned) is treated
+ *     as a per-item refusal, so the "never throws" contract holds for it too.
+ *
+ * Sequential, one request per item, never a batch: the route serialises per
+ * item behind the same lock the claim uses, and GitHub has no batch label
+ * call to hand a batch to anyway.
+ *
+ * A removal of a label that is not there is a 200 — the ROUTE maps GitHub's
+ * 404 to success (§2), because every `false` is a sweep and a sweep's
+ * contract is "the label is not there". That is why a skip whose item a human
+ * already claimed by hand, which removed the label through the claim swap,
+ * prints nothing here.
+ */
+function trackerQueueLabel(run, items, queued) {
+  const verb = queued ? 'add' : 'remove';
+  for (const [index, item] of items.entries()) {
+    try {
+      const res = apiCall('POST', '/api/items/queue', { project: claimProjectOf(run), id: claimItemId(item.id), queued });
+      if (!res.ok) console.error(`orchestrator:queued: ${verb} failed for ${item.id} — ${apiErrorText(res, 'the API refused it')}`);
+    } catch (e) {
+      // The count is what is LEFT, this item included: the ones before it
+      // were answered, and naming the whole batch would overstate the damage.
+      if (e instanceof OrchestrateError && e.code === EXIT_API_DOWN) {
+        console.error(`orchestrator:queued: API down — label not ${queued ? 'added' : 'removed'} on ${items.length - index} item(s)`);
+        return;
+      }
+      console.error(`orchestrator:queued: ${verb} failed for ${item.id} — ${e.message}`);
+    }
+  }
+}
+
+// The queue items a sweep takes the label off: every one this run never
+// claimed. A claimed item needs nothing — the server's claim swap removed the
+// label the moment the claim was won (§3.3) — so `claim === undefined` is the
+// whole test, the same one `cmdAbort`'s release loop is the complement of.
+function unclaimedQueueItems(run) {
+  return run.queue.filter((item) => item.claim === undefined);
+}
+
+/**
  * Take the issue for this run, at `preflight` or on a resume.
  *
  * Three outcomes, and the middle one is the whole point of the phase:
@@ -2896,6 +2956,11 @@ function cmdInit(argv) {
   };
 
   writeRunAtomic(dir, newRun);
+  // The plan, published: every item this run will attempt — the queue as
+  // built, already cut to `--max` — gets `orchestrator:queued`. AFTER the run
+  // file is written, so a label never appears for a run that failed to start,
+  // and advisory, so a failed add is a stderr line and `init` still exits 0.
+  if (projectSource(project) === 'github') trackerQueueLabel(newRun, queue, true);
   // bug-19: said out loud rather than left to be inferred from a `null` in the
   // file. A run started without an identity can never enforce its own driver
   // lease, and the one place that is worth knowing is here — at the start,
@@ -3168,6 +3233,9 @@ function cmdStage(argv) {
       applyQueueItemFields(item, { stage: 'skipped', note: claimed.note });
       run.updatedAt = nowISO();
       writeRunAtomic(dir, run);
+      // Out of this run's plan, so off the label. Usually a no-op the route
+      // answers 200 for: the winner's claim already removed it (§3.3).
+      trackerQueueLabel(run, [item], false);
       console.log(JSON.stringify({ id: itemId, stage: 'skipped', note: claimed.note }));
       return 0;
     }
@@ -3206,6 +3274,11 @@ function cmdStage(argv) {
   if (tracker) {
     if (CLAIM_RELEASE_STAGES.has(stage)) trackerRelease(run, item, stage, mergedCounters);
     else trackerHeartbeat(run, item);
+    // An item that leaves the plan WITHOUT ever being claimed — `skipped` or
+    // `ungroomed` by the driver before `preflight` — takes its label off now
+    // rather than carrying it until `finish`. A claimed item needs nothing:
+    // the claim swap already removed it.
+    if (CLAIM_RELEASE_STAGES.has(stage) && item.claim === undefined) trackerQueueLabel(run, [item], false);
   }
   // The new count is echoed back only when this call actually incremented it,
   // so the caller enforcing the two-loop ceiling reads it straight off the
@@ -3543,7 +3616,17 @@ function cmdFinish(argv) {
   // task-48, tracker only: another machine can only tell a finished run from
   // a crashed one if the outcome is on a claim, so it is stamped on the run's
   // last-touched claimed item. Best-effort like every publish here.
-  if (projectSource(run.project) === 'github') trackerFinish(run, status);
+  //
+  // Then the sweep (spec §3): every item the run never claimed loses
+  // `orchestrator:queued`, because a finished run plans nothing. NOT on
+  // `paused` — a paused run still means to reach those items, and a resume
+  // re-adds nothing. `abort` reaches this through its own `cmdFinish` call,
+  // after its claim releases, which is the one sweep it makes: the backstop
+  // for a board Stop whose server-side sweep partly failed (§3.1).
+  if (projectSource(run.project) === 'github') {
+    trackerFinish(run, status);
+    if (status !== 'paused') trackerQueueLabel(run, unclaimedQueueItems(run), false);
+  }
   console.log(JSON.stringify({ status }));
   return 0;
 }
@@ -5060,6 +5143,10 @@ function cmdAbort() {
     for (const item of run.queue) {
       if (item.claim !== undefined && !CLAIM_RELEASE_STAGES.has(item.stage)) trackerRelease(run, item, 'aborted');
     }
+    // The `orchestrator:queued` sweep over the items this run never claimed
+    // is NOT made here: the `cmdFinish(['--status', 'aborted'])` this command
+    // ends with makes it, after these releases, and a second copy here would
+    // send every removal twice.
   }
 
   run.updatedAt = nowISO();

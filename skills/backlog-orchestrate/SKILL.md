@@ -1488,7 +1488,9 @@ it is someone's working tree, and this run's authority stops at worktrees it cre
 
 `--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits `1`. In a tracker project `finish` also stamps that status on the run's
 last-touched claim (`finished: { at, status }`), which is how another machine's Runs page tells a finished run from a crashed one; like every publish to the
-issue it is best-effort, one stderr line on failure and exit `0`. Then summarise for the user from `status --json`: what merged or branched,
+issue it is best-effort, one stderr line on failure and exit `0`. The tool also keeps `orchestrator:queued` — the run's plan, on the issues — by itself: `init`
+adds it to every queue item, a skip takes it off, and every `finish` but `paused` (and so every `abort`) sweeps it off each item the run never claimed; you run
+nothing for it, and a failed label write is a warning, never a park. Then summarise for the user from `status --json`: what merged or branched,
 what parked and why, what was skipped as `ungroomed` or `needs-answers` and therefore wants a groom pass before the next run. A clean item — no fix loops, no
 retries, green first try — should have produced no ping at all along the way; the summary is where it finally gets mentioned.
 

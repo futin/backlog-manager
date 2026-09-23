@@ -6612,6 +6612,10 @@ function apiItem(projectPath, number, over = {}) {
 function gateRoutes(items, bodies, { projectPath = items.find((i) => i && i.projectPath)?.projectPath ?? '', polledAt = new Date(Date.now() - 60_000).toISOString() } = {}) {
   return {
     '/api/items': { body: { items, errors: [] } },
+    // `init` on a tracker project marks its queue `orchestrator:queued`, and a
+    // case that is not about the label wants those writes answered rather than
+    // filling stderr with the fake's 404.
+    '/api/items/queue': (body) => ({ body: { id: body?.id, queued: body?.queued } }),
     '/api/items/body': (_body, url) => {
       const number = String(url.searchParams.get('path') ?? '').replace(/^.*#/, '');
       return { body: bodies[number] ?? '' };
@@ -7658,4 +7662,176 @@ test('C-5: reconcile reads who holds each item, and another run-s live claim mea
   const down = await runApi(project, home, await closedPort(), 'reconcile', '--json');
   assert.equal(down.status, 0, down.stderr);
   assert.deepEqual(JSON.parse(down.stdout).map((r) => r.claim), ['unknown', 'unknown']);
+});
+
+// --- Q-1 … Q-7: `orchestrator:queued`, the driver's half (task-55) -----------
+//
+// The label is the run's PLAN, published: `init` adds it to every item the run
+// will attempt, and the driver takes it off each item that leaves the plan
+// without being claimed — a skip at `preflight`, and `finish`'s sweep. A WON
+// claim sends nothing, because the server's claim swap already removed it.
+// Every write is advisory: a refusal is a stderr line and never an exit code.
+
+const queueBodies = (requests) => posts(requests, 'queue').map((r) => ({ id: r.body.id, queued: r.body.queued }));
+
+test('Q-1: init on a tracker project marks exactly the queue --max builds, in queue order', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [31, 32, 33].map((n) => apiItem(project, n));
+  const bodies = { 31: GROOMED_TASK_BODY, 32: GROOMED_TASK_BODY, 33: GROOMED_TASK_BODY };
+
+  const { out, requests } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'init', '--project', project, '--max', '2'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(run.queue.length, 2);
+  assert.deepEqual(
+    queueBodies(requests),
+    run.queue.map((q) => ({ id: `#${q.id}`, queued: true })),
+  );
+  // The issue numbers that reached the fake, not only the count: queue ids are bare, the route takes `#n` (Review Focus 5).
+  assert.deepEqual(queueBodies(requests).map((b) => b.id).sort(), ['#31', '#32']);
+  for (const r of posts(requests, 'queue')) assert.equal(r.body.project, project);
+});
+
+test('Q-2: init on a files project makes no queue request', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'a task');
+  commitEverything(project, 'seed');
+
+  const { out, requests } = await withApi({}, (port) => runApi(project, home, port, 'init', '--project', project));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(posts(requests, 'queue').length, 0);
+});
+
+test('Q-3: a refused add at init is one stderr line naming the item, and init still exits 0 with the run written', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [31, 32].map((n) => apiItem(project, n));
+  const routes = {
+    ...gateRoutes(items, { 31: GROOMED_TASK_BODY, 32: GROOMED_TASK_BODY }),
+    '/api/items/queue': (body) => (body?.id === '#32' ? { status: 502, body: { error: 'github said no' } } : { body: { id: body?.id, queued: true } }),
+  };
+
+  const { out, requests } = await withApi(routes, (port) => runApi(project, home, port, 'init', '--project', project));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.ok(fs.existsSync(runFile(home, project)));
+  assert.match(out.stderr, /orchestrator:queued: add failed for 32 — github said no/);
+  assert.doesNotMatch(out.stderr, /failed for 31/);
+  // A refusal is per item: the loop went on past it rather than stopping.
+  assert.equal(posts(requests, 'queue').length, 2);
+});
+
+test('Q-4: a claim lost at preflight skips the item and takes its label off; a won claim sends nothing', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const held = {
+    '/api/items/claim': (_body, _url, method) =>
+      method === 'GET'
+        ? { body: null }
+        : { status: 409, body: { error: '#3 is already in progress', holder: { session: 'other-machine', heartbeat: '…', ageMs: 42_000, commentId: 7 } } },
+  };
+
+  const lost = await withApi(claimRoutes(project, held), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    return runApi(project, home, port, 'stage', '3', 'preflight');
+  });
+  assert.equal(lost.out.status, 0, lost.out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].stage, 'skipped');
+  // The add from `init`, then the removal the skip makes — and the fake's 200 for it prints nothing.
+  assert.deepEqual(queueBodies(lost.requests), [
+    { id: '#3', queued: true },
+    { id: '#3', queued: false },
+  ]);
+  assert.doesNotMatch(lost.out.stderr, /orchestrator:queued/);
+
+  const { home: home2, project: project2 } = trackerFixture(t);
+  const won = await withApi(claimRoutes(project2), async (port) => {
+    assert.equal((await runApi(project2, home2, port, 'init', '--project', project2)).status, 0);
+    return runApi(project2, home2, port, 'stage', '3', 'preflight');
+  });
+  assert.equal(won.out.status, 0, won.out.stderr);
+  // Only `init`'s add: the server's claim swap owns the removal on a won claim.
+  assert.deepEqual(queueBodies(won.requests), [{ id: '#3', queued: true }]);
+});
+
+test('Q-4b: an item staged skipped before it was ever claimed takes its label off then, not at finish', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [{ id: '33', stage: 'pending' }]);
+
+  const { out, requests } = await withApi({ '/api/items/queue': (body) => ({ body: { id: body?.id } }) }, (port) =>
+    runApi(project, home, port, 'stage', '33', 'skipped', '--note', 'gate failed'),
+  );
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(queueBodies(requests), [{ id: '#33', queued: false }]);
+});
+
+test('Q-5: finish sweeps the label off every item the run never claimed, and paused sweeps nothing', async (t) => {
+  const seed = () =>
+    seededTrackerRun(t, [
+      { id: '31', stage: 'merged', claim: 531 },
+      { id: '32', stage: 'skipped' },
+      { id: '33', stage: 'pending' },
+    ]);
+  const routes = { '/api/items/heartbeat': { status: 201, body: { commentId: 531, record: { v: 1 } } }, '/api/items/queue': (body) => ({ body: { id: body?.id } }) };
+
+  const done = await seed();
+  const { out, requests } = await withApi(routes, (port) => runApi(done.project, done.home, port, 'finish', '--status', 'done'));
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(queueBodies(requests), [
+    { id: '#32', queued: false },
+    { id: '#33', queued: false },
+  ]);
+
+  // A paused run still means to reach those items, and a resume re-adds nothing — so the pause must not take them off.
+  const paused = await seed();
+  const p = await withApi(routes, (port) => runApi(paused.project, paused.home, port, 'finish', '--status', 'paused'));
+  assert.equal(p.out.status, 0, p.out.stderr);
+  assert.equal(posts(p.requests, 'queue').length, 0);
+});
+
+test('Q-6: abort makes the same sweep, once, after its claim releases', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '31', stage: 'reviewing', claim: 531 },
+    { id: '32', stage: 'skipped' },
+    { id: '33', stage: 'pending' },
+  ]);
+
+  const { out, requests } = await withApi(
+    {
+      '/api/items/claim': { body: { commentId: 0, record: { v: 1, counters: { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } } },
+      '/api/items/release': { status: 201, body: { commentId: 0, record: { v: 1 } } },
+      '/api/items/heartbeat': { status: 201, body: { commentId: 0, record: { v: 1 } } },
+      '/api/items/queue': (body) => ({ body: { id: body?.id } }),
+    },
+    (port) => runApi(project, home, port, 'abort'),
+  );
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(queueBodies(requests), [
+    { id: '#32', queued: false },
+    { id: '#33', queued: false },
+  ]);
+  const order = requests.filter((r) => r.method === 'POST' && ['/api/items/release', '/api/items/queue'].includes(r.path)).map((r) => r.path);
+  assert.deepEqual(order, ['/api/items/release', '/api/items/queue', '/api/items/queue'], 'the sweep must follow the in-flight release');
+});
+
+test('Q-7: finish with the API down warns once for the whole sweep and exits as a files finish does', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '32', stage: 'skipped' },
+    { id: '33', stage: 'pending' },
+    { id: '34', stage: 'pending' },
+  ]);
+
+  const out = await runApi(project, home, await closedPort(), 'finish', '--status', 'done');
+
+  const files = orchFixture(t);
+  seedReadyTask(files.project, 'task-1', 'a task');
+  commitEverything(files.project, 'seed');
+  assert.equal(run(files.project, files.home, 'init', '--project', files.project).status, 0);
+  const filesFinish = run(files.project, files.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, filesFinish.status, out.stderr);
+  const down = out.stderr.split('\n').filter((line) => /API down/.test(line));
+  assert.deepEqual(down, ['orchestrator:queued: API down — label not removed on 3 item(s)']);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'done');
 });
