@@ -617,6 +617,13 @@ clean — it does refresh `.git/ORIG_HEAD`, the same as any other `git merge`, h
 classifier is shown what it will be shown later. It buys "find out in ten seconds instead of four hours" and nothing else: the verdict is per call, so a passing
 probe can still be followed by a denied merge, which is exactly why the degrade path exists as well as the probe.
 
+A tracker project's probe takes the tracker merge's own shape — three `-m` messages against `HEAD`, since that merge carries `Fixes #<n>` and a `Reviewed:` line
+naming the approving report instead of `--no-edit` — and a resumed or unpaused session that has not probed probes before its first merge (#222). Both follow from
+the probe's one job: a probe of a different shape, or none at all, asks the classifier nothing about the call that matters. The same incident fixed the other
+half: **the merge is one Bash call of its own.** The classifier returns one verdict per call over the whole call, so a driver that chained `git merge …; git
+push origin main` had a reviewed, green merge denied as `[Merge Without Review]` and degraded the run — a push question answered on the merge's degrade path,
+when a denied push is meant to park.
+
 ## Question mode is run-scoped, and it only ever takes effect in a headless run
 
 Question mode is run-scoped, and it only ever takes effect in a headless run. `QuestionMode` (`shared/types.ts`) is `decide | park`, with `isQuestionMode` as
