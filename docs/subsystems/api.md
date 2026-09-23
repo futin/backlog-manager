@@ -73,7 +73,7 @@ each with its OWN high-water mark — sharing one mark was a task-46 defect that
 phase 2 and is what the claim protocol maps from since task-46), paginates the first sync to the end, upserts by issue number against an inclusive `since`,
 drops pull requests, and sleeps a rate-limited repo until its reset. Since bug-55 a tick also makes one conditional per-issue comments read for every issue the
 cache holds an UNRELEASED claim on — none at all when nothing is held — and lets that list be the truth for that issue, because the repo-wide `since` read can
-never report a deletion and a loser deleted by another machine's server otherwise stayed cached as a phantom claim. The eight labels in `labels.ts` are created on a repo's first successful sync if any is
+never report a deletion and a loser deleted by another machine's server otherwise stayed cached as a phantom claim. The nine labels in `labels.ts` are created on a repo's first successful sync if any is
 missing — the module's one write to GitHub. `map-issue.ts` is the pure issue → `BacklogItem` mapping (spec §5.3). `GET /api/trackers` is read-only and carries
 the platform's `hasToken`/`login`, its rate limit, and one row per registered project — **never the token**, which is read per call from the environment and
 leaves this process in no payload, log line or URL.

@@ -65,7 +65,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   this machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
   while some run file says `running`.
 - **`tracker/`** — the other outbound-calling module: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set, the
-  in-memory issue cache the `github` adapter answers from (the one cache in this server whose age is rendered, as `polledAt`), the eight-label bootstrap, the
+  in-memory issue cache the `github` adapter answers from (the one cache in this server whose age is rendered, as `polledAt`), the nine-label bootstrap, the
   claim protocol's pure half (`claim.ts` — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for Settings. The token
   is read per call from the environment and reaches no payload.
 - **`registry/`** — read-only view of the registry file.

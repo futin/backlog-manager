@@ -45,6 +45,7 @@ interface Call {
   url: string;
   method: string;
   headers: Record<string, string>;
+  body?: string;
 }
 
 interface Canned {
@@ -66,7 +67,12 @@ function fakeFetch(rules: [string, Canned | ((call: number) => Canned)][]): { fe
   const calls: Call[] = [];
   const counts = new Map<string, number>();
   const impl = async (url: string, init?: RequestInit): Promise<Response> => {
-    calls.push({ url, method: init?.method ?? 'GET', headers: (init?.headers ?? {}) as Record<string, string> });
+    calls.push({
+      url,
+      method: init?.method ?? 'GET',
+      headers: (init?.headers ?? {}) as Record<string, string>,
+      body: typeof init?.body === 'string' ? init.body : undefined
+    });
     const method = init?.method ?? 'GET';
     for (const [rule, answer] of rules) {
       const verb = /^(GET|POST|PATCH|DELETE) /.exec(rule);
@@ -359,7 +365,25 @@ describe('the label bootstrap', () => {
     p.disarm();
   });
 
-  it('creates none when the repo already has all eight', async () => {
+  /* A repo bootstrapped before orchestrator:queued existed carries the other
+     eight; its next sync must create exactly the one it lacks, and by name —
+     a count alone would pass with the wrong label created. */
+  it('creates exactly orchestrator:queued for a repo that has the earlier eight', async () => {
+    const eight = TRACKER_LABELS.filter((l) => l.name !== 'orchestrator:queued').map((l) => ({ name: l.name }));
+    expect(eight).toHaveLength(8);
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      ['/issues?', { status: 200, body: [] }],
+      ['POST /labels', { status: 201 }],
+      ['GET /labels', { status: 200, body: eight }]
+    ]);
+    await p.tick();
+
+    const created = calls.filter((c) => c.method === 'POST' && c.url.endsWith('/labels'));
+    expect(created.map((c) => (JSON.parse(c.body ?? '{}') as { name?: string }).name)).toEqual(['orchestrator:queued']);
+    p.disarm();
+  });
+
+  it('creates none when the repo already has all nine', async () => {
     const { poller: p, calls } = poller(registryOf(githubProject()), [
       ['/issues?', { status: 200, body: [] }],
       ['/labels', LABELS_PRESENT]

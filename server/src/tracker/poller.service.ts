@@ -766,7 +766,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   }
 
   /**
-   * Create whichever of the eight labels (spec §5.2) the repo is missing, once
+   * Create whichever of the nine labels (spec §5.2, plus task-52's) the repo is missing, once
    * per repo per process. Idempotent twice over: only the missing ones are
    * created, and a 422 from a create — another machine's poller won the race —
    * counts as success, because the label exists either way and that is the
@@ -795,7 +795,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // `undefined.toLowerCase()` one line down, which is the same
     // unhandled-rejection-kills-the-timer-chain hazard the guard above exists
     // for, one level in. An element this drops is a label this process cannot
-    // name, so it cannot be compared against the eight either way.
+    // name, so it cannot be compared against the nine either way.
     const present = new Set(
       listed.data.filter((l): l is { name: string } => typeof (l as { name?: unknown })?.name === 'string').map((l) => l.name.toLowerCase())
     );

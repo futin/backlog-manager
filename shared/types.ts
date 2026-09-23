@@ -297,6 +297,20 @@ export interface BacklogItem {
    * gate wanted a field.
    */
   runnerFix?: true;
+  /**
+   * The `orchestrator:queued` label, for a TRACKER item only (task-52): a live
+   * orchestrator run has this issue in its queue and has not picked it up yet.
+   * The card reads it as a badge (live or stale, decided in
+   * `client/src/lib/tracker.ts`); nothing else does. It is advisory — a plan,
+   * not a claim — so no gate, queue builder or claim reads it, and a session
+   * that claims a queued item by hand is doing nothing wrong.
+   *
+   * **Optional, `true` or absent, and never `false`,** for exactly the reason
+   * `runnerFix` above gives: the mapper is the only writer, so every files
+   * item and every unqueued issue carries no key at all, and `'queued' in item`
+   * means what it says.
+   */
+  queued?: true;
 }
 
 export interface ItemsIndex {
