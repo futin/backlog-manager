@@ -1,6 +1,5 @@
 import { Body, Controller, HttpException, Post, UseGuards } from '@nestjs/common';
 
-import { ClaimSweeperService } from './claim-sweeper.service';
 import { ItemsService, type WriterLookup } from './items.service';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import { KIND_NAMES } from '../tracker/labels';
@@ -62,10 +61,7 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
 @Controller('api/items')
 @UseGuards(SameOriginPostGuard)
 export class ItemsWriteController {
-  constructor(
-    private readonly items: ItemsService,
-    private readonly sweeper: ClaimSweeperService
-  ) {}
+  constructor(private readonly items: ItemsService) {}
 
   /**
    * A new item. `section` becomes the `type:*` label — the label IS the
@@ -142,12 +138,6 @@ export class ItemsWriteController {
     const run = claimRunOf(raw.run);
 
     const w = this.writable(this.items.writerFor(project));
-    // bug-49: a claim request reaches this loopback-bound route only from this
-    // machine, so the `host` it carries is this machine's — the one thing the
-    // claim sweeper needs before it may read a missing registry entry as an
-    // exited session. Learned once the request is well-formed and aimed at a
-    // tracker project, whatever the claim's outcome.
-    this.sweeper.noteOwnHost(host);
     return this.answer(await w.writer.claim(w.project, w.marker, { project, id, phase, session, host, run }));
   }
 

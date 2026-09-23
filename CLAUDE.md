@@ -93,8 +93,6 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-seven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
-- **The claim sweeper reads the session registry's files and never its pids.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-claim-sweeper-reads-the-session-registrys-files-and-never-its-pids)
 - **`backlog.mjs` in a tracker project needs the stack up, and says so with exit `5`.**
   Why: [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
 - **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.**

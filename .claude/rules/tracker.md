@@ -22,7 +22,8 @@ paths: ["server/src/tracker/**"]
   understood, and holds no entry naming the holder whose pid is running (and whose `procStart` matches `/proc/<pid>/stat` field 22 where `/proc` exists) — a
   check that is meaningful ONLY because the host refusal already ran, since on a foreign machine an absent entry is bug-46's false negative. It answers
   `unknown`, and `abort` refuses, when the directory is unreadable, any entry lacks a string `sessionId` or integer `pid`, or the aborting session cannot find
-  its own running entry (bug-49; a transcript mtime was the evidence before, and every killed session's transcript post-dates its last beat). In files mode
+  its own running entry (bug-49; a transcript mtime was the evidence before, and every killed session's transcript post-dates its last beat). `gone` is "no
+  process now": a board-dispatched `claude -p` session between turns has no entry either, so nothing automatic may release on this signal. In files mode
   `abort` is exit 1 naming `stop <id> --abandon`. The split is billing's, for billing's reason (the CLI holds the clock, the transcripts and the process table), and the boundary it draws is a MISTAKE one, not a security one: `stop` has always sent a caller-supplied `session`.
   `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second number. **Every release removes `in-progress`; exactly one reason also clears the
   ASSIGNEE, and it is `aborted`** — the claim SETS the assignee when it wins, so after a session torn down mid-item that field records no work while still

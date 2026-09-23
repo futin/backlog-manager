@@ -2061,9 +2061,7 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
    * where the evidence is — Claude Code's process registry under
    * `<configDir>/sessions/` and the process table it names (bug-49) — exactly
    * as billing lives on the CLI side because that is where the clock and the
-   * transcript are. The claim sweeper is the one other sender, and it sends
-   * the CLAIM's own host once the registry files show the session exited —
-   * see `ClaimSweeperService`. That is a MISTAKE boundary
+   * transcript are. That is a MISTAKE boundary
    * rather than a security one: `stop` has always let a caller send any
    * `session` it likes, and the holder's id is printed in the refusal.
    */

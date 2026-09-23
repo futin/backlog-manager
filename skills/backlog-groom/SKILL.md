@@ -97,7 +97,7 @@ beside "ours, here" is exactly the reading this skill must not take. Either way:
   minutes with nobody behind it. This is the one case a session may take the item back, because this is the one machine that can check:
   `abort <id>` releases the claim with `reason: 'aborted'`, keeping its counters, and then `start <id> --as groom` succeeds. It refuses unless the claim's host
   is this one AND Claude Code's session registry shows no running process for the holder, so a live neighbour on this laptop is safe from it — and refuses
-  too when it cannot read that registry. A session that exited cleanly is usually released for you within one poll, by the server's claim sweeper. Do not reach for it on the
+  too when it cannot read that registry. A board-dispatched session is one `claude -p` process per turn, so while it waits on a reply it has no registry entry and reads as gone — check the dashboard before aborting its claim. Do not reach for it on the
   bullet above: on a foreign claim an unfindable session id is bug-46's false negative, and `abort` refuses that claim anyway.
 
 **`Groomed on disk only` is NOT printed for a tracker project.** There is nothing on disk and nothing to commit: the groom is on GitHub the moment the call

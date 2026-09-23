@@ -107,12 +107,6 @@ services:
       # with no connected project never needs one, and the poller is disarmed
       # without it.
       BM_GITHUB_TOKEN: '${BM_GITHUB_TOKEN:-}'
-      # The claim sweeper (bug-49) reads Claude Code's session registry to see
-      # that a hand session holding a tracker claim has exited. Same path as the
-      # mount below, for the same reason the registry mount keeps its host path.
-      # Files only: this container cannot test a host pid (every one answers
-      # ESRCH here), so presence of <pid>.json is the whole signal.
-      BM_CLAUDE_SESSIONS_DIR: '${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/sessions'
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:
@@ -132,10 +126,6 @@ services:
       # Read-write is scoped to exactly this subtree; everything else under
       # ~/.backlog-manager stays covered by the :ro mount above.
       - ${HOME}/.backlog-manager/settings:${HOME}/.backlog-manager/settings
-      # Claude Code's session registry, read-only and nothing else under the
-      # config dir — transcripts and credentials stay out of the container.
-      # Read by the claim sweeper alone; see BM_CLAUDE_SESSIONS_DIR above.
-      - ${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/sessions:${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/sessions:ro
       - ${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:ro
 
   client:

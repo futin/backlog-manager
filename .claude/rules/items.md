@@ -15,8 +15,7 @@ paths: ["server/src/items/**"]
   `optional()` as a non-empty string or a 400 naming the field: absent is a value (a caller that sends none writes no `host` key at all), but a blank or a
   non-string is a mistake worth hearing about. It is never derived here — a hostname read in the compose stack is a container id. `release` takes the same
   optional `host` through the same `optional()` (bug-48), as the assertion behind the release rule's third clause; the liveness proof that makes it narrow lives
-  in `backlog.mjs abort` and in the claim sweeper's registry read (below), never in the route, because the route can see neither the caller's filesystem nor
-  its process table. `GithubSource` keeps a `Map<urn,
+  in `backlog.mjs abort`, never here, because this process can see neither the caller's filesystem nor its process table. `GithubSource` keeps a `Map<urn,
   Promise>` so two local sessions never race on one item, and every response is absorbed into the poller's cache — but a write never moves `polledAt`, because
   nothing was polled. The token stays in the process; no response carries it. An eighth route, `GET /api/items/claim`, is a READ (unguarded like every other
   GET) and exists because `start` and `stop` are two processes. Why:
@@ -50,12 +49,3 @@ paths: ["server/src/items/**"]
   gates the render; nothing derived reads it; it changes no default selection. Any surface stating a consequence must split it: absent from `main` is skipped,
   present-but-edited is executed on `main`'s bytes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-orchestrate-sheets-uncommitted-flag-is-read-from-git-per-request-and-memoised-nowhere)
-- **The claim sweeper reads the session registry's files and never its pids.** `ClaimSweeperService` (`server/src/items/claim-sweeper.service.ts`) runs
-  inside the poller's tick after each successful repo sync (`TrackerPollerService.onRepoSynced`, a listener the poller calls and never imports) and releases a
-  cached claim only when it is live, carries no `run`, has a UUID `session`, has a `host` in the in-memory set `noteOwnHost` learns from `POST
-  /api/items/claim`, and `readSessionRegistry(process.env.BM_CLAUDE_SESSIONS_DIR)` reads a registry it understands with no `*.json` naming the session. Unset
-  or unreadable directory, or any entry without a string `sessionId` and integer `pid`, sweeps nothing. The release is `GithubSource.release` with `reason:
-  'aborted'`, the claim's own `host`, `session: 'backlog-manager:claim-sweeper'`, and no `counters`; a refusal is skipped, never retried in the tick. No
-  `process.kill` on a registry pid anywhere in the server: in the container every host pid answers `ESRCH`, so a hard-killed session (file left behind) is
-  `abort`'s, not the sweeper's. Compose mounts `${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/sessions` `:ro` at the same path. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-claim-sweeper-reads-the-session-registrys-files-and-never-its-pids)

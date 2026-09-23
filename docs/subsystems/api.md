@@ -59,12 +59,6 @@ answering `unregistered` (404), `files` (400, `this project's items are files �
 reason) or the call. None of those four makes a network request. `FilesSource` has no writer at all. Refusals travel as values (`WriteRefusal`) and the
 controller alone maps them: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · anything else 502.
 
-**The claim sweeper** (`claim-sweeper.service.ts`, bug-49) is the one caller of `release` inside this process. It runs after each successful per-repo poll
-(`TrackerPollerService.onRepoSynced`) and releases, `reason: 'aborted'` under the claim's own `host`, any live non-run claim whose session id is shaped like a
-Claude Code one, whose `host` was carried by a `POST /api/items/claim` this process received, and which no `*.json` under `BM_CLAUDE_SESSIONS_DIR` names —
-Claude Code's session registry, mounted read-only by compose at its host path. A registry it cannot read or understand sweeps nothing. Files only, never pids:
-a hard-killed session leaves its file behind and stays for `backlog.mjs abort`. → [invariants.md](invariants.md#the-claim-sweeper-reads-the-session-registrys-files-and-never-its-pids)
-
 Writes to one item are serialised in-process (`Map<urn, Promise>`), and every response is absorbed into the poller's cache so the next board read shows it —
 `polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the eighth route and a READ, unguarded like every other GET,
 answering who holds one item out of the cache; `backlog.mjs stop` needs it because `start` ran in a different process.

@@ -177,7 +177,7 @@ Read it the three ways `backlog-groom`'s "Already in progress" section reads it 
 - **Fresh heartbeat, held on ANOTHER machine** — somebody is working it right now. Stop. Everything above is this case.
 - **Fresh heartbeat, held on THIS machine by a session that is gone** — the only case where a session may take the item back, because this is the one machine
   that can check: `abort <id>` releases the claim, and then `start` succeeds. It refuses unless the claim's host is this one AND Claude Code's session registry
-  shows no running process for the holder, so a live neighbour on this laptop is safe from it — and refuses too when it cannot read that registry. Never reach for it because a session id is unfindable — that is the
+  shows no running process for the holder, so a live neighbour on this laptop is safe from it — and refuses too when it cannot read that registry. A board-dispatched session is one `claude -p` process per turn, so while it waits on a reply it has no registry entry and reads as gone — check the dashboard before aborting its claim. Never reach for it because a session id is unfindable — that is the
   paragraph above, and on a foreign claim it is bug-46's false negative.
 - **Stale past fifteen minutes** — the protocol retires it the moment you claim, so re-run `start` alone and it succeeds. Do **not** `stop --abandon` first:
   that clears a marker, and this claim is not yours to clear. `abort` is not for this case either, and says so.

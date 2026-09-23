@@ -166,9 +166,6 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    */
   private identity: { token: string; login: string | null } | null = null;
 
-  /** See `onRepoSynced`. */
-  private readonly syncedListeners: Array<(repo: string) => Promise<void>> = [];
-
   constructor(
     private readonly registry: RegistryService,
     private readonly client: GithubClient
@@ -216,20 +213,6 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
 
   disarm(): void {
     this.clearTimer();
-  }
-
-  /**
-   * Run `listener` after every successful sync of a repo, inside the same tick
-   * (bug-49). The claim sweeper is the one caller: it hangs off this loop
-   * rather than owning a timer of its own, so it inherits "armed only while
-   * something is connected" instead of restating it — no token or nothing
-   * connected, no tick, no sweep. And it lives in `items/` and registers
-   * itself here, rather than this service importing it, because the
-   * dependency runs one way only: items depend on the tracker, never the
-   * reverse (see `TrackerModule`).
-   */
-  onRepoSynced(listener: (repo: string) => Promise<void>): void {
-    this.syncedListeners.push(listener);
   }
 
   /**
@@ -582,18 +565,6 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // The bootstrap, after the first sync that proved the repo is readable
     // (spec §5.2). Phase 2's one write to GitHub.
     if (!state.labelsEnsured) await this.ensureLabels(repo, token, state);
-
-    // Last, and only for a repo whose reads all succeeded: the cache is as
-    // current as it gets, which is what a listener deciding from it needs.
-    for (const listener of this.syncedListeners) {
-      try {
-        await listener(repo);
-      } catch (e) {
-        // A listener is somebody else's code running inside this loop. Its
-        // failure must not stop the next repo's sync or the next tick.
-        console.warn(`tracker: a repo-synced listener failed for ${repo}: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
   }
 
   /**

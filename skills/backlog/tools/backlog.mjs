@@ -1630,6 +1630,12 @@ function registryEntryRunning(entry) {
 // A claim whose `session` is the `<user>@<host>` fallback (no `CLAUDE_CODE_SESSION_ID` when it was taken) has no registry entry by construction and so reads
 // `gone`. That is bug-48's reading kept on purpose: such a claim is a person at a terminal on this host, and the person at that terminal is who runs `abort`.
 //
+// **`gone` means "no process now", not "stopped".** A board-dispatched session is one `claude -p` process per turn (`--session-id`, then `--resume` for each
+// reply), and a `-p` process exits normally at the end of its turn, removing its file — so a dispatched session waiting on a reply still holds its claim and
+// reads `gone` here. Nothing in the registry tells the two apart. That is acceptable for `abort` only because a person runs it, at the machine whose
+// dashboard shows whether the session is idle-and-resumable, and the skills tell them to look first; it is exactly why bug-49's automatic server-side sweep
+// over this same signal was withdrawn in review.
+//
 // `{ state: 'alive', file, pid }`, `{ state: 'gone' }` or `{ state: 'unknown', why }`.
 export function holdingSessionEvidence(session, env = process.env) {
   const dir = path.join(claudeConfigDir(env), 'sessions')
