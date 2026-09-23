@@ -237,7 +237,7 @@ prompt, validated and recorded by `init`, read back from the run file downstream
 ### Step 0: the four premises, two of which had moved
 
 - **`git worktree add` refuses a branch checked out elsewhere** — re-run rather than trusted: `fatal: 'main' is already used by worktree at
-  '/Users/andrejajevtic/Documents/custom-projects/backlog-manager'`, with a free-branch control succeeding, proving the refusal is about the branch not the path.
+  '/Users/<me>/Documents/custom-projects/backlog-manager'`, with a free-branch control succeeding, proving the refusal is about the branch not the path.
 - **`agents.service.ts`'s composition order and its comment** — confirmed as described.
 - **MOVED: `BASE_REF_DEFAULT`'s own comment stated the opposite of this task.** It read "Deliberately NOT recorded in run.json: that would be a shared/types.ts
   schema change for a value the loop can just pass on each `plan` call" — right while the base was a queue gate, false the moment it became the merge target.

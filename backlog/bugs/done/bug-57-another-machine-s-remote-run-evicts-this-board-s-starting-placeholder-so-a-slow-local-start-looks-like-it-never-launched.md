@@ -50,7 +50,7 @@ to start in the window between this board's spawn and its `init` — evicts the 
 that hits bug-56's empty `$CLAUDE_PLUGIN_ROOT`, which is exactly the race this bug was seen in.
 
 Why the `landed` arm was widened when the `running` arm was not: bug-51 misread its own evidence. It saw a Mac mark at 14:14:36Z sitting beside a Linux run
-(`run-20260922-141510`, host `futin_ubuntu@JevticPC`, started 14:15:10Z) and concluded that run WAS the mark's landing — "a board-started run whose driver
+(`run-20260922-141510`, host `futin_ubuntu@<host>`, started 14:15:10Z) and concluded that run WAS the mark's landing — "a board-started run whose driver
 ran on another machine". Given the spawn path above, it cannot have been: the Mac's own spawn had never reached `init` (had it done so, the local arm of rule 1
 would have evicted the mark), and the Linux run was an independent launch that coincided with it. bug-51's reasoning for keeping rule 3 local ("the spawn this
 entry was marked for can still land, and its placeholder must survive a remote run already in flight") is correct, and applies equally to rule 1: a remote run

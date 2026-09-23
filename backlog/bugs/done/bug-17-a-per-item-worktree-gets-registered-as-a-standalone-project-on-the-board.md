@@ -9,7 +9,7 @@ tags: registry, worktree, skills
 
 `~/.backlog-manager/registry.json` carried a sixth project called `bug-13`,
 pointing at
-`/Users/andrejajevtic/Documents/custom-projects/backlog-manager/.worktrees/bug-13`
+`/Users/<me>/Documents/custom-projects/backlog-manager/.worktrees/bug-13`
 — a per-item orchestrator worktree, registered as if it were a repository of
 its own. The board listed it beside the five real projects.
 

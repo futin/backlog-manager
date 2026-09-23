@@ -14,7 +14,7 @@ An orchestrator run committed `node_modules` — mode `120000`, target `../../no
 never showed it as untracked at any point, so nothing before the reviewer had a chance to notice. The reviewer caught it as a Critical on `backlog/task-45`
 (run `run-20260918-081422`) and named both consequences: merging that blob into a tree that has a real untracked `node_modules/` **directory** at that path makes
 git refuse to clobber it — the merge fails, or leaves the base tree mid-checkout, which is a run-level failure rather than a code defect — and if it does land,
-every clone of this repo gets a dangling root symlink resolving outside the repository entirely (`/Users/andrejajevtic/Documents/node_modules` on this machine,
+every clone of this repo gets a dangling root symlink resolving outside the repository entirely (`/Users/<me>/Documents/node_modules` on this machine,
 nothing at all elsewhere), breaking module resolution and `pnpm install` for anyone who pulls.
 
 The symlink itself is not the defect and is not going away: an orchestrator worktree has no `node_modules` of its own, and on this machine the verify step cannot

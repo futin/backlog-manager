@@ -21,7 +21,7 @@ plugin's. It happens on the Linux machine too.
 
 Not deterministic. Start several sessions that invoke `/backlog` or the orchestrate trigger; some sessions' first `node "$CLAUDE_PLUGIN_ROOT/skills/..."` call
 fails. In one of them, `echo "[$CLAUDE_PLUGIN_ROOT]"` prints `[]` while the skill header reads `Base directory for this skill: <cache>/backlog-manager/0.1.1/skills/<name>`.
-Example: `~/.claude/projects/-Users-andrejajevtic-Documents-custom-projects-guide-manager/dd85c89f-f4c1-4090-850a-5996186b6715.jsonl`, 21:32:39 → 21:32:50.
+Example: `~/.claude/projects/-Users-<me>-Documents-custom-projects-guide-manager/dd85c89f-f4c1-4090-850a-5996186b6715.jsonl`, 21:32:39 → 21:32:50.
 
 ## Affects
 

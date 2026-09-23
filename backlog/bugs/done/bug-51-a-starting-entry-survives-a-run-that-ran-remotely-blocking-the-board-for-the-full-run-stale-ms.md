@@ -18,7 +18,7 @@ Nothing is wrong with the item or its claim while this lasts: the issue reads un
 the board is a `starting` entry in server memory that no longer describes anything.
 
 Observed 2026-09-22. The Mac server's `/api/orchestrator/runs` answered `starting: [{project: .../guide-manager, requestedAt: "2026-09-22T14:14:36.166Z"}]`
-while the same payload carried, in `remote`, the run that mark was for: `run-20260922-141510`, `startedAt` 14:15:10Z, host `futin_ubuntu@JevticPC`, status
+while the same payload carried, in `remote`, the run that mark was for: `run-20260922-141510`, `startedAt` 14:15:10Z, host `futin_ubuntu@<host>`, status
 `aborted`. The board was still blocked at 14:25:35Z and would not free until 14:29:36Z — 14 minutes after that run had already ended.
 
 ## Repro

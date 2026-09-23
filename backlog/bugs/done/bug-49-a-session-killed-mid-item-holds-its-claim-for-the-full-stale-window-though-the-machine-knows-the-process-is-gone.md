@@ -29,7 +29,7 @@ rendered as `working` from its last transcript line and the claim on the issue s
 Observed 2026-09-22 on `futin/guide-manager#5`, with two machines racing the claim (Mac `facc726a`, Linux `77a705a3`):
 
 1. Start `/backlog-execute` on a tracker project's item from machine A; let it win the claim. Here: Linux `77a705a3` took comment `5776031009` at 11:56:39Z,
-   host `futin_ubuntu@JevticPC`.
+   host `futin_ubuntu@<host>`.
 2. Stop that session from the dashboard (or kill the process) while the item is mid-execute — before any terminal stage.
 3. Read the claim from any machine: `GET /api/items/claim?project=<path>&id=gh:<owner>/<repo>#<n>`.
 
@@ -40,7 +40,7 @@ row is still labelled `working`.
 Expected: within one dashboard poll of the process disappearing, the claim carries `released: { reason: "aborted", ... }`, the `in-progress` label comes off,
 and the item is claimable again — without the 15-minute wait and without a person composing a release by hand.
 
-Cleared by hand with `POST /api/items/release` against the HOLDING machine's own API (`host: futin_ubuntu@JevticPC`), which is bug-48's clause working as
+Cleared by hand with `POST /api/items/release` against the HOLDING machine's own API (`host: futin_ubuntu@<host>`), which is bug-48's clause working as
 designed; the claim then showed `released: { at: 2026-09-22T12:00:23.536Z, reason: "aborted: session 77a705a3 stopped by the user mid-item" }`.
 
 ## Affects
