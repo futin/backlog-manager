@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { RUN_STALE_MS } from '../../../shared/types';
-import type { OrchestratorRun, RemoteRun, StartingRun } from '../../../shared/types';
+import type { OrchestratorRun, StartingRun } from '../../../shared/types';
 
 /**
  * starting-runs.service.ts — the in-memory record of "this server spawned an
@@ -55,13 +55,10 @@ import type { OrchestratorRun, RemoteRun, StartingRun } from '../../../shared/ty
  * "fix" that by folding `sweep` back into `list`; the next
  * `GET /api/orchestrator/runs` clears whatever those calls left behind.
  *
- * **One exception, and it errs toward blocking** (bug-51): a run another
- * machine drove retires a mark only where the remote runs are in hand, which
- * is the controller alone — `OrchestratorService` cannot be handed them,
- * because `RemoteRunsService` already depends on it. So those direct callers
- * see such a mark until the next GET sweeps it. They can only ever see MORE
- * than the payload, never less, and the GET that tells the board a project is
- * free is the same request whose sweep frees the lock behind it.
+ * No exception to that any more (bug-57): every rule reads local runs alone,
+ * so a direct caller and the controller decide from the same inputs. bug-51
+ * had added a remote-run retirement only the controller could apply; bug-57
+ * withdrew it, for the reason rule 1's own comment below gives.
  */
 @Injectable()
 export class StartingRunsService {
@@ -95,13 +92,12 @@ export class StartingRunsService {
    * `now` is injectable for the tests that pin the `RUN_STALE_MS` boundary in
    * both directions; `OrchestratorService` passes nothing, and the controller
    * passes one instant to this and to `sweep` so the pair decide at the same
-   * moment. `remoteRuns` (bug-51) are other machines' runs; only the controller
-   * has them, and a caller that passes none gets the local-only answer.
+   * moment. Local runs only, never another machine's (bug-57 — see rule 1).
    */
-  list(realRuns: readonly OrchestratorRun[], now: number = Date.now(), remoteRuns: readonly RemoteRun[] = []): StartingRun[] {
+  list(realRuns: readonly OrchestratorRun[], now: number = Date.now()): StartingRun[] {
     const live: StartingRun[] = [];
     for (const [project, requestedAt] of this.marks) {
-      if (this.expired(project, requestedAt, realRuns, remoteRuns, now)) continue;
+      if (this.expired(project, requestedAt, realRuns, now)) continue;
       live.push({ project, requestedAt: new Date(requestedAt).toISOString() });
     }
     return live;
@@ -115,9 +111,9 @@ export class StartingRunsService {
    * No timers and no background work: the prune still happens per request,
    * one layer up from where it used to sit in the approved design.
    */
-  sweep(realRuns: readonly OrchestratorRun[], now: number = Date.now(), remoteRuns: readonly RemoteRun[] = []): void {
+  sweep(realRuns: readonly OrchestratorRun[], now: number = Date.now()): void {
     for (const [project, requestedAt] of [...this.marks]) {
-      if (this.expired(project, requestedAt, realRuns, remoteRuns, now)) this.marks.delete(project);
+      if (this.expired(project, requestedAt, realRuns, now)) this.marks.delete(project);
     }
   }
 
@@ -127,16 +123,21 @@ export class StartingRunsService {
    * spelled out because rule 3 arrived after the other two (bug-21) and the
    * word this sentence used to open with was "either":
    *
-   *   1. **A real run for that project has landed.** A run in `realRuns` OR
-   *      `remoteRuns` whose `project` matches and whose `startedAt` parses to
-   *      at or after `requestedAt`. Remote runs since bug-51: a board-started
-   *      run whose driver ran on another machine writes no run file here, so
-   *      before that this rule never saw it and only rule 2 could retire the
-   *      mark — fifteen minutes of a blocked board for a run that had already
-   *      started and ended. "Remote runs ride beside `runs`, never in it" is
-   *      untouched: that is about what the `runs` array holds, and this rule is
-   *      asking whether a run started, which a remote run answers as well as a
-   *      local one. `startedAt`, emphatically not "a run.json exists for
+   *   1. **A real run for that project has landed.** A run in `realRuns`
+   *      whose `project` matches and whose `startedAt` parses to at or after
+   *      `requestedAt`. LOCAL runs only (bug-57, withdrawing bug-51's
+   *      widening to remote runs): a board spawn can only ever land on THIS
+   *      machine. `AgentsController.orchestrate` marks only after the local
+   *      dashboard accepted the spawn, the dashboard spawns in the registry's
+   *      absolute path — a path on this host — and the spawned session's first
+   *      write is `init`, which writes a local run file before it claims
+   *      anything. `deriveRemoteRuns` then excludes every run id this machine
+   *      holds a file for, so a remote run is, by construction, never this
+   *      machine's run, and never the landing a mark waits for. Counting one
+   *      meant any other machine that happened to start between this board's
+   *      spawn and its `init` evicted the placeholder of a spawn that was
+   *      alive — a slow start then read as a launch that silently failed.
+   *      `startedAt`, emphatically not "a run.json exists for
    *      this project": `cmdInit` archives the previous `run.json` into
    *      `runs/` and writes a fresh one, so a project that has ever run
    *      already has a file, and mere existence would evict the placeholder
@@ -152,6 +153,13 @@ export class StartingRunsService {
    *      spawned but never reached `init` is a broken session, diagnosed at
    *      the dashboard where its transcript is — not by a card that claims
    *      it is still starting forever.
+   *
+   *      The accepted cost (bug-57): a board spawn that dies before `init`
+   *      keeps its placeholder for up to `RUN_STALE_MS`, whether or not
+   *      another machine is running — which is what bug-51 saw, and misread
+   *      as a remote landing. Retiring such a mark early needs a signal about
+   *      THIS spawn (the dashboard reporting the spawned session ended, say),
+   *      never any other machine's run; that is its own item, not this rule.
    *
    *   3. **A run for that project already reads `status: 'running'`** — fresh
    *      or crashed. bug-21 moved this here from a render-time filter in
@@ -193,18 +201,19 @@ export class StartingRunsService {
    *      here — two machines draining one tracker project must not block each
    *      other (spec §7.4) — so the spawn this entry was marked for can still
    *      land, and its placeholder must survive a remote run already in
-   *      flight. A remote run that started AFTER the mark is rule 1's.
+   *      flight. The same holds for one that started AFTER the mark, which is
+   *      why rule 1 is local-only too (bug-57): no remote run, whenever it
+   *      started, is this spawn's landing.
    */
   private expired(
     project: string,
     requestedAt: number,
     realRuns: readonly OrchestratorRun[],
-    remoteRuns: readonly RemoteRun[],
     now: number
   ): boolean {
     if (now - requestedAt > RUN_STALE_MS) return true;
     if (realRuns.some((run) => run.project === project && run.status === 'running')) return true;
     const landed = (run: OrchestratorRun): boolean => run.project === project && Date.parse(run.startedAt) >= requestedAt;
-    return realRuns.some(landed) || remoteRuns.some(landed);
+    return realRuns.some(landed);
   }
 }

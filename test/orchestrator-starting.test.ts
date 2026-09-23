@@ -1,7 +1,7 @@
 import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { RUN_STALE_MS } from '../shared/types';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { OrchestratorRun, RemoteRun } from '../shared/types';
+import type { OrchestratorRun } from '../shared/types';
 
 // Same cast every other suite reading this fixture makes: plain JSON widens
 // its string fields to `string`, so without it `{ ...fixture, project }`
@@ -24,15 +24,6 @@ function runAt(project: string, startedAt: string): OrchestratorRun {
  *  precisely where rule 1 does not fire and only rule 3 can decide. */
 function runWithStatus(project: string, startedAt: string, status: OrchestratorRun['status']): OrchestratorRun {
   return { ...fixture, project, startedAt, status };
-}
-
-/** A run another machine drove for `project` (task-48), as `RemoteRunsService`
- *  derives it from claim comments — the same run shape plus the three facts a
- *  claim answers. bug-51's whole subject: such a run never has a file here, so
- *  it can only ever reach the predicate through `list`/`sweep`'s third
- *  argument, never through `realRuns`. */
-function remoteRunAt(project: string, startedAt: string, status: OrchestratorRun['status'] = 'aborted'): RemoteRun {
-  return { ...fixture, project, startedAt, status, fresh: false, remote: true, repo: 'owner/repo' };
 }
 
 describe('StartingRunsService', () => {
@@ -235,60 +226,12 @@ describe('StartingRunsService', () => {
     expect(svc.list([], at + 1)).toEqual([]);
   });
 
-  /* bug-51 — a board-started run whose driver ran on ANOTHER machine writes no
-     run file here, so it never reaches `realRuns`; it arrives as a remote run,
-     beside `runs` in the payload. Rule 1 asks "has a run for this project
-     started since I was marked", and a remote run answers that exactly as well
-     as a local one — before this, only RUN_STALE_MS could retire such a mark,
-     and the board stayed blocked for the full fifteen minutes after the run
-     had already started and ended. */
-
-  it('drops the entry once a REMOTE run for that project started after it was marked', () => {
-    svc.mark('/p');
-    const now = Date.now();
-    const remote = remoteRunAt('/p', new Date(now + 1_000).toISOString());
-
-    expect(svc.list([], now + 2_000, [remote])).toEqual([]);
-  });
-
-  it('keeps the entry when the only remote run for that project started BEFORE it was marked', () => {
-    // An older remote run must not retire a fresh mark — the same boundary
-    // rule 1 keeps for a local run whose file was archived by the next `init`.
-    svc.mark('/p');
-    const now = Date.now();
-    const older = remoteRunAt('/p', new Date(now - 60_000).toISOString());
-
-    expect(svc.list([], now, [older])).toHaveLength(1);
-  });
-
-  it('keeps the entry when the only remote run belongs to a different project', () => {
-    svc.mark('/p');
-    const now = Date.now();
-
-    expect(svc.list([], now + 2_000, [remoteRunAt('/other', new Date(now + 1_000).toISOString())])).toHaveLength(1);
-  });
-
-  it('keeps the entry while a remote run reads running, when it started BEFORE the mark', () => {
-    // Rule 3 is deliberately NOT widened to remote runs. It exists because the
-    // spawned session's own `init` refuses a LOCAL run file that says
-    // `running`; another machine's run blocks nothing here (spec §7.4 — two
-    // machines draining one tracker project must not block each other), so the
-    // local spawn it was marked for can still land, and its placeholder must
-    // stay until it does.
-    svc.mark('/p');
-    const now = Date.now();
-    const inFlight = remoteRunAt('/p', new Date(now - 60_000).toISOString(), 'running');
-
-    expect(svc.list([], now, [inFlight])).toHaveLength(1);
-  });
-
-  it('sweep deletes an entry a remote run retired — list and sweep agree on remote runs too', () => {
-    svc.mark('/p');
-    const now = Date.now();
-
-    svc.sweep([], now + 2_000, [remoteRunAt('/p', new Date(now + 1_000).toISOString())]);
-    // Asked with no runs of either kind: a surviving entry would prove the
-    // sweep ignored its remote argument.
-    expect(svc.list([], now + 2_000)).toEqual([]);
-  });
+  /* No remote-run cases here any more (bug-57). bug-51 widened rule 1 to other
+     machines' runs through a third `list`/`sweep` argument; bug-57 withdrew it
+     and removed the argument, because a board spawn can only land on this
+     machine and no remote run is ever its landing. With no parameter left to
+     hand one through, the proof that a remote run does NOT retire a mark lives
+     where remote runs still exist — orchestrator-runs.test.ts's bug-57 cases,
+     which drive it through the controller for a running and an aborted remote
+     run alike. */
 });
