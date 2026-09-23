@@ -2821,7 +2821,9 @@ writes a human sentence under the fenced JSON: somebody reading the timeline sho
 
 **Why the LOWEST live comment id, and not the highest.** GitHub assigns comment ids monotonically, so lowest means "posted first", and every reader of the same
 comment list reaches the same verdict with no lock, no lease server and no clock they have to agree on. Highest — last writer wins — is not convergent at all:
-a third claimant arriving mid-race would change the answer for everyone who had already decided.
+a third claimant arriving mid-race would change the answer for everyone who had already decided. The read route (`GET /api/items/claim`, `currentClaim`)
+resolves the holder by the same lowest-live-id rule, falling back to the newest claim only when nothing is live — before bug-58 it answered the newest claim
+outright, which inside a race window named the loser as the holder to `stop`, `heartbeat`, `abort` and `show`.
 
 **The sequence is list · post · settle · list · UNION, and the union is what decides.** GitHub's comment listing is eventually consistent by a fraction of a
 second, so a concurrent claimant can be absent from one list and present in the other; taking the second list alone would let both racers believe they won.

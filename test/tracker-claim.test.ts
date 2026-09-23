@@ -1,4 +1,4 @@
-import { claimsFor, isLive, newestClaim, parseClaim, renderClaim, winner } from '../server/src/tracker/claim';
+import { claimsFor, currentClaim, isLive, newestClaim, parseClaim, renderClaim, winner } from '../server/src/tracker/claim';
 import { CLAIM_MARKER, CLAIM_STALE_MS } from '../shared/types';
 import type { ClaimRecord } from '../shared/types';
 import type { GithubComment } from '../server/src/tracker/github.client';
@@ -198,5 +198,63 @@ describe('newestClaim and winner', () => {
 
   it('answers null for an issue nobody has claimed', () => {
     expect(newestClaim([])).toBeNull();
+  });
+});
+
+/**
+ * What the read route answers (bug-58): the HOLDER by the protocol's own rule —
+ * the lowest live id, the answer `claim` reaches — and the newest claim only
+ * when nobody holds the issue. Inside a race window the loser's comment is
+ * both live and newer, and answering "newest" there named the loser as the
+ * holder to `stop`, `heartbeat`, `abort` and `show`.
+ */
+describe('currentClaim', () => {
+  const released = { released: { at: '2026-09-18T11:59:30Z', reason: 'stopped' as const, by: 'A' } };
+  const stale = { heartbeat: new Date(NOW - CLAIM_STALE_MS).toISOString() };
+
+  it('answers the lower id when two claims are live, not the newer one', () => {
+    const claims = [
+      { commentId: 101, record: record({ session: 'loser' }) },
+      { commentId: 100, record: record({ session: 'winner' }) }
+    ];
+    expect(currentClaim(claims, NOW)?.commentId).toBe(100);
+  });
+
+  it('answers the live claim over an older released one', () => {
+    const claims = [
+      { commentId: 100, record: record(released) },
+      { commentId: 101, record: record() }
+    ];
+    expect(currentClaim(claims, NOW)?.commentId).toBe(101);
+  });
+
+  it('answers the live claim over an older stale one', () => {
+    const claims = [
+      { commentId: 100, record: record(stale) },
+      { commentId: 101, record: record() }
+    ];
+    expect(currentClaim(claims, NOW)?.commentId).toBe(101);
+  });
+
+  /* Nothing live: the newest claim, released or not — the counters live there,
+     and `stop`'s released and stale paths depend on getting it back. */
+  it('answers the newest claim when every claim is released', () => {
+    const claims = [
+      { commentId: 101, record: record(released) },
+      { commentId: 100, record: record(released) }
+    ];
+    expect(currentClaim(claims, NOW)?.commentId).toBe(101);
+  });
+
+  it('answers the newest claim when nothing is live, stale included', () => {
+    const claims = [
+      { commentId: 100, record: record(released) },
+      { commentId: 101, record: record(stale) }
+    ];
+    expect(currentClaim(claims, NOW)?.commentId).toBe(101);
+  });
+
+  it('answers null for an issue nobody has claimed', () => {
+    expect(currentClaim([], NOW)).toBeNull();
   });
 });

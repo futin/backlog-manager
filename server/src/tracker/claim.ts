@@ -236,3 +236,24 @@ export function winner(live: readonly ParsedClaim[]): ParsedClaim | null {
   }
   return low;
 }
+
+/**
+ * The claim the read route answers (bug-58): the HOLDER, resolved by the same
+ * rule `claim` resolves it — the lowest live id is the holder — and, only when
+ * nothing is live, the newest claim, released or not.
+ *
+ * Holder first because every caller of the route asks "who holds this": `stop`
+ * refuses or releases by it, `heartbeat` beats it, `abort` checks its host and
+ * `show` prints its session. Inside a race window the loser's comment is both
+ * live and NEWER, so answering `newestClaim` there named the loser as the
+ * holder until the loser deleted it — and `claim` leaves that comment standing
+ * for the full stale window when its delete fails.
+ *
+ * The newest-claim fallback is not a convenience. With nothing live the
+ * counters live on the newest claim, and `stop`'s released and stale paths
+ * depend on getting exactly that claim back. `newestClaim` itself is unchanged:
+ * `claim`'s counter seed and the mapper still want it.
+ */
+export function currentClaim(claims: readonly ParsedClaim[], nowMs: number): ParsedClaim | null {
+  return winner(liveClaims(claims, nowMs)) ?? newestClaim(claims);
+}

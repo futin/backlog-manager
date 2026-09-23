@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { claimsByIssue, claimsFor, isLive, liveClaims, newestClaim, renderClaim, winner, type ParsedClaim } from '../../tracker/claim';
+import { claimsByIssue, claimsFor, currentClaim, isLive, liveClaims, newestClaim, renderClaim, winner, type ParsedClaim } from '../../tracker/claim';
 import { GithubClient, isRepo, type GithubComment, type GithubIssue, type GithubResponse } from '../../tracker/github.client';
 import { issueNumberFor, issueUrn, mapIssue, parseUrn } from '../../tracker/map-issue';
 import { TrackerPollerService } from '../../tracker/poller.service';
@@ -811,8 +811,19 @@ export class GithubSource implements ItemSource, ItemWriter {
   }
 
   /**
-   * The newest claim on one item — the eighth route's whole implementation, and
-   * the only read on `ItemWriter`.
+   * The claim that holds one item — the lowest live id, or the newest claim
+   * when nothing is live — the eighth route's whole implementation, and the
+   * only read on `ItemWriter`.
+   *
+   * **The holder, not the newest (bug-58).** Inside a race window two claims
+   * are live at once, and the loser's is the newer one until it deletes it.
+   * Answering the newest there named the LOSER to every caller: `stop` refused
+   * the winner, or later released the loser's comment and orphaned the
+   * winner's; `heartbeat` was refused and let the winner's claim go stale.
+   * `claim` leaves the loser's comment behind on two paths — a failed
+   * `deleteComment`, and the after-read failure, which by design never deletes
+   * — and on those the window is the full `CLAIM_STALE_MS`, not a poll tick.
+   * `currentClaim` resolves the holder the way `claim` does.
    *
    * **Cache first, then one fresh read on a miss.** The cache is the fast path
    * and the common one: a claim this server posted is in it before the POST
@@ -844,7 +855,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const number = issueNumberFor(id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${id} does not name an issue in ${repo}` } };
 
-    const cached = newestClaim(claimsFor(number, this.poller.comments(repo)));
+    const cached = currentClaim(claimsFor(number, this.poller.comments(repo)), Date.now());
     if (cached !== null) return { ok: true, value: { commentId: cached.commentId, record: cached.record } };
 
     // The fallback. Serialised on this item's chain like every other call that
@@ -853,8 +864,8 @@ export class GithubSource implements ItemSource, ItemWriter {
     return this.serialise(issueUrn(repo, number), async () => {
       const fresh = await this.allClaims(repo, number, token);
       if (!fresh.ok) return fresh;
-      const newest = newestClaim(fresh.value);
-      return { ok: true as const, value: newest === null ? null : { commentId: newest.commentId, record: newest.record } };
+      const current = currentClaim(fresh.value, Date.now());
+      return { ok: true as const, value: current === null ? null : { commentId: current.commentId, record: current.record } };
     });
   }
 

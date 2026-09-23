@@ -264,6 +264,43 @@ describe('a claim made before this process started', () => {
     expect(gh.calls.filter((c) => c.url.includes('/issues/9/comments'))).toHaveLength(1);
   });
 
+  /**
+   * Two live claims on #5 — a race window (bug-58): the winner at 100, posted
+   * first, and a loser at 101 that has not deleted its comment yet. `claim`
+   * leaves such a comment standing for the full stale window when its delete
+   * fails, so this is not a one-tick state. The route must name the WINNER,
+   * the lowest live id, on both of its paths.
+   */
+  function seedLoser(): void {
+    const loser = gh.claim(record({ session: 'the-loser' }), 5, 101);
+    loser.created_at = '2026-09-18T10:00:00Z';
+    loser.updated_at = '2026-09-18T10:00:00Z';
+  }
+
+  it('answers the lowest live claim, not the newest, from the cache', async () => {
+    seedLoser();
+    await sweep();
+
+    const res = await request(app.getHttpServer())
+      .get('/api/items/claim')
+      .query({ project: trackerPath, id: '#5' })
+      .expect(200);
+    expect((res.body as ClaimResult).commentId).toBe(100);
+    expect((res.body as ClaimResult).record.session).toBe('the-other-machine');
+  });
+
+  it('answers the lowest live claim, not the newest, from the fresh read', async () => {
+    seedLoser();
+
+    const res = await request(app.getHttpServer())
+      .get('/api/items/claim')
+      .query({ project: trackerPath, id: '#5' })
+      .expect(200);
+    expect((res.body as ClaimResult).commentId).toBe(100);
+    expect((res.body as ClaimResult).record.session).toBe('the-other-machine');
+    expect(gh.calls.filter((c) => c.url.includes('/issues/5/comments'))).toHaveLength(1);
+  });
+
   /** …and the cache is still the fast path: a claim already there costs no
    *  request at all, which is what keeps `stop` free in the common case. */
   it('makes no request when the cache already holds the claim', async () => {

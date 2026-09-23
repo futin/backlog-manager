@@ -3,9 +3,12 @@ id: bug-58
 title: readClaim answers the newest claim on an issue, so inside a race window stop and heartbeat can target the losing machine's comment
 created: 2026-09-22
 tags: tracker, claim
-updated: 2026-09-23T07:20:22Z
+updated: 2026-09-23T09:06:50Z
 groom-elapsed: 142
 groom-tokens: 51433
+started: 2026-09-23T08:49:47Z
+execute-elapsed: 1023
+execute-tokens: 58826
 ---
 
 ## Symptom
@@ -95,3 +98,40 @@ Test cases:
   - Red-proof: each of those cases fails on the current `newestClaim` line.
 - `skills/backlog/tools/backlog.test.mjs` needs no new case, because the CLI is unchanged. Run the suite to confirm it stays green.
 - `pnpm test` and `pnpm run typecheck` stay green. Two supertest-bind cases are a known red on WSL, so compare against a pristine worktree before chasing them.
+
+## Outcome
+
+2026-09-23 — fixed as groomed. Added `currentClaim(claims, nowMs)` to `server/src/tracker/claim.ts` (`winner(liveClaims(...)) ?? newestClaim(...)`) and
+swapped both `readClaim` paths in `github.source.ts` (cache and fresh fallback) over to it; `newestClaim` is untouched and still feeds `claim`'s counter seed
+and the mapper. The cause was confirmed against the current code before the change: both paths called `newestClaim`, and `claim` resolves the holder with
+`winner` (lowest live id). No CLI change. Prose fixed in `ItemWriter.readClaim`, the `readClaim` doc comment (with a bug-58 paragraph), the two
+`orchestrate.mjs` comments, `recovery.md`'s `this-run` row, one sentence in `invariants.md`'s claim-protocol section, and the function list in
+`.claude/rules/tracker.md`.
+
+Verification — `pnpm run typecheck` finished clean (`$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo`, and no errors after it), and
+`pnpm test`:
+
+```
+Test Suites: 130 passed, 130 total
+not ok 346 - the preflight claim carries the machine it was taken on, and a refusal names the holder-s
+# tests 799
+# pass 797
+# fail 1
+```
+
+That one node failure has nothing to do with this diff. The test expects the default `user@host` host identity, and this machine exports
+`BM_MACHINE_NAME=aj_macbook` (`AssertionError: The input did not match the regular expression /^[^@\s]+@\S+$/. Input: 'aj_macbook'`). The only change this
+diff makes in `orchestrate.mjs` is to comments. With the variable unset, the test passes:
+
+```
+$ env -u BM_MACHINE_NAME node --test --test-name-pattern="preflight claim carries" skills/backlog-orchestrate/tools/orchestrate.test.mjs
+ok 1 - the preflight claim carries the machine it was taken on, and a refusal names the holder-s
+ok 2 - the preflight claim carries BM_MACHINE_NAME when the machine has been given a name
+# pass 2
+# fail 0
+```
+
+The test leaks the environment variable, which is worth a separate capture: it should delete `BM_MACHINE_NAME` for its own run.
+
+Contract sweep: 7 sites updated (server/src/items/sources/source.ts, server/src/items/sources/github.source.ts, skills/backlog-orchestrate/tools/orchestrate.mjs ×2, skills/backlog-orchestrate/references/recovery.md, docs/subsystems/invariants.md, .claude/rules/tracker.md) — left standing on purpose, as the Fix directs: the mapper's "newest claim" lines (`map-issue.ts:168`, `invariants.md:3022`, `.claude/rules/tracker.md:50`, `remote-runs.util.ts`), which describe `newestClaim` callers that are unchanged; `api.md:63`, `items.md:20` and `invariants.md:2810` already say "who holds", which is now accurate.
+Red proof: 7 tests went red with the change reverted (with `readClaim`'s cache line back on `newestClaim`, the cache-path route case failed; with its fallback line back on `newestClaim`, the fresh-read route case failed; with `currentClaim` reduced to `newestClaim`, the two-live unit case failed; with it reduced to `winner(liveClaims)`, both nothing-live cases failed; with it reduced to an unfiltered `winner`, the live-over-released and live-over-stale cases failed; the `[]` → null case pins no reverted behaviour and stays green under every variant)

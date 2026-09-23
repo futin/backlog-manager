@@ -91,8 +91,8 @@ suggestions (`skip` only ever appears in a tracker project):
 task-3  stage=dispatched  worktree=true  branch=true  marker=true  session=a1b2…  -> resume-session
 ```
 
-In a **tracker project** each row also carries `claim`, read from the item's issue: `this-run` (the newest claim is unreleased and this run's, stale or not —
-a resume takes it over), `other` (a LIVE claim from another run or a hand `start`), `released`, `none` (never claimed), or `unknown` (the API could not say; one
+In a **tracker project** each row also carries `claim`, read from the item's issue: `this-run` (the claim the route answers — the lowest live one, or the newest
+when nothing is live — is unreleased and this run's, stale or not — a resume takes it over), `other` (a LIVE claim from another run or a hand `start`), `released`, `none` (never claimed), or `unknown` (the API could not say; one
 stderr line, and every other column is computed as usual). A stale claim from another run reads `released`: the protocol lets the next contestant retire it, so
 it does not stop a resume. A files project's rows have no `claim` key at all.
 

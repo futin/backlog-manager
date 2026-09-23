@@ -1975,8 +1975,10 @@ function trackerHeartbeat(run, item) {
  *
  * The counters are the ITEM's running totals across every session that has
  * ever worked it, so they are READ first and added to — never recomputed.
- * `GET /api/items/claim` answers the newest claim, released or not, which is
- * where those totals live.
+ * `GET /api/items/claim` answers the holder — the lowest live claim — or, when
+ * nothing is live, the newest claim, released or not, which is where those
+ * totals live. A race's two live claims were both seeded from the same prior
+ * claim, so either one's counters are the same base.
  *
  * What this run spent is the sum over its own `usage` entries: seconds of
  * wall-clock, and the three token kinds that are actually BILLED. Cache READS
@@ -4644,7 +4646,9 @@ function suggestReconcileAction({ worktreeExists, itemBranchExists, marker, sess
 
 /**
  * Who holds a tracker item's issue, as `reconcile` reports it (task-48) — read
- * from `GET /api/items/claim`, which answers the NEWEST claim, released or not.
+ * from `GET /api/items/claim`, which answers the HOLDER — the lowest live claim,
+ * as the protocol resolves it (bug-58) — and the newest claim, released or not,
+ * only when nothing is live.
  *
  *   * `this-run` — unreleased and carrying this run's `runId`, stale or not: a
  *     crashed driver's own claim, which a resume takes over.
