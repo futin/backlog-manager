@@ -128,22 +128,25 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" import github [own
 ```
 
 The order is the whole design. It writes `backlog/source.json` and the issue forms FIRST, because the server refuses every item write to a project whose marker
-still says `files`. Then one issue per item, open items by `created` then done then out-of-scope, one request a second (`BM_IMPORT_PACE_MS`): each body keeps the
-item's own text and gains a `bm:imported` footer carrying the old id, the `created` date and the `tags:`. An item with any of the four counters is given one
-synthetic claim which is released immediately with those counters billed onto it, before the item is closed — a claim cannot be taken on a closed issue. A done
-item's `## Outcome` becomes its closing comment rather than part of the body. Then a second pass rewrites every cross-link (`bug-2` becomes `#5`, `from:` becomes
-a `_From #4._` line) now that every number is known. Only then are the item files deleted, and the files to commit are printed — the marker and the deletions are
-one change and have to be committed together. It never commits and never pushes.
+still says `files`. Then one issue per item, open items by `created` then done then out-of-scope, one request a second (`BM_IMPORT_PACE_MS`): each body keeps
+the item's own text and gains a `bm:imported` footer carrying the old id, the `created` date and the `tags:`. An item with any of the four counters is given one
+synthetic claim which is released immediately with those counters billed onto it, before the item is closed — a claim cannot be taken on a closed issue. So a
+done item, and a rejected item that started life as a bug, task, idea or refactor, are both created open (the rejected one under its original section, keeping
+its `type:*` label) and closed by a later request; only a born-rejected `oos-N` is created closed. A done item's `## Outcome` becomes its closing comment rather
+than part of the body. Then a second pass rewrites every cross-link (`bug-2` becomes `#5`, `from:` becomes a `_From #4._` line) now that every number is known.
+Only then are the item files deleted, and the files to commit are printed — the marker and the deletions are one change and have to be committed together. It
+never commits and never pushes.
 
 It refuses rather than guesses, and each refusal leaves the project exactly as it found it: inside a linked worktree; outside a git repository; on an unreadable
 marker, an explicit `{"kind":"files"}` marker, or a `github` marker with no item files left to move (already done); on a store with no item files at all (that is
 `connect`); with no `owner/repo` argument and no GitHub `origin` to take one from; with uncommitted or untracked changes under `backlog/`, or a HEAD that is on no
 `origin/*` branch (the truncation link below pins files at HEAD, so HEAD has to be pushed); on a malformed item file, a refactor whose `kind:` is neither `chore`
-nor `debt`, or an OPEN item with a `started:` stamp — somebody is working it. Exit `5` means the stack is not running; nothing has been written.
+nor `debt`, an OPEN item with a `started:` stamp — somebody is working it — or an `oos-N` file carrying any of the four counters, whose issue would be closed
+at creation where no claim can bill them (remove them from the frontmatter first). Exit `5` means the stack is not running; nothing has been written.
 
-A failure mid-run stops at the item it names, writes nothing further and deletes nothing. Run the same command again: `import` reads the `bm:imported` footer off
-every issue on the tracker, skips the items it finds there, closes a `done/` item whose issue is still open, and carries on. The footer is the whole record — it
-is on the tracker, where a crash cannot lose it.
+A failure mid-run stops at the item it names, writes nothing further and deletes nothing. Run the same command again: `import` reads the `bm:imported` footer
+off every issue on the tracker, skips the items it finds there, closes a `done/` or `out-of-scope/` item whose issue is still open, and carries on. The footer
+is the whole record — it is on the tracker, where a crash cannot lose it.
 
 Three things do not survive the move. A body over GitHub's 65,536-character cap is cut at a `## ` heading boundary and gains a line linking the full file at
 HEAD. `tags:` live in the footer only, since the tracker's label set is a closed nine. And the file's git history stays in the repository — the issue is dated
