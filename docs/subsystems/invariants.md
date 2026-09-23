@@ -3292,7 +3292,9 @@ keeps whole `##` segments from the top and appends `_Truncated. Full text: <SHA-
 stopping mid-sentence reads as corruption while one that ends after its last whole section and says so reads as what it is. The footer's length is subtracted from
 the cap before fitting, so the footer always survives — a body that lost it to truncation would be re-imported as a duplicate issue by the next resume. The link
 is what makes two of §8.1's refusals load-bearing: the link pins `backlog/<path>` at HEAD's sha, so HEAD has to be on some `origin/*` ref (otherwise the link
-404s for everyone else) and `backlog/` has to be clean (otherwise the link shows bytes that differ from what was imported).
+404s for everyone else) and `backlog/` has to be clean (otherwise the link shows bytes that differ from what was imported). A resume's one exemption is the
+marker the stopped run wrote itself, while no commit carries it (`??` or `A `): the link never points at it, and without the exemption every resume refused on the
+tool's own file (#218). A committed marker edited by hand is still refused.
 
 **Three things are lost, and saying which is the point.** A body over the cap keeps only its leading sections plus the link. `tags:` survive in the footer alone,
 because the tracker's label set is the closed nine of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the

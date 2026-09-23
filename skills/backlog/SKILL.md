@@ -143,7 +143,9 @@ nor `debt`, or an OPEN item with a `started:` stamp — somebody is working it. 
 
 A failure mid-run stops at the item it names, writes nothing further and deletes nothing. Run the same command again: `import` reads the `bm:imported` footer off
 every issue on the tracker, skips the items it finds there, closes a `done/` item whose issue is still open, and carries on. The footer is the whole record — it
-is on the tracker, where a crash cannot lose it.
+is on the tracker, where a crash cannot lose it. The `backlog/source.json` the first run wrote needs no commit first: while no commit carries it (untracked
+or staged), a resume leaves it out of the uncommitted-changes check. Every other change under `backlog/` — a hand edit to a committed marker included — still
+refuses.
 
 Three things do not survive the move. A body over GitHub's 65,536-character cap is cut at a `## ` heading boundary and gains a line linking the full file at
 HEAD. `tags:` live in the footer only, since the tracker's label set is a closed nine. And the file's git history stays in the repository — the issue is dated
