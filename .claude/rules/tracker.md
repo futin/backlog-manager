@@ -18,10 +18,13 @@ paths: ["server/src/tracker/**"]
   holder is gone belongs to `backlog.mjs abort <id>`, the only sender of that field, because the server can see neither the caller's filesystem nor its process
   table. `abort` releases with `reason: 'aborted'` (bug-40's word, the same event) and NO `counters` key, and refuses unless all three hold: the claim's `host`
   is non-empty and equals `hostIdentity()` (a hostless claim is refused, never assumed local); the claim is unreleased and live (a dead one exits 0 saying the
-  next `start` retires it, and makes no request); and `holdingSessionEvidence` finds no transcript for the holder's session under `<configDir>/projects/` whose
-  mtime is at or after the claim's heartbeat — a check that is meaningful ONLY because the host refusal already ran, since on a foreign machine an absent
-  transcript is bug-46's false negative. In files mode `abort` is exit 1 naming `stop <id> --abandon`. The split is billing's, for billing's reason (the CLI
-  holds the clock and the transcripts), and the boundary it draws is a MISTAKE one, not a security one: `stop` has always sent a caller-supplied `session`.
+  next `start` retires it, and makes no request); and `holdingSessionEvidence` answers `gone` — Claude Code's registry `<configDir>/sessions/*.json` was read,
+  understood, and holds no entry naming the holder whose pid is running (and whose `procStart` matches `/proc/<pid>/stat` field 22 where `/proc` exists) — a
+  check that is meaningful ONLY because the host refusal already ran, since on a foreign machine an absent entry is bug-46's false negative. It answers
+  `unknown`, and `abort` refuses, when the directory is unreadable, any entry lacks a string `sessionId` or integer `pid`, or the aborting session cannot find
+  its own running entry (bug-49; a transcript mtime was the evidence before, and every killed session's transcript post-dates its last beat). `gone` is "no
+  process now": a board-dispatched `claude -p` session between turns has no entry either, so nothing automatic may release on this signal. In files mode
+  `abort` is exit 1 naming `stop <id> --abandon`. The split is billing's, for billing's reason (the CLI holds the clock, the transcripts and the process table), and the boundary it draws is a MISTAKE one, not a security one: `stop` has always sent a caller-supplied `session`.
   `CLAIM_STALE_MS` is a named alias of `RUN_STALE_MS`, not a second number. **Every release removes `in-progress`; exactly one reason also clears the
   ASSIGNEE, and it is `aborted`** — the claim SETS the assignee when it wins, so after a session torn down mid-item that field records no work while still
   reading as ownership, which is the same false signal the label is removed for arriving through the other field the protocol writes. `stopped`, `merged` and

@@ -2058,9 +2058,10 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
    * **The PROOF that the holder is gone is the CLI's, not this server's.** The
    * server can see neither the caller's filesystem nor its process table, so
    * its clause is `sameHost` alone; `backlog.mjs abort` runs the liveness check
-   * where the evidence is — the holding session's transcript under
-   * `<configDir>/projects/` — exactly as billing lives on the CLI side because
-   * that is where the clock and the transcript are. That is a MISTAKE boundary
+   * where the evidence is — Claude Code's process registry under
+   * `<configDir>/sessions/` and the process table it names (bug-49) — exactly
+   * as billing lives on the CLI side because that is where the clock and the
+   * transcript are. That is a MISTAKE boundary
    * rather than a security one: `stop` has always let a caller send any
    * `session` it likes, and the holder's id is printed in the refusal.
    */

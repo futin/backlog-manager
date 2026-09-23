@@ -2904,11 +2904,36 @@ filesystem nor its process table. That is the same split billing already has, fo
 **`abort` refuses unless three things hold, and the order matters.** The claim's `host` must be non-empty and equal this machine's `hostIdentity()` — a
 cross-machine claim is refused naming BOTH hosts, and a hostless one is refused rather than assumed local. The claim must be unreleased and live — a released
 one has nothing to abort, and a dead one needs no abort at all, so that case exits `0` saying the next `start` retires it and makes no request. And
-`holdingSessionEvidence` must find no transcript for the holder's session under `<configDir>/projects/` whose mtime is at or after the claim's heartbeat: a
-transcript written no earlier than the beat means that session is the one beating, and it is alive. **That last check is meaningful only because the host check
-already ran**, and the asymmetry with bug-46 is the whole point — on a machine that did not mint the session, an absent transcript is bug-46's false negative
-and proves nothing at all. A session with no `CLAUDE_CODE_SESSION_ID` has no transcript and passes trivially, which is correct: such a claim's `session` is
-`<user>@<host>`, a person at a terminal on this host, and that person is the one running `abort`.
+`holdingSessionEvidence` must answer `gone`: Claude Code's own process registry, `<configDir>/sessions/<pid>.json`, was read and understood and holds no entry
+naming the holder whose process is still running (`kill(pid, 0)` succeeds or answers `EPERM`, and — where `/proc/<pid>/stat` is readable — its field 22 equals
+the entry's `procStart`, so a reused pid does not pass). **That last check is meaningful only because the host check already ran**, and the asymmetry with
+bug-46 is the whole point — on a machine that did not mint the session, an absent entry is bug-46's false negative and proves nothing at all. A session with no
+`CLAUDE_CODE_SESSION_ID` has no registry entry and reads `gone`, which is correct: such a claim's `session` is `<user>@<host>`, a person at a terminal on this
+host, and that person is the one running `abort`.
+
+**The evidence was a transcript mtime until bug-49, and that could never fire for the case it was written for.** bug-48 called the holder alive if any transcript
+of its session had an mtime at or after the claim's heartbeat. But the `start`/`heartbeat` that stamped the beat is itself a tool call inside the holding
+session, and the session appends the call's `tool_result` AFTER the server stamps the beat — so every session killed after its last heartbeat returned has a
+transcript newer than the beat, and `abort` refused all of them as "still writing here". The repro (`futin/guide-manager#5`, 2026-09-22) had to be cleared with a
+raw `POST /api/items/release`; the unit tests stayed green because they set a transcript's mtime by hand and never modelled a session whose last act was the
+beat itself. A transcript answers "did this session write after the beat", which every session did; the registry answers "is the process still there": a
+graceful exit removes the file, and a hard kill leaves it behind with a pid that no longer answers.
+
+**`holdingSessionEvidence` has three answers, and the third fails closed.** `unknown` when the registry directory is missing or unreadable, when any `*.json` in
+it lacks a string `sessionId` or an integer `pid`, or — when the aborting process has a `CLAUDE_CODE_SESSION_ID` — when no running entry names the aborting
+session ITSELF. That self-check is what catches a registry whose shape or location changed under a new Claude Code: a session that cannot find itself would read
+every neighbour as gone too. `abort` refuses on `unknown` and says so ("cannot tell … wait out the 15 min window"), because a misread in that direction is the
+one that turns a live neighbour into a dead one.
+
+**`gone` means "no process now", not "stopped", and a board-dispatched session between turns is the case where those differ.** The dashboard runs every
+dispatched session as `claude -p --session-id <id>` and every reply as a fresh `claude -p --resume <id>`, and a `-p` process exits normally when its turn ends —
+removing its registry file. So a dispatched session that asked a question and is waiting on the answer still holds its claim, and reads `gone`. `abort` is
+safe only because a person runs it, at the holding machine, where the dashboard shows whether that session is idle-and-resumable; the skills' prose says to
+check before aborting. The same fact is why bug-49's groomed second half — a server-side sweeper releasing every own-host claim with no registry entry, once per
+poll — was withdrawn in review before it merged: on the board's primary dispatch path it would have released a groom session's claim the first time it asked
+a question, and a released claim is permanent. A reply wait is unbounded, so no heartbeat grace shorter than `CLAIM_STALE_MS` covers it, and one that long
+adds nothing the protocol does not already do. An automatic release needs a signal that separates "stopped" from "between turns" — the dashboard's own
+session state is the candidate — and that is a follow-up to groom, not a variant of this check.
 
 Rejected, each for its own reason. **A `--force` flag, or a clause letting any caller name the holder**: the clause with no proof attached, assertable from a
 machine that cannot possibly know, which is the shape bug-46 exists to stop being persuasive. **Host equality with no liveness check**: cheaper, and it would

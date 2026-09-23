@@ -3,9 +3,12 @@ id: bug-49
 title: A session killed mid-item holds its claim for the full stale window, though the machine knows the process is gone
 created: 2026-09-22
 tags: tracker, claim
-updated: 2026-09-23T06:11:04Z
+updated: 2026-09-23T07:55:24Z
 groom-elapsed: 251
 groom-tokens: 72546
+started: 2026-09-23T07:32:32Z
+execute-elapsed: 1372
+execute-tokens: 225495
 ---
 
 ## Symptom
@@ -166,3 +169,90 @@ Proof on the machine, after merge and a `docker compose up -d --build server`: o
 `claude -p` session, stop it from the dashboard, and within one poll interval `GET /api/items/claim?project=…&id=…` shows
 `released: { reason: "aborted", by: <sweeper identity> }` and the issue has lost `in-progress` and its assignee. Then repeat with `kill -9` on that session's
 pid: the claim stays live (sweeper leaves it), and `backlog.mjs abort <id>` releases it.
+
+## Outcome
+
+2026-09-23. **Part A shipped. Part B was withdrawn in review and is not in this branch.**
+
+**Part A:** `backlog.mjs abort` now gets its liveness evidence from Claude Code's process registry instead of a transcript's modified time.
+
+- `holdingSessionEvidence(session, env)` reads `<configDir>/sessions/*.json` and returns one of three answers:
+  - `alive`: an entry names the holder and its pid still answers `kill 0` or `EPERM`. Where `/proc` exists, `procStart` must also equal field 22.
+  - `gone`: no running entry names the holder.
+  - `unknown`: the directory is unreadable, an entry lacks a string `sessionId` or an integer `pid`, or the aborting session cannot find its own running entry.
+- `abort` refuses on `alive` and on `unknown` ("cannot tell … wait out the 15 min window").
+- The killed-after-last-beat case is fixed: a transcript newer than the heartbeat no longer blocks the release.
+- Checked live on this Mac: this session's own id reads `alive` (`~/.claude/sessions/73534.json`), and a random uuid reads `gone`.
+
+**Part B withdrawn (review fix loop 1, Critical).** The server-side claim sweeper released any own-host hand claim with no registry entry, once per poll.
+
+- The board dispatches every session as `claude -p --session-id <id>` and every reply as a fresh `claude -p --resume <id>`. A `-p` process exits normally at
+  the end of each turn and removes its registry file.
+- So a dispatched groom or execute session waiting on the user's answer would lose its claim within one poll. A release is permanent, and the item then goes
+  to any machine.
+- The registry cannot tell "stopped" from "between turns":
+  - A reply wait is unbounded. Any heartbeat grace long enough to cover it is at least `CLAIM_STALE_MS`, which adds nothing the protocol does not already do.
+  - Transcript shutdown bookkeeping is unverified as a signal.
+- What I removed:
+  - the service, `session-registry.util.ts`, and its suite `test/tracker-claim-sweep.test.ts`
+  - the poller's `onRepoSynced` hook and the controller's `noteOwnHost`
+  - the compose mount and env var, and the `.env.example` entry
+  - the CLAUDE.md headline, the `.claude/rules/items.md` bullet, the invariants.md section, and the api.md paragraph
+- The review's two Minor notes (a thrown release cutting the loop short, and the compose mount's host-side creation) were both about part B, so they went with it.
+
+**Follow-up to groom:** automatic release needs a signal that separates a stopped session from one between turns. The dashboard's own session state (idle or
+resumable versus stopped) is the candidate. That means the server asking the dashboard, which is a design decision, not a variant of this check.
+
+**Part A's limit, documented:** `gone` means "no process now", not "stopped". A dispatched `-p` session between turns reads `gone` too. `abort` stays safe
+because a person runs it at the holding machine. I added a "check the dashboard before aborting" sentence to both SKILL.md files, `docs/subsystems/skills.md`,
+the `.claude/rules/tracker.md` bullet, a new invariants.md paragraph, and the `holdingSessionEvidence` comment.
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo      (clean)
+
+$ pnpm test
+Test Suites: 130 passed, 130 total
+Tests:       2208 passed, 2208 total
+# tests 799
+# pass 797
+# fail 1        ← orchestrate.test.mjs:7036, see note 1 — untouched file, env leak
+# skipped 1
+
+$ env -u BM_MACHINE_NAME pnpm run test:skills
+# tests 799
+# pass 798
+# fail 0
+# skipped 1     ← the Linux-only procStart case, skipped on macOS
+```
+
+Contract sweep: 8 sites updated (.claude/rules/tracker.md, docs/subsystems/invariants.md, docs/subsystems/skills.md, docs/subsystems/api.md, shared/types.ts, server/src/items/sources/github.source.ts, skills/backlog-execute/SKILL.md, skills/backlog-groom/SKILL.md)
+Red proof: 6 tests went red with the change reverted
+
+The red proofs used file copies, never a stash:
+
+- Running `backlog.mjs` from base against the new suite reddened 5 abort cases:
+  - transcript newer than the beat and no registry file → release
+  - live registry entry → refuse
+  - registry dir absent → cannot tell
+  - entry without a sessionId → cannot tell
+  - no self entry → cannot tell
+- Stubbing `registryEntryRunning` to `true` reddened the dead-pid case.
+- The procStart case is Linux-only and cannot run here.
+- The part-B proofs from the first pass no longer apply, because that code is gone.
+
+Notes:
+
+1. **Environment leak (unfixed).** `BM_MACHINE_NAME=aj_macbook` is exported in this machine's environment and leaks into spawned CLIs.
+   - I fixed it in `backlog.test.mjs`: `apiEnv` now blanks it by default, because the abort cases compare hosts.
+   - `orchestrate.test.mjs:7036` has the same leak. That file is outside this item and I left it as it was: it passes with the variable unset. It is worth
+     filing as its own bug.
+2. **Known limits:**
+   - `abort` reads a dispatched `-p` session between turns as `gone` (documented above).
+   - A second `CLAUDE_CONFIG_DIR` on one machine is not searched.
+3. **Plugin sync needed.** The skill edits (`backlog.mjs`, both SKILL.md files) do nothing until they are committed, pushed and followed by
+   `pnpm run plugin:sync`.
+4. **Old wording kept on purpose.** Mentions of the old transcript-mtime evidence remain where they narrate history: the invariants.md paragraph, the
+   `backlog.mjs` comment, the tracker rule's parenthetical, a test comment and the done bug-48 item.

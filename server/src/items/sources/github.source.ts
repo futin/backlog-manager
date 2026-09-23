@@ -555,8 +555,8 @@ export class GithubSource implements ItemSource, ItemWriter {
    * What the clause asserts is `ClaimRecord.host`, and **that is all this
    * server can check**: it can see neither the caller's filesystem nor its
    * process table, so the PROOF that the holding session is actually gone
-   * lives in `backlog.mjs abort`, which compares the holder's transcript mtime
-   * against the claim's heartbeat before it ever posts here. The split is the
+   * lives in `backlog.mjs abort`, which reads Claude Code's session registry
+   * and tests the holder's pid before it ever posts here (bug-49). The split is the
    * one billing already follows, for the same reason — the CLI is the side
    * holding the clock and the transcripts. And it is a MISTAKE boundary rather
    * than a security one: `stop` has always sent a caller-supplied `session`
