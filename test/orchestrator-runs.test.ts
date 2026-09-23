@@ -489,29 +489,44 @@ describe('GET /api/orchestrator/runs', () => {
     expect(starting.list([])).toEqual([]);
   });
 
-  it('a run that ran remotely retires the mark on one GET, for the payload AND for the direct callers (bug-51)', async () => {
-    // The run another machine drove has no file here, so the only place it
-    // exists is `remote` — stubbed at the service, because deriving one from
-    // claim comments is remote-runs.util's own suite and not this one's.
-    const starting = app.get(StartingRunsService);
-    starting.mark(fixture.project);
-    const remote: RemoteRun = {
-      ...fixture,
-      status: 'aborted',
-      startedAt: new Date(Date.now() + 1_000).toISOString(),
-      fresh: false,
-      remote: true,
-      repo: 'owner/repo'
-    };
-    jest.spyOn(app.get(RemoteRunsService), 'list').mockReturnValue([remote]);
+  it.each(['running', 'aborted'] as const)(
+    'a remote run started after the mark keeps the placeholder, for the payload AND the direct callers, until a local run lands (bug-57, %s)',
+    async (status) => {
+      // The bug-57 repro. A board spawn can only land on THIS machine — the
+      // dashboard spawns in a registry path on this host, and `init` writes a
+      // local run file before anything is claimed — and `deriveRemoteRuns`
+      // excludes every run id this machine holds a file for, so no remote run
+      // is ever the landing a mark waits for. Another machine that started in
+      // the window between this board's spawn and its `init` is coincidence,
+      // and the slow start it coincided with must keep its placeholder. The
+      // remote run is stubbed at the service, because deriving one from claim
+      // comments is remote-runs.util's own suite and not this one's.
+      const starting = app.get(StartingRunsService);
+      starting.mark(fixture.project);
+      const requestedAt = Date.parse(starting.list([])[0].requestedAt);
+      const remote: RemoteRun = {
+        ...fixture,
+        status,
+        startedAt: new Date(requestedAt + 1_000).toISOString(),
+        fresh: status === 'running',
+        remote: true,
+        repo: 'owner/repo'
+      };
+      jest.spyOn(app.get(RemoteRunsService), 'list').mockReturnValue([remote]);
 
-    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
-    expect(res.body.remote).toHaveLength(1);
-    expect(res.body.starting).toEqual([]);
-    // AgentsService's RUN_IN_PROGRESS lock reads `OrchestratorService.runs()`
-    // directly, which never sees a remote run. It is freed by the SWEEP the
-    // GET above ran, so a board that has just been told the project is free
-    // is not then 409'd by the lock behind it.
-    expect(app.get(OrchestratorService).runs().starting).toEqual([]);
-  });
+      const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+      expect(res.body.remote).toHaveLength(1);
+      expect(res.body.starting).toEqual([{ project: fixture.project, requestedAt: new Date(requestedAt).toISOString() }]);
+      // The GET's sweep did not delete it either: AgentsService's direct
+      // `runs()` callers, which never see a remote run, still see the mark.
+      expect(app.get(OrchestratorService).runs().starting).toHaveLength(1);
+
+      // This machine's own `init` lands — a local run file started after the
+      // mark — and that, alone, retires the placeholder on the next GET.
+      writeRun({ ...fixture, status: 'done', updatedAt: new Date().toISOString(), startedAt: new Date(requestedAt + 2_000).toISOString() });
+      const landed = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+      expect(landed.body.starting).toEqual([]);
+      expect(starting.list([])).toEqual([]);
+    }
+  );
 });

@@ -49,8 +49,7 @@ export class OrchestratorController {
     // every eviction rule on every call, so a map nobody ever swept leaks at
     // most one entry per project. AgentsService's own direct `runs()` calls
     // (the RUN_IN_PROGRESS lock, `resume()`) need no sweep of their own for
-    // any rule a run FILE answers; the one they do lean on it for is the
-    // remote-run case below, and there they err toward blocking.
+    // any rule — every one is answered by a run FILE they read themselves.
     //
     // Other machines' runs (task-48), set HERE and never inside `runs()`: the
     // service is the run-state directory's reader and fills `remote: []`, so
@@ -58,19 +57,17 @@ export class OrchestratorController {
     // another machine's run. That is what keeps two machines draining one
     // tracker project from blocking each other (spec §7.4).
     //
-    // Read BEFORE the starting pair, since bug-51: a board-started run whose
-    // driver ran on another machine appears only here, and it is as good an
-    // answer to "has the run this mark was for started" as a run file. So the
-    // payload's `starting` is re-filtered against both, and the sweep deletes
-    // what that filter hid — which is also what frees the direct callers above,
-    // since they never see a remote run themselves. One `now` for both halves,
-    // so they decide at the same instant. The watchdog still reads `runs`
-    // alone: a remote run has nothing for it to do.
-    const remote = this.remoteRuns.list();
+    // The starting pair reads `runs` alone, never `remote` (bug-57, withdrawing
+    // bug-51): a board spawn can only land on this machine, as a local run
+    // file, so no other machine's run is ever the landing a mark waits for —
+    // counting one evicted the placeholder of a live spawn whenever another
+    // machine happened to start inside its boot. One `now` for both halves,
+    // so they decide at the same instant. The watchdog reads `runs` alone too:
+    // a remote run has nothing for it to do.
     const now = Date.now();
-    payload.starting = this.starting.list(payload.runs, now, remote);
-    this.starting.sweep(payload.runs, now, remote);
-    payload.remote = remote;
+    payload.starting = this.starting.list(payload.runs, now);
+    this.starting.sweep(payload.runs, now);
+    payload.remote = this.remoteRuns.list();
     return payload;
   }
 

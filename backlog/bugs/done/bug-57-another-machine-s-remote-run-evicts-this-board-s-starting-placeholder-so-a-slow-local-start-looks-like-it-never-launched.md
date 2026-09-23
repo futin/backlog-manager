@@ -3,9 +3,12 @@ id: bug-57
 title: Another machine's remote run evicts this board's starting placeholder, so a slow local start looks like it never launched
 created: 2026-09-22
 tags: orchestrator, tracker, board
-updated: 2026-09-23T06:09:19Z
+updated: 2026-09-23T08:40:14Z
 groom-elapsed: 116
 groom-tokens: 39616
+started: 2026-09-23T08:28:16Z
+execute-elapsed: 718
+execute-tokens: 46429
 ---
 
 ## Symptom
@@ -95,3 +98,42 @@ In the browser (playwright MCP tools): only runnable with a second machine drain
 headless session. By hand: open `http://127.0.0.1:5177/`, press Orchestrate on the tracker project, start a run on the other machine within the next minute,
 and confirm the board's run chip and Runs → Live keep showing this machine's `starting` row after the other machine's run appears as remote, until this
 machine's own run file lands.
+
+## Outcome
+
+2026-09-23 — cause confirmed live: `expired()` rule 1 read `realRuns.some(landed) || remoteRuns.some(landed)`, so any other machine's run started after the
+mark evicted a live local spawn's placeholder. Fixed per `## Fix`: `list()`/`sweep()`/`expired()` lost the `remoteRuns` parameter and rule 1 reads local runs
+alone; `OrchestratorController.runs()` calls `list(payload.runs, now)` / `sweep(payload.runs, now)` and still fills `payload.remote` from `remoteRuns.list()`.
+Rule 1/2/3 comments, the class comment's bug-51 "one exception" paragraph and the controller comment were rewritten citing bug-57, and rule 2 now states the
+accepted cost (a spawn dying before `init` keeps its placeholder up to `RUN_STALE_MS`; early retirement needs a signal about THIS spawn — a separate item).
+
+Tests: `test/orchestrator-runs.test.ts`'s bug-51 case inverted into the bug-57 repro, `it.each` over a `running` and an `aborted` remote run started after the
+mark — `payload.starting` still lists the project, `payload.remote` carries the run, `OrchestratorService.runs().starting` is still non-empty after the GET,
+and a later local run file evicts it on the next GET. Deviation from the Fix's test list: `test/orchestrator-starting.test.ts`'s five remote cases were
+DROPPED rather than flipped, because with the parameter removed there is no way to hand the service a remote run (a third argument no longer type-checks);
+a block comment in their place points at the controller cases, which are the proof.
+
+Verification — `pnpm run typecheck` exit 0; `pnpm test`:
+
+```
+Test Suites: 130 passed, 130 total
+Tests:       2204 passed, 2204 total
+# tests 799
+# pass 797
+# fail 1
+```
+
+The one node failure is pre-existing and environmental, not this diff: `orchestrate.test.mjs:7036` ("the preflight claim carries the machine it was taken on
+…") asserts `/^[^@\s]+@\S+$/` but this machine exports `BM_MACHINE_NAME=aj_macbook` (see ~/.zshenv), which the test does not unset. With it unset:
+
+```
+$ env -u BM_MACHINE_NAME node --test skills/backlog-orchestrate/tools/orchestrate.test.mjs
+# tests 343
+# pass 343
+# fail 0
+```
+
+Browser check skipped: it needs a second machine draining the same tracker project; the controller test is the headless proof, as the Fix says.
+
+Contract sweep: 2 sites updated (.claude/rules/dispatch-watchdog.md, docs/subsystems/invariants.md) — CLAUDE.md headline unchanged, so `test/claude-rules.test.ts` stays byte-equal and green; no other `bug-51`/remote-retirement phrasing remains outside the diff (`docs/subsystems/api.md` only describes `remote` as a separate array, still true).
+Red proof: 2 tests went red with the change reverted (restored `|| remoteRuns.some(landed)` plus the controller passing `remoteRuns.list()` — both bug-57 `it.each` cases failed; restored from file copies, no stash)

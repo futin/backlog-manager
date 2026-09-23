@@ -6,8 +6,8 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
 
 - **A board-started run is visible before its run file exists, from server memory that is never written to disk.** `StartingRunsService` is a
   `Map<project, requestedAt>`, lost on restart on purpose, riding the payload as a separate top-level `starting` array — never a `status: 'starting'` member of
-  `runs`. An entry dies on three rules: a run for the project whose `startedAt` is at or after `requestedAt` (never "a `run.json` exists") — a local run
-  or, since bug-51, a remote one, which only the controller holds and passes in — age past `RUN_STALE_MS`, or a LOCAL run for that project already
+  `runs`. An entry dies on three rules: a LOCAL run for the project whose `startedAt` is at or after `requestedAt` (never "a `run.json` exists") — never a
+  remote one, since bug-57: a board spawn lands only on this machine — age past `RUN_STALE_MS`, or a LOCAL run for that project already
   `running`, fresh or crashed. Marked from `AgentsController` after the awaited spawn; `resume` is
   deliberately not marked; the Board's chip and the Runs Live sheet both render `starting` with no client-side filter, and a starting row carries no controls
   and cannot be selected — there is no run file for the detail sheet to show. Why:
