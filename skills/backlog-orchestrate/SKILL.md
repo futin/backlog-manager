@@ -47,8 +47,9 @@ Two reference files sit beside this one and are **not** loaded with it. Read the
 
 Every command in this file names the plugin root as `${CLAUDE_PLUGIN_ROOT}`, and Claude Code filled that in with the installed copy's path when it loaded this
 skill — no shell here sets the variable, so an unfilled one expands to nothing and every `node` line becomes `node "/skills/…"`. A file read by hand is never
-filled in: both reference files, and a SKILL.md re-read from the repo after a runner fix (below), still carry the placeholder, as `$CLAUDE_PLUGIN_ROOT` or in
-braces. Replace it with `${CLAUDE_PLUGIN_ROOT}` before running the line — or, once a runner fix has switched this run to the repo copy, with this repo's root.
+filled in: both reference files, and a SKILL.md re-read from the repo after a runner fix (below), still carry the unfilled placeholder — the
+name `CLAUDE_PLUGIN_ROOT` inside `${…}`. Replace it with `${CLAUDE_PLUGIN_ROOT}` before running the line — or, once a runner fix has switched this run to the
+repo copy, with this repo's root.
 
 ## Where commands run, and why it is not negotiable
 

@@ -113,8 +113,10 @@ read as a gate.
 
 ### Why the launcher carries named env variables and never a positional
 
-The quotes have to stay single so `$?` reaches the inner shell instead of being expanded by the outer one, which rules out writing `$CLAUDE_PLUGIN_ROOT` in
-there directly; `env` sets both names for the child without the outer shell touching anything.
+The quotes have to stay single so `$?` reaches the inner shell instead of being expanded by the outer one, which rules out reading the plugin root as a shell
+variable in there — no shell exports one, and `${CLAUDE_PLUGIN_ROOT}` is a placeholder Claude Code fills in as text when it loads SKILL.md (bug #14), so outside
+the quotes it has already become a literal path. `env` hands that path, and the run directory, to the child under names it can expand, without the outer shell
+touching anything.
 
 The obvious alternative — pass them positionally and read the first and second arguments — is the one thing that must not be done, and the reason is not style.
 **Slash-command argument substitution rewrites positional parameters in a SKILL.md before the session ever reads it, fenced code included.** Invoked as
