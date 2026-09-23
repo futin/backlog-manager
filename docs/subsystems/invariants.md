@@ -281,7 +281,9 @@ run would take the cooperative path (`finish --status paused`) for a request who
 **Recording the fact and ending the run are two outcomes, and only the first is guaranteed.** The response is
 `{ stopRequested, abortSession, abortRefused }`, and a gate refusal or a spawn failure is not an error — the request is on disk, the sweeper is already
 standing down on it and `abort` will already take the lease on the strength of it, so the refusal rides back in `abortRefused` naming the one command a person
-can run instead. A 5xx here would tell a caller the stop did not land when the half that matters did.
+can run instead. A 5xx here would tell a caller the stop did not land when the half that matters did. The tracker queue sweep that runs between the two
+halves (the orchestrator:queued spec, §3.1) is a third outcome held to the same rule: a refused label removal adds its id to an optional `unqueueFailed` and
+the stop proceeds, because the label is advisory and the `--abort` session repeats the sweep.
 
 **A stop cannot be withdrawn, so it asks first (bug-53).** The route's `cancel: true` was copied from pause's along with the rest of its shape, and the board
 drew it as a `Cancel stop` chip — but a pause is a REQUEST the run honours at the next boundary, so withdrawing it genuinely returns the run to where it was,

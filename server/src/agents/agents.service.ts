@@ -37,6 +37,7 @@ import type {
   AgentsStatus,
   BacklogItem,
   MergeMode,
+  OrchestratorRun,
   PauseResult,
   PermissionMode,
   QuestionMode,
@@ -1167,8 +1168,58 @@ export class AgentsService {
     // request — the confirmation-not-acknowledgement rule `pause()` follows.
     const stopRequested = stopRequestEffective(readPauseRequest(project), run);
 
+    // AFTER the stop is on file, so a sweep that fails — or throws past its own
+    // guard — can never cost the stop itself; BEFORE the abort spawns, so the
+    // label stops advertising the plan within this request rather than when
+    // that session gets round to its own sweep.
+    const unqueueFailed = await this.unqueue(project, run);
+
     const { abortSession, abortRefused } = await this.spawnAbort(project);
-    return { stopRequested, abortSession, abortRefused };
+    return { stopRequested, abortSession, abortRefused, ...(unqueueFailed.length > 0 ? { unqueueFailed } : {}) };
+  }
+
+  /**
+   * The stop's server-side queue sweep (the orchestrator:queued spec, §3.1):
+   * take `orchestrator:queued` off every queue item the run never claimed, and
+   * answer the ids whose removal was refused.
+   *
+   * **Why the server does it, and not only the driver.** The driver reads a
+   * stop only at its dispatch gates, so a stop pressed at the start of a long
+   * execute session would leave the queue labelled for that whole session —
+   * and a dead driver reads nothing at all. The server holds the token and the
+   * run file's queue, so it can answer "the plan is off" within one request.
+   * The spawned `--abort` repeats the sweep, which is what makes a partial
+   * failure here a warning rather than a fault.
+   *
+   * **Never-claimed is `claim === undefined`.** An item with a claim has had
+   * its label swapped for `in-progress` by the claim itself (§3.3), and one
+   * that is being worked right now is not this sweep's to write to.
+   *
+   * **Through the item writer, never `GithubClient`.** The per-item lock and
+   * the refusal mapping live in the source, and a second route to GitHub from
+   * this module would be a second copy of both. A `files` project has no writer
+   * and no label, so it returns before anything is asked.
+   *
+   * Sequential, not parallel: every removal lands on its own item's chain
+   * anyway, and one request at a time is the kinder shape against a rate limit
+   * this sweep may be the thing that hits. A refusal and a thrown error are the
+   * same answer — the id goes on the list and the next item is still tried.
+   */
+  private async unqueue(project: string, run: OrchestratorRun): Promise<string[]> {
+    const lookup = this.items.writerFor(project);
+    if (lookup.kind !== 'writer') return [];
+
+    const failed: string[] = [];
+    for (const entry of run.queue) {
+      if (entry.claim !== undefined) continue;
+      try {
+        const outcome = await lookup.writer.queue(lookup.project, lookup.marker, { project, id: entry.id, queued: false });
+        if (!outcome.ok) failed.push(entry.id);
+      } catch {
+        failed.push(entry.id);
+      }
+    }
+    return failed;
   }
 
   /**

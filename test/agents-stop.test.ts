@@ -6,12 +6,17 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
+import { GithubSource } from '../server/src/items/sources/github.source';
+import { GithubClient } from '../server/src/tracker/github.client';
+import { TrackerPollerService } from '../server/src/tracker/poller.service';
+import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
+import { FakeGithub } from './helpers/github';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { OrchestratorRun } from '../shared/types';
+import type { OrchestratorRun, RunQueueItem } from '../shared/types';
 
 const fixture = rawFixture as OrchestratorRun;
 
@@ -88,11 +93,14 @@ describe('POST /api/agents/stop', () => {
     }) as jest.Mock;
   }
 
-  async function createApp(): Promise<void> {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+  /** `gh` is the tracker suite's GitHub, behind a REAL `GithubClient` — the
+   *  files cases pass none and never reach one. */
+  async function createApp(gh?: FakeGithub): Promise<void> {
+    let builder = Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
-      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }]))
-      .compile();
+      .useValue(makeRegistry([{ name: 'alpha', path: projectPath }]));
+    if (gh !== undefined) builder = builder.overrideProvider(GithubClient).useValue(new GithubClient(gh.fetch));
+    const moduleRef = await builder.compile();
     app = moduleRef.createNestApplication();
     await app.init();
     // `listenLoopback`, never a bare `listen(0)` — see test/helpers/app.ts
@@ -362,5 +370,152 @@ describe('POST /api/agents/stop', () => {
     // RUN_IN_PROGRESS_CODE as a silent success, and this one needs a person
     // to read it — a stopped run is over, and its work is a new run's.
     expect(res.body.code).toBeUndefined();
+  });
+
+  /**
+   * The queue sweep (the orchestrator:queued spec, §3.1 and §3.2): a Stop
+   * takes `orchestrator:queued` off every queue item the run never claimed,
+   * server-side and before the abort spawns, so the label stops advertising a
+   * plan that is off within the one request — not when a driver that may be
+   * mid-session, or dead, next reaches a dispatch gate.
+   *
+   * The tracker is the in-memory GitHub of `test/helpers/github.ts`, behind a
+   * real `GithubClient`, so a refusal here is the client's and the source's own
+   * reading of a real 403 rather than a stubbed method's return value.
+   */
+  describe('the queue sweep', () => {
+    let gh: FakeGithub;
+
+    /** A queue entry spelled the way `run.json` spells a tracker item: the
+     *  bare issue number, `'31'`, never `'#31'`. */
+    const entry = (id: string, over: Partial<RunQueueItem> = {}): RunQueueItem => ({
+      ...fixture.queue[0],
+      id,
+      title: `item ${id}`,
+      stage: 'pending',
+      sessionId: null,
+      worktree: null,
+      branch: null,
+      claim: undefined,
+      ...over
+    });
+
+    const trackerRun = (): OrchestratorRun =>
+      runningRun({ queue: [entry('31', { stage: 'dispatched', claim: { commentId: 900 } }), entry('32'), entry('33')] });
+
+    /** Every removal of the label, in the order GitHub received them, by the
+     *  issue number each one named. */
+    const removals = (): number[] =>
+      gh
+        .matching('/labels/orchestrator%3Aqueued', 'DELETE')
+        .map((c) => Number(/\/issues\/(\d+)\//.exec(c.url)?.[1]));
+
+    beforeEach(async () => {
+      // The outer `beforeEach` built a files app; this one replaces it with a
+      // tracker project, keeping every other piece of the outer setup.
+      await app.close();
+      process.env[GITHUB_TOKEN_ENV] = 'ghp_stopSweepSentinelToken';
+      gh = new FakeGithub();
+      for (const number of [31, 32, 33]) gh.issue({ number, labels: [{ name: 'type:task' }, { name: 'orchestrator:queued' }] });
+      projectPath = makeProject('alpha', [], JSON.stringify({ kind: 'github', repo: 'futin/x' }));
+      stubDashboard();
+      await createApp(gh);
+      app.get(GithubSource).settleMs = 0;
+      // Seed and stand the poller down, then forget its calls: every request
+      // counted below is one the stop itself made.
+      const poller = app.get(TrackerPollerService);
+      await poller.tick();
+      poller.disarm();
+      gh.calls.length = 0;
+    });
+
+    it('removes the label from every never-claimed item, in queue order, and still spawns the abort', async () => {
+      writeRun(trackerRun());
+
+      const res = await post({ project: projectPath }).expect(200);
+
+      // 31 holds a claim: its claim already swapped the label for in-progress,
+      // and a sweep that touched it would be writing to an item a session is
+      // working right now.
+      expect(removals()).toEqual([32, 33]);
+      expect(gh.issues.get(32)?.labels.map((l) => l.name)).not.toContain('orchestrator:queued');
+      expect(gh.issues.get(33)?.labels.map((l) => l.name)).not.toContain('orchestrator:queued');
+      expect(res.body.stopRequested).toBe(true);
+      expect(res.body.abortSession).toBe('sess-abort');
+      expect(spawns()).toHaveLength(1);
+      // Present only when something was refused — a clean sweep adds no key.
+      expect(res.body).not.toHaveProperty('unqueueFailed');
+    });
+
+    it('reports a refused removal in unqueueFailed, finishes the sweep, and still stops', async () => {
+      writeRun(trackerRun());
+      gh.failNext = { fragment: '/issues/32/labels/orchestrator', status: 403, headers: { 'x-ratelimit-remaining': '0' } };
+
+      const res = await post({ project: projectPath }).expect(200);
+
+      // The id as the run file spells it, so a caller can match it against the
+      // queue it already holds.
+      expect(res.body.unqueueFailed).toEqual(['32']);
+      expect(gh.issues.get(33)?.labels.map((l) => l.name)).not.toContain('orchestrator:queued');
+      expect(res.body.stopRequested).toBe(true);
+      expect(spawns()).toHaveLength(1);
+    });
+
+    it('writes the stop first, sweeps second and spawns the abort last', async () => {
+      writeRun(trackerRun());
+      // What was true at the moment each removal reached GitHub: the stop
+      // must already be on file (so a sweep that throws cannot lose it), and
+      // no abort may have been spawned yet (so the abort's own sweep finds
+      // the server's already done).
+      const seen: { stopOnFile: boolean; spawnsBefore: number }[] = [];
+      const inner = gh.fetch;
+      gh.fetch = (async (url: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE' && url.includes('orchestrator%3Aqueued')) {
+          seen.push({ stopOnFile: readPauseRequest(projectPath, controlRoot)?.kind === 'stop', spawnsBefore: spawns().length });
+        }
+        return inner(url, init);
+      }) as typeof fetch;
+      // The client captured the fetch at construction, so rebuild the app
+      // around the wrapper rather than mutating a field it never reads again.
+      await app.close();
+      await createApp(gh);
+      app.get(TrackerPollerService).disarm();
+
+      await post({ project: projectPath }).expect(200);
+
+      expect(seen).toEqual([
+        { stopOnFile: true, spawnsBefore: 0 },
+        { stopOnFile: true, spawnsBefore: 0 }
+      ]);
+      expect(spawns()).toHaveLength(1);
+    });
+
+    it('409s a project with no running run and sweeps nothing', async () => {
+      writeRun({ ...trackerRun(), status: 'done' });
+
+      await post({ project: projectPath }).expect(409);
+
+      expect(removals()).toEqual([]);
+    });
+
+    it('never reaches the item writer for a files project', async () => {
+      // Rebuilt around a files project with the same GitHub wired in, so the
+      // assertion is about the stop's own decision and not about a tracker
+      // that was never there to be called.
+      await app.close();
+      projectPath = makeProject('alpha', []);
+      stubDashboard();
+      await createApp(gh);
+      app.get(TrackerPollerService).disarm();
+      const queue = jest.spyOn(app.get(GithubSource), 'queue');
+      writeRun(trackerRun());
+
+      const res = await post({ project: projectPath }).expect(200);
+
+      expect(queue).not.toHaveBeenCalled();
+      expect(removals()).toEqual([]);
+      expect(res.body).not.toHaveProperty('unqueueFailed');
+      expect(res.body.stopRequested).toBe(true);
+    });
   });
 });
