@@ -210,9 +210,11 @@ export interface ItemWriter {
   comment(project: RegistryProject, marker: SourceMarker, req: ItemCommentRequest): Promise<WriteOutcome<{ commentId: number; url: string }>>;
 
   /**
-   * The newest claim on one item, or `null` for an item nobody has ever
-   * claimed — the one READ on this interface, and the eighth route
-   * (`GET /api/items/claim`) behind the seven the spec names.
+   * The claim that holds one item — the lowest live id, the holder `claim`
+   * itself resolves, or the newest claim when nothing is live (bug-58) — or
+   * `null` for an item nobody has ever claimed. The one READ on this
+   * interface, and the eighth route (`GET /api/items/claim`) behind the seven
+   * the spec names.
    *
    * It is here rather than on `ItemSource` because the claim IS the writer's:
    * the protocol writes it, the protocol's vocabulary describes it, and the

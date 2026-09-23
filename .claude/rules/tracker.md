@@ -5,7 +5,8 @@ paths: ["server/src/tracker/**"]
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
 
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.** `server/src/tracker/claim.ts` is the one implementation of
-  what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`); `GithubSource.claim` is the one implementation of taking one. The sequence
+  what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`, `currentClaim`);
+  `GithubSource.claim` is the one implementation of taking one. The sequence
   is list · post · settle (`settleMs`, 1 s) · list · UNION, and the union is what decides — never the second list alone, because GitHub's comment listing is
   eventually consistent. A LOSER deletes its own comment; a claim that merely went STALE is released (`released: { reason: 'stale' }`), never deleted, because
   it is the permanent record of work somebody did and carries the counters to prove it. **Who may release is a quadruple: the holder always, the RUN that owns
