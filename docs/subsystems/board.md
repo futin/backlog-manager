@@ -243,6 +243,13 @@ merely rendered by the components:
   link-out to the issue that stops its click from opening the modal behind it.
 - **The item modal** prints the same line under the title, because the body it shows came out of the poller's cache rather than from GitHub on open.
 
+**A fourth card reading, `queued` (task-52, [spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md) §4.2).** An issue carrying the
+`orchestrator:queued` label maps to `BacklogItem.queued`, and `queuedReading` (`lib/tracker.ts`) turns it into `'live' | 'stale' | null`: `'live'` while the
+item's project has a local run that is `paused`, or `running` and not crashed, or a live remote run for the same repo; `'stale'` when the label is there and no
+live run holds the project — a crash, a run that died on another machine without its Stop, a label added by hand. The card draws the `Marker` tone `queued`
+for the first and a dimmed `queued-stale` (`queued · stale`, its title saying no live run holds it and where to remove it) for the second. It is a reading, never
+a block: dispatch, the Orchestrate sheet and every gate ignore it, because the label is a plan and the claim is the only exclusion.
+
 **Dispatch is drawn exactly as it is for a files item (task-46).** Task-45 hid the control here, because a spawned session would have run the file-writing
 skills against a project with no files; phase 3 made that false — the skills write through the API — so `deriveAction` asks nothing about an item's `source`
 and a tracker card gets the same chip on the same rules. The per-item block that stops a CLAIMED item is the ordinary one: `progressBlock` reads the `started`

@@ -38,7 +38,7 @@ where there are no item files.
 
 #### The write side (task-46, spec §6.2)
 
-Seven POST routes under `/api/items/`, in `items-write.controller.ts`, each a thin pass-through to one `ItemWriter` method:
+Eight POST routes under `/api/items/`, in `items-write.controller.ts`, each a thin pass-through to one `ItemWriter` method:
 
 | Route       | Body                                                      | Does                                                                                                                                                 | Answers                                        |
 | ----------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
@@ -49,6 +49,7 @@ Seven POST routes under `/api/items/`, in `items-write.controller.ts`, each a th
 | `heartbeat` | `project, id, commentId, session, runId?, state?, finished?` | re-stamps `heartbeat`; carries the opaque `ClaimState` (read tolerantly by the remote-run assembly). `finished` (task-48) is also accepted on a RELEASED claim, where it sets `finished` alone. `session` is required and only the holder or the claim's own run may beat — `release`'s triple minus its dead-claim clause, since reviving a dead claim is the harm (bug-45) | 200 `{ commentId, record }`                    |
 | `body`      | `project, id, body, ifUpdatedAt, runnerFix?`              | one fresh `GET`, then `PATCH` only if the stamp matches; `runnerFix` adds/removes the `runner-fix` label AFTER the patch, and ABSENT leaves it alone | 200 `{ id, updatedAt }` / 409 `{ updatedAt }`  |
 | `comment`   | `project, id, body`                                       | appends a comment                                                                                                                                    | 201 `{ commentId, url }`                       |
+| `queue`     | `project, id, queued`                                     | adds (`true`) or removes (`false`) `orchestrator:queued` (task-52); `queued` must be a literal boolean or a 400, and a removal's GitHub 404 is SUCCESS — every `false` caller is a sweep | 200 `{ id, queued }`                           |
 
 Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `agents/` — these create and close issues with a credential the browser never sees, which is
 a larger consequence than the dispatch route the guard was written for. A JSON POST with no `Origin` still passes, because `backlog.mjs` in API mode is exactly
@@ -60,8 +61,13 @@ reason) or the call. None of those four makes a network request. `FilesSource` h
 controller alone maps them: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · anything else 502.
 
 Writes to one item are serialised in-process (`Map<urn, Promise>`), and every response is absorbed into the poller's cache so the next board read shows it —
-`polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the eighth route and a READ, unguarded like every other GET,
+`polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the ninth route and a READ, unguarded like every other GET,
 answering who holds one item out of the cache; `backlog.mjs stop` needs it because `start` ran in a different process.
+
+`queue` is the only way the orchestrator driver reaches the advisory `orchestrator:queued` label ([spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md)): `orchestrate.mjs` adds it at `init` and removes
+it on a skip, at `finish` and at `--abort`, while two server paths remove it on their own — a WON `claim` swaps it for `in-progress` in the same step, whoever
+claimed, and `POST /api/agents/stop` sweeps the run's never-claimed items (below). Nothing on this side reads the label as exclusion: the claim is still the
+only lock.
 
 ### `tracker/`
 

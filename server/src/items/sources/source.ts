@@ -107,7 +107,7 @@ export interface ItemSource {
    * than a gap: item files are written by the skills and by nothing else
    * (CLAUDE.md, "Item files are read-only to the server and client"). A files
    * project reaching a write route is a 400 saying so, produced by the ONE
-   * check that reads this field — never by seven routes each remembering to
+   * check that reads this field — never by eight routes each remembering to
    * ask.
    */
   readonly writer?: ItemWriter;
@@ -235,7 +235,7 @@ export interface ItemWriter {
    * comment id that identifies the claim, and `stop` — a separate `backlog.mjs`
    * invocation, possibly minutes later — has to rediscover it in order to
    * `release` or `heartbeat` it. Without this the CLI could take an item and
-   * never give it back. The spec's §6.2 names seven write routes and does not
+   * never give it back. The spec's §6.2 names the write routes and does not
    * name this one; the deviation is recorded in the task item's Outcome.
    *
    * Answered from the CACHE when it is there, and from ONE fresh read when it

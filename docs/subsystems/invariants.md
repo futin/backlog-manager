@@ -2772,7 +2772,7 @@ A closed issue's section can change while its labels never do: `completed` (or n
 intact, and any other reason is `terminal` in `out-of-scope`. The `type:*` label stays on the issue, so the original type is recoverable — which the file store
 cannot do, since a rejected item moves into a flat directory that forgets it.
 
-## The seven item-write routes are guarded, refused for `files`, and serialised per item
+## The eight item-write routes are guarded, refused for `files`, and serialised per item
 
 Task-46, spec §6.2. Until this branch every route in this server either read something or spawned a session; these seven CREATE AND CLOSE ISSUES in somebody's
 repository, with a credential the browser never sees. That is a strictly larger consequence than the dispatch route the origin guard was written for, which is
@@ -2788,7 +2788,7 @@ registry's own `path` (deliberately not realpath — the `uncommitted` rule, and
 be a filesystem touch on a path this server was never given), then `resolveSource` per request, then the adapter's `writer`. It answers `unregistered` → 404,
 `files` → 400 `this project's items are files — the skills write them directly`, `unsupported` → 400 carrying `resolveSource`'s own path-prefixed reason, and
 otherwise the writer. `FilesSource` has NO `writer` field at all, and that absence is the rule rather than a gap: item files are written by the skills and by
-nothing else, and the one check that reads the field is what makes that true for all seven routes at once instead of seven routes each remembering to ask.
+nothing else, and the one check that reads the field is what makes that true for all eight routes at once instead of eight routes each remembering to ask.
 
 **Every refusal is a value.** `ItemWriter` answers `WriteOutcome`, never throws, and `GithubClient` beneath it answers a `GithubResponse` for every status —
 the same posture, one layer down. The controller is the only place a `refused` becomes a status: `no-token` 503, `not-found` 404, `conflict` 409,
@@ -2807,9 +2807,18 @@ naming the ENVIRONMENT VARIABLE, which is the thing an operator can act on.
 **`heartbeat` accepts one field on a RELEASED claim (task-48).** A request carrying `finished: { at, status }` is taken on a released claim too, and there it
 sets `finished` and nothing else — no heartbeat, no state, never an un-release. `orchestrate.mjs finish` stamps the run's outcome on its last-touched claim, and
 that claim's terminal stage has normally released it already. `finished` is validated field by field like `run` (a derived run's status IS that value), where
-`state` is still taken outright. It rides the heartbeat route rather than an eighth write route so the count below stays seven.
+`state` is still taken outright. It rides the heartbeat route rather than a new write route, because a route for one field would have moved the headline's
+count for nothing; the count did move later, for `queue` below, which is a whole write of its own.
 
-**There is an eighth route, and it is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
+**The eighth write route is `queue` (task-52, [the orchestrator:queued spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md) §2).**
+`POST /api/items/queue`, body `{ project, id, queued }`, adds or removes the advisory `orchestrator:queued` label, and it is everything the seven are: the
+same class decorator, the same `writerFor` gate (so a `files` project is refused before any network call), the same per-URN chain, so a queue write and a claim
+on one item never interleave. `queued` must be a literal boolean — a truthy string silently choosing "add" is the mistake the 400 exists to name. Its one rule of
+its own: a REMOVAL's 404 is success. Every `queued: false` caller is a sweep, whose contract is "the label is not there", and a label already gone — most often
+because a human's won claim swapped it off first — is that contract met, not a failure worth a warning line. The driver reaches GitHub through this route and
+no other way; the headless session never holds the token.
+
+**There is a ninth route, and it is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
 every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
 `backlog.mjs stop` are two PROCESSES: `claim` answers the comment id that identifies the claim, and the `stop` that must release it has no other way to
 rediscover it. Without it the CLI could take an item and never give it back. Spec §6.2 names seven routes and not this one; the deviation is recorded in
@@ -3023,6 +3032,40 @@ for a files item is "ANY stamp, fresh or stale" (`progressBlock`), and what reti
 issue. A mapper that expired claims on its own would show an item as free while the next `claim` call still had to fight for it. The counters come off the
 newest claim whether or not it is released, because they are the item's running totals rather than a fact about who holds it.
 
+## `orchestrator:queued` is a plan, never a claim
+
+Task-52, [the orchestrator:queued spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md). A run on a tracker project claims one issue at a
+time, so every other item in its queue looked, to a teammate on github.com or another machine's board, exactly like an unplanned open issue: a person picked one
+up, the run reached it an hour later, lost the claim at preflight and skipped it. Nobody did anything wrong and both sides lost time. The fix is a SIGNAL — one
+label, `orchestrator:queued`, on every issue a live run still means to reach, filterable in GitHub's own UI and drawn on every machine's board.
+
+**Why advisory, and why nothing may read it as exclusion.** The claim protocol above is the only mutual exclusion this system has, and it is convergent because
+it is ordered comment ids with no clock. A label has no order, no owner and no heartbeat; a lock built on it would be a second, weaker protocol that two
+machines could disagree about. So no gate, queue builder or claim reads the label — a human who claims a queued item by hand is doing nothing wrong, their won
+claim simply wins, and the run skips the item at preflight exactly as it did before the label existed. It is not the assignee either: the assignee means "who
+last worked this", and setting it for a plan would make a queued item indistinguishable from a worked one. The same reasoning makes every driver-side write
+best-effort: a failed add at `init` or a failed remove at a skip prints one stderr line and the run continues, because parking a run over a cosmetic hint would
+trade real work for it.
+
+**Who adds and who removes.** The driver adds it at `init` to every item of the queue as built, already cut to `--max`. The server's won `claim` removes it in the
+same step that adds `in-progress` — the claim swap — because the claim is the moment an item stops being planned and starts being worked, and every claimant, a
+run, a hand session or another machine, goes through that one method. The driver removes it on a skip and sweeps it off every never-claimed item at `finish`
+and at `--abort`. A pause keeps it: a paused run still plans those items.
+
+**Why the server sweeps at Stop, not only the driver.** The driver reads a stop request only at its dispatch gates, so a Stop pressed early in a long execute
+session would leave the whole queue labelled for that session — the opposite of what a stop says, which is that the plan is off. A dead driver reads nothing
+at all. The server holds the token and can read the run file's queue, so `AgentsService.stop` sweeps every never-claimed item itself, through the item writer
+(never `GithubClient` directly, so the per-item lock and the refusal mapping stay in `items/`), before the abort spawns. The sweep never fails the stop: the ids
+it could not clear come back in `StopResult.unqueueFailed`, and the spawned `--abort` sweeps again as the backstop — idempotent by the route's 404 rule. A
+`files` project has no writer, so its stop asks nothing.
+
+**Why stale is drawn, not hidden.** A crashed run, a run on another machine that died without its Stop, or a label added by hand all leave the label on the
+issue with no live run behind it. Hiding the badge then would make the board disagree with GitHub's own issue list, which still shows the label, and would
+hide the one thing a reader can act on — remove the label, or Stop the crashed run when it is this machine's. So `queuedReading` (`client/src/lib/tracker.ts`)
+answers `'live'` only while a local run is `running` and not crashed, or `paused`, or a remote run for the same repo is live; otherwise `'stale'`, drawn as a
+dimmed `queued · stale` whose title says why. `paused` is accepted on its own because `runIsLive` is `running`-only, and a paused run is still the run that
+queued the item.
+
 ## `isItemId` accepts three shapes
 
 Task-46. The predicate now admits `[a-z]+-\d+` (a files id), `#\d+` and `gh:<owner>/<repo>#\d+`, and the cap moved from 64 to 200 characters because GitHub
@@ -3213,7 +3256,7 @@ Task-50, spec §8 — phase 5 of the tracker-backed direction, and the phase whe
 `backlog.mjs import github [owner/repo] [--no-forms]` moves a whole `backlog/` store onto GitHub issues through the local API, in one shot, and the ORDER of its
 two writes to the repository is the entire design: the marker goes down first, the item files are deleted last, and everything else happens between them.
 
-**The marker cannot go anywhere but first.** Every request `import` makes is one of the seven existing item write routes, and `ItemsService.writerFor` answers
+**The marker cannot go anywhere but first.** Every request `import` makes is one of the existing item write routes, and `ItemsService.writerFor` answers
 `files` — a 400 reading `this project's items are files — the skills write them directly` — for a project whose marker does not yet say `github`. The 2026-09-17
 draft of this design had the marker written LAST, on the reasonable-sounding argument that a project should not claim to be tracker-backed until its issues exist;
 that draft could not have worked at all, because the first `create` it made would have been refused by the server it was talking to. This is not a bug that
@@ -3252,7 +3295,7 @@ is what makes two of §8.1's refusals load-bearing: the link pins `backlog/<path
 404s for everyone else) and `backlog/` has to be clean (otherwise the link shows bytes that differ from what was imported).
 
 **Three things are lost, and saying which is the point.** A body over the cap keeps only its leading sections plus the link. `tags:` survive in the footer alone,
-because the tracker's label set is the closed eight of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the
+because the tracker's label set is the closed nine of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the
 repository — the issue's date is its `created` frontmatter, not the commit that filed it. None of the three is recoverable from the tracker, which is why the
 files' history is worth keeping in git rather than deleting the whole `backlog/` directory.
 

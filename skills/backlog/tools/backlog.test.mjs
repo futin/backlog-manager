@@ -5274,7 +5274,7 @@ test('import composes each create from the frontmatter the tracker has a field f
   assert.ok(one.body.endsWith('<!-- bm:imported from=task-1 created=2026-01-01 tags=x,y -->\n_Imported from backlog/tasks/open/task-1-one.md_'), one.body.slice(-200))
   assert.equal('runnerFix' in two, false)
   assert.equal(five.section, 'out-of-scope')
-  // The label set is the closed eight the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
+  // The label set is the closed nine the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
   for (const create of creates) assert.equal('labels' in create.body, false)
   const tagsOutsideFooter = one.body.replace(/<!-- bm:imported[^]*$/, '')
   assert.equal(/\bx, y\b/.test(tagsOutsideFooter), false, 'the tags line must not survive anywhere but the footer')

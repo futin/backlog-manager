@@ -64,7 +64,7 @@ export function splitOutcome(body) {
  * is the same fact for a human scrolling the issue. They are two different things on purpose — the parser matches only the comment, so an issue whose body
  * merely mentions an old id is never mistaken for an imported one.
  *
- * `tags=` carries what the tracker has no field for: the label set is a closed eight (`server/src/tracker/labels.ts`), so free-text `tags:` become no label at
+ * `tags=` carries what the tracker has no field for: the label set is a closed nine (`server/src/tracker/labels.ts`), so free-text `tags:` become no label at
  * all, and the key is omitted entirely rather than written empty when an item has none.
  */
 export function renderImportFooter({ id, created, tags, relPath }) {
