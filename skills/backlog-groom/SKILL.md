@@ -55,9 +55,12 @@ file, so `show` is the whole item. Use `show <id> --json` when you are about to 
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt from show --json>
 ```
 
-`--if-updated-at` is not ceremony. It is what stops two machines' grooms from silently overwriting each other: the server re-reads the issue and refuses if it
-moved since you read it. **A refusal means re-read and re-apply** — `show --json` again, redo your edit against the body you get back, and call `body` again
-with the new stamp. Never work around it.
+`--if-updated-at` is not ceremony. It is what stops two machines' grooms from silently overwriting each other: the server re-reads the issue and refuses if its
+body changed since you read it. Your own `start` and `heartbeat` move the issue's stamp too, and they do not count — only a body edit refuses. **A refusal
+means re-read and re-apply** — `show --json` again, redo your edit against the body you get back, and call `body` again with the new stamp. Never work around it.
+**Run `body` as a command of its own, and run `stop` only after `body` exits `0`** — never chain `stop` after it with `;`, which runs `stop` even when `body`
+is refused. A refused `body` must leave the claim in place for the retry; releasing it means the retry needs a second `start`, and that leaves a second claim
+comment on the issue that is never deleted.
 
 **Promote** is two calls rather than a write-then-move: file the new task with `new tasks "<title>" --body /tmp/task.md --from #<n>`, then close the original
 with `move #<n> done --outcome /tmp/promoted.md`, whose text is `Promoted to #45.` The closing comment is what `promoted-to:` was in frontmatter; the server

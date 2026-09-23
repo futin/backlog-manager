@@ -2128,7 +2128,11 @@ export interface ItemHeartbeatRequest extends ItemWriteRequest {
  * `POST /api/items/body` — groom's route, and the ONE route that rewrites an
  * issue body (§6.4). `ifUpdatedAt` is the optimistic-concurrency token: the
  * `updated_at` the caller read, checked against a FRESH `GET` before the patch,
- * so two grooms on two machines cannot silently overwrite each other.
+ * so two grooms on two machines cannot silently overwrite each other. A moved
+ * stamp alone is not a conflict (bug #220): the patch still goes through when
+ * the cached copy at exactly this stamp holds the same body as the fresh read,
+ * because the claim protocol's own label and comment writes move the stamp
+ * too. `GithubSource.patchBody` carries the whole rule.
  */
 export interface ItemBodyRequest extends ItemWriteRequest {
   id: string;
