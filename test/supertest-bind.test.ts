@@ -143,7 +143,28 @@ describe('the platform behaviour this helper exists for', () => {
     return (squatter.address() as { port: number }).port;
   }
 
-  it('lets a wildcard listen(port) succeed on a port 127.0.0.1 already holds', async () => {
+  /* The overlap is a BSD-stack behaviour (macOS, where bug-33 was measured), not a universal one. Linux refuses a dual-stack
+     wildcard bind on a port any IPv4 address already holds, so there the first two cases below are not merely wrong but
+     unreachable: the shadow's listen() errors before any dial happens, and every `pnpm test` on a Linux machine went red on
+     them — which parked every item of an orchestrator run on the Ubuntu box, since the merge gate reads nothing else. They
+     run off Linux only, and the Linux case in their place asserts the refusal itself, so a kernel that ever started allowing
+     the overlap would go red here rather than silently reopening the bug on a platform this file claimed was immune. */
+  const onLinux = process.platform === 'linux';
+  const whereWildcardOverlaps = onLinux ? it.skip : it;
+  const whereWildcardIsRefused = onLinux ? it : it.skip;
+
+  whereWildcardIsRefused('refuses a wildcard listen(port) on a port 127.0.0.1 already holds — why Linux never had the bug', async () => {
+    shadow = createHttpServer();
+
+    const error = await new Promise<NodeJS.ErrnoException>((resolve, reject) => {
+      shadow!.once('error', resolve);
+      shadow!.listen(occupiedPort(), () => reject(new Error('a wildcard bind shared a port 127.0.0.1 already holds')));
+    });
+
+    expect(error.code).toBe('EADDRINUSE');
+  });
+
+  whereWildcardOverlaps('lets a wildcard listen(port) succeed on a port 127.0.0.1 already holds', async () => {
     shadow = createHttpServer((_req, res) => res.end('ours'));
 
     await new Promise<void>((resolve, reject) => {
@@ -154,7 +175,7 @@ describe('the platform behaviour this helper exists for', () => {
     expect(shadow.address()).toEqual({ address: '::', family: 'IPv6', port: occupiedPort() });
   });
 
-  it('routes the IPv4 dial to the squatter, not to the wildcard listener', async () => {
+  whereWildcardOverlaps('routes the IPv4 dial to the squatter, not to the wildcard listener', async () => {
     shadow = createHttpServer((_req, res) => res.end('ours'));
     await new Promise<void>((resolve, reject) => {
       shadow!.once('error', reject);
