@@ -3,6 +3,9 @@ id: bug-49
 title: A session killed mid-item holds its claim for the full stale window, though the machine knows the process is gone
 created: 2026-09-22
 tags: tracker, claim
+updated: 2026-09-23T06:11:04Z
+groom-elapsed: 251
+groom-tokens: 72546
 ---
 
 ## Symptom
@@ -49,17 +52,117 @@ designed; the claim then showed `released: { at: 2026-09-22T12:00:23.536Z, reaso
 
 ## Cause
 
-unknown
+Three things, and the first one is a defect in bug-48's own repair that has to be fixed before anything automatic can be built on it.
 
-Two candidate shapes, not yet investigated:
+**1. `abort`'s proof of death can never fire for the case it was written for.** `holdingSessionEvidence` (`skills/backlog/tools/backlog.mjs:1590`) calls
+the holder alive if any transcript of its session has an mtime at or after the claim's `heartbeat`. But the `start`/`heartbeat` that stamped the beat is
+itself a `Bash` tool call inside that session, and the session appends the call's `tool_result` to its transcript AFTER the server stamps the beat — so a
+session killed at any point after its last heartbeat returned always has a transcript newer than the beat, and `abort` refuses it as "still writing here".
+Measured on the repro session: `77a705a3-….jsonl` on this machine has mtime `2026-09-22T11:57:18.561Z` against the claim's heartbeat
+`2026-09-22T11:56:39.324Z` (the `tool_result` lines run to 11:56:55Z, and the shutdown bookkeeping lines `last-prompt`/`cost-state` land at the stop).
+`abort 5` on that claim would have refused, which is why the repro was cleared with a raw `POST /api/items/release` rather than the verb bug-48 added. The
+unit tests stayed green because they fixture a transcript mtime by hand and never model a session whose last act was the beat itself. Transcript mtime
+answers "did this session ever write after the beat", which every session did; it cannot answer "is the process still there".
 
-- A `SessionEnd`/`Stop` hook on the executing session that releases whatever it holds. Cheap, but it does not fire for a `kill -9` or a machine that loses
-  power, so it narrows the window rather than closing it.
-- A sweeper on the machine that owns the claim: the dashboard already knows the session's process is gone (`runningClaudeProcs`, and per-session liveness), so
-  the holding machine can satisfy the host clause itself and release with reason `aborted`. This is the one that matches the clause bug-48 added, and it is
-  the direction to investigate first — including who owns the sweeper (this server or the dashboard), how it proves the session is gone rather than merely
-  idle, and what it must NOT do to a session that is alive but quiet between long tool calls.
+**2. The evidence that CAN answer it exists, and nothing reads it.** Claude Code keeps its own process registry at `<configDir>/sessions/<pid>.json`:
+`{ pid, sessionId, procStart, cwd, kind, status, … }`, one file per running `claude` process, headless `-p` sessions included. Verified on this machine
+2026-09-23:
+- the file is written at process start and stays for the whole life of the process, busy or idle — so a session quiet between long tool calls is present;
+- it is REMOVED on a graceful exit: the repro session `77a705a3` (stopped from the dashboard) has no file;
+- it is LEFT BEHIND by a hard kill: `1726359.json` names session `6bb566f5` and `process.kill(1726359, 0)` answers `ESRCH`;
+- `procStart` equals field 22 of `/proc/<pid>/stat` (checked on the live `1895628`: `25913776` both), so a reused pid is distinguishable from the original.
+
+So on the holding machine "no registry file names the session" proves a graceful exit, and "a file names it but its pid is dead or its `procStart`
+differs" proves a hard kill. The dashboard's own liveness signals are weaker for this: `runningClaudeProcs` is a machine-wide count, `liveCwds` is per
+directory (two sessions in one repo are indistinguishable), and `liveSessionIds` only sees ids that appear in argv (`--session-id`/`--resume`), so a
+plainly-launched terminal session would read as dead.
+
+**3. Nothing on the holding machine looks.** The one clause that may release a live claim for a gone holder is bug-48's `sameHost`
+(`server/src/items/sources/github.source.ts:597`), and its only caller is a person typing `abort`. No periodic process on the host asks the question. The
+obvious owner is this server — it already polls every connected repo on a timer and caches every claim comment (`poller.service.ts`, `claimsFor`) — but
+it runs in the compose stack under **Docker Desktop**, whose containers share neither the WSL distro's pid namespace nor its `~/.claude`. So the server can
+be taught to read the registry FILES (a read-only mount), but must never be taught to test a pid: inside the container `process.kill(pid, 0)` answers
+`ESRCH` for every host pid, which would read every live session as dead.
 
 ## Fix
 
-unknown
+Two parts, in this order: part A is a standalone correction to bug-48 and is what part B's reasoning rests on. No `runner-fix:` — nothing here touches
+`backlog-orchestrate`'s SKILL.md or CLI, the reviewer agent, or `server/src/agents/`.
+
+Assumptions decided without the user (no question channel in this session): the sweeper lives in this server rather than in the dashboard, which knows
+nothing about claims; the hard-kill case stays on the fifteen-minute window when the server runs in Docker, rather than widening the container to the host
+pid namespace, which Docker Desktop cannot give it anyway; and run-owned claims are out of the sweep.
+
+**A. Replace the transcript-mtime evidence with the process registry, in `backlog.mjs`.**
+
+- `holdingSessionEvidence(session, heartbeatISO, env)` becomes a registry reader (the heartbeat argument goes). Scan `<configDir>/sessions/*.json` —
+  `<configDir>` derived exactly as `claudeProjectsRoot` derives it, `CLAUDE_CONFIG_DIR` first. A file is evidence of life when its `sessionId` equals the
+  holder's, `process.kill(pid, 0)` succeeds or throws `EPERM`, and — where `/proc/<pid>/stat` is readable — its field 22 equals the file's `procStart`.
+  Where `/proc` is absent (macOS) the pid test stands alone; a reused pid then reads as alive, which is the safe direction.
+- Fail CLOSED on a registry this build does not understand, because a misread there turns every live neighbour into a dead one. Three states, not two:
+  `alive` (evidence found), `gone` (registry read, nothing names the session), `unknown`. It is `unknown` when the directory is missing or unreadable, when
+  any `*.json` in it lacks a string `sessionId` or a numeric `pid`, or — when the aborting process has a `CLAUDE_CODE_SESSION_ID` — when the registry has no
+  live entry for the aborting session itself. That last one is the self-check: a session that cannot find itself is reading a registry whose shape changed.
+- `abort` refuses on `alive` (the existing refusal, reworded to name the registry file and pid instead of a transcript) and on `unknown` (new refusal:
+  cannot tell whether the session is gone, wait out the 15 min window). Only `gone` releases. Every other refusal and the request body are unchanged.
+- A claim whose `session` is the `<user>@<host>` fallback (no `CLAUDE_CODE_SESSION_ID`) has no registry entry by construction; keep bug-48's reading that
+  the person at that terminal is the one running `abort`, so it releases — but it is excluded from part B, see below.
+- Update the prose that describes the old check: `skills/backlog-groom/SKILL.md:99`, `skills/backlog-execute/SKILL.md:179-180`,
+  `.claude/rules/tracker.md:21`, and `docs/subsystems/invariants.md:2907` ("finds no transcript … whose mtime is at or after" becomes the registry rule).
+
+Test cases for A (`skills/backlog/tools/backlog.test.mjs`, the bug-48 `abort` block at ~4294; the two transcript-mtime cases are replaced, not kept):
+- registry dir with no file naming the holder, aborting session has its own live entry (fixture it with `pid: process.pid` and the test process's real
+  `procStart` or no `/proc` check) → one `POST release`, `reason: 'aborted'`, exit 0;
+- a file naming the holder with `pid: process.pid` → exit 1, no request, message names the file;
+- a file naming the holder with a pid that is not running (spawn and reap a child, use its pid) → releases;
+- a file naming the holder with `pid: process.pid` but a `procStart` that differs from `/proc/self/stat` field 22 (Linux only; skip elsewhere) → releases;
+- registry directory absent → exit 1, no request, "cannot tell";
+- a `*.json` without `sessionId` → exit 1, no request;
+- `CLAUDE_CODE_SESSION_ID` set but no entry for it → exit 1, no request;
+- a transcript for the holder with mtime AFTER the heartbeat and no registry entry → releases (the regression case: this is the repro, and today it refuses).
+The host, no-host, released and dead-claim cases are unchanged and must stay green.
+
+**B. A claim sweeper in this server, for graceful exits.**
+
+A new service in `server/src/items/` (it calls `GithubSource.release`, which lives there; the poller must not import it back) that runs after each
+successful per-repo sync of `TrackerPoller` — a callback the poller exposes, so the sweeper inherits the "armed only while something is connected"
+behaviour instead of owning a second timer. For each cached claim in the synced repo it releases the claim when ALL of these hold:
+- the claim is live (`isLive`) and carries no `run` — a run's claim has its own recovery path (watchdog resume, `orchestrate.mjs abort`), and releasing it
+  between a driver crash and its resume would hand the item to somebody else mid-run;
+- `session` is shaped like a Claude Code session id (a UUID), never the `<user>@<host>` fallback, which has no registry entry and would always read gone;
+- `host` is one this server has been told is its own: an in-memory set of the `host` values carried by `POST /api/items/claim` requests this process has
+  received (the API is loopback-bound, so those callers are on this machine). In memory only, never written, the way starting runs are; after a restart a
+  claim is sweepable again once any session on the machine has claimed through this server — until then it waits out the window, which is today's
+  behaviour. This is what keeps bug-46's false negative out: a foreign claim's host is never in the set, so an absent local entry is never read as death;
+- the registry is readable and understood (same `unknown` rules as A, minus the self-check, which a server has no session to run) and no file in it names
+  the session. **File presence only — the server never calls `process.kill` on a registry pid**, because in the container every host pid answers `ESRCH`.
+  A hard-killed session leaves its file behind and so is never swept: it stays on the fifteen-minute window, and `abort` at the machine (part A) clears it.
+
+The release goes through `GithubSource.release` with `reason: 'aborted'`, `host` set to the claim's own host (bug-48's `sameHost` clause, satisfied by the
+machine that holds the claim), `session` set to a fixed sweeper identity so the `released.by` field says who did it, and no `counters` key (the abandon
+rule). A `conflict` answer (already released, raced by the holder's own stop) is not an error — log nothing louder than debug and move on. One release per
+claim per sweep; no retry loop inside a tick.
+
+Mount the registry read-only in `docker-compose.yml` beside the existing `~/.backlog-manager` mount:
+`${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/sessions` → the same absolute path inside the container, `:ro`, and give the server the path through an env var
+(e.g. `BM_CLAUDE_SESSIONS_DIR`) so a host run (`pnpm run dev`) and the container resolve it the same way. When the variable is unset or the directory is
+unreadable the sweeper does nothing. Record the mount's reason in the compose comment block and in `docs/subsystems/api.md`; add an invariant headline
+("the claim sweeper reads the session registry's files and never its pids") with its reasoning in `docs/subsystems/invariants.md` and its mechanism in
+`.claude/rules/tracker.md`, per `test/claude-rules.test.ts`'s one-home rules.
+
+Test cases for B (jest, flat in `test/`, e.g. `test/tracker-claim-sweep.test.ts`, a temp dir as the registry and a faked `GithubSource.release`):
+- live hand claim, own host (learned from a prior claim request), UUID session, empty-but-present registry → one release, `reason: 'aborted'`, `host` equal
+  to the claim's, no `counters`;
+- the same with a registry file naming the session (any pid, including a dead one) → no release;
+- claim host not in the learned set, or the set empty because no claim request has been seen since start → no release;
+- claim carries `run` → no release;
+- `session` is `futin@box` (fallback shape) → no release;
+- registry dir missing, or holding a file with no `sessionId` → no release;
+- claim already released, or dead past `CLAIM_STALE_MS` → no release (a dead one is retired by the next `start`);
+- `release` answers `conflict` → no throw, sweep continues to the next claim;
+- the sweeper is not invoked when no repo is connected (poller not armed).
+
+Proof on the machine, after merge and a `docker compose up -d --build server`: on a tracker project, `backlog.mjs start <id> --as groom` from a throwaway
+`claude -p` session, stop it from the dashboard, and within one poll interval `GET /api/items/claim?project=…&id=…` shows
+`released: { reason: "aborted", by: <sweeper identity> }` and the issue has lost `in-progress` and its assignee. Then repeat with `kill -9` on that session's
+pid: the claim stays live (sweeper leaves it), and `backlog.mjs abort <id>` releases it.
