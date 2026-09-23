@@ -134,14 +134,16 @@ needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-or
 - **The retro home** — `retro.mjs record` writes `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`) and nothing else does, once per sweep and refusing to overwrite
   an existing record; `retro.mjs sweep` only reads it back for the deltas. Nothing in the server or the client reads it at all — a board view over the newest
   record is a separate design, once records exist.
-- **The plugin install** — a run resolves its own skill files through `$CLAUDE_PLUGIN_ROOT`, a copy of the pushed `HEAD`. Getting an edit there is
+- **The plugin install** — a run resolves its own skill files through the plugin-root path its skill text was loaded with,
+  a copy of the pushed `HEAD`. Getting an edit there is
   [workflows/publishing.md](../workflows/publishing.md).
 
 **Every command in a SKILL.md spells the plugin root `${CLAUDE_PLUGIN_ROOT}`, braces included.** Claude Code substitutes that exact braced form into a plugin
 skill's text when it loads the skill, and exports no such variable to the Bash tool — so the bare `$CLAUDE_PLUGIN_ROOT` survives loading untouched, expands to
 the empty string in the shell, and every `node` line becomes `node "/skills/…"`. Sessions noticed and fell back to guessing the plugin cache path by hand.
 A file read with `Read` (the `references/` files, a SKILL.md re-read from the repo after a runner fix) is never substituted; `backlog-orchestrate` says what
-to replace the placeholder with there. Guarded by `test/skill-plugin-root.test.ts`.
+to replace the placeholder with there, and those files spell it braced too, so there is one placeholder to recognise. Guarded by
+`test/skill-plugin-root.test.ts`, which refuses the bare spelling in every `.md` and `.mjs` under `skills/` — prose and usage headers included.
 
 **Start orchestrator runs from the board, not by typing the trigger into a terminal** — the board spawns `claude -p`, and headless sessions were measured
 flooring well below an interactive session's context.

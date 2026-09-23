@@ -67,8 +67,8 @@ skill needs at runtime has to live under a published path.
 **No plugin at all.** The reinstall is an uninstall followed by an install, so a failed install leaves the machine with nothing. The script says exactly that
 and hands over the one command that fixes it — `claude plugin install backlog-manager@backlog-manager-marketplace`.
 
-**Edited, pushed, synced — and a running orchestrator run still behaves the old way.** A run resolves its own skill files through `$CLAUDE_PLUGIN_ROOT`, the
-copy it started with. Which copy a run follows after merging a fix to the runner itself is the orchestrator's own rule, in
+**Edited, pushed, synced — and a running orchestrator run still behaves the old way.** A run resolves its own skill files through the plugin-root path its skill
+text was loaded with — the copy it started with. Which copy a run follows after merging a fix to the runner itself is the orchestrator's own rule, in
 [the invariant rationale](../subsystems/invariants.md); the short version is that a sync makes the new behaviour available to the _next_ run, not the current
 one.
 

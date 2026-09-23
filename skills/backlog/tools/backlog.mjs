@@ -4,8 +4,8 @@
 // plugin repo; nothing is installed into the repos it manages — the backlog/
 // directory itself is the only thing that lands in a project.
 //
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" init
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" root
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" init
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" root
 
 import fs from 'node:fs'
 import os from 'node:os'
