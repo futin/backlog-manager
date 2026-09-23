@@ -18,7 +18,7 @@ it refuses and says so.
 
 Look at the words that came with the trigger. The token `[orchestrator-run` appears **anywhere after the id**, never before it — the id is always the first word
 after the trigger, so a rule that expected the marker to come first would never fire. Its presence anywhere in those words means `backlog-orchestrate`
-dispatched this session and owns the item, the worktree, the branch and everything that happens to the work after this session exits. Four rules hold for as
+dispatched this session and owns the item, the worktree, the branch and everything that happens to the work after this session exits. Five rules hold for as
 long as that marker does:
 
 - **Never escalate to the user.** Not "prefer not to" — a message can still arrive through the dashboard, and answering it is the defect this rule exists for.
@@ -30,7 +30,12 @@ long as that marker does:
   no better one: `orchestrate.mjs` refuses every command but `init` from inside a linked worktree, so this session _cannot_ park or stage itself. Parking is the
   orchestrator's decision, made from outside, on the evidence this session leaves behind.
 - **Unchanged: never commits, never pushes.** The marker adds a prohibition and removes none.
-- **In a TRACKER project the marker carries a fifth rule, and an `outcome <path>` clause to go with it.** It reads
+- **Never run anything in the background, and never end a turn waiting on a notification.** Every test, typecheck and build runs in the foreground — no Bash
+  `run_in_background: true`, no `&`, no polling a background task's output file. A suite too slow for the default raises the Bash `timeout`, up to its 600000 ms
+  maximum, or is split into runs that each fit. This session is `claude -p`: the process exits the moment a turn ends, so the completion notification an
+  interactive session would wake on has no session left to wake. The habit from interactive work — background the long suite, end the turn, resume on the
+  notification — writes no `## Outcome`, leaves a final message that says only "waiting", and parks the item with its edits uncommitted (#221).
+- **In a TRACKER project the marker carries a sixth rule, and an `outcome <path>` clause to go with it.** It reads
   `[orchestrator-run <runId> item <n> of <m> branch backlog/<n> outcome <absolute path>: …]`.
   - **Never run `start`, `stop`, `heartbeat`, `move` or `comment` on the item.** The driver holds the issue's claim for the whole item — it claimed before this
     worktree existed and it releases when the item reaches its terminal stage — and it is the driver that closes the issue. A session that ran any of those
@@ -99,7 +104,7 @@ whole item — read the plan or the fix there. `show <id> --json` if you also ne
   archive.
 
 **None of that applies under an `[orchestrator-run` marker.** There, the Outcome goes to the path the marker names and nothing else happens: no `stop`, no
-`move`, no `comment`. The run holds the claim and closes the issue itself — see the marker's own fifth rule above, which is the authority for a tracker item
+`move`, no `comment`. The run holds the claim and closes the issue itself — see the marker's own sixth rule above, which is the authority for a tracker item
 inside a run.
 
 **Heartbeat between long steps.** A claim reads stale after 15 minutes without one, and the next session to contest the item retires it. An execute session that

@@ -3788,6 +3788,50 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
   assert.ok(bullet.includes(RUN_MARKER_TOKEN), `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`);
 });
 
+// --- #221: a headless session never backgrounds its test runs --------------
+//
+// An execute session dispatched under `claude -p` ran its suite with Bash
+// `run_in_background: true` and ended its turn to wait for the notification.
+// Headless, there is no next turn: the process exits when the turn ends, so no
+// Outcome was written, the final message said only "waiting", and the driver
+// parked the item with its edits uncommitted. The rule lives in three places a
+// dispatched session reads — the fresh prompt, the retry prompt, and execute's
+// marker section — and each is pinned here, because each is prose under
+// constant pressure to be compressed away.
+
+const BACKGROUND_RULE = 'Never run a command in the background; run tests in the foreground.';
+
+test('the fresh dispatch prompt forbids backgrounded commands', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const line = text.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN));
+  assert.ok(line, 'no dispatch line carries the run marker at all');
+  assert.ok(line.includes(BACKGROUND_RULE), `the fresh dispatch prompt lost the background rule: ${BACKGROUND_RULE}`);
+});
+
+test('the retry prompt file is told to carry the same background rule', () => {
+  // The retry line reads its prompt out of a file the driver writes, so the
+  // rule cannot sit on the line itself — it sits in the instruction for what
+  // that file must say, which is the prose between "Retry resumes" and the
+  // retry's own code fence.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const start = text.indexOf('Retry resumes');
+  assert.ok(start !== -1, 'the retry instructions are gone');
+  const paragraph = text.slice(start, text.indexOf('```', start));
+  assert.ok(paragraph.includes(BACKGROUND_RULE), `the retry prompt instructions no longer carry the background rule: ${BACKGROUND_RULE}`);
+});
+
+test('backlog-execute forbids backgrounding inside its marker section, with the reason', () => {
+  // Inside the marker section specifically: a hand session may background a
+  // suite and wait on the notification, because it has a next turn.
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
+  const section = text.slice(text.indexOf('## Am I inside an orchestrator run?'), text.indexOf('No marker means a human started this session'));
+  assert.ok(section.length > 0, 'the marker section is gone');
+  assert.ok(section.includes('run_in_background'), 'the marker section no longer names run_in_background');
+  assert.ok(section.includes('Never run anything in the background'), 'the marker section lost the no-background rule');
+  assert.ok(section.includes('600000'), 'the marker section no longer names the foreground alternative: raising the Bash timeout');
+  assert.ok(/exits the moment a turn ends/.test(section), 'the marker section lost the reason: headless -p exits when the turn ends');
+});
+
 // --- bug-20: the environment marker the Stop hook reads ---------------------
 //
 // Every orchestrator-owned headless session used to finish its work and then
