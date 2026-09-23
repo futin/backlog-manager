@@ -590,6 +590,19 @@ export interface StopResult {
   stopRequested: boolean;
   abortSession: string | null;
   abortRefused: string | null;
+  /**
+   * The queue ids whose `orchestrator:queued` label the stop's server-side
+   * sweep could NOT remove (the orchestrator:queued spec, §3.1 and §3.2),
+   * spelled as `run.json` spells them — `'31'`, never `'#31'`.
+   *
+   * Present only when at least one removal was refused, so a clean sweep and a
+   * `files` project — which has no label to sweep — answer the same shape they
+   * always did. A failure here is a warning and never fails the stop: the label
+   * is advisory, and the `--abort` session the stop spawns repeats the sweep, so
+   * whatever this one left behind is finished by a session that is already
+   * coming.
+   */
+  unqueueFailed?: string[];
 }
 
 /**
