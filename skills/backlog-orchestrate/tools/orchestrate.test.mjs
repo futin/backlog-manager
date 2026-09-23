@@ -7035,6 +7035,14 @@ test('a claim held by another run skips the item and says whose it is, exit 0', 
    may be in the compose stack where `os.hostname()` is a container id. */
 test('the preflight claim carries the machine it was taken on, and a refusal names the holder-s', async (t) => {
   const { home, project } = trackerFixture(t);
+  // `runApi` hands the child this process's environment, and a machine that has been given a claim-host nickname exports `BM_MACHINE_NAME` from
+  // `~/.zshenv` — which the tool prefers, so the `<user>@<host>` default asserted below would never be computed. Unset here, restored after, the same way
+  // the next case sets it.
+  const before = process.env.BM_MACHINE_NAME;
+  delete process.env.BM_MACHINE_NAME;
+  t.after(() => {
+    if (before !== undefined) process.env.BM_MACHINE_NAME = before;
+  });
 
   const { requests } = await withApi(claimRoutes(project), async (port) => {
     assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
