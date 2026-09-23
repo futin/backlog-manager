@@ -97,7 +97,7 @@ describe('the agents POST guard', () => {
   // here, because the guard refuses every case in this loop before a handler
   // runs.
   const bodyFor = (route: string): Record<string, unknown> => {
-    // Every field any of the seven needs, in one object: the routes validate
+    // Every field any of the eight needs, in one object: the routes validate
     // the BODY before they ask which project this is, so a body missing a field
     // would be refused for the wrong reason and the case below would pass on a
     // 400 that says nothing about the project gate.
@@ -113,7 +113,8 @@ describe('the agents POST guard', () => {
         session: 'A',
         commentId: 100,
         reason: 'stopped',
-        ifUpdatedAt: '2026-09-18T10:00:00Z'
+        ifUpdatedAt: '2026-09-18T10:00:00Z',
+        queued: true
       };
     }
     const verb = route.slice('/api/agents/'.length);
@@ -122,7 +123,8 @@ describe('the agents POST guard', () => {
 
   // This array, not a count in CLAUDE.md's prose, is where the guarded set
   // actually lives — the agents routes (`pause` is task-17's, `stop` is
-  // bug-39's) and the seven item-write routes task-46 added.
+  // bug-39's), the seven item-write routes task-46 added, and `queue`, the
+  // eighth (the orchestrator:queued spec, §2).
   const GUARDED = [
     '/api/agents/plan',
     '/api/agents/dispatch',
@@ -137,7 +139,8 @@ describe('the agents POST guard', () => {
     '/api/items/release',
     '/api/items/heartbeat',
     '/api/items/body',
-    '/api/items/comment'
+    '/api/items/comment',
+    '/api/items/queue'
   ];
 
   for (const route of GUARDED) {
@@ -181,9 +184,9 @@ describe('the agents POST guard', () => {
   }
 
   /* The CLI's exact shape: a JSON POST with no `Origin` at all, which the guard
-     allows on purpose (see `origin.guard.ts`). Asserted for each of the seven
+     allows on purpose (see `origin.guard.ts`). Asserted for each of the eight
      write routes rather than only for `plan`, because `backlog.mjs` in API mode
-     is that caller for all seven and a guard tightened to require an origin
+     is that caller for all eight and a guard tightened to require an origin
      would break every skill while adding nothing a browser cannot forge.
 
      Each gets past the GUARD and is then refused by the route's own project

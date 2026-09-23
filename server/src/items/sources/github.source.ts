@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { claimsByIssue, claimsFor, currentClaim, isLive, liveClaims, newestClaim, renderClaim, winner, type ParsedClaim } from '../../tracker/claim';
 import { GithubClient, isRepo, type GithubComment, type GithubIssue, type GithubResponse } from '../../tracker/github.client';
+import { QUEUED_LABEL } from '../../tracker/labels';
 import { issueNumberFor, issueUrn, mapIssue, parseUrn } from '../../tracker/map-issue';
 import { TrackerPollerService } from '../../tracker/poller.service';
 import { githubToken } from '../../tracker/token.util';
@@ -18,6 +19,7 @@ import type {
   ItemCommentRequest,
   ItemCreateRequest,
   ItemHeartbeatRequest,
+  ItemQueueRequest,
   ItemReleaseRequest,
   ItemStateRequest,
   Registry,
@@ -472,6 +474,15 @@ export class GithubSource implements ItemSource, ItemWriter {
         if (assigned.status === 200 && assigned.data !== null) this.poller.absorbIssue(repo, assigned.data);
       }
       await this.client.addLabels(repo, number, ['in-progress'], { token });
+      // The claim swap (the orchestrator:queued spec, §3.3): the claim is the
+      // moment the item stops being planned and starts being worked, and every
+      // claimant — a run, a hand `backlog-execute`, another machine — comes
+      // through here, so this is the one place the swap cannot be skipped. The
+      // result is ignored for the reason `release` gives for `in-progress`: a
+      // 404 means the label was not there, which is the contract, and the claim
+      // is already won, so failing here would report a won claim as lost. A
+      // LOST claim never reaches this line — the winner's claim already did it.
+      await this.client.removeLabel(repo, number, QUEUED_LABEL, { token });
 
       // Every OTHER unreleased claim that has gone stale is RELEASED, never
       // deleted (spec §6.3 step 5). The distinction is the whole reason a claim
@@ -811,8 +822,46 @@ export class GithubSource implements ItemSource, ItemWriter {
   }
 
   /**
+   * Add or remove `orchestrator:queued` — the eighth write route.
+   *
+   * On the item's chain like every other write, so a run's `init` adding the
+   * label and a claim taking it off can never interleave into an issue that
+   * reads both queued and in progress.
+   *
+   * No `issueNow` first, unlike `comment` and `state`, and on purpose: this
+   * route has no opinion about the issue's state. A closed issue is not
+   * refused — a sweep removing a stale label from one is a cleanup worth doing
+   * — and an add on an issue that does not exist is answered by GitHub's own
+   * 404 through `refusalFor`, so a read first would be a second request to
+   * learn what the write already says.
+   *
+   * A removal's 404 is SUCCESS. Every `queued: false` caller is a sweep, and a
+   * sweep's contract is "the label is not there" — the same reasoning `release`
+   * spells out for `in-progress`. The cost is that a removal naming an issue
+   * that does not exist is also a 404, and also success; that caller wanted
+   * the label gone from an issue that has no labels at all, and it is.
+   */
+  async queue(_project: RegistryProject, marker: SourceMarker, req: ItemQueueRequest): Promise<WriteOutcome<{ id: string; queued: boolean }>> {
+    const ready = this.ready(marker);
+    if (!ready.ok) return ready;
+    const { repo, token } = ready.value;
+
+    const number = issueNumberFor(req.id, repo);
+    if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
+
+    return this.serialise(issueUrn(repo, number), async () => {
+      const res = req.queued
+        ? await this.client.addLabels(repo, number, [QUEUED_LABEL], { token })
+        : await this.client.removeLabel(repo, number, QUEUED_LABEL, { token });
+      const ok = res.status === 200 || (!req.queued && res.status === 404);
+      if (!ok) return { ok: false as const, refusal: refusalFor(res) };
+      return { ok: true as const, value: { id: `#${number}`, queued: req.queued } };
+    });
+  }
+
+  /**
    * The claim that holds one item — the lowest live id, or the newest claim
-   * when nothing is live — the eighth route's whole implementation, and the
+   * when nothing is live — the read route's whole implementation, and the
    * only read on `ItemWriter`.
    *
    * **The holder, not the newest (bug-58).** Inside a race window two claims
@@ -870,7 +919,7 @@ export class GithubSource implements ItemSource, ItemWriter {
   }
 
   /* ---------------------------------------------------------------------
-   * The shared machinery the seven share.
+   * The shared machinery the eight share.
    * ------------------------------------------------------------------- */
 
   /**

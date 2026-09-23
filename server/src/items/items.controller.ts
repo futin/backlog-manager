@@ -70,7 +70,7 @@ export class ItemsController {
    * Who holds one item, or `null` — the eighth item route (task-46) and the
    * only READ among the claim protocol's.
    *
-   * A GET, and therefore in THIS controller rather than beside the seven
+   * A GET, and therefore in THIS controller rather than beside the eight
    * writes: it starts nothing, reads no caller-supplied path (`project` has to
    * match a registry entry exactly), and discloses strictly less than
    * `/api/items` already does to any same-origin reader. That is the same

@@ -162,7 +162,7 @@ describe('a claim made before this process started', () => {
   });
 
   /**
-   * The same sweep, through the eighth route — `backlog.mjs stop`'s lookup.
+   * The same sweep, through the read route — `backlog.mjs stop`'s lookup.
    * Asserted beside the board's because the two readers are independent and
    * the failure was worse on this one: the board merely looked wrong, while the
    * CLI ended the session by losing the counters.

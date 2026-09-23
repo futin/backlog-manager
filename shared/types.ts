@@ -1680,7 +1680,7 @@ export interface OrchestratorArchivePayload {
 
 /* ===========================================================================
  * The write side of a tracker project (task-46, spec §6) — the claim protocol's
- * vocabulary and the seven write routes' request/response shapes.
+ * vocabulary and the eight write routes' request/response shapes.
  *
  * It sits at the END of this file, after `RUN_STALE_MS`, for one mechanical
  * reason worth stating rather than rediscovering: `CLAIM_STALE_MS` is an ALIAS
@@ -1945,7 +1945,8 @@ export const CLAIM_MARKER = '<!-- bm:claim -->';
 export const CLAIM_STALE_MS = RUN_STALE_MS;
 
 /**
- * The seven write routes' request bodies (spec §6.2). Declared here so the
+ * The eight write routes' request bodies (spec §6.2, and the orchestrator:queued
+ * spec §2 for the eighth). Declared here so the
  * server's validation and the CLI's expectations are checked against ONE
  * declaration rather than against each other.
  *
@@ -2015,7 +2016,7 @@ export interface ItemClaimRequest extends ItemWriteRequest {
    * `run` key at all, and that is what makes a hand claim un-takeoverable.
    *
    * Validated field by field by the route rather than taken as a blob: it is
-   * the one field on these seven routes the SERVER branches on (same-run
+   * the one field on the claim routes the SERVER branches on (same-run
    * takeover), so a malformed one is a 400 naming the field rather than a
    * value that silently fails to match any `runId` and contests its own run.
    */
@@ -2146,6 +2147,20 @@ export interface ItemBodyRequest extends ItemWriteRequest {
 export interface ItemCommentRequest extends ItemWriteRequest {
   id: string;
   body: string;
+}
+
+/**
+ * `POST /api/items/queue` — the eighth write route (the orchestrator:queued
+ * spec, §2). `true` adds `orchestrator:queued`, `false` removes it, and there
+ * is no third state: every caller is either a run's `init` saying "I intend to
+ * work this" or a sweep saying "I no longer do", and both have an opinion.
+ *
+ * The label is advisory. Nothing that decides who works an item reads it —
+ * the claim is the lock — so this route writes a plan, never a reservation.
+ */
+export interface ItemQueueRequest extends ItemWriteRequest {
+  id: string;
+  queued: boolean;
 }
 
 /** What `claim`, `release` and `heartbeat` answer on success: the comment that
