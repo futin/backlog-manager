@@ -645,7 +645,7 @@ dispatch line onto that same worktree — `references/recovery.md` names the sha
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background; run tests in the foreground. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -861,7 +861,9 @@ a report that no longer describes the branch.
 For both failure shapes, ask the user — best-effort, exactly like pre-flight — which of three they want: **retry**, **skip**, or **stop the run**. Retry resumes
 that item's own session so its context is not paid for twice. **Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first, with the Write tool**,
 and only then launch. §4's rule about prose in a command position covers this text: it quotes execute's failure `## Outcome`, which carries command output
-verbatim.
+verbatim. **End that file with the fresh dispatch's background rule, word for word: "Never run a command in the background; run tests in the foreground."** A
+retry is exactly the session most tempted to background — it is re-running a suite it already watched take long — and a headless `-p` session that ends its
+turn waiting on a notification exits with no Outcome, so the one retry is spent on nothing (#221).
 
 ```bash
 nohup sh -c 'cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
