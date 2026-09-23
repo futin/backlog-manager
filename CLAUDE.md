@@ -42,8 +42,8 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
 
   Watchdog — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
   surface draws has one home in `components/ui/`. A connected tracker adds three readings and no new surface: the band's poll-age line, the card's
-  `untyped`/assignee/link-out, and the item modal's age beside the cached body — all derived in `lib/tracker.ts`, plus the read-only `Trackers` card on Shared
-  Settings. → [docs/subsystems/board.md](docs/subsystems/board.md)
+  `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body — all derived in `lib/tracker.ts`, plus the read-only
+  `Trackers` card on Shared Settings. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
   cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into
   `invariants.md`.

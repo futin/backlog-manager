@@ -1,5 +1,6 @@
 import { elapsedSince } from './item-age';
-import type { ProjectSummary, TrackersPayload } from '../../../shared/types';
+import { runIsLive } from './run-time';
+import type { BacklogItem, OrchestratorRun, ProjectSummary, TrackersPayload } from '../../../shared/types';
 
 /**
  * What the board says about a connected tracker (task-45, spec §5.5) — the
@@ -87,6 +88,34 @@ export function trackerLine(project: ProjectSummary, now: number): string | null
   // Before the first successful poll there is no age to print, and printing
   // `polled 0 s ago` would claim a read that has not happened.
   return age === null ? `${repo} · connecting…` : `${repo} · polled ${age} ago`;
+}
+
+/**
+ * What the card says about an `orchestrator:queued` label (the orchestrator:queued spec, §4.2): `'live'` while a live run holds the item's project, `'stale'`
+ * when none does, `null` when there is no label. The fourth tracker reading on the card, and a reading only — the label is advisory, so nothing on the board
+ * gates on this, and a `'stale'` badge is a prompt to clear the label, not a block.
+ *
+ * `runs` is the caller's concatenation of this machine's runs and `remote.map(remoteAsLive)`. A remote run carries THIS machine's registry path for its repo
+ * (`RemoteRunsService.list`), so one `project === projectPath` match covers both, and a run on another machine that died without its Stop reads stale here
+ * exactly as a crashed local one does: its claim comments stop being refreshed, its `updatedAt` stops moving, and `runIsLive` ages it out on the same
+ * `RUN_STALE_MS` line the band already draws.
+ *
+ * `paused` is accepted on its own, whatever its heartbeat, because `runIsLive` is `running`-only and a paused run is still the run that queued the item — it
+ * will pick it up on `unpause`, and a board that called its whole queue stale for the length of a pause would be telling the operator to clear labels the run
+ * is about to need. Only `running` is aged, since a crashed run leaves `status: "running"` in `run.json` forever and freshness is the only thing that says so.
+ *
+ * Matches on the project, not on the run's queue: the driver labels every queued item within `--max`, and whether this item is still `pending` in that queue
+ * or was never in it (a hand-added label) is not something the badge distinguishes — a live run on the project is the one fact that makes the label mean
+ * what it says. `now` is required, for the reason this module's header gives.
+ */
+export function queuedReading(
+  item: Pick<BacklogItem, 'queued' | 'projectPath'>,
+  runs: readonly Pick<OrchestratorRun, 'project' | 'status' | 'updatedAt'>[],
+  now: number
+): 'live' | 'stale' | null {
+  if (item.queued !== true) return null;
+  const held = runs.some((run) => run.project === item.projectPath && (run.status === 'paused' || runIsLive(run, now)));
+  return held ? 'live' : 'stale';
 }
 
 /* `projectIsFiles` lived here from task-46 until task-47 and is gone.

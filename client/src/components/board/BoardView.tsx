@@ -3,7 +3,8 @@ import { useId, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
-import { hasTracker, trackerLine } from '../../lib/tracker';
+import { hasTracker, queuedReading, trackerLine } from '../../lib/tracker';
+import { remoteAsLive } from '../../lib/remote-run';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useReverify } from '../../hooks/useReverify';
@@ -207,7 +208,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   // resume is the Runs section's now (§8.4.1's moved-rules table), and this
   // view has no control that can start one. The hook still exports both for
   // that surface; what it no longer has on this page is a second caller.
-  const { runs, starting, refresh: refreshRuns } = useOrchestratorRuns();
+  const { runs, starting, remote, refresh: refreshRuns } = useOrchestratorRuns();
   /* Separate from `open`: the sheet can be opened from a card (modal closed)
      or from inside the modal (the modal stays open behind it), so one piece of
      state cannot serve both. */
@@ -559,6 +560,13 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
 
   const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
 
+  /* The orchestrator:queued reading (spec §4.2). This machine's runs AND the remote ones, through `remoteAsLive` — the label is written by whichever
+     machine's driver queued the item, so a board that consulted only its own runs would call every other machine's live queue stale. The full `runs`, not
+     `freshRuns`: `queuedReading` does its own freshness, and must see a `paused` run that `fresh` alone would not vouch for. Built once per render rather
+     than per card. */
+  const queueHolders = [...runs, ...remote.map(remoteAsLive)];
+  const queuedFor = (item: BacklogItem): 'live' | 'stale' | null => queuedReading(item, queueHolders, now);
+
   /*
    * Task 12 fix round 1 paired the item drawer with `RunDrawer` here: two
    * role="dialog" `.drawer` asides, neither with a focus trap of its own, so
@@ -837,6 +845,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
                     run={runEntryFor(item)}
                     runBlock={runBlockFor(item)}
                     reverify={reverifyAgents}
+                    queued={queuedFor(item)}
                   />
                 ))}
               </BoardColumn>

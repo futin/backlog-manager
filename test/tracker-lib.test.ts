@@ -1,5 +1,7 @@
-import { accessReason, hasTracker, pollAge, trackerLine } from '../client/src/lib/tracker';
-import type { ProjectSummary } from '../shared/types';
+import { accessReason, hasTracker, pollAge, queuedReading, trackerLine } from '../client/src/lib/tracker';
+import { remoteAsLive } from '../client/src/lib/remote-run';
+import { RUN_STALE_MS } from '../shared/types';
+import type { OrchestratorRun, ProjectSummary, RemoteRun } from '../shared/types';
 
 /**
  * The board's tracker derivations (task-45). Pure functions with the clock
@@ -96,5 +98,54 @@ describe('hasTracker', () => {
     expect(hasTracker([])).toBe(false);
     expect(hasTracker([project({ source: 'files' })])).toBe(false);
     expect(hasTracker([project({ source: 'files' }), project()])).toBe(true);
+  });
+});
+
+describe('queuedReading', () => {
+  // Stamps relative to the clock the assertion runs under (the jsdom suites'
+  // convention, followed here too): `runIsLive` ages `updatedAt` against the
+  // `now` handed in, so a literal date would only pin the arithmetic.
+  const now = Date.now();
+  const ago = (ms: number): string => new Date(now - ms).toISOString();
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+
+  type RunPick = Pick<OrchestratorRun, 'project' | 'status' | 'updatedAt'>;
+  const run = (over: Partial<RunPick> = {}): RunPick => ({ project: '/abs/tracker', status: 'running', updatedAt: ago(MIN), ...over });
+  const queued = { queued: true as const, projectPath: '/abs/tracker' };
+
+  it('is null for an item with no label, whatever the runs', () => {
+    expect(queuedReading({ projectPath: '/abs/tracker' }, [], now)).toBeNull();
+    expect(queuedReading({ projectPath: '/abs/tracker' }, [run()], now)).toBeNull();
+  });
+
+  it('is live while a fresh local run holds the project', () => {
+    expect(queuedReading(queued, [run()], now)).toBe('live');
+  });
+
+  it('is live for a paused run, however old its heartbeat — a paused run still plans its items', () => {
+    // `runIsLive` alone answers false here (it is `running`-only), which is
+    // the plan's Review Focus 1: the derivation has to accept `paused` itself.
+    expect(queuedReading(queued, [run({ status: 'paused', updatedAt: ago(3 * HOUR) })], now)).toBe('live');
+  });
+
+  it('is stale for a crashed run — `running`, heartbeat past RUN_STALE_MS', () => {
+    expect(queuedReading(queued, [run({ updatedAt: ago(RUN_STALE_MS + MIN) })], now)).toBe('stale');
+  });
+
+  it('is live for a fresh remote run, through the same adapter the Runs page uses', () => {
+    // A remote run carries THIS machine's registry path for its repo
+    // (`RemoteRunsService.list`), so the path match needs no translation.
+    const remote = { ...run(), fresh: true, remote: true, repo: 'futin/x' } as unknown as RemoteRun;
+    expect(queuedReading(queued, [remoteAsLive(remote)], now)).toBe('live');
+  });
+
+  it('is stale when the only live run belongs to another project', () => {
+    expect(queuedReading(queued, [run({ project: '/abs/alpha' })], now)).toBe('stale');
+  });
+
+  it('is stale when the project’s run has finished', () => {
+    expect(queuedReading(queued, [run({ status: 'done', updatedAt: ago(MIN) })], now)).toBe('stale');
+    expect(queuedReading(queued, [], now)).toBe('stale');
   });
 });

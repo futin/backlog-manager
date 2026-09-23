@@ -125,7 +125,7 @@ const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [] };
 
 let bodyCalls: string[];
 
-function stubFetch(items: BacklogItem[], summaries: ProjectSummary[]): void {
+function stubFetch(items: BacklogItem[], summaries: ProjectSummary[], runs: OrchestratorRunsPayload = NO_RUNS): void {
   bodyCalls = [];
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
@@ -136,7 +136,7 @@ function stubFetch(items: BacklogItem[], summaries: ProjectSummary[]): void {
     const payload = url.includes('/api/agents/status')
       ? AGENTS_STATUS
       : url.includes('/api/orchestrator/runs')
-        ? NO_RUNS
+        ? runs
         : url.includes('/api/projects')
           ? summaries
           : ({ items, errors: [] } as ItemsIndex);
@@ -144,8 +144,8 @@ function stubFetch(items: BacklogItem[], summaries: ProjectSummary[]): void {
   }) as jest.Mock;
 }
 
-async function renderBoard(items: BacklogItem[], summaries: ProjectSummary[] = projects()): Promise<void> {
-  stubFetch(items, summaries);
+async function renderBoard(items: BacklogItem[], summaries: ProjectSummary[] = projects(), runs: OrchestratorRunsPayload = NO_RUNS): Promise<void> {
+  stubFetch(items, summaries, runs);
   render(<BoardView />);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
@@ -203,7 +203,7 @@ describe('dispatch on a tracker project', () => {
   });
 });
 
-describe('the card’s three tracker readings', () => {
+describe('the card’s untyped, link-out and assignee readings', () => {
   it('draws the untyped badge only for an untyped item', async () => {
     await renderBoard([issueItem({ untyped: true, section: 'ideas', groomed: null }), issueItem({ id: '#32', title: 'typed issue' })]);
     expect(within(card('an issue')).getByText('untyped')).toBeInTheDocument();
@@ -244,6 +244,68 @@ describe('the card’s three tracker readings', () => {
     // Space too: the card acts on both keys, so the guard has to cover both.
     await userEvent.keyboard(' ');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('the orchestrator:queued badge', () => {
+  /** A local run of the tracker project with an empty queue — it holds the
+   *  project, which is all the badge asks, and claims no card, so nothing else
+   *  on the card moves. Stamps are relative to the clock the assertion runs
+   *  under. */
+  function trackerRun(over: Partial<OrchestratorRunsPayload['runs'][number]>): OrchestratorRunsPayload {
+    const now = new Date().toISOString();
+    return {
+      runs: [
+        {
+          runId: 'run-1',
+          project: TRACKER_PATH,
+          base: 'main',
+          startedAt: now,
+          updatedAt: now,
+          status: 'running',
+          queue: [],
+          fresh: true,
+          pastRuns: 0,
+          pauseRequested: false,
+          stopRequested: false,
+          ...over
+        } as OrchestratorRunsPayload['runs'][number]
+      ],
+      starting: [],
+      remote: []
+    };
+  }
+
+  it('reads `queued` while a live run holds the project', async () => {
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({}));
+    await waitFor(() => expect(within(card('an issue')).getByText('queued')).toBeInTheDocument());
+    expect(within(card('an issue')).queryByText('queued · stale')).toBeNull();
+  });
+
+  it('reads a dimmed `queued · stale`, titled with the way out, when no live run does', async () => {
+    const crashed = new Date(Date.now() - 20 * 60_000).toISOString();
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({ updatedAt: crashed, fresh: false }));
+    const badge = await within(card('an issue')).findByText('queued · stale');
+    expect(badge).toHaveAttribute('title', expect.stringContaining('no live run holds it'));
+    expect(badge.getAttribute('title')).toContain('GitHub');
+    expect(within(card('an issue')).queryByText('queued')).toBeNull();
+  });
+
+  it('reads `queued` when the live run holding the project is another machine’s', async () => {
+    // Spec §5's card case the plan's list left out, and the one that pins
+    // BoardView's wiring rather than the derivation: the board must hand
+    // `queuedReading` the REMOTE runs too, or every other machine's live queue
+    // reads stale here.
+    const local = trackerRun({});
+    const remote = { ...local.runs[0], repo: 'futin/x', remote: true as const };
+    await renderBoard([issueItem({ queued: true })], projects(), { runs: [], starting: [], remote: [remote] });
+    await waitFor(() => expect(within(card('an issue')).getByText('queued')).toBeInTheDocument());
+  });
+
+  it('draws neither for an item without the label', async () => {
+    await renderBoard([issueItem()], projects(), trackerRun({}));
+    expect(within(card('an issue')).queryByText('queued')).toBeNull();
+    expect(within(card('an issue')).queryByText('queued · stale')).toBeNull();
   });
 });
 

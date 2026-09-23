@@ -2500,6 +2500,11 @@ code, kbd, samp, pre { font-family: inherit }
    it — and no rule of its own beyond the colour, because a marker is a weight
    and an ink and nothing else (§8.3). */
 .ui-marker-untyped { color: var(--amber) }
+/* The orchestrator:queued label (the orchestrator:queued spec, §4.2). A plan, not a claim and not a warning, so no accent either way: `--ink2` while a live
+   run holds the project, one step dimmer at `--ink3` once none does — dimmed rather than recoloured, because a stale label is a leftover to tidy, and the
+   row's one warning ink belongs to `stale`/`untyped`, which mark an item the board is wrong about until someone acts. */
+.ui-marker-queued { color: var(--ink2) }
+.ui-marker-queued-stale { color: var(--ink3) }
 
 /* task-45's two tracker readings outside the card: the board band's poll-age
    clause, and the same line under the item modal's title. Both are 12/400

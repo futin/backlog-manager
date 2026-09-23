@@ -2,7 +2,7 @@ import { elapsedSince, formatCreated } from '../../lib/item-age';
 import { isInProgress, progressLabel } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { Dot } from '../ui/Dot';
-import { Marker } from '../ui/Marker';
+import { Marker, type MarkerTone } from '../ui/Marker';
 import { DispatchButton, dispatchAvailable } from './DispatchButton';
 import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
 import type { AgentsStatus, BacklogItem, RunQueueItem, RunStage } from '../../../../shared/types';
@@ -180,7 +180,8 @@ export function ItemCard({
   stale,
   run,
   runBlock,
-  reverify
+  reverify,
+  queued
 }: {
   item: BacklogItem;
   hues: ProjectHues;
@@ -253,6 +254,12 @@ export function ItemCard({
    *  Threaded rather than derived for the same reason `agents` is: the
    *  status belongs to one hook per view, not to forty cards. */
   reverify?: () => Promise<AgentsStatus>;
+  /**
+   * The `orchestrator:queued` reading (`queuedReading`, `lib/tracker.ts`), decided by BoardView and handed down for the same reason `stale` and `run` are:
+   * it needs the run payload and the clock, and this component owns neither. Absent and `null` both draw nothing — ArchiveView passes nothing, because a
+   * card that has left the Board is not in anyone's queue worth reading.
+   */
+  queued?: 'live' | 'stale' | null;
 }) {
   const at = now ?? Date.now();
   /* One derivation for the whole strip — see `liveBarFor` above for the
@@ -289,7 +296,8 @@ export function ItemCard({
      unknown key) and is reported by the API verbatim, so the only thing a new
      kind needs is an entry in REFACTOR_KINDS above. Silence, not a fallback
      marker: one reading `kind: whatevr` would present a typo as a category. */
-  const markers = [
+  type CardMarker = { tone: MarkerTone; word: string; title?: string };
+  const markers = ([
     item.section === 'refactors' && REFACTOR_KINDS.includes(item.kind) ? { tone: 'kind' as const, word: item.kind } : null,
     item.section === 'bugs' && item.groomed ? { tone: 'groomed' as const, word: 'groomed' } : null,
     /* task-45: a tracker issue with no `type:*` label. It leads the two
@@ -300,9 +308,20 @@ export function ItemCard({
        this board, which is the rule shared/types.ts states and this is the
        one place that reads the field at all. */
     item.untyped ? { tone: 'untyped' as const, word: 'untyped' } : null,
+    /* The orchestrator:queued label (spec §4.2) — where the item has got to, so it leads the two history markers. `'stale'` carries a title because its
+       word alone cannot say what to do about it: the label is advisory (no reader treats it as exclusion), so a leftover one is harmless but untidy, and
+       the two ways to clear it are GitHub itself or stopping the crashed run that left it. */
+    queued === 'live' ? { tone: 'queued' as const, word: 'queued' } : null,
+    queued === 'stale'
+      ? {
+          tone: 'queued-stale' as const,
+          word: 'queued · stale',
+          title: 'orchestrator:queued is set but no live run holds it — remove the label on GitHub, or stop the crashed run if it is this machine’s'
+        }
+      : null,
     item.status === 'done' ? { tone: 'done' as const, word: 'done' } : null,
     stale ? { tone: 'stale' as const, word: 'stale' } : null
-  ].filter((m): m is { tone: 'kind' | 'groomed' | 'done' | 'stale' | 'untyped'; word: string } => m !== null);
+  ] as (CardMarker | null)[]).filter((m): m is CardMarker => m !== null);
 
   /* Asked through `dispatchAvailable` rather than by re-deriving the action and
      the gate here: the row has to reserve its space exactly when the control
@@ -428,7 +447,7 @@ export function ItemCard({
         {(markers.length > 0 || dispatchable) && (
           <div className="board-card-markers" data-testid="marker-row">
             {markers.map((m) => (
-              <Marker key={m.tone} tone={m.tone}>
+              <Marker key={m.tone} tone={m.tone} title={m.title}>
                 {m.word}
               </Marker>
             ))}
