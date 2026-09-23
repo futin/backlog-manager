@@ -1,5 +1,6 @@
 import { deriveGroomed } from '../items/parse.util';
 import { newestClaim, type ParsedClaim } from './claim';
+import { QUEUED_LABEL } from './labels';
 import type { GithubIssue } from './github.client';
 import type { BacklogItem, ClaimCounters, RegistryProject, Section } from '../../../shared/types';
 
@@ -144,17 +145,19 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   const kindLabel = names.filter((n) => n.startsWith('kind:')).sort()[0];
   const kind = kindLabel === undefined ? '' : kindLabel.slice('kind:'.length);
   const runnerFix = names.includes('runner-fix');
+  const queued = names.includes(QUEUED_LABEL);
 
-  // Every label that is not a type, a kind, the runner-fix marker or the
-  // in-progress flag. All four are CONSUMED — they are structure, and leaving
-  // one in `tags` would draw it twice on a card, once as the thing it means and
-  // once as a word.
+  // Every label that is not a type, a kind, the runner-fix marker, the
+  // in-progress flag or the queued label. All five are CONSUMED — they are
+  // structure, and leaving one in `tags` would draw it twice on a card, once as
+  // the thing it means and once as a word.
   //
   // `in-progress` joined them in task-46 and only then. In phase 2 nothing read
   // it, so hiding it would have been hiding a label this build had no other way
   // to show; now the claim protocol sets it and `started`/`phase` below render
-  // it as the in-progress bar every other item gets.
-  const tags = names.filter((n) => !(n in SECTION_BY_LABEL) && !n.startsWith('kind:') && n !== 'runner-fix' && n !== 'in-progress');
+  // it as the in-progress bar every other item gets. `orchestrator:queued`
+  // joined in task-52 for the same reason: the card draws it as its own badge.
+  const tags = names.filter((n) => !(n in SECTION_BY_LABEL) && !n.startsWith('kind:') && n !== 'runner-fix' && n !== 'in-progress' && n !== QUEUED_LABEL);
 
   const closed = issue.state === 'closed';
   const reason = typeof issue.state_reason === 'string' ? issue.state_reason : null;
@@ -234,7 +237,11 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // wherever the payload is compared as a whole, and the mapper is the one
     // writer of this field, so the absence is arranged here rather than
     // cleaned up later.
-    ...(runnerFix ? { runnerFix: true as const } : {})
+    ...(runnerFix ? { runnerFix: true as const } : {}),
+    // The same spread, for the same reason (task-52). No `queued` field on
+    // `MappedIssue` beside it: `runnerFix` rides there because `list`'s
+    // bookkeeping reads it, and nothing reads `queued` but the card.
+    ...(queued ? { queued: true as const } : {})
   };
 
   return { item, runnerFix, errors };

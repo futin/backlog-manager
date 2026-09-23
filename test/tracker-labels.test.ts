@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { TRACKER_LABELS, TRACKER_LABEL_NAMES, TYPE_LABELS } from '../server/src/tracker/labels';
+import { QUEUED_LABEL, TRACKER_LABELS, TRACKER_LABEL_NAMES, TYPE_LABELS } from '../server/src/tracker/labels';
 
 /**
  * The label set has one home — `server/src/tracker/labels.ts` — and one place
@@ -29,9 +29,33 @@ function formLabels(): string[] {
   return [...CONNECT_SOURCE.matchAll(/label:\s*'(type:[a-z]+)'/g)].map((m) => m[1]).sort();
 }
 
-describe('the eight labels', () => {
-  it('names exactly the set spec §5.2 lists', () => {
-    expect(TRACKER_LABEL_NAMES).toEqual(['type:bug', 'type:idea', 'type:task', 'type:refactor', 'kind:chore', 'kind:debt', 'runner-fix', 'in-progress']);
+describe('the nine labels', () => {
+  it('names exactly the set spec §5.2 lists, plus orchestrator:queued last', () => {
+    expect(TRACKER_LABEL_NAMES).toEqual([
+      'type:bug',
+      'type:idea',
+      'type:task',
+      'type:refactor',
+      'kind:chore',
+      'kind:debt',
+      'runner-fix',
+      'in-progress',
+      'orchestrator:queued'
+    ]);
+    expect(TRACKER_LABELS).toHaveLength(9);
+  });
+
+  /* The ninth label arrived with the orchestrator:queued spec (§1), appended
+     rather than inserted so the bootstrap's diff against an existing repo is
+     exactly one create. Its name has one spelling, exported, so the write
+     route and the Stop sweep import it instead of repeating the string. */
+  it('ends with orchestrator:queued, exported as QUEUED_LABEL with the description the spec fixes', () => {
+    expect(QUEUED_LABEL).toBe('orchestrator:queued');
+    expect(TRACKER_LABELS[TRACKER_LABELS.length - 1]).toEqual({
+      name: QUEUED_LABEL,
+      color: expect.stringMatching(/^[0-9a-f]{6}$/),
+      description: "In a live orchestrator run's queue, not yet picked up — a plan, not a claim"
+    });
   });
 
   it('gives every label a colour and a description GitHub will accept', () => {

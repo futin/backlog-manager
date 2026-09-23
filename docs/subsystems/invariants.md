@@ -2714,7 +2714,7 @@ records the reset TIME (not a duration, which goes stale the moment it is drawn)
 request at all, not even a conditional one: a `304` is free against the budget but a `403` is not, and asking again before the reset is how an app earns a
 secondary limit on top of the one it has.
 
-**The label set has one home and one cross-file guard.** `server/src/tracker/labels.ts` lists the eight labels spec §5.2 names, and the poller creates whichever
+**The label set has one home and one cross-file guard.** `server/src/tracker/labels.ts` lists the nine labels — spec §5.2's eight plus `orchestrator:queued` (task-52) — and the poller creates whichever
 are missing on the first successful sync of a repo — idempotently, case-insensitively (GitHub label names preserve case but collide without it), treating a 422
 as success because another machine's poller winning the race still leaves the label there. This is phase 2's ONE write to GitHub, and it is a bootstrap rather
 than a lifecycle write: the issue→item mapping cannot work without the set. `skills/backlog/tools/backlog.mjs`'s `connect` writes issue forms that pre-apply the

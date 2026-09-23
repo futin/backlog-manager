@@ -408,7 +408,7 @@ export function init(backlog) {
 //   - it does not touch `~/.backlog-manager/registry.json`. That file's one-writer relationship with this tool stands, but registration answers "does this
 //     machine's board know about this project at all", which is per machine and unchanged by connecting; the marker answers "where do this project's items
 //     come from", which is per project and committed. Conflating the two would make connecting a project on one machine silently re-register it there;
-//   - it makes no network call and needs no server running. The eight labels the issue→item mapping depends on are created by the board's poller on its first
+//   - it makes no network call and needs no server running. The nine labels the issue→item mapping depends on are created by the board's poller on its first
 //     successful sync (spec §5.2), so a `connect` run on a laptop with no token still produces a correct, committable marker;
 //   - it does not create the labels' issue forms' *labels*, only forms that REQUEST them. A form naming a label that does not exist yet is not an error on
 //     GitHub's side — the label is applied once it exists, and the poller creates it before anyone can file through the form in anger.

@@ -176,6 +176,17 @@ describe('both adapters in one payload', () => {
     expect(index.errors).toEqual([]);
   });
 
+  /* `queued` is a tracker label's reading (task-52). A files item has no
+     label to read it off, so it carries no key at all — `'queued' in item`,
+     not `toBeUndefined`, because a present-but-undefined key would fail the
+     byte-identical payload the `true | absent` rule exists for. */
+  it('never puts a queued key on a files item', async () => {
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    const bug = (res.body as ItemsIndex).items.find((i) => i.source === 'files');
+    expect(bug).toBeDefined();
+    expect('queued' in (bug ?? {})).toBe(false);
+  });
+
   it('counts a tracker project over the cache, excluding done exactly as today', async () => {
     const res = await request(app.getHttpServer()).get('/api/projects').expect(200);
     const summary = (res.body as ProjectSummary[]).find((p) => p.name === 'tracker');

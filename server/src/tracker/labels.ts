@@ -1,13 +1,22 @@
 /**
- * The eight labels a connected repo must carry (task-45, spec §5.2), and the
+ * The nine labels a connected repo must carry (task-45, spec §5.2), and the
  * one home for that list.
  *
  * Four of them ARE the mapping: `section` is read off the one `type:*` label
  * an issue carries (spec §5.3), so an issue in a repo without them is untyped
- * by construction and every item lands in `ideas`. The other four are the
+ * by construction and every item lands in `ideas`. The other five are the
  * fields the file store keeps in frontmatter and a tracker has nowhere else to
  * put — a refactor's `kind:`, the orchestrator's `runner-fix:` marker, and the
- * `in-progress` flag the claim protocol sets (task-46).
+ * `in-progress` flag the claim protocol sets (task-46) — plus one the file
+ * store has no equivalent of at all: `orchestrator:queued`, which a live
+ * tracker run puts on every issue it intends to work and has not yet picked up
+ * (task-52, the orchestrator:queued spec §1). It is advisory, a plan and never
+ * a claim: nothing that decides who may work an item reads it.
+ *
+ * A repo bootstrapped when the list was eight long gains the ninth on its next
+ * successful sync, because the bootstrap diffs names rather than counting —
+ * which is also why the ninth is APPENDED: order is cosmetic to GitHub, but
+ * this file's order is what spec §5.2 and its tests read.
  *
  * Created by the POLLER, the first time a repo syncs successfully and any is
  * missing, which is why `connect` needs no server and no network (spec §5.7):
@@ -43,7 +52,15 @@ export interface TrackerLabel {
  *  type label stays on a closed issue so the original type is recoverable. */
 export const TYPE_LABELS = ['type:bug', 'type:idea', 'type:task', 'type:refactor'] as const;
 
-/** The eight, in the order spec §5.2 lists them. */
+/**
+ * The one spelling of the queued label's name (task-52). The write route that
+ * adds and removes it, the won-claim swap and the Stop sweep all import this
+ * rather than repeating the string, so a rename is one edit and a typo is a
+ * compile error instead of a label GitHub silently creates on first use.
+ */
+export const QUEUED_LABEL = 'orchestrator:queued';
+
+/** The nine, in the order spec §5.2 lists them, `orchestrator:queued` last. */
 export const TRACKER_LABELS: readonly TrackerLabel[] = [
   { name: 'type:bug', color: 'd73a4a', description: 'A defect — backlog section: bugs' },
   { name: 'type:idea', color: '0e8a16', description: 'Something new — backlog section: ideas' },
@@ -52,7 +69,8 @@ export const TRACKER_LABELS: readonly TrackerLabel[] = [
   { name: 'kind:chore', color: 'c5def5', description: "A refactor's flavour: tidying that carries no tracked risk" },
   { name: 'kind:debt', color: 'fbca04', description: "A refactor's flavour: a deliberate shortcut, now due" },
   { name: 'runner-fix', color: 'b60205', description: 'Executing this repairs machinery the orchestrator run itself depends on' },
-  { name: 'in-progress', color: 'ededed', description: 'A session holds this item (set by the claim protocol)' }
+  { name: 'in-progress', color: 'ededed', description: 'A session holds this item (set by the claim protocol)' },
+  { name: QUEUED_LABEL, color: 'bfdadc', description: "In a live orchestrator run's queue, not yet picked up — a plan, not a claim" }
 ];
 
 /**
@@ -74,7 +92,7 @@ export const TRACKER_LABELS: readonly TrackerLabel[] = [
  */
 export const KIND_NAMES: readonly string[] = TRACKER_LABELS.filter((l) => l.name.startsWith('kind:')).map((l) => l.name.slice('kind:'.length));
 
-/** The eight names alone — what the bootstrap compares the repo's existing
+/** The nine names alone — what the bootstrap compares the repo's existing
  *  labels against. Case-insensitive on purpose: GitHub label names are
  *  case-preserving but collide case-insensitively, so a repo that already has
  *  `Type:Bug` has the label, and creating it again is a 422. */

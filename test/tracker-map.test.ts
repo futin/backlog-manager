@@ -154,6 +154,18 @@ describe('issue → BacklogItem', () => {
     expect(plain?.item).toEqual(BASE);
   });
 
+  /* orchestrator:queued (task-52): the same `true | absent` shape `runnerFix`
+     has, for the same reason — and CONSUMED, because the card draws it as a
+     badge of its own and a tag would draw it twice. */
+  it('reads orchestrator:queued as queued: true, consumes it, and puts no key on an unqueued item', () => {
+    const queued = map({ labels: [{ name: 'type:task' }, { name: 'orchestrator:queued' }] });
+    expect(queued?.item.queued).toBe(true);
+    expect(queued?.item.tags).toEqual([]);
+
+    const plain = map({ labels: [{ name: 'type:task' }] });
+    expect('queued' in (plain?.item ?? {})).toBe(false);
+  });
+
   it('maps an open issue to open', () => {
     expect(map({ state: 'open' })?.item.status).toBe('open');
   });
