@@ -136,6 +136,12 @@ needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-or
 - **The plugin install** — a run resolves its own skill files through `$CLAUDE_PLUGIN_ROOT`, a copy of the pushed `HEAD`. Getting an edit there is
   [workflows/publishing.md](../workflows/publishing.md).
 
+**Every command in a SKILL.md spells the plugin root `${CLAUDE_PLUGIN_ROOT}`, braces included.** Claude Code substitutes that exact braced form into a plugin
+skill's text when it loads the skill, and exports no such variable to the Bash tool — so the bare `$CLAUDE_PLUGIN_ROOT` survives loading untouched, expands to
+the empty string in the shell, and every `node` line becomes `node "/skills/…"`. Sessions noticed and fell back to guessing the plugin cache path by hand.
+A file read with `Read` (the `references/` files, a SKILL.md re-read from the repo after a runner fix) is never substituted; `backlog-orchestrate` says what
+to replace the placeholder with there. Guarded by `test/skill-plugin-root.test.ts`.
+
 **Start orchestrator runs from the board, not by typing the trigger into a terminal** — the board spawns `claude -p`, and headless sessions were measured
 flooring well below an interactive session's context.
 

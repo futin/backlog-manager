@@ -24,7 +24,7 @@ which is why the two verdicts that produce one end by saying so out loud (see "G
 If the trigger already named one ("plan idea 3", "reject task 5"), use that id directly. Otherwise show what's open first — run `/backlog`, or:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" board
 ```
 
 — and ask the user which item, and which verdict.
@@ -35,7 +35,7 @@ the user there instead of creating it yourself. If a command exits `2`, you're n
 Every verdict starts the same way:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" show <id>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show <id>
 ```
 
 This prints the item's absolute path on line 1, then its frontmatter block — **never the body**. Read the file at that printed path yourself to see the actual
@@ -52,7 +52,7 @@ file, so `show` is the whole item. Use `show <id> --json` when you are about to 
 **Only groom patches a body, and it does so through one command:**
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt from show --json>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt from show --json>
 ```
 
 `--if-updated-at` is not ceremony. It is what stops two machines' grooms from silently overwriting each other: the server re-reads the issue and refuses if it
@@ -74,8 +74,8 @@ frontmatter (see both verdicts below for exactly when that judgement applies —
 there is no file to write a line into:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt> --runner-fix
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new tasks "<title>" --body /tmp/task.md --from #<n> --runner-fix
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" body <id> --body /tmp/item.md --if-updated-at <updatedAt> --runner-fix
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" new tasks "<title>" --body /tmp/task.md --from #<n> --runner-fix
 ```
 
 `--no-runner-fix` removes it, for the groom that decides an item no longer repairs the runner. **Passing neither leaves the label exactly as it is** — which
@@ -141,7 +141,7 @@ before any investigation. A directed groom is the ordinary case, not an exceptio
 prompt is allowed to satisfy it in one turn.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as groom
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" start <id> --as groom
 ```
 
 Not any earlier — and not any later. The stamp costs something in both directions. Too early: an item nobody has agreed to work on yet isn't "in progress," and
@@ -198,8 +198,8 @@ Then, by their answer:
   skill knows it can produce). Once the user confirms it, take the marker over properly:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> --abandon
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as groom
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id> --abandon
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" start <id> --as groom
   ```
 
   Both lines, in that order. `start` refuses to re-stamp a file that already carries a stamp, so the clear has to come first; and the point of the second line
@@ -252,7 +252,7 @@ exactly one such place, step 1's headings.
 3. Create the new task:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new tasks "<title>" --from idea-N
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" new tasks "<title>" --from idea-N
    ```
 
    This prints the new task's path and frontmatter, already carrying `from: idea-N`. The title doesn't have to match the idea's own — use whatever fits the plan
@@ -285,7 +285,7 @@ exactly one such place, step 1's headings.
 6. Release the marker on the idea — not on the task step 3 just created; nobody has started working that yet:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop idea-N
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop idea-N
    ```
 
    `stop` doesn't check location, so running it here rather than after the move below is a style choice, not a requirement — a session resuming after an
@@ -296,7 +296,7 @@ exactly one such place, step 1's headings.
 7. Move the idea:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move idea-N done
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" move idea-N done
    ```
 
 8. Print the **Groomed on disk only** line (below), naming the _new task's_ path from step 3 — not the idea's. The task is what a run would pick up; the idea is
@@ -325,7 +325,7 @@ one.
 3. Release the marker:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id>
    ```
 
    Skip this only if you are working over another session's live marker at the user's explicit request — see "Already in progress" above; that marker belongs to
@@ -361,7 +361,7 @@ Otherwise, for an open bug, idea, refactor, or task:
 4. Release the marker, before the move below:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id>
    ```
 
    Same reasoning as Promote's release: `stop` doesn't check location, so this could run after the move too — a session resuming here after an interruption that
@@ -372,7 +372,7 @@ Otherwise, for an open bug, idea, refactor, or task:
 5. Move it:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move <id> out-of-scope
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" move <id> out-of-scope
    ```
 
    The id and filename never change — `move` only relocates the file; it never renames it and never touches its bytes. A rejected `bug-7` is still
@@ -410,7 +410,7 @@ would pick either one up and committing it changes nothing about that.
 If the user walks away mid-groom — no verdict given yet, or one chosen but the steps above never finished — clear the marker before the turn ends:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id>
 ```
 
 A stamp left on the file reads on the board as a session still actively working it, long after this one is gone. Worse, the next `backlog-execute start <id>` on

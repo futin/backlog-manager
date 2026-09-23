@@ -43,7 +43,7 @@ Capture only ever creates. It never moves, converts, or reclassifies an existing
 1. Make sure the store exists — every time, unconditionally:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" init
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" init
    ```
 
    This is the one skill of the four allowed to create `backlog/`. Run it every time, not only when you think this is the "first" capture: `init` is idempotent
@@ -54,7 +54,7 @@ Capture only ever creates. It never moves, converts, or reclassifies an existing
 2. Pick the section from the table above (asking first if it's ambiguous), then:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new <section> "<title>"
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" new <section> "<title>"
    ```
 
    Never pass `--from <id>` here, with the single exception below. That flag writes a `from: <id>` line into the new item's frontmatter, which is how a
@@ -108,7 +108,7 @@ moves.
 2. **Compose the whole body into a temp file** — the section's headings from the table below, verbatim, with `unknown` where you don't know — and pass it:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new <section> "<title>" --body /tmp/item.md
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" new <section> "<title>" --body /tmp/item.md
    ```
 
    `--body` is required here and refused in a files project, and the asymmetry is the point: with a file there is a path for you to write and a second writer
@@ -126,7 +126,7 @@ an error, and capture is not the skill that fixes it.
 ### Worked example
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" new ideas "Backlog dashboard tab"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" new ideas "Backlog dashboard tab"
 ```
 
 ```

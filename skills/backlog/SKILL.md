@@ -13,7 +13,7 @@ trigger: /backlog
 One command, and it changes nothing on disk:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" board
 ```
 
 This skill only reads `backlog/` and prints what's open. No moves, no captures, no
@@ -23,7 +23,7 @@ anything new, hand off to `backlog-capture` instead of doing it here.
 ## The command
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" board
 ```
 
 Prints four headers, in this fixed order, every time — `bugs`, `ideas`, `tasks`,
@@ -33,7 +33,7 @@ appears here: those items were already decided against, not left open.
 One section only:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --section bugs
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" board --section bugs
 ```
 
 `--section` takes `bugs`, `ideas`, `tasks`, or `refactors` — not `out-of-scope`.
@@ -41,7 +41,7 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --section bugs
 Machine-readable:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --json
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" board --json
 ```
 
 Each row is `<id>  <age>d  <title>`. A `»` before a title means someone is on that item
@@ -105,7 +105,7 @@ reworded is a board the next reader can't trust to be complete.
 file is where the tool's commands are documented:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" connect github [owner/repo] [--no-forms]
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" connect github [owner/repo] [--no-forms]
 ```
 
 It writes `backlog/source.json` — the committed marker that tells every machine's board this project's
@@ -124,7 +124,7 @@ under `backlog/` (that is `import`'s job), and on a project that already has a m
 `connect` is for an empty store. A project whose items are already files is moved by `import`, which is a one-shot migration of the whole `backlog/` store:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" import github [owner/repo] [--no-forms]
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" import github [owner/repo] [--no-forms]
 ```
 
 The order is the whole design. It writes `backlog/source.json` and the issue forms FIRST, because the server refuses every item write to a project whose marker

@@ -26,7 +26,7 @@ is for, and why `record` refuses to overwrite one.
 ## 1. Sweep
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-retro/tools/retro.mjs" sweep --json > <scratch>/sweep.json
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-retro/tools/retro.mjs" sweep --json > <scratch>/sweep.json
 ```
 
 Read that file. **Do not recompute anything it already holds** — every figure in the report comes out of this JSON, and when a number needs tracing, cite the
@@ -100,7 +100,7 @@ not available in the session, **propose in prose and file nothing** — filing i
 ## 5. Record, and bank one lesson
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-retro/tools/retro.mjs" record \
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-retro/tools/retro.mjs" record \
   --sweep <scratch>/sweep.json --labels <scratch>/labels.json --report <scratch>/report.md
 ```
 

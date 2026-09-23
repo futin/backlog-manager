@@ -52,8 +52,8 @@ necessarily re-reading this section.
 If the trigger already named an id ("fix bug 7", "execute task 12"), use it. Otherwise find the next thing to work:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --section bugs
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" board --section tasks
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" board --section bugs
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" board --section tasks
 ```
 
 Never `--section ideas` or `--section refactors` — neither has a plan to execute; that's what promoting one via `backlog-groom` is for. "Do the next thing"
@@ -63,7 +63,7 @@ This skill never runs `init`. If a command exits `3`, there's no `backlog/` stor
 git repository.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" show <id>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show <id>
 ```
 
 prints the item's absolute path on line 1, then its frontmatter — **never the body**. Read the file at that path yourself to see the actual headings; there's no
@@ -136,7 +136,7 @@ below), so an unreliable cause doesn't slip through even though the gate itself 
 The gate passed, so this item is about to be worked. Say so on disk, before any of the work starts:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" start <id> --as execute
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" start <id> --as execute
 ```
 
 That writes a `started: <UTC timestamp>` line and a `phase: execute` line into the item's frontmatter, and nothing else — the body is untouched.
@@ -260,13 +260,13 @@ Only once verification passed and both checks above have actually been run:
 2. Bill the session and clear the phase marker, but keep the record of when it started:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> --keep-started
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id> --keep-started
    ```
 
 3. Move it:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" move <id> done
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" move <id> done
    ```
 
 Between steps 2 and 3 the item sits open with `started:` but no `phase:` — the board reads that as in progress under its generic label rather than "executing,"
@@ -284,7 +284,7 @@ outside. Say what failed there and exit.
 Leave the in-progress marker alone if they're retrying now. Clear it if the item is being parked or handed back:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id>
 ```
 
 An item nobody is actually working that still shows an amber bar is worse than no marker at all — it's the board lying about where the work is. The two paths

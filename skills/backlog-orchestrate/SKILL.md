@@ -45,6 +45,11 @@ Two reference files sit beside this one and are **not** loaded with it. Read the
 - **`references/rationale.md`** — the measurements and the failures behind the rules here. Read the matching section before arguing with a rule, or before
   simplifying one away.
 
+Every command in this file names the plugin root as `${CLAUDE_PLUGIN_ROOT}`, and Claude Code filled that in with the installed copy's path when it loaded this
+skill — no shell here sets the variable, so an unfilled one expands to nothing and every `node` line becomes `node "/skills/…"`. A file read by hand is never
+filled in: both reference files, and a SKILL.md re-read from the repo after a runner fix (below), still carry the placeholder, as `$CLAUDE_PLUGIN_ROOT` or in
+braces. Replace it with `${CLAUDE_PLUGIN_ROOT}` before running the line — or, once a runner fix has switched this run to the repo copy, with this repo's root.
+
 ## Where commands run, and why it is not negotiable
 
 **This session's cwd must be the project root every time `orchestrate.mjs` is called — whatever put it somewhere else.** Never a worktree this run created. A
@@ -124,7 +129,7 @@ Before anything is created, spawned, or locked, print the queue that a run _woul
 is safe to run as many times as it takes to agree on the queue.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD"
 ```
 
 `--project` must be an **absolute** path (a relative one exits `1`) and must be the project root — the same string every later command will derive from its own
@@ -184,7 +189,7 @@ item 1's very first dispatch refused by exactly the flag item 3 existed to repla
 Two optional flags, and they pass through to `init` identically, which is the point: whatever you previewed is what you get.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD" --ids task-3,bug-7 --max 2
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD" --ids task-3,bug-7 --max 2
 ```
 
 - **`--ids a,b,c`** restricts the run to those ids **in the order given, after any runner-fix item is hoisted to the front**, overriding the bugs-then-tasks
@@ -204,7 +209,7 @@ its several hundred turns. Measured on this machine: interactive sessions floor 
 _orchestrate_ run existed when this was written, so treat that ~18k as the expected order for this path, not a measured result for it.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project "$PWD" --ids task-3,bug-7 --max 2
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project "$PWD" --ids task-3,bug-7 --max 2
 ```
 
 Same flags, same queue, now written down. `init` prints one JSON line:
@@ -228,7 +233,7 @@ and an in-progress marker still on disk (`references/rationale.md`, §2). Do not
 show the user, then take the run over with `--resume` or end it with `--abort` — both of which begin at `references/recovery.md`.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" status
 ```
 
 ### The base branch
@@ -237,7 +242,7 @@ When the trigger carries `--base <ref>`, add that flag to the `init` above — a
 the run behaves exactly as every run before this flag existed.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project "$PWD" --base feature/tracker-backed
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project "$PWD" --base feature/tracker-backed
 ```
 
 `init` refuses anything that is not an **existing local branch** — a tag, a commit SHA, a remote-tracking ref like `origin/main`, a branch that does not exist,
@@ -288,7 +293,7 @@ is byte-identical to §9's real one, so the permission classifier is asked now e
   mode. The run does not stop and nothing is parked:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge probe"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge probe"
   ```
 
   `--note` is mandatory (omitting it exits `1`), and the command only ever moves `merge` → `branch`, only once per run — a second call exits `1` rather than
@@ -337,7 +342,7 @@ comment there has the full reasoning for both.)
     again — that would spend a whole item's budget re-proving what is already green.
 
     ```bash
-    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
+    node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
     ```
 
   - **`archived=1`** — a real leftover, not a finished item (a crash before this run re-checked the branch out). Continue below; §4 resumes it.
@@ -350,13 +355,13 @@ comment there has the full reasoning for both.)
 human may groom an item mid-run. So re-gate this one item immediately before dispatching it:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD" --ids <id> --json
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" plan --project "$PWD" --ids <id> --json
 ```
 
 - **`ungroomed`** → record it and move to the next item:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> ungroomed --note "<the gate's own reason>"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> ungroomed --note "<the gate's own reason>"
   ```
 
   `stage`, not `attention`: the attention list takes exactly three kinds — `needs-answers`, `parked`, `fix-exhausted` — and anything else exits `1`. An
@@ -369,7 +374,7 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" plan
 Then say so on the record before doing anything slow:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> preflight
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> preflight
 ```
 
 **Exit `6`** — the board asked this run to pause. Do not pre-flight the item, do not create anything: go straight to §10, _Pausing_. Nothing was written, the
@@ -412,8 +417,8 @@ and then record it. The Write tool rather than a shell line for §4's reason: a 
 a question is prose.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind needs-answers --detail "asked, no channel — skipped" --questions-json "<dir>/questions/<id>.json"
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> needs-answers
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind needs-answers --detail "asked, no channel — skipped" --questions-json "<dir>/questions/<id>.json"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> needs-answers
 ```
 
 `--questions-json` takes a file holding a JSON array of strings, and its content is only ever applied for `--kind needs-answers` — the other two kinds read the
@@ -437,7 +442,7 @@ Write `<dir>/questions/<id>-assumed.json` with the **Write tool** too — an arr
 `[{"question":"question one","answer":"what you decided"}]` — and pass it in:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" assume <id> --json "<dir>/questions/<id>-assumed.json"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" assume <id> --json "<dir>/questions/<id>-assumed.json"
 ```
 
 Then continue to the loop and dispatch the item like any other. `assume` appends rather than replaces, so a second question decided later in this same
@@ -489,9 +494,9 @@ project root and on a `--base` run is not.
 A non-zero exit **parks the run**, because what cannot fast-forward is the branch every remaining item would be cut from:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <n> --kind parked --detail "<base> cannot fast-forward onto origin — another machine pushed something this tree cannot take; resolve it by hand, then resume"
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <n> parked
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <n> --kind parked --detail "<base> cannot fast-forward onto origin — another machine pushed something this tree cannot take; resolve it by hand, then resume"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <n> parked
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
 ```
 
 `init` ran the same pull once, before it built the queue, so on the ordinary path this never fires for the first item. It is here because a run lasts hours and
@@ -530,15 +535,15 @@ no longer knows about, and `worktree add` refuses that just as hard as one it do
     this run's.
 
     ```bash
-    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id>
+    node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id>
     ```
 
   - **Park it again** — the only answer with no channel, and the honest one either way: the item is parked because a human decision was already asked for and
     not given, and a new run does not change that.
 
     ```bash
-    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "leftover worktree $PWD/.worktrees/<id> and branch backlog/<id> from an earlier run — resume or clear them by hand before the next run"
-    node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+    node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "leftover worktree $PWD/.worktrees/<id> and branch backlog/<id> from an earlier run — resume or clear them by hand before the next run"
+    node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
     ```
 
 - **`branch=0 worktree=1 dir=1`** — a branch with no worktree. **A real leftover, not a finished item**: §3's own copy of this probe (top of that section)
@@ -573,7 +578,7 @@ committed, which is the normal state of an item the moment grooming finishes, ex
 its own `.git`-ancestor walk resolves to the worktree and not to the main tree (a subshell, per the rules at the top of this file):
 
 ```bash
-( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" show <id> ); echo "present=$?"
+( cd "$PWD/.worktrees/<id>" && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show <id> ); echo "present=$?"
 ```
 
 - **`present=0`** — the item is in the worktree. Carry on below.
@@ -581,8 +586,8 @@ its own `.git`-ancestor walk resolves to the worktree and not to the main tree (
   `-D` nothing.
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<id> is not present in the worktree checked out from <base> — commit backlog/ on <base>, then re-run"
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<id> is not present in the worktree checked out from <base> — commit backlog/ on <base>, then re-run"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
 §1's gate refuses an uncommitted item before a run ever starts, so on the ordinary path this probe never fires. It is here because it catches strictly more than
@@ -622,7 +627,7 @@ Run that from the project root (the path `git rev-parse` prints is relative to c
 Now write any pre-flight answer into the worktree's copy of the item file (see above), and record the worktree on the run:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id> --permission-mode auto
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --worktree "$PWD/.worktrees/<id>" --branch backlog/<id> --permission-mode auto
 ```
 
 Pass the worktree as an **absolute** path: `reconcile` and `abort` both test it with a plain existence check from wherever they happen to be running, and a
@@ -646,7 +651,7 @@ echo $! > "<dir>/logs/<id>.pid"
 **Then record that pid on the run** (bug-39):
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --pid "$(cat '<dir>/logs/<id>.pid')"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --pid "$(cat '<dir>/logs/<id>.pid')"
 ```
 
 A re-stamp of the stage the item already occupies, exactly like the `--session` line further down, so the pause gate lets it through. It is the same number
@@ -778,7 +783,7 @@ on one day as a contract: it is a classifier's judgment, not a list.
 ### Watch until it exits
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/logs/<id>.pid')" --jsonl "<dir>/logs/<id>.jsonl"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/logs/<id>.pid')" --jsonl "<dir>/logs/<id>.jsonl"
 ```
 
 **Make this call with the Bash tool's timeout raised to its maximum: `timeout: 600000`.** The default is `120000` — two minutes — and nothing raises it for you.
@@ -805,8 +810,8 @@ that file itself, and why `status --json` is where the session id is read back f
 ## 5. Inspect what the session left behind
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> inspecting
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> inspecting
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
 ```
 
 **Both lines, one Bash invocation** — that is the whole reason `usage` is its own command and not a flag on something else: it costs this step no extra turn. It
@@ -818,7 +823,7 @@ pointed at `<id>-retry-<n>.jsonl`, and again in step 7's fix loop.
 **First, before the item file: did the session get refused anything?**
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>.jsonl"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>.jsonl"
 ```
 
 Prints `{"count":N,"denials":[…]}`. A non-zero `count` means the session ran `auto` into a call the classifier refused (see step 4's rationale) — and because a
@@ -845,7 +850,7 @@ middle two take exactly the branches above:
 Then, in a tracker project only, write the snapshot the reviewer and `verify` both read:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" snapshot <n>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" snapshot <n>
 ```
 
 It writes `<dir>/items/<n>.md` — the issue's body, then `## Outcome`, then that outcome file — which is byte for byte what a files run's item file looks like at
@@ -907,7 +912,7 @@ missed half costs.
 ## 7. Review
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> reviewing
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> reviewing
 ```
 
 Dispatch the plugin's own reviewer, `backlog-manager:backlog-reviewer`, with the four fields its input contract requires and nothing else:
@@ -930,7 +935,7 @@ reports in this session's context.
 - **`verdict: fix`** → one fix loop. Spend it on the run file first, and read the count back:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> fixing --fix-loop
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> fixing --fix-loop
   ```
 
   `--fix-loop` is the only valueless flag on `stage`; it increments this item's `fixLoops` and echoes the new value back, so the line prints
@@ -948,8 +953,8 @@ reports in this session's context.
   certain to carry the backticks, `$(…)` and apostrophes §4's rule is about, and pasting it into the launcher instead is what bug-31 was.
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
   ```
 
   The second line is step 5's `usage` call again, on this loop's own transcript — one entry per transcript, so it lands beside the first session's rather than
@@ -971,7 +976,7 @@ one held in the run file does not. It is also the number the run drawer renders,
 After the second `fix` verdict (`fixLoops` is now `2`), stop looping and hand it to a human:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary, your words> — report at <dir>/reviews/<id>-2.md"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary, your words> — report at <dir>/reviews/<id>-2.md"
 ```
 
 `<verdict summary, your words>` is one line of your own on what the reviewer still objects to — never a quote from the report. The report path sitting beside it
@@ -990,10 +995,10 @@ than left to be inferred.
 ## 8. Verify
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> verifying
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> verifying
 mkdir -p "<dir>/verify"
 rm -f "<dir>/verify/<id>.status" "<dir>/verify/<id>.out" "<dir>/verify/<id>.pid"
-nohup env BM_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" BM_RUN_DIR="<dir>" sh -c 'node "$BM_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" verify <id> --cwd "$PWD/.worktrees/<id>" > "$BM_RUN_DIR/verify/<id>.out" 2>&1; echo $? > "$BM_RUN_DIR/verify/<id>.status"' > /dev/null 2>&1 &
+nohup env BM_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" BM_RUN_DIR="<dir>" sh -c 'node "$BM_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" verify <id> --cwd "$PWD/.worktrees/<id>" > "$BM_RUN_DIR/verify/<id>.out" 2>&1; echo $? > "$BM_RUN_DIR/verify/<id>.status"' > /dev/null 2>&1 &
 echo $! > "<dir>/verify/<id>.pid"
 ```
 
@@ -1016,7 +1021,7 @@ Five details in those lines, none of them the same as step 4's:
 - **No `exec`, unlike the dispatch line.** The pid recorded here is deliberately the wrapper `sh`, because the wrapper is what outlives `node` long enough to
   write `.status`. `exec` would replace it and the exit code — the one thing this whole step exists to produce — would be lost.
 - **Named `env` variables inside the quotes, never a positional.** The quotes must stay single so `$?` reaches the inner shell rather than this one, which rules
-  out interpolating `$CLAUDE_PLUGIN_ROOT` directly; `env` sets both names for the child instead. **Never pass them positionally.** Slash-command argument
+  out interpolating anything into them from this shell; `env` sets both names for the child instead. **Never pass them positionally.** Slash-command argument
   substitution rewrites positional parameters in this file before the session reads it, fenced code included — it has corrupted this exact line in a live run.
   Keep the plugin root and the run directory in `BM_PLUGIN_ROOT` / `BM_RUN_DIR`, and do not reintroduce a positional anywhere in this file. `$PWD` needs none of
   this care, which is why step 4's line uses it directly. (`references/rationale.md`, §8.)
@@ -1033,7 +1038,7 @@ Then poll it out, with the same maximum Bash timeout step 4's `watch` needs (`ti
 me again", exactly as it does there:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/verify/<id>.pid')" --jsonl "<dir>/verify/<id>.out"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" watch <id> --pid "$(cat '<dir>/verify/<id>.pid')" --jsonl "<dir>/verify/<id>.out"
 ```
 
 Yes, `watch` — the same command, doing the same three jobs: sleeping inside node rather than in the shell, returning `0` the moment the pid is gone, and
@@ -1074,8 +1079,8 @@ call as the launch.
   opinion.
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, verification still red: <the failing command names> — rows in status --json"
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, verification still red: <the failing command names> — rows in status --json"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
   `<the failing command names>` is the names alone — `pnpm test`, `pnpm run typecheck` — and never their output. The rows in `status --json` carry the output
@@ -1088,8 +1093,8 @@ call as the launch.
   written, and this item cannot prove itself. **Park it**:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "nothing to verify with — add backlog/verify.json or a ## Done when block"
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "nothing to verify with — add backlog/verify.json or a ## Done when block"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
   Annoying on an unconfigured repo, and correct anyway: "merged, verified by nothing" is the false-done this entire system exists to prevent.
@@ -1104,7 +1109,7 @@ Fix the command or the environment, or park the item with that row quoted in the
 **In `branch` mode this whole section collapses to two commands. Take them and skip the rest of it:**
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
@@ -1170,8 +1175,8 @@ Three outcomes, and they are exhaustive:
    answer — park, quoting git's message, which names the tree:
 
    ```bash
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<base> is checked out at <path> but not cleanly (git: <message>) — branch backlog/<id> kept for a manual merge"
-   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<base> is checked out at <path> but not cleanly (git: <message>) — branch backlog/<id> kept for a manual merge"
+   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
    ```
 
 **The run removes a base worktree only if it created it** — outcome 2 and nothing else. A worktree the person made is theirs, and this is the same sentence as
@@ -1182,7 +1187,7 @@ Three outcomes, and they are exhaustive:
 ### The two preconditions, in the base tree
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merging
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merging
 git -C "<base tree>" symbolic-ref HEAD
 ```
 
@@ -1199,8 +1204,8 @@ In either case do **not** check out `<base>` yourself: their working tree is the
 continue:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "base tree <base tree> is on <ref>, not refs/heads/<base> — branch backlog/<id> kept for a manual merge"
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "base tree <base tree> is on <ref>, not refs/heads/<base> — branch backlog/<id> kept for a manual merge"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
 ```
 
 **Second precondition: the base tree's uncommitted paths must not overlap the branch's.** A dirty base tree is fine — this run does not get to demand a clean
@@ -1225,8 +1230,8 @@ On a non-empty intersection, do not stash, commit, or check anything out on the 
 abort's preservation branch draws. Take the worktree-side resolve below if it applies, otherwise park with the overlapping paths named:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "merge would be refused: <paths> are uncommitted in <base tree> and this branch also touches them — commit or stash them, then merge backlog/<id> by hand"
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "merge would be refused: <paths> are uncommitted in <base tree> and this branch also touches them — commit or stash them, then merge backlog/<id> by hand"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
 ```
 
 Otherwise merge:
@@ -1263,8 +1268,8 @@ is not something a human must look at, so this item takes the _branch_ outcome i
 just been shown to fail:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge of <id>"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge of <id>"
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 ```
 
@@ -1328,7 +1333,7 @@ rule out that the user has uncommitted work in the tree it is writing to, so the
 **On success**, record it and clean up. Capture the removal's status — the rest of this section branches on it, and on what git printed:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged
 git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 git -C "<base tree>" branch -d backlog/<id>
 ```
@@ -1420,9 +1425,9 @@ feature accumulates on its own branch and `main` is never written until a human 
 
 ### After a runner-fix item lands
 
-A merged fix does **not** reach this run on its own. Every skill body and every `orchestrate.mjs` invocation here resolves through `$CLAUDE_PLUGIN_ROOT` — the
-_installed plugin copy_ — while the merge just landed in this repo's base branch. Hoisting the item to the front of the queue (§1) buys ordering and nothing else
-unless the run is told, once, to follow the repo's copy for the rest of the run.
+A merged fix does **not** reach this run on its own. Every skill body and every `orchestrate.mjs` invocation here resolves through the plugin root filled in
+at load (`${CLAUDE_PLUGIN_ROOT}`) — the _installed plugin copy_ — while the merge just landed in this repo's base branch. Hoisting the item to the front of the
+queue (§1) buys ordering and nothing else unless the run is told, once, to follow the repo's copy for the rest of the run.
 
 So after every merge, print what it brought in — in the base tree, for the reason the cleanup rule above gives: `HEAD` here has to mean the merge commit, and on
 a `--base` run the project root's `HEAD` is `main`, which the merge never touched. Asked there this prints some unrelated earlier merge's file list, or nothing
@@ -1444,7 +1449,7 @@ taking neither leaves the run exactly as it was. Never one.
 Record the switch on the item that carried the fix, through the note channel that already exists rather than a new field:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged --note "runner fix — the remainder of this run follows the repo copy"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged --note "runner fix — the remainder of this run follows the repo copy"
 ```
 
 (or `branched` under branch mode, same note). **No `attention` entry** — `ATTENTION_KINDS` is the closed set of three and means "a human must look at this
@@ -1467,7 +1472,7 @@ resumed session that finds any queue item staged `merged` or `branched` carrying
 When the queue is drained:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status done
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status done
 ```
 
 **If this run created a base worktree (§9, outcome 2), remove it first — and only if this run created it.**
@@ -1514,7 +1519,7 @@ step 8, which is precisely why neither of those two can make a healthy run read 
 freshness threshold on their own, and a run whose heartbeat goes stale reads to the board (and to a later `init`) as crashed:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" heartbeat
 ```
 
 In a tracker project `heartbeat` also heartbeats every claim the run still holds — `needs-answers` items included — so a long review cannot let the in-flight
@@ -1525,7 +1530,7 @@ item's claim go stale and read to another machine as a crashed run it may contes
 You are here because `stage <id> preflight` or `stage <id> dispatched` exited `6`. Nothing was written by that call. Finish the run:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
 ```
 
 Then summarise exactly as _Finishing_ above does — what merged or branched, what parked and why, the branch list and its conflict pairs if any item finished
@@ -1547,7 +1552,7 @@ next item boundary and leaves the item in flight to complete, a stop abandons it
 even if you tried.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
 ```
 
 Read `references/recovery.md`'s abort section first, as always — abort's order of operations is its entire safety property, and it is unchanged here. Five
