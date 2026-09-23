@@ -7459,6 +7459,68 @@ test('SKILL.md says a classifier-denied PUSH parks, in the push paragraph itself
   assert.match(paragraph, /branch mode|branched/i);
 });
 
+// --- #222: the merge is one Bash call of its own, and the probe asks what it will ask ---
+//
+// run-20260923-154625 (claude-agents-dashboard) chained `git merge …; git push
+// origin main` into ONE Bash call. The classifier judges a call as a whole, so
+// a reviewed, green merge was denied as "[Merge Without Review]" and the run
+// degraded to branch mode — the push question had turned into a merge denial.
+// The tracker snippet had also lost its branch argument, which is what invited
+// the driver to improvise the command in the first place.
+
+const fencedLines = (text) => {
+  const out = [];
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) out.push(line.trim());
+  }
+  return out;
+};
+
+test('the tracker merge snippet names its branch and carries the review provenance', () => {
+  const lines = fencedLines(fs.readFileSync(SKILL_MD, 'utf8'));
+  const tracker = lines.filter((l) => l.startsWith('git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>'));
+  assert.equal(tracker.length, 1, `expected exactly one tracker merge snippet, found ${tracker.length}`);
+  const [merge] = tracker;
+  assert.ok(merge.endsWith(' backlog/<n>'), `the tracker merge does not name the branch it merges: ${merge}`);
+  assert.ok(merge.includes('-m "Fixes #<n>"'), 'the tracker merge lost its Fixes line');
+  assert.match(merge, /-m "Reviewed: approve \(reviews\/<n>-<k>\.md\)"/, 'the tracker merge does not show the classifier the review it passed');
+});
+
+test('no snippet chains a git merge with anything else, and the rule says why', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const merges = fencedLines(text).filter((l) => /^git\b.*\bmerge --no-ff\b/.test(l));
+  assert.ok(merges.length >= 4, `only ${merges.length} merge snippets found — the scan is no longer reaching them`);
+  for (const line of merges) {
+    // Quotes stripped first: a `;` or `|` inside a -m message is text, not a chain.
+    const bare = line.replace(/"[^"]*"/g, '""');
+    assert.ok(!/;|&&|\|\||\|/.test(bare), `a merge snippet chains another command: ${line}`);
+    assert.ok(!/\bpush\b/.test(bare), `a merge snippet pushes: ${line}`);
+  }
+  const flat = text.replace(/\s*\n\s*/g, ' ');
+  assert.match(flat, /never chains `git merge` with anything else/, 'the one-call rule is not stated');
+  assert.match(flat, /one classifier verdict per (Bash )?call/i, 'the one-call rule lost its reason');
+});
+
+test('the probe has the tracker merge\'s shape, and a resumed run probes before its first merge', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const lines = fencedLines(text);
+  const mFlags = (l) => (l.replace(/"[^"]*"/g, '""').match(/ -m ""/g) ?? []).length;
+  const [trackerMerge] = lines.filter((l) => l.startsWith('git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>'));
+  const trackerProbe = lines.filter((l) => /^git merge --no-ff -m .* HEAD$/.test(l));
+  assert.equal(trackerProbe.length, 1, `expected exactly one tracker-shaped probe, found ${trackerProbe.length}`);
+  assert.equal(mFlags(trackerProbe[0]), mFlags(trackerMerge), 'the tracker probe does not carry as many -m messages as the tracker merge');
+  assert.ok(lines.includes('git merge --no-ff --no-edit HEAD'), 'the files probe changed');
+  const flat = text.replace(/\s*\n\s*/g, ' ');
+  assert.match(flat, /resumed or unpaused[^.]*probes? before its first merge/i, 'SKILL.md does not make a resumed run probe');
+  const recovery = fs.readFileSync(path.join(path.dirname(SKILL_MD), 'references', 'recovery.md'), 'utf8').replace(/\s*\n\s*/g, ' ');
+  assert.match(recovery, /before this session's first merge: run SKILL\.md §2's merge probe/, 'recovery.md does not send a resumed run to the probe');
+});
+
 // --- C-1 … C-5: task-48, what the rest of the run publishes -----------------
 //
 // Phase 4b makes a run VISIBLE from other machines, and the only thing another

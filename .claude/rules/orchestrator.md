@@ -82,7 +82,9 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   [invariants.md](docs/subsystems/invariants.md#question-mode-is-run-scoped-and-it-only-ever-takes-effect-in-a-headless-run)
 - **A classifier denial degrades a run to branch mode; every other merge failure still parks.** Denied means the item is staged `branched`, the downgrade is
   recorded once (`merge-mode branch --note`), the queue continues, and there is no attention entry. A conflict, overlapping dirty paths and a main tree not on
-  `main` still park. SKILL.md §2's preflight probe is early warning, never a guarantee — the verdict is per call. Why:
+  `main` still park. SKILL.md §2's preflight probe is early warning, never a guarantee — the verdict is per call; in a tracker project it takes the tracker
+  merge's `-m` shape, and a resumed or unpaused session probes before its first merge. **The merge is its own Bash call, never chained** — a push chained onto
+  it turned a would-be park into a degrade (#222). Why:
   [invariants.md](docs/subsystems/invariants.md#a-classifier-denial-degrades-the-run-every-other-merge-failure-parks)
 - **Undoing an already-completed orchestrator merge is `git revert -m 1`, never `git reset --hard`** — proved empirically: the reset silently destroyed
   unrelated uncommitted work with no reflog entry to recover it. `git merge --abort` still handles an in-progress conflicted merge. Why:

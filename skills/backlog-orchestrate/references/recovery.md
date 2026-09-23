@@ -45,6 +45,10 @@ write: a paused run carries the lease of whichever session paused it and then ex
 `running` path above does — it is a no-op re-claim by the session that already holds it, and running it keeps this branch identical to the other one — and
 continue, `reconcile` next.
 
+**Either path, before this session's first merge: run SKILL.md §2's merge probe** if `mergeModeEffective` still reads `merge` — the tracker-shaped one in a
+tracker project. The probe is per session, not per run: a run paused before item 1 and unpaused here has never asked the classifier anything, and #222's
+first denial came at a real merge for exactly that reason. A denied probe degrades the run the way §2 says.
+
 **Anything else** — `done`, `aborted`, `failed` — is not this path's to touch. Refuse and say which.
 
 `status` runs first for exactly that reason, and it is the guard, not a formality: a finished run is not this step's to re-stamp, and `status` is what tells the
