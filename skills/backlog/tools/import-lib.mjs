@@ -167,7 +167,7 @@ export function importOrder(items) {
   })
 }
 
-const COUNTER_KEYS = [
+export const COUNTER_KEYS = [
   ['groom-elapsed', 'groomElapsed'],
   ['execute-elapsed', 'executeElapsed'],
   ['groom-tokens', 'groomTokens'],
