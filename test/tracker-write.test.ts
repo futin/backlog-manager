@@ -17,8 +17,8 @@ import { CLAIM_STALE_MS } from '../shared/types';
 import type { ClaimRecord, ClaimRun, ItemsIndex } from '../shared/types';
 
 /**
- * The seven write routes and the claim protocol, end to end (task-46,
- * spec §6.2 and §6.3).
+ * The eight write routes and the claim protocol, end to end (task-46,
+ * spec §6.2 and §6.3; `queue` is the orchestrator:queued spec's §2).
  *
  * The network is an in-memory GitHub behind a REAL `GithubClient`
  * (`test/helpers/github.ts` — see its header for why a whole little server
@@ -372,6 +372,103 @@ describe('comment', () => {
 });
 
 /* =========================================================================
+ * queue — the eighth write route (the orchestrator:queued spec, §2)
+ * ========================================================================= */
+
+describe('queue', () => {
+  it('adds orchestrator:queued for queued: true, and answers the id and the flag', async () => {
+    gh.issue();
+    await sync();
+    const res = await post('queue', { project: trackerPath, id: '#31', queued: true }).expect(201);
+    expect(res.body).toEqual({ id: '#31', queued: true });
+
+    const adds = gh.matching('/issues/31/labels', 'POST');
+    expect(adds).toHaveLength(1);
+    expect(adds[0].body).toEqual({ labels: ['orchestrator:queued'] });
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('orchestrator:queued');
+  });
+
+  it('removes the label for queued: false', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'orchestrator:queued' }] });
+    await sync();
+    const res = await post('queue', { project: trackerPath, id: '#31', queued: false }).expect(201);
+    expect(res.body).toEqual({ id: '#31', queued: false });
+
+    expect(gh.matching('/issues/31/labels/orchestrator%3Aqueued', 'DELETE')).toHaveLength(1);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toEqual(['type:bug']);
+  });
+
+  /* Every caller of `false` is a sweep, and a sweep's contract is "the label is
+     not there" — which a 404 from the removal says it is not. Asserting the
+     DELETE was made is what stops a route that skipped the call from passing. */
+  it('answers success when the removal 404s because the label was never there', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }] });
+    await sync();
+    const res = await post('queue', { project: trackerPath, id: '#31', queued: false }).expect(201);
+    expect(res.body).toEqual({ id: '#31', queued: false });
+    expect(gh.matching('/labels/orchestrator%3Aqueued', 'DELETE')).toHaveLength(1);
+  });
+
+  it('does not refuse a closed issue — removing a stale label from one is a cleanup', async () => {
+    gh.issue({ state: 'closed', state_reason: 'completed', labels: [{ name: 'type:bug' }, { name: 'orchestrator:queued' }] });
+    await sync();
+    await post('queue', { project: trackerPath, id: '#31', queued: false }).expect(201);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toEqual(['type:bug']);
+  });
+
+  it('maps any other failure through the refusal table — an add on a missing issue is a 404', async () => {
+    await sync();
+    await post('queue', { project: trackerPath, id: '#31', queued: true }).expect(404);
+  });
+
+  it('400s a queued that is not a boolean, and a missing id, reaching GitHub not at all', async () => {
+    gh.issue();
+    await sync();
+    const bad = await post('queue', { project: trackerPath, id: '#31', queued: 'yes' }).expect(400);
+    expect(bad.body.error).toMatch(/queued/);
+    await post('queue', { project: trackerPath, id: '#31' }).expect(400);
+    const noId = await post('queue', { project: trackerPath, queued: true }).expect(400);
+    expect(noId.body.error).toMatch(/id/);
+    expect(gh.calls).toEqual([]);
+  });
+
+  it('refuses a files project the way the other seven do, and makes no request', async () => {
+    const res = await post('queue', { project: filesPath, id: '#31', queued: true }).expect(400);
+    expect(res.body.error).toMatch(/files/);
+    expect(gh.calls).toEqual([]);
+  });
+
+  /* Driven at the adapter for the reason the claim-serialisation cases below
+     spell out: two supertest calls never overlap here. The queue add is fired
+     first, so on the item's chain it runs first and the claim's swap then takes
+     it off — the end state a run's `init` followed by its first claim produces. */
+  it('serialises a concurrent queue and claim on one item — both resolve, and the claim wins the label', async () => {
+    gh.issue();
+    await sync();
+    const source = app.get(GithubSource);
+    const project = registryEntry();
+    const marker = { kind: 'github', repo: REPO };
+
+    const [queued, claimed] = await Promise.all([
+      source.queue(project, marker, { project: trackerPath, id: '#31', queued: true }),
+      source.claim(project, marker, { project: trackerPath, id: '#31', phase: 'execute', session: 'A' })
+    ]);
+    expect(queued.ok).toBe(true);
+    expect(claimed.ok).toBe(true);
+
+    // The queue add lands before the claim's first request: not interleaved.
+    const queueAdd = gh.calls.findIndex((c) => c.method === 'POST' && c.url.endsWith('/issues/31/labels') && JSON.stringify(c.body).includes('orchestrator:queued'));
+    const claimPost = gh.calls.findIndex((c) => c.method === 'POST' && c.url.includes('/issues/31/comments'));
+    expect(queueAdd).toBeGreaterThanOrEqual(0);
+    expect(queueAdd).toBeLessThan(claimPost);
+
+    const names = gh.issues.get(31)?.labels.map((l) => l.name);
+    expect(names).toContain('in-progress');
+    expect(names).not.toContain('orchestrator:queued');
+  });
+});
+
+/* =========================================================================
  * The protocol
  * ========================================================================= */
 
@@ -388,6 +485,28 @@ describe('claim', () => {
     expect(gh.matching('/issues/31/comments', 'GET')).toHaveLength(2);
     expect(gh.matching('/issues/31', 'PATCH')[0].body).toEqual({ assignees: ['futin'] });
     expect(gh.matching('/issues/31/labels', 'POST')[0].body).toEqual({ labels: ['in-progress'] });
+  });
+
+  /* The claim swap (the orchestrator:queued spec, §3.3): the claim is the
+     moment an item stops being planned and starts being worked, and every
+     claimant goes through this one method. */
+  it('takes orchestrator:queued off as it puts in-progress on, on a won claim', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'orchestrator:queued' }] });
+    await sync();
+    await post('claim', { project: trackerPath, id: '#31', phase: 'execute', session: 'A' }).expect(201);
+
+    expect(gh.matching('/issues/31/labels/orchestrator%3Aqueued', 'DELETE')).toHaveLength(1);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toEqual(['type:bug', 'in-progress']);
+  });
+
+  it('leaves orchestrator:queued alone on a lost claim — the winner-s claim already took it off', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'orchestrator:queued' }] });
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+    await post('claim', { project: trackerPath, id: '#31', phase: 'execute', session: 'B' }).expect(409);
+
+    expect(gh.matching('/labels/orchestrator%3Aqueued', 'DELETE')).toEqual([]);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('orchestrator:queued');
   });
 
   it('maps the claimed item as in progress, with in-progress consumed from tags', async () => {

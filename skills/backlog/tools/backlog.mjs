@@ -3110,7 +3110,7 @@ export async function main(argv) {
   // `import github [owner/repo] [--no-forms]` — `connect`'s sibling for a POPULATED store, and the one command in this file that moves a project between
   // sources (§8). It is also the only one that deletes item files.
   //
-  // The shape is forced by the server rather than chosen here: the seven item write routes refuse a `files` project (`ItemsService.writerFor`), so the marker
+  // The shape is forced by the server rather than chosen here: the item write routes refuse a `files` project (`ItemsService.writerFor`), so the marker
   // has to be written BEFORE the first `create`. From that moment the board reads the tracker and ignores the files, which is what makes deleting them LAST
   // free — they are already invisible — and deleting them any earlier unrecoverable, since a pass that never ran is a file nothing has a copy of.
   //
@@ -3281,7 +3281,7 @@ export async function main(argv) {
 
     // --- the marker, then the writes (§8.2) ---------------------------------
     //
-    // The marker goes down FIRST because the seven item write routes refuse a `files` project, and it is not rewritten on a resume: it is already this
+    // The marker goes down FIRST because the item write routes refuse a `files` project, and it is not rewritten on a resume: it is already this
     // project's committed identity, and re-writing a file to the bytes it already holds is a diff somebody has to read.
     if (!resuming) writeSourceMarker(backlog, repo)
     const committable = [`backlog/${SOURCE_MARKER}`]

@@ -8,6 +8,7 @@ import type {
   ItemCommentRequest,
   ItemCreateRequest,
   ItemHeartbeatRequest,
+  ItemQueueRequest,
   ItemReleaseRequest,
   ItemStateRequest,
   ProjectSummary,
@@ -160,7 +161,7 @@ export interface CreatedItem {
 }
 
 /**
- * The write half of one source (task-46, spec §6.2) — seven methods, one per
+ * The write half of one source (task-46, spec §6.2) — eight methods, one per
  * route, each a value-returning call the controller turns into a status.
  *
  * Every method takes the RESOLVED project and marker rather than a project
@@ -210,11 +211,20 @@ export interface ItemWriter {
   comment(project: RegistryProject, marker: SourceMarker, req: ItemCommentRequest): Promise<WriteOutcome<{ commentId: number; url: string }>>;
 
   /**
+   * Add or remove `orchestrator:queued` (the eighth write route). Deliberately
+   * reads nothing first — not the issue, not its state: a closed issue is not
+   * refused, because removing a stale label from one is a legitimate cleanup,
+   * and a removal that 404s is success, because every `queued: false` caller is
+   * a sweep whose contract is "the label is not there".
+   */
+  queue(project: RegistryProject, marker: SourceMarker, req: ItemQueueRequest): Promise<WriteOutcome<{ id: string; queued: boolean }>>;
+
+  /**
    * The claim that holds one item — the lowest live id, the holder `claim`
    * itself resolves, or the newest claim when nothing is live (bug-58) — or
    * `null` for an item nobody has ever claimed. The one READ on this
-   * interface, and the eighth route (`GET /api/items/claim`) behind the seven
-   * the spec names.
+   * interface, and the one read route (`GET /api/items/claim`) beside the
+   * eight writes.
    *
    * It is here rather than on `ItemSource` because the claim IS the writer's:
    * the protocol writes it, the protocol's vocabulary describes it, and the

@@ -9,12 +9,12 @@ import type { CreatedItem, WriteOutcome, WriteRefusal } from './sources/source';
 import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, Section } from '../../../shared/types';
 
 /**
- * items-write.controller.ts — the seven write routes of a tracker project
- * (task-46, spec §6.2).
+ * items-write.controller.ts — the eight write routes of a tracker project
+ * (task-46, spec §6.2; the eighth, `queue`, is the orchestrator:queued spec's §2).
  *
  * ## What this file is, and what it deliberately is not
  *
- * Seven thin pass-throughs. Every route does the same four things in the same
+ * Eight thin pass-throughs. Every route does the same four things in the same
  * order and nothing else: rebuild the body field by field, ask
  * `ItemsService.writerFor` whether this project can be written to at all, call
  * one `ItemWriter` method, and turn its `WriteRefusal` into a status. No route
@@ -37,7 +37,7 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
  * for: a hidden cross-origin form auto-submit needs no CORS preflight, and
  * without the guard any page in the developer's browser could file issues, edit
  * bodies and close items. `test/agents-origin-guard.test.ts`'s route list is
- * where the guarded set lives, and it grew by these seven.
+ * where the guarded set lives, and it grew by these eight.
  *
  * A JSON POST with NO `Origin` at all still passes, deliberately and by the
  * guard's existing rule — because the CLI is exactly that caller.
@@ -183,7 +183,7 @@ export class ItemsWriteController {
     const finished = claimFinishedOf(raw.finished);
 
     const w = this.writable(this.items.writerFor(project));
-    // `state` is the ONE field on these seven routes taken outright, and it is
+    // `state` is the ONE field on these eight routes taken outright, and it is
     // safe for the reason the dispatch route's `prompt` is not: no predicate
     // branches on it. It is the `ClaimState` task-47's driver publishes,
     // round-tripped into a comment this app wrote and back out again; its one
@@ -232,10 +232,32 @@ export class ItemsWriteController {
   }
 
   /**
-   * The project gate, in one place for all seven (the second, third and fourth
+   * The eighth route (the orchestrator:queued spec, §2): add or remove the
+   * advisory `orchestrator:queued` label. The driver's only way to GitHub for
+   * it — the headless session never sees the token.
+   *
+   * `queued` must be a literal boolean, and a non-boolean is a 400 rather than
+   * a coerced value for the reason `body`'s `runnerFix` is: a caller that sent
+   * `'yes'` meant something, and coercing `'false'` to truthy would add the
+   * label a sweep was trying to take off.
+   */
+  @Post('queue')
+  async queue(@Body() body: Record<string, unknown> | undefined): Promise<{ id: string; queued: boolean }> {
+    const raw = body ?? {};
+    const project = required(raw.project, 'project');
+    const id = required(raw.id, 'id');
+    if (typeof raw.queued !== 'boolean') throw new HttpException({ error: 'queued must be a boolean' }, 400);
+    const queued = raw.queued;
+
+    const w = this.writable(this.items.writerFor(project));
+    return this.answer(await w.writer.queue(w.project, w.marker, { project, id, queued }));
+  }
+
+  /**
+   * The project gate, in one place for all eight (the second, third and fourth
    * refusals). Throws rather than returning a union, because every caller does
-   * the identical thing with a failure and a seventh copy of that branch is
-   * seven chances for one of them to answer 404 where the others answer 400.
+   * the identical thing with a failure and an eighth copy of that branch is
+   * eight chances for one of them to answer 404 where the others answer 400.
    */
   private writable(lookup: WriterLookup): Extract<WriterLookup, { kind: 'writer' }> {
     // 404 rather than 400: a path this server was never told about is, as far
