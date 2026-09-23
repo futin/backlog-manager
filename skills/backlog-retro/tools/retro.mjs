@@ -14,8 +14,8 @@
 // not, and no amount of regex will make it so. So `sweep` never labels and
 // `record` refuses a label outside the closed set.
 //
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-retro/tools/retro.mjs" sweep --json
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-retro/tools/retro.mjs" last
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-retro/tools/retro.mjs" sweep --json
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-retro/tools/retro.mjs" last
 //
 // Deliberately standalone, exactly as orchestrate.mjs is: it imports
 // nothing from another skill's `tools/` and nothing from the server, even

@@ -711,11 +711,11 @@ the rest keep the order they had, and a marked _task_ hoists ahead of an unmarke
 fix that was going to fall outside the cap now lands inside it. The gate itself is untouched, so an ungroomed marked item hoists too and prints first labelled
 `ungroomed`; "the thing that would fix your runner is not groomed" is information, and the top of the list is where it gets read.
 
-**Ordering alone would buy nothing.** Every skill body and every `orchestrate.mjs` invocation in a run resolves through `$CLAUDE_PLUGIN_ROOT` — the installed
-plugin copy — while the merge lands in this repo's `main`, so a merged fix does not reach the run that merged it. SKILL.md §9's "After a runner-fix item lands"
-is the within-run half: print `git diff --name-only HEAD^1 HEAD` **in the base tree** (bug-38 — `HEAD` there has to mean the merge commit, and on a `--base` run
-the project root's is `main`), and if it names `skills/backlog-orchestrate/SKILL.md`, follow the repo's copy for the rest of the run — plus the repo's
-`orchestrate.mjs` if that moved too. **Prose and tool move together or not at all**: following freshly merged prose while still
+**Ordering alone would buy nothing.** Every skill body and every `orchestrate.mjs` invocation in a run resolves through the plugin-root path the skill text was
+loaded with — the installed plugin copy — while the merge lands in this repo's `main`, so a merged fix does not reach the run that merged it. SKILL.md §9's
+"After a runner-fix item lands" is the within-run half: print `git diff --name-only HEAD^1 HEAD` **in the base tree** (bug-38 — `HEAD` there has to mean the
+merge commit, and on a `--base` run the project root's is `main`), and if it names `skills/backlog-orchestrate/SKILL.md`, follow the repo's copy for the rest of
+the run — plus the repo's `orchestrate.mjs` if that moved too. **Prose and tool move together or not at all**: following freshly merged prose while still
 invoking the installed tool is the one genuinely dangerous combination, because the new body may name a flag the old tool refuses.
 
 The switch is session state and nothing on disk carries it, so a crashed run resumed by the board or the watchdog is handed the installed copy again. Both

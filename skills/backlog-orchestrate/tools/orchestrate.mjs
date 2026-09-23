@@ -14,8 +14,8 @@
 // and `abort` (tear down worktrees/branches and mark the run over) on top
 // of the same run file.
 //
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project /abs/path/to/repo
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" init --project /abs/path/to/repo
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
 //
 // Deliberately standalone: this file imports nothing from skills/backlog/
 // tools/backlog.mjs, even though a couple of things below (the git-root

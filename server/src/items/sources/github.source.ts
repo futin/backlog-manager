@@ -733,13 +733,41 @@ export class GithubSource implements ItemSource, ItemWriter {
    * Rewrite one issue's body — groom's route, and the only route that does
    * (§6.4).
    *
-   * Optimistic concurrency, not a lock: one FRESH read, a comparison of
-   * `updated_at` against what the caller last saw, and a patch only if they
-   * match. Fresh rather than cached because the cache is up to a poll interval
-   * old and a stale stamp would compare equal to a body somebody has since
-   * rewritten — the exact overwrite this check exists to prevent.
+   * Optimistic concurrency, not a lock: one FRESH read, then a patch only if
+   * the BODY has not changed since the caller read it. That is the one change
+   * that can make this route's write an overwrite; a label, an assignee or a
+   * comment moving is irrelevant to it.
    *
-   * A mismatch is a 409 carrying the CURRENT stamp, so the caller can re-read
+   * Two readings of "not changed", either one enough:
+   *
+   * - the fresh `updated_at` equals the caller's stamp — nothing at all moved;
+   * - the cached copy of the issue carries exactly the caller's stamp, and its
+   *   body equals the fresh body. The caller's stamp names that cached copy
+   *   (it is what `show --json` printed), so its body is the body the caller
+   *   read — and GitHub still holds it. Whatever moved the stamp was not a
+   *   body edit.
+   *
+   * The stamp alone was wrong because the claim protocol's own writes move it
+   * (bug #220): `claim` adds `in-progress` (the label endpoint answers with the
+   * labels, not the issue, so there is nothing to absorb) and `heartbeat` edits
+   * the claim comment, which bumps the parent issue LATE — a read straight
+   * after the edit still returns the old stamp — so absorbing a fresher stamp
+   * at the write cannot close it. A groom's first `body` after `start` was a
+   * guaranteed 409 on its own bookkeeping.
+   *
+   * The cache is read BEFORE the fresh issue is absorbed into it, or the second
+   * reading would be comparing the fresh copy with itself. And it is strict
+   * equality on the cached stamp, never `>=`: a cached copy newer than the
+   * caller's read may already hold another session's body, and matching the
+   * fresh body against THAT would approve exactly the overwrite this check
+   * exists to prevent. A poll that refreshed the cache between `show` and
+   * `body` therefore still refuses — one retry, never an overwrite.
+   *
+   * Fresh rather than cached for the first reading because the cache is up to
+   * a poll interval old and a stale stamp would compare equal to a body
+   * somebody has since rewritten.
+   *
+   * A refusal is a 409 carrying the CURRENT stamp, so the caller can re-read
    * and re-apply without a second round trip to learn it.
    */
   async patchBody(_project: RegistryProject, marker: SourceMarker, req: ItemBodyRequest): Promise<WriteOutcome<{ id: string; updatedAt: string }>> {
@@ -751,11 +779,15 @@ export class GithubSource implements ItemSource, ItemWriter {
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
     return this.serialise(issueUrn(repo, number), async () => {
+      const cached = this.poller.issue(repo, number);
       const fresh = await this.client.issue(repo, number, { token });
       if (fresh.status !== 200 || fresh.data === null) return { ok: false as const, refusal: refusalFor(fresh) };
       this.poller.absorbIssue(repo, fresh.data);
 
-      if (fresh.data.updated_at !== req.ifUpdatedAt) {
+      const untouched =
+        fresh.data.updated_at === req.ifUpdatedAt ||
+        (cached !== undefined && cached.updated_at === req.ifUpdatedAt && (cached.body ?? '') === (fresh.data.body ?? ''));
+      if (!untouched) {
         return {
           ok: false as const,
           refusal: { refused: 'conflict' as const, error: `#${number} changed since you read it`, updatedAt: fresh.data.updated_at }
