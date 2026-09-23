@@ -25,7 +25,9 @@ paths: ["skills/**", "agents/**"]
   skips those items — the footer is on the tracker, where a crash cannot lose it, and the readable `_Imported from …_` line beside it is never parsed. Counters
   ride ONE synthetic `claim` + `release` (`reason: 'imported'`) BEFORE the close, because `claim` refuses a closed issue, and a resumed repair deliberately does
   not re-bill them. An over-cap body is cut at a `## ` boundary and links the file at HEAD, which is why HEAD must be on an `origin/*` ref and `backlog/` must be
-  clean. Every refusal leaves the project byte-identical, a mid-run failure deletes nothing, and `import` never commits. Why:
+  clean — except that a resume ignores its own uncommitted marker (`?? backlog/source.json` or `A  backlog/source.json`, via `withoutResumeMarker`), which a
+  stopped run always leaves and the link never points at; ` M backlog/source.json` still refuses. Every refusal leaves the project byte-identical, a mid-run
+  failure deletes nothing, and `import` never commits. Why:
   [invariants.md](docs/subsystems/invariants.md#import-writes-the-marker-first-and-deletes-the-files-last)
 - **`refactors/` is a peer section, not a facet on ideas**: ideas are new, refactors are existing things that should be improved. Prefix `ref`, lifecycle
   identical to ideas (`open/` → `done/`, promotable to a task with `from:`, rejectable). `kind: chore | debt` is written by `backlog-capture`, round-tripped by
