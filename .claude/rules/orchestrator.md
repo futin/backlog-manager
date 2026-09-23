@@ -133,3 +133,12 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `loop`, both from the file name, never `sessionId`. Absence is a value: no result event writes no entry, a renamed numeric field reads `null` never `0`, and
   `usage` stays optional so an older run renders nothing rather than `$0.00`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-sessions-cost-is-recorded-per-transcript-and-a-transcripts-identity-is-its-file-name)
+- **`orchestrator:queued` is a plan, never a claim: the driver adds it, the claim and the Stop remove it, and no reader treats it as exclusion.** Adds:
+  `orchestrate.mjs init` on a tracker project, to every queue item as built (already cut to `--max`), through `POST /api/items/queue` — the driver's only way to
+  the label. Removes: `GithubSource.claim` on a WON claim, in the same step that adds `in-progress` (a lost claim removes nothing); the driver on a skip (an item
+  reaching a release stage it never claimed); `finish` and `cmdAbort`, over `unclaimedQueueItems`; and `AgentsService.stop`, which sweeps the run file's
+  never-claimed items through the item writer BEFORE the abort spawns, reports what it could not clear in `StopResult.unqueueFailed`, and never fails the stop.
+  A pause removes nothing. Every driver write goes through `trackerQueueLabel`, which never throws and never moves an exit code: one stderr line per refused
+  item, ONE line for the whole batch when the API is down. No gate, queue builder, preflight or claim reads the label; the mapper sets `BacklogItem.queued` and
+  only the card reads it, as `queuedReading`'s `'live' | 'stale' | null`. A `files` project makes no label call on any path. Why:
+  [invariants.md](docs/subsystems/invariants.md#orchestratorqueued-is-a-plan-never-a-claim)

@@ -103,6 +103,7 @@ the suite pins by driving a whole stage sequence with `BM_API_PORT` pointed at a
 | `init`               | `git pull --ff-only origin <base>` in the tree holding the base, BEFORE the queue is built. A failure refuses the init, nothing written                |
 | the claim            | `stage <n> preflight` claims; every field-changing command heartbeats the state; a terminal stage releases with this run's bill, and so does `abort` for everything the run still holds (reason `aborted`, bug-40); `stage <n> merged --outcome <file>` closes the issue |
 | publishing (task-48) | `finish` stamps `finished` on the last-touched claimed item; `attention` posts a `bm:attention` comment with an `@mention`; `heartbeat` heartbeats every held claim — all best-effort, one stderr line on failure |
+| `orchestrator:queued` (task-52) | `init` adds the label to every queue item as built, within `--max`; a skip removes it from an item never claimed; `finish` and `--abort` sweep every never-claimed item. All through `POST /api/items/queue`, all advisory: a refusal is one stderr line per item, the API down is ONE line for the batch, and no exit code moves. A won claim removes it server-side, so a claimed item needs nothing here |
 | `reconcile`          | each row gains `claim` (`this-run`/`other`/`released`/`none`/`unknown`, from `GET /api/items/claim`); `other` makes the suggestion `skip` |
 
 Two commands exist only here: `snapshot <n>` (the issue body plus the session's Outcome, as one file the reviewer and `verify` read) and `stage`'s `--outcome`

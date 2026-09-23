@@ -146,7 +146,7 @@ every issue on the tracker, skips the items it finds there, closes a `done/` ite
 is on the tracker, where a crash cannot lose it.
 
 Three things do not survive the move. A body over GitHub's 65,536-character cap is cut at a `## ` heading boundary and gains a line linking the full file at
-HEAD. `tags:` live in the footer only, since the tracker's label set is a closed eight. And the file's git history stays in the repository — the issue is dated
+HEAD. `tags:` live in the footer only, since the tracker's label set is a closed nine. And the file's git history stays in the repository — the issue is dated
 by its `created` frontmatter, not by the commit that filed it.
 
 ## Next

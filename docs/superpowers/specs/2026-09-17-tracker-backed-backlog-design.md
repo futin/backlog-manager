@@ -171,8 +171,9 @@ active item.
 
 ### 5.2 The label set, ensured on first sync
 
-Eight labels, created by the poller the first time a repo syncs successfully and any is missing, idempotently: `type:bug`, `type:idea`, `type:task`,
-`type:refactor`, `kind:chore`, `kind:debt`, `runner-fix`, `in-progress`. This is phase 2's one write to GitHub, and it is a bootstrap, not a lifecycle write:
+Nine labels, created by the poller the first time a repo syncs successfully and any is missing, idempotently: `type:bug`, `type:idea`, `type:task`,
+`type:refactor`, `kind:chore`, `kind:debt`, `runner-fix`, `in-progress`, `orchestrator:queued` (the ninth, added by task-52 — see
+[the orchestrator:queued spec](2026-09-23-orchestrator-queued-label-design.md) §1). This is phase 2's one write to GitHub, and it is a bootstrap, not a lifecycle write:
 the mapping below cannot work without the set, and the poller is the first thing that touches a repo with a token in hand. `connect` therefore needs no server
 running (§5.6).
 
@@ -187,6 +188,7 @@ running (§5.6).
 | `section`                                    | the one `type:*` label; none → `ideas` with `untyped: true` (new, default `false`); two → the first alphabetically, and a scan error  |
 | `kind`                                       | the one `kind:*` label's value, else `''`                                                                                            |
 | `tags`                                       | every other label                                                                                                                    |
+| `queued` (new, `true` or absent)             | `true` when `orchestrator:queued` is on the issue, the key absent otherwise; consumed like `runner-fix`, never a tag — advisory, read by the card alone ([orchestrator:queued spec](2026-09-23-orchestrator-queued-label-design.md) §4.1) |
 | `status`                                     | open → `open`; closed with `state_reason` `completed` or none → `done`; closed with any other reason (`not_planned`, `duplicate`) → `terminal`, and `section` becomes `out-of-scope` — the type label stays on the issue so the original type is recoverable |
 | `created`                                    | `created_at`, date part                                                                                                              |
 | `updated`                                    | `updated_at`, verbatim — the client's `lastTouched` precedence is unchanged; `lastCommit` is `''` so the middle rung falls through   |
@@ -259,6 +261,7 @@ by these), and each refused with `400` for a `files` project. A CLI sends no `Or
 | `heartbeat`          | `project, id, commentId, state?`                  | edits the claim's heartbeat and, when given, its machine state (§7.1)                       |
 | `body`               | `project, id, body, ifUpdatedAt`                  | patches the body; `409` if `updated_at` has moved — groom's route, nobody else's           |
 | `comment`            | `project, id, body`                               | appends a comment — attention and outcome, the human events                                 |
+| `queue`              | `project, id, queued: boolean`                    | adds or removes `orchestrator:queued`; a removal's 404 is success — the eighth, added by task-52 ([orchestrator:queued spec](2026-09-23-orchestrator-queued-label-design.md) §2) |
 
 Each is a thin pass-through to the adapter's write method; the server validates shapes and serialises §6.3 per item in-process so two local sessions never
 race each other on the network — the protocol still covers other machines.
@@ -337,6 +340,10 @@ run-relevant text.
 > **Landed in task-47 (phase 4a), 2026-09-19 — one machine orchestrating.** Phase 4 was split on the user's call: 4a is a run draining a tracker project
 > from one machine, and task-48 (4b) is making that run visible from others. The annotations below record what each subsection actually became; the original
 > text above and beneath them is never rewritten. §7.3 is 4b's whole subject and landed nothing here.
+>
+> **Extended 2026-09-23 by [the orchestrator:queued spec](2026-09-23-orchestrator-queued-label-design.md)**: a run's not-yet-claimed queue items carry the
+> advisory `orchestrator:queued` label — added at `init`, removed by the claim, a skip, `finish`, the board's Stop and `--abort` — so a teammate on another
+> machine can see the plan. It is never a claim; §6.3 stays the only exclusion.
 
 ### 7.1 The claim comment is the item's machine state
 
@@ -487,7 +494,7 @@ Per item, in this order:
 
 1. **Split the body.** `## Outcome` comes out — on a tracker project the outcome is the closing comment (§6.2's `state`), and an imported item should read
    like a natively closed one. The rest is the issue body, plus a footer: `<!-- bm:imported from=<id> created=<date> tags=<a,b> -->` and one readable line,
-   `_Imported from backlog/<section>/<status>/<file>.md_`. Free-text `tags:` live in that footer and become no label — the label set stays the closed eight
+   `_Imported from backlog/<section>/<status>/<file>.md_`. Free-text `tags:` live in that footer and become no label — the label set stays the closed nine
    (§5.2). `created` dates become the import time; the footer keeps the original.
 2. **Fit the cap.** GitHub caps a body and each comment at 65,536 characters, and the survey found a real item over it (guide-manager `task-1`, 69,883
    bytes, one section of 58 KB). Keep whole `##` sections from the top while they fit, then append
