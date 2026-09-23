@@ -79,7 +79,7 @@ The commands and flags that exist only here, one line each:
   holder on another machine is the ordinary case, not litter: an empty `claim-host:` means the claim was written before machines were recorded, never that
   the holder is on this one.
 - `comment <id> --body <file>` appends a comment without moving anything.
-- `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the issue moved since you read it. Only `backlog-groom` uses it.
+- `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the body changed since you read it (a claim's own label or comment write does not count). Only `backlog-groom` uses it.
 
 ## Print it as returned
 
