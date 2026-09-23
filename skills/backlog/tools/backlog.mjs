@@ -1563,44 +1563,108 @@ export function transcriptFiles(projectsRoot, sessionId) {
   return files
 }
 
-// Where this machine's transcripts live. One derivation for the two readers of that tree — `sessionTokensSince` bills from it and `holdingSessionEvidence`
-// dates it — because a second spelling of the same path is how one of them silently stops looking where the other looks.
-function claudeProjectsRoot(env) {
-  const configDir = env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude')
-  return path.join(configDir, 'projects')
+// This machine's Claude Code config directory — `CLAUDE_CONFIG_DIR` first, the same rule Claude Code itself follows. One derivation for the two trees read
+// out of it — `projects/` (transcripts, which `sessionTokensSince` bills from) and `sessions/` (the process registry `holdingSessionEvidence` reads) —
+// because a second spelling of the same path is how one reader silently stops looking where the other looks.
+function claudeConfigDir(env) {
+  return env.CLAUDE_CONFIG_DIR || path.join(env.HOME || os.homedir(), '.claude')
 }
 
-// Evidence that the session holding a claim is STILL RUNNING on this machine (bug-48) — the proof `abort` needs before it releases a claim that is not its
-// own, and the reason the SERVER's half of the new clause is `sameHost` alone: a process on another host can see neither of the two things this reads.
-//
-// The evidence is a transcript for the holder's session under `<configDir>/projects/` — the directory `transcriptFiles` already scans — whose mtime is at or
-// after the claim's heartbeat stamp. Present means a session on this host wrote to its transcript no earlier than the beat, i.e. it is the one beating.
-// Absent, or older than the beat, means the session that wrote that heartbeat is not writing here any more.
-//
-// **The asymmetry with bug-46 is the whole point.** The absence of a local transcript is MEANINGLESS on a machine that did not mint the session — that is
-// exactly bug-46's false negative, where the one check a remote reader can run answers "no" for every foreign claim, live or dead, and the "no" gets read as
-// proof of death. It becomes meaningful here only because `abort`'s first refusal has already established that this machine is the one the claim was made
-// on, so a running holder's transcript would have to be here.
-//
-// A session with no `CLAUDE_CODE_SESSION_ID` has no transcript at all and so passes this check trivially. That is correct rather than a hole: such a claim's
-// `session` is `<user>@<host>` — a person at a terminal on this host — and the person at that terminal is who is running `abort`.
-//
-// `{ file, at }` for the first transcript that is evidence, or `null`. An unreadable file or directory is not evidence, the same tolerance every other
-// reader of that tree has: nothing about a directory this tool does not own may throw here.
-export function holdingSessionEvidence(session, heartbeatISO, env = process.env) {
-  const beat = Date.parse(heartbeatISO)
-  if (!Number.isFinite(beat)) return null
+function claudeProjectsRoot(env) {
+  return path.join(claudeConfigDir(env), 'projects')
+}
 
-  for (const file of transcriptFiles(claudeProjectsRoot(env), session)) {
-    let mtimeMs
-    try {
-      mtimeMs = fs.statSync(file).mtimeMs
-    } catch {
-      continue
-    }
-    if (mtimeMs >= beat) return { file, at: new Date(mtimeMs).toISOString() }
+// Field 22 of `/proc/<pid>/stat` — the process's start time in clock ticks since boot, which is what Claude Code records as `procStart` on Linux. The
+// command name in field 2 is parenthesised and may itself hold spaces or parens, so the split starts after the LAST `)`: field 3 is then index 0, and
+// field 22 is index 19. `null` wherever there is no `/proc` (macOS) or the process is not readable — the caller then has only the pid to go on.
+function procStartOf(pid) {
+  let stat
+  try {
+    stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
+  } catch {
+    return null
   }
-  return null
+  const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+  return fields[19] ?? null
+}
+
+// Is the process a registry entry was written for still running? `kill(pid, 0)` answers for the pid — `EPERM` means it exists and belongs to somebody
+// else, which is still alive. Where `/proc` can say when that pid started, the entry's `procStart` must match it too, so a pid the kernel has since handed
+// to an unrelated process does not read as the session. Compared only when the entry's value is all digits, the Linux shape; macOS writes a date string
+// and has no `/proc`, and there a reused pid reads as alive — the safe direction, since the cost is a refusal rather than a seizure.
+function registryEntryRunning(entry) {
+  try {
+    process.kill(entry.pid, 0)
+  } catch (e) {
+    if (e.code !== 'EPERM') return false
+  }
+  const recorded = String(entry.procStart ?? '')
+  if (!/^\d+$/.test(recorded)) return true
+  const actual = procStartOf(entry.pid)
+  return actual === null || actual === recorded
+}
+
+// Evidence about the session holding a claim on THIS machine (bug-48, bug-49) — the proof `abort` needs before it releases a claim that is not its own, and
+// the reason the SERVER's half of that clause is `sameHost` alone: a process on another host can see neither this registry nor this process table.
+//
+// The evidence is Claude Code's own process registry, `<configDir>/sessions/<pid>.json`: one file per running `claude` process, headless `-p` sessions
+// included, written at start and kept for the whole life of the process however quiet it is. A graceful exit REMOVES the file; a hard kill leaves it, with a
+// pid that no longer answers. So an entry naming the holder whose process is still running (`registryEntryRunning`) is `alive`; a registry that was read
+// and understood with no such entry is `gone`.
+//
+// bug-48 read transcript mtimes instead, and that could never fire for the case it was written for: the `start`/`heartbeat` that stamped the beat is a tool
+// call INSIDE the holding session, whose `tool_result` is appended to the transcript after the server stamps it — so every session killed after its last
+// heartbeat has a transcript newer than the beat, and `abort` refused all of them as "still writing here". A transcript answers "did this session write
+// after the beat", which every session did; only the registry answers "is the process still there".
+//
+// **Three answers, not two, and the third fails closed.** `unknown` when the directory is missing or unreadable, when any `*.json` in it lacks a string
+// `sessionId` or a numeric `pid`, or — when the aborting process has a `CLAUDE_CODE_SESSION_ID` — when no running entry names the aborting session ITSELF.
+// That last is the self-check: a session that cannot find itself is reading a registry whose shape or location changed, and its "nothing names the holder"
+// means nothing. A misread in this direction turns every live neighbour into a dead one, so anything the reader does not understand is `unknown`, and
+// `abort` refuses on it. The sibling `<pid>.<hash>.key` files are not `*.json` and are not read.
+//
+// **The asymmetry with bug-46 is the whole point.** The absence of a local entry is MEANINGLESS on a machine that did not mint the session — that is exactly
+// bug-46's false negative. It becomes meaningful here only because `abort`'s first refusal has already established that this machine is the one the claim
+// was made on, so a running holder would have to be in this registry.
+//
+// A claim whose `session` is the `<user>@<host>` fallback (no `CLAUDE_CODE_SESSION_ID` when it was taken) has no registry entry by construction and so reads
+// `gone`. That is bug-48's reading kept on purpose: such a claim is a person at a terminal on this host, and the person at that terminal is who runs `abort`.
+//
+// `{ state: 'alive', file, pid }`, `{ state: 'gone' }` or `{ state: 'unknown', why }`.
+export function holdingSessionEvidence(session, env = process.env) {
+  const dir = path.join(claudeConfigDir(env), 'sessions')
+  let names
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort()
+  } catch {
+    return { state: 'unknown', why: `${dir} could not be read` }
+  }
+
+  const entries = []
+  for (const name of names) {
+    const file = path.join(dir, name)
+    let entry
+    try {
+      entry = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {
+      return { state: 'unknown', why: `${file} could not be read as JSON` }
+    }
+    if (entry === null || typeof entry !== 'object' || typeof entry.sessionId !== 'string' || !Number.isInteger(entry.pid)) {
+      return { state: 'unknown', why: `${file} carries no sessionId and pid this build understands` }
+    }
+    entries.push({ file, entry })
+  }
+
+  const self = env.CLAUDE_CODE_SESSION_ID
+  if (typeof self === 'string' && self.trim() !== '') {
+    const found = entries.some(({ entry }) => entry.sessionId === self.trim() && registryEntryRunning(entry))
+    if (!found) return { state: 'unknown', why: `${dir} holds no running entry for this session (${self.trim()})` }
+  }
+
+  for (const { file, entry } of entries) {
+    if (entry.sessionId === session && registryEntryRunning(entry)) return { state: 'alive', file, pid: entry.pid }
+  }
+  return { state: 'gone' }
 }
 
 // One transcript file's records, or `null` if the file could not be read at
@@ -2698,8 +2762,8 @@ export async function main(argv) {
      but wait or delete the comment by hand — which destroys the record of the work and the counters that prove it.
 
      The server's new clause is `sameHost`, and **the PROOF behind it is this command's**. The server can see neither this filesystem nor this process table,
-     so the three refusals below are where the narrowness lives; they run in the order the evidence gets cheaper to trust, and the HOST check comes before
-     the transcript check because the transcript check is meaningless without it (see `holdingSessionEvidence`).
+     so the refusals below are where the narrowness lives; they run in the order the evidence gets cheaper to trust, and the HOST check comes before the
+     session-registry check because the registry check is meaningless without it (see `holdingSessionEvidence`).
 
      There is deliberately no `--force`, no flag naming the holder and no remote path. The first two are the fourth clause with no proof attached, assertable
      from a machine that cannot possibly know — the shape bug-46 exists to stop being persuasive. The third is honest about its limit: a machine that is
@@ -2760,12 +2824,18 @@ export async function main(argv) {
 
       /* Refusal 2: nothing may show the holding session still running here. Without this, `abort` is a seizure rather than a repair — a second session on
          this same laptop could take an item out from under the person holding it at a terminal, which is the one thing host equality alone cannot stop. */
-      const alive = holdingSessionEvidence(held.record.session, held.record.heartbeat)
-      if (alive !== null) {
+      const evidence = holdingSessionEvidence(held.record.session)
+      if (evidence.state === 'alive') {
         console.error(
-          `${wanted} is held by session ${held.record.session}, which is still writing here: ${alive.file} was touched ${alive.at}, at or after the claim's` +
-            ` heartbeat ${held.record.heartbeat} — not aborting a session that is running`,
+          `${wanted} is held by session ${held.record.session}, which is still running here: ${evidence.file} names it, and pid ${evidence.pid} is alive` +
+            ` — not aborting a session that is running`,
         )
+        return 1
+      }
+      /* Refusal 3 (bug-49): the registry could not be read, or reads in a shape this build does not understand. Fail closed — a misread there is what
+         would turn a live neighbour into a dead one — and say the honest thing: nothing here can tell, so the protocol's own window is the answer. */
+      if (evidence.state === 'unknown') {
+        console.error(`${wanted}: abort cannot tell whether session ${held.record.session} is gone (${evidence.why}) — wait out the 15 min window`)
         return 1
       }
 

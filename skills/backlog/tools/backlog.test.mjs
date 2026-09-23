@@ -3728,7 +3728,9 @@ function trackerFixture(repo = 'futin/x') {
   return { dir, backlog }
 }
 
-const apiEnv = (port, extra = {}) => ({ ...process.env, BM_API_PORT: String(port), ...extra })
+// `BM_MACHINE_NAME` blanked unless a case sets it: a machine that exports one (the claim host nickname lives in `~/.zshenv`) would otherwise leak it into
+// every child, and each case that compares a claim's host against `THIS_HOST` would fail there and pass everywhere else. Blank reads as unset.
+const apiEnv = (port, extra = {}) => ({ ...process.env, BM_MACHINE_NAME: '', BM_API_PORT: String(port), ...extra })
 
 /** One issue as `/api/items` returns it, with only what a case is about spelled out. */
 function apiItem(over = {}) {
@@ -4324,15 +4326,42 @@ const abortableClaim = (over = {}) => ({
   '/api/items/release': { status: 201, body: { commentId: 100, record: {} } },
 })
 
+/* Claude Code's own process registry, `<configDir>/sessions/<pid>.json` — the evidence `abort` reads since bug-49. A temp config dir per case, never the
+   real one: the real registry holds this machine's live sessions, and none of them is `sess-aborting`, so every case would read the self-check as failed. */
+function registryFixture(entries = [], { self = true } = {}) {
+  const config = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-registry-')))
+  const sessions = path.join(config, 'sessions')
+  fs.mkdirSync(sessions, { recursive: true })
+  const all = self ? [{ pid: process.pid, sessionId: 'sess-aborting', procStart: selfProcStart() }, ...entries] : entries
+  all.forEach((entry, i) => fs.writeFileSync(path.join(sessions, `${entry.pid ?? `x${i}`}-${i}.json`), JSON.stringify(entry)))
+  return { config, sessions }
+}
+
+/** This process's start time the way the registry records it on Linux — field 22 of `/proc/<pid>/stat` — or a date string where there is no `/proc`,
+ *  which is the shape macOS writes and which the CLI never compares. */
+function selfProcStart() {
+  try {
+    const stat = fs.readFileSync('/proc/self/stat', 'utf8')
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]
+  } catch {
+    return new Date().toString()
+  }
+}
+
+/** A pid that is certainly not running: a child spawned and reaped before the case reads it. */
+const deadPid = () => spawnSync('node', ['-e', '']).pid
+
+const abortEnv = (port, config, extra = {}) => apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting', CLAUDE_CONFIG_DIR: config, ...extra })
+
 test('API mode: abort releases a live claim whose holding session is gone from THIS machine', async () => {
   const { dir } = trackerFixture()
-  const { out, requests } = await withApi(abortableClaim(), async (port) =>
-    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting' }), 'abort', '31'),
-  )
+  const { config } = registryFixture()
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
 
-  assert.equal(out.status, 0)
-  const release = requests.find((r) => r.path === '/api/items/release')
-  assert.ok(release, 'abort must release the claim')
+  assert.equal(out.status, 0, out.stderr)
+  const releases = requests.filter((r) => r.path === '/api/items/release')
+  assert.equal(releases.length, 1, 'abort must release the claim exactly once')
+  const release = releases[0]
   assert.equal(release.body.commentId, 100)
   // The same word `orchestrate.mjs abort` writes (bug-40), because it is the same event: a session torn down without passing through a terminal stage.
   assert.equal(release.body.reason, 'aborted')
@@ -4345,39 +4374,95 @@ test('API mode: abort releases a live claim whose holding session is gone from T
   assert.ok(!('counters' in release.body), 'counters must be absent, never zeroed')
 })
 
-// The mtime comparison, in the direction that matters: a transcript that stopped being written BEFORE the heartbeat was stamped is not evidence that the
-// session writing it is the one beating — it is evidence of the opposite.
-test('API mode: abort proceeds when the holder-s transcript is older than the heartbeat', async () => {
+/* The regression case, and the repro of bug-49: the heartbeat that stamped the claim was a tool call INSIDE the holding session, whose `tool_result` lands in
+   its transcript after the beat — so every session killed after its last heartbeat has a transcript newer than that beat. bug-48's mtime check refused
+   exactly this, which is why the repro had to be cleared with a raw `POST /api/items/release`. A transcript is not evidence of a process. */
+test('API mode: abort releases when the holder-s transcript is NEWER than the heartbeat but no registry file names it', async () => {
   const { dir } = trackerFixture()
-  const { config, projects } = transcriptFixture()
-  const file = writeTranscript(projects, 'proj-a', 'sess-gone.jsonl', [])
-  const old = Date.now() - 600_000
-  fs.utimesSync(file, old / 1000, old / 1000)
-
-  const { requests } = await withApi(abortableClaim(), async (port) =>
-    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting', CLAUDE_CONFIG_DIR: config }), 'abort', '31'),
-  )
-
-  assert.ok(requests.find((r) => r.path === '/api/items/release'), 'a transcript older than the beat must not refuse')
-})
-
-/* The check that makes `abort` a repair rather than a seizure. Without it, a second session on the same laptop could take an item out from under the
-   person holding it at a terminal. */
-test('API mode: abort refuses while a transcript for the holding session is at or after the heartbeat', async () => {
-  const { dir } = trackerFixture()
-  const { config, projects } = transcriptFixture()
+  const { config } = registryFixture()
+  const projects = path.join(config, 'projects')
   const beat = new Date(Date.now() - 60_000).toISOString()
   const file = writeTranscript(projects, 'proj-a', 'sess-gone.jsonl', [])
   const fresh = Date.now()
   fs.utimesSync(file, fresh / 1000, fresh / 1000)
 
-  const { out, requests } = await withApi(abortableClaim({ heartbeat: beat }), async (port) =>
-    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-aborting', CLAUDE_CONFIG_DIR: config }), 'abort', '31'),
-  )
+  const { out, requests } = await withApi(abortableClaim({ heartbeat: beat }), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(requests.filter((r) => r.path === '/api/items/release').length, 1)
+})
+
+/* The check that makes `abort` a repair rather than a seizure. Without it, a second session on the same laptop could take an item out from under the
+   person holding it at a terminal. The registry file and its pid are named, because "something is still running" with no evidence attached is exactly the
+   unanswerable refusal bug-48 was about. */
+test('API mode: abort refuses while a registry file names the holding session and its pid is running', async () => {
+  const { dir } = trackerFixture()
+  const { config } = registryFixture([{ pid: process.pid, sessionId: 'sess-gone', procStart: selfProcStart() }])
+
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
 
   assert.equal(out.status, 1)
-  // The file and its mtime are named, because "something is still running" with no evidence attached is exactly the unanswerable refusal this bug is about.
-  assert.match(out.stderr, /sess-gone\.jsonl/)
+  assert.ok(out.stderr.includes(`${process.pid}-1.json`), `the registry file must be named: ${out.stderr}`)
+  assert.ok(out.stderr.includes(`pid ${process.pid}`), `the pid must be named: ${out.stderr}`)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+// A hard kill leaves the registry file behind; its pid is what says the process is gone.
+test('API mode: abort releases when the registry file naming the holder points at a pid that is not running', async () => {
+  const { dir } = trackerFixture()
+  const { config } = registryFixture([{ pid: deadPid(), sessionId: 'sess-gone', procStart: '1' }])
+
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(requests.filter((r) => r.path === '/api/items/release').length, 1)
+})
+
+// A reused pid: running, but not the process the file was written for. Only Linux can tell, from `/proc/<pid>/stat`; elsewhere the pid test stands alone.
+test('API mode: abort releases when the holder-s pid is running but its procStart differs (Linux only)', { skip: !fs.existsSync('/proc/self/stat') }, async () => {
+  const { dir } = trackerFixture()
+  const { config } = registryFixture([{ pid: process.pid, sessionId: 'sess-gone', procStart: String(Number(selfProcStart()) + 1) }])
+
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(requests.filter((r) => r.path === '/api/items/release').length, 1)
+})
+
+/* Fail CLOSED on a registry this build cannot read or does not understand: a misread there turns every live neighbour into a dead one. Three shapes of
+   "cannot tell", each exit 1 with no request. */
+test('API mode: abort refuses when the session registry directory is absent', async () => {
+  const { dir } = trackerFixture()
+  const config = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-registry-')))
+
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /cannot tell/)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+test('API mode: abort refuses when a registry file carries no sessionId', async () => {
+  const { dir } = trackerFixture()
+  const { config } = registryFixture([{ pid: deadPid(), procStart: '1' }])
+
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /cannot tell/)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+})
+
+// The self-check: a session that cannot find ITSELF in the registry is reading a registry whose shape changed, and its "nothing names the holder" means
+// nothing either.
+test('API mode: abort refuses when the aborting session has no live entry of its own', async () => {
+  const { dir } = trackerFixture()
+  const { config } = registryFixture([], { self: false })
+
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /cannot tell/)
   assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
 })
 

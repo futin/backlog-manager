@@ -96,7 +96,8 @@ beside "ours, here" is exactly the reading this skill must not take. Either way:
 - **Live, held on THIS machine by a session that is gone** — a session killed mid-item releases nothing, so its claim stays live for the rest of the fifteen
   minutes with nobody behind it. This is the one case a session may take the item back, because this is the one machine that can check:
   `abort <id>` releases the claim with `reason: 'aborted'`, keeping its counters, and then `start <id> --as groom` succeeds. It refuses unless the claim's host
-  is this one AND the holder's transcript shows no write since the last beat, so a live neighbour on this laptop is safe from it. Do not reach for it on the
+  is this one AND Claude Code's session registry shows no running process for the holder, so a live neighbour on this laptop is safe from it — and refuses
+  too when it cannot read that registry. A session that exited cleanly is usually released for you within one poll, by the server's claim sweeper. Do not reach for it on the
   bullet above: on a foreign claim an unfindable session id is bug-46's false negative, and `abort` refuses that claim anyway.
 
 **`Groomed on disk only` is NOT printed for a tracker project.** There is nothing on disk and nothing to commit: the groom is on GitHub the moment the call

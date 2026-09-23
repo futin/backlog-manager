@@ -2904,11 +2904,26 @@ filesystem nor its process table. That is the same split billing already has, fo
 **`abort` refuses unless three things hold, and the order matters.** The claim's `host` must be non-empty and equal this machine's `hostIdentity()` — a
 cross-machine claim is refused naming BOTH hosts, and a hostless one is refused rather than assumed local. The claim must be unreleased and live — a released
 one has nothing to abort, and a dead one needs no abort at all, so that case exits `0` saying the next `start` retires it and makes no request. And
-`holdingSessionEvidence` must find no transcript for the holder's session under `<configDir>/projects/` whose mtime is at or after the claim's heartbeat: a
-transcript written no earlier than the beat means that session is the one beating, and it is alive. **That last check is meaningful only because the host check
-already ran**, and the asymmetry with bug-46 is the whole point — on a machine that did not mint the session, an absent transcript is bug-46's false negative
-and proves nothing at all. A session with no `CLAUDE_CODE_SESSION_ID` has no transcript and passes trivially, which is correct: such a claim's `session` is
-`<user>@<host>`, a person at a terminal on this host, and that person is the one running `abort`.
+`holdingSessionEvidence` must answer `gone`: Claude Code's own process registry, `<configDir>/sessions/<pid>.json`, was read and understood and holds no entry
+naming the holder whose process is still running (`kill(pid, 0)` succeeds or answers `EPERM`, and — where `/proc/<pid>/stat` is readable — its field 22 equals
+the entry's `procStart`, so a reused pid does not pass). **That last check is meaningful only because the host check already ran**, and the asymmetry with
+bug-46 is the whole point — on a machine that did not mint the session, an absent entry is bug-46's false negative and proves nothing at all. A session with no
+`CLAUDE_CODE_SESSION_ID` has no registry entry and reads `gone`, which is correct: such a claim's `session` is `<user>@<host>`, a person at a terminal on this
+host, and that person is the one running `abort`.
+
+**The evidence was a transcript mtime until bug-49, and that could never fire for the case it was written for.** bug-48 called the holder alive if any transcript
+of its session had an mtime at or after the claim's heartbeat. But the `start`/`heartbeat` that stamped the beat is itself a tool call inside the holding
+session, and the session appends the call's `tool_result` AFTER the server stamps the beat — so every session killed after its last heartbeat returned has a
+transcript newer than the beat, and `abort` refused all of them as "still writing here". The repro (`futin/guide-manager#5`, 2026-09-22) had to be cleared with a
+raw `POST /api/items/release`; the unit tests stayed green because they set a transcript's mtime by hand and never modelled a session whose last act was the
+beat itself. A transcript answers "did this session write after the beat", which every session did; the registry answers "is the process still there": a
+graceful exit removes the file, and a hard kill leaves it behind with a pid that no longer answers.
+
+**`holdingSessionEvidence` has three answers, and the third fails closed.** `unknown` when the registry directory is missing or unreadable, when any `*.json` in
+it lacks a string `sessionId` or an integer `pid`, or — when the aborting process has a `CLAUDE_CODE_SESSION_ID` — when no running entry names the aborting
+session ITSELF. That self-check is what catches a registry whose shape or location changed under a new Claude Code: a session that cannot find itself would read
+every neighbour as gone too. `abort` refuses on `unknown` and says so ("cannot tell … wait out the 15 min window"), because a misread in that direction is the
+one that turns a live neighbour into a dead one.
 
 Rejected, each for its own reason. **A `--force` flag, or a clause letting any caller name the holder**: the clause with no proof attached, assertable from a
 machine that cannot possibly know, which is the shape bug-46 exists to stop being persuasive. **Host equality with no liveness check**: cheaper, and it would
@@ -3009,6 +3024,40 @@ orchestrated at all, so no `#`-bearing id could reach the prompt; task-47 (phase
 normalisation is the stronger of the two — nothing is refused for carrying a `#`, it simply never survives to the prompt — but it is also the more fragile,
 because it is one `replace` rather than a closed door. `orchestrate.mjs` reads its argv as tokens and SKILL.md substitutes those tokens into fenced shell
 commands, so anything that weakens or routes around the normalisation needs proving safe against THAT reader, not against this predicate.
+
+## The claim sweeper reads the session registry's files and never its pids
+
+bug-48 gave the machine holding a claim a clause to release it (`sameHost`) and a person a verb to invoke it (`abort`), but nothing invoked it WITHOUT a person:
+nothing noticed the process had died, so an unattended run on another machine waited out the full fifteen minutes, and a person who walked away left the item
+locked until they came back — while the dashboard on the holding machine already reported `runningClaudeProcs: 0` (bug-49).
+
+The sweeper (`server/src/items/claim-sweeper.service.ts`) runs inside the poller's tick, after each successful per-repo sync (`onRepoSynced`), so it inherits
+"armed only while something is connected" instead of owning a second timer. It lives in `items/` and registers itself with the poller, because it calls
+`GithubSource.release` and the dependency between the two modules runs one way. It releases a cached claim only when every condition holds, and each one is a
+failure somebody would otherwise pay for:
+
+- **Live and carrying no `run`.** A dead claim is retired by the next `start` already. A run's claim has its own recovery path — the watchdog's resume and
+  `orchestrate.mjs abort` — and releasing it between a driver crash and its resume would hand the item to somebody else mid-run.
+- **`session` shaped like a Claude Code session id**, never the `<user>@<host>` fallback, which has no registry entry by construction and would always read gone.
+- **`host` one this process has been TOLD is its own** — the `host` on a `POST /api/items/claim` it received. The API is loopback-bound, so those callers are on
+  this machine; the set is in memory only, never written, the way starting runs are. This is what keeps bug-46's false negative out: a foreign claim's host is
+  never in the set, so the absence of a local entry is never read as death for a session this machine could not have seen. After a restart nothing is swept
+  until some local session has claimed again — until then a claim waits out the window, which is the behaviour before the sweeper existed.
+- **The registry is readable, understood, and no file in it names the session** (`readSessionRegistry`, `session-registry.util.ts`), failing closed exactly as
+  the CLI's reader does, minus the self-check a server has no session to run.
+
+**File presence only, never a pid — and that is why a hard kill is not swept.** The server runs in the compose stack under Docker Desktop, whose containers share
+neither the host's pid namespace nor its `~/.claude`. It can be given the registry FILES — a read-only mount of `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions`
+at the same absolute path, named by `BM_CLAUDE_SESSIONS_DIR` — but inside the container `kill(pid, 0)` answers `ESRCH` for every host pid, so a pid test there
+would read every live session as dead and release every claim on the machine. A graceful exit removes the file, which the sweeper sees; a hard kill leaves it,
+which the sweeper cannot tell from a live session, so that claim stays on the fifteen-minute window and `backlog.mjs abort` at the machine — which CAN test the
+pid — clears it. Widening the container to the host pid namespace was rejected: Docker Desktop cannot give it one.
+
+The release is `GithubSource.release` with `reason: 'aborted'`, `host` set to the claim's own host (the `sameHost` clause, satisfied by the machine that holds
+the claim), `session` set to the fixed `backlog-manager:claim-sweeper` so `released.by` says who did it, and no `counters` key (the abandon rule). A `conflict`
+— already released, or raced by the holder's own `stop` — is not an error; one release per claim per sweep, no retry inside a tick. **Known limit:** a session
+running under a different `CLAUDE_CONFIG_DIR` from the mounted one writes its registry file elsewhere and reads gone; one config dir per machine is the
+supported shape, and a machine running two should leave `BM_CLAUDE_SESSIONS_DIR` unset.
 
 ## The driver owns a tracker item's claim for the whole item
 

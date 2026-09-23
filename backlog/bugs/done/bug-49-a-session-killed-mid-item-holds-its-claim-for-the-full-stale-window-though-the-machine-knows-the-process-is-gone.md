@@ -3,9 +3,12 @@ id: bug-49
 title: A session killed mid-item holds its claim for the full stale window, though the machine knows the process is gone
 created: 2026-09-22
 tags: tracker, claim
-updated: 2026-09-23T06:11:04Z
+updated: 2026-09-23T07:55:24Z
 groom-elapsed: 251
 groom-tokens: 72546
+started: 2026-09-23T07:32:32Z
+execute-elapsed: 1372
+execute-tokens: 225495
 ---
 
 ## Symptom
@@ -166,3 +169,88 @@ Proof on the machine, after merge and a `docker compose up -d --build server`: o
 `claude -p` session, stop it from the dashboard, and within one poll interval `GET /api/items/claim?project=…&id=…` shows
 `released: { reason: "aborted", by: <sweeper identity> }` and the issue has lost `in-progress` and its assignee. Then repeat with `kill -9` on that session's
 pid: the claim stays live (sweeper leaves it), and `backlog.mjs abort <id>` releases it.
+
+## Outcome
+
+2026-09-23. Both parts of the Fix landed. **Part A:** `backlog.mjs abort` gets its evidence from Claude Code's process registry now, not from a transcript
+mtime.
+
+- `holdingSessionEvidence(session, env)` reads `<configDir>/sessions/*.json` and returns one of three answers:
+  - `alive`: an entry names the holder and its pid still answers `kill 0` or `EPERM`. Where `/proc` exists, `procStart` must also equal field 22.
+  - `gone`: no running entry names the holder.
+  - `unknown`: the directory is unreadable, an entry lacks a string `sessionId` or an integer `pid`, or the aborting session cannot find its own running entry.
+- `abort` refuses on `alive` and on `unknown` ("cannot tell … wait out the 15 min window").
+- Checked live on this Mac: this session's own id reads `alive` (`~/.claude/sessions/73534.json`), and a random uuid reads `gone`.
+
+**Part B:** `ClaimSweeperService` (`server/src/items/claim-sweeper.service.ts`) runs after each successful per-repo poll, through the new
+`TrackerPollerService.onRepoSynced`.
+
+- It releases a claim only when all of these hold: the claim is live and carries no `run`, its session is a UUID, its host is one the sweeper learned in memory
+  from `POST /api/items/claim`, and no registry `*.json` names the session. The registry read is `readSessionRegistry`, which fails closed.
+- The release is `reason: 'aborted'` under the claim's own host, with `released.by = backlog-manager:claim-sweeper` and no counters.
+- It checks file presence only and never tests a pid, because the container cannot see host pids.
+- Compose mounts `${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/sessions` `:ro` at its host path and sets `BM_CLAUDE_SESSIONS_DIR`.
+- New invariant: "The claim sweeper reads the session registry's files and never its pids". Its headline is in CLAUDE.md, the mechanism in
+  `.claude/rules/items.md`, and the reasoning is a new section in invariants.md.
+
+Verification:
+
+```
+$ pnpm run typecheck
+$ tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo      (clean)
+
+$ pnpm test
+Test Suites: 131 passed, 131 total
+Tests:       2222 passed, 2222 total
+# tests 799
+# pass 797
+# fail 1        ← orchestrate.test.mjs:7036, see note 1 — untouched file, env leak
+# skipped 1
+
+$ env -u BM_MACHINE_NAME pnpm run test:skills
+# tests 799
+# pass 798
+# fail 0
+# skipped 1     ← the Linux-only procStart case, skipped on macOS
+```
+
+Contract sweep: 12 sites updated (.claude/rules/tracker.md, .claude/rules/items.md, CLAUDE.md, docs/subsystems/invariants.md, docs/subsystems/skills.md, docs/subsystems/api.md, shared/types.ts, server/src/items/sources/github.source.ts, skills/backlog-execute/SKILL.md, skills/backlog-groom/SKILL.md, docker-compose.yml, .env.example)
+Red proof: 19 tests went red with the change reverted
+
+The red proofs used file copies, never a stash. Each change was reverted separately:
+
+- **abort (6 tests):**
+  - Running `backlog.mjs` from HEAD reddened 5 abort cases: transcript newer and no registry file → release, live registry entry → refuse, dir absent,
+    no sessionId, and no self entry.
+  - Stubbing `registryEntryRunning` to `true` reddened the dead-pid case.
+- **Sweep (13 tests):**
+  - Removing the poller listener loop: 4 red.
+  - Removing `noteOwnHost`: 1.
+  - Removing the `*.json` filter: 1.
+  - Removing the `run` guard: 1.
+  - Removing `isLive`: 1.
+  - Removing the SESSION_ID guard: 1.
+  - Removing the host guard: 1.
+  - Removing the host guard and the empty-set early return together: +1, the no-learned-hosts case. The early return alone is redundant with the host guard
+    and stays as defence in depth.
+  - Removing the `kind` gate: 3.
+  - Removing `sessions.has`: 2.
+- **Skipped:**
+  - The procStart case is Linux-only and cannot run here.
+  - "no token, no sweep" pins an absence: the sweeper owns no timer of its own, so there is no production line to revert.
+
+Notes:
+
+1. **Environment leak (unfixed).** `BM_MACHINE_NAME=aj_macbook` is exported in this machine's environment (`~/.zshenv`) and leaks into spawned CLIs. That
+   makes `hostIdentity()` differ from the tests' `<user>@<host>` expectation. I fixed it in `backlog.test.mjs` (`apiEnv` now blanks it by default, because the
+   abort cases compare hosts). `orchestrate.test.mjs:7036` has the same leak. That file is outside this item and I left it as it was: it passes with the variable
+   unset, and it fails on HEAD too under this env. It is worth filing as its own bug.
+2. **Known limits, documented in invariants.md:**
+   - A hard-killed session leaves its registry file behind, so the sweeper never releases it. `abort` at the machine still does.
+   - After an API restart nothing is swept until a local session claims again.
+   - A second `CLAUDE_CONFIG_DIR` on one machine reads as gone. Leave `BM_CLAUDE_SESSIONS_DIR` unset there.
+3. **On-machine proof is still pending.** It needs the merge plus `docker compose up -d --build server`, so that the new mount and env reach the container.
+   Then kill a hand session mid-item on a tracker project and watch the claim release within one poll. The skill edits (`backlog.mjs`, both SKILL.md files) do
+   nothing until they are committed, pushed and followed by `pnpm run plugin:sync`.
+4. **Old wording kept on purpose.** Mentions of the old transcript-mtime evidence remain where they narrate history: the invariants.md paragraph, the
+   `backlog.mjs` comment, the tracker rule's parenthetical, a test comment and the done bug-48 item.

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { ClaimSweeperService } from './claim-sweeper.service';
 import { ItemsController } from './items.controller';
 import { ItemsWriteController } from './items-write.controller';
 import { ItemsService } from './items.service';
@@ -22,6 +23,9 @@ import { TrackerModule } from '../tracker/tracker.module';
     ItemsService,
     FilesSource,
     GithubSource,
+    // bug-49: registers itself with the poller on construction, and is fed
+    // this machine's hosts by the claim route in `ItemsWriteController`.
+    ClaimSweeperService,
     {
       // The registered adapters, as one array behind one token (task-43).
       // Phase 2 (task-45) is the seam's own test, and it passed: registering
