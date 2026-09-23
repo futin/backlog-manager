@@ -73,12 +73,17 @@ export function renderImportFooter({ id, created, tags, relPath }) {
   return `<!-- bm:imported ${parts.join(' ')} -->\n_Imported from backlog/${relPath}_`
 }
 
-const FOOTER_MARKER = /<!-- bm:imported from=([^\s]+)/
+const FOOTER_MARKER = /<!-- bm:imported from=([^\s]+)/g
 
-/** The old id out of a body's marker comment, or `null`. Never reads the readable line — see `renderImportFooter`. */
+/**
+ * The old id out of a body's marker comment, or `null`. Never reads the readable line — see `renderImportFooter`.
+ *
+ * The LAST marker, never the first: the footer is always appended at the very end, while an item's own text can quote the marker format — the item that
+ * specified this command does, and read from the top it resolved to `<id>`, so every resume re-created that item as a fresh issue.
+ */
 export function parseImportFooter(body) {
-  const match = FOOTER_MARKER.exec(typeof body === 'string' ? body : '')
-  return match === null ? null : match[1]
+  const matches = [...(typeof body === 'string' ? body : '').matchAll(FOOTER_MARKER)]
+  return matches.length === 0 ? null : matches[matches.length - 1][1]
 }
 
 /** The SHA-pinned blob link §6.6 uses, which is what makes "HEAD is on an `origin/*` ref" a precondition of the whole command. */
@@ -122,7 +127,10 @@ export function fitBody(text, cap, link) {
 
 // The four id shapes an item file can cite, word-bounded on both sides. `-` and `/` are excluded as left neighbours and `-` as a right one because a filename
 // and a slug both carry an id in the middle of them; see this file's header comment for the three cases that proves.
-const OLD_ID = /(?<![\w/-])(bug|task|idea|ref)-(\d+)(?![\w-])/g
+//
+// `=` is excluded as a left neighbour for the footer marker: `from=task-1` is the idempotency key a resume reads, and rewritten to `from=#4` it keys nothing —
+// every issue pass 2 had already patched was invisible to the next resume, which created each of them again.
+const OLD_ID = /(?<![\w/=-])(bug|task|idea|ref)-(\d+)(?![\w-])/g
 
 /** Rewrite every old id the map knows to `#<n>`; leave every other match — an unknown id, a different casing — exactly as it was. */
 export function rewriteOldIds(text, map) {

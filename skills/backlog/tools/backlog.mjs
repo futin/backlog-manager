@@ -3423,8 +3423,11 @@ export async function main(argv) {
         let next = rewriteOldIds(current, map)
         // `from:` has no field on an issue, so it becomes the first line of the body. An unmapped source keeps its old id: the FACT that this item came from
         // something is worth more than the link, and an id somebody can grep the repository's history for is not a dead end.
+        //
+        // Only when the body does not already open with it: a resume re-patches every issue a previous pass 2 reached, and prepending unconditionally stacks
+        // one more `_From_` line on each of them per re-run.
         const from = typeof item.data.from === 'string' ? item.data.from.trim() : ''
-        if (from !== '') next = `${map.has(from) ? `_From #${map.get(from)}._` : `_From ${from}._`}\n\n${next}`
+        if (from !== '' && !next.startsWith('_From ')) next = `${map.has(from) ? `_From #${map.get(from)}._` : `_From ${from}._`}\n\n${next}`
 
         // An unchanged body is not patched. The route posts no comment, but an edit is still an event on somebody's timeline and a new `updatedAt` for every
         // reader; a no-op edit would say something changed when nothing did.

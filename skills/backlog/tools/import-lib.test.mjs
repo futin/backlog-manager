@@ -73,6 +73,14 @@ test('parseImportFooter answers the marker id, not the first old id the body men
   assert.equal(parseImportFooter(`## Plan\n\nBlocked on bug-3.\n\n${footer}`), 'task-1')
 })
 
+// This repo's own task-50 is the plan for `import`, and its body quotes the marker it specifies — `<!-- bm:imported from=<id> … -->` — well above its real
+// footer. Read from the top, that quote won: every resume mapped `<id>` instead of `task-50`, missed the issue it had already made, and created task-50 again.
+test('parseImportFooter answers the LAST marker, so a body quoting the footer format is not mistaken for it', () => {
+  const footer = renderImportFooter({ id: 'task-50', created: '2026-09-20', tags: [], relPath: 'tasks/done/task-50-import.md' })
+  const body = `## Plan\n\n6. **Resume**: rebuild the map from \`<!-- bm:imported from=<id> … -->\` footers.\n\n${footer}`
+  assert.equal(parseImportFooter(body), 'task-50')
+})
+
 // --- blobLink / fitBody ------------------------------------------------------
 // GitHub caps a body at 65,536 characters and the survey found a real item over it (guide-manager task-1, 69,883 bytes). The cut is at a `## ` boundary so
 // what survives is whole sections rather than a sentence stopping mid-word, and the trailer links the file at HEAD — which is what makes "HEAD is on an
@@ -154,6 +162,16 @@ test('rewriteOldIds rewrites inside a code fence too', () => {
 
 test('rewriteOldIds rewrites every known id in one line', () => {
   assert.equal(rewriteOldIds('idea-12 → task-1', MAP), '#7 → #4')
+})
+
+// The footer's `from=<id>` is the idempotency key, and it carries a bare old id — word-bounded on both sides, exactly the shape pass 2 rewrites. Before `=`
+// was excluded, pass 2 turned `from=task-1` into `from=#4`, so every issue it had already patched lost its key: the next resume recognised none of them and
+// created all 72 again (this repo's own import, #146–#217).
+test('rewriteOldIds leaves the footer marker alone, so a patched issue is still recognised on resume', () => {
+  const footer = renderImportFooter({ id: 'task-1', created: '2026-08-30', tags: [], relPath: 'tasks/open/task-1-foo.md' })
+  const patched = rewriteOldIds(`Blocked on idea-12.\n\n${footer}`, MAP)
+  assert.equal(patched, `Blocked on #7.\n\n${footer}`)
+  assert.equal(parseImportFooter(patched), 'task-1')
 })
 
 // --- importOrder -------------------------------------------------------------

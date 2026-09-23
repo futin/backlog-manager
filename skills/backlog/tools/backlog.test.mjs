@@ -5543,6 +5543,19 @@ test('import’s second pass patches issues an earlier run created', async () =>
   assert.match(patch.body.body, /Blocked on #8 and task-99\./)
 })
 
+// A pass 2 that stopped part way leaves some issues already patched, `_From_` line included. The resume re-reads every body, and prepending unconditionally
+// gave each of those issues a second `_From_` line per re-run.
+test('a resumed second pass leaves an already-patched from: line alone', async () => {
+  const { dir } = resumeFixture()
+  const seed = [RESUME_SEED[0], { number: 6, status: 'closed', body: seededBody('task-3', 'tasks/done/task-3-three.md', '_From idea-9._\n\n## Plan\n\nplan text') }]
+  const { routes } = githubRoutes({ projectPath: dir, seed, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(posts(requests, 'body').find((r) => r.body.id === '#6'), undefined, 'an unchanged body is not patched')
+})
+
 test('import leaves the marker exactly as it found it, and honours --no-forms on a resume', async () => {
   const { dir, backlog } = resumeFixture()
   const before = fs.readFileSync(path.join(backlog, 'source.json'), 'utf8')
