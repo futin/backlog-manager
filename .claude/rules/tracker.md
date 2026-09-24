@@ -42,7 +42,8 @@ paths: ["server/src/tracker/**"]
   BOTH tools, and a blank one reads as unset**, because a claim comment on a public repository publishes whatever this returns and the default spells out the
   OS username and the real hostname; the two copies must read the same variable, since the server's `sameHost` clause compares the strings for equality and a
   machine answering two names could not release its own driver's claim — and never derived server-side, because
-  the server may be in the compose stack where `os.hostname()` is a container id; `session` is NOT widened to carry it, since three checks compare `session`
+  the server may be in the compose stack where `os.hostname()` is a container id (#225's abort reads `BM_MACHINE_NAME` through compose only to COMPARE a
+  claim's `host`, with no `<user>@<host>` default — unset refuses); `session` is NOT widened to carry it, since three checks compare `session`
   raw. `renderClaim` says `session <s> on <host> holds this issue …` when one is present and today's sentence byte-for-byte when it is not, the `holder` of
   all three 409s carries `host`, and `show` prints `claim-host:`/`this-host:`. A refusal that has no holder host degrades WHOLE — it names neither machine —
   because naming ours beside their blank invites the reading that a claim nothing local accounts for is litter. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the

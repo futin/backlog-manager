@@ -61,13 +61,21 @@ reason) or the call. None of those four makes a network request. `FilesSource` h
 controller alone maps them: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · anything else 502.
 
 Writes to one item are serialised in-process (`Map<urn, Promise>`), and every response is absorbed into the poller's cache so the next board read shows it —
-`polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the ninth route and a READ, unguarded like every other GET,
+`polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the one READ beside them, unguarded like every other GET,
 answering who holds one item out of the cache; `backlog.mjs stop` needs it because `start` ran in a different process.
 
 `queue` is the only way the orchestrator driver reaches the advisory `orchestrator:queued` label ([spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md)): `orchestrate.mjs` adds it at `init` and removes
 it on a skip, at `finish` and at `--abort`, while two server paths remove it on their own — a WON `claim` swaps it for `in-progress` in the same step, whoever
 claimed, and `POST /api/agents/stop` sweeps the run's never-claimed items (below). Nothing on this side reads the label as exclusion: the claim is still the
 only lock.
+
+The ninth write route, `POST /api/items/abort` (#225, body `project, id`), is not in this file: it calls the dashboard, so it lives in
+`agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this one. It releases a live, non-run claim with `reason: 'aborted'` and
+`authority: 'board'` (a field `release` never parses) once one proof holds — the holder is a session this server dispatched, which it stops through the
+dashboard first (`POST /api/sessions/:id/stop`; a 200 or the `no live session` 404 proceeds, anything else is a 502 and the claim is untouched), or the claim's
+`host` equals `BM_MACHINE_NAME` and `GET /api/sessions` reports the holder neither `working` nor `question`. Every other case is a 409 naming what failed.
+Answers `{ id, released: true, stopped }`. The dispatch record is `DispatchRecordsService` (`items/`, in memory, 24 h / 200 entries), written by
+`AgentsService.dispatch` and read by `GithubSource.list` to set `BacklogItem.holder.dispatched` — the mapper fills the rest of `holder` from the live claim.
 
 ### `tracker/`
 

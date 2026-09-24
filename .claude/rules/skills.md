@@ -19,7 +19,7 @@ paths: ["skills/**", "agents/**"]
   `http://127.0.0.1:${BM_API_PORT ?? 4322}`; anything else is exit `1` naming the marker, NEVER a fallback to files. There is no offline queue on purpose: a
   parked write would be a second source of truth on one laptop. Ids are `31` / `#31` / this project's own URN; a file-shaped id and another repo's URN are each
   refused with their own sentence. Why: [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
-- **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.** The eight write routes refuse a `files`
+- **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.** The nine write routes refuse a `files`
   project, so no request `backlog.mjs import github [owner/repo] [--no-forms]` makes could precede the marker; the deletion is the transaction's commit and runs
   only after pass 2 has rewritten every cross-link. A re-run rebuilds `old id → #n` from the `<!-- bm:imported from=<id> … -->` footer on each indexed issue and
   skips those items — the footer is on the tracker, where a crash cannot lose it, and the readable `_Imported from …_` line beside it is never parsed. Counters

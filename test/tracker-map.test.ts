@@ -261,7 +261,8 @@ describe('the claim fields', () => {
   const COUNTERS = { groomElapsed: 5, executeElapsed: 30, groomTokens: 10, executeTokens: 4000 };
 
   it('fills started, phase and the four counters from a live unreleased claim', () => {
-    const mapped = map({}, [claim({ at: '2026-09-18T10:00:00Z', phase: 'execute', counters: COUNTERS })]);
+    const live = claim({ at: '2026-09-18T10:00:00Z', phase: 'execute', counters: COUNTERS });
+    const mapped = map({}, [live]);
     expect(mapped?.item).toEqual({
       ...BASE,
       started: '2026-09-18T10:00:00Z',
@@ -269,7 +270,9 @@ describe('the claim fields', () => {
       groomElapsed: 5,
       executeElapsed: 30,
       groomTokens: 10,
-      executeTokens: 4000
+      executeTokens: 4000,
+      // #225 — the holder rides the same live reading; this claim records no host and no run, so neither key is there.
+      holder: { session: 'A', heartbeat: live.record.heartbeat }
     });
   });
 

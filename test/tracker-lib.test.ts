@@ -1,7 +1,7 @@
-import { accessReason, hasTracker, pollAge, queuedReading, trackerLine } from '../client/src/lib/tracker';
+import { accessReason, claimControl, hasTracker, pollAge, queuedReading, trackerLine } from '../client/src/lib/tracker';
 import { remoteAsLive } from '../client/src/lib/remote-run';
-import { RUN_STALE_MS } from '../shared/types';
-import type { OrchestratorRun, ProjectSummary, RemoteRun } from '../shared/types';
+import { CLAIM_STALE_MS, RUN_STALE_MS } from '../shared/types';
+import type { ItemHolder, OrchestratorRun, ProjectSummary, RemoteRun } from '../shared/types';
 
 /**
  * The board's tracker derivations (task-45). Pure functions with the clock
@@ -147,5 +147,41 @@ describe('queuedReading', () => {
   it('is stale when the project’s run has finished', () => {
     expect(queuedReading(queued, [run({ status: 'done', updatedAt: ago(MIN) })], now)).toBe('stale');
     expect(queuedReading(queued, [], now)).toBe('stale');
+  });
+});
+
+/* #225 — the item modal's claim control. The server re-decides every case at click time; this is only whether the click is offered. */
+describe('claimControl', () => {
+  const beat = (msAgo: number): string => new Date(NOW - msAgo).toISOString();
+  const tracker = (holder?: ItemHolder) => ({ source: 'github' as const, ...(holder === undefined ? {} : { holder }) });
+
+  it('offers Stop & release for a live claim the board dispatched', () => {
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(60_000), dispatched: true }), NOW)).toBe('stop-release');
+  });
+
+  it('offers Release claim for any other live claim', () => {
+    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: beat(60_000) }), NOW)).toBe('release');
+  });
+
+  it('offers nothing for a files item, whatever it carries', () => {
+    expect(claimControl({ source: 'files', holder: { session: 's', heartbeat: beat(0), dispatched: true } }, NOW)).toBeNull();
+  });
+
+  it('offers nothing for an unheld item', () => {
+    expect(claimControl(tracker(), NOW)).toBeNull();
+  });
+
+  it('offers nothing for a run-held claim, dispatched or not', () => {
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(0), run: 'run-9' }), NOW)).toBeNull();
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(0), run: 'run-9', dispatched: true }), NOW)).toBeNull();
+  });
+
+  it('offers nothing once the heartbeat reaches CLAIM_STALE_MS, and still offers it one millisecond short', () => {
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS) }), NOW)).toBeNull();
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS - 1) }), NOW)).toBe('release');
+  });
+
+  it('offers nothing for a heartbeat it cannot read', () => {
+    expect(claimControl(tracker({ session: 's', heartbeat: 'not a date' }), NOW)).toBeNull();
   });
 });

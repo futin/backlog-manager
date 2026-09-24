@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 
 import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
+import { ItemsAbortController } from './items-abort.controller';
+import { ItemsAbortService } from './items-abort.service';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { RegistryModule } from '../registry/registry.module';
@@ -21,6 +23,10 @@ import { OrchestratorModule } from '../orchestrator/orchestrator.module';
  * which dispatches on the ref's shape over the registered adapters. The edge
  * runs agents → items and never back: nothing in `ItemsModule` knows dispatch
  * exists, so there is no cycle for Nest to refuse.
+ *
+ * `ItemsAbortController` and its service are here since #225 although the route is `/api/items/abort`: the abort calls the dashboard, and this module
+ * and `tracker/` are the only two that call out. It reaches the item write seam through `ItemsService` and `DispatchRecordsService`, both exported by
+ * `ItemsModule` — the same agents → items edge.
  *
  * OrchestratorModule is imported for the same reason RegistryModule is:
  * AgentsService.orchestrate() (POST /api/agents/orchestrate) injects its
@@ -46,7 +52,7 @@ import { OrchestratorModule } from '../orchestrator/orchestrator.module';
  */
 @Module({
   imports: [RegistryModule, ItemsModule, OrchestratorModule],
-  controllers: [AgentsController],
-  providers: [AgentsService, SameOriginPostGuard, WatchdogService]
+  controllers: [AgentsController, ItemsAbortController],
+  providers: [AgentsService, ItemsAbortService, SameOriginPostGuard, WatchdogService]
 })
 export class AgentsModule {}

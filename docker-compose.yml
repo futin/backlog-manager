@@ -107,6 +107,13 @@ services:
       # with no connected project never needs one, and the poller is disarmed
       # without it.
       BM_GITHUB_TOKEN: '${BM_GITHUB_TOKEN:-}'
+      # The name this machine's tracker claims record (#225). backlog.mjs and
+      # orchestrate.mjs read it on the host; the server reads it only for the
+      # board's Release claim on a session it did not dispatch, which releases
+      # a claim only when the claim's host equals this name. A hostname read
+      # in here would be the container id, so it has to be passed through, and
+      # `:-` so an unset one reads as empty — which that release refuses.
+      BM_MACHINE_NAME: '${BM_MACHINE_NAME:-}'
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:

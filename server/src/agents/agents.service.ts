@@ -6,6 +6,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import { RegistryService } from '../registry/registry.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ItemsService } from '../items/items.service';
+import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
@@ -305,7 +306,9 @@ export class AgentsService {
      * The edge runs agents → items and never back: `ItemsModule` knows nothing
      * about dispatch, so there is no cycle for Nest to refuse.
      */
-    private readonly items: ItemsService
+    private readonly items: ItemsService,
+    /** #225 — written by `dispatch` alone; see `DispatchRecordsService` for why it lives in `ItemsModule`. */
+    private readonly dispatches: DispatchRecordsService
   ) {}
 
   async status(): Promise<AgentsStatus> {
@@ -479,7 +482,7 @@ export class AgentsService {
       throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
     }
 
-    return this.spawn(cfg, {
+    const spawned = await this.spawn(cfg, {
       project: dirName,
       prompt,
       name: sessionName(item),
@@ -496,6 +499,11 @@ export class AgentsService {
       // field: anything else means off.
       remoteControl: req.remoteControl === true
     });
+    // #225 — remembered, because this id is the one the spawned session claims its issue under (`claude -p --session-id`), and without it nothing on
+    // the board can later tell "the board started the session holding this claim" from "somebody at a terminal did". Only after a spawn that came
+    // back with an id: a refused spawn started nothing to remember.
+    this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, at: Date.now() });
+    return spawned;
   }
 
   /**

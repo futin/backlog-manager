@@ -1584,7 +1584,7 @@ sheets', and each calls `useDialogEscape` once, so a fourth surface opened throu
 The count is still three because the shells have three composers, and `test/dialog-escape.test.tsx` mounts all three together to prove the ranking holds across
 them.
 
-One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens, drawn inline in
+One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
 the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to one composer and nothing else floating. It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
@@ -2785,7 +2785,7 @@ A closed issue's section can change while its labels never do: `completed` (or n
 intact, and any other reason is `terminal` in `out-of-scope`. The `type:*` label stays on the issue, so the original type is recoverable — which the file store
 cannot do, since a rejected item moves into a flat directory that forgets it.
 
-## The eight item-write routes are guarded, refused for `files`, and serialised per item
+## The nine item-write routes are guarded, refused for `files`, and serialised per item
 
 Task-46, spec §6.2. Until this branch every route in this server either read something or spawned a session; these seven CREATE AND CLOSE ISSUES in somebody's
 repository, with a credential the browser never sees. That is a strictly larger consequence than the dispatch route the origin guard was written for, which is
@@ -2801,7 +2801,7 @@ registry's own `path` (deliberately not realpath — the `uncommitted` rule, and
 be a filesystem touch on a path this server was never given), then `resolveSource` per request, then the adapter's `writer`. It answers `unregistered` → 404,
 `files` → 400 `this project's items are files — the skills write them directly`, `unsupported` → 400 carrying `resolveSource`'s own path-prefixed reason, and
 otherwise the writer. `FilesSource` has NO `writer` field at all, and that absence is the rule rather than a gap: item files are written by the skills and by
-nothing else, and the one check that reads the field is what makes that true for all eight routes at once instead of eight routes each remembering to ask.
+nothing else, and the one check that reads the field is what makes that true for all nine routes at once instead of nine routes each remembering to ask.
 
 **Every refusal is a value.** `ItemWriter` answers `WriteOutcome`, never throws, and `GithubClient` beneath it answers a `GithubResponse` for every status —
 the same posture, one layer down. The controller is the only place a `refused` becomes a status: `no-token` 503, `not-found` 404, `conflict` 409,
@@ -2831,7 +2831,18 @@ its own: a REMOVAL's 404 is success. Every `queued: false` caller is a sweep, wh
 because a human's won claim swapped it off first — is that contract met, not a failure worth a warning line. The driver reaches GitHub through this route and
 no other way; the headless session never holds the token.
 
-**There is a ninth route, and it is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
+**The ninth write route is `abort` (#225), and it is the one outside `items/`.** `POST /api/items/abort`, body `{ project, id }`, releases a live claim
+whose session was stopped from the dashboard, or died, without running its own closing `stop` — before it, a board-dispatched groom or execute left its item
+reading as in progress on every machine until the heartbeat went stale. It lives in `agents/items-abort.controller.ts` because it calls the dashboard, and
+`agents/` and `tracker/` stay the only outbound-calling modules; it gates and maps through the same exported `writable` and `answer`, carries the same class
+guard, and its release goes through `ItemWriter.release` on the same per-URN chain. Two proofs, one per case: a session THIS server dispatched (an in-memory
+`DispatchRecordsService` entry — lost on restart on purpose, like a starting run) is stopped through the dashboard first, and only a 200 or the `no live
+session` 404 lets the release through; any other session needs the claim's `host` to equal this server's `BM_MACHINE_NAME` and the dashboard's session list to
+report it neither `working` nor `question` — absent from the list is refused, because not found is not the same as not running. A run-held claim and a claim
+that is not live are refused before the dashboard is asked anything. The release carries `authority: 'board'`, the release rule's fifth clause, which the
+`release` route never parses — so no HTTP body can reach it, and the one caller that sets it has already made one of those two proofs.
+
+**Beside the nine there is one route that is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
 every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
 `backlog.mjs stop` are two PROCESSES: `claim` answers the comment id that identifies the claim, and the `stop` that must release it has no other way to
 rediscover it. Without it the CLI could take an item and never give it back. Spec §6.2 names seven routes and not this one; the deviation is recorded in

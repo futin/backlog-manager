@@ -107,7 +107,7 @@ export interface ItemSource {
    * than a gap: item files are written by the skills and by nothing else
    * (CLAUDE.md, "Item files are read-only to the server and client"). A files
    * project reaching a write route is a 400 saying so, produced by the ONE
-   * check that reads this field — never by eight routes each remembering to
+   * check that reads this field — never by nine routes each remembering to
    * ask.
    */
   readonly writer?: ItemWriter;
@@ -162,7 +162,8 @@ export interface CreatedItem {
 
 /**
  * The write half of one source (task-46, spec §6.2) — eight methods, one per
- * route, each a value-returning call the controller turns into a status.
+ * route in `items-write.controller.ts` (the ninth route, `abort`, adds none: it is a
+ * `readClaim` and a `release`), each a value-returning call the controller turns into a status.
  *
  * Every method takes the RESOLVED project and marker rather than a project
  * path: `ItemsService.writerFor` has already gated the path against the

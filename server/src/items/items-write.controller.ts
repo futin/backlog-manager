@@ -11,6 +11,8 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
 /**
  * items-write.controller.ts — the eight write routes of a tracker project
  * (task-46, spec §6.2; the eighth, `queue`, is the orchestrator:queued spec's §2).
+ * The ninth item write, `POST /api/items/abort` (#225), is NOT here: it calls the dashboard, so it lives in
+ * `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this file.
  *
  * ## What this file is, and what it deliberately is not
  *
@@ -91,8 +93,8 @@ export class ItemsWriteController {
     const from = raw.from === undefined ? undefined : text(raw.from);
 
     const lookup = this.items.writerFor(project);
-    const w = this.writable(lookup);
-    return this.answer(
+    const w = writable(lookup);
+    return answer(
       await w.writer.create(w.project, w.marker, {
         project,
         section: section as Section,
@@ -119,8 +121,8 @@ export class ItemsWriteController {
     }
     const outcome = typeof raw.outcome === 'string' ? raw.outcome : '';
 
-    const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.state(w.project, w.marker, { project, id, status, outcome }));
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.state(w.project, w.marker, { project, id, status, outcome }));
   }
 
   /** Take the issue. The protocol's entry point — see `tracker/claim.ts`. */
@@ -137,8 +139,8 @@ export class ItemsWriteController {
     const host = optional(raw.host, 'host');
     const run = claimRunOf(raw.run);
 
-    const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.claim(w.project, w.marker, { project, id, phase, session, host, run }));
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.claim(w.project, w.marker, { project, id, phase, session, host, run }));
   }
 
   /** Give it back, billing the counters the CALLER computed — the CLI is the
@@ -162,8 +164,8 @@ export class ItemsWriteController {
     const runId = runIdOf(raw.runId);
     const host = optional(raw.host, 'host');
 
-    const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters, runId, host }));
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.release(w.project, w.marker, { project, id, commentId, session, reason, counters, runId, host }));
   }
 
   /** Say the session is still alive; carry the driver's opaque `state` when
@@ -182,7 +184,7 @@ export class ItemsWriteController {
     const runId = runIdOf(raw.runId);
     const finished = claimFinishedOf(raw.finished);
 
-    const w = this.writable(this.items.writerFor(project));
+    const w = writable(this.items.writerFor(project));
     // `state` is the ONE field on these eight routes taken outright, and it is
     // safe for the reason the dispatch route's `prompt` is not: no predicate
     // branches on it. It is the `ClaimState` task-47's driver publishes,
@@ -191,7 +193,7 @@ export class ItemsWriteController {
     // tolerantly. `run`, one route over, is the opposite case and is validated
     // field by field for exactly that reason — and so is `finished`, which a
     // derived run's status is decided from.
-    return this.answer(await w.writer.heartbeat(w.project, w.marker, { project, id, commentId, session, runId, state: raw.state, finished }));
+    return answer(await w.writer.heartbeat(w.project, w.marker, { project, id, commentId, session, runId, state: raw.state, finished }));
   }
 
   /** Groom's route — the ONE route that rewrites an item's body (§6.4), behind
@@ -213,8 +215,8 @@ export class ItemsWriteController {
     }
     const runnerFix = raw.runnerFix as boolean | undefined;
 
-    const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix }));
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix }));
   }
 
   /** Append a comment. Execute's failure path: the Outcome is recorded and the
@@ -227,8 +229,8 @@ export class ItemsWriteController {
     const itemBody = typeof raw.body === 'string' ? raw.body : '';
     if (itemBody.trim() === '') throw new HttpException({ error: 'body is required' }, 400);
 
-    const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.comment(w.project, w.marker, { project, id, body: itemBody }));
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.comment(w.project, w.marker, { project, id, body: itemBody }));
   }
 
   /**
@@ -249,60 +251,64 @@ export class ItemsWriteController {
     if (typeof raw.queued !== 'boolean') throw new HttpException({ error: 'queued must be a boolean' }, 400);
     const queued = raw.queued;
 
-    const w = this.writable(this.items.writerFor(project));
-    return this.answer(await w.writer.queue(w.project, w.marker, { project, id, queued }));
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.queue(w.project, w.marker, { project, id, queued }));
   }
+}
 
-  /**
-   * The project gate, in one place for all eight (the second, third and fourth
-   * refusals). Throws rather than returning a union, because every caller does
-   * the identical thing with a failure and an eighth copy of that branch is
-   * eight chances for one of them to answer 404 where the others answer 400.
-   */
-  private writable(lookup: WriterLookup): Extract<WriterLookup, { kind: 'writer' }> {
-    // 404 rather than 400: a path this server was never told about is, as far
-    // as this caller is concerned, not a project — the same answer
-    // `uncommitted` and `mergeCheck` already give an unregistered path.
-    if (lookup.kind === 'unregistered') throw new HttpException({ error: 'not found' }, 404);
-    if (lookup.kind === 'files') {
-      throw new HttpException({ error: "this project's items are files — the skills write them directly" }, 400);
-    }
-    // `resolveSource`'s own reason, already prefixed with the marker's absolute
-    // path, rather than a sentence composed here: it is the same string
-    // `ItemsIndex.errors` carries for the same project, and two wordings for
-    // one fact is how a reader ends up believing they are two facts.
-    if (lookup.kind === 'unsupported') throw new HttpException({ error: lookup.reason }, 400);
-    return lookup;
+/**
+ * The project gate, in one place for all nine (the second, third and fourth
+ * refusals). Throws rather than returning a union, because every caller does
+ * the identical thing with a failure and an eighth copy of that branch is
+ * eight chances for one of them to answer 404 where the others answer 400.
+ *
+ * Exported since #225, so the abort route in `agents/` gates a project exactly as these routes do.
+ */
+export function writable(lookup: WriterLookup): Extract<WriterLookup, { kind: 'writer' }> {
+  // 404 rather than 400: a path this server was never told about is, as far
+  // as this caller is concerned, not a project — the same answer
+  // `uncommitted` and `mergeCheck` already give an unregistered path.
+  if (lookup.kind === 'unregistered') throw new HttpException({ error: 'not found' }, 404);
+  if (lookup.kind === 'files') {
+    throw new HttpException({ error: "this project's items are files — the skills write them directly" }, 400);
   }
+  // `resolveSource`'s own reason, already prefixed with the marker's absolute
+  // path, rather than a sentence composed here: it is the same string
+  // `ItemsIndex.errors` carries for the same project, and two wordings for
+  // one fact is how a reader ends up believing they are two facts.
+  if (lookup.kind === 'unsupported') throw new HttpException({ error: lookup.reason }, 400);
+  return lookup;
+}
 
-  /**
-   * One `WriteOutcome` → the response, or the exception. The ONE mapping from
-   * `refused` to a status, so no route can invent its own.
-   *
-   * Each status is chosen for what the READER can do about it: 503 for a
-   * credential this machine is missing (fix the environment), 404 for an issue
-   * that is not there (fix the id), 409 for a race or a stale read (re-read and
-   * retry), 429 for a budget with a time on it (wait), 502 for anything else
-   * GitHub said (nothing local to fix).
-   */
-  private answer<T>(outcome: WriteOutcome<T>): T {
-    if (outcome.ok) return outcome.value;
-    const r: WriteRefusal = outcome.refusal;
-    switch (r.refused) {
-      case 'no-token':
-        throw new HttpException({ error: r.error }, 503);
-      case 'not-found':
-        throw new HttpException({ error: r.error }, 404);
-      case 'conflict':
-        // `holder` and `updatedAt` ride along when the adapter set them: each
-        // is what the caller needs in order to do something other than give up
-        // — who holds the claim, or the stamp to re-read against.
-        throw new HttpException({ error: r.error, holder: r.holder, updatedAt: r.updatedAt }, 409);
-      case 'rate-limited':
-        throw new HttpException({ error: r.error, resetAt: r.resetAt ?? null }, 429);
-      default:
-        throw new HttpException({ error: r.error, status: r.status ?? null }, 502);
-    }
+/**
+ * One `WriteOutcome` → the response, or the exception. The ONE mapping from
+ * `refused` to a status, so no route can invent its own.
+ *
+ * Each status is chosen for what the READER can do about it: 503 for a
+ * credential this machine is missing (fix the environment), 404 for an issue
+ * that is not there (fix the id), 409 for a race or a stale read (re-read and
+ * retry), 429 for a budget with a time on it (wait), 502 for anything else
+ * GitHub said (nothing local to fix).
+ *
+ * Exported since #225, for the reason `writable` gives.
+ */
+export function answer<T>(outcome: WriteOutcome<T>): T {
+  if (outcome.ok) return outcome.value;
+  const r: WriteRefusal = outcome.refusal;
+  switch (r.refused) {
+    case 'no-token':
+      throw new HttpException({ error: r.error }, 503);
+    case 'not-found':
+      throw new HttpException({ error: r.error }, 404);
+    case 'conflict':
+      // `holder` and `updatedAt` ride along when the adapter set them: each
+      // is what the caller needs in order to do something other than give up
+      // — who holds the claim, or the stamp to re-read against.
+      throw new HttpException({ error: r.error, holder: r.holder, updatedAt: r.updatedAt }, 409);
+    case 'rate-limited':
+      throw new HttpException({ error: r.error, resetAt: r.resetAt ?? null }, 429);
+    default:
+      throw new HttpException({ error: r.error, status: r.status ?? null }, 502);
   }
 }
 
@@ -321,7 +327,7 @@ function text(value: unknown): string {
 /** …and the same, refusing an empty one by name, because a missing `project`
  *  and a missing `id` are different mistakes and a caller should be told which
  *  it made. */
-function required(value: unknown, field: string): string {
+export function required(value: unknown, field: string): string {
   const trimmed = text(value);
   if (trimmed === '') throw new HttpException({ error: `${field} is required` }, 400);
   return trimmed;

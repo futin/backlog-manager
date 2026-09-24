@@ -108,3 +108,13 @@ describe('docker-compose BM_GITHUB_TOKEN', () => {
     expect(assignments(GITHUB_TOKEN_ENV)).toEqual(['${BM_GITHUB_TOKEN:-}']);
   });
 });
+
+/**
+ * #225 — the server's copy of the machine name, read by the board's Release claim on a session it did not dispatch. A passthrough with an empty default,
+ * because a hostname read inside the container is its id and would match no claim, and a literal here would be one machine's name on every machine.
+ */
+describe('docker-compose BM_MACHINE_NAME', () => {
+  it('passes the host value through with an empty default', () => {
+    expect(assignments('BM_MACHINE_NAME')).toEqual(['${BM_MACHINE_NAME:-}']);
+  });
+});

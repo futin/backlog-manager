@@ -12,8 +12,8 @@ paths: ["client/src/**"]
   listener; three dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet` — and none binds its own (bug-23 — four until task-37 took the run
   drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog again). Since task-40 the hook is called by the two overlay
   shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the three surfaces themselves. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline
-  confirmation the run's Stop opens, joins the stack while it is drawn, so Escape dismisses it and nothing under it — it paints no scrim and is not counted.
-  Ranking is by mount order; entries are removed by identity, never popped.
+  confirmation the run's Stop and the item modal's claim release (#225) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it —
+  it paints no scrim and is not counted. Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **Board-versus-Archive is derived from `updated ?? lastCommit ?? created` and the run payload, never stored.** `isStale`/`leavesBoard`

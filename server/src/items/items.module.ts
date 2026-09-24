@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ItemsController } from './items.controller';
 import { ItemsWriteController } from './items-write.controller';
 import { ItemsService } from './items.service';
+import { DispatchRecordsService } from './dispatch-records.service';
 import { FilesSource } from './sources/files.source';
 import { GithubSource } from './sources/github.source';
 import { ITEM_SOURCES } from './sources/source';
@@ -20,6 +21,7 @@ import { TrackerModule } from '../tracker/tracker.module';
   controllers: [ItemsController, ItemsWriteController],
   providers: [
     ItemsService,
+    DispatchRecordsService,
     FilesSource,
     GithubSource,
     {
@@ -38,6 +40,8 @@ import { TrackerModule } from '../tracker/tracker.module';
   // Exported for `AgentsModule` (task-46): `AgentsService.findItem` is now a
   // delegate to `ItemsService.find`, and `orchestrate` asks
   // `isTrackerProject`. One direction only — nothing here imports agents.
-  exports: [ItemsService]
+  // `DispatchRecordsService` since #225: `AgentsService.dispatch` writes it and the abort route reads it, while `GithubSource` above reads it for
+  // `BacklogItem.holder.dispatched` — which is why it lives on this side of the edge.
+  exports: [ItemsService, DispatchRecordsService]
 })
 export class ItemsModule {}

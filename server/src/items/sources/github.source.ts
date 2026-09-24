@@ -6,6 +6,7 @@ import { QUEUED_LABEL } from '../../tracker/labels';
 import { issueNumberFor, issueUrn, mapIssue, parseUrn } from '../../tracker/map-issue';
 import { TrackerPollerService } from '../../tracker/poller.service';
 import { githubToken } from '../../tracker/token.util';
+import { DispatchRecordsService } from '../dispatch-records.service';
 import { resolveSource } from './resolve.util';
 import type { SourceMarker } from './resolve.util';
 import type { CreatedItem, ItemSource, ItemWriter, SourceSummary, WriteOutcome, WriteRefusal } from './source';
@@ -64,7 +65,9 @@ export class GithubSource implements ItemSource, ItemWriter {
 
   constructor(
     private readonly poller: TrackerPollerService,
-    private readonly client: GithubClient
+    private readonly client: GithubClient,
+    /** #225 — read by `list` alone, to mark a holder this server dispatched. */
+    private readonly dispatches: DispatchRecordsService
   ) {}
 
   /**
@@ -140,6 +143,10 @@ export class GithubSource implements ItemSource, ItemWriter {
       // real issues and which is not an item at all — dropped silently,
       // because there is nothing wrong with the repo containing PRs.
       if (mapped === null) continue;
+      // #225 — the one fact about a holder the mapper cannot know: whether this server spawned the holding session. Checked per render, because the record
+      // is pruned and forgotten on a timetable of its own.
+      const holder = mapped.item.holder;
+      if (holder !== undefined && this.dispatches.get(holder.session) !== null) holder.dispatched = true;
       items.push(mapped.item);
       errors.push(...mapped.errors);
     }
@@ -606,7 +613,10 @@ export class GithubSource implements ItemSource, ItemWriter {
          `ClaimRecord.host`'s own sentence, that absence means "the machine was
          not recorded" and NEVER "the reader's own". */
       const sameHost = typeof req.host === 'string' && req.host.length > 0 && existing.host === req.host;
-      if (isLive(existing, now) && existing.session !== req.session && !sameRun && !sameHost) {
+      /* #225's clause. Never parsed from a request body — the release route rebuilds its request field by field and has no line for it — so the only
+         caller that can set it is `ItemsAbortService`, and only after it has stopped the holder through the dashboard or shown it is not running. */
+      const byBoard = req.authority === 'board';
+      if (isLive(existing, now) && existing.session !== req.session && !sameRun && !sameHost && !byBoard) {
         return {
           refused: 'conflict',
           error: `#${number} is held by session ${existing.session}`,

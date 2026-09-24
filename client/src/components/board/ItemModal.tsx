@@ -7,6 +7,7 @@ import { isInProgress } from '../../lib/item-progress';
 import type { ProjectHues } from '../../lib/project-hue';
 import { Dot } from '../ui/Dot';
 import { Modal } from '../ui/Modal';
+import { ClaimRelease } from './ClaimRelease';
 import { DispatchButton } from './DispatchButton';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
@@ -210,9 +211,10 @@ function groupDigits(n: number): string {
  * (.claude/DESIGN.md §8.7, the design spec's §6.1 and §12.3).
  *
  * It composes `Modal`, which owns the scrim, the exit, the Escape key and the
- * 700 px shape; this file owns what goes in the two slots. Read-only on
- * purpose — every write to an item belongs to the skills, so this renders and
- * never edits.
+ * 700 px shape; this file owns what goes in the two slots. It never edits an
+ * item — every write to an item file belongs to the skills. The one write it
+ * can start is a TRACKER claim's release (#225, `ClaimRelease`), through the
+ * server's guarded abort route, never a file.
  *
  * It was `ItemDrawer`, a panel pinned to the right edge, until task-40. The
  * facts it drew as one run-on meta line are a facts COLUMN now, one labelled
@@ -235,7 +237,8 @@ export function ItemModal({
   onDispatch,
   runBlock,
   reverify,
-  trackerLine
+  trackerLine,
+  onReleased
 }: {
   item: BacklogItem;
   hues: ProjectHues;
@@ -275,6 +278,9 @@ export function ItemModal({
    * neither.
    */
   trackerLine?: string | null;
+  /** #225 — the board's re-read after the claim control released this item's claim. Its presence is also what draws the control at all, so a render
+   *  site with no payload to re-read (a test, a future read-only view) offers no write. */
+  onReleased?: () => void;
 }) {
   const [body, setBody] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -381,6 +387,7 @@ export function ItemModal({
           <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} />
         </div>
       )}
+      {onReleased && <ClaimRelease item={item} onReleased={onReleased} />}
     </div>
   );
 

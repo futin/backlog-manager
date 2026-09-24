@@ -311,6 +311,25 @@ export interface BacklogItem {
    * means what it says.
    */
   queued?: true;
+  /**
+   * Who holds this TRACKER item's claim right now (#225) — the newest claim, when it is unreleased, which is the same claim `started` and `phase` are read
+   * from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
+   *
+   * It carries the `heartbeat` rather than a liveness verdict because liveness is a function of the clock the READER holds: the client decides "live" against
+   * `CLAIM_STALE_MS` at render time (`claimControl` in `client/src/lib/tracker.ts`), the way it already ages `queued`. `dispatched` is `true` when this
+   * server's own dispatch record names the holding session — the board started it, so the board can stop it — and absent otherwise. `run` is the holding
+   * run's id, and a run-held claim offers no control at all.
+   */
+  holder?: ItemHolder;
+}
+
+/** `BacklogItem.holder`'s shape. */
+export interface ItemHolder {
+  session: string;
+  host?: string;
+  heartbeat: string;
+  run?: string;
+  dispatched?: true;
 }
 
 export interface ItemsIndex {
@@ -1693,7 +1712,7 @@ export interface OrchestratorArchivePayload {
 
 /* ===========================================================================
  * The write side of a tracker project (task-46, spec §6) — the claim protocol's
- * vocabulary and the eight write routes' request/response shapes.
+ * vocabulary and the nine write routes' request/response shapes.
  *
  * It sits at the END of this file, after `RUN_STALE_MS`, for one mechanical
  * reason worth stating rather than rediscovering: `CLAIM_STALE_MS` is an ALIAS
@@ -1958,8 +1977,8 @@ export const CLAIM_MARKER = '<!-- bm:claim -->';
 export const CLAIM_STALE_MS = RUN_STALE_MS;
 
 /**
- * The eight write routes' request bodies (spec §6.2, and the orchestrator:queued
- * spec §2 for the eighth). Declared here so the
+ * The write routes' request bodies (spec §6.2, the orchestrator:queued spec §2 for
+ * the eighth, #225 for `abort`, the ninth). Declared here so the
  * server's validation and the CLI's expectations are checked against ONE
  * declaration rather than against each other.
  *
@@ -2094,6 +2113,29 @@ export interface ItemReleaseRequest extends ItemWriteRequest {
    * `session` it likes, and the holder's id is printed in the refusal.
    */
   host?: string;
+  /**
+   * The board's own authority to release (#225) — the fifth clause, set by `ItemsAbortService` and by NOTHING that reads an HTTP body.
+   *
+   * `POST /api/items/release` rebuilds its request field by field and never copies this one, so a caller that sends `authority: 'board'` is still a
+   * stranger to somebody else's live claim (pinned in `test/tracker-abort.test.ts`). The abort route is the one writer: it sets it only after it has either
+   * stopped the holding session through the dashboard (case A) or shown that the holder is on this machine and not running (case B) — the two proofs a
+   * caller of `release` cannot offer, because it has no dispatch record and no dashboard to ask.
+   */
+  authority?: 'board';
+}
+
+/** `POST /api/items/abort` (#225) — release a claim whose session was stopped, or died, without running its own closing `stop`. Only the item: which
+ *  claim, whose session, and whether the board may release it are all the server's to work out. */
+export interface ItemAbortRequest extends ItemWriteRequest {
+  id: string;
+}
+
+/** The abort's answer. `stopped` is `true` only when the dashboard answered the stop with a 200 — a `no live session` 404 still releases, but nothing
+ *  was stopped by THIS request, and case B never stops anything. */
+export interface ItemAbortResult {
+  id: string;
+  released: true;
+  stopped: boolean;
 }
 
 /** `POST /api/items/heartbeat`. `state` is the `ClaimState` task-47's driver

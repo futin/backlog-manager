@@ -3,6 +3,7 @@ import type {
   AgentDispatchResult,
   AgentPlan,
   AgentsStatus,
+  ItemAbortResult,
   MergeMode,
   OrchestratorArchivePayload,
   OrchestratorArchiveRun,
@@ -426,6 +427,21 @@ export async function stopOrchestrate(project: string): Promise<StopResult> {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project })
+    })
+  );
+}
+
+/**
+ * The item modal's **Stop & release** / **Release claim** (#225) — `POST /api/items/abort`. Two fields: which claim, which session and whether the board
+ * may release it are all the server's to decide, so the client sends nothing it could get wrong. Here rather than beside the item reads because this is
+ * the board's same-origin POST layer, and `unwrap` turns a refusal into an `ApiError` carrying the server's own sentence.
+ */
+export async function abortClaim(project: string, id: string): Promise<ItemAbortResult> {
+  return unwrap<ItemAbortResult>(
+    await fetch('/api/items/abort', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project, id })
     })
   );
 }

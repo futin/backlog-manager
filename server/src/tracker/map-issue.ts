@@ -241,7 +241,20 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // The same spread, for the same reason (task-52). No `queued` field on
     // `MappedIssue` beside it: `runnerFix` rides there because `list`'s
     // bookkeeping reads it, and nothing reads `queued` but the card.
-    ...(queued ? { queued: true as const } : {})
+    ...(queued ? { queued: true as const } : {}),
+    // #225 — the holding claim, off the same `held` reading `started` and `phase` use, spread-absent for the reason the two above give. Optional keys
+    // inside it are spread too, so a claim with no `host` or `run` carries no such key. `dispatched` is not set here: the mapper knows claims, not which
+    // sessions this server spawned — `GithubSource.list` adds it.
+    ...(held
+      ? {
+          holder: {
+            session: newest.record.session,
+            ...(typeof newest.record.host === 'string' && newest.record.host.length > 0 ? { host: newest.record.host } : {}),
+            heartbeat: newest.record.heartbeat,
+            ...(newest.record.run !== undefined ? { run: newest.record.run.runId } : {})
+          }
+        }
+      : {})
   };
 
   return { item, runnerFix, errors };

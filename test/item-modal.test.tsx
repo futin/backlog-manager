@@ -425,3 +425,119 @@ describe('ItemModal', () => {
     expect(new URL(img.src).origin).toBe(window.location.origin);
   });
 });
+
+/* #225 — the claim control under the facts column. The label is `claimControl`'s (pinned case by case in tracker-lib.test.ts); what this suite pins is
+   that the modal draws it, gates both labels behind the inline confirm, and posts only on accept. */
+describe('ItemModal claim control', () => {
+  const TRACKER: BacklogItem = {
+    ...ITEM,
+    id: '#31',
+    project: 'alpha',
+    path: 'gh:futin/x#31',
+    source: 'github',
+    url: 'https://github.com/futin/x/issues/31'
+  };
+  const held = (over: Partial<NonNullable<BacklogItem['holder']>> = {}): BacklogItem => ({
+    ...TRACKER,
+    holder: { session: 'b1c2d3e4-5555-6666-7777-888899990000', host: 'laptop', heartbeat: new Date().toISOString(), ...over }
+  });
+
+  let abortAnswer: { status: number; body: unknown };
+  let posts: { url: string; body: unknown }[];
+
+  beforeEach(() => {
+    posts = [];
+    abortAnswer = { status: 201, body: { id: '#31', released: true, stopped: true } };
+    global.fetch = jest.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return Promise.resolve({ ok: abortAnswer.status < 300, status: abortAnswer.status, json: () => Promise.resolve(abortAnswer.body) } as Response);
+      }
+      return Promise.resolve({ ok: true, text: () => Promise.resolve('body') } as Response);
+    }) as jest.Mock;
+  });
+
+  it('draws Stop & release for a session the board dispatched, and asks before it posts', async () => {
+    const onReleased = jest.fn();
+    render(<ItemModal item={held({ dispatched: true })} hues={HUES} onClose={() => {}} onReleased={onReleased} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    expect(posts).toEqual([]);
+    expect(screen.getByTestId('claim-release-confirm').textContent).toMatch(/Stop session b1c2d3e4 and release its claim on #31/);
+    expect(screen.getByTestId('claim-release-confirm-accept').textContent).toBe('Stop & release');
+
+    await userEvent.click(screen.getByTestId('claim-release-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('claim-released')).toBeInTheDocument());
+    expect(posts).toEqual([{ url: '/api/items/abort', body: { project: '/abs/alpha', id: '#31' } }]);
+    expect(onReleased).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('claim-release')).toBeNull();
+  });
+
+  it('draws Release claim for any other live claim, and its confirm warns that a waiting session looks stopped', async () => {
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+    await screen.findByText('body');
+
+    expect(screen.getByTestId('claim-release').textContent).toBe('Release claim');
+    await userEvent.click(screen.getByTestId('claim-release'));
+    expect(screen.getByTestId('claim-release-confirm').textContent).toMatch(/waiting on a reply also looks stopped/);
+  });
+
+  it('puts the chip back and posts nothing when the confirm is dismissed', async () => {
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    await userEvent.click(screen.getByTestId('claim-release-confirm-dismiss'));
+    expect(screen.queryByTestId('claim-release-confirm')).toBeNull();
+    expect(screen.getByTestId('claim-release')).toBeInTheDocument();
+    expect(posts).toEqual([]);
+  });
+
+  // The confirm is on the escape stack above the modal it sits in, so one Escape takes back the question and leaves the modal open.
+  it('lets Escape dismiss the confirm and nothing under it', async () => {
+    const onClose = jest.fn();
+    render(<ItemModal item={held()} hues={HUES} onClose={onClose} onReleased={() => {}} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByTestId('claim-release-confirm')).toBeNull();
+    expect(screen.getByTestId('claim-release')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(posts).toEqual([]);
+  });
+
+  it('prints the server refusal verbatim, keeps the chip, and does not re-read the board', async () => {
+    abortAnswer = { status: 409, body: { error: 'session b1c2 is working — stop it before releasing its claim' } };
+    const onReleased = jest.fn();
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={onReleased} />);
+    await screen.findByText('body');
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    await userEvent.click(screen.getByTestId('claim-release-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('claim-release-error').textContent).toBe('session b1c2 is working — stop it before releasing its claim'));
+    expect(screen.getByTestId('claim-release')).toBeInTheDocument();
+    expect(onReleased).not.toHaveBeenCalled();
+  });
+
+  it('draws nothing for a files item, a run-held claim, a stale claim, or an unheld issue', () => {
+    const cases: BacklogItem[] = [
+      { ...ITEM, holder: { session: 's', heartbeat: new Date().toISOString(), dispatched: true } },
+      held({ run: 'run-9' }),
+      held({ heartbeat: new Date(Date.now() - 16 * 60_000).toISOString() }),
+      TRACKER
+    ];
+    for (const item of cases) {
+      const { unmount } = render(<ItemModal item={item} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+      expect(screen.queryByTestId('claim-release')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('draws nothing when the render site has no payload to re-read', async () => {
+    render(<ItemModal item={held({ dispatched: true })} hues={HUES} onClose={() => {}} />);
+    await screen.findByText('body');
+    expect(screen.queryByTestId('claim-release')).toBeNull();
+  });
+});

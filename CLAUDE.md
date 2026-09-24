@@ -30,9 +30,9 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 [docs/subsystems/invariants.md](docs/subsystems/invariants.md). The doc map is [docs/overview.md](docs/overview.md).
 
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
-  adapters, and — since task-46 — the eight guarded write routes in `items-write.controller.ts`, which are the ONLY writes this server makes to anybody's
-  items), `agents/` (the
-  dashboard calls, plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap and the read-only
+  adapters, and — since task-46 — the eight guarded write routes in `items-write.controller.ts`, which with the ninth, `abort`, are the ONLY writes this
+  server makes to anybody's items), `agents/` (the
+  dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap and the read-only
   `trackers` route) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
   in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, and the two files the server does write), `registry/`, `static.ts` (serves `client/dist` only when built),
   `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
@@ -87,10 +87,10 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **Escape has one owner, and the topmost dialog is the only one that closes.**
   Why: [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
-  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the eight routes
+  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the nine routes
   below — never a file, on any path.
-- **The eight `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-eight-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
+- **The nine `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-nine-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
 - **`orchestrator:queued` is a plan, never a claim: the driver adds it, the claim and the Stop remove it, and no reader treats it as exclusion.**

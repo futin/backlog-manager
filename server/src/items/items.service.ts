@@ -272,7 +272,8 @@ export class ItemsService {
 
   /**
    * How, if at all, one registered project's items may be WRITTEN through this
-   * API (task-46, spec §6.2) — the one gate the eight write routes share.
+   * API (task-46, spec §6.2) — the one gate the nine write routes share
+   * (the ninth, `abort`, reaches it from `agents/items-abort.service.ts`).
    *
    * Four answers rather than a boolean, because the routes owe four different
    * HTTP statuses and the difference between them is the whole of what a caller

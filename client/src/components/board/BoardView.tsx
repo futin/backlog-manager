@@ -180,7 +180,7 @@ function sortItems(items: BacklogItem[], sort: SortKey, stageFor: (item: Backlog
  * predates the chip and none of them needs a destination for it.
  */
 export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
-  const { items: index, projects, loading, error } = useBoard();
+  const { items: index, projects, loading, error, refetch } = useBoard();
   /* Task 5: only `staleDays` is read here, but the whole control comes back —
      `useSettings` falls back to the defaults outside a provider (see its own
      comment), which is what lets every board test that never mounts one still
@@ -871,6 +871,8 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
              here rather than in the modal because this view owns the clock and
              the project list, exactly as it does for `runBlock` and `now`. */
           trackerLine={trackerLineFor(open)}
+          // #225 — a released claim reads on the next payload, not on the next poll tick.
+          onReleased={refetch}
         />
       )}
       {dispatching !== null && (

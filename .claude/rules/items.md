@@ -4,7 +4,7 @@ paths: ["server/src/items/**"]
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
 
-- **The eight `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
+- **The nine `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
   `@UseGuards(SameOriginPostGuard)` (`items-write.controller.ts`, one decorator on the class) and each is a thin pass-through to an `ItemWriter` method:
   `ItemsService.writerFor` gates the `project` against the registry by a RAW string compare, resolves the marker per request, and answers `unregistered` (404)
   / `files` (400, `this project's items are files — the skills write them directly`) / `unsupported` (400, carrying `resolveSource`'s own reason) / the call.
@@ -19,9 +19,11 @@ paths: ["server/src/items/**"]
   Promise>` so two local sessions never race on one item, and every response is absorbed into the poller's cache — but a write never moves `polledAt`, because
   nothing was polled. The token stays in the process; no response carries it. The eighth, `queue` (task-52), takes `{ project, id, queued }` with `queued` a
   literal boolean or a 400, adds or removes `orchestrator:queued` through `ItemWriter.queue` on the same per-URN chain, and answers a REMOVAL's GitHub 404 as
-  success, because every `queued: false` caller is a sweep. A ninth route, `GET /api/items/claim`, is a READ (unguarded like every other GET) and exists
+  success, because every `queued: false` caller is a sweep. The ninth, `abort` (#225), is the one outside this directory — `agents/items-abort.controller.ts`,
+  because it calls the dashboard — yet gates and maps through the same exported `writable`/`answer`, and releases with `authority: 'board'`, a field the
+  `release` route never parses, so no HTTP body can set it. The one READ beside them, `GET /api/items/claim`, is unguarded like every other GET and exists
   because `start` and `stop` are two processes. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-eight-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
+  [invariants.md](docs/subsystems/invariants.md#the-nine-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **A project's source is a committed marker, resolved per request, and an `unsupported` one never falls back to `files`.** `resolveSource`
   (`server/src/items/sources/resolve.util.ts`) reads `backlog/source.json` per request, caches nothing, and answers `missing` / `files` / `tracker` /
   `unsupported`; `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES` and **throws at boot** if two claim one kind. Absent means `files`;

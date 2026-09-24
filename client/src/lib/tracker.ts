@@ -1,5 +1,6 @@
 import { elapsedSince } from './item-age';
 import { runIsLive } from './run-time';
+import { CLAIM_STALE_MS } from '../../../shared/types';
 import type { BacklogItem, OrchestratorRun, ProjectSummary, TrackersPayload } from '../../../shared/types';
 
 /**
@@ -116,6 +117,24 @@ export function queuedReading(
   if (item.queued !== true) return null;
   const held = runs.some((run) => run.project === item.projectPath && (run.status === 'paused' || runIsLive(run, now)));
   return held ? 'live' : 'stale';
+}
+
+/**
+ * Which claim control the item modal draws for a tracker item's holder (#225): `stop-release` when this server dispatched the holding session — the board
+ * started it, so **Stop & release** stops it through the dashboard and then releases — `release` for any other live claim, and `null` when there is nothing
+ * the board may do.
+ *
+ * `null` for a files item (the skills own its stamp), for an item nobody holds, for a claim a RUN holds (the run owns its items for the whole item — stop
+ * the run instead), and for a claim that is not live: past `CLAIM_STALE_MS` the protocol retires it at the next `start`, and an unreadable heartbeat is read
+ * the same way, since nothing can call it fresh. The server re-decides every one of these at click time (`ItemsAbortService`); this only decides whether to
+ * offer the click. `now` is required, for the reason this module's header gives.
+ */
+export function claimControl(item: Pick<BacklogItem, 'source' | 'holder'>, now: number): 'stop-release' | 'release' | null {
+  const holder = item.holder;
+  if (item.source !== 'github' || holder === undefined || holder.run !== undefined) return null;
+  const beat = Date.parse(holder.heartbeat);
+  if (!Number.isFinite(beat) || now - beat >= CLAIM_STALE_MS) return null;
+  return holder.dispatched === true ? 'stop-release' : 'release';
 }
 
 /* `projectIsFiles` lived here from task-46 until task-47 and is gone.

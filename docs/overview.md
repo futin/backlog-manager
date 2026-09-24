@@ -55,8 +55,9 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`items/`** — resolves which source owns each registered project's items (its committed `backlog/source.json`, read per request; absent means the files on
   disk), lists them through that source's adapter — `files` or, since task-45, `github` — parses frontmatter, derives what the board needs, and serves item
   bodies through a registry-built allowlist so a file outside every registered `backlog/` cannot be read; a `gh:<owner>/<repo>#<n>` URN goes to the tracker
-  adapter instead, gated on the registry the same way. Since task-46 it also holds the app's ONLY writes to anybody's items — eight guarded POST routes that a
-  tracker project's items go through, refused outright for a `files` project, whose credential never leaves the server. Two git-backed reads live here: the last
+  adapter instead, gated on the registry the same way. Since task-46 it also holds the app's ONLY writes to anybody's items — nine guarded POST routes (the
+  ninth, `abort`, served from `agents/` because it calls the dashboard) that a tracker project's items go through, refused outright for a `files` project,
+  whose credential never leaves the server. Two git-backed reads live here: the last
   commit touching an item file (memoised against the files git rewrites) and which items differ from `main` (memoised nowhere — the edit it reports moves
   neither of those files).
 - **`orchestrator/`** — a read-only view of the run-state directory, current run and archived runs alike, plus two pieces of in-memory bookkeeping that are lost

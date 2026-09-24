@@ -18,7 +18,8 @@ import type { ClaimRecord, ClaimRun, ItemsIndex } from '../shared/types';
 
 /**
  * The eight write routes and the claim protocol, end to end (task-46,
- * spec §6.2 and §6.3; `queue` is the orchestrator:queued spec's §2).
+ * spec §6.2 and §6.3; `queue` is the orchestrator:queued spec's §2). The ninth,
+ * `abort`, calls the dashboard and has its own suite, `test/tracker-abort.test.ts`.
  *
  * The network is an in-memory GitHub behind a REAL `GithubClient`
  * (`test/helpers/github.ts` — see its header for why a whole little server

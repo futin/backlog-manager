@@ -243,6 +243,13 @@ merely rendered by the components:
   link-out to the issue that stops its click, and its Enter and Space, from opening the modal behind it — the same two-half guard `DispatchButton` uses.
 - **The item modal** prints the same line under the title, because the body it shows came out of the poller's cache rather than from GitHub on open.
 
+**A claim control in the item modal (#225).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a live claim whose
+session the board dispatched, `'release'` for any other live claim that is not a run's, and `null` otherwise — a files item, no holder, a run-held claim, a
+heartbeat `CLAIM_STALE_MS` old or unparseable. `ClaimRelease` draws the chip under the dispatch control, asks through `ui/Confirm` (the Release claim wording
+says a board-dispatched session waiting on a reply also looks stopped, the one thing the server cannot see), posts `POST /api/items/abort`, prints any refusal
+verbatim, and on success shows `claim released` and calls `onReleased` so the Board re-reads its payload. It is drawn only where the modal is handed
+`onReleased` — the Board — and the card carries no claim control, because it carries no claim reading to hang one on.
+
 **A fourth card reading, `queued` (task-52, [spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md) §4.2).** An issue carrying the
 `orchestrator:queued` label maps to `BacklogItem.queued`, and `queuedReading` (`lib/tracker.ts`) turns it into `'live' | 'stale' | null`: `'live'` while the
 item's project has a local run that is `paused`, or `running` and not crashed, or a live remote run for the same repo; `'stale'` when the label is there and no
