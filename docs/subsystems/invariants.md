@@ -617,6 +617,13 @@ clean — it does refresh `.git/ORIG_HEAD`, the same as any other `git merge`, h
 classifier is shown what it will be shown later. It buys "find out in ten seconds instead of four hours" and nothing else: the verdict is per call, so a passing
 probe can still be followed by a denied merge, which is exactly why the degrade path exists as well as the probe.
 
+A tracker project's probe takes the tracker merge's own shape — three `-m` messages against `HEAD`, since that merge carries `Fixes #<n>` and a `Reviewed:` line
+naming the approving report instead of `--no-edit` — and a resumed or unpaused session that has not probed probes before its first merge (#222). Both follow from
+the probe's one job: a probe of a different shape, or none at all, asks the classifier nothing about the call that matters. The same incident fixed the other
+half: **the merge is one Bash call of its own.** The classifier returns one verdict per call over the whole call, so a driver that chained `git merge …; git
+push origin main` had a reviewed, green merge denied as `[Merge Without Review]` and degraded the run — a push question answered on the merge's degrade path,
+when a denied push is meant to park.
+
 ## Question mode is run-scoped, and it only ever takes effect in a headless run
 
 Question mode is run-scoped, and it only ever takes effect in a headless run. `QuestionMode` (`shared/types.ts`) is `decide | park`, with `isQuestionMode` as
@@ -711,11 +718,11 @@ the rest keep the order they had, and a marked _task_ hoists ahead of an unmarke
 fix that was going to fall outside the cap now lands inside it. The gate itself is untouched, so an ungroomed marked item hoists too and prints first labelled
 `ungroomed`; "the thing that would fix your runner is not groomed" is information, and the top of the list is where it gets read.
 
-**Ordering alone would buy nothing.** Every skill body and every `orchestrate.mjs` invocation in a run resolves through `$CLAUDE_PLUGIN_ROOT` — the installed
-plugin copy — while the merge lands in this repo's `main`, so a merged fix does not reach the run that merged it. SKILL.md §9's "After a runner-fix item lands"
-is the within-run half: print `git diff --name-only HEAD^1 HEAD` **in the base tree** (bug-38 — `HEAD` there has to mean the merge commit, and on a `--base` run
-the project root's is `main`), and if it names `skills/backlog-orchestrate/SKILL.md`, follow the repo's copy for the rest of the run — plus the repo's
-`orchestrate.mjs` if that moved too. **Prose and tool move together or not at all**: following freshly merged prose while still
+**Ordering alone would buy nothing.** Every skill body and every `orchestrate.mjs` invocation in a run resolves through the plugin-root path the skill text was
+loaded with — the installed plugin copy — while the merge lands in this repo's `main`, so a merged fix does not reach the run that merged it. SKILL.md §9's
+"After a runner-fix item lands" is the within-run half: print `git diff --name-only HEAD^1 HEAD` **in the base tree** (bug-38 — `HEAD` there has to mean the
+merge commit, and on a `--base` run the project root's is `main`), and if it names `skills/backlog-orchestrate/SKILL.md`, follow the repo's copy for the rest of
+the run — plus the repo's `orchestrate.mjs` if that moved too. **Prose and tool move together or not at all**: following freshly merged prose while still
 invoking the installed tool is the one genuinely dangerous combination, because the new body may name a flag the old tool refuses.
 
 The switch is session state and nothing on disk carries it, so a crashed run resumed by the board or the watchdog is handed the installed copy again. Both
@@ -3297,7 +3304,9 @@ keeps whole `##` segments from the top and appends `_Truncated. Full text: <SHA-
 stopping mid-sentence reads as corruption while one that ends after its last whole section and says so reads as what it is. The footer's length is subtracted from
 the cap before fitting, so the footer always survives — a body that lost it to truncation would be re-imported as a duplicate issue by the next resume. The link
 is what makes two of §8.1's refusals load-bearing: the link pins `backlog/<path>` at HEAD's sha, so HEAD has to be on some `origin/*` ref (otherwise the link
-404s for everyone else) and `backlog/` has to be clean (otherwise the link shows bytes that differ from what was imported).
+404s for everyone else) and `backlog/` has to be clean (otherwise the link shows bytes that differ from what was imported). A resume's one exemption is the
+marker the stopped run wrote itself, while no commit carries it (`??` or `A `): the link never points at it, and without the exemption every resume refused on the
+tool's own file (#218). A committed marker edited by hand is still refused.
 
 **Three things are lost, and saying which is the point.** A body over the cap keeps only its leading sections plus the link. `tags:` survive in the footer alone,
 because the tracker's label set is the closed nine of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the

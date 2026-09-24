@@ -13,7 +13,7 @@ every remaining item.
 Then, before reconcile, before Inspect, before anything else this file describes, close the gap the board's watchdog is timing:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" status
 ```
 
 `status` has three outcomes here, not two.
@@ -21,7 +21,7 @@ node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stat
 **`running`** — claim the run immediately, before doing anything else:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" claim
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" claim
 ```
 
 `claim` _is_ the heartbeat this step used to stamp — it writes `updatedAt` from the same clock reading — and it also records that **this** session is the one
@@ -36,7 +36,7 @@ is the failure the lease exists to make impossible, and it only works if the los
 **`paused`** — this run was not crashed, it was stopped on purpose at an item boundary (SKILL.md §10, _Pausing_). Put it back to `running` first:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" unpause
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" unpause
 ```
 
 The run is `running` again from this instant, and the request that paused it is retired by that same stamp — so the first `stage <id> preflight` of the rest of
@@ -44,6 +44,10 @@ the queue will not exit `6` all over again. No separate heartbeat is needed: `un
 write: a paused run carries the lease of whichever session paused it and then exited, and this is a different session. Then `claim` the run exactly as the
 `running` path above does — it is a no-op re-claim by the session that already holds it, and running it keeps this branch identical to the other one — and
 continue, `reconcile` next.
+
+**Either path, before this session's first merge: run SKILL.md §2's merge probe** if `mergeModeEffective` still reads `merge` — the tracker-shaped one in a
+tracker project. The probe is per session, not per run: a run paused before item 1 and unpaused here has never asked the classifier anything, and #222's
+first denial came at a real merge for exactly that reason. A denied probe degrades the run the way §2 says.
 
 **Anything else** — `done`, `aborted`, `failed` — is not this path's to touch. Refuse and say which.
 
@@ -67,7 +71,7 @@ session, handed the installed copy again exactly as the crashed one was. Nothing
 for any item staged `merged` or `branched` whose note says the remainder of the run follows the repo copy:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
 ```
 
 If one is there, take the switch again — **both halves or neither**, per §9: re-read `skills/backlog-orchestrate/SKILL.md` from this repo's working tree and
@@ -81,7 +85,7 @@ the exit-`4` lock is what makes it safe for that sweep to move a live child's `l
 live child exists. The flat paths below are the same paths the crashed session wrote to.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" reconcile
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" reconcile
 ```
 
 Read-only — it never writes the run file; deciding what to do is this skill's job. For every item still in the pipeline it prints what it found and one of five
@@ -99,7 +103,7 @@ it does not stop a resume. A files project's rows have no `claim` key at all.
 - **`skip`** — `claim=other`: another machine or session holds the item now, whatever this tree still has on disk. Do not resume or re-dispatch it:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> skipped --note "claimed elsewhere — found by reconcile; worktree <path> left in place"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> skipped --note "claimed elsewhere — found by reconcile; worktree <path> left in place"
   ```
 
   Leave its worktree and branch where they are, the same rule the resumed driver's own re-claim follows: this run lost the item, not the work.
@@ -117,7 +121,7 @@ it does not stop a resume. A files project's rows have no `claim` key at all.
   command in this skill that runs with the worktree as its cwd, because the item file it edits is the worktree's copy:
 
   ```bash
-  ( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> )
+  ( cd "$PWD/.worktrees/<id>" && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id> )
   ```
 
   The subshell is mandatory, not tidiness — see "Where commands run" at the top: a bare `cd` would leave this session sitting in the worktree, and every later
@@ -144,8 +148,8 @@ it does not stop a resume. A files project's rows have no `claim` key at all.
 - **`park`** — neither worktree nor branch survives. Nothing to resume:
 
   ```bash
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "resume: worktree and branch both gone — nothing to take over"
-  node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "resume: worktree and branch both gone — nothing to take over"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
   `--detail` is mandatory on every `attention` call — omitting it exits `1` with the usage line, and an attention row with no detail would be a drawer entry
@@ -156,7 +160,7 @@ between a session finishing and that call landing has the number sitting in `log
 history is. Compare `status --json`'s `usage` array on each item against the transcripts actually on disk, and run it for any that is missing:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
 ```
 
 One entry per transcript — `<id>.jsonl`, each `<id>-retry-<n>.jsonl`, each `<id>-fix-<n>.jsonl` — and re-running it over one already recorded is harmless: an
@@ -172,7 +176,7 @@ be another abort's teardown in progress (bug-54): on 2026-09-22 a session ran `g
 additions, and took the other abort emptying the directory for the child's work. The tool cannot refuse a read made before it is called.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
 ```
 
 No `claim` before it, deliberately: `abort` takes the run over itself, as its first write. A crashed run's driver lease belongs to the session that died, and
@@ -222,7 +226,7 @@ path.
 So, after `abort` returns, read the attention list it wrote:
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
 ```
 
 For each preserved item, in this order:
@@ -230,7 +234,7 @@ For each preserved item, in this order:
 1. Clear the marker where the item file actually lives — in a subshell, so this session's cwd stays at the project root:
 
    ```bash
-   ( cd "$PWD/.worktrees/<id>" && node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" stop <id> )
+   ( cd "$PWD/.worktrees/<id>" && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id> )
    ```
 
    `orchestrate.mjs` cannot do this itself: item files have exactly one writer family — the backlog skills — and it is not one of them. That is why abort

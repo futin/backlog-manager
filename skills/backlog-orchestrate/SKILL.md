@@ -47,8 +47,9 @@ Two reference files sit beside this one and are **not** loaded with it. Read the
 
 Every command in this file names the plugin root as `${CLAUDE_PLUGIN_ROOT}`, and Claude Code filled that in with the installed copy's path when it loaded this
 skill — no shell here sets the variable, so an unfilled one expands to nothing and every `node` line becomes `node "/skills/…"`. A file read by hand is never
-filled in: both reference files, and a SKILL.md re-read from the repo after a runner fix (below), still carry the placeholder, as `$CLAUDE_PLUGIN_ROOT` or in
-braces. Replace it with `${CLAUDE_PLUGIN_ROOT}` before running the line — or, once a runner fix has switched this run to the repo copy, with this repo's root.
+filled in: both reference files, and a SKILL.md re-read from the repo after a runner fix (below), still carry the unfilled placeholder — the
+name `CLAUDE_PLUGIN_ROOT` inside `${…}`. Replace it with `${CLAUDE_PLUGIN_ROOT}` before running the line — or, once a runner fix has switched this run to the
+repo copy, with this repo's root.
 
 ## Where commands run, and why it is not negotiable
 
@@ -287,6 +288,19 @@ git merge --no-ff --no-edit HEAD
 Merging `HEAD` into itself prints `Already up to date.`, exits `0`, and changes nothing that matters — no commit, no index change, no reflog entry, dirty tree
 or clean (it does refresh `.git/ORIG_HEAD`, the same as any other `git merge` invocation, harmlessly). The point is not the merge; it is that the command shape
 is byte-identical to §9's real one, so the permission classifier is asked now exactly what it will be asked at every merge later.
+
+**In a tracker project the probe takes the tracker merge's shape instead**, because §9's merge there carries three `-m` messages rather than `--no-edit`, and a
+probe of the other shape asks the classifier a different question (#222):
+
+```bash
+git merge --no-ff -m "Merge probe: <runId>" -m "Fixes nothing: merge-mode probe" -m "Reviewed: merge-mode probe, no item" HEAD
+```
+
+Same effect — `Already up to date.`, exit `0`, no commit — and it pushes nothing, deliberately: a denied push parks rather than degrades (§9), so there is
+nothing for a push probe to decide.
+
+**A resumed or unpaused run that has not probed in this session probes before its first merge.** The verdict belongs to the session asking, and a run that was
+paused before item 1 and unpaused by a later session reaches §9 having never asked at all — which is how #222's run met its first denial at a real merge.
 
 - **Allowed** → carry on in merge mode.
 - **Denied** (`Permission for this action was denied by the Claude Code auto mode classifier`) → record the downgrade and run the **whole queue** in branch
@@ -644,7 +658,7 @@ dispatch line onto that same worktree — `references/recovery.md` names the sha
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background; run tests in the foreground. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -860,7 +874,9 @@ a report that no longer describes the branch.
 For both failure shapes, ask the user — best-effort, exactly like pre-flight — which of three they want: **retry**, **skip**, or **stop the run**. Retry resumes
 that item's own session so its context is not paid for twice. **Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first, with the Write tool**,
 and only then launch. §4's rule about prose in a command position covers this text: it quotes execute's failure `## Outcome`, which carries command output
-verbatim.
+verbatim. **End that file with the fresh dispatch's background rule, word for word: "Never run a command in the background; run tests in the foreground."** A
+retry is exactly the session most tempted to background — it is re-running a suite it already watched take long — and a headless `-p` session that ends its
+turn waiting on a notification exits with no Outcome, so the one retry is spent on nothing (#221).
 
 ```bash
 nohup sh -c 'cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
@@ -1244,14 +1260,22 @@ git -C "<base tree>" merge --no-ff --no-edit backlog/<id>
 session that has no terminal to open one in. The explicit `-C` is what makes this land in the base tree — the version of this command before run-scoped bases
 had none and relied on the main tree being the cwd, which is true only while the base is `main`.
 
-**In a tracker project the merge carries `Fixes #<n>`, and `--no-edit` gives way to two `-m` flags:**
+**In a tracker project the merge carries `Fixes #<n>`, and `--no-edit` gives way to three `-m` flags:**
 
 ```bash
-git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>: <title>" -m "Fixes #<n>"
+git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>: <title>" -m "Fixes #<n>" -m "Reviewed: approve (reviews/<n>-<k>.md)" backlog/<n>
 ```
 
 Free provenance: `git log` then names the issue every merge came from, and GitHub's own close-on-push is idempotent with the close the tool performs below, so
-the two cannot disagree. `--no-edit` is dropped because `-m` already supplies the message — no editor can open either way.
+the two cannot disagree. `--no-edit` is dropped because `-m` already supplies the message — no editor can open either way. The `Reviewed:` line names the
+approving report (`<k>` is the loop that approved it, `1` or `2`), so the classifier sees the review inside the command it is judging; without it, "merge into
+the base" reads as an unreviewed publish (#222).
+
+**The merge is one Bash call of its own: the driver never chains `git merge` with anything else** — not the push, not an `echo`, not the stage. There is one
+classifier verdict per Bash call, judged over the whole call, and the failure it produces decides which path the item takes: a denied merge degrades the run,
+a denied push parks the item. Chain them and the push's question is answered as a merge denial — in run-20260923-154625 (claude-agents-dashboard)
+`git merge …; git push origin main` in one call was denied as `[Merge Without Review]` for an item whose review had approved it, and the run degraded to
+branch mode for the rest of its queue. Read the merge's exit status from the tool result, then issue the push (tracker) as the next call.
 
 **Three different failures, and they take different commands. Do not conflate them: only the first one degrades the run, and the other two park the item exactly
 as they always have.**
@@ -1338,7 +1362,8 @@ git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
 git -C "<base tree>" branch -d backlog/<id>
 ```
 
-**In a tracker project the push comes between the merge and the stage, and the order is not negotiable:**
+**In a tracker project the push comes between the merge and the stage, and the order is not negotiable** — as its own Bash call, never chained onto the
+merge (above):
 
 ```bash
 git -C "<base tree>" push origin <base>

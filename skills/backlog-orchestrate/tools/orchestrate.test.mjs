@@ -3788,6 +3788,50 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
   assert.ok(bullet.includes(RUN_MARKER_TOKEN), `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`);
 });
 
+// --- #221: a headless session never backgrounds its test runs --------------
+//
+// An execute session dispatched under `claude -p` ran its suite with Bash
+// `run_in_background: true` and ended its turn to wait for the notification.
+// Headless, there is no next turn: the process exits when the turn ends, so no
+// Outcome was written, the final message said only "waiting", and the driver
+// parked the item with its edits uncommitted. The rule lives in three places a
+// dispatched session reads — the fresh prompt, the retry prompt, and execute's
+// marker section — and each is pinned here, because each is prose under
+// constant pressure to be compressed away.
+
+const BACKGROUND_RULE = 'Never run a command in the background; run tests in the foreground.';
+
+test('the fresh dispatch prompt forbids backgrounded commands', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const line = text.split('\n').find((l) => l.includes('exec claude -p') && l.includes(RUN_MARKER_TOKEN));
+  assert.ok(line, 'no dispatch line carries the run marker at all');
+  assert.ok(line.includes(BACKGROUND_RULE), `the fresh dispatch prompt lost the background rule: ${BACKGROUND_RULE}`);
+});
+
+test('the retry prompt file is told to carry the same background rule', () => {
+  // The retry line reads its prompt out of a file the driver writes, so the
+  // rule cannot sit on the line itself — it sits in the instruction for what
+  // that file must say, which is the prose between "Retry resumes" and the
+  // retry's own code fence.
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const start = text.indexOf('Retry resumes');
+  assert.ok(start !== -1, 'the retry instructions are gone');
+  const paragraph = text.slice(start, text.indexOf('```', start));
+  assert.ok(paragraph.includes(BACKGROUND_RULE), `the retry prompt instructions no longer carry the background rule: ${BACKGROUND_RULE}`);
+});
+
+test('backlog-execute forbids backgrounding inside its marker section, with the reason', () => {
+  // Inside the marker section specifically: a hand session may background a
+  // suite and wait on the notification, because it has a next turn.
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
+  const section = text.slice(text.indexOf('## Am I inside an orchestrator run?'), text.indexOf('No marker means a human started this session'));
+  assert.ok(section.length > 0, 'the marker section is gone');
+  assert.ok(section.includes('run_in_background'), 'the marker section no longer names run_in_background');
+  assert.ok(section.includes('Never run anything in the background'), 'the marker section lost the no-background rule');
+  assert.ok(section.includes('600000'), 'the marker section no longer names the foreground alternative: raising the Bash timeout');
+  assert.ok(/exits the moment a turn ends/.test(section), 'the marker section lost the reason: headless -p exits when the turn ends');
+});
+
 // --- bug-20: the environment marker the Stop hook reads ---------------------
 //
 // Every orchestrator-owned headless session used to finish its work and then
@@ -7413,6 +7457,68 @@ test('SKILL.md says a classifier-denied PUSH parks, in the push paragraph itself
   assert.match(paragraph, /denied by the auto-mode classifier/i);
   assert.match(paragraph, /park/i);
   assert.match(paragraph, /branch mode|branched/i);
+});
+
+// --- #222: the merge is one Bash call of its own, and the probe asks what it will ask ---
+//
+// run-20260923-154625 (claude-agents-dashboard) chained `git merge …; git push
+// origin main` into ONE Bash call. The classifier judges a call as a whole, so
+// a reviewed, green merge was denied as "[Merge Without Review]" and the run
+// degraded to branch mode — the push question had turned into a merge denial.
+// The tracker snippet had also lost its branch argument, which is what invited
+// the driver to improvise the command in the first place.
+
+const fencedLines = (text) => {
+  const out = [];
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) out.push(line.trim());
+  }
+  return out;
+};
+
+test('the tracker merge snippet names its branch and carries the review provenance', () => {
+  const lines = fencedLines(fs.readFileSync(SKILL_MD, 'utf8'));
+  const tracker = lines.filter((l) => l.startsWith('git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>'));
+  assert.equal(tracker.length, 1, `expected exactly one tracker merge snippet, found ${tracker.length}`);
+  const [merge] = tracker;
+  assert.ok(merge.endsWith(' backlog/<n>'), `the tracker merge does not name the branch it merges: ${merge}`);
+  assert.ok(merge.includes('-m "Fixes #<n>"'), 'the tracker merge lost its Fixes line');
+  assert.match(merge, /-m "Reviewed: approve \(reviews\/<n>-<k>\.md\)"/, 'the tracker merge does not show the classifier the review it passed');
+});
+
+test('no snippet chains a git merge with anything else, and the rule says why', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const merges = fencedLines(text).filter((l) => /^git\b.*\bmerge --no-ff\b/.test(l));
+  assert.ok(merges.length >= 4, `only ${merges.length} merge snippets found — the scan is no longer reaching them`);
+  for (const line of merges) {
+    // Quotes stripped first: a `;` or `|` inside a -m message is text, not a chain.
+    const bare = line.replace(/"[^"]*"/g, '""');
+    assert.ok(!/;|&&|\|\||\|/.test(bare), `a merge snippet chains another command: ${line}`);
+    assert.ok(!/\bpush\b/.test(bare), `a merge snippet pushes: ${line}`);
+  }
+  const flat = text.replace(/\s*\n\s*/g, ' ');
+  assert.match(flat, /never chains `git merge` with anything else/, 'the one-call rule is not stated');
+  assert.match(flat, /one classifier verdict per (Bash )?call/i, 'the one-call rule lost its reason');
+});
+
+test('the probe has the tracker merge\'s shape, and a resumed run probes before its first merge', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const lines = fencedLines(text);
+  const mFlags = (l) => (l.replace(/"[^"]*"/g, '""').match(/ -m ""/g) ?? []).length;
+  const [trackerMerge] = lines.filter((l) => l.startsWith('git -C "<base tree>" merge --no-ff -m "Merge backlog/<n>'));
+  const trackerProbe = lines.filter((l) => /^git merge --no-ff -m .* HEAD$/.test(l));
+  assert.equal(trackerProbe.length, 1, `expected exactly one tracker-shaped probe, found ${trackerProbe.length}`);
+  assert.equal(mFlags(trackerProbe[0]), mFlags(trackerMerge), 'the tracker probe does not carry as many -m messages as the tracker merge');
+  assert.ok(lines.includes('git merge --no-ff --no-edit HEAD'), 'the files probe changed');
+  const flat = text.replace(/\s*\n\s*/g, ' ');
+  assert.match(flat, /resumed or unpaused[^.]*probes? before its first merge/i, 'SKILL.md does not make a resumed run probe');
+  const recovery = fs.readFileSync(path.join(path.dirname(SKILL_MD), 'references', 'recovery.md'), 'utf8').replace(/\s*\n\s*/g, ' ');
+  assert.match(recovery, /before this session's first merge: run SKILL\.md §2's merge probe/, 'recovery.md does not send a resumed run to the probe');
 });
 
 // --- C-1 … C-5: task-48, what the rest of the run publishes -----------------

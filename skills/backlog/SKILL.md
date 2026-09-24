@@ -79,7 +79,7 @@ The commands and flags that exist only here, one line each:
   holder on another machine is the ordinary case, not litter: an empty `claim-host:` means the claim was written before machines were recorded, never that
   the holder is on this one.
 - `comment <id> --body <file>` appends a comment without moving anything.
-- `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the issue moved since you read it. Only `backlog-groom` uses it.
+- `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the body changed since you read it (a claim's own label or comment write does not count). Only `backlog-groom` uses it.
 
 ## Print it as returned
 
@@ -144,9 +144,11 @@ marker, an explicit `{"kind":"files"}` marker, or a `github` marker with no item
 nor `debt`, an OPEN item with a `started:` stamp — somebody is working it — or an `oos-N` file carrying any of the four counters, whose issue would be closed
 at creation where no claim can bill them (remove them from the frontmatter first). Exit `5` means the stack is not running; nothing has been written.
 
-A failure mid-run stops at the item it names, writes nothing further and deletes nothing. Run the same command again: `import` reads the `bm:imported` footer
-off every issue on the tracker, skips the items it finds there, closes a `done/` or `out-of-scope/` item whose issue is still open, and carries on. The footer
-is the whole record — it is on the tracker, where a crash cannot lose it.
+A failure mid-run stops at the item it names, writes nothing further and deletes nothing. Run the same command again: `import` reads the `bm:imported` footer off
+every issue on the tracker, skips the items it finds there, closes a `done/` or `out-of-scope/` item whose issue is still open, and carries on. The footer is
+the whole record — it is on the tracker, where a crash cannot lose it. The `backlog/source.json` the first run wrote needs no commit first: while no commit
+carries it (untracked or staged), a resume leaves it out of the uncommitted-changes check. Every other change under `backlog/` — a hand edit to a committed
+marker included — still refuses.
 
 Three things do not survive the move. A body over GitHub's 65,536-character cap is cut at a `## ` heading boundary and gains a line linking the full file at
 HEAD. `tags:` live in the footer only, since the tracker's label set is a closed nine. And the file's git history stays in the repository — the issue is dated

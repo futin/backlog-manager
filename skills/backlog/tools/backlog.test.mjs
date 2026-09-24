@@ -5559,11 +5559,22 @@ test('pass 2 makes no write but body patches', async () => {
   }
 })
 
-/** A store whose marker is already down and whose item files are still there: an import that stopped part way through, which is the state resume is for. */
-function resumeFixture() {
-  return importFixture({
-    items: [...importItems(), { relPath: 'source.json', text: JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n' }],
-  })
+/**
+ * A store whose marker is already down and whose item files are still there: an import that stopped part way through, which is the state resume is for.
+ *
+ * The marker is written AFTER the seed commit by default, untracked, because that is exactly what a stopped run leaves: `import` writes it before the first
+ * `create` and nothing commits it. The fixture used to commit it with the items, and so never saw a resume refuse on the tool's own file (#218).
+ * `marker: 'staged'` is the same file after a `git add`; `marker: 'committed'` is the old shape, a marker some commit already carries.
+ */
+function resumeFixture({ marker = 'untracked' } = {}) {
+  const markerItem = { relPath: 'source.json', text: JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n' }
+  if (marker === 'committed') return importFixture({ items: [...importItems(), markerItem] })
+  const fixture = importFixture({ items: importItems() })
+  fs.writeFileSync(path.join(fixture.backlog, markerItem.relPath), markerItem.text)
+  if (marker === 'staged') {
+    assert.equal(spawnSync('git', ['-C', fixture.dir, 'add', 'backlog/source.json'], { encoding: 'utf8' }).status, 0)
+  }
+  return fixture
 }
 
 const seededBody = (id, relPath, text) => `${text}\n\n<!-- bm:imported from=${id} created=2026-01-01 -->\n_Imported from backlog/${relPath}_`
@@ -5639,6 +5650,53 @@ test('import leaves the marker exactly as it found it, and honours --no-forms on
   assert.equal(out.status, 0, out.stderr)
   assert.equal(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), before)
   for (const form of FORM_FILES) assert.equal(fs.existsSync(formPath(dir, form)), false)
+})
+
+// #218: the marker a stopped run wrote is the tool's own state, not an operator's change, so the dirty check exempts it on a resume — and only while no commit
+// carries it (`??` or `A `). Everything else in `backlog/` still refuses, and the exempt line is left out of the message too.
+test('import resumes over the untracked marker a stopped run left behind', async () => {
+  const { dir, backlog } = resumeFixture({ marker: 'untracked' })
+  const before = fs.readFileSync(path.join(backlog, 'source.json'), 'utf8')
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /resuming: 2 of 4 item\(s\) already imported/)
+  assert.equal(fs.readFileSync(path.join(backlog, 'source.json'), 'utf8'), before)
+})
+
+test('import resumes over a staged-but-uncommitted marker', async () => {
+  const { dir } = resumeFixture({ marker: 'staged' })
+  const { routes } = githubRoutes({ projectPath: dir, seed: RESUME_SEED, firstNumber: 8 })
+
+  const { out } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /resuming: 2 of 4 item\(s\) already imported/)
+})
+
+test('a resume still refuses a modified item file, and does not list its own marker as the problem', () => {
+  const { dir, backlog } = resumeFixture({ marker: 'untracked' })
+  fs.appendFileSync(path.join(backlog, 'tasks/open/task-1-one.md'), 'one more line\n')
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /uncommitted changes/)
+  assert.match(out.stderr, / M backlog\/tasks\/open\/task-1-one\.md/)
+  assert.doesNotMatch(out.stderr, /backlog\/source\.json/)
+})
+
+test('a resume still refuses a committed files marker hand-edited to github', () => {
+  const { dir, backlog } = importFixture({ items: [...importItems(), { relPath: 'source.json', text: JSON.stringify({ kind: 'files' }) + '\n' }] })
+  fs.writeFileSync(path.join(backlog, 'source.json'), JSON.stringify({ kind: 'github', repo: 'futin/x' }) + '\n')
+
+  const out = run(dir, 'import', 'github')
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /uncommitted changes/)
+  assert.match(out.stderr, / M backlog\/source\.json/)
 })
 
 test('import refuses a repo that disagrees with the marker, before any request', async () => {

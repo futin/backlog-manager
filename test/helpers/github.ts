@@ -109,6 +109,26 @@ export class FakeGithub {
   private nextIssue = 77;
   private nextComment = 100;
 
+  /**
+   * Move one issue's `updated_at` the way GitHub does for a write that is not a
+   * PATCH to the issue itself (bug #220): a label added or removed, a comment
+   * posted, a comment edited. None of those endpoints answers with the issue,
+   * so a caller that only absorbs what it is handed back never hears about the
+   * new stamp — and a fake that did not bump it modelled a GitHub where the
+   * claim protocol's own bookkeeping left the stamp alone, which is how
+   * `patchBody` refusing a `start`-then-`body` stayed green.
+   *
+   * Strictly later than the old stamp, not just `new Date()`: two writes inside
+   * one millisecond would otherwise tie, and a tie is exactly the "nothing
+   * moved" reading this exists to rule out.
+   */
+  private touch(number: number): void {
+    const issue = this.issues.get(number);
+    if (issue === undefined) return;
+    const next = Math.max(Date.now(), Date.parse(issue.updated_at) + 1);
+    issue.updated_at = new Date(next).toISOString();
+  }
+
   issue(over: Partial<FakeIssue> = {}): FakeIssue {
     const number = over.number ?? 31;
     const issue: FakeIssue = {
@@ -250,6 +270,7 @@ export class FakeGithub {
         return { ...this.page(rows, url), etag };
       }
       const id = this.nextComment++;
+      this.touch(number);
       this.comments.set(id, {
         id,
         issue_url: `https://api.github.com/repos/${FAKE_REPO}/issues/${number}`,
@@ -273,6 +294,7 @@ export class FakeGithub {
       }
       const updated = { ...existing, body: String(body?.body ?? ''), updated_at: new Date().toISOString() };
       this.comments.set(id, updated);
+      this.touch(Number(/\/issues\/(\d+)$/.exec(existing.issue_url)?.[1]));
       return { status: 200, payload: updated };
     }
 
@@ -284,11 +306,13 @@ export class FakeGithub {
         for (const name of (body?.labels as string[]) ?? []) {
           if (!issue.labels.some((l) => l.name === name)) issue.labels.push({ name });
         }
+        this.touch(issue.number);
         return { status: 200, payload: issue.labels };
       }
       const name = decodeURIComponent(labels[2] ?? '');
       const before = issue.labels.length;
       issue.labels = issue.labels.filter((l) => l.name !== name);
+      if (before !== issue.labels.length) this.touch(issue.number);
       return before === issue.labels.length ? { status: 404, payload: { message: 'Label does not exist' } } : { status: 200, payload: issue.labels };
     }
 

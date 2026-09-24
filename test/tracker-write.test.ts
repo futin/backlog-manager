@@ -358,6 +358,85 @@ describe('body', () => {
     expect(res.body.updatedAt).toBe('2026-09-02T10:00:00Z');
     expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
   });
+
+  /* Bug #220. The stamp a caller holds is the one `show --json` printed — the
+     cached issue's, which is what `GET /api/items` answers as `updated`. The
+     claim protocol's own writes (the `in-progress` label on `start`, the
+     claim-comment edit on `heartbeat`) move GitHub's `updated_at` without the
+     cache hearing about it, so a stamp comparison alone read our own
+     bookkeeping as somebody else's edit.
+
+     Read straight from the poller's cache — the value `mapIssue` hands out as
+     `updated`, byte for byte — rather than through `GET /api/items`. That
+     route arms the poller, and in this suite `sync()` leaves it with no timer
+     pending, so `arm()` starts a sweep at once and absorbs GitHub's newer
+     stamp behind the case's back. The served app always has a timer pending,
+     so a `show --json` there never sweeps. */
+  function cachedStamp(): string {
+    const stamp = app.get(TrackerPollerService).issue(REPO, 31)?.updated_at;
+    if (typeof stamp !== 'string') throw new Error('#31 has no cached stamp');
+    return stamp;
+  }
+
+  it('patches after a start, on the stamp show --json hands out, though the label add moved updated_at', async () => {
+    gh.issue();
+    await sync();
+    await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A' }).expect(201);
+    const stamp = cachedStamp();
+    // The premise: GitHub's stamp has moved on past the one the caller holds.
+    expect(gh.issues.get(31)?.updated_at).not.toBe(stamp);
+    gh.calls.length = 0;
+
+    await post('body', { project: trackerPath, id: '#31', body: 'new text', ifUpdatedAt: stamp }).expect(201);
+    const patches = gh.matching('/issues/31', 'PATCH');
+    expect(patches).toHaveLength(1);
+    expect(patches[0].body).toEqual({ body: 'new text' });
+  });
+
+  it('patches after a start and a heartbeat, on the stamp read between them', async () => {
+    gh.issue();
+    await sync();
+    const claimed = await post('claim', { project: trackerPath, id: '#31', phase: 'groom', session: 'A' }).expect(201);
+    const stamp = cachedStamp();
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: claimed.body.commentId, session: 'A' }).expect(201);
+    gh.calls.length = 0;
+
+    await post('body', { project: trackerPath, id: '#31', body: 'new text', ifUpdatedAt: stamp }).expect(201);
+    expect(gh.matching('/issues/31', 'PATCH')).toHaveLength(1);
+    expect(gh.issues.get(31)?.body).toBe('new text');
+  });
+
+  /* The overwrite the check exists for, through the new path: the stamp still
+     names the cached copy, but somebody else's groom rewrote the body since. */
+  it('refuses when the body itself changed since the cached read, even though the caller holds the cached stamp', async () => {
+    gh.issue();
+    await sync();
+    const stamp = cachedStamp();
+    const theirs = gh.issues.get(31)!;
+    gh.issues.set(31, { ...theirs, body: 'another machine groomed this', updated_at: '2026-09-02T11:00:00Z' });
+    gh.calls.length = 0;
+
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'new text', ifUpdatedAt: stamp }).expect(409);
+    expect(res.body.updatedAt).toBe('2026-09-02T11:00:00Z');
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+  });
+
+  /* The conservative side, pinned: once a poll refreshed the cache past the
+     caller's stamp, the copy that stamp named is gone and nothing proves the
+     body the caller read is the body GitHub holds. One retry, never an
+     overwrite. */
+  it('refuses when the cache has moved past the caller-s stamp, even if only labels changed', async () => {
+    gh.issue();
+    await sync();
+    const stamp = cachedStamp();
+    const issue = gh.issues.get(31)!;
+    gh.issues.set(31, { ...issue, labels: [...issue.labels, { name: 'in-progress' }], updated_at: '2026-09-02T11:00:00Z' });
+    await sync();
+
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'new text', ifUpdatedAt: stamp }).expect(409);
+    expect(res.body.updatedAt).toBe('2026-09-02T11:00:00Z');
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+  });
 });
 
 describe('comment', () => {

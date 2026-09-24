@@ -4,8 +4,8 @@
 // plugin repo; nothing is installed into the repos it manages — the backlog/
 // directory itself is the only thing that lands in a project.
 //
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" init
-//   node "$CLAUDE_PLUGIN_ROOT/skills/backlog/tools/backlog.mjs" root
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" init
+//   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" root
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -497,6 +497,8 @@ export function backlogItemFiles(backlog) {
 // is NOT — the interesting case is one excluded by `.gitignore` or `.git/info/exclude`, where the status is clean and the file would still be deleted at the end
 // with no commit anywhere carrying it. The tracked set is read with one `ls-files -- backlog` and subtracted, rather than one `--error-unmatch` call whose
 // refusal has to be scraped back out of git's stderr: the same fact, one child process either way, and the list of paths is exact instead of parsed.
+// `dirty` is the raw porcelain, marker line included: the one exemption — a resume's own uncommitted marker — is applied by the caller through
+// `withoutResumeMarker`, because it depends on whether this is a resume, which is not a git fact.
 //
 // `sha` and `pushed` are about the truncation link. A body over `IMPORT_BODY_CAP` keeps its first whole sections and links the rest at this exact commit, so a
 // commit no remote has is a link that 404s for everybody but this machine — and by then the file it pointed at is deleted. `branch -r --contains HEAD` is the
@@ -526,6 +528,21 @@ function gitImportState(root, files) {
   }
 
   return { dirty, untracked, sha, pushed }
+}
+
+// `gitImportState`'s `dirty`, minus the one line a resume is entitled to ignore: the marker `import` wrote itself (#218). A stopped run leaves the marker behind
+// uncommitted — it goes down before the first `create`, and nothing in this command commits it — so without this every resume the refusal messages send the
+// operator to (`re-run import to resume`) was refused on the tool's own state before it could do anything.
+//
+// Deliberately narrow: only `??` (untracked, what a stopped run leaves) and `A ` (staged, worktree unchanged) — the two states in which no commit carries the
+// marker yet, so no operator's committed source identity is being changed. ` M backlog/source.json` is NOT exempt: a committed marker edited by hand is an
+// operator change, and it is refused for the same reason every other modification is. Kept apart from `gitImportState` so that stays a plain reader of git.
+function withoutResumeMarker(dirty) {
+  const exempt = new Set([`?? backlog/${SOURCE_MARKER}`, `A  backlog/${SOURCE_MARKER}`])
+  return dirty
+    .split('\n')
+    .filter((line) => line !== '' && !exempt.has(line))
+    .join('\n')
 }
 
 // Where an item file sits, as the two values every request about it needs: `section` is what `create` maps to a `type:*` label, `status` is what decides whether
@@ -3124,7 +3141,8 @@ export async function main(argv) {
   //   4. the marker               exit 1 — unreadable, an explicit `files` one, or a `github` one with nothing left to import
   //   5. an empty store           exit 1 — that is `connect`'s job, and saying so is more use than writing a marker nobody needed
   //   6. the repo                 exit 1 — positional or derived from `origin`, proved either way: the server interpolates it into an api.github.com path
-  //   7. git state                exit 1 — `backlog/` committed, every item file tracked, HEAD on some `origin/*` ref (see `gitImportState`)
+  //   7. git state                exit 1 — `backlog/` committed, every item file tracked, HEAD on some `origin/*` ref (see `gitImportState`); a resume
+  //                                         ignores its own uncommitted marker, and nothing else (see `withoutResumeMarker`)
   //   8. the item files           exit 1 — every one parses, no OPEN item is in progress, no `kind:` the tracker has no label for
   //   9. the probe                exit 5 — `GET /api/items`, which is how "the stack is up" is decided before the marker goes down
   if (cmd === 'import') {
@@ -3215,8 +3233,9 @@ export async function main(argv) {
     }
 
     const git = gitImportState(root, itemFiles)
-    if (git.dirty !== '') {
-      console.error(`backlog/ has uncommitted changes — commit or stash them first:\n${git.dirty}`)
+    const dirty = resuming ? withoutResumeMarker(git.dirty) : git.dirty
+    if (dirty !== '') {
+      console.error(`backlog/ has uncommitted changes — commit or stash them first:\n${dirty}`)
       return 1
     }
     if (git.untracked.length > 0) {
