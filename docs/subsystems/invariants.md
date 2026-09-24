@@ -3284,15 +3284,20 @@ comment and the readable line are two different things** and only the comment is
 prose change, while rewording the comment would break every resume. An issue with no footer is skipped when the map is built: it is somebody's own issue, filed by
 hand, and taking a number off it would map an item onto a stranger's work.
 
-The resume does exactly ONE repair, and the boundary is deliberate: a `done/` file whose issue the index still reports as `open` is a run that died between
-`create` and `state done`, so the close is made again. The counters are NOT re-billed. A second `claim` + `release` pair would add a second permanent record of
-the same work, and a doubled record is worse than a missing repair — the counters are evidence, and evidence that double-counts is not conservative, it is wrong.
+The resume does exactly ONE repair, and the boundary is deliberate: a `done/` or `out-of-scope/` file whose issue the index still reports as `open` is a run
+that died between `create` and its close (`state done` / `state out-of-scope`), so the close is made again. The counters are NOT re-billed. A second `claim` +
+`release` pair would add a second permanent record of the same work, and a doubled record is worse than a missing repair — the counters are evidence, and
+evidence that double-counts is not conservative, it is wrong.
 
-**Counters ride one synthetic claim, released immediately, BEFORE the close** (spec §14.13). The four counters live in a claim comment (§6.4) and nowhere else, so
-an item carrying any of them is given a claim whose session is `import-<stamp>` and which is released at once with `reason: 'imported'` and the counters billed
-onto it. The order is forced from the other side: `claim` refuses a closed issue, and a `done/` item is closed two requests later. The cost accepted here is one
-extra comment per item that has counters, which is the cheapest of the options weighed — the alternatives were putting the counters in the body (they would be
-invisible to every reader that knows where counters live) or dropping them (losing the only record of how long somebody spent).
+**Counters ride one synthetic claim, released immediately, BEFORE the close** (spec §14.13). The four counters live in a claim comment (§6.4) and nowhere else,
+so an item carrying any of them is given a claim whose session is `import-<stamp>` and which is released at once with `reason: 'imported'` and the counters
+billed onto it. The order is forced from the other side: `claim` refuses a closed issue, so neither closed shape is closed at creation — a `done/` item is
+closed by `state done` two requests later, and a rejected item that started life as a bug, task, idea or refactor is created OPEN under that section (keeping
+its `type:*` label) and closed by `state out-of-scope` the same way. #219 is what happened when a rejected item was created straight into `out-of-scope`: the
+adapter closed it inside `create`, the claim was refused, and a re-run skipped the item by its footer, so its counters were lost for good. Only a born-rejected
+`oos-N` is still created closed, and since no skill bills counters onto one, an `oos-N` file carrying them is refused before the marker. The cost accepted here
+is one extra comment per item that has counters, which is the cheapest of the options weighed — the alternatives were putting the counters in the body (they
+would be invisible to every reader that knows where counters live) or dropping them (losing the only record of how long somebody spent).
 
 **An over-cap body is cut at a `## ` boundary and links the full file at HEAD** (spec §14.14). `IMPORT_BODY_CAP` is 65,000, under GitHub's 65,536, and `fitBody`
 keeps whole `##` segments from the top and appends `_Truncated. Full text: <SHA-pinned blob link>_`. Whole sections rather than a character count, because a body

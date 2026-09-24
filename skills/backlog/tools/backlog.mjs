@@ -29,6 +29,7 @@ import {
   rewriteOldIds,
   importOrder,
   countersOf,
+  COUNTER_KEYS,
 } from './import-lib.mjs'
 
 // Section name -> id prefix. Fixed and exported so every later command (ids,
@@ -3264,7 +3265,7 @@ export async function main(argv) {
         console.error(e.message)
         return e.code
       }
-      const { section, status } = importPlace(rel)
+      let { section, status } = importPlace(rel)
       // The FILENAME is the id, not the frontmatter: `locateItem` resolves every id in this store by matching `<id>-` against directory entries, so the name is
       // what the rest of the store already agrees on, and a frontmatter `id:` that disagrees with it is a file nothing could find in the first place.
       const named = /^([a-z]+-\d+)-/.exec(path.basename(rel))
@@ -3273,6 +3274,35 @@ export async function main(argv) {
       if (kind !== '' && kind !== 'chore' && kind !== 'debt') {
         console.error(`${id}: kind ${JSON.stringify(kind)} is not chore or debt — fix the frontmatter first`)
         return 1
+      }
+      // A rejected item that started life in a queue section keeps its old prefix (`bug-1`, `ref-4`), and it is CREATED under that section — born open, with
+      // its original `type:*` label — and closed by a later `state out-of-scope`, the shape a `done/` item has (#219). Created straight into `out-of-scope`
+      // the adapter would close it inside `create`, and the synthetic claim that carries its counters would then be refused: `claim` refuses a closed issue.
+      // Every such item takes this path, counters or not, so a rejection has one shape on the tracker rather than two. Only a born-rejected `oos-N` is still
+      // created closed, and no skill ever bills counters onto one — so one that carries them anyway is refused HERE, before the marker, rather than losing them
+      // silently mid-run.
+      if (status === 'out-of-scope') {
+        const prefix = /^([a-z]+)-\d+$/.exec(id)?.[1]
+        const queue = Object.keys(SECTIONS).find((name) => name !== 'out-of-scope' && SECTIONS[name] === prefix)
+        if (queue !== undefined) {
+          section = queue
+        } else {
+          let counters
+          try {
+            counters = countersOf(parsed.data)
+          } catch (e) {
+            console.error(`${id}: ${e.message}`)
+            return 1
+          }
+          if (counters !== null) {
+            const keys = COUNTER_KEYS.filter(([, field]) => counters[field] !== 0).map(([key]) => key)
+            console.error(
+              `${id}: a born-rejected item cannot carry counters (${keys.join(', ')}) — its issue is closed at creation, where no claim can bill them; ` +
+                'remove them from the frontmatter first',
+            )
+            return 1
+          }
+        }
       }
       // An open item with a stamp is somebody's live session, and the import would delete the file out from under it. The same stamp on a `done/` or
       // `out-of-scope/` file is history — the item is closed and nobody is holding it — so it is read past deliberately.
@@ -3353,14 +3383,15 @@ export async function main(argv) {
         at = item.id
 
         // Already on the tracker, so this item's `create` is not made a second time — the footer said so, and a duplicate issue is the one failure a resume
-        // exists to prevent. One repair happens here and nothing else: a `done/` file whose issue is still open is a run that died between `create` and
-        // `state done`, and the close is idempotent from the operator's point of view because the issue carries neither the comment nor the closed state yet.
+        // exists to prevent. One repair happens here and nothing else: a `done/` or `out-of-scope/` file whose issue is still open is a run that died between
+        // `create` and its close, and the close is idempotent from the operator's point of view because the issue carries neither the comment nor the closed
+        // state yet. (A born-rejected `oos-N` is closed by its `create`, so the index never reports one open.)
         // The counters are deliberately NOT re-billed — `claim`/`release` would add a second copy of them, and a doubled record of work is worse than one that
         // is merely missing a repair this command cannot detect.
         if (map.has(item.id)) {
           const mapped = `#${map.get(item.id)}`
-          if (item.status === 'done' && resumedStatus.get(item.id) === 'open') {
-            const repair = { project, id: mapped, status: 'done' }
+          if ((item.status === 'done' || item.status === 'out-of-scope') && resumedStatus.get(item.id) === 'open') {
+            const repair = { project, id: mapped, status: item.status }
             if (item.outcome !== '') repair.outcome = item.outcome
             await apiPost('state', repair)
             await pace()
@@ -3392,7 +3423,7 @@ export async function main(argv) {
 
         // The four counters are a permanent record of work somebody did, and the tracker keeps them in a claim comment (§6.4) — so an item that has any is
         // given one synthetic claim and that claim is released immediately with the counters billed onto it. Before the close, always: `claim` refuses a closed
-        // issue, and a `done/` item is about to be closed two requests from here.
+        // issue, and a `done/` or rejected item is about to be closed two requests from here — which is why neither is created closed.
         const counters = countersOf(item.data)
         if (counters !== null) {
           const claimed = await apiPost('claim', { project, id: ref, phase: 'execute', session })
@@ -3401,12 +3432,16 @@ export async function main(argv) {
           await pace()
         }
 
-        // Two closed shapes and only one of them needs a request: `create` with `section: 'out-of-scope'` already closed a rejected item `not_planned`, and an
-        // open item is not closed at all. `state done` is what posts the Outcome comment and then closes `completed`, in that order, inside the adapter.
+        // Two closed shapes, each closed by its own `state` request after the counters: `state done` posts the Outcome comment and then closes `completed`, in
+        // that order, inside the adapter; `state out-of-scope` closes `not_planned` and carries no Outcome — a rejection's own headings are its body. An open
+        // item is not closed at all, and a born-rejected `oos-N` was already closed by its `create` (created with `section: 'out-of-scope'`).
         if (item.status === 'done') {
           const closing = { project, id: ref, status: 'done' }
           if (item.outcome !== '') closing.outcome = item.outcome
           await apiPost('state', closing)
+          await pace()
+        } else if (item.status === 'out-of-scope' && item.section !== 'out-of-scope') {
+          await apiPost('state', { project, id: ref, status: 'out-of-scope' })
           await pace()
         }
 

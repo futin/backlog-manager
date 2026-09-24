@@ -506,8 +506,10 @@ Per item, in this order:
    counters verbatim). The mapper reads counters off the newest claim regardless of release (§5.3), so this needs no mapper change and no footer parser.
    It MUST precede step 5 — `claim` refuses a closed issue — and it leaves the assignee set, as every release does. Only for items that have counters:
    an item without them gets no synthetic comment.
-5. **Close.** A `done/` item: `POST state done` with the Outcome text as `outcome` (comment, then close `completed`). An `out-of-scope/` item: `create`
-   already closed it `not_planned`.
+5. **Close.** A `done/` item: `POST state done` with the Outcome text as `outcome` (comment, then close `completed`). An `out-of-scope/` item whose id
+   names a queue section (`bug-`, `task-`, `idea-`, `ref-`): step 3 created it under THAT section, open and typed, and `POST state out-of-scope` (no
+   `outcome`) closes it `not_planned` here — created straight into `out-of-scope`, the adapter would close it inside `create` and step 4's claim would be
+   refused (#219). A born-rejected `oos-N`: `create` with `section: 'out-of-scope'` already closed it; one carrying counters is refused before the marker.
 6. Record `<old id> → <n>` in memory. Content-creating requests are paced at one per second — GitHub's secondary limit is roughly eighty a minute.
 
 ### 8.4 Pass 2 — cross-links

@@ -5187,11 +5187,20 @@ function githubRoutes({ projectPath = '', repo = 'futin/x', seed = [], firstNumb
       created += 1
       numbers.push(number)
       bodies.set(number, body.body)
+      // The real adapter closes an out-of-scope create `not_planned` inside the same call, so the fake records it closed — which is what lets the claim below
+      // refuse it the way `GithubSource.claim` does (#219).
+      statuses.set(number, body.section === 'out-of-scope' ? 'out-of-scope' : 'open')
       return { body: { id: `#${number}`, urn: `gh:${repo}#${number}`, url: `https://github.com/${repo}/issues/${number}`, number } }
     },
-    '/api/items/claim': () => ({ body: { commentId: 900 + ++claims, record: {} } }),
+    '/api/items/claim': (body) => {
+      if (statuses.get(numberOf(body.id)) !== 'open') return { status: 409, body: { error: `#${numberOf(body.id)} is done — nothing to start` } }
+      return { body: { commentId: 900 + ++claims, record: {} } }
+    },
     '/api/items/release': () => ({ body: { ok: true } }),
-    '/api/items/state': () => ({ body: { ok: true, url: `https://github.com/${repo}/issues/1` } }),
+    '/api/items/state': (body) => {
+      statuses.set(numberOf(body.id), body.status)
+      return { body: { ok: true, url: `https://github.com/${repo}/issues/1` } }
+    },
     '/api/items/body': (body, { method, query }) => {
       if (method === 'GET') return { body: bodies.get(numberOf(query.path)) ?? '' }
       bodies.set(numberOf(body.id), body.body)
@@ -5315,6 +5324,70 @@ test('import bills an item’s counters as a released claim, before the issue is
   // `claim` refuses a closed issue, so the pair has to land before the close — asserted as an ORDER, since both requests succeed either way.
   const writes = requests.filter((r) => r.method === 'POST').map((r) => r.path.replace('/api/items/', ''))
   assert.deepEqual(writes.slice(2, 7), ['create', 'claim', 'release', 'state', 'create'])
+})
+
+// A rejected item that started life as a bug, task, idea or refactor is born OPEN under its original section and closed by a later `state` — the same shape a
+// `done/` item has — because `create` with `section: 'out-of-scope'` closes the issue at birth and the counters' claim then refuses it (#219).
+const REJECTED_BUG = {
+  relPath: 'out-of-scope/bug-9-x.md',
+  text: itemText('id: bug-9\ntitle: x\ncreated: 2026-04-01\ngroom-elapsed: 100\ngroom-tokens: 500', '## Symptom\n\ns\n\n## Cause\n\nc\n\n## Fix\n\nf'),
+}
+
+test('import bills a rejected item’s counters on an open issue, then closes it out-of-scope', async () => {
+  const { dir } = importFixture({ items: [REJECTED_BUG] })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  const writes = requests.filter((r) => r.method === 'POST' && r.path !== '/api/items/body').map((r) => r.path.replace('/api/items/', ''))
+  assert.deepEqual(writes, ['create', 'claim', 'release', 'state'])
+  assert.equal(posts(requests, 'create')[0].body.section, 'bugs', 'born open under its original type, so the type label survives the rejection')
+  assert.deepEqual(posts(requests, 'release')[0].body.counters, { groomElapsed: 100, executeElapsed: 0, groomTokens: 500, executeTokens: 0 })
+  assert.deepEqual(posts(requests, 'state')[0].body, { project: dir, id: '#4', status: 'out-of-scope' })
+})
+
+test('import closes a rejected item with no counters through state, and claims nothing', async () => {
+  const rejectedTask = { relPath: 'out-of-scope/task-3-y.md', text: itemText('id: task-3\ntitle: y\ncreated: 2026-04-02', '## Plan\n\np') }
+  const { dir } = importFixture({ items: [rejectedTask] })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(posts(requests, 'create')[0].body.section, 'tasks')
+  assert.equal(posts(requests, 'claim').length, 0)
+  assert.deepEqual(posts(requests, 'state').map((r) => r.body), [{ project: dir, id: '#4', status: 'out-of-scope' }])
+})
+
+test('import refuses an oos item that carries counters before the marker or any request', async () => {
+  const bad = { relPath: 'out-of-scope/oos-7-z.md', text: itemText('id: oos-7\ntitle: z\ncreated: 2026-04-03\nexecute-elapsed: 30', 'why not') }
+  const { dir, backlog } = importFixture({ items: [TASK_ONE, bad] })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /oos-7/)
+  assert.match(out.stderr, /execute-elapsed/)
+  assert.equal(requests.filter((r) => r.method === 'POST').length, 0)
+  assert.equal(fs.existsSync(path.join(backlog, 'source.json')), false)
+})
+
+test('import repairs a rejected item whose close failed, and claims nothing a second time', async () => {
+  const { dir } = importFixture({
+    items: [REJECTED_BUG, { relPath: 'source.json', text: JSON.stringify({ kind: 'github', repo: 'futin/x' }, null, 2) + '\n' }],
+  })
+  const body = '## Symptom\n\ns\n\n<!-- bm:imported from=bug-9 created=2026-04-01 -->\n_Imported from backlog/out-of-scope/bug-9-x.md_'
+  const seed = [{ number: 4, status: 'open', body }]
+  const { routes } = githubRoutes({ projectPath: dir, seed, firstNumber: 8 })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(posts(requests, 'state').map((r) => r.body), [{ project: dir, id: '#4', status: 'out-of-scope' }])
+  assert.equal(posts(requests, 'create').length, 0)
+  assert.equal(posts(requests, 'claim').length, 0)
 })
 
 test('import cuts an over-cap body at a heading, links the rest at HEAD, and keeps the footer last', async () => {

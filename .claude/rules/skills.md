@@ -23,10 +23,12 @@ paths: ["skills/**", "agents/**"]
   project, so no request `backlog.mjs import github [owner/repo] [--no-forms]` makes could precede the marker; the deletion is the transaction's commit and runs
   only after pass 2 has rewritten every cross-link. A re-run rebuilds `old id → #n` from the `<!-- bm:imported from=<id> … -->` footer on each indexed issue and
   skips those items — the footer is on the tracker, where a crash cannot lose it, and the readable `_Imported from …_` line beside it is never parsed. Counters
-  ride ONE synthetic `claim` + `release` (`reason: 'imported'`) BEFORE the close, because `claim` refuses a closed issue, and a resumed repair deliberately does
-  not re-bill them. An over-cap body is cut at a `## ` boundary and links the file at HEAD, which is why HEAD must be on an `origin/*` ref and `backlog/` must be
-  clean — except that a resume ignores its own uncommitted marker (`?? backlog/source.json` or `A  backlog/source.json`, via `withoutResumeMarker`), which a
-  stopped run always leaves and the link never points at; ` M backlog/source.json` still refuses. Every refusal leaves the project byte-identical, a mid-run
+  ride ONE synthetic `claim` + `release` (`reason: 'imported'`) BEFORE the close, because `claim` refuses a closed issue — so both `done/` and a rejected
+  `bug`/`task`/`idea`/`ref` item are created open and closed by a later `state` request, only a born-rejected `oos-N` is created closed, and an `oos-N` carrying
+  counters is refused before the marker — and a resumed repair deliberately does not re-bill them. An over-cap body is cut at a `## ` boundary and links the
+  file at HEAD, which is why HEAD must be on an `origin/*` ref and `backlog/` must be clean — except that a resume ignores its own uncommitted marker
+  (`?? backlog/source.json` or `A  backlog/source.json`, via `withoutResumeMarker`), which a stopped run always leaves and the link never points at;
+  ` M backlog/source.json` still refuses. Every refusal leaves the project byte-identical, a mid-run
   failure deletes nothing, and `import` never commits. Why:
   [invariants.md](docs/subsystems/invariants.md#import-writes-the-marker-first-and-deletes-the-files-last)
 - **`refactors/` is a peer section, not a facet on ideas**: ideas are new, refactors are existing things that should be improved. Prefix `ref`, lifecycle
