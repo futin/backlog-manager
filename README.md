@@ -315,5 +315,5 @@ drop the image at `docs/board.png`._
     - .env.example
     - pnpm-workspace.yaml
   kind: readme
-  verified: d3dbf8855e78b4ae70c792eeb7696167a44ce8a4
+  verified: 5034d2de2916b416fcb5d654aa12b07a73507cdd
 -->
