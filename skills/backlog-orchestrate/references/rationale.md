@@ -80,6 +80,28 @@ Code is running in don't ask mode"_ — and the run still finished `subtype: "su
 before the work starts, which is the one thing a session doing unenumerated work cannot have. Tighter is not better when the tightening has to be guessed ahead
 of the work.
 
+### Why the main tree's `settings.local.json` rides `--settings`, and is never copied into the worktree
+
+The session's permissions are not only its mode. Explicit allow and deny rules sit beside `auto`, and the ones a user grants a project by hand usually land in
+`.claude/settings.local.json` — the file Claude Code writes when someone answers "always allow", and the one every repo gitignores because it is personal. A
+per-item worktree is a checkout, so it has the tracked `.claude/settings.json` and never the local file. The driver, at the project root, ran with the user's
+rules; the execute session it dispatched, one directory down, ran without them, and the gap showed up as a session occasionally refused something the same
+user's interactive sessions in the same project were never asked about.
+
+Three ways to close it were weighed:
+
+- **`--settings <root>/.claude/settings.local.json` on the launch line — chosen.** The CLI loads the file as an additional settings source; nothing is written
+  into the worktree, so there is no file for §6's `add -A` to commit in a repo whose `.gitignore` happens not to list it, and no new entry for §4's exclude
+  list. The path is resolved before the `cd` and the flag is omitted when the file is absent.
+- **Copy it in after `worktree add`.** Works, but it is one more runner-written file inside the net `add -A` casts, protected only by an exclude line — the
+  exact shape bug-37 was.
+- **Symlink it in**, the `node_modules` idiom. The same exposure, plus the symlink-blob behaviour bug-37 already paid for once.
+
+Probed on this machine: a headless `claude -p --permission-mode auto` under `sh -c`, given `--settings` naming a file whose only content is
+`{"permissions":{"deny":["Bash(echo bmprobe:*)"]}}`, reported the `echo bmprobe hello` call in `permission_denials`; the identical line without the flag ran it.
+So the file's rules are live in exactly the mode this skill dispatches under. The same probe typed straight into zsh failed with `unknown option '--settings
+<path>'`, because zsh does not split an unquoted `${VAR:+word}` — the line is only correct inside the `sh -c` body it lives in.
+
 ---
 
 ## §8 — Verify

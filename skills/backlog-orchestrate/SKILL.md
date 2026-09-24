@@ -658,7 +658,7 @@ dispatch line onto that same worktree — `references/recovery.md` names the sha
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background; run tests in the foreground. Anything you cannot resolve goes in your final message, not to a person.]" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background; run tests in the foreground. Anything you cannot resolve goes in your final message, not to a person.]" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -684,6 +684,15 @@ and goes to the `.jsonl` that `watch` reads; stderr goes to its own file, so a w
 **`--model opus` is on the line on purpose.** A bare `claude -p` takes whatever model the host's CLI defaults to, and on this machine that was Sonnet: task-48's
 execute session ran on it twice while the driver, spawned with `--model opus`, did not — so the run looked Opus from the board and was not. The flag is on the
 retry line below too, for the same reason; `--resume` does not promise to carry a model forward.
+
+**`${LOCAL:+--settings "$LOCAL"}` hands the session the main tree's `.claude/settings.local.json`, because the worktree has none.** Claude Code reads project
+settings from the session's cwd, and that file is gitignored by design, so `worktree add` never checks it out: every allow and deny rule the user granted this
+project locally was silently absent from the one session doing the work, while the driver — at the project root — had them all. `LOCAL` is resolved **before**
+the `cd`, while `$PWD` is still the project root, and emptied when the file does not exist, so a project without one gets no flag at all rather than a
+`--settings` pointing at nothing. The expansion is unquoted on purpose and correct only because the body runs under `sh`: POSIX splits it into two words and
+keeps the quoted path whole, while zsh would pass `--settings <path>` as one argument the CLI rejects. It is a flag, never a copy or a link into the worktree,
+so there is nothing for §6's `add -A` to pick up and nothing for §4's exclude list to guard. **The retry line carries it too**, and so does every fix loop that
+reuses it. Rationale: `references/rationale.md` (§4).
 
 **`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the prompt marker by another spelling.** It says "a run owns this process" to a reader
 that cannot see the prompt at all: the machine's `Stop` hook, which holds a finished turn open at the dashboard for up to ten minutes so a remote answer can
@@ -879,7 +888,7 @@ retry is exactly the session most tempted to background — it is re-running a s
 turn waiting on a notification exits with no Outcome, so the one retry is spent on nothing (#221).
 
 ```bash
-nohup sh -c 'cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
+nohup sh -c 'LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 

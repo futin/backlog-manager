@@ -4062,6 +4062,76 @@ test('an absent or empty prompt file spawns nothing', (t) => {
   assert.equal(empty.argv, null, 'an empty prompt file still resumed the session');
 });
 
+// --- the main tree's settings.local.json reaches the worktree session --------
+// A per-item worktree is a checkout, and `.claude/settings.local.json` is
+// gitignored, so the session `cd`-ed into it ran without every rule the user
+// had granted the project locally while the driver one directory up had them
+// all. Both launchers now resolve the file BEFORE the `cd` and pass it through
+// `--settings`, omitting the flag when there is no file. Executed out of
+// SKILL.md for the same reason bug-31's cases are: "this splits into two argv
+// words and keeps a spaced path whole" is a property of sh, and zsh — the
+// shell a person would retype the line into — gets it wrong.
+function launchHarness(t, line, { settingsLocal }) {
+  // A space in the root, so a path that word-split would show up as a third argv word rather than passing by luck.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch settings-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'runstate');
+  fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'prompts', 'bug-1-retry-1.txt'), 'do it differently\n');
+  const cwd = path.join(root, 'project');
+  fs.mkdirSync(path.join(cwd, '.worktrees', 'bug-1'), { recursive: true });
+  const local = path.join(cwd, '.claude', 'settings.local.json');
+  if (settingsLocal) {
+    fs.mkdirSync(path.dirname(local), { recursive: true });
+    fs.writeFileSync(local, '{"permissions":{"allow":[]}}\n');
+  }
+  // A worktree-side copy the flag must NOT point at: the line resolves the path before `cd`, and this is what resolving it after would find.
+  fs.mkdirSync(path.join(cwd, '.worktrees', 'bug-1', '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.worktrees', 'bug-1', '.claude', 'settings.local.json'), '{}\n');
+
+  const argvFile = path.join(root, 'argv');
+  const stub = path.join(root, 'stub.sh');
+  fs.writeFileSync(stub, `#!/bin/sh\n: > "${argvFile}"\nfor a in "$@"; do printf '%s\\0' "$a" >> "${argvFile}"; done\n`);
+  fs.chmodSync(stub, 0o755);
+
+  const composed = line
+    .replaceAll('<dir>', dir)
+    .replaceAll('<id>', 'bug-1')
+    .replaceAll('<runId>', 'run-1')
+    .replaceAll('<sessionId>', 's1')
+    .replaceAll('<n>', '1')
+    .replaceAll('<m>', '1')
+    .replace('exec claude ', `exec "${stub}" `);
+  const result = spawnSync('sh', ['-c', `${composed}\nwait`], { cwd, encoding: 'utf8' });
+  const argv = fs.existsSync(argvFile) ? fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1) : null;
+  return { argv, local, result };
+}
+
+test("both launchers pass the main tree's settings.local.json to the worktree session", (t) => {
+  const lines = execClaudeLines(fs.readFileSync(SKILL_MD, 'utf8'));
+  assert.equal(lines.length, 2, 'expected exactly 2 headless dispatch lines');
+  for (const line of lines) {
+    const { argv, local, result } = launchHarness(t, line, { settingsLocal: true });
+    assert.ok(argv, `the launcher spawned nothing: ${result.stderr}`);
+    const at = argv.indexOf('--settings');
+    assert.ok(at !== -1, `no --settings reached the session: ${JSON.stringify(argv)}`);
+    // The very next word is the whole root-side path — not split at the space, and not the worktree's own copy.
+    assert.equal(argv[at + 1], local);
+    assert.equal(argv.filter((a) => a === '--settings').length, 1);
+  }
+});
+
+test('a project with no settings.local.json gets no --settings flag at all', (t) => {
+  for (const line of execClaudeLines(fs.readFileSync(SKILL_MD, 'utf8'))) {
+    const { argv, result } = launchHarness(t, line, { settingsLocal: false });
+    assert.ok(argv, `the launcher spawned nothing: ${result.stderr}`);
+    // Absent, not `--settings ""` and not the worktree's copy found after the `cd`.
+    assert.ok(!argv.includes('--settings'), `a --settings flag was passed with no local file at the project root: ${JSON.stringify(argv)}`);
+    assert.ok(argv.includes('--permission-mode'), 'the stub did not receive the rest of the line');
+  }
+});
+
 // The other half of the same rule, and the half the first round of this fix
 // missed: `attention --detail`, `stage --note` and `merge-mode --note` stay
 // inline arguments, so what protects them is that their VALUES are the
