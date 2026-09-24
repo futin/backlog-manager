@@ -20,9 +20,12 @@ pnpm install
 cp .env.example .env
 ```
 
-Everything in [`.env.example`](../../.env.example) is commented out and documents its own default; the file matters for three things — moving the host-side
-ports, pointing the container at a project tree that isn't `~/Documents/custom-projects`, and turning dispatch on. `BM_AGENTS` is **off** by default, and
-compose passes it through as `${BM_AGENTS:-off}` rather than setting a literal, so that documented default survives the documented quick start.
+Everything in [`.env.example`](../../.env.example) is commented out and documents its own default; the file matters for four things — moving the host-side
+ports, pointing the container at a project tree that isn't `~/Documents/custom-projects`, turning dispatch on, and giving the tracker poller its
+`BM_GITHUB_TOKEN`. `BM_AGENTS` is **off** by default, and compose passes it through as `${BM_AGENTS:-off}` rather than setting a literal, so that documented
+default survives the documented quick start. `BM_GITHUB_TOKEN` is passed through the same way (`${BM_GITHUB_TOKEN:-}`), because a literal there would be a
+token committed to the repo; absent is a supported state, and the poller stays disarmed. `BM_API_PORT` also moves the skills: in a tracker project
+`backlog.mjs` dials `http://127.0.0.1:${BM_API_PORT:-4322}`, so there is no second port setting for them.
 
 ### The whole stack
 

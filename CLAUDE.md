@@ -59,7 +59,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
 - `.claude/rules/` — nine path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps each rule's headline, `docs/subsystems/invariants.md` its reasoning. Guarded by
   `test/claude-rules.test.ts`: bullets only, each anchored exactly once, one home per anchor, headlines byte-equal with the ones below.
-- `backlog/` — this repo's own backlog, self-registered like any project.
+- `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](docs/workflows/publishing.md)), `test-all.mjs`
   (`pnpm test`, → [docs/workflows/development.md](docs/workflows/development.md)) and `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper).
 - `docs/` — the reference docs; `docs/superpowers/` holds the design spec and implementation plans this repo was built from.

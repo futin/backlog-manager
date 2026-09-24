@@ -110,7 +110,7 @@ call `useDialogEscape` for whatever they wrap. `ui/Confirm` (bug-53) joins the s
 
 ### What leaves the Board
 
-An open refactor, idea or bug nobody has touched inside the staleness window (30 days by default, `Settings → Board → Archive after`) leaves it for Archive on
+An open refactor, idea or bug nobody has touched inside the staleness window (30 days by default, `Settings → Local → Board → Archive after`) leaves it for Archive on
 its own. "Touched" is the `updated:` stamp every `start`/`stop` writes, falling back to the last commit that touched the item file, and to `created` only when
 git can answer neither — that middle rung is there because a groom session which edits an item through the editor rather than through the CLI leaves the
 frontmatter silent.
@@ -240,7 +240,7 @@ merely rendered by the components:
   The band already carries the run chip, so it is the board's status line; a freshness fact about a whole project must not be repeated on forty cards.
 - **The card** gains three things: an `untyped` marker (amber, like `stale` — both mark something a person must do before the board can be trusted), the
   assignee's login on the foot line (NOT on the live strip — it records who owns the issue, not who is working it right now; that is the claim's job), and a
-  link-out to the issue that stops its click from opening the modal behind it.
+  link-out to the issue that stops its click, and its Enter and Space, from opening the modal behind it — the same two-half guard `DispatchButton` uses.
 - **The item modal** prints the same line under the title, because the body it shows came out of the poller's cache rather than from GitHub on open.
 
 **A fourth card reading, `queued` (task-52, [spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md) §4.2).** An issue carrying the

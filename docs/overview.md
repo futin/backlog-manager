@@ -5,7 +5,8 @@ app that shows every registered project's backlog on one board. There is no data
 and everything the app displays is derived from them on the way out.
 
 The plugin half and the app half share one rule that explains most of the design: **the skills write, everything else reads.** The server and the client never
-touch an item file, and each file that holds state has exactly one writer.
+touch an item file, and each file that holds state has exactly one writer. The one place the server writes items is a TRACKER project (task-46), whose items
+are GitHub issues rather than files: there the skills still decide every write, and the server carries it out, because the credential lives nowhere else.
 
 ## Map
 
@@ -40,11 +41,11 @@ Five artefacts hold everything, and the single-writer column is the load-bearing
 | `~/.backlog-manager/registry.json`                   | `skills/backlog/tools/backlog.mjs`                 | the server, per request, never cached                                         |
 | each project's `backlog/**/*.md`                     | the skills                                         | the server's scan; the client renders it                                      |
 | `~/.backlog-manager/orchestrator/<project>/run.json` | `skills/backlog-orchestrate/tools/orchestrate.mjs` | `server/src/orchestrator/`, fresh per request                                 |
-| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config it wrote, and — for the pause request — `orchestrate.mjs` |
+| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config it wrote, and — for the control file — `orchestrate.mjs`  |
 | `~/.backlog-manager/retro/`                          | `skills/backlog-retro/tools/retro.mjs record`      | `retro.mjs sweep`, read-only, for the deltas against the newest record        |
 
-The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the pause request flows
-server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
+The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
+per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
 guarantee is untouched by it.
 
 ### The API — [full doc](subsystems/api.md)
@@ -59,7 +60,8 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   commit touching an item file (memoised against the files git rewrites) and which items differ from `main` (memoised nowhere — the edit it reports moves
   neither of those files).
 - **`orchestrator/`** — a read-only view of the run-state directory, current run and archived runs alike, plus two pieces of in-memory bookkeeping that are lost
-  on restart on purpose: what the watchdog has done, and which projects this process has just asked to start a run.
+  on restart on purpose: what the watchdog has done, and which projects this process has just asked to start a run. Since task-48 it also derives the runs
+  other machines drove on a tracker project from the poller's cached claim comments, and serves them in a separate `remote` array, never among the local runs.
 - **`agents/`** — one of the two modules that make an outbound call — to the local claude-agents-dashboard — and the only one that can start a session. Off
   unless `BM_AGENTS` says otherwise; every POST here is additionally guarded by content-type and `Origin`, because loopback is no boundary against a page in
   this machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
@@ -84,8 +86,9 @@ about the same item; the ones the server needs too live in [`shared/`](../shared
 
 Six skills under `skills/`, three CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
 retro home's only writer and the one of the three nothing else reads at runtime), and one agent under `agents/` that the orchestrator dispatches to review an
-item's branch before it merges. `backlog-orchestrate` is the only skill that touches git history at all — it works one item per worktree and merges to `main` —
-while execute does the work and groom writes the plans, neither of them committing anything.
+item's branch before it merges. `backlog-orchestrate` is the only skill that touches git history at all — it works one item per worktree and merges each into
+the run's base branch (`main` unless the run was given `--base`), or leaves a reviewed branch per item in branch mode, and for a tracker project it is also the
+only one that pushes — while execute does the work and groom writes the plans, neither of them committing anything.
 
 An install is a copy of the pushed `HEAD`, never the working tree; see [workflows/publishing.md](workflows/publishing.md).
 

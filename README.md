@@ -18,8 +18,9 @@ watchdog that resumes a crashed run.
 
 - **No auth, no database.** The registry file and each project's `backlog/` directory ARE the data; there is nothing here to log into.
 - **The app writes no item files.** Filing, grooming, executing and moving items all happen through the skills — at the CLI, inside Claude Code, or in a session
-  the board itself spawned. What the board can do is start that work (a dispatch, or an orchestrator run), pause a run, and save the run watchdog's own
-  server-side settings; every item on screen is rendered from what is already on disk.
+  the board itself spawned. What the board can do is start that work (a dispatch, or an orchestrator run), pause, resume or stop a run, and save the run
+  watchdog's own server-side settings; every item on screen is rendered from what is already on disk. A project connected to a tracker has no item files at
+  all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
 
 **Docs.** [`docs/overview.md`](docs/overview.md) is the map and the one place that lists them all: the architecture in brief, the rationale behind the rules
 ([`docs/subsystems/invariants.md`](docs/subsystems/invariants.md)), and the two procedures — [running the app](docs/workflows/development.md) and
@@ -95,7 +96,8 @@ and `.env.example` does not carry.
 | `BM_WATCHDOG_FILE`            | `~/.backlog-manager/settings/watchdog.json`         | Where the server itself writes the run watchdog's own settings                                                                                                                                                                                                                                                                                       |
 | `BM_WATCHDOG`                 | on                                                  | `off` disables the run watchdog entirely — the operator's kill switch, separate from its Settings toggle                                                                                                                                                                                                                                             |
 | `BM_ORCH_HOME`                | `~/.backlog-manager/orchestrator/`                  | The orchestrator's run-state directory: `orchestrate.mjs` writes each run's `run.json` there and archives each finished run under `runs/` — its run file as `runs/<runId>.json` and its sidecars (transcripts, reviewer reports, verify output) as the sibling directory `runs/<runId>/` — and this server only ever reads it. Not in `.env.example` |
-| `BM_ORCH_CONTROL_HOME`        | `~/.backlog-manager/settings/orchestrator-control/` | Where this server writes a pause request, which a live run reads back at its dispatch gates — the one file travelling server to tool. Not in `.env.example`                                                                                                                                                                                          |
+| `BM_ORCH_CONTROL_HOME`        | `~/.backlog-manager/settings/orchestrator-control/` | Where this server writes a pause or stop request, which a live run reads back at its dispatch gates — the one file travelling server to tool. Not in `.env.example`                                                                                                                                                                                  |
+| `BM_MACHINE_NAME`             | `<user>@<host>`                                     | The machine name a tracker claim records, read by `backlog.mjs` and `orchestrate.mjs` from their own environment — not by this server, and not in `.env.example`. On a public repository the claim comment publishes it, so set a name you chose rather than publish your OS username and hostname |
 
 A project outside `BM_PROJECT_ROOT` is invisible to the container and is reported as missing on `/api/projects` rather than silently dropped from the board —
 widen the mount if you keep backlogs elsewhere.
@@ -108,13 +110,15 @@ gets executed. The board calls this API, this API calls the dashboard's `POST /a
 can watch it, and answer its questions from a phone if its hooks are installed.
 
 Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, or `BM_AGENTS_DOCKER_URL` when the stack is doing the calling, and `BM_AGENTS_TOKEN` if the dashboard
-sets `ANSWER_TOKEN`). **Settings ▸ Claude Agents** reports exactly which gate is closed and what to do about it. The action is derived from the item file, not
+sets `ANSWER_TOKEN`). **Settings ▸ Shared ▸ Claude Agents** reports exactly which gate is closed and what to do about it. The action is derived from the item file, not
 from the click, so an ungroomed bug cannot be executed by asking nicely — and nothing here ever writes an item: the spawned session runs the skills, which
 remain the only writers.
 
 The board's Orchestrate control goes out the same way and through the same switch: with `BM_AGENTS` off there is nothing to spawn a run with. Pausing or
 cancelling a live run is deliberately not gated on it — a pause is a fact on this machine's own disk and calls nothing outbound, so it keeps working after that
-switch is turned off, which is what stops a run started while agents were on from becoming unstoppable.
+switch is turned off, which is what stops a run started while agents were on from becoming unstoppable. Stopping a run is the same: the stop request is
+written either way, and only the `--abort` session it then tries to spawn needs the switch — with it off, the response says to run
+`/backlog-orchestrate --abort` at the project root by hand.
 
 ## Read it from your phone
 
@@ -259,7 +263,7 @@ Four seams, one doc each:
 [`docs/overview.md`](docs/overview.md) is the map, and the one place that lists every doc.
 
 One behaviour worth knowing before it surprises you: an open refactor, idea or bug nobody has touched inside the staleness window (30 days by default,
-`Settings → Board → Archive after`) leaves the Board for Archive on its own — so the first load after upgrading moves genuinely old, never-touched items across.
+`Settings → Local → Board → Archive after`) leaves the Board for Archive on its own — so the first load after upgrading moves genuinely old, never-touched items across.
 Nothing is lost: grooming one puts it back at the next load, and a task never leaves at all. How "touched" is decided, and the two things that outrank it, are
 in [the board doc](docs/subsystems/board.md#what-leaves-the-board).
 
@@ -273,7 +277,8 @@ pnpm run typecheck    # tsc --noEmit
 pnpm run build        # nest build + vite build
 ```
 
-Tests are flat in `test/`. Component suites opt into jsdom with a `@jest-environment jsdom` docblock; everything else runs in node.
+Jest suites are flat in `test/`; node suites sit beside the tool they cover. Component suites opt into jsdom with a `@jest-environment jsdom` docblock;
+everything else runs in node.
 
 Ports, binds, what the container mounts and the failure modes each of those has are in [`docs/workflows/development.md`](docs/workflows/development.md).
 
@@ -283,10 +288,10 @@ Ports, binds, what the container mounts and the failure modes each of those has 
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `skills/`  | The six published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                           |
 | `agents/`  | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md))                                                              |
-| `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader ([doc](docs/subsystems/api.md))                                 |
-| `client/`  | React SPA — side rail, board, run strip, runs, archive, settings ([doc](docs/subsystems/board.md))                                                              |
+| `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller ([doc](docs/subsystems/api.md))             |
+| `client/`  | React SPA — side rail, board, run chip, runs, archive, settings ([doc](docs/subsystems/board.md))                                                               |
 | `shared/`  | Types, the derivations both sides must agree on (`agent.ts`), theme tokens                                                                                      |
-| `backlog/` | This repo's own file-based backlog                                                                                                                              |
+| `backlog/` | This repo's own backlog marker — its items are GitHub issues since the repo connected itself to a tracker                                                      |
 | `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)), `test-all.mjs` ([doc](docs/workflows/development.md)) and `tailnet.mjs`, the `tailscale serve` wrapper |
 | `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans                                     |
 

@@ -75,7 +75,10 @@ What each verb does differently, and the four that exist only here:
 | `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |
 
 Ids are `31`, `#31` or this project's own URN, all meaning one issue; a file-shaped id and another repo's URN are each refused with their own sentence. Session
-identity is `CLAUDE_CODE_SESSION_ID`, falling back to `<user>@<host>` — stable across the two processes `start` and `stop` run in.
+identity is `CLAUDE_CODE_SESSION_ID`, falling back to `<user>@<host>` — stable across the two processes `start` and `stop` run in. The MACHINE a claim records
+(`hostIdentity()`, bug-46) rides beside the session, never inside it: `BM_MACHINE_NAME` when set and not blank, else `<user>@<host>`. `orchestrate.mjs` reads
+the same variable, because the server's release clause compares the two tools' strings for equality — and on a public repository the claim comment publishes
+that string, so the variable is a privacy setting first.
 
 What every one of them _does_ share is how it ends: `process.exitCode = main(...)`, never `process.exit(main(...))`. Writing to a pipe is asynchronous, so
 `process.exit()` tears the process down before stdout drains and a `--json` payload is silently cut at exactly 65,536 bytes — while a `> file.json` redirect,

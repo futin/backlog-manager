@@ -969,7 +969,10 @@ was a sound inference about a response this app never produced); a listener that
 on `127.0.0.1` inside the ephemeral range — two `java`, Postman, WebStorm): 13 anomalies, ~1 in 1,540 — 8 wrong statuses, 2 parse errors, 3 connect timeouts.
 The identical probe with the single change `listen(0, '127.0.0.1')`: zero. `test/supertest-bind.test.ts` reproduces the same thing deterministically in
 milliseconds — a wildcard `listen(P)` succeeds on a port `127.0.0.1` already holds and reports `::`, the IPv4 dial to it comes back `HPE_INVALID_CONSTANT`, and
-the same bind written with the host is refused `EADDRINUSE`.
+the same bind written with the host is refused `EADDRINUSE`. That overlap is a BSD-stack behaviour (macOS, where this was measured), not a universal one:
+Linux refuses the wildcard bind itself with `EADDRINUSE`, so the two overlap cases run off Linux only, and on Linux a case in their place asserts the refusal —
+a kernel that ever allowed the overlap goes red there instead of silently reopening this bug. Pinning the macOS quirk everywhere had turned every Linux
+`pnpm test` red, which parked every item of an orchestrator run on the Ubuntu machine.
 
 Everything previously filed as inexplicable follows from it: exactly one failure per run (a few hundred draws at ~1 in 1,500), never reproducible (the colliding
 port is a fresh draw, so re-running proves nothing about the tree), only ever the full suite (the draw count is the number of supertest requests in the
@@ -1540,8 +1543,11 @@ itself ever changing, which is exactly why this section's own heading used to na
 ## Launch sheet model/effort pickers seed from Settings, never the last launch
 
 `dispatchDefaultModel` / `dispatchDefaultEffort` (`client/src/lib/settings.ts`, mirroring the dashboard's own `spawnDefaultModel` / `spawnDefaultEffort`) are
-per-device like every other key there, default to `''` — no flag, the CLI decides — and are clamped against the same `MODELS`/`EFFORTS` the sheet renders, so a
-stored name can never be one the selects cannot show. Remembering the _last pick_ stays rejected: a sticky `max` from last week quietly spending on a trivial
+per-device like every other key there, default to `''` — no pick — and are clamped against the same `MODELS`/`EFFORTS` the sheet renders, so a stored name can
+never be one the selects cannot show. For the model, "no pick" does not mean the CLI decides: `AgentsService` fills `DEFAULT_MODEL` (`shared/agent.ts`, `opus`)
+at both spawn sites when the request names no valid model, because a bare `claude -p` takes the host CLI's own default — Sonnet on this machine — and the
+orchestrator's execute sessions were running on a different model from the driver the board launched. `backlog-orchestrate`'s dispatch lines and the reviewer
+agent carry the same value literally, since neither can import from `shared/`; `test/default-model.test.ts` holds them to the constant. Remembering the _last pick_ stays rejected: a sticky `max` from last week quietly spending on a trivial
 groom is the failure a per-launch control exists to prevent, and a default you set once in a row you can go and read is the opposite arrangement. Permission
 mode deliberately has no stored default — it comes from the server's `plan.defaultMode` and is clamped to the host ceiling, and a remembered mode would fight
 that ladder. That server-side default is `auto`, because a dispatched session runs unattended: nobody is necessarily at the terminal a permission prompt would
@@ -2356,7 +2362,7 @@ down to a normative index plus anchored `Why:` links, should this file split int
   split it on that would not put one rule's rationale in two places.
 
 **Ordering against
-[idea-11](../../backlog/ideas/done/idea-11-path-scoped-claude-rules-pointers-into-the-invariant-rationale-once-headless-loading-is-proven.md), stated so it is
+[idea-11](https://github.com/futin/backlog-manager/issues/94) (issue #94 since this repo's backlog moved to GitHub), stated so it is
 not rediscovered** — since built, as task-35, against exactly these anchors; see
 [the probe matrix](#path-scoped-clauderules-reach-a-headless-run-in-a-linked-worktree-task-35). idea-11 proposes `.claude/rules/*.md` pointers whose payload is
 "read `invariants.md` §A, §B, §C" — they consume this document's anchor shape, so a split after they exist rewrites every one of them on top of every `Why:`
@@ -3283,6 +3289,12 @@ that killed the importing process between two requests, which a local file would
 comment and the readable line are two different things** and only the comment is ever parsed — the line is for a human reading the issue, and rewording it is a
 prose change, while rewording the comment would break every resume. An issue with no footer is skipped when the map is built: it is somebody's own issue, filed by
 hand, and taking a number off it would map an item onto a stranger's work.
+
+Three rules keep that key intact across resumes, each learned from migrating this repo's own backlog. The LAST marker in a body is the one parsed, never the
+first: the footer is always appended at the very end, while an item's own text can quote the marker format — and read from the top, such an item resolved to
+`<id>` and was re-created on every resume. Pass 2's cross-link rewrite never touches the marker (`=` is an excluded left neighbour in `OLD_ID`): rewritten to
+`from=#4`, the key matched nothing, and the next resume re-created every issue pass 2 had already patched — 72 duplicates here. And pass 2 prepends the
+`_From #n._` line only to a body that does not already open with one, because a resume re-patches every issue a previous pass 2 reached.
 
 The resume does exactly ONE repair, and the boundary is deliberate: a `done/` or `out-of-scope/` file whose issue the index still reports as `open` is a run
 that died between `create` and its close (`state done` / `state out-of-scope`), so the close is made again. The counters are NOT re-billed. A second `claim` +
