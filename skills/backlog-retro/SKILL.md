@@ -69,7 +69,8 @@ Markdown, in this fixed section order so two reports diff cleanly:
 1. **Headline** — spend, cost per merged item, rework share, context re-read, median item wall.
 2. **Where the money went** — by actor (execute / fix / retry / driver), by token type, by project, bugs versus tasks.
 3. **Where the time went** — by stage, queue wait reported separately and never summed into pipeline time, then outcomes.
-4. **The fix loop** — verdict counts, your labels from §2, what a loop costs, the resume tax.
+4. **The fix loop** — verdict counts, your labels from §2, what a loop costs, the resume tax, and resumed versus fresh loops (`totals.fixLoops.byMode`: each
+   mode's loops, cost, median peak and the next review pass's verdicts — the evidence the 150k fresh-session threshold is tuned from, #226).
 5. **Defects and gaps found** — each with the evidence rows it rests on.
 6. **Decisions that are not defects** — things that look wrong and are not.
 7. **Method and caveats** — `caveats[]` verbatim.

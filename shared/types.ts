@@ -940,6 +940,14 @@ export interface RunSessionUsage {
    * the per-model split is in the transcript for anyone who needs it.
    */
   model: string | null;
+  /**
+   * The largest context any single turn of this session carried: over every assistant event with `message.usage`, the max of input + cache read + cache
+   * creation tokens, a missing term counting 0 (#226). The same definition as the retro's `context.peak`
+   * (`skills/backlog-retro/tools/lib/sessions.mjs`), so the runner and the retro agree about which sessions were long. `orchestrate.mjs fix-mode` reads it
+   * to decide whether a fix loop resumes this session or starts a fresh one. `null` when no assistant event carried usage — "unmeasured", which fix-mode
+   * treats as resumable, never as small. Optional because entries written before #226 do not have it.
+   */
+  peakContextTokens?: number | null;
   /** When the entry was written, not when the session ended — this command runs at inspect time, minutes after. Named for what a reader will do with it (order the entries) rather than promising a precision the source cannot give. */
   endedAt: string;
 }

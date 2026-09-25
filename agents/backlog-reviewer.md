@@ -123,7 +123,7 @@ code" in the abstract, you are reviewing "does this change do what the item said
    `CLAUDE.md` — report the site itself, at its own severity, not the line.
 
 Out of scope, deliberately: style and formatting preferences, naming bikesheds, refactors the item never asked for, and anything "while we're here." The
-orchestrator cannot act on those — its only two moves are merge or hand the findings back to the executor session — so raising them costs a fix loop and buys
+orchestrator cannot act on those — its only two moves are merge or hand the findings back to a fix session — so raising them costs a fix loop and buys
 nothing.
 
 ## Severity, and what it decides

@@ -117,6 +117,9 @@ it does not stop a resume. A files project's rows have no `claim` key at all.
   line; bug-31). A resume that skips the write gets a `test -s` that fails, a pid that is dead within a second, and a reconcile that looks exactly like the
   crash it was recovering from.
 
+  After a fresh fix loop (§7's `fix-mode` answered `fresh`) the known session id is the fixer's, not the executor's: `watch` records the newest session on the
+  item, and that is the right one to resume here — it is the session that last worked the branch. Nothing to look up; resume what `status --json` names.
+
 - **`redispatch-after-stop`** — same, but no session id was ever recorded, so there is nothing to resume. **Clear the dead marker first**, and this is the one
   command in this skill that runs with the worktree as its cwd, because the item file it edits is the worktree's copy:
 

@@ -25,9 +25,9 @@ describe('DEFAULT_MODEL', () => {
   });
 
   it('is on every headless dispatch line in backlog-orchestrate/SKILL.md', () => {
-    // Every shell line that launches a session, first dispatch and retry alike.
+    // Every shell line that launches a session: first dispatch, retry and the fresh fix loop (#226) alike.
     const launches = SKILL.split('\n').filter((l) => /exec claude -p/.test(l));
-    expect(launches).toHaveLength(2);
+    expect(launches).toHaveLength(3);
     for (const line of launches) {
       expect(line).toContain(` --model ${DEFAULT_MODEL} `);
     }

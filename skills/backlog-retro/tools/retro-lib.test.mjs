@@ -605,3 +605,121 @@ test('computePrevious leaves a delta null when either side is unmeasured', async
   // A record with no labels at all has no rates, which is not "0% drift".
   assert.equal(previous.labelRates, null);
 });
+
+// --- #226: fix loops split by mode -----------------------------------------
+
+// A hand-built sweep with only what the mode split reads. Sessions and
+// reviews carry the key/file shapes the readers produce —
+// `<project>/logs/<name>` and `<project>/reviews/<name>`, or the same under
+// `runs/<stem>/` once archived — because that storage location is how a
+// review is matched to its run's sessions: reviews carry no run id.
+function modeSweep(sessions, reviews = []) {
+  return { runs: [], items: [], sessions, reviews, drivers: [], projects: [] };
+}
+
+function modeSession(name, { sessionId, peak = null, cost = null, root = 'P' }) {
+  const m = /^(.+?)(?:-(retry|fix)-(\d+))?$/.exec(name);
+  return {
+    key: `${root}/logs/${name}.jsonl`,
+    project: 'P',
+    itemId: m[1],
+    kind: m[2] ?? 'execute',
+    loop: m[3] === undefined ? null : Number(m[3]),
+    sessionId,
+    context: peak === null ? null : { floor: 20000, peak, messages: 10 },
+    result: cost === null ? null : { costUsd: cost }
+  };
+}
+
+function modeReview(itemId, pass, verdict, root = 'P') {
+  return { file: `${root}/reviews/${itemId}-${pass}.md`, project: 'P', itemId, pass, verdict };
+}
+
+const EMPTY_MODE = { loops: 0, costUsd: 0, peakMedian: null, nextPass: { approve: 0, fix: 0 } };
+
+test('a fix loop that kept its execute session id is resumed, and its next pass is credited to that mode', async () => {
+  const { computeTotals } = await import('./lib/totals.mjs');
+  const totals = computeTotals(
+    modeSweep(
+      [modeSession('bug-1', { sessionId: 's1', peak: 90000, cost: 5 }), modeSession('bug-1-fix-1', { sessionId: 's1', peak: 120000, cost: 2.5 })],
+      [modeReview('bug-1', 1, 'fix'), modeReview('bug-1', 2, 'approve')]
+    )
+  );
+  assert.deepEqual(totals.fixLoops.byMode, {
+    resumed: { loops: 1, costUsd: 2.5, peakMedian: 120000, nextPass: { approve: 1, fix: 0 } },
+    fresh: EMPTY_MODE
+  });
+});
+
+test('a fresh fix loop and the loop that resumes it are split, each with its own next pass', async () => {
+  const { computeTotals } = await import('./lib/totals.mjs');
+  const totals = computeTotals(
+    modeSweep(
+      [
+        modeSession('bug-1', { sessionId: 's1', peak: 240000, cost: 9 }),
+        modeSession('bug-1-fix-1', { sessionId: 's2', peak: 40000, cost: 1.25 }),
+        // Loop 2 resumes loop 1's fresh session, not the execute session.
+        modeSession('bug-1-fix-2', { sessionId: 's2', peak: 70000, cost: 0.75 })
+      ],
+      [modeReview('bug-1', 1, 'fix'), modeReview('bug-1', 2, 'fix'), modeReview('bug-1', 3, 'approve')]
+    )
+  );
+  assert.deepEqual(totals.fixLoops.byMode.fresh, { loops: 1, costUsd: 1.25, peakMedian: 40000, nextPass: { approve: 0, fix: 1 } });
+  assert.deepEqual(totals.fixLoops.byMode.resumed, { loops: 1, costUsd: 0.75, peakMedian: 70000, nextPass: { approve: 1, fix: 0 } });
+});
+
+test('a fix session with no session id is counted in neither mode', async () => {
+  const { computeTotals } = await import('./lib/totals.mjs');
+  const totals = computeTotals(
+    modeSweep(
+      [modeSession('bug-1', { sessionId: null, cost: 5 }), modeSession('bug-1-fix-1', { sessionId: null, cost: 2 })],
+      [modeReview('bug-1', 2, 'approve')]
+    )
+  );
+  assert.deepEqual(totals.fixLoops.byMode, { resumed: EMPTY_MODE, fresh: EMPTY_MODE });
+});
+
+test('a fix loop with no following review counts in loops and in no verdict', async () => {
+  const { computeTotals } = await import('./lib/totals.mjs');
+  const totals = computeTotals(
+    modeSweep([modeSession('bug-1', { sessionId: 's1' }), modeSession('bug-1-fix-1', { sessionId: 's1' })], [modeReview('bug-1', 1, 'fix')])
+  );
+  // No cost and no context were recorded: the cost sums nothing and the
+  // median has nothing to be the middle of.
+  assert.deepEqual(totals.fixLoops.byMode.resumed, { loops: 1, costUsd: 0, peakMedian: null, nextPass: { approve: 0, fix: 0 } });
+});
+
+test('the mode split matches sessions and reviews within one storage location, never across runs', async () => {
+  const { computeTotals } = await import('./lib/totals.mjs');
+  const totals = computeTotals(
+    modeSweep(
+      [
+        // An archived run dispatched bug-1 as s1 and resumed it for loop 1;
+        // the live run dispatched it again as s9 and ran loop 1 fresh as s8.
+        // Each run's pass-2 review belongs to that run's loop alone — joined
+        // by item id only, both loops would be credited with both verdicts.
+        modeSession('bug-1', { sessionId: 's1', root: 'P/runs/old' }),
+        modeSession('bug-1-fix-1', { sessionId: 's1', root: 'P/runs/old' }),
+        modeSession('bug-1', { sessionId: 's9' }),
+        modeSession('bug-1-fix-1', { sessionId: 's8' })
+      ],
+      [modeReview('bug-1', 2, 'fix', 'P/runs/old'), modeReview('bug-1', 2, 'approve')]
+    )
+  );
+  assert.deepEqual(totals.fixLoops.byMode.resumed.nextPass, { approve: 0, fix: 1 });
+  assert.deepEqual(totals.fixLoops.byMode.fresh.nextPass, { approve: 1, fix: 0 });
+});
+
+test('computePrevious reads a record with no mode split as not comparable, never as zero loops', async (t) => {
+  const { computePrevious, newestRecord } = await import('./lib/totals.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-rec-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  writeRecord(dir, '2026-09-06T21:03:30.697Z', RECORD_TOTALS, { reviews: {}, candidates: [] });
+  const now = {
+    ...RECORD_TOTALS,
+    fixLoops: { ...RECORD_TOTALS.fixLoops, byMode: { resumed: { ...EMPTY_MODE, loops: 2 }, fresh: { ...EMPTY_MODE, loops: 1 } } }
+  };
+  const previous = computePrevious({ totals: now }, newestRecord(dir));
+  assert.deepEqual(previous.deltas.fixLoopsResumed, { then: null, now: 2, delta: null });
+  assert.deepEqual(previous.deltas.fixLoopsFresh, { then: null, now: 1, delta: null });
+});

@@ -804,7 +804,7 @@ function runDriver(run) {
 // Refuses a mutating command whose run is leased to a DIFFERENT session.
 //
 // Called by every command that writes and by none that only reads: `status`,
-// `plan`, `denials` and `reconcile` are what a session evicted from a run
+// `plan`, `denials`, `fix-mode` and `reconcile` are what a session evicted from a run
 // should still be able to run in order to understand what happened to it.
 //
 // An unidentified caller (no CLAUDE_CODE_SESSION_ID — a hand-run terminal)
@@ -2255,7 +2255,7 @@ function snapshotFilePath(dir, itemId) {
 // call that backgrounded it. Named here, in one place, because `cmdAbort` now
 // DEPENDS on it: until bug-43 nothing read `logs/` at all, so a rename in
 // SKILL.md's prose was free. `orchestrate.test.mjs` guards the seam from the
-// other side by asserting both launch lines still write this exact name.
+// other side by asserting every launch line still writes this exact name.
 function dispatchPidPath(dir, itemId) {
   return path.join(dir, 'logs', `${itemId}.pid`);
 }
@@ -4099,6 +4099,14 @@ export function readSessionUsage(file) {
   // findSessionIdInJsonl, which would re-read and re-parse the whole file
   // (these transcripts run to tens of megabytes).
   let initSessionId = null;
+  // #226: the largest context any one turn carried, which `fix-mode` gates a
+  // fix loop on. Defined exactly as the retro's `context.peak`
+  // (skills/backlog-retro/tools/lib/sessions.mjs) — input + cache read +
+  // cache creation per assistant event, a missing term counting 0 — so the
+  // runner and the retro can never disagree about which sessions were long.
+  // `null`, not 0, when no assistant event carries usage: "unmeasured" must
+  // stay distinguishable from "small", because fix-mode resumes on the first.
+  let peakContextTokens = null;
   for (const line of completeLines) {
     const trimmed = line.trim();
     if (trimmed === '') continue;
@@ -4111,6 +4119,11 @@ export function readSessionUsage(file) {
     if (!event || typeof event !== 'object') continue;
     if (event.type === 'system' && event.subtype === 'init' && typeof event.session_id === 'string' && initSessionId === null) {
       initSessionId = event.session_id;
+    }
+    if (event.type === 'assistant' && event.message && event.message.usage && typeof event.message.usage === 'object') {
+      const u = event.message.usage;
+      const context = (finiteOrNull(u.input_tokens) ?? 0) + (finiteOrNull(u.cache_read_input_tokens) ?? 0) + (finiteOrNull(u.cache_creation_input_tokens) ?? 0);
+      if (peakContextTokens === null || context > peakContextTokens) peakContextTokens = context;
     }
     if (event.type === 'result') result = event;
   }
@@ -4131,7 +4144,8 @@ export function readSessionUsage(file) {
     cacheReadTokens: finiteOrNull(usage.cache_read_input_tokens),
     cacheCreationTokens: finiteOrNull(usage.cache_creation_input_tokens),
     durationMs: finiteOrNull(result.duration_ms),
-    model: models.length === 0 ? null : models.join(', ')
+    model: models.length === 0 ? null : models.join(', '),
+    peakContextTokens
   };
 }
 
@@ -5172,6 +5186,67 @@ function cmdAbort() {
   return cmdFinish(['--status', 'aborted']);
 }
 
+// #226: the context a fix loop's resumable session may have peaked at and
+// still be resumed. At or above it, §7 starts a fresh fixer instead. The
+// 2026-09-24 retro put 69% of measured spend on sessions that peaked above
+// 200k — the tier the rate fit does not model — and a resumed fix loop only
+// ever grows the context it inherits, so 150k leaves that growth a margin.
+// One constant rather than a flag or a BM_* variable: SKILL.md's env-var
+// allowlist test exists to stop a knob nothing tunes, and the retro's
+// resumed/fresh split is what should move this number, by an edit here.
+const FRESH_FIX_PEAK_TOKENS = 150000;
+
+const FIX_MODE_USAGE = 'usage: orchestrate.mjs fix-mode <itemId>';
+
+// Whether §7's next fix loop resumes the item's last session or starts a
+// fresh one, as one JSON line the driver copies instead of doing arithmetic
+// (spec: docs/superpowers/specs/2026-09-25-fresh-session-fix-loop-design.md).
+//
+// "The last session" is the LAST entry of `item.usage` in array order, which
+// is recording order: `usage` appends, and its replace-by-slot keeps an
+// entry's position. So a second fix loop after a fresh first one resumes the
+// first fixer — small context, and the reasoning that produced the current
+// diff — rather than the long execute session behind it.
+//
+// Fresh when that entry has no session id (nothing to resume) or its peak is
+// a finite number at or above the threshold. A missing peak — an entry
+// written before #226, or a transcript with no per-turn usage — resumes:
+// "unmeasured" is today's behaviour, never a guess in the expensive
+// direction. No usage at all falls back to `item.sessionId`, the one watch
+// records, with the same no-id-means-fresh rule.
+//
+// Read-only, so no lease (assertDriver's own comment): a resumed driver must
+// get the answer the crashed one would have, from the run file alone, and it
+// answers on a stopped or paused run exactly as on a running one.
+function cmdFixMode(argv) {
+  const itemId = argv[0];
+  if (!itemId) throw new OrchestrateError(FIX_MODE_USAGE, 1);
+
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  const item = findQueueItem(run, itemId);
+
+  const usage = Array.isArray(item.usage) ? item.usage : [];
+  const last = usage.length > 0 ? usage[usage.length - 1] : null;
+  const sessionId = last !== null ? last.sessionId : item.sessionId;
+  const resumable = typeof sessionId === 'string' && sessionId !== '' ? sessionId : null;
+  const peak = last !== null ? finiteOrNull(last.peakContextTokens) : null;
+  const fresh = resumable === null || (peak !== null && peak >= FRESH_FIX_PEAK_TOKENS);
+
+  console.log(
+    JSON.stringify({
+      id: itemId,
+      mode: fresh ? 'fresh' : 'resume',
+      from: last !== null ? last.kind : 'execute',
+      loop: last !== null && typeof last.loop === 'number' ? last.loop : null,
+      sessionId: resumable,
+      peak,
+      threshold: FRESH_FIX_PEAK_TOKENS
+    })
+  );
+  return 0;
+}
+
 const USAGE = `usage: orchestrate.mjs <command>
 
 commands:
@@ -5189,6 +5264,7 @@ commands:
   watch        survive a long headless child across the loop's own Bash cap
   denials      list the permission denials a session's transcript recorded
   usage        record what one dispatched session cost, from its transcript
+  fix-mode     say whether the next fix loop resumes the last session or starts fresh
   verify       run the project's proof commands and record them
   snapshot     write a tracker item + its Outcome to one file (tracker projects only)
   reconcile    read-only crash-recovery report
@@ -5284,6 +5360,7 @@ export function main(argv) {
     if (cmd === 'watch') return cmdWatch(rest);
     if (cmd === 'denials') return cmdDenials(rest);
     if (cmd === 'usage') return cmdUsage(rest);
+    if (cmd === 'fix-mode') return cmdFixMode(rest);
     if (cmd === 'verify') return cmdVerify(rest);
     if (cmd === 'snapshot') return cmdSnapshot(rest);
     if (cmd === 'reconcile') return cmdReconcile(rest);

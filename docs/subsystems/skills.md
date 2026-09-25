@@ -113,6 +113,16 @@ Two commands exist only here: `snapshot <n>` (the issue body plus the session's 
 flag, which is required for `merged` in a tracker project and refused in a files one. `docs/subsystems/invariants.md`'s
 "the driver owns a tracker item's claim for the whole item" carries the reasoning.
 
+#### A fix loop resumes, or starts fresh past 150k (#226)
+
+A reviewer's `fix` verdict used to resume the item's last session every time, and that session had already read everything the execute pass read.
+`orchestrate.mjs fix-mode <id>` now decides, read-only: it reads the last `usage` entry's `peakContextTokens` (the largest context any one turn carried,
+recorded by `usage`) and answers `fresh` at or above 150,000 tokens, or when there is no session id to resume, and `resume` otherwise — an entry without the
+field resumes, so a run from before the change behaves as it did. `SKILL.md` §7 copies the verdict into one of two launchers: `--resume` as before, or a new
+`claude -p` handed the findings and pointers in a prompt file. `retro.mjs` splits `totals.fixLoops` into `byMode.resumed` and `byMode.fresh`, derived from
+session ids alone (a resumed session keeps the id it was handed), each with its cost, median peak and the next review pass's verdicts, so the threshold can
+be tuned from what each mode came to. Design: `docs/superpowers/specs/2026-09-25-fresh-session-fix-loop-design.md`.
+
 ### `references/`
 
 `skills/backlog-orchestrate/references/` holds the two parts its `SKILL.md` deliberately does **not** carry inline, because a run re-reads its whole body on
