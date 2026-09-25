@@ -189,6 +189,18 @@ test('classifyLog reads the dispatch slot out of the file name', async () => {
   assert.equal(classifyLog('notes.jsonl'), null);
 });
 
+test('classifyLog reads a tracker item’s bare-number id, and still refuses its sidecars', async () => {
+  const { classifyLog } = await import('./lib/sessions.mjs');
+  // A tracker item's id reaches the run file, and so every sidecar path, without its `#` — `logs/18.jsonl`, never `logs/#18.jsonl` (#223).
+  assert.deepEqual(classifyLog('18.jsonl'), { itemId: '18', kind: 'execute', loop: null });
+  assert.deepEqual(classifyLog('18-fix-2.jsonl'), { itemId: '18', kind: 'fix', loop: 2 });
+  assert.deepEqual(classifyLog('18-retry-1.jsonl'), { itemId: '18', kind: 'retry', loop: 1 });
+  assert.equal(classifyLog('18.err'), null);
+  assert.equal(classifyLog('18.pid'), null);
+  // No writer ever puts a `#` in a path, so a file carrying one is a file nobody wrote and must not classify as an item.
+  assert.equal(classifyLog('#18.jsonl'), null);
+});
+
 test('readSession reads the result event, the context envelope and the session id', async (t) => {
   const { readSession } = await import('./lib/sessions.mjs');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-log-'));
@@ -324,6 +336,22 @@ test('readReviews pulls the verdict, the pass number and the two excerpts', asyn
   assert.ok(!('important' in approved));
 
   assert.equal(reviews.find((r) => r.itemId === 'bug-23').verdict, null);
+});
+
+test('readReviews reads a tracker item’s review, named by its bare number', async (t) => {
+  const { readReviews } = await import('./lib/reviews.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-rev-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'reviews'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'reviews', '18-1.md'), ['# Review — #18 (backlog/18)', '', 'verdict: pass', ''].join('\n'));
+  // Not a review: a bare id with no pass number.
+  fs.writeFileSync(path.join(dir, 'reviews', '18.md'), 'verdict: pass\n');
+
+  const reviews = readReviews(dir, '/P');
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].itemId, '18');
+  assert.equal(reviews[0].pass, 1);
+  assert.equal(reviews[0].verdict, 'pass');
 });
 
 test('readVerifyStatus reads the exit code the run recorded, or null', async (t) => {

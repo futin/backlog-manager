@@ -306,6 +306,52 @@ test('a session for an item no run holds is reported, not dropped', (t) => {
   assert.equal(sweep.sessions[0].runId, null);
 });
 
+// A tracker item's id is its bare issue number in the run file, and so in every sidecar name (#223). The join must treat it like any other id.
+function seedTrackerRun(fx) {
+  seedRun(fx, PROJECT_A, {
+    runId: 'R1',
+    startedAt: '2026-09-01T10:00:00Z',
+    queue: [
+      queueItem('7', {
+        stageAt: STAMPS('2026-09-01T10:00:00Z'),
+        usage: [{ sessionId: 's7', kind: 'execute', costUsd: 1.25, turns: 10 }]
+      })
+    ]
+  });
+}
+
+test('a tracker item’s transcript joins its usage entry and counts toward measured', (t) => {
+  const fx = retroFixture(t);
+  seedTrackerRun(fx);
+  seedLog(fx, PROJECT_A, '7.jsonl', { sessionId: 's7', contexts: [1000], result: okResult(1.25, 10) });
+
+  const sweep = sweepJson(fx);
+  const session = sweep.sessions.find((s) => s.itemId === '7');
+  assert.ok(session, JSON.stringify(sweep.sessions));
+  assert.equal(session.joinedBy, 'usage');
+  assert.deepEqual(sweep.items.find((i) => i.id === '7').sessionKeys, [session.key]);
+  assert.equal(sweep.totals.costUsd.measured, 1.25);
+  assert.deepEqual(
+    sweep.caveats.filter((c) => c.kind === 'unjoined'),
+    []
+  );
+});
+
+test('a usage entry no transcript joined is a caveat, and stays out of measured', (t) => {
+  const fx = retroFixture(t);
+  seedTrackerRun(fx);
+
+  const sweep = sweepJson(fx);
+  assert.equal(sweep.sessions.length, 0);
+  // `measured` stays sessions-only: the run file's figure is real money, but folding it in would make `measured` mean two things.
+  assert.equal(sweep.totals.costUsd.measured, 0);
+  const unjoined = sweep.caveats.filter((c) => c.kind === 'unjoined');
+  assert.equal(unjoined.length, 1);
+  assert.ok(unjoined[0].detail.includes(' 7 execute'), unjoined[0].detail);
+  assert.ok(unjoined[0].detail.includes('1.25'), unjoined[0].detail);
+  assert.ok(unjoined[0].detail.includes('R1'), unjoined[0].detail);
+});
+
 test('a transcript with no result event is a killed session and a caveat', (t) => {
   const fx = retroFixture(t);
   seedRun(fx, PROJECT_A, {

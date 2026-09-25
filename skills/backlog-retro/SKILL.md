@@ -39,7 +39,7 @@ machine has no run state for.
 What it will not tell you, and says so in `caveats[]`: runs from before the driver lease landed have no measured orchestrator spend (`no-lease`); a machine with
 fewer than eight measured sessions gets no fitted rates and therefore no all-in figure (`rates`); an item two runs dispatched has one transcript with two
 possible owners (`collision`); a session still running or killed has no cost (`killed`); sessions past the long-context tier are priced by a fit that does not
-model that tier (`long-context`).
+model that tier (`long-context`); a run-file usage entry no transcript joined is money spent outside `measured` (`unjoined`).
 
 ## 2. Label the fix-verdict reviews
 

@@ -20,7 +20,14 @@ import { sidecarFiles } from './paths.mjs';
 // pair). `null` for `.err`, `.pid` and anything else in the directory —
 // deliberately strict, because a silent default of `execute` would file a
 // stray file's cost against a real item forever.
-const LOG_NAME = /^([a-z]+-\d+)(?:-(fix|retry)-(\d+))?\.jsonl$/;
+//
+// `<id>` has two shapes: a files project's `bug-26` / `task-6`, and a
+// tracker project's bare issue number, `18`. A tracker id reaches the run
+// file — and so every sidecar path — WITHOUT its `#` (`logs/18.jsonl`), so
+// `#` is not accepted: a file carrying one is a file no writer produced.
+// The two shapes cannot swallow the suffix, because a bare id is digits
+// only and every suffix starts with `-` (#223).
+const LOG_NAME = /^((?:[a-z]+-)?\d+)(?:-(fix|retry)-(\d+))?\.jsonl$/;
 
 export function classifyLog(basename) {
   const m = LOG_NAME.exec(basename);
@@ -172,6 +179,11 @@ export function attachSessions(items, sessions, runsById) {
   const caveats = [];
   const index = dispatchIndex(items);
   const collisionsReported = new Set();
+  // Every usage entry a transcript matched, so the walk after the loop can
+  // name the ones none did. Keyed by the entry object itself: `matchUsage`
+  // returns the run file's own entry, and that identity is exactly `kind` +
+  // `loop` on one item, never a session id.
+  const joined = new Set();
 
   for (const session of sessions) {
     if (session.result === null) {
@@ -207,6 +219,7 @@ export function attachSessions(items, sessions, runsById) {
 
     const usage = matchUsage(chosen, session);
     if (usage) {
+      joined.add(usage);
       session.joinedBy = 'usage';
       if (session.result) {
         const diffs = [];
@@ -233,6 +246,24 @@ export function attachSessions(items, sessions, runsById) {
       }
     } else {
       session.joinedBy = 'item';
+    }
+  }
+
+  // The reverse of `joinedBy: 'none'`: a run-file usage entry no transcript
+  // joined. Its cost is real money, but `measured` stays sessions-only —
+  // folding the run file's figure in here would make `measured` mean two
+  // things. The caveat is what keeps the gap from being silent: before
+  // #223 every tracker item's sessions vanished this way with nothing said.
+  for (const item of items) {
+    if (!Array.isArray(item.usage)) continue;
+    for (const u of item.usage) {
+      if (!u || joined.has(u)) continue;
+      const loop = u.loop === null || u.loop === undefined ? '' : ` loop ${u.loop}`;
+      const cost = typeof u.costUsd === 'number' && Number.isFinite(u.costUsd) ? `$${u.costUsd}` : 'cost unrecorded';
+      caveats.push({
+        kind: 'unjoined',
+        detail: `${item.project} ${item.id} ${u.kind}${loop} (run ${item.runId}) has a usage entry (${cost}) but no transcript under logs/; its cost is not in measured`
+      });
     }
   }
   return caveats;
