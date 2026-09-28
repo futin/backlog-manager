@@ -9,9 +9,11 @@ import type { TrackerProjectRow, TrackersPayload } from '../../../shared/types';
 
 /**
  * `GET /api/trackers` — the Shared Settings page's Trackers card (task-45,
- * spec §5.6). Read-only, and the whole route surface this phase adds: nothing
- * POSTs here, there is no connections file, and connecting a project is
- * `backlog.mjs connect` writing a marker someone then commits.
+ * spec §5.6). Read-only: there is no connections file, and connecting a
+ * project is `backlog.mjs connect` writing a marker someone then commits. The
+ * card's one write — a repo's sync interval (#17) — is `POST /api/trackers/sync`,
+ * which lives in `orchestrator/tracker-sync.controller.ts` for the module-cycle
+ * reason its header gives, not here.
  *
  * Under `/api` like every other route (CLAUDE.md), and unguarded for
  * `ItemsController.uncommitted`'s stated reason: `SameOriginPostGuard` answers

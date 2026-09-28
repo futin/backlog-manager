@@ -442,10 +442,11 @@ export interface ProjectSummary {
 
 /**
  * `GET /api/trackers` — everything the Shared Settings page's Trackers card
- * draws (task-45, spec §5.6), and deliberately nothing else. Read-only: no
- * surface POSTs to a tracker route in this phase, and there is no connections
- * file — a project is connected by committing `backlog/source.json`, which is
- * `backlog.mjs connect`'s job and nobody else's.
+ * draws (task-45, spec §5.6), and deliberately nothing else. There is no
+ * connections file — a project is connected by committing `backlog/source.json`,
+ * which is `backlog.mjs connect`'s job and nobody else's. The card's one write,
+ * a repo's sync interval (#17), is `POST /api/trackers/sync`; its answer is a
+ * `SourceSummary`, and this payload is re-read after it.
  *
  * **The token is not in this payload and never will be.** It is process-only
  * (spec §11): `hasToken` says whether one is configured and `login` says who

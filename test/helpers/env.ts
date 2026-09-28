@@ -86,3 +86,12 @@ process.env.BM_WATCHDOG ||= 'off';
  * win, hence `||=`.
  */
 process.env.BM_ORCH_CONTROL_HOME ||= mkdtempSync(join(tmpdir(), 'bm-control-'));
+
+/**
+ * `BM_TRACKER_SYNC_FILE` — the per-repo sync interval file (#17, `server/src/tracker/sync-config.util.ts`), defaulted for both halves at once. Its untouched
+ * default is the developer's real `~/.backlog-manager/settings/tracker-sync.json`: READ by every poller tick and every tracker summary, so a real `off` on
+ * a repo a suite happens to name would silently freeze that suite's poller; and WRITTEN by `POST /api/trackers/sync`, so a suite posting to it would switch
+ * the developer's real repo off. A file under a fresh temp directory that does not exist yet reads as every repo `15s` — today's behaviour — which is what
+ * every suite that is not about this feature assumes. `||=`, like the two above.
+ */
+process.env.BM_TRACKER_SYNC_FILE ||= join(mkdtempSync(join(tmpdir(), 'bm-tracker-sync-')), 'tracker-sync.json');
