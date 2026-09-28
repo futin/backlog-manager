@@ -1919,6 +1919,13 @@ One thing under `settings/` is now read by a skill's tool as well: `settings/orc
 the server writes and the tool reads" above). It is still written only by this server — the exception is to the "nothing under here is ever read by a skill"
 half of the sentence, not to the single-writer half.
 
+The third file is `settings/tracker-sync.json` (#17, `server/src/tracker/sync-config.util.ts`), each connected repo's sync interval on this machine. It joins
+`settings/` for `watchdog.json`'s reason — it is how eagerly THIS server asks GitHub, which no skill has anything to say about and which would differ between
+two machines on one repo, so it cannot live in the committed marker — and it follows that file's posture point for point: read fresh, never cached, every
+failure reading as the default (`15s`), one writer (`writeSyncInterval`, reached only from `POST /api/trackers/sync`), temp file plus rename. It is a map, not
+a fixed object, so validation is per entry: a bad value costs its own repo its setting, never a neighbour's. No skill reads it; `backlog.mjs` learns of it only
+through the 409 the server answers while a repo is `off`.
+
 Two switches guard this file's effect, and they answer different questions. `WatchdogConfig.enabled` (the file's own field, read fresh on every tick) is the
 _user's_ switch: a disabled watchdog still arms, ticks and reports the crashed run it would have resumed — it only withholds the spawn, which is what keeps the
 strip's "off — resume by hand" clause an honest fact rather than a guess produced by nothing watching at all. `BM_WATCHDOG=off` is the _operator's_ switch: no
@@ -2686,6 +2693,35 @@ is present, and disarms on the tick that finds either half missing. A standing i
 cost the watchdog's own rule exists to refuse — and this loop would make HTTP requests rather than directory reads. `arm()` is called from the bootstrap hook
 and from `GithubSource.list`, which is reached precisely when a project resolved to `github`: the cheapest honest signal that something is connected, and the
 reason a repo connected after boot is polled from the first board read that touches it.
+
+**Since #17, "connected" means connected and on.** Each repo has a sync interval (`15s`, `1m`, `5m`, `off`; see the settings-file exception for where it
+lives), and `shouldPoll` is a token plus at least one connected repo that is either not `off` or still owed its cold-boot sync. That one sync is the exception
+`off` carries: a never-filled cache would leave an `off` repo's columns empty behind `connecting…` forever, a worse lie than a stale age, so the first sweep of a
+process fills it once and every later one skips it. A machine whose every repo is `off` therefore disarms after those syncs, and `POST /api/trackers/sync`
+calls `arm()` so that turning one back on restarts the chain. The tick stays `TRACKER_POLL_MS`, and all four intervals are multiples of it, so the tick is the
+resolution and there is no timer per repo: a `15s` repo is due on EVERY tick with no clock check — which is why no existing tick-count assertion moved — and a
+slower one once its interval has elapsed since its last sync, stamped on failure as well as success so a failing repo is not retried faster than it asked.
+
+## A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run
+
+#17, [spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md) §6 and §8. An `off` repo's cache is not refreshed, so everything this server
+knows about its issues and claims is as old as the last sync — and every write path decides something from that cache: whether a claim is held, what the body
+was, which label to remove. A write against a frozen view is the same class of failure bug-55's phantom claim was, reached on purpose instead of by accident.
+So `off` refuses them all, with one sentence naming the repo and the fix — `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` —
+composed in exactly one server place (`TrackerPollerService.syncOffBlock`) and pinned byte for byte against the client's copy (`syncOffReason`), since the
+client cannot import the server's composer.
+
+The eight `/api/items/*` writes refuse inside the per-item serialisation and before any request to GitHub; `dispatch`, `orchestrate` and `resume` refuse
+before any spawn; `plan()` names the same sentence as its block, so the launch sheet never offers what dispatch would refuse; and the board disables — never
+hides — the dispatch control and the Orchestrate chip, because it is a per-project block rather than an environment one. Resume is on the list as belt and
+braces for the route's own 409: a hand-edited file can still turn a repo off under a paused run.
+
+**Why the switch itself refuses `off` under a run.** A run's driver claims, heartbeats, releases and labels through these very routes, so turning its repo off
+mid-drain would park the run at its next write, and under a PAUSED run it would park the resume. `POST /api/trackers/sync` therefore answers 409 for `off`
+while any registered project on that repo has a run file reading `running` or `paused`, or a starting entry. Any other interval during a run is allowed:
+slowing a live run's sync costs latency, and that is the user's call. The route lives in `OrchestratorModule` for that check alone — it needs the run files and
+the starting entries, and hosting it in `TrackerModule` would be a module cycle. Remote runs are the read-side twin: an `off` repo derives none, because a
+frozen comment cache would otherwise show another machine's run as live for as long as sync stays off.
 
 ## The tracker cache is the one cache in this server whose age is a rendered value
 

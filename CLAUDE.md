@@ -32,9 +32,9 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
   adapters, and — since task-46 — the eight guarded write routes in `items-write.controller.ts`, which with the ninth, `abort`, are the ONLY writes this
   server makes to anybody's items), `agents/` (the
-  dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap and the read-only
-  `trackers` route) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
-  in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, and the two files the server does write), `registry/`, `static.ts` (serves `client/dist` only when built),
+  dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
+  `trackers` route and `tracker-sync.json`'s reader/writer) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
+  in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `registry/`, `static.ts` (serves `client/dist` only when built),
   `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
@@ -43,7 +43,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   Watchdog — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
   surface draws has one home in `components/ui/`. A connected tracker adds one shell-level chip — POLL and API meters in the strip above the well, or in
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
-  all derived in `lib/tracker.ts`, plus the read-only `Trackers` card on Shared Settings. → [docs/subsystems/board.md](docs/subsystems/board.md)
+  all derived in `lib/tracker.ts`, plus the `Trackers` card on Shared Settings, whose one control is each repo's sync interval. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
   cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into
   `invariants.md`.
@@ -107,6 +107,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#a-projects-source-is-a-committed-marker-resolved-per-request-and-an-unsupported-one-never-falls-back-to-files)
 - **The GitHub token never leaves the server, and the poller is armed only while something is connected.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
+- **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
 - **The tracker cache is the one cache in this server whose age is a rendered value.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**

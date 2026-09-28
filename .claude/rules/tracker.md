@@ -57,7 +57,10 @@ paths: ["server/src/tracker/**"]
   passes it through as an interpolation with a default, never a literal (bug-25's rule, higher stakes), pinned by `test/compose-env.test.ts`. Outbound calls go
   to one constant host and `repo` is validated before it is interpolated. `TrackerPollerService` is a `setTimeout` chain in the watchdog's shape, armed only
   while a registered project resolves to `github` AND a token is present, disarmed on the tick that finds either missing; `arm()` is called from the bootstrap
-  hook and from `GithubSource.list`. Why:
+  hook, from `GithubSource.list` and from `POST /api/trackers/sync`. Since #17 "resolves to `github`" means a repo that is not `off` or is still owed its ONE
+  cold-boot sync (`live`); `sweep` syncs only DUE repos (`due`) — `15s` every tick with no clock check, `1m`/`5m` once the interval has elapsed since
+  `lastSyncAt`, stamped on failure too but not for a sweep that found the repo asleep on a rate limit. The interval is `intervalFor(repo)`, read fresh per call from
+  `settings/tracker-sync.json` (`sync-config.util.ts`, `BM_TRACKER_SYNC_FILE`), every missing or invalid entry reading `15s`. Why:
   [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **The tracker cache is the one cache in this server whose age is a rendered value.** In memory, per repo, lost on restart, rebuilt by the first sync; it
   exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal, on the Trackers card and — since
@@ -65,7 +68,7 @@ paths: ["server/src/tracker/**"]
   ONE re-read, timed off `polledAt`, and only a second miss is refused** — never a fresh per-id `GET` to GitHub, which was weighed and rejected. Every other read stays per request — the registry's and `resolveSource`'s rules are untouched. A `304` leaves the cache unchanged and MOVES
   `polledAt`: the rendered age means "since we last successfully checked", and a conditional request that came back `304` is a successful check (settled
   2026-09-18 in spec §12.2's favour, against task-45's own authoritative case, which is recorded as having been overturned). The comments request is made every
-  tick and is read by `TrackerPollerService.comments()`, which is what the claim protocol maps an item's `started`/`phase` and counters
+  tick the repo is synced and is read by `TrackerPollerService.comments()`, which is what the claim protocol maps an item's `started`/`phase` and counters
   from — and, since task-48, what `RemoteRunsService` derives other machines' runs from, with no cache of its own. **Issues and comments have SEPARATE high-water marks and each paginates to the end** — sharing one mark asked for comments `since` the newest
   ISSUE's stamp, which hid every claim older than that from a fresh process, and `readClaim` therefore falls back to one fresh read on a cache miss
   rather than reporting "unclaimed". **Every issue holding an unreleased cached claim is re-read per tick, and that list is the truth for its comments**
@@ -76,3 +79,12 @@ paths: ["server/src/tracker/**"]
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
   `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. Why:
   [invariants.md](docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value)
+- **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.** `TrackerPollerService.syncOffBlock(path)` is
+  the ONE server home of the sentence `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` (tracker projects only, `null` otherwise);
+  `syncOffReason` (`client/src/lib/tracker.ts`) is the client's copy, and both are pinned to the same literal in a test, never an import. It answers 409
+  `{ error }` from the eight `GithubSource` writes — through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check, before
+  any GitHub request (`create` checks it after `ready()`) — and from `AgentsService`'s `dispatch`, `orchestrate` and `resume`, before any spawn; `plan()` puts
+  it in `blocked`. `WriteRefusal.refused` is `'sync-off'`. `POST /api/trackers/sync` (`orchestrator/tracker-sync.controller.ts`, guarded) answers 400/404/409
+  in that order — 409 only for `off`, while a run file on any registered project of the repo reads `running` or `paused`, or a starting entry exists — then
+  writes, `arm()`s and returns `summary(repo)`. `RemoteRunsService` drops `off` repos before deriving. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)

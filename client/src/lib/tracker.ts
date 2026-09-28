@@ -296,12 +296,14 @@ export function claimControl(item: Pick<BacklogItem, 'source' | 'holder'>, now: 
  * time; the two were always one rule stated twice.
  */
 
-/** Whether any registered project's items come from a tracker — the board's
- *  "should I keep re-reading the payload" question (a tracker's items move on
- *  the server's poll clock, not on a person's edit), and the one place that
- *  question is asked. Takes anything with a `source`, so the strip chip and
- *  `useTrackers` ask it of the `/api/trackers` rows they already hold — the
- *  shell has no `useBoard` to borrow `ProjectSummary[]` from. */
+/** Whether any registered project's items come from a tracker — the "is there
+ *  a tracker to draw" question: the strip chip's visibility and the board's
+ *  clock for the item modal's poll age. The "should I keep re-reading the
+ *  payload" question was this function's too until #17 and is now
+ *  `hasSyncingTracker`'s below, since an `off` repo is still a tracker but has
+ *  nothing moving it. Takes anything with a `source`, so the strip chip asks it
+ *  of the `/api/trackers` rows it already holds — the shell has no `useBoard`
+ *  to borrow `ProjectSummary[]` from. */
 export function hasTracker(projects: readonly Pick<ProjectSummary, 'source'>[] | null): boolean {
   return (projects ?? []).some((p) => p.source === 'github');
 }

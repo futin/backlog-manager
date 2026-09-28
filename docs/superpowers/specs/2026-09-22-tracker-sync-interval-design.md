@@ -59,7 +59,9 @@ The base tick stays `TRACKER_POLL_MS`. All four intervals are multiples of it, s
 - **Per-repo last-sync time**, in `RepoState`, in memory — set when `syncRepo` completes, success or failure alike, so a failing repo is not retried faster
   than its interval.
 - **`sweep` syncs only the repos that are due**: interval not `off`, and no last-sync time or at least one interval elapsed since it. A repo changed to a
-  faster interval is due immediately if its last sync is already older than the new interval.
+  faster interval is due immediately if its last sync is already older than the new interval. _As built:_ a `15s` repo is due on every tick with no clock
+  check at all — the tick IS its interval — so every existing tick-count assertion holds unchanged; and a sweep that finds a repo asleep on a rate limit does
+  not stamp it, since that sweep made no request.
 - **An `off` repo still gets exactly one sync per process** — the cold-boot sync — when its cache has never been filled. Without it, a restart leaves an
   `off` repo's board columns empty forever with `connecting…` beside them, which is a worse lie than a stale age. After that sync it is skipped.
 - **`shouldPoll`** (the armed condition) becomes: a token, and at least one connected repo that is either not `off` or still owed its cold-boot sync. So a
@@ -72,38 +74,45 @@ otherwise show another machine's run as live for as long as sync stays off — t
 
 ## 6. The route
 
-`POST /api/trackers/sync` with `{ repo, interval }`, in `tracker.controller.ts`, guarded like the agents POSTs (content type and origin — the existing guard,
-not a new one). The tracker module stays one of the two outbound-calling modules; this route calls nothing outbound.
+`POST /api/trackers/sync` with `{ repo, interval }`, guarded like the agents POSTs (content type and origin — the existing guard, not a new one). This route
+calls nothing outbound. _Amended by the plan (amendment 3):_ it is its own controller, `orchestrator/tracker-sync.controller.ts` in `OrchestratorModule`, not
+a method in `tracker.controller.ts` — the 409 below needs `OrchestratorService` and `StartingRunsService`, and `TrackerModule` hosting it would need those two
+back, a module cycle.
 
 | Request                                                                                          | Answer                                         |
 | ------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
 | `repo` not a string, or fails `isRepo`                                                           | 400                                            |
 | `repo` not among `connectedRepos()`                                                              | 404                                            |
 | `interval` not one of the four tokens                                                            | 400                                            |
-| `interval: "off"` while a project on that repo has a run file reading `running`, or a `starting` entry | 409, `{ error }` naming the run            |
+| `interval: "off"` while a project on that repo has a run file reading `running` or `paused`, or a `starting` entry | 409, `{ error }` naming the run |
 | anything else                                                                                    | 200 with the repo's new row (same shape as §7) |
 
 The 409 exists because a live run's driver claims, releases and writes through this server, and every one of those refuses while `off` (§8) — switching a
-repo off under a running drain would park it at its next write. Setting any non-`off` interval during a run is allowed; slowing a live run's sync is the
-user's call and costs only latency.
+repo off under a running drain would park it at its next write. _Amended (amendment 1):_ a `paused` run counts too, since its resume goes through the same
+driver and would park at its first write. Setting any non-`off` interval during a run is allowed; slowing a live run's sync is the user's call and costs only
+latency.
 
 ## 7. The read
 
 `GET /api/trackers` gains, on each `TrackerProjectRow` whose source is `github`, an `interval` field holding the effective token (after §4's defaults). Rows
 for `files`, `unsupported` and store-less projects carry `null`. `ProjectSummary` gains the same field, because the board's band line and the dispatch gate
-read the project payload, not the trackers route.
+read the project payload, not the trackers route. _As built:_ the band's poll-age lines moved to the shell's tracker chip (#228) before this landed, so the
+project payload's readers are the item modal's line and the dispatch block; the chip reads `TrackerProjectRow.interval`.
 
 ## 8. What `off` refuses
 
 Every refusal names the repo and the fix: `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers`.
 
 - **The seven `/api/items/*` write routes**: 409 with that wording, checked after the project lookup and before any outbound call, inside the existing
-  per-item serialisation.
-- **Dispatch** (`POST /api/agents/dispatch`) and **orchestrate spawn**: the same 409, server-side.
+  per-item serialisation. _As built:_ EIGHT — `queue` (the `orchestrator:queued` label) landed after this was written and writes like the rest; abort's
+  release goes through the same chain.
+- **Dispatch** (`POST /api/agents/dispatch`) and **orchestrate spawn**: the same 409, server-side. _Amended (amendment 2):_ **resume** too, as belt and
+  braces for §6's 409 — a hand-edited file can still turn a repo off under a paused run. `plan()` names the sentence as its `blocked`, so the launch sheet
+  never offers what dispatch refuses.
 - **The board**: a per-project dispatch block, `disabled` with that reason — NOT hidden. It is a project-scoped block like the starting-entry one, not an
   environment-level one (`environmentBlock`), so the invariant "environment-level blocks hide, per-item ones disable" puts it on the disabled side. The
   Orchestrate sheet lists the project as unavailable with the same reason. The derivation is one function in `lib/tracker.ts`, the one home tracker readings
-  already have.
+  already have. _As built:_ the sheet is single-project, so "unavailable" is the board's toolbar Orchestrate chip, disabled with the reason.
 - **`backlog.mjs`** in that project: prints the route's `error` verbatim and exits non-zero through the tool's existing refusal path. It is not exit `5` —
   the stack is up, the setting is the refusal.
 
@@ -114,7 +123,9 @@ Every refusal names the repo and the fix: `sync is off for <owner/name> — turn
   §8.6's sentence saying so both change. Selecting a value POSTs; the pill shows the server's answer, not an optimistic one, and a 409 renders the refusal as
   the row's hint until the next read.
 - **Poll-age wording** (`lib/tracker.ts`, the band line and the Trackers row alike): an `off` repo reads `futin/x · sync off · polled 3 h ago`. A slowed repo
-  needs no new wording — its age simply grows larger between polls, which is true.
+  needs no new wording — its age simply grows larger between polls, which is true. _As built:_ it does need its own CLOCK. The shell's tracker chip (#228)
+  and `useTrackers`' fetch schedule both assumed one sweep restamps every repo, which would read a `5m` repo `overdue` at 34 s; each row now runs on
+  `syncCycleMs(interval)`, an `off` row reads `sync off`, and a payload whose every repo is off sets no fetch timer.
 - **`useBoard`** arms its 15 s refetch only while some tracker project's interval is not `off`, derived from the same `projects` payload it already reads.
   Its interval stays `BOARD_TRACKER_POLL_MS` whatever the repos' intervals — a slow repo's refetch is a cheap cache read, not a GitHub call.
 

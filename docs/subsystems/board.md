@@ -211,8 +211,9 @@ everything in this browser's `localStorage`, Shared is what the API reads off th
 Each card is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether changing this
 affects anybody but the person changing it. Both pages draw the same two hand-placed columns, so a card does not move to the other side of the page when its
 neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card
-against two shorter reports stacked in one column (task-45 added `Trackers` under `Claude Agents`; both report on the host and neither sets anything, which is
-what makes them one column rather than two halves of the page).
+against two shorter reports stacked in one column (task-45 added `Trackers` under `Claude Agents`; both report on the host, and the one thing either sets is
+the Trackers card's per-repo sync interval since #17 — a row control, not a section of settings — which is what makes them one column rather than two halves of
+the page).
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
 model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
@@ -222,9 +223,15 @@ its right slot at all. `Trackers · this machine` is the other Shared report and
 `backlog/source.json`, so what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with the repo
 read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is.
 
-The watchdog card is the one place Settings writes to the server — four knobs that live in `settings/watchdog.json` beside the registry rather than in this
-browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the rail's tree calls. Because it is the one write, it is also the one card
-that can be refused: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while
+Since #17 ([spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md)) the Trackers card sets exactly one thing: each `github` row's sync interval,
+a `Segmented` pill (`15s`, `1m`, `5m`, `off` — `SYNC_INTERVALS`' keys, never a second list) in the row's right slot. Connecting stays read-only; the interval is
+how often THIS machine asks GitHub, so it is the machine's, in `settings/tracker-sync.json`. `useTrackers().saveInterval` posts `POST /api/trackers/sync` and
+refetches, so the pill shows the server's value, never the one clicked; a refusal (turning a repo off under a live or paused run) keeps the old value selected
+and puts the server's sentence in the row's hint until the next successful read. Two checkouts of one repo are one key, so both rows move.
+
+The watchdog card is one of the two places Settings writes to the server — the Trackers card's sync picker above is the other, since #17 — four knobs that
+live in `settings/watchdog.json` beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the
+rail's tree calls. Because it writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while
 every knob keeps showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it, because a
 failed read replaces the whole group and a failed write must not.
 
@@ -245,12 +252,20 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   `ok`) and API (`apiUsage` — the rate limit's used share, amber from 60 %, red from 90 %). Clicking it opens `TrackerPopover`, a read-only panel with one row
   per connected repo (its own `pollProgress` countdown) and the API block (`N of M left · resets HH:MM`, `resetClock`), or the `BM_GITHUB_TOKEN` note when no
   token is set. It has no buttons and no links; Escape closes it through `useDialogEscape`, as do a pointerdown outside and a section change.
+  Since #17 each repo runs on its own clock, `syncCycleMs(interval)` — the interval plus the same 2 s tick slack `TRACKER_CYCLE_MS` carries, so `15s` is that
+  constant exactly. POLL follows the newest stamp among the repos on the FASTEST interval present and skips `off` ones; it reads amber `sync off` when every
+  repo is off, and `failing` only when every repo still syncing is failing. A popover row reads `sync off` for an off repo, never `overdue`.
 - **The band** carries no tracker reading any more — it used to print one `polled 12 s ago` line per project, and the chip is that reading's home now.
 - **The card** gains three things: an `untyped` marker (amber, like `stale` — both mark something a person must do before the board can be trusted), the
   assignee's login on the foot line (NOT on the live strip — it records who owns the issue, not who is working it right now; that is the claim's job), and a
   link-out to the issue that stops its click, and its Enter and Space, from opening the modal behind it — the same two-half guard `DispatchButton` uses.
 - **The item modal** prints its project's `polled 12 s ago` line under the title, because the body it shows came out of the poller's cache rather than from
   GitHub on open — the one place a per-project poll age is still drawn, since it qualifies that one body.
+- **Sync off** (#17). A repo this machine no longer syncs reads `futin/x · sync off · polled 3h ago` (or `· never polled`) in the modal and on the Trackers
+  row — one `trackerState`, an access reason still winning over it. Because the server refuses every write and spawn for it, the card's and modal's dispatch
+  control is DISABLED with the server's sentence (`syncOffReason`, byte-equal to `syncOffBlock`, pinned on both sides) — carried on `DispatchButton`'s
+  `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
+  whose click re-asks nothing for this reason because no status refetch could clear it.
 
 **A claim control in the item modal (#225).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a live claim whose
 session the board dispatched, `'release'` for any other live claim that is not a run's, and `null` otherwise — a files item, no holder, a run-held claim, a
@@ -287,13 +302,15 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `starting` entry is present, plus a grace window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop.
-- `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker: a tracker's items move on the server's
-  poll clock, which this tab has no event for. No tracker registered means no interval at all.
+- `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
+  (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no interval at all.
 - `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared
   Settings Trackers card through `useTrackersContext`. Mount and window focus, plus a timer on the server's poll clock: `nextDelay` arms the next read
   `TRACKER_FETCH_SLACK_MS` after the newest stamp's cycle ends, drops to a 1 s floor while any `ok` repo of the same sweep is still due (the server stamps repos
   one after another, so the newest stamp lands before the sweep does), and waits one whole cycle — never the floor — once the newest deadline has passed with
-  nothing due (overdue or failing stamps do not move) and after an error. No github row means no timer at all.
+  nothing due (overdue or failing stamps do not move) and after an error. No github row means no timer at all. Since #17 each row counts on its own
+  `syncCycleMs`: the deadline is the EARLIEST next stamp still ahead, a row is due for one base cycle after its own cycle ends, `off` rows are skipped, and a
+  payload whose every github row is off sets no timer — nothing on the server moves it, and the card's own save refetches.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.

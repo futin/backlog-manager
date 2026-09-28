@@ -92,6 +92,26 @@ missing — the module's one write to GitHub. `map-issue.ts` is the pure issue �
 the platform's `hasToken`/`login`, its rate limit, and one row per registered project — **never the token**, which is read per call from the environment and
 leaves this process in no payload, log line or URL.
 
+**Each repo on its own interval** (#17, [spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md)). `sync-config.util.ts` owns
+`~/.backlog-manager/settings/tracker-sync.json` (`BM_TRACKER_SYNC_FILE` overrides it): a map `owner/name → '15s' | '1m' | '5m' | 'off'` (`SYNC_INTERVALS`,
+`shared/types.ts`), read fresh per call, every missing or invalid entry reading `15s`, written temp-file-plus-rename by `writeSyncInterval` alone. The tick stays
+`TRACKER_POLL_MS`; `sweep` syncs only the repos that are DUE — a `15s` repo every tick with no clock check, a slower one once its interval has elapsed since
+its last sync (success or failure), an `off` one never, except the one cold-boot sync a never-filled cache is owed. `shouldPoll` narrows to "a token, and some
+connected repo that is not `off` or still owes that cold sync". `TrackerPollerService.syncOffBlock(projectPath)` is the ONE server home of the refusal
+sentence, `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers`, and `RemoteRunsService` derives nothing for an `off` repo. Both
+`ProjectSummary` and `TrackerProjectRow` carry `interval` — the effective token for a `github` row, `null` for every other.
+
+`POST /api/trackers/sync` (`{ repo, interval }`) is `orchestrator/tracker-sync.controller.ts`, in `OrchestratorModule` rather than beside `GET /api/trackers`
+because its 409 needs the run files and the starting entries and `TrackerModule` hosting it would be a module cycle. Guarded like the agents POSTs; 400 for a
+repo that fails `isRepo` or an interval outside the four; 404 for a repo no registered project is connected to; 409 for `off` while a run file on any project
+of that repo reads `running` or `paused`, or a starting entry exists for one; otherwise write, `arm()`, and 200 with the repo's `summary()`. It calls nothing
+outbound.
+
+While a repo is `off`, every write path refuses with 409 `{ error: <the sentence> }` before any request to GitHub or the dashboard: the eight
+`GithubSource` writes (through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check), and `dispatch`, `orchestrate` and
+`resume` in `AgentsService`. `plan()` names the same sentence as its `blocked`, so the launch sheet never offers what dispatch refuses. `backlog.mjs` prints
+the `error` verbatim and exits `1` through its generic non-2xx path — not `5`: the stack is up, the setting is the refusal.
+
 ### `registry/`
 
 Read-only view of the registry file, re-read on every request so a capture made mid-session shows up on the next fetch.
@@ -146,7 +166,8 @@ owns: `watchdog-state.service.ts` (in memory — what the watchdog did, annotate
 claim comments into the payload's separate `remote` array), `starting-runs.service.ts` (in memory — a spawn this server itself requested, surfaced as the payload's separate `starting` array so a board-started run is
 visible before `init` writes a run file), and two files it genuinely writes: `watchdog-config.util.ts`, the first file the server ever wrote, and
 `pause-control.util.ts`, the second — the pause request `orchestrate.mjs` reads back at its two dispatch gates, the one file in this system travelling server →
-tool.
+tool. The third, `settings/tracker-sync.json` (#17), is written through `tracker-sync.controller.ts` here and owned by `tracker/sync-config.util.ts` — see
+"Each repo on its own interval" under `tracker/` for why the route lives in this module.
 
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 
