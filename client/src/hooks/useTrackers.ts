@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { hasSyncingTracker, isTrackersPayload, syncCycleMs, TRACKER_CYCLE_MS } from '../lib/tracker';
-import type { TrackersPayload } from '../../../shared/types';
+import type { SyncInterval, TrackersPayload } from '../../../shared/types';
 
 /**
  * `GET /api/trackers` — the shell's one instance (the tracker strip spec, §4), provided through `TrackersContext` to the strip chip and to Shared
@@ -38,6 +38,13 @@ export interface TrackersState {
   loading: boolean;
   error: boolean;
   reload: () => void;
+  /**
+   * The Trackers card's one write (#17): `POST /api/trackers/sync`, then a refetch, so the picker shows the value the SERVER now reads rather than the one
+   * clicked. Resolves on every outcome and never throws — a refusal is a reading for the card, not an exception for its click handler.
+   */
+  saveInterval: (repo: string, interval: SyncInterval) => Promise<void>;
+  /** The last refused `saveInterval` per repo — the answer's own `error`, shown as that repo's row hint — cleared by the next successful read. */
+  refusals: Readonly<Record<string, string>>;
 }
 
 /**
@@ -77,7 +84,8 @@ function nextDelay(data: TrackersPayload, now: number): number | null {
 }
 
 export function useTrackers(): TrackersState {
-  const [state, setState] = useState<Omit<TrackersState, 'reload'>>({ data: null, loading: true, error: false });
+  const [state, setState] = useState<Pick<TrackersState, 'data' | 'loading' | 'error'>>({ data: null, loading: true, error: false });
+  const [refusals, setRefusals] = useState<Readonly<Record<string, string>>>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // An answer that lands after unmount must not arm a timer nobody will clear.
   const mounted = useRef(true);
@@ -108,6 +116,8 @@ export function useTrackers(): TrackersState {
         if (!isTrackersPayload(data)) throw new Error('malformed /api/trackers response');
         if (!mounted.current) return;
         setState({ data, loading: false, error: false });
+        // A fresh answer supersedes whatever a refused save said about it: the row reads the server's value again, and the refusal was about a moment.
+        setRefusals({});
         arm(nextDelay(data, Date.now()));
       })
       .catch(() => {
@@ -132,5 +142,34 @@ export function useTrackers(): TrackersState {
     return () => window.removeEventListener('focus', onFocus);
   }, [reload]);
 
-  return { ...state, reload };
+  /*
+   * Refetch on success, and ONLY on success: the refetch is what moves the pill, and a refusal must leave the old value selected with the reason beside it —
+   * a refetch there would clear the reason before anyone read it. `reload` is also what re-aims the schedule, which matters here: turning the last repo
+   * back on from `off` is the one moment a card with no timer needs one again.
+   */
+  const saveInterval = useCallback(
+    async (repo: string, interval: SyncInterval): Promise<void> => {
+      let res: Response;
+      try {
+        res = await fetch('/api/trackers/sync', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repo, interval })
+        });
+      } catch {
+        if (mounted.current) setRefusals((prev) => ({ ...prev, [repo]: 'the server did not answer — nothing was changed' }));
+        return;
+      }
+      if (res.ok) {
+        reload();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      const error = typeof body?.error === 'string' ? body.error : `refused (${res.status})`;
+      if (mounted.current) setRefusals((prev) => ({ ...prev, [repo]: error }));
+    },
+    [reload]
+  );
+
+  return { ...state, reload, saveInterval, refusals };
 }

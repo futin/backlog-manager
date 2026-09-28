@@ -38,7 +38,7 @@ function payload(rows: TrackerProjectRow[] = [row()], plat: TrackerPlatform = pl
 }
 
 function wrap(data: TrackersPayload | null, section: Section, extra?: React.ReactNode) {
-  const value: TrackersState = { data, loading: false, error: false, reload: () => {} };
+  const value: TrackersState = { data, loading: false, error: false, reload: () => {}, saveInterval: () => Promise.resolve(), refusals: {} };
   return (
     <TrackersContext.Provider value={value}>
       {extra}

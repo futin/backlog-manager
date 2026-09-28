@@ -1,19 +1,35 @@
+import { useState } from 'react';
+
 import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { Segmented } from '../ui/Segmented';
 import { useTrackersContext } from '../../hooks/TrackersContext';
 import { resetClock, trackerState } from '../../lib/tracker';
-import type { TrackerPlatform, TrackerProjectRow } from '../../../../shared/types';
+import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS } from '../../../../shared/types';
+import type { SyncInterval, TrackerPlatform, TrackerProjectRow } from '../../../../shared/types';
+
+/** The picker's options: the shared constant's keys, in its order — never a second list (spec §11's pin, `test/settings-trackers.test.tsx`). */
+const INTERVAL_OPTIONS = (Object.keys(SYNC_INTERVALS) as SyncInterval[]).map((value) => ({ value, label: value }));
 
 /**
  * The Trackers card (.claude/DESIGN.md §8.6's settings card, applied; spec
  * §5.6) — Shared Settings, `scope="this machine"`, beside Claude Agents.
  *
- * **Read-only, and that is a design decision rather than a phase-2 limit.**
- * Nothing on this card POSTs and there is no connections file: a project is
- * connected by committing `backlog/source.json`, which `backlog.mjs connect`
- * writes, so the marker travels with the repo to every machine instead of
- * being re-entered on each one. A "Connect" button here would be a second
- * writer of that decision — the exact shape the registry's single-writer rule
- * refuses — so what the card offers instead is the COMMAND, as text to copy.
+ * **Connecting is read-only here, and that is a design decision rather than a
+ * phase-2 limit.** There is no connections file: a project is connected by
+ * committing `backlog/source.json`, which `backlog.mjs connect` writes, so the
+ * marker travels with the repo to every machine instead of being re-entered on
+ * each one. A "Connect" button here would be a second writer of that decision —
+ * the exact shape the registry's single-writer rule refuses — so what the card
+ * offers instead is the COMMAND, as text to copy.
+ *
+ * **The one control is each repo's sync interval** (#17; DESIGN.md §8.6's
+ * pill, as the Display rows draw it). That setting is the opposite case from a
+ * connection: it is how often THIS machine asks GitHub, so it belongs to the
+ * machine and not the repo — `settings/tracker-sync.json`, written by
+ * `POST /api/trackers/sync` alone. The pill shows the server's answer after a
+ * refetch, never the value clicked, and a refusal (turning a repo off under a
+ * live run) keeps the old value selected with the server's sentence as the
+ * row's hint. Two checkouts of one repo share the key, so both rows move.
  *
  * Shared rather than Local because everything on it is the host's: the token
  * is in the server's environment, the poll state is in the server's memory,
@@ -27,7 +43,19 @@ import type { TrackerPlatform, TrackerProjectRow } from '../../../../shared/type
  * It no longer owns the fetch: the shell does (`TrackersProvider` in `App`), so this card and the strip chip read one answer on one clock.
  */
 export function TrackersGroup() {
-  const { data, loading, error } = useTrackersContext();
+  const { data, loading, error, saveInterval, refusals } = useTrackersContext();
+  // One save in flight per repo: the pill is disabled until its answer lands, so a second click cannot race the first one's refetch.
+  const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
+  const save = (repo: string, interval: SyncInterval): void => {
+    setSaving((prev) => new Set(prev).add(repo));
+    void saveInterval(repo, interval).finally(() =>
+      setSaving((prev) => {
+        const next = new Set(prev);
+        next.delete(repo);
+        return next;
+      })
+    );
+  };
   // One instant for the whole card, read here and passed down, because
   // `lib/tracker.ts` states the rule its own header carries: nothing in that
   // module reads a clock, so every age on one surface is aged against one
@@ -45,9 +73,26 @@ export function TrackersGroup() {
           {data.platforms.map((platform) => (
             <SettingsRow key={platform.kind} name={platformName(platform.kind)} hint={platformLine(platform)} />
           ))}
-          {data.projects.map((project) => (
-            <SettingsRow key={project.path} name={project.name} hint={<ProjectLine project={project} now={now} />} />
-          ))}
+          {data.projects.map((project) => {
+            const repo = project.source === 'github' ? project.repo : null;
+            const refusal = repo === null ? undefined : refusals[repo];
+            return (
+              <SettingsRow key={project.path} name={project.name} hint={refusal ?? <ProjectLine project={project} now={now} />}>
+                {repo !== null && (
+                  <Segmented
+                    value={project.interval ?? DEFAULT_SYNC_INTERVAL}
+                    options={INTERVAL_OPTIONS}
+                    onChange={(interval) => {
+                      if (interval !== project.interval) save(repo, interval);
+                    }}
+                    disabled={saving.has(repo)}
+                    label="Sync interval"
+                    pill
+                  />
+                )}
+              </SettingsRow>
+            );
+          })}
           {data.projects.length === 0 && <SettingsRow name="Projects" hint="nothing registered yet" />}
         </>
       )}

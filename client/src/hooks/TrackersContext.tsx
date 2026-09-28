@@ -12,7 +12,7 @@ import { useTrackers, type TrackersState } from './useTrackers';
  * The default value is the hook's own loading state, not `null`-and-throw: a component rendered without the provider (a test mounting `SettingsView`
  * alone, or a future surface) draws its loading branch — "checking…" — rather than taking the page down. It never fetches; only the provider does.
  */
-const LOADING: TrackersState = { data: null, loading: true, error: false, reload: () => {} };
+const LOADING: TrackersState = { data: null, loading: true, error: false, reload: () => {}, saveInterval: () => Promise.resolve(), refusals: {} };
 
 export const TrackersContext = createContext<TrackersState>(LOADING);
 
