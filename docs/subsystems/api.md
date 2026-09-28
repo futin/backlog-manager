@@ -108,8 +108,8 @@ of that repo reads `running` or `paused`, or a starting entry exists for one; ot
 outbound.
 
 While a repo is `off`, every write path refuses with 409 `{ error: <the sentence> }` before any request to GitHub or the dashboard: the eight
-`GithubSource` writes (through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check), and `dispatch`, `orchestrate` and
-`resume` in `AgentsService`. `plan()` names the same sentence as its `blocked`, so the launch sheet never offers what dispatch refuses. `backlog.mjs` prints
+`GithubSource` writes (through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check), `dispatch`, `orchestrate` and
+`resume` in `AgentsService`, and `ItemsAbortService.abort` as its first check after the files refusal — before its dashboard stop, not only before its release. `plan()` names the same sentence as its `blocked`, so the launch sheet never offers what dispatch refuses. `backlog.mjs` prints
 the `error` verbatim and exits `1` through its generic non-2xx path — not `5`: the stack is up, the setting is the refusal.
 
 ### `registry/`

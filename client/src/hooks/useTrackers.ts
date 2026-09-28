@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { hasSyncingTracker, isTrackersPayload, syncCycleMs, TRACKER_CYCLE_MS } from '../lib/tracker';
 import type { SyncInterval, TrackersPayload } from '../../../shared/types';
@@ -43,7 +43,9 @@ export interface TrackersState {
    * clicked. Resolves on every outcome and never throws — a refusal is a reading for the card, not an exception for its click handler.
    */
   saveInterval: (repo: string, interval: SyncInterval) => Promise<void>;
-  /** The last refused `saveInterval` per repo — the answer's own `error`, shown as that repo's row hint — cleared by the next successful read. */
+  /** The last refused `saveInterval` per repo — the answer's own `error`, shown as that repo's row hint — cleared by the next pick for that repo, or by a
+   *  read in which that repo's interval has changed. NOT by any read: a scheduled poll or a focus refetch would wipe it within a second, and a refused pick
+   *  does not move the pill, so the hint is the only sign the click was answered at all (final review M6). */
   refusals: Readonly<Record<string, string>>;
 }
 
@@ -85,7 +87,8 @@ function nextDelay(data: TrackersPayload, now: number): number | null {
 
 export function useTrackers(): TrackersState {
   const [state, setState] = useState<Pick<TrackersState, 'data' | 'loading' | 'error'>>({ data: null, loading: true, error: false });
-  const [refusals, setRefusals] = useState<Readonly<Record<string, string>>>({});
+  // Each refusal remembers the interval its repo had when it was refused, so a read can tell "still true" from "superseded".
+  const [refused, setRefused] = useState<Readonly<Record<string, { error: string; interval: SyncInterval | null }>>>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // An answer that lands after unmount must not arm a timer nobody will clear.
   const mounted = useRef(true);
@@ -116,8 +119,14 @@ export function useTrackers(): TrackersState {
         if (!isTrackersPayload(data)) throw new Error('malformed /api/trackers response');
         if (!mounted.current) return;
         setState({ data, loading: false, error: false });
-        // A fresh answer supersedes whatever a refused save said about it: the row reads the server's value again, and the refusal was about a moment.
-        setRefusals({});
+        // A refusal survives a read that still shows the value it was refused against; one whose repo has since moved is about a setting that is gone.
+        setRefused((prev) => {
+          const next: Record<string, { error: string; interval: SyncInterval | null }> = {};
+          for (const [repo, r] of Object.entries(prev)) {
+            if (data.projects.some((p) => p.repo === repo && p.interval === r.interval)) next[repo] = r;
+          }
+          return next;
+        });
         arm(nextDelay(data, Date.now()));
       })
       .catch(() => {
@@ -149,6 +158,12 @@ export function useTrackers(): TrackersState {
    */
   const saveInterval = useCallback(
     async (repo: string, interval: SyncInterval): Promise<void> => {
+      // A new pick answers the old refusal, whatever this one's answer turns out to be.
+      setRefused(({ [repo]: _dropped, ...rest }) => rest);
+      const from = state.data?.projects.find((p) => p.repo === repo)?.interval ?? null;
+      const refuse = (error: string): void => {
+        if (mounted.current) setRefused((prev) => ({ ...prev, [repo]: { error, interval: from } }));
+      };
       let res: Response;
       try {
         res = await fetch('/api/trackers/sync', {
@@ -157,7 +172,7 @@ export function useTrackers(): TrackersState {
           body: JSON.stringify({ repo, interval })
         });
       } catch {
-        if (mounted.current) setRefusals((prev) => ({ ...prev, [repo]: 'the server did not answer — nothing was changed' }));
+        refuse('the server did not answer — nothing was changed');
         return;
       }
       if (res.ok) {
@@ -165,11 +180,11 @@ export function useTrackers(): TrackersState {
         return;
       }
       const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
-      const error = typeof body?.error === 'string' ? body.error : `refused (${res.status})`;
-      if (mounted.current) setRefusals((prev) => ({ ...prev, [repo]: error }));
+      refuse(typeof body?.error === 'string' ? body.error : `refused (${res.status})`);
     },
-    [reload]
+    [reload, state.data]
   );
+  const refusals = useMemo(() => Object.fromEntries(Object.entries(refused).map(([repo, r]) => [repo, r.error])), [refused]);
 
   return { ...state, reload, saveInterval, refusals };
 }

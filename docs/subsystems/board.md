@@ -227,7 +227,8 @@ Since #17 ([spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.m
 a `Segmented` pill (`15s`, `1m`, `5m`, `off` — `SYNC_INTERVALS`' keys, never a second list) in the row's right slot. Connecting stays read-only; the interval is
 how often THIS machine asks GitHub, so it is the machine's, in `settings/tracker-sync.json`. `useTrackers().saveInterval` posts `POST /api/trackers/sync` and
 refetches, so the pill shows the server's value, never the one clicked; a refusal (turning a repo off under a live or paused run) keeps the old value selected
-and puts the server's sentence in the row's hint until the next successful read. Two checkouts of one repo are one key, so both rows move.
+and puts the server's sentence in the row's hint until the next pick for that repo or a read in which its interval has moved — not any read, which would
+wipe it within a second. Two checkouts of one repo are one key, so both rows move.
 
 The watchdog card is one of the two places Settings writes to the server — the Trackers card's sync picker above is the other, since #17 — four knobs that
 live in `settings/watchdog.json` beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the
@@ -252,8 +253,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   `ok`) and API (`apiUsage` — the rate limit's used share, amber from 60 %, red from 90 %). Clicking it opens `TrackerPopover`, a read-only panel with one row
   per connected repo (its own `pollProgress` countdown) and the API block (`N of M left · resets HH:MM`, `resetClock`), or the `BM_GITHUB_TOKEN` note when no
   token is set. It has no buttons and no links; Escape closes it through `useDialogEscape`, as do a pointerdown outside and a section change.
-  Since #17 each repo runs on its own clock, `syncCycleMs(interval)` — the interval plus the same 2 s tick slack `TRACKER_CYCLE_MS` carries, so `15s` is that
-  constant exactly. POLL follows the newest stamp among the repos on the FASTEST interval present and skips `off` ones; it reads amber `sync off` when every
+  Since #17 each repo runs on its own clock, `syncCycleMs(interval)` — one `TRACKER_CYCLE_MS` per server tick the interval spans (`1m` is four, `5m`
+  twenty), because the server restamps a slow repo on its n-th tick and every tick carries a sweep's length; `15s` is that constant exactly. POLL follows the newest stamp among the repos on the FASTEST interval present and skips `off` ones; it reads amber `sync off` when every
   repo is off, and `failing` only when every repo still syncing is failing. A popover row reads `sync off` for an off repo, never `overdue`.
 - **The band** carries no tracker reading any more — it used to print one `polled 12 s ago` line per project, and the chip is that reading's home now.
 - **The card** gains three things: an `untyped` marker (amber, like `stale` — both mark something a person must do before the board can be trusted), the

@@ -53,16 +53,18 @@ export function pollAge(polledAt: string | null, now: number): string | null {
 export const TRACKER_CYCLE_MS = 17_000;
 
 /**
- * One repo's cycle on its own interval (#17): the interval plus the same tick slack `TRACKER_CYCLE_MS` carries over the 15 s tick, so `15s` — and the
- * `null` a fixture or an older payload carries — is exactly that constant, and every existing reading of a 15 s repo is unchanged. `null` for `off`, which
- * has no cycle at all: nothing is due, so nothing can be late.
+ * One repo's cycle on its own interval (#17): one client cycle per server tick the interval spans — `TRACKER_CYCLE_MS` × interval ÷ 15 s — so `15s`, and
+ * the `null` a fixture or an older payload carries, is exactly that constant and every existing reading of a 15 s repo is unchanged. `null` for `off`,
+ * which has no cycle at all: nothing is due, so nothing can be late.
  *
- * Interval plus slack, not interval plus a whole tick, because of how the server decides "due": `lastSyncAt` is stamped before the next tick is scheduled,
- * so the first tick at least `interval` after it is the one that syncs — the repo is restamped a sweep's length after the interval, as a 15 s one is.
+ * Scaled, not interval plus one slack, because of how the server decides "due": `now - lastSyncAt >= interval`, checked once per tick, and a tick is 15 s
+ * PLUS the sweep before it (`schedule()` runs after the sweep). So a `5m` repo is restamped on its twentieth tick, twenty sweeps late, not one — and the
+ * interval-plus-2 s this first used left its countdown at `0s` for ~20 s every cycle, with `useTrackers` asking at 1 Hz through a due window the restamp
+ * then missed (final review M1). `TRACKER_CYCLE_MS` is the measured length of one tick, so n of them is the honest length of n.
  */
 export function syncCycleMs(interval: SyncInterval | null): number | null {
   if (interval === 'off') return null;
-  return SYNC_INTERVALS[interval ?? '15s'] + TRACKER_CYCLE_MS - SYNC_INTERVALS['15s'];
+  return (SYNC_INTERVALS[interval ?? '15s'] / SYNC_INTERVALS['15s']) * TRACKER_CYCLE_MS;
 }
 
 /** Where a poll clock stands: how much of the cycle has elapsed (0–1), the whole seconds left until the next sweep, and whether two whole cycles have gone

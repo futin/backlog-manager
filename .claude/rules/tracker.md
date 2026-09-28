@@ -83,7 +83,7 @@ paths: ["server/src/tracker/**"]
   the ONE server home of the sentence `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` (tracker projects only, `null` otherwise);
   `syncOffReason` (`client/src/lib/tracker.ts`) is the client's copy, and both are pinned to the same literal in a test, never an import. It answers 409
   `{ error }` from the eight `GithubSource` writes — through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check, before
-  any GitHub request (`create` checks it after `ready()`) — and from `AgentsService`'s `dispatch`, `orchestrate` and `resume`, before any spawn; `plan()` puts
+  any GitHub request (`create` checks it after `ready()`) — from `AgentsService`'s `dispatch`, `orchestrate` and `resume`, before any spawn, and from `ItemsAbortService.abort` before its dashboard stop; `plan()` puts
   it in `blocked`. `WriteRefusal.refused` is `'sync-off'`. `POST /api/trackers/sync` (`orchestrator/tracker-sync.controller.ts`, guarded) answers 400/404/409
   in that order — 409 only for `off`, while a run file on any registered project of the repo reads `running` or `paused`, or a starting entry exists — then
   writes, `arm()`s and returns `summary(repo)`. `RemoteRunsService` drops `off` repos before deriving. Why:

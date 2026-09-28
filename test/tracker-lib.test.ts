@@ -354,11 +354,13 @@ describe('sync interval readings (#17)', () => {
     expect(itemSyncOff({ projectPath: '/abs/tracker' }, null)).toBeNull();
   });
 
-  it('syncCycleMs is the interval plus the same tick slack TRACKER_CYCLE_MS carries, and null for off', () => {
+  // Final review M1: the server restamps a slow repo on its n-th TICK, and a tick is 15 s plus the sweep before it — so the slack scales with n. Interval
+  // plus 2 s put a 5m repo's countdown at 0 s for ~20 s every cycle and hurried the fetch at 1 Hz through its due window.
+  it('syncCycleMs is one client cycle per server tick the interval spans, and null for off', () => {
     expect(syncCycleMs('15s')).toBe(TRACKER_CYCLE_MS);
     expect(syncCycleMs(null)).toBe(TRACKER_CYCLE_MS);
-    expect(syncCycleMs('1m')).toBe(62_000);
-    expect(syncCycleMs('5m')).toBe(302_000);
+    expect(syncCycleMs('1m')).toBe(4 * TRACKER_CYCLE_MS);
+    expect(syncCycleMs('5m')).toBe(20 * TRACKER_CYCLE_MS);
     expect(syncCycleMs('off')).toBeNull();
   });
 
@@ -384,7 +386,7 @@ describe('sync interval readings (#17)', () => {
     // An off repo's fresher stamp says nothing about the next sweep.
     expect(sweepProgress([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ interval: 'off', polledAt: new Date(NOW - 1_000).toISOString() })], NOW)?.leftS).toBe(12);
     // Only 5m repos: the clock is five minutes long, and 40 s in is not overdue.
-    expect(sweepProgress([row({ interval: '5m', polledAt: new Date(NOW - 40_000).toISOString() })], NOW)).toEqual({ fraction: 40_000 / 302_000, leftS: 262, overdue: false });
+    expect(sweepProgress([row({ interval: '5m', polledAt: new Date(NOW - 40_000).toISOString() })], NOW)).toEqual({ fraction: 40_000 / 340_000, leftS: 300, overdue: false });
     // A 15s repo beside a 5m one that synced a moment later: the chip follows the 15s one.
     expect(
       sweepProgress([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ path: '/abs/y', interval: '5m', polledAt: new Date(NOW - 4_000).toISOString() })], NOW)?.leftS

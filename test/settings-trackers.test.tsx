@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -130,6 +130,31 @@ describe('the Trackers card’s sync picker', () => {
 
     expect(await within(rowOf('alpha')).findByText('sync cannot be turned off while a run is running in guide-manager (run r1)')).toBeInTheDocument();
     expect(selected('alpha')).toBe('1m');
+  });
+
+  // Final review M6: clearing the refusal on ANY successful read let a scheduled poll or a focus refetch wipe it within a second of appearing — and a refused
+  // pick does not move the pill, so the hint is the only sign the click was answered at all.
+  it('keeps the refusal through an unrelated read, and clears it on the next pick for that repo', async () => {
+    answerPost = () => ({ status: 409, body: { error: 'sync cannot be turned off while a run is running in guide-manager (run r1)' } });
+    await renderCard();
+    await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: 'off' }));
+    await within(rowOf('alpha')).findByText(/sync cannot be turned off/);
+
+    const reads = (): number => (global.fetch as jest.Mock).mock.calls.filter(([u]) => u === '/api/trackers').length;
+    const before = reads();
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(within(rowOf('alpha')).getByText(/sync cannot be turned off/)).toBeInTheDocument();
+
+    serverWrites();
+    await userEvent.click(within(pillOf('alpha')).getByRole('button', { name: '5m' }));
+    await waitFor(() => expect(selected('alpha')).toBe('5m'));
+    expect(within(rowOf('alpha')).queryByText(/sync cannot be turned off/)).toBeNull();
   });
 
   it('moves every row on the repo together, since the repo is the setting (Review Focus 3)', async () => {

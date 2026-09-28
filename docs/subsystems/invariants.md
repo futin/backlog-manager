@@ -2712,7 +2712,7 @@ composed in exactly one server place (`TrackerPollerService.syncOffBlock`) and p
 client cannot import the server's composer.
 
 The eight `/api/items/*` writes refuse inside the per-item serialisation and before any request to GitHub; `dispatch`, `orchestrate` and `resume` refuse
-before any spawn; `plan()` names the same sentence as its block, so the launch sheet never offers what dispatch would refuse; and the board disables — never
+before any spawn; `abort` refuses before its dashboard stop, since a stop followed by a refused release would kill a session and leave its claim live; `plan()` names the same sentence as its block, so the launch sheet never offers what dispatch would refuse; and the board disables — never
 hides — the dispatch control and the Orchestrate chip, because it is a per-project block rather than an environment one. Resume is on the list as belt and
 braces for the route's own 409: a hand-edited file can still turn a repo off under a paused run.
 

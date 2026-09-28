@@ -1,4 +1,6 @@
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -9,6 +11,7 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { GithubClient } from '../server/src/tracker/github.client';
 import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
+import { writeSyncInterval } from '../server/src/tracker/sync-config.util';
 import { parseClaim } from '../server/src/tracker/claim';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
@@ -177,6 +180,22 @@ describe('case A — the board dispatched the holding session', () => {
     expect(claimIn(100)?.counters).toEqual({ groomElapsed: 11, executeElapsed: 22, groomTokens: 33, executeTokens: 44 });
     expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('in-progress');
     expect(gh.issues.get(31)?.assignees).toEqual([]);
+  });
+
+  /* #17 (final review M2). On a repo whose sync is off the release is refused — so the stop must be too, or the board kills the session and then reports a
+     refusal with the claim still live. The refusal comes first, before the dashboard or GitHub is asked anything. */
+  it('refuses on a repo whose sync is off BEFORE stopping the session, and edits nothing', async () => {
+    await seed({ session: 'sess-1' });
+    await dispatch();
+    process.env.BM_TRACKER_SYNC_FILE = join(mkdtempSync(join(tmpdir(), 'bm-abort-sync-')), 'tracker-sync.json');
+    writeSyncInterval(FAKE_REPO, 'off');
+
+    const res = await abort().expect(409);
+
+    expect(res.body).toEqual({ error: `sync is off for ${FAKE_REPO} — turn it on in Settings › Shared › Trackers` });
+    expect(stopCalls()).toEqual([]);
+    expect(gh.calls).toEqual([]);
+    expect(claimIn(100)?.released).toBeUndefined();
   });
 
   /* Case A needs no host match and no session list: the board started this session itself, so the stop it just sent is the proof. */

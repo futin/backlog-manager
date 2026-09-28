@@ -196,7 +196,7 @@ describe('sync intervals on the chip (#17)', () => {
   it('runs a 5m repo on a five-minute clock', () => {
     renderChip(payload([row({ interval: '5m', polledAt: ago(40_000) })]));
     const poll = meterOf(chip(), 'POLL');
-    expect(within(poll).getByText('262s')).toBeInTheDocument();
+    expect(within(poll).getByText('300s')).toBeInTheDocument();
     expect(poll).toHaveAttribute('data-tone', 'green');
   });
 
@@ -204,7 +204,7 @@ describe('sync intervals on the chip (#17)', () => {
     renderChip(payload([row({ interval: '1m', polledAt: ago(40_000) }), beta({ interval: 'off', polledAt: ago(600_000) })]));
     await user.click(chip());
     const [slow, off] = screen.getAllByTestId('tracker-row');
-    expect(within(slow!).getByText('22s')).toBeInTheDocument();
+    expect(within(slow!).getByText('28s')).toBeInTheDocument();
     expect(within(off!).getByText('sync off')).toBeInTheDocument();
     expect(within(off!).queryByText('overdue')).toBeNull();
   });

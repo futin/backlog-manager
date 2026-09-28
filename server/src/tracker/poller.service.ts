@@ -397,7 +397,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
 
   /**
    * The refusal for a project whose repo's sync is `off` (#17, spec §8), or `null` — a files, unsupported or store-less project, or a repo at any other
-   * interval. The ONE home of that sentence on the server: the write routes, dispatch, orchestrate and resume all call this and none of them composes the
+   * interval. The ONE home of that sentence on the server: the write routes, dispatch, orchestrate, resume and abort all call this and none of them composes the
    * words (the client's `syncOffReason` pins the same literal from its side). Resolved the way `connectedRepos` resolves a project, per call, so a marker
    * committed or removed a second ago answers correctly.
    *

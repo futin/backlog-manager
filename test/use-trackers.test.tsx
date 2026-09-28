@@ -169,11 +169,11 @@ describe('useTrackers', () => {
 
   // #17: each repo's next stamp lands on its own interval, so the schedule aims at the earliest of them and never hurries for a slow one between polls.
   it('aims at a 5m repo’s own next stamp, not at a 15s cycle', async () => {
-    // 40 s old on a 302 s cycle: the next stamp is 262 s away, plus the slack.
+    // 40 s old on a 340 s cycle (twenty client cycles): the next stamp is 300 s away, plus the slack.
     fetchMock.mockImplementation(() => answer(payload([row({ interval: '5m', polledAt: new Date(NOW - 40_000).toISOString() })])));
     render(<Probe />);
     await flush();
-    await advance(262_499);
+    await advance(300_499);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await advance(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);

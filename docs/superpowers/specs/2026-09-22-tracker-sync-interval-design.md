@@ -121,7 +121,8 @@ Every refusal names the repo and the fix: `sync is off for <owner/name> — turn
 - **Shared › `Trackers · this machine`**: each `github` row gets the `Segmented` pill (`pill` prop, as the Settings rows already use it) in its right slot,
   the four tokens as its options. `files` rows keep no control. The card stops being a card that "reports and never sets"; its header comment and DESIGN.md
   §8.6's sentence saying so both change. Selecting a value POSTs; the pill shows the server's answer, not an optimistic one, and a 409 renders the refusal as
-  the row's hint until the next read.
+  the row's hint until the next read. _As built:_ until the next pick for that repo, or a read in which its interval has moved — any read would clear it
+  within a second of appearing, and the hint is the only sign a refused pick was answered.
 - **Poll-age wording** (`lib/tracker.ts`, the band line and the Trackers row alike): an `off` repo reads `futin/x · sync off · polled 3 h ago`. A slowed repo
   needs no new wording — its age simply grows larger between polls, which is true. _As built:_ it does need its own CLOCK. The shell's tracker chip (#228)
   and `useTrackers`' fetch schedule both assumed one sweep restamps every repo, which would read a `5m` repo `overdue` at 34 s; each row now runs on

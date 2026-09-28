@@ -4,6 +4,7 @@ import { ItemsService } from '../items/items.service';
 import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { answer, writable } from '../items/items-write.controller';
 import { isLive } from '../tracker/claim';
+import { TrackerPollerService } from '../tracker/poller.service';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { authHeaders, dashboardError } from './agents.service';
 import type { ItemAbortResult } from '../../../shared/types';
@@ -46,11 +47,17 @@ const SESSIONS_TIMEOUT_MS = 15_000;
 export class ItemsAbortService {
   constructor(
     private readonly items: ItemsService,
-    private readonly dispatches: DispatchRecordsService
+    private readonly dispatches: DispatchRecordsService,
+    /** For `syncOffBlock` alone (#17) — see the first check in `abort`. */
+    private readonly poller: TrackerPollerService
   ) {}
 
   async abort(project: string, id: string): Promise<ItemAbortResult> {
     const w = writable(this.items.writerFor(project));
+    // Sync off refuses the release (`GithubSource.writeChain`), so it must refuse here, FIRST: this route's other half is a dashboard stop, and a stop
+    // followed by a refused release is a killed session with its claim still live and an error on the screen (#17, final review M2).
+    const syncOff = this.poller.syncOffBlock(project);
+    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
     const claim = answer(await w.writer.readClaim(w.project, w.marker, id));
     if (claim === null || !isLive(claim.record, Date.now())) {
       throw new HttpException({ error: `${id} is not claimed` }, 409);
