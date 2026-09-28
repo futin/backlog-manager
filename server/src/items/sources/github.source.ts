@@ -204,7 +204,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    *  produced is where the reason lives. */
   async summary(_project: RegistryProject, marker: SourceMarker | null): Promise<SourceSummary> {
     const repo = marker?.repo;
-    if (!isRepo(repo)) return { repo: null, polledAt: null, access: null, detail: null };
+    if (!isRepo(repo)) return { repo: null, polledAt: null, access: null, detail: null, interval: null };
     return this.poller.summary(repo);
   }
 

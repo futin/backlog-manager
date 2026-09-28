@@ -36,6 +36,7 @@ function project(over: Partial<ProjectSummary> = {}): ProjectSummary {
     polledAt: '2026-09-18T11:59:48Z',
     access: 'ok',
     detail: null,
+    interval: null,
     ...over
   };
 }
@@ -64,7 +65,7 @@ describe('pollAge', () => {
 
 /** A `/api/trackers` row — the shape the strip chip reads, as distinct from the board's `ProjectSummary`. */
 function row(over: Partial<TrackerProjectRow> = {}): TrackerProjectRow {
-  return { name: 'x', path: '/abs/x', source: 'github', repo: 'futin/x', polledAt: null, access: 'ok', detail: null, connect: null, ...over };
+  return { name: 'x', path: '/abs/x', source: 'github', repo: 'futin/x', polledAt: null, access: 'ok', detail: null, interval: null, connect: null, ...over };
 }
 
 const stamp = (msAgo: number): string => new Date(NOW - msAgo).toISOString();

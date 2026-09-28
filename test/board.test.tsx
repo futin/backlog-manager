@@ -109,7 +109,8 @@ const PROJECTS: ProjectSummary[] = [
     repo: null,
     polledAt: null,
     access: null,
-    detail: null
+    detail: null,
+    interval: null
   },
   {
     name: 'beta',
@@ -121,7 +122,8 @@ const PROJECTS: ProjectSummary[] = [
     repo: null,
     polledAt: null,
     access: null,
-    detail: null
+    detail: null,
+    interval: null
   },
   {
     name: 'ghost',
@@ -133,7 +135,8 @@ const PROJECTS: ProjectSummary[] = [
     repo: null,
     polledAt: null,
     access: null,
-    detail: null
+    detail: null,
+    interval: null
   }
 ];
 

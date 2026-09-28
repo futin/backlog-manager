@@ -56,6 +56,7 @@ function row(over: Partial<TrackerProjectRow> = {}): TrackerProjectRow {
     polledAt: new Date(Date.now() - 5_000).toISOString(),
     access: 'ok',
     detail: null,
+    interval: null,
     connect: null,
     ...over
   };

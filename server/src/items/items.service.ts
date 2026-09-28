@@ -122,7 +122,7 @@ export class ItemsService {
       // The four connection fields default to their non-tracker answer, which
       // is also the right answer for `missing` and for `unsupported`: neither
       // has an adapter to ask, and neither has a connection.
-      let connection: SourceSummary = { repo: null, polledAt: null, access: null, detail: null };
+      let connection: SourceSummary = { repo: null, polledAt: null, access: null, detail: null, interval: null };
 
       if (resolved.kind === 'unsupported') {
         // Counts stay at zero and the reason is NOT repeated here: it travels

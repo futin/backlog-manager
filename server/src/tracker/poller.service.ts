@@ -368,13 +368,13 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   summary(repo: string): SourceSummary {
     const state = this.repos.get(repo);
     if (githubToken() === null) {
-      return { repo, polledAt: state?.polledAt ?? null, access: 'no-token', detail: null };
+      return { repo, polledAt: state?.polledAt ?? null, access: 'no-token', detail: null, interval: null };
     }
     // A repo with a token and no state yet has not failed at anything — it has
     // simply not been polled, which `polledAt: null` already says. `ok` here
     // is "nothing is wrong", not "we have read it".
-    if (state === undefined) return { repo, polledAt: null, access: 'ok', detail: null };
-    return { repo, polledAt: state.polledAt, access: state.access, detail: state.detail };
+    if (state === undefined) return { repo, polledAt: null, access: 'ok', detail: null, interval: null };
+    return { repo, polledAt: state.polledAt, access: state.access, detail: state.detail, interval: null };
   }
 
   /** The repos the registry currently resolves to `github`, de-duplicated.

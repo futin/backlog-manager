@@ -37,7 +37,7 @@ export class FilesSource implements ItemSource {
    * was chosen over four optional keys.
    */
   async summary(_project: RegistryProject, _marker: SourceMarker | null): Promise<SourceSummary> {
-    return { repo: null, polledAt: null, access: null, detail: null };
+    return { repo: null, polledAt: null, access: null, detail: null, interval: null };
   }
 
   /**

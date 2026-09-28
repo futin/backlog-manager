@@ -68,7 +68,8 @@ const PROJECTS: ProjectSummary[] = [
     repo: null,
     polledAt: null,
     access: null,
-    detail: null
+    detail: null,
+    interval: null
   }
 ];
 
@@ -89,7 +90,8 @@ const PROJECTS_TWO: ProjectSummary[] = [
     repo: null,
     polledAt: null,
     access: null,
-    detail: null
+    detail: null,
+    interval: null
   }
 ];
 

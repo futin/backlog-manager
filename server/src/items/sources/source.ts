@@ -253,13 +253,13 @@ export interface ItemWriter {
 }
 
 /**
- * The four connection fields of `ProjectSummary`, as their own type so the
+ * The connection fields of `ProjectSummary` (four, and since #17 the sync interval), as their own type so the
  * adapter contract and the payload cannot drift: `ItemsService` spreads this
  * straight into the summary it builds, so a field added here has to be
  * answered by every adapter and appears on the payload in one edit rather
  * than three.
  */
-export type SourceSummary = Pick<ProjectSummary, 'repo' | 'polledAt' | 'access' | 'detail'>;
+export type SourceSummary = Pick<ProjectSummary, 'repo' | 'polledAt' | 'access' | 'detail' | 'interval'>;
 
 /**
  * The injection token the module provides `ItemSource[]` under. A token rather

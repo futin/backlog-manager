@@ -29,7 +29,7 @@ class DuplicateFilesSource implements ItemSource {
     return null;
   }
   async summary(): Promise<SourceSummary> {
-    return { repo: null, polledAt: null, access: null, detail: null };
+    return { repo: null, polledAt: null, access: null, detail: null, interval: null };
   }
   /* task-46: the seam grew `find`, so a stub adapter has to answer it too.
      Deliberately not a spy — this suite is about the module refusing two

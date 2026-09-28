@@ -56,7 +56,8 @@ describe('BoardView: card live strips', () => {
       repo: null,
       polledAt: null,
       access: null,
-      detail: null
+      detail: null,
+      interval: null
     },
     {
       name: 'beta',
@@ -68,7 +69,8 @@ describe('BoardView: card live strips', () => {
       repo: null,
       polledAt: null,
       access: null,
-      detail: null
+      detail: null,
+      interval: null
     }
   ];
 

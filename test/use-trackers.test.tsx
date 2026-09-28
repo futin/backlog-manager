@@ -17,7 +17,7 @@ import type { TrackerProjectRow, TrackersPayload } from '../shared/types';
 const NOW = Date.parse('2026-09-18T12:00:00Z');
 
 function row(over: Partial<TrackerProjectRow> = {}): TrackerProjectRow {
-  return { name: 'x', path: '/abs/x', source: 'github', repo: 'futin/x', polledAt: null, access: 'ok', detail: null, connect: null, ...over };
+  return { name: 'x', path: '/abs/x', source: 'github', repo: 'futin/x', polledAt: null, access: 'ok', detail: null, interval: null, connect: null, ...over };
 }
 
 function payload(rows: TrackerProjectRow[]): TrackersPayload {

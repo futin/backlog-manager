@@ -92,7 +92,8 @@ function projects(trackerOver: Partial<ProjectSummary> = {}): ProjectSummary[] {
       repo: null,
       polledAt: null,
       access: null,
-      detail: null
+      detail: null,
+      interval: null
     },
     {
       name: 'tracker',
@@ -105,6 +106,7 @@ function projects(trackerOver: Partial<ProjectSummary> = {}): ProjectSummary[] {
       polledAt: new Date().toISOString(),
       access: 'ok',
       detail: null,
+      interval: null,
       ...trackerOver
     }
   ];

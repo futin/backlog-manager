@@ -28,7 +28,7 @@ function platform(over: Partial<TrackerPlatform> = {}): TrackerPlatform {
 }
 
 function row(over: Partial<TrackerProjectRow> = {}): TrackerProjectRow {
-  return { name: 'alpha', path: '/abs/alpha', source: 'github', repo: 'futin/alpha', polledAt: ago(5_000), access: 'ok', detail: null, connect: null, ...over };
+  return { name: 'alpha', path: '/abs/alpha', source: 'github', repo: 'futin/alpha', polledAt: ago(5_000), access: 'ok', detail: null, interval: null, connect: null, ...over };
 }
 
 const beta = (over: Partial<TrackerProjectRow> = {}) => row({ name: 'beta', path: '/abs/beta', repo: 'futin/beta', ...over });

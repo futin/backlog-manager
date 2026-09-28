@@ -37,7 +37,8 @@ const PROJECTS: ProjectSummary[] = [
     repo: null,
     polledAt: null,
     access: null,
-    detail: null
+    detail: null,
+    interval: null
   }
 ];
 

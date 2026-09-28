@@ -46,6 +46,7 @@ export class TrackerController {
         polledAt: null,
         access: null,
         detail: null,
+        interval: null,
         connect: null
       };
 

@@ -205,7 +205,8 @@ describe('BoardView: the run chip', () => {
       repo: null,
       polledAt: null,
       access: null,
-      detail: null
+      detail: null,
+      interval: null
     },
     {
       name: 'beta',
@@ -217,7 +218,8 @@ describe('BoardView: the run chip', () => {
       repo: null,
       polledAt: null,
       access: null,
-      detail: null
+      detail: null,
+      interval: null
     }
   ];
 

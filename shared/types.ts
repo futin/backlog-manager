@@ -432,6 +432,12 @@ export interface ProjectSummary {
    * `unsupported`'s reason here would make this a second home for `errors`.
    */
   detail: string | null;
+  /**
+   * The connected repo's effective sync interval on this machine (#17) — the settings file's value after its defaults, so never absent for a `github`
+   * project — and `null` for everything else, the same total-shape rule as the four fields above. Carried here, not only on the Trackers rows, because the
+   * board's band line and the dispatch gate read this payload: an `off` repo reads `sync off` and its project refuses dispatch.
+   */
+  interval: SyncInterval | null;
 }
 
 /**
@@ -490,6 +496,34 @@ export interface TrackerProjectRow {
    * request, the way `uncommitted` reads git per request, and joins no memo.
    */
   connect: string | null;
+  /** The repo's effective sync interval on this machine, as `ProjectSummary.interval` carries it — `null` for every non-`github` row. */
+  interval: SyncInterval | null;
+}
+
+/**
+ * How often the tracker poller syncs one repo, on THIS machine (#17). The one home of the enumeration: the server's validator, the poller's due-check and
+ * the Trackers card's picker all read this record, and the picker's labels are its KEYS — there is no second list to drift. Declaration order is the picker's
+ * order. Every value is a whole multiple of the poller's 15 s base tick (`TRACKER_POLL_MS`), so the tick is the resolution and no repo needs a timer of its
+ * own; `off` has no milliseconds because it has no schedule — one cold-boot sync per process, then nothing.
+ *
+ * A fact about this machine's attention, not about the project, so it lives in `~/.backlog-manager/settings/tracker-sync.json` and never in the committed
+ * `backlog/source.json`: two machines on one repo choose independently.
+ */
+export const SYNC_INTERVALS = {
+  '15s': 15_000,
+  '1m': 60_000,
+  '5m': 300_000,
+  off: null
+} as const satisfies Record<string, number | null>;
+
+export type SyncInterval = keyof typeof SYNC_INTERVALS;
+
+/** Today's behaviour, and what every missing, malformed or unknown value in the settings file reads as. */
+export const DEFAULT_SYNC_INTERVAL: SyncInterval = '15s';
+
+/** Own-key check, so `toString` and `__proto__` — both "in" any object literal — are not tokens. */
+export function isSyncInterval(value: unknown): value is SyncInterval {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SYNC_INTERVALS, value);
 }
 
 /**
