@@ -3862,6 +3862,23 @@ test('API mode: new --from sends the cited id in the tracker spelling', async ()
   assert.equal(requests[0].body.from, '#12')
 })
 
+// #17. A repo whose sync is `off` on this machine refuses every write with a 409 whose `error` is the whole instruction — which page, which card. The CLI
+// must print it verbatim, since a skill reading "409" alone would have nothing to tell its user. `apiPost`'s generic non-2xx mapping already does this; the
+// case pins it, so a later special-case for 409s (the claim race's `holder` shape) cannot swallow a 409 that carries no holder.
+test('API mode: a sync-off refusal prints the server-s sentence verbatim and exits 1', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, 'x\n')
+  const sentence = 'sync is off for futin/x — turn it on in Settings › Shared › Trackers'
+
+  const { out } = await withApi({ '/api/items/create': { status: 409, body: { error: sentence } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'new', 'tasks', 't', '--body', bodyFile),
+  )
+
+  assert.equal(out.status, 1)
+  assert.ok(out.stderr.includes(sentence), out.stderr)
+})
+
 // Three spellings, one issue. A person types `31`, a skill's prose says `#31`, and the board posts the URN — and all three have to mean the same item or a
 // skill written against one of them breaks against another.
 test('API mode: show accepts a number, a #number and this project-s urn identically', async () => {

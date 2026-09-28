@@ -128,7 +128,9 @@ export interface ItemSource {
  * chooses the STATUS and copies the sentence.
  */
 export interface WriteRefusal {
-  refused: 'no-token' | 'not-found' | 'conflict' | 'upstream' | 'rate-limited';
+  /** `sync-off` (#17): this machine has the repo's sync switched off, so every write refuses until it is on again — a 409, like `conflict`, but carrying
+   *  nothing but the sentence, because there is no holder and no stamp to re-read against. */
+  refused: 'no-token' | 'not-found' | 'conflict' | 'upstream' | 'rate-limited' | 'sync-off';
   error: string;
   /** `rate-limited` only: when the budget comes back, as an ISO timestamp.
    *  The reset TIME rather than a duration, the rule `handleFailure`'s

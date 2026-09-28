@@ -9,6 +9,7 @@ import { WatchdogService } from './watchdog.service';
 import { RegistryModule } from '../registry/registry.module';
 import { ItemsModule } from '../items/items.module';
 import { OrchestratorModule } from '../orchestrator/orchestrator.module';
+import { TrackerModule } from '../tracker/tracker.module';
 
 /**
  * SameOriginPostGuard is listed here rather than left to `@UseGuards`'s own
@@ -51,7 +52,8 @@ import { OrchestratorModule } from '../orchestrator/orchestrator.module';
  * payload reads the sweeper's state back out).
  */
 @Module({
-  imports: [RegistryModule, ItemsModule, OrchestratorModule],
+  // `TrackerModule` for the poller's `syncOffBlock` (#17) — no cycle: it imports only `RegistryModule`.
+  imports: [RegistryModule, ItemsModule, OrchestratorModule, TrackerModule],
   controllers: [AgentsController, ItemsAbortController],
   providers: [AgentsService, ItemsAbortService, SameOriginPostGuard, WatchdogService]
 })

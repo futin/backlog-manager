@@ -6,6 +6,7 @@ import { HttpException, Injectable } from '@nestjs/common';
 import { RegistryService } from '../registry/registry.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ItemsService } from '../items/items.service';
+import { TrackerPollerService } from '../tracker/poller.service';
 import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
@@ -308,7 +309,12 @@ export class AgentsService {
      */
     private readonly items: ItemsService,
     /** #225 — written by `dispatch` alone; see `DispatchRecordsService` for why it lives in `ItemsModule`. */
-    private readonly dispatches: DispatchRecordsService
+    private readonly dispatches: DispatchRecordsService,
+    /**
+     * #17 — for `syncOffBlock` alone: dispatch, orchestrate and resume refuse a project whose repo's sync is `off`, because every one of them starts a
+     * session that writes through the item routes, and those refuse too. `TrackerModule` imports only `RegistryModule`, so the edge opens no cycle.
+     */
+    private readonly poller: TrackerPollerService
   ) {}
 
   async status(): Promise<AgentsStatus> {
@@ -399,7 +405,8 @@ export class AgentsService {
       // writes it, and this is the field the launch sheet renders its refusal
       // from — a sheet that offers a launch button for an item the dispatch
       // route below is about to 409 is the half-fixed state.
-      blocked: dispatchBlock(item, status) ?? runClaimBlock(item, runs, starting) ?? undefined
+      // #17: a project whose sync is off is the third, after the run claim — the sheet must not offer what `dispatch` below would refuse.
+      blocked: dispatchBlock(item, status) ?? runClaimBlock(item, runs, starting) ?? this.poller.syncOffBlock(item.projectPath) ?? undefined
     };
   }
 
@@ -471,6 +478,11 @@ export class AgentsService {
     if (claimed !== null) {
       throw new HttpException({ error: claimed }, 409);
     }
+
+    // #17 — after the run-claim check (a reader told a run holds the item learns more than "sync is off"), before anything spawns. Uncoded 409, the
+    // sentence `syncOffBlock`'s: the session this would start writes through the item routes, and every one of them refuses while the repo is off.
+    const syncOff = this.poller.syncOffBlock(item.projectPath);
+    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
 
     const cfg = readAgentsConfig();
     const dirName = (await this.projectMap(cfg)).get(item.projectPath);
@@ -662,6 +674,10 @@ export class AgentsService {
     if (starting.some((s) => s.project === req.project)) {
       throw new HttpException({ error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE }, 409);
     }
+
+    // #17 — after both run-in-progress locks, before the spawn. A drain on a repo whose sync is off would park at its first claim.
+    const syncOff = this.poller.syncOffBlock(req.project);
+    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
 
     const cfg = readAgentsConfig();
     const dirName = (await this.projectMap(cfg)).get(req.project);
@@ -914,6 +930,12 @@ export class AgentsService {
         409
       );
     }
+
+    // #17 (plan amendment 2) — `POST /api/trackers/sync` refuses `off` under a paused or running run, but a hand-edited settings file can still turn the
+    // repo off, and a resumed driver's first act is to re-claim through the item routes, which refuse. Refused here, after the alive check and before the
+    // resume lock below, so a refused resume consumes no lock and spawns nothing — the watchdog reads it as a refusal like any other.
+    const syncOff = this.poller.syncOffBlock(project);
+    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
 
     // bug-19 — the resume LOCK, and the one refusal in this method that is
     // taken rather than merely decided.

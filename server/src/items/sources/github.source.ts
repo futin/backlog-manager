@@ -227,10 +227,13 @@ export class GithubSource implements ItemSource, ItemWriter {
    * timeline for free. Nothing derived reads it, exactly as nothing derived
    * read `from:` in frontmatter.
    */
-  async create(_project: RegistryProject, marker: SourceMarker, req: ItemCreateRequest): Promise<WriteOutcome<CreatedItem>> {
+  async create(project: RegistryProject, marker: SourceMarker, req: ItemCreateRequest): Promise<WriteOutcome<CreatedItem>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;
+    // `off` refuses before the one outbound call (#17). There is no item chain to wait on — the issue does not exist yet — so the check is simply first.
+    const off = this.syncOff<CreatedItem>(project);
+    if (off !== null) return off;
 
     const labels: string[] = [];
     const typeLabel = TYPE_LABEL_BY_SECTION[req.section];
@@ -277,7 +280,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * away. The `type:*` label stays too, which is what makes a rejected issue's
    * original type recoverable where the file store loses it.
    */
-  async state(_project: RegistryProject, marker: SourceMarker, req: ItemStateRequest): Promise<WriteOutcome<{ id: string; status: string; url: string }>> {
+  async state(project: RegistryProject, marker: SourceMarker, req: ItemStateRequest): Promise<WriteOutcome<{ id: string; status: string; url: string }>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;
@@ -285,7 +288,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const number = issueNumberFor(req.id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
-    return this.serialise(issueUrn(repo, number), async () => {
+    return this.writeChain(project, issueUrn(repo, number), async () => {
       const found = await this.issueNow(repo, number, token);
       if (!found.ok) return found;
 
@@ -332,7 +335,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * costs nothing — the request count is identical, two listings either way —
    * and the union still spans both, so the race semantics are untouched.
    */
-  async claim(_project: RegistryProject, marker: SourceMarker, req: ItemClaimRequest): Promise<WriteOutcome<ClaimResult>> {
+  async claim(project: RegistryProject, marker: SourceMarker, req: ItemClaimRequest): Promise<WriteOutcome<ClaimResult>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;
@@ -340,7 +343,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const number = issueNumberFor(req.id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
-    return this.serialise(issueUrn(repo, number), async () => {
+    return this.writeChain(project, issueUrn(repo, number), async () => {
       const found = await this.issueNow(repo, number, token);
       if (!found.ok) return found;
       /* This is the one precondition in this file read from the CACHE rather
@@ -584,8 +587,8 @@ export class GithubSource implements ItemSource, ItemWriter {
    * not "can this be forged" but "is the caller in a position to KNOW", and
    * that is a question about which machine it is running on.
    */
-  async release(_project: RegistryProject, marker: SourceMarker, req: ItemReleaseRequest): Promise<WriteOutcome<ClaimResult>> {
-    return this.editClaim(marker, req.id, req.commentId, (existing, now, number) => {
+  async release(project: RegistryProject, marker: SourceMarker, req: ItemReleaseRequest): Promise<WriteOutcome<ClaimResult>> {
+    return this.editClaim(project, marker, req.id, req.commentId, (existing, now, number) => {
       if (existing.released !== undefined) {
         return { refused: 'conflict', error: `claim ${req.commentId} on #${number} is already released` };
       }
@@ -712,8 +715,8 @@ export class GithubSource implements ItemSource, ItemWriter {
    * so the driver's own claims pass the same-run clause whether or not their
    * terminal stage already released them.
    */
-  async heartbeat(_project: RegistryProject, marker: SourceMarker, req: ItemHeartbeatRequest): Promise<WriteOutcome<ClaimResult>> {
-    return this.editClaim(marker, req.id, req.commentId, (existing, now, number) => {
+  async heartbeat(project: RegistryProject, marker: SourceMarker, req: ItemHeartbeatRequest): Promise<WriteOutcome<ClaimResult>> {
+    return this.editClaim(project, marker, req.id, req.commentId, (existing, now, number) => {
       const sameRun = typeof req.runId === 'string' && req.runId.length > 0 && existing.run?.runId === req.runId;
       if (existing.session !== req.session && !sameRun) {
         return {
@@ -780,7 +783,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * A refusal is a 409 carrying the CURRENT stamp, so the caller can re-read
    * and re-apply without a second round trip to learn it.
    */
-  async patchBody(_project: RegistryProject, marker: SourceMarker, req: ItemBodyRequest): Promise<WriteOutcome<{ id: string; updatedAt: string }>> {
+  async patchBody(project: RegistryProject, marker: SourceMarker, req: ItemBodyRequest): Promise<WriteOutcome<{ id: string; updatedAt: string }>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;
@@ -788,7 +791,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const number = issueNumberFor(req.id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
-    return this.serialise(issueUrn(repo, number), async () => {
+    return this.writeChain(project, issueUrn(repo, number), async () => {
       const cached = this.poller.issue(repo, number);
       const fresh = await this.client.issue(repo, number, { token });
       if (fresh.status !== 200 || fresh.data === null) return { ok: false as const, refusal: refusalFor(fresh) };
@@ -845,7 +848,7 @@ export class GithubSource implements ItemSource, ItemWriter {
   }
 
   /** Append a comment and nothing else. */
-  async comment(_project: RegistryProject, marker: SourceMarker, req: ItemCommentRequest): Promise<WriteOutcome<{ commentId: number; url: string }>> {
+  async comment(project: RegistryProject, marker: SourceMarker, req: ItemCommentRequest): Promise<WriteOutcome<{ commentId: number; url: string }>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;
@@ -853,7 +856,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const number = issueNumberFor(req.id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
-    return this.serialise(issueUrn(repo, number), async () => {
+    return this.writeChain(project, issueUrn(repo, number), async () => {
       const found = await this.issueNow(repo, number, token);
       if (!found.ok) return found;
       const posted = await this.client.createComment(repo, number, req.body, { token });
@@ -883,7 +886,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * that does not exist is also a 404, and also success; that caller wanted
    * the label gone from an issue that has no labels at all, and it is.
    */
-  async queue(_project: RegistryProject, marker: SourceMarker, req: ItemQueueRequest): Promise<WriteOutcome<{ id: string; queued: boolean }>> {
+  async queue(project: RegistryProject, marker: SourceMarker, req: ItemQueueRequest): Promise<WriteOutcome<{ id: string; queued: boolean }>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;
@@ -891,7 +894,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const number = issueNumberFor(req.id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
-    return this.serialise(issueUrn(repo, number), async () => {
+    return this.writeChain(project, issueUrn(repo, number), async () => {
       const res = req.queued
         ? await this.client.addLabels(repo, number, [QUEUED_LABEL], { token })
         : await this.client.removeLabel(repo, number, QUEUED_LABEL, { token });
@@ -1026,6 +1029,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * differently.
    */
   private async editClaim(
+    project: RegistryProject,
     marker: SourceMarker,
     id: string,
     commentId: number,
@@ -1039,7 +1043,7 @@ export class GithubSource implements ItemSource, ItemWriter {
     const number = issueNumberFor(id, repo);
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${id} does not name an issue in ${repo}` } };
 
-    return this.serialise(issueUrn(repo, number), async () => {
+    return this.writeChain(project, issueUrn(repo, number), async () => {
       const claims = await this.allClaims(repo, number, token);
       if (!claims.ok) return claims;
       const existing = claims.value.find((c) => c.commentId === commentId);
@@ -1056,6 +1060,24 @@ export class GithubSource implements ItemSource, ItemWriter {
       if (after !== undefined) await after(repo, number, token);
       return { ok: true as const, value: { commentId, record: decided } };
     });
+  }
+
+  /**
+   * A write on one item's chain that first asks whether the project's sync is `off` (#17, spec §8). Every write method but `create` goes through here, and
+   * `readClaim` — a read that only happens to share the chain — deliberately does not.
+   *
+   * The check is INSIDE the chain, not in front of it: a write queued behind another reads the setting as it is when its turn comes, not as it was when it
+   * was queued, so a repo switched off while writes were waiting refuses the ones that had not started. It is the first thing the turn does, so a refused
+   * write has made no outbound call.
+   */
+  private writeChain<T>(project: RegistryProject, urn: string, fn: () => Promise<WriteOutcome<T>>): Promise<WriteOutcome<T>> {
+    return this.serialise(urn, async () => this.syncOff<T>(project) ?? fn());
+  }
+
+  /** The `sync-off` refusal for `project`, or `null`. The words are `TrackerPollerService.syncOffBlock`'s, never composed here. */
+  private syncOff<T>(project: RegistryProject): WriteOutcome<T> | null {
+    const error = this.poller.syncOffBlock(project.path);
+    return error === null ? null : { ok: false, refusal: { refused: 'sync-off', error } };
   }
 
   /**

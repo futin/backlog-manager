@@ -50,8 +50,10 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
  * ## The refusal order, and why it is fixed
  *
  * Malformed body (400) · unregistered project (404) · files project (400) ·
- * unsupported marker (400) · no token (503) · issue not found (404) · rate
- * limited (429) · anything else from GitHub (502).
+ * unsupported marker (400) · no token (503) · sync off (409, #17 — checked by
+ * the adapter as the first step of the item's write chain, so before any
+ * outbound call) · issue not found (404) · rate limited (429) · anything else
+ * from GitHub (502).
  *
  * The first four are answered here, before the adapter is reached, so none of
  * them can make a network call — which is the property `test/tracker-write.
@@ -307,6 +309,9 @@ export function answer<T>(outcome: WriteOutcome<T>): T {
       throw new HttpException({ error: r.error, holder: r.holder, updatedAt: r.updatedAt }, 409);
     case 'rate-limited':
       throw new HttpException({ error: r.error, resetAt: r.resetAt ?? null }, 429);
+    case 'sync-off':
+      // No `code`: `RUN_IN_PROGRESS_CODE` is the app's one coded 409 and means a different fact. The sentence names the repo and the fix.
+      throw new HttpException({ error: r.error }, 409);
     default:
       throw new HttpException({ error: r.error, status: r.status ?? null }, 502);
   }
