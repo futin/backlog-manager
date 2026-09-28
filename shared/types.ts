@@ -228,7 +228,7 @@ export interface BacklogItem {
    * knowing about: `deriveAction` (`shared/agent.ts`) answers `null` for any
    * row that is not `'files'`, which is what hides the dispatch control on a
    * tracker project, and `lib/tracker.ts` reads `ProjectSummary.source` (not
-   * this one) to decide which projects get a poll-age line. Nothing else
+   * this one) to decide which projects get a tracker reading. Nothing else
    * branches on it — the board draws a tracker row exactly as it draws a file
    * row.
    */
@@ -399,8 +399,8 @@ export interface ProjectSummary {
   repo: string | null;
   /**
    * When the poller last successfully read this repo, ISO, or `null` before
-   * the first successful sync. The board renders its AGE (`polled 12 s ago`),
-   * which is what keeps the one cache in this server honest: the items are at
+   * the first successful sync. The client renders its AGE — the tracker chip's
+   * POLL countdown, the item modal's `polled 12 s ago` — which is what keeps the one cache in this server honest: the items are at
    * most one poll interval old and the number says exactly how old.
    */
   polledAt: string | null;

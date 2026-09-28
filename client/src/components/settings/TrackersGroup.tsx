@@ -1,6 +1,6 @@
 import { SettingsGroup, SettingsRow } from './SettingsRow';
-import { useTrackers } from '../../hooks/useTrackers';
-import { accessReason, pollAge } from '../../lib/tracker';
+import { useTrackersContext } from '../../hooks/TrackersContext';
+import { accessReason, pollAge, resetClock } from '../../lib/tracker';
 import type { TrackerPlatform, TrackerProjectRow } from '../../../../shared/types';
 
 /**
@@ -23,14 +23,17 @@ import type { TrackerPlatform, TrackerProjectRow } from '../../../../shared/type
  * The token itself is never here. `hasToken` and `login` are what the payload
  * carries (spec §11) and they are what an operator needs: whether a credential
  * is loaded, and whose it is.
+ *
+ * It no longer owns the fetch: the shell does (`TrackersProvider` in `App`), so this card and the strip chip read one answer on one clock.
  */
 export function TrackersGroup() {
-  const { data, loading, error } = useTrackers();
+  const { data, loading, error } = useTrackersContext();
   // One instant for the whole card, read here and passed down, because
   // `lib/tracker.ts` states the rule its own header carries: nothing in that
   // module reads a clock, so every age on one surface is aged against one
-  // moment. This card has no ticking clock of its own — it re-reads on window
-  // focus like `useAgents` — so "now" is the moment it rendered.
+  // moment. This card has no ticking clock of its own — it re-renders when the
+  // shell's `useTrackers` answers (on the poll clock, and on focus) — so "now"
+  // is the moment it rendered.
   const now = Date.now();
 
   return (
@@ -77,13 +80,6 @@ function platformLine(platform: TrackerPlatform): string {
   // numbers are read off response headers, so "0 of 0 left" would be a
   // reading rather than an absence.
   return parts.join(' · ');
-}
-
-/** GitHub sends the reset as Unix SECONDS; the card shows a local wall clock,
- *  because the question it answers is "how long do I wait" and a reader is
- *  looking at their own clock while asking it. */
-function resetClock(reset: number): string {
-  return new Date(reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 /**

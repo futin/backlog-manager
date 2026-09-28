@@ -1,8 +1,11 @@
 import { lazy, Suspense, useState } from 'react';
 
 import { SideRail } from './components/SideRail';
+import { TrackerChip } from './components/TrackerChip';
 import { SECTIONS, type Section } from './lib/sections';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
+import { TrackersProvider } from './hooks/TrackersContext';
+import { useNarrow } from './hooks/useNarrow';
 import { usePersistedState } from './hooks/usePersistedState';
 import { setRunsMode } from './hooks/useRunsMode';
 
@@ -46,7 +49,10 @@ export function resolveSection(raw: unknown): Section {
 export function App() {
   return (
     <SettingsProvider>
-      <AppShell />
+      {/* The shell's one `useTrackers` (the tracker strip spec, §4): the strip chip and Settings' Trackers card read one answer on one clock. */}
+      <TrackersProvider>
+        <AppShell />
+      </TrackersProvider>
     </SettingsProvider>
   );
 }
@@ -81,6 +87,15 @@ function AppShell() {
   };
 
   /*
+    The tracker chip has ONE home at a time, chosen here from the same `useNarrow` reading the rail uses (§8.0; the tracker strip spec, §1.2): the
+    shell strip at desktop width, the rail's phone bar below 700 px, where the strip is not drawn. Never both, hidden by CSS — two mounted chips would
+    be two one-second clocks and two popovers able to join the Escape stack. A change of home remounts it, which is what closes an open popover
+    rather than leaving it anchored to a chip that moved.
+  */
+  const narrow = useNarrow();
+  const chip = <TrackerChip section={section} />;
+
+  /*
     No second clamp on the way to the render below, unlike the two-way guard
     this replaced. Everything untrusted was resolved in the initializer above,
     and the only other writer is `change`, which the rail calls with one of its
@@ -89,9 +104,15 @@ function AppShell() {
   */
   return (
     <div className="shell">
-      <SideRail section={section} onChange={change} />
-      <main className="main">
-        {/* One measure for every section since task-42. Settings used to be the
+      <SideRail section={section} onChange={change} chipSlot={narrow ? chip : undefined} />
+      {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
+          curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
+          The strip is always in the tree, empty without a tracker, so its height (`--main-gap`, which `.runs-board` subtracts) never depends on
+          whether one is connected; CSS hides it below 700 px. */}
+      <div className="maincol">
+        <div className="topstrip">{narrow ? null : chip}</div>
+        <main className="main">
+          {/* One measure for every section since task-42. Settings used to be the
             exception — a narrow `wrap`, on the grounds that a column of
             label-and-control rows reads better that way — and the Local/Shared
             split took the exception away: both of its pages are two
@@ -100,18 +121,18 @@ function AppShell() {
             width. The cap itself is released entirely under
             `contentWidth: 'full'`, which is a stylesheet rule keyed off
             `<html>` and nothing this expression has to know about. */}
-        <div className="wrap wide">
-          <Suspense fallback={<SectionLoading />}>
-            {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
+          <div className="wrap wide">
+            <Suspense fallback={<SectionLoading />}>
+              {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
                 the setter it navigates with — the same `change` the rail's own
                 Runs entry calls, handed down rather than reimplemented, so the
                 two cannot come to disagree about what opening Runs does (and
                 so the chip's click is recorded in `backlog-manager.section`
                 exactly as the rail's is). */}
-            {section === 'board' && <BoardView onOpenRuns={() => change('runs')} />}
-            {section === 'runs' && <RunsView />}
-            {section === 'archive' && <ArchiveView />}
-            {/* Settings' watchdog card carries a `Live view` link to Runs ›
+              {section === 'board' && <BoardView onOpenRuns={() => change('runs')} />}
+              {section === 'runs' && <RunsView />}
+              {section === 'archive' && <ArchiveView />}
+              {/* Settings' watchdog card carries a `Live view` link to Runs ›
                 Watchdog (DESIGN.md §8.6), and this is what it opens with — the
                 same PAIR the rail's own Watchdog sub-nav entry calls, in the
                 same order: `setRunsMode` (the module-level store every mounted
@@ -120,17 +141,18 @@ function AppShell() {
                 Settings, for the reason the board's chip is handed `change`:
                 two expressions of "open Runs › Watchdog" would be two things
                 free to disagree, and the section key is recorded here. */}
-            {section === 'settings' && (
-              <SettingsView
-                onOpenWatchdog={() => {
-                  setRunsMode('watchdog');
-                  change('runs');
-                }}
-              />
-            )}
-          </Suspense>
-        </div>
-      </main>
+              {section === 'settings' && (
+                <SettingsView
+                  onOpenWatchdog={() => {
+                    setRunsMode('watchdog');
+                    change('runs');
+                  }}
+                />
+              )}
+            </Suspense>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

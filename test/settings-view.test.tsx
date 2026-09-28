@@ -12,6 +12,7 @@ import { readStyles, ruleBlock } from './helpers/css-rule';
 
 import SettingsView from '../client/src/components/settings/SettingsView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
+import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SETTINGS_STORAGE_KEY, type SettingsScope } from '../client/src/lib/settings';
 import type { AgentsStatus } from '../shared/types';
 
@@ -90,7 +91,9 @@ describe('SettingsView', () => {
     if (scope !== 'local') localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ settingsScope: scope }));
     render(
       <SettingsProvider>
-        <SettingsView />
+        <TrackersProvider>
+          <SettingsView />
+        </TrackersProvider>
       </SettingsProvider>
     );
   }

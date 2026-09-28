@@ -1589,6 +1589,12 @@ the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md`
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
+The second entry that is not a dialog is the tracker strip's popover, `TrackerPopover` in `components/TrackerChip.tsx`, and it joins for the same reason and
+in the same shape: a component of its own that MOUNTS only while open, calling `useDialogEscape` once, so a popover opened over the item modal takes the key
+from the modal and hands it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so the chip
+binds its own `pointerdown` on `document` while the popover is open. The dashboard's `useDismiss` bundles the two into one hook with its own `keydown`
+listener, which is exactly the second Escape owner this section forbids, and is why it was not copied. Still three dialogs counted.
+
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the
 drawer above the sheet on the next runs poll. Entries are removed by identity, never popped — a dialog can unmount from under one that is still open.
@@ -1598,6 +1604,31 @@ standalone.
 
 Knowingly out of scope: nothing traps focus, so a drawer opened _after_ the sheet ranks above a sheet still painted over it — ranking by paint order would mean
 a z-index registry.
+
+## The strip's height and the well's gap are one token
+
+The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal (the tracker strip spec,
+`docs/superpowers/specs/2026-09-28-tracker-header-strip-design.md`).
+
+**Why the strip exists at all.** Since the redesign, `.main` carried a 24 px top margin and a 24 px top-left radius so the grey well would curve in where it
+meets the white rail. It never showed: `body` paints `--board` too, so the margin was grey on grey and the corner was invisible. The strip is `.maincol`'s
+paper — `--strip`, the rail's own token rather than a new one, because the point is that the rail and the strip read as ONE white L around the well — and the
+well now begins exactly where the strip ends, so its radius is finally drawn against white. `body` stays `--board`: below the fold and behind a short section
+the page is still the well's colour, which the rail's bottom edge expects.
+
+**Why one token.** The same 50 px is three facts: how tall the strip is, where the well starts, and how much the Runs page must give up to fill the viewport
+exactly (`.runs-board` is `100vh` less the two `--body-pad` gutters, and less the strip above `.main`). Three literals kept in step by hand is how a page
+gains a scrollbar precisely the strip's height the first time someone retunes one of them. With `margin-top` gone from `.main` the strip IS the gap, so there
+is nothing left to keep in step — design guard 9 pins that the token is declared twice and read twice.
+
+**Why `0px` on the phone rather than a smaller strip.** Below 700 px the rail is already a top bar, and the chip moves into it; a second band under that bar
+would be two headers stacked on a screen with no height to spare. So the strip is not drawn and the token is zero, which keeps `.runs-board`'s calc correct
+there without a narrow copy of it.
+
+**Why the chip has one home, not two copies hidden by CSS.** `App.tsx` picks the strip or the rail bar from the same `useNarrow` reading the rail uses and
+renders the chip in exactly one. Two mounted chips would be two one-second `useNow` clocks and two popovers able to join the Escape stack — the second of which
+would make "the topmost entry is the only one that closes" depend on which copy happened to mount last. A change of home remounts the chip, which is also what
+closes an open popover instead of leaving it anchored to a chip that moved.
 
 ## A resume is serialized at three layers
 
@@ -2663,8 +2694,8 @@ read in this server is per request and uncached — the registry, each project's
 poller re-reads all of them on every tick. What it keeps is the one thing behind a network call with an hourly budget.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
-board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the board's band prints its
-age (`futin/x · polled 12 s ago`), the item modal prints it beside the body it drew from that same cache, and the Trackers card prints it per project. A cache
+board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
+counts the sweep down on its POLL meter (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Trackers card prints it per project. A cache
 whose staleness is on screen is a different object from one that is not.
 
 **The orchestrator's queue preview is the fourth reader of that age, and a named id gets one retry before it is refused (bug-41).** `trackerCandidates`

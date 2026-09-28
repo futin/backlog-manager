@@ -68,7 +68,8 @@ untouched.
 
 ### 2.1 Visibility
 
-The chip is drawn iff `hasTracker(projects)` — at least one registered project resolves to a `github` source, **whatever its access state**. It renders
+The chip is drawn iff `hasTracker(data.projects)` over the `/api/trackers` payload's own rows (`TrackerProjectRow` carries `source`) — at least one
+registered project resolves to a `github` source, **whatever its access state**. It renders
 nothing (`null`) otherwise: no tracker, no chip, and the strip stays an empty 50 px band. A person with no tracker projects sees the layout change (the
 strip, the curve) and nothing else.
 
@@ -142,8 +143,8 @@ Two readers: the chip (two meters) and the popover (one per row, plus the API ba
   covers the server's own two-request tick), falling back to `TRACKER_CYCLE_MS` from now when no project has a `polledAt`, and to `TRACKER_CYCLE_MS` after
   an error. One timer at a time, cleared on unmount and re-armed on every response; focus still refetches immediately. This is what makes the chip's bar
   reach the end and snap back rather than drift: the client asks right after the server has answered itself.
-- The hook is armed only while `hasTracker(projects)` is true — `App` already has `projects` from `useBoard`; with no tracker project the hook fetches
-  once (so Settings can say "none") and sets no timer.
+- The hook is armed only while `hasTracker(data.projects)` is true, read from the `/api/trackers` payload itself — `App` does not call `useBoard` (only
+  `BoardView` does), and `TrackerProjectRow` carries `source`; with no tracker project the hook fetches once (so Settings can say "none") and sets no timer.
 
 `TRACKER_CYCLE_MS = 17_000` lives in `lib/tracker.ts` beside the derivations, with the comment that it is the server's `TRACKER_POLL_MS` (15 s) plus the
 measured length of a tick, and matches `TRACKER_POLL_WINDOW_MS` in `orchestrate.mjs`. It is the one client-side home of the cycle; the bar's fraction, the

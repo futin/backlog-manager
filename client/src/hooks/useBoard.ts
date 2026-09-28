@@ -6,7 +6,7 @@ import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
 /**
  * How often the board re-reads the payload while a tracker project is
  * registered (task-45). Matched to the server's own `TRACKER_POLL_MS` rather
- * than tuned separately — the point is that the rendered poll age stays close
+ * than tuned separately — the point is that the modal's rendered poll age stays close
  * to the real one, and a client interval slower than the server's would make
  * the board claim the items are older than they are, while a faster one would
  * ask the same question twice for the same answer.
@@ -45,7 +45,7 @@ async function fetchJson<T>(url: string): Promise<T> {
  *
  * A TRACKER project is the case that argument does not cover, and task-45 adds
  * the one interval this hook has: its items move when someone edits an issue
- * on another machine, which this browser has no event for, and the board
+ * on another machine, which this browser has no event for, and the item modal
  * renders the poll age as a live reading. So while any registered project
  * resolves to a tracker, the pair is re-read every `BOARD_TRACKER_POLL_MS` —
  * the same "poll only while there is something moving" shape

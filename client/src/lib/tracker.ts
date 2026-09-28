@@ -1,13 +1,13 @@
 import { elapsedSince } from './item-age';
 import { runIsLive } from './run-time';
 import { CLAIM_STALE_MS } from '../../../shared/types';
-import type { BacklogItem, OrchestratorRun, ProjectSummary, TrackersPayload } from '../../../shared/types';
+import type { BacklogItem, OrchestratorRun, ProjectSummary, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../../../shared/types';
 
 /**
  * What the board says about a connected tracker (task-45, spec §5.5) — the
  * poll age, and the access reason in its place when the connection is not
- * `ok`. One home for the derivation, like every other in `lib/`: the band, the
- * item modal and the Trackers card all print the same two sentences, and three
+ * `ok`. One home for the derivation, like every other in `lib/`: the tracker
+ * chip, the item modal and the Trackers card all print the same two sentences, and three
  * copies of "is this `ok`, and if not what do I say" is three chances to
  * describe one connection two ways on one screen.
  *
@@ -43,6 +43,103 @@ export function pollAge(polledAt: string | null, now: number): string | null {
 }
 
 /**
+ * One poll cycle as the client measures it: the server's `TRACKER_POLL_MS` (15 s, `server/src/tracker/poller.service.ts`) plus the measured length of a
+ * tick (a sweep makes two requests per repo, so the stamp lands a little after the interval fires). It equals `TRACKER_POLL_WINDOW_MS` in
+ * `skills/backlog-orchestrate/tools/orchestrate.mjs`, which asks the same question — "how long until a poll must have happened" — from the driver's side.
+ *
+ * The ONE client-side home of the cycle (the tracker strip spec, §4): the chip's bar fraction, its overdue threshold and `useTrackers`' fetch schedule all
+ * read this, so the bar that reaches its end and the fetch that snaps it back cannot disagree about when the end is.
+ */
+export const TRACKER_CYCLE_MS = 17_000;
+
+/** Where a poll clock stands: how much of the cycle has elapsed (0–1), the whole seconds left until the next sweep, and whether two whole cycles have gone
+ *  by with no poll at all. */
+export interface PollProgress {
+  fraction: number;
+  leftS: number;
+  overdue: boolean;
+}
+
+/**
+ * The strip chip's line timer for one stamp (spec §5). Parses the way `pollAge` does — the same three `null` exits, the same clamp of a future stamp to
+ * zero — because the two read one field and must agree on when it means nothing.
+ *
+ * The bar stops FULL at one cycle rather than wrapping: a bar that restarted on its own would claim a poll the server never made. It only snaps back when a
+ * fresh `polledAt` arrives. `overdue` waits a second whole cycle so that one slow tick — the server's own jitter, a fetch that landed late — reads as a full
+ * bar at `0s`, not as an alarm.
+ */
+export function pollProgress(polledAt: string | null, now: number): PollProgress | null {
+  if (polledAt === null || polledAt === '') return null;
+  const then = Date.parse(polledAt);
+  if (Number.isNaN(then)) return null;
+  const elapsed = Math.max(0, now - then);
+  return {
+    fraction: Math.min(elapsed / TRACKER_CYCLE_MS, 1),
+    leftS: Math.max(Math.ceil((TRACKER_CYCLE_MS - elapsed) / 1000), 0),
+    overdue: elapsed >= 2 * TRACKER_CYCLE_MS
+  };
+}
+
+/**
+ * The chip's one clock for every connected repo: `pollProgress` of the NEWEST github stamp. One sweep polls every repo, so the newest stamp is when the
+ * last sweep landed; an older one belongs to a repo that failed in that sweep, which the caller reads from `access` (the red pip and bar), not from its
+ * age. `files` rows never carry a meaningful stamp and are skipped whatever they hold. `null` when no github row has polled yet.
+ */
+export function sweepProgress(projects: readonly Pick<TrackerProjectRow, 'source' | 'polledAt'>[], now: number): PollProgress | null {
+  let newest: string | null = null;
+  let newestMs = -Infinity;
+  for (const p of projects) {
+    if (p.source !== 'github' || p.polledAt === null) continue;
+    const ms = Date.parse(p.polledAt);
+    if (Number.isNaN(ms) || ms <= newestMs) continue;
+    newest = p.polledAt;
+    newestMs = ms;
+  }
+  return pollProgress(newest, now);
+}
+
+/** The hourly API budget as the chip and popover read it. */
+export interface ApiUsage {
+  /** Used share of the limit, 0–1. */
+  fraction: number;
+  /** `1.4%`, or `<1%` for any use under one percent. */
+  label: string;
+  /** Requests left, as the platform last reported them. */
+  left: number;
+  /** `reset` as a local `HH:MM`, or `null` when the platform has not said. */
+  resetsAt: string | null;
+}
+
+/**
+ * The `API` meter's reading (spec §2.2, §5). `null` until the platform has reported a positive limit — the numbers come off response headers, so before
+ * the first request there is nothing to read, and a zero limit would divide into `NaN%`. A `remaining` above the limit (a reset landing between two reads)
+ * clamps to nothing used rather than drawing a negative bar.
+ *
+ * `<1%` rather than `0.3%` or `0%` below one percent: the meter must never claim zero use once a request has been made, and a tenth of a percent is more
+ * precision than a 56 px bar can show. Tone is the caller's, like `sweepProgress`' — the thresholds are a look, not a derivation.
+ */
+export function apiUsage(platform: Pick<TrackerPlatform, 'limit' | 'remaining' | 'reset'>): ApiUsage | null {
+  const { limit, remaining, reset } = platform;
+  if (limit === null || limit <= 0 || remaining === null) return null;
+  const used = Math.max(0, limit - remaining);
+  const fraction = used / limit;
+  const pct = fraction * 100;
+  return {
+    fraction,
+    label: pct < 1 ? '<1%' : `${pct.toFixed(1)}%`,
+    left: remaining,
+    resetsAt: reset === null ? null : resetClock(reset)
+  };
+}
+
+/** GitHub sends the reset as Unix SECONDS; the board shows a local wall clock, because the question it answers is "how long do I wait" and a reader is
+ *  looking at their own clock while asking it. Moved here from `TrackersGroup.tsx` when the strip chip became its second reader, so the card and the
+ *  popover print one clock. */
+export function resetClock(reset: number): string {
+  return new Date(reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
  * The sentence for an access state other than `ok`, or `null` for `ok` and for
  * a project with no connection at all.
  *
@@ -74,7 +171,7 @@ export function accessReason(project: Pick<ProjectSummary, 'access' | 'detail'>)
 }
 
 /**
- * The whole line the board's band prints for one connected project:
+ * The whole poll-age line for one connected project, as the item modal prints it:
  * `futin/x · polled 12 s ago`, or the access reason in place of the age.
  * `null` for a project that is not a tracker — the caller filters on this
  * rather than re-asking `source`, so "which projects does this line exist for"
@@ -151,11 +248,12 @@ export function claimControl(item: Pick<BacklogItem, 'source' | 'holder'>, now: 
 /** Whether any registered project's items come from a tracker — the board's
  *  "should I keep re-reading the payload" question (a tracker's items move on
  *  the server's poll clock, not on a person's edit), and the one place that
- *  question is asked. */
-export function hasTracker(projects: ProjectSummary[] | null): boolean {
+ *  question is asked. Takes anything with a `source`, so the strip chip and
+ *  `useTrackers` ask it of the `/api/trackers` rows they already hold — the
+ *  shell has no `useBoard` to borrow `ProjectSummary[]` from. */
+export function hasTracker(projects: readonly Pick<ProjectSummary, 'source'>[] | null): boolean {
   return (projects ?? []).some((p) => p.source === 'github');
 }
-
 
 /**
  * `GET /api/trackers`' body, checked before anything renders from it — the
