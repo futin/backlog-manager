@@ -5,6 +5,7 @@ import { deriveRemoteRuns } from './remote-runs.util';
 import { RegistryService } from '../registry/registry.service';
 import { resolveSource } from '../items/sources/resolve.util';
 import { isRepo } from '../tracker/github.client';
+import { intervalFor } from '../tracker/sync-config.util';
 import { TrackerPollerService } from '../tracker/poller.service';
 import type { RemoteRun } from '../../../shared/types';
 
@@ -49,6 +50,9 @@ export class RemoteRunsService {
       const repo = resolved.marker.repo;
       if (isRepo(repo) && !projects.has(repo)) projects.set(repo, project.path);
     }
+    // An `off` repo derives nothing (#17, spec §5) — the same "says nothing" a never-synced repo gets. Its comment cache is frozen, so a claim that was
+    // live when sync stopped would keep drawing another machine's run as running for as long as sync stays off: bug-55's phantom, by a different road.
+    for (const repo of [...projects.keys()]) if (intervalFor(repo) === 'off') projects.delete(repo);
     if (projects.size === 0) return [];
 
     const localRunIds = this.orchestrator.localRunIds();

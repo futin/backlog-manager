@@ -4,10 +4,12 @@ import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/comm
 import { claimsByIssue } from './claim';
 import { GithubClient, isRepo, type GithubComment, type GithubIssue } from './github.client';
 import { TRACKER_LABELS, TRACKER_LABEL_NAMES } from './labels';
+import { intervalFor } from './sync-config.util';
 import { githubToken } from './token.util';
 import { resolveSource } from '../items/sources/resolve.util';
 import { RegistryService } from '../registry/registry.service';
 import type { SourceSummary } from '../items/sources/source';
+import { SYNC_INTERVALS, type SyncInterval } from '../../../shared/types';
 
 /**
  * poller.service.ts — the tracker's read loop (task-45, spec §5.1).
@@ -33,6 +35,15 @@ import type { SourceSummary } from '../items/sources/source';
  * tick that finds it. A standing interval against a registry where nobody has
  * connected anything is precisely the cost the watchdog's rule exists to
  * refuse, and this loop would make HTTP requests rather than directory reads.
+ *
+ * ## Each repo on its own interval (#17)
+ *
+ * The tick stays `TRACKER_POLL_MS`, but a sweep no longer syncs every connected repo: it syncs the ones that are DUE under their interval in
+ * `~/.backlog-manager/settings/tracker-sync.json` (`sync-config.util.ts`, read fresh per tick). Every interval is a whole number of ticks, so the tick is the
+ * resolution and no repo needs a timer of its own. An `off` repo gets exactly one attempt per process — the cold-boot sync that fills an empty cache —
+ * because without it a restart would leave that repo's board columns empty forever beside `connecting…`, a worse lie than a stale age. "Connected" in the
+ * armed rule above therefore narrows to "connected and on, or still owed that one attempt": a machine whose every repo is `off` disarms after the cold syncs,
+ * and `POST /api/trackers/sync` calls `arm()` after it writes so turning one back on restarts the chain.
  *
  * ## The cache, and why this one is allowed to exist
  *
@@ -141,6 +152,13 @@ interface RepoState {
   /** Epoch ms before which this repo gets no requests at all — a rate limit's
    *  reset, or a secondary limit's backoff. */
   sleepUntil: number | null;
+  /**
+   * Epoch ms at which the last sync that made a request FINISHED — success, failure and `304` alike (#17). What the interval due-check measures from, so
+   * a failing repo is not retried faster than its interval; and what marks an `off` repo's one cold attempt as spent, so a cold sync that fails is not
+   * retried every tick either. A sync that returned at the asleep check made no request and stamps NOTHING: a `5m` repo woken from a rate limit is retried
+   * on the first tick after `sleepUntil`, not five minutes after that.
+   */
+  lastSyncAt: number | null;
 }
 
 @Injectable()
@@ -359,7 +377,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   }
 
   /**
-   * The four connection fields for one repo (spec §5.4). `access` reads
+   * The connection fields for one repo (spec §5.4), and since #17 its effective sync interval, read from the settings file per call. `access` reads
    * `no-token` whenever there is no token, whatever the last sync said: the
    * credential is read per call (see `token.util.ts`), so removing it from the
    * environment and restarting is immediately visible, and a stale `ok` from
@@ -368,13 +386,30 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   summary(repo: string): SourceSummary {
     const state = this.repos.get(repo);
     if (githubToken() === null) {
-      return { repo, polledAt: state?.polledAt ?? null, access: 'no-token', detail: null, interval: null };
+      return { repo, polledAt: state?.polledAt ?? null, access: 'no-token', detail: null, interval: intervalFor(repo) };
     }
     // A repo with a token and no state yet has not failed at anything — it has
     // simply not been polled, which `polledAt: null` already says. `ok` here
     // is "nothing is wrong", not "we have read it".
-    if (state === undefined) return { repo, polledAt: null, access: 'ok', detail: null, interval: null };
-    return { repo, polledAt: state.polledAt, access: state.access, detail: state.detail, interval: null };
+    if (state === undefined) return { repo, polledAt: null, access: 'ok', detail: null, interval: intervalFor(repo) };
+    return { repo, polledAt: state.polledAt, access: state.access, detail: state.detail, interval: intervalFor(repo) };
+  }
+
+  /**
+   * The refusal for a project whose repo's sync is `off` (#17, spec §8), or `null` — a files, unsupported or store-less project, or a repo at any other
+   * interval. The ONE home of that sentence on the server: the write routes, dispatch, orchestrate and resume all call this and none of them composes the
+   * words (the client's `syncOffReason` pins the same literal from its side). Resolved the way `connectedRepos` resolves a project, per call, so a marker
+   * committed or removed a second ago answers correctly.
+   *
+   * Why `off` refuses writes at all: the cache is frozen, so a write would be judged against a picture of the issue that may be hours old — a claim race
+   * decided against a comment list nobody has re-read — and the board would not show the write's own result until sync came back on.
+   */
+  syncOffBlock(projectPath: string): string | null {
+    const resolved = resolveSource(projectPath, KNOWN);
+    if (resolved.kind !== 'tracker') return null;
+    const repo = resolved.marker.repo;
+    if (!isRepo(repo) || intervalFor(repo) !== 'off') return null;
+    return `sync is off for ${repo} — turn it on in Settings › Shared › Trackers`;
   }
 
   /** The repos the registry currently resolves to `github`, de-duplicated.
@@ -405,9 +440,37 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    * tick already in flight, and the next tick — which cannot start before
    * this one finishes — sees it.) This early-out only saves kicking off a
    * tick that would immediately discover it has nothing to do.
+   *
+   * Since #17 "connected" means connected AND on, or still owed its one cold attempt (`live` below) — so every repo `off` after its cold sync reads false
+   * here, and `sweep` makes the same judgement before it schedules a successor.
    */
   private shouldPoll(): boolean {
-    return githubToken() !== null && this.connectedRepos().length > 0;
+    return githubToken() !== null && this.connectedRepos().some((repo) => this.live(repo, intervalFor(repo)));
+  }
+
+  /** Whether a repo at `interval` will ever be due again: any interval but `off`, or `off` with its cold attempt still unspent. */
+  private live(repo: string, interval: SyncInterval): boolean {
+    if (interval !== 'off') return true;
+    const state = this.repos.get(repo);
+    return state === undefined || (state.polledAt === null && state.lastSyncAt === null);
+  }
+
+  /**
+   * Whether this tick should sync `repo`. Never synced (or never attempted) is due at every interval — the cold-boot sync — and an `off` repo is due for
+   * that alone. Otherwise one full interval since the last attempt FINISHED, so a repo moved to a faster interval is due at once if its last sync is already
+   * older than the new one, and a repo moved to a slower one simply waits longer.
+   *
+   * An interval no longer than the base tick — `15s` — is due on EVERY tick, with no clock comparison at all. That is today's behaviour byte for byte, and
+   * it is not a shortcut: a scheduled tick starts `TRACKER_POLL_MS` after the previous sweep FINISHED, so the comparison could only ever say yes there, and
+   * the only ticks that come sooner — `arm()` restarting a dead chain, a caller awaiting `tick()` — are exactly the ones where skipping the repo that the
+   * chain exists for would be a surprise.
+   */
+  private due(repo: string, interval: SyncInterval, now: number): boolean {
+    const ms = SYNC_INTERVALS[interval];
+    if (ms === null) return this.live(repo, interval);
+    if (ms <= TRACKER_POLL_MS) return true;
+    const last = this.repos.get(repo)?.lastSyncAt ?? null;
+    return last === null || now - last >= ms;
   }
 
   private clearTimer(): void {
@@ -451,10 +514,24 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       this.identity = { token, login: viewer.data?.login ?? null };
     }
 
+    // Due-ness is judged once, up front, against the settings as they read at the top of the tick; a setting changed mid-tick is honoured from the NEXT
+    // tick, and a sync already in flight for a repo just switched off finishes normally rather than being abandoned half-absorbed (Review Focus 2).
+    const now = Date.now();
     for (const repo of repos) {
-      await this.syncRepo(repo, token);
+      if (!this.due(repo, intervalFor(repo), now)) continue;
+      const state = this.stateOf(repo);
+      // The asleep early return in `syncRepo` makes no request, so it must not count as an attempt — see `lastSyncAt`.
+      const asleep = state.sleepUntil !== null && Date.now() < state.sleepUntil;
+      try {
+        await this.syncRepo(repo, token);
+      } finally {
+        if (!asleep) state.lastSyncAt = Date.now();
+      }
     }
 
+    // No successor when nothing will ever be due again — every repo `off` and its cold attempt spent. That is the disarm; `arm()` restarts the chain the
+    // moment a repo is turned back on. The settings are re-read here, after the awaits, so a repo switched off during this tick disarms on this tick.
+    if (!this.connectedRepos().some((repo) => this.live(repo, intervalFor(repo)))) return;
     this.schedule();
   }
 
@@ -473,7 +550,8 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
         access: 'ok',
         detail: null,
         labelsEnsured: false,
-        sleepUntil: null
+        sleepUntil: null,
+        lastSyncAt: null
       };
       this.repos.set(repo, state);
     }
