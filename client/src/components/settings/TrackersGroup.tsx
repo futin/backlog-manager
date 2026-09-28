@@ -1,6 +1,6 @@
 import { SettingsGroup, SettingsRow } from './SettingsRow';
 import { useTrackersContext } from '../../hooks/TrackersContext';
-import { accessReason, pollAge, resetClock } from '../../lib/tracker';
+import { resetClock, trackerState } from '../../lib/tracker';
 import type { TrackerPlatform, TrackerProjectRow } from '../../../../shared/types';
 
 /**
@@ -89,11 +89,10 @@ function platformLine(platform: TrackerPlatform): string {
  */
 function ProjectLine({ project, now }: { project: TrackerProjectRow; now: number }) {
   if (project.source === 'github') {
-    const reason = accessReason(project);
-    const age = pollAge(project.polledAt, now);
+    // `trackerState` (lib/tracker.ts) — the item modal's own words for the same connection, `sync off` included since #17.
     return (
       <>
-        github {project.repo} · {reason ?? (age === null ? 'connecting…' : `polled ${age} ago`)}
+        github {project.repo} · {trackerState(project, now)}
       </>
     );
   }

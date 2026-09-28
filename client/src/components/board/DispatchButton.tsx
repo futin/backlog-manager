@@ -97,6 +97,13 @@ export function DispatchButton({
    *
    * Optional and defaulted so every caller that has no run data to give
    * (the older tests, any future read-only view) behaves exactly as before.
+   *
+   * Since #17 the board and the Archive also carry the sync-off block here
+   * (`itemSyncOff`, lib/tracker.ts) when no run block speaks: the same kind of
+   * fact — read off a payload this leaf does not hold, the project list — and
+   * the same kind of block, a per-project one that DISABLES and never hides.
+   * It is excluded from `reverifiable` below for `runBlock`'s own reason: a
+   * status refetch cannot move it.
    */
   runBlock?: string | null;
   /**

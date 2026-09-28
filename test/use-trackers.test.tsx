@@ -167,6 +167,37 @@ describe('useTrackers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // #17: each repo's next stamp lands on its own interval, so the schedule aims at the earliest of them and never hurries for a slow one between polls.
+  it('aims at a 5m repo’s own next stamp, not at a 15s cycle', async () => {
+    // 40 s old on a 302 s cycle: the next stamp is 262 s away, plus the slack.
+    fetchMock.mockImplementation(() => answer(payload([row({ interval: '5m', polledAt: new Date(NOW - 40_000).toISOString() })])));
+    render(<Probe />);
+    await flush();
+    await advance(262_499);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hurry for a slowed repo whose age merely passed fifteen seconds', async () => {
+    // A 1m repo 20 s old is not due, whatever a 15s one that age would be; the 15s repo beside it sets the schedule.
+    fetchMock.mockImplementation(() =>
+      answer(payload([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ path: '/abs/y', interval: '1m', polledAt: new Date(NOW - 20_000).toISOString() })]))
+    );
+    render(<Probe />);
+    await flush();
+    await advance(12_499);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('sets no timer when every tracker repo is off — nothing on the server is moving', async () => {
+    fetchMock.mockImplementation(() => answer(payload([row({ interval: 'off', polledAt: new Date(NOW - 5_000).toISOString() })])));
+    render(<Probe />);
+    await flush();
+    await advance(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('sets no timer when no project is a tracker', async () => {
     fetchMock.mockImplementation(() => answer(payload([row({ source: 'files', polledAt: new Date(NOW - 5_000).toISOString() })])));
     render(<Probe />);

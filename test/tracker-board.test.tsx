@@ -370,3 +370,59 @@ describe('the board’s own poll', () => {
     }
   });
 });
+
+/**
+ * #17 — a tracker project whose sync is `off` on this machine. Its cache stops moving, so the server refuses every write and spawn for it; the board says
+ * why BEFORE the click, with the server's own sentence, and stops re-reading a payload nothing is refreshing. Disabled, never hidden: the block is a fact
+ * about one project, not about the environment (CLAUDE.md's "environment-level blocks hide, per-item ones disable").
+ */
+describe('a tracker project whose sync is off (#17)', () => {
+  const SENTENCE = 'sync is off for futin/x — turn it on in Settings › Shared › Trackers';
+
+  it('disables the card’s dispatch control with the server’s sentence, and leaves the files card alone', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: 'off' }));
+
+    const button = within(card('an issue')).getByRole('button', { name: /execute/i });
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    expect(button).toHaveAttribute('title', SENTENCE);
+    expect(within(card('a files bug')).getByRole('button', { name: /execute/i })).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('leaves the control enabled for the same project at 15s', async () => {
+    await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: '15s' }));
+
+    expect(within(card('an issue')).getByRole('button', { name: /execute/i })).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('disables Orchestrate for the project with the same sentence, and a click opens nothing', async () => {
+    await renderBoard([item({}), issueItem()], projects({ interval: 'off' }));
+
+    await userEvent.selectOptions(screen.getByLabelText('Project'), TRACKER_PATH);
+    const chip = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(chip).toHaveAttribute('aria-disabled', 'true');
+    expect(chip).toHaveAttribute('title', SENTENCE);
+    await userEvent.click(chip);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // Nothing was re-asked either: a stale status is not what blocks it, so a status refetch could not unblock it.
+    expect((global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/agents/status'))).toHaveLength(1);
+  });
+
+  it.each([
+    ['every tracker project is off', 'off' as const, false],
+    ['the tracker project is at 5m', '5m' as const, true]
+  ])('re-reads the payload on the board’s interval only while some tracker syncs — %s', async (_label, interval, polls) => {
+    jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+    try {
+      stubFetch([item({})], projects({ interval }));
+      render(<BoardView />);
+      await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
+      const before = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/projects')).length;
+      jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);
+      const after = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/api/projects')).length;
+      if (polls) expect(after).toBeGreaterThan(before);
+      else expect(after).toBe(before);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});

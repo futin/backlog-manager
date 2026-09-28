@@ -2,12 +2,16 @@ import {
   accessReason,
   apiUsage,
   claimControl,
+  hasSyncingTracker,
   hasTracker,
+  itemSyncOff,
   pollAge,
   pollProgress,
   queuedReading,
   resetClock,
   sweepProgress,
+  syncCycleMs,
+  syncOffReason,
   TRACKER_CYCLE_MS,
   trackerLine
 } from '../client/src/lib/tracker';
@@ -298,5 +302,93 @@ describe('claimControl', () => {
 
   it('offers nothing for a heartbeat it cannot read', () => {
     expect(claimControl(tracker({ session: 's', heartbeat: 'not a date' }), NOW)).toBeNull();
+  });
+});
+
+/**
+ * #17 — a repo's sync interval as the client reads it. `off` is a reading AND a block: the line says so, and dispatch refuses with the server's sentence.
+ * A slowed repo needs no new words, but it does need its own clock — a `5m` repo is not overdue at 34 s.
+ */
+describe('sync interval readings (#17)', () => {
+  const SENTENCE = 'sync is off for futin/x — turn it on in Settings › Shared › Trackers';
+
+  it('syncOffReason is the server’s sentence, byte for byte, and only for off', () => {
+    // The client cannot import the server's composer; both sides pin this literal (tracker-sync-interval.test.ts pins the server's), so a wording change
+    // goes red on both.
+    expect(syncOffReason({ repo: 'futin/x', interval: 'off' })).toBe(SENTENCE);
+    expect(syncOffReason({ repo: 'futin/x', interval: '5m' })).toBeNull();
+    expect(syncOffReason({ repo: 'futin/x', interval: null })).toBeNull();
+    expect(syncOffReason({ repo: null, interval: 'off' })).toBeNull();
+  });
+
+  it('trackerLine says sync off beside the age, or never polled', () => {
+    expect(trackerLine(project({ interval: 'off', polledAt: new Date(NOW - 3 * 3_600_000).toISOString() }), NOW)).toBe(
+      `futin/x · sync off · polled ${pollAge(new Date(NOW - 3 * 3_600_000).toISOString(), NOW)} ago`
+    );
+    expect(trackerLine(project({ interval: 'off', polledAt: null }), NOW)).toBe('futin/x · sync off · never polled');
+  });
+
+  it('lets an access reason win over sync off', () => {
+    expect(trackerLine(project({ interval: 'off', access: 'no-token' }), NOW)).toBe('futin/x · no token — set BM_GITHUB_TOKEN and restart');
+  });
+
+  it('leaves a slowed repo’s line exactly as a 15s one reads', () => {
+    expect(trackerLine(project({ interval: '1m' }), NOW)).toBe(trackerLine(project({ interval: '15s' }), NOW));
+    expect(trackerLine(project({ interval: '1m' }), NOW)).toBe('futin/x · polled 12 s ago');
+  });
+
+  it('hasSyncingTracker is true only for a github project whose sync is not off', () => {
+    const files = project({ source: 'files', repo: null, interval: null });
+    expect(hasSyncingTracker([])).toBe(false);
+    expect(hasSyncingTracker(null)).toBe(false);
+    expect(hasSyncingTracker([project({ interval: 'off' })])).toBe(false);
+    expect(hasSyncingTracker([project({ interval: 'off' }), project({ path: '/abs/y', interval: '5m' })])).toBe(true);
+    expect(hasSyncingTracker([files])).toBe(false);
+  });
+
+  it('itemSyncOff looks the item’s project up by path', () => {
+    const list = [project({ interval: 'off' }), project({ path: '/abs/y', repo: 'futin/y', interval: '15s' })];
+    expect(itemSyncOff({ projectPath: '/abs/tracker' }, list)).toBe(SENTENCE);
+    expect(itemSyncOff({ projectPath: '/abs/y' }, list)).toBeNull();
+    expect(itemSyncOff({ projectPath: '/abs/unregistered' }, list)).toBeNull();
+    expect(itemSyncOff({ projectPath: '/abs/tracker' }, null)).toBeNull();
+  });
+
+  it('syncCycleMs is the interval plus the same tick slack TRACKER_CYCLE_MS carries, and null for off', () => {
+    expect(syncCycleMs('15s')).toBe(TRACKER_CYCLE_MS);
+    expect(syncCycleMs(null)).toBe(TRACKER_CYCLE_MS);
+    expect(syncCycleMs('1m')).toBe(62_000);
+    expect(syncCycleMs('5m')).toBe(302_000);
+    expect(syncCycleMs('off')).toBeNull();
+  });
+
+  it('pollProgress runs on the cycle it is given', () => {
+    const stamp = new Date(NOW - 40_000).toISOString();
+    expect(pollProgress(stamp, NOW)?.overdue).toBe(true);
+    expect(pollProgress(stamp, NOW, 302_000)).toEqual({ fraction: 40_000 / 302_000, leftS: 262, overdue: false });
+  });
+
+  it('sweepProgress skips off rows, and runs on the fastest interval present', () => {
+    const row = (over: Partial<TrackerProjectRow>): TrackerProjectRow => ({
+      name: 'x',
+      path: '/abs/x',
+      source: 'github',
+      repo: 'futin/x',
+      polledAt: null,
+      access: 'ok',
+      detail: null,
+      interval: '15s',
+      connect: null,
+      ...over
+    });
+    // An off repo's fresher stamp says nothing about the next sweep.
+    expect(sweepProgress([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ interval: 'off', polledAt: new Date(NOW - 1_000).toISOString() })], NOW)?.leftS).toBe(12);
+    // Only 5m repos: the clock is five minutes long, and 40 s in is not overdue.
+    expect(sweepProgress([row({ interval: '5m', polledAt: new Date(NOW - 40_000).toISOString() })], NOW)).toEqual({ fraction: 40_000 / 302_000, leftS: 262, overdue: false });
+    // A 15s repo beside a 5m one that synced a moment later: the chip follows the 15s one.
+    expect(
+      sweepProgress([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ path: '/abs/y', interval: '5m', polledAt: new Date(NOW - 4_000).toISOString() })], NOW)?.leftS
+    ).toBe(12);
+    expect(sweepProgress([row({ interval: 'off', polledAt: new Date(NOW - 1_000).toISOString() })], NOW)).toBeNull();
   });
 });

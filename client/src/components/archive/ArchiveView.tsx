@@ -9,6 +9,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { groupByMonth } from '../../lib/item-month';
 import { leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
+import { itemSyncOff } from '../../lib/tracker';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { runClaimBlock } from '../../../../shared/agent';
 import { Band } from '../ui/Band';
@@ -212,7 +213,8 @@ export default function ArchiveView() {
      deleting the block would let exactly that card dispatch from Archive while
      its equivalent on the Board is blocked — which is the half-fixed state the
      block was added to close. */
-  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
+  // BoardView's own pairing — the run block, then the sync-off one (#17) — for the same control drawn on the same items.
+  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting) ?? itemSyncOff(item, projects);
 
   /* The same two overlays the Board has, with the same relationship: the sheet
      may be opened from a card (modal closed) or from inside the modal (the modal

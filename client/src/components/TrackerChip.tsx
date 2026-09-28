@@ -4,7 +4,7 @@ import { Meter } from './ui/Meter';
 import { useTrackersContext } from '../hooks/TrackersContext';
 import { useDialogEscape } from '../hooks/useDialogEscape';
 import { useNow } from '../hooks/useNow';
-import { accessReason, apiUsage, hasTracker, pollProgress, sweepProgress } from '../lib/tracker';
+import { accessReason, apiUsage, hasTracker, pollProgress, sweepProgress, syncCycleMs } from '../lib/tracker';
 import type { Section } from '../lib/sections';
 import type { TrackerPlatform, TrackerProjectRow } from '../../../shared/types';
 
@@ -93,20 +93,29 @@ type Reading = { value: string; fraction: number | null; tone: 'green' | 'amber'
  * The chip's POLL reading, in precedence order. `failing` beats the clock when EVERY repo is failing — no poll can succeed, so a countdown would promise a
  * sweep that will not land. `…` before the first poll: an empty bar, not a full one, because nothing has been read yet. `overdue` is a full amber bar
  * after two silent cycles (`pollProgress`' own threshold).
+ *
+ * `sync off` comes first, and only when EVERY repo is off (#17): nothing is being polled, so neither a countdown nor `failing` would be true, and amber
+ * because it is a state writes are refused in, not a neutral one. Otherwise off repos drop out of both remaining readings — a repo nobody polls cannot be
+ * failing now, and its stamp says when sync stopped, not when the next sweep lands.
  */
 function sweepReading(rows: TrackerProjectRow[], now: number): Reading {
-  if (rows.every((r) => r.access !== 'ok')) return { value: 'failing', fraction: 1, tone: 'red' };
+  const live = rows.filter((r) => r.interval !== 'off');
+  if (live.length === 0) return { value: 'sync off', fraction: null, tone: 'amber' };
+  if (live.every((r) => r.access !== 'ok')) return { value: 'failing', fraction: 1, tone: 'red' };
   const sweep = sweepProgress(rows, now);
   if (sweep === null) return { value: '…', fraction: null, tone: 'green' };
   if (sweep.overdue) return { value: 'overdue', fraction: 1, tone: 'amber' };
   return { value: `${sweep.leftS}s`, fraction: sweep.fraction, tone: 'green' };
 }
 
-/** One repo's line timer in the popover — `sweepReading`'s rules for one row, with the access sentence in place of `failing`. */
+/** One repo's line timer in the popover — `sweepReading`'s rules for one row, with the access sentence in place of `failing`, on the row's own interval
+ *  (#17), and `sync off` for a repo this machine no longer polls — before the access reason, which describes a poll that is no longer being made. */
 function rowReading(row: TrackerProjectRow, now: number): Reading {
+  const cycle = syncCycleMs(row.interval);
+  if (cycle === null) return { value: 'sync off', fraction: null, tone: 'amber' };
   const reason = accessReason(row);
   if (reason !== null) return { value: reason, fraction: 1, tone: 'red' };
-  const p = pollProgress(row.polledAt, now);
+  const p = pollProgress(row.polledAt, now, cycle);
   if (p === null) return { value: 'connecting…', fraction: null, tone: 'green' };
   if (p.overdue) return { value: 'overdue', fraction: 1, tone: 'amber' };
   return { value: `${p.leftS}s`, fraction: p.fraction, tone: 'green' };

@@ -3,7 +3,7 @@ import { useId, useMemo, useState } from 'react';
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
-import { hasTracker, queuedReading, trackerLine } from '../../lib/tracker';
+import { hasTracker, itemSyncOff, queuedReading, syncOffReason, trackerLine } from '../../lib/tracker';
 import { remoteAsLive } from '../../lib/remote-run';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -515,7 +515,12 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      conditions again, exactly as before phase 3. */
   const orchestrateProject = registered.find((p) => p.path === projectValue);
   const showOrchestrate = orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateBusy;
-  const orchestrateBlockedReason = orchestrateGate?.control === 'disabled' ? orchestrateGate.reason : null;
+  const orchestrateGateReason = orchestrateGate?.control === 'disabled' ? orchestrateGate.reason : null;
+  /* #17: a project whose sync is `off` cannot be drained — the driver claims and writes through the item routes, which refuse — so the chip is disabled
+     with the server's sentence. Kept apart from the gate's reason because the click handles the two differently: a visibility block may be stale and is
+     re-asked, a sync-off block is read off the project list and no status refetch could clear it. */
+  const orchestrateSyncOff = orchestrateProject === undefined ? null : syncOffReason(orchestrateProject);
+  const orchestrateBlockedReason = orchestrateGateReason ?? orchestrateSyncOff;
   // The registry's own display name, for the button's title and the sheet's
   // header — falls back to the raw path only in the unreachable case where
   // `projectValue` names a project `registered` no longer carries (the same
@@ -554,7 +559,9 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
     return project === undefined ? null : trackerLine(project, now);
   };
 
-  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting);
+  /* The run block, then the sync-off one (#17): both are facts from a payload the card cannot read — the run list, the project list — and both DISABLE,
+     so they ride one prop. The run block first, because a claimed item is the more specific reason and the one whose fix is not a setting. */
+  const runBlockFor = (item: BacklogItem): string | null => runClaimBlock(item, runs, starting) ?? itemSyncOff(item, projects);
 
   /* The orchestrator:queued reading (spec §4.2). This machine's runs AND the remote ones, through `remoteAsLive` — the label is written by whichever
      machine's driver queued the item, so a board that consulted only its own runs would call every other machine's live queue stale. The full `runs`, not
@@ -750,6 +757,9 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
                 // stale answer sits behind the control the stale answer
                 // made inert.
                 if (orchestrateBlockedReason !== null) {
+                  // Sync off alone: nothing to re-ask, and nothing to open.
+                  if (orchestrateGateReason === null) return;
+                  const syncOff = orchestrateSyncOff;
                   // Captured, not re-read at resolve time: the filter is a
                   // live <select>, and the sheet must open for the project
                   // the reader actually clicked for. Deliberately no "the
@@ -762,7 +772,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
                     // Re-derived from the FRESH answer through the same
                     // gate, so a status that came back with dispatch off or
                     // the dashboard gone opens nothing either.
-                    if (projectDispatchGate(fresh, path).control === 'enabled') openOrchestrateSheet(path);
+                    if (projectDispatchGate(fresh, path).control === 'enabled' && syncOff === null) openOrchestrateSheet(path);
                   });
                   return;
                 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { hasTracker, isTrackersPayload, TRACKER_CYCLE_MS } from '../lib/tracker';
+import { hasSyncingTracker, isTrackersPayload, syncCycleMs, TRACKER_CYCLE_MS } from '../lib/tracker';
 import type { TrackersPayload } from '../../../shared/types';
 
 /**
@@ -17,7 +17,12 @@ import type { TrackersPayload } from '../../../shared/types';
  *   once and getting the same stale stamp back would loop. One second is the chip's own tick, so nothing faster could show.
  * - **One cycle** from now when no github row has polled yet, and after an error — there is no stamp to aim at, and a failed read retried faster than the
  *   server polls would only hammer a server that is already not answering.
- * - **No timer at all without a github row.** One fetch, so the Settings card can say "files" or "none", and then nothing: there is no clock to follow.
+ * - **No timer at all without a github row that syncs.** One fetch, so the Settings card can say "files" or "none", and then nothing: there is no clock
+ *   to follow. A row whose sync is `off` (#17) counts as none — nothing on the server moves it, and the one thing that can, this machine's own
+ *   `POST /api/trackers/sync`, refetches through the card's own answer.
+ * - **Each repo on its own interval** (#17). "The newest stamp plus a cycle" assumed one sweep restamps every repo; with `1m` and `5m` repos it does not,
+ *   so the deadline is the EARLIEST next stamp still ahead, each row's stamp plus its own `syncCycleMs`, and a row is DUE for one base cycle after its own
+ *   cycle ends — never for its whole second cycle, which for a `5m` repo would be five minutes of asking every second.
  * - **Focus still refetches at once**, and re-arms from that answer — the pending timer is cleared first, so there is never more than one.
  *
  * A failed fetch keeps whatever is in state and raises `error`, exactly as `useBoard` does: a card that emptied itself on one failed poll would report
@@ -50,21 +55,24 @@ export interface TrackersState {
  * away instead, which is still often enough for the chip's `overdue` to stay true. The floor is only for a deadline that is near, never one already gone.
  */
 function nextDelay(data: TrackersPayload, now: number): number | null {
-  if (!hasTracker(data.projects)) return null;
-  let newest = -Infinity;
+  if (!hasSyncingTracker(data.projects)) return null;
+  let stamped = false;
+  let deadline = Infinity;
   let due = false;
   for (const p of data.projects) {
-    if (p.source !== 'github' || p.polledAt === null) continue;
+    const cycle = p.source === 'github' ? syncCycleMs(p.interval) : null;
+    if (cycle === null || p.polledAt === null) continue;
     const ms = Date.parse(p.polledAt);
     if (Number.isNaN(ms)) continue;
-    if (ms > newest) newest = ms;
+    stamped = true;
+    const next = ms + cycle + TRACKER_FETCH_SLACK_MS - now;
+    if (next > 0 && next < deadline) deadline = next;
     const age = now - ms;
-    if (p.access === 'ok' && age >= TRACKER_CYCLE_MS && age < 2 * TRACKER_CYCLE_MS) due = true;
+    if (p.access === 'ok' && age >= cycle && age < cycle + TRACKER_CYCLE_MS) due = true;
   }
-  if (newest === -Infinity) return TRACKER_CYCLE_MS;
+  if (!stamped) return TRACKER_CYCLE_MS;
   if (due) return MIN_DELAY_MS;
-  const deadline = newest + TRACKER_CYCLE_MS + TRACKER_FETCH_SLACK_MS - now;
-  if (deadline <= 0) return TRACKER_CYCLE_MS;
+  if (deadline === Infinity) return TRACKER_CYCLE_MS;
   return Math.max(deadline, MIN_DELAY_MS);
 }
 

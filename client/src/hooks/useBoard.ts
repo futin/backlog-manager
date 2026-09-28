@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { hasTracker } from '../lib/tracker';
+import { hasSyncingTracker } from '../lib/tracker';
 import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
 
 /**
@@ -86,7 +86,11 @@ export function useBoard(): BoardState {
   // had: no interval is created at all, rather than one that ticks and does
   // nothing. `projects` being a dependency means connecting a project starts
   // the interval on the next payload and disconnecting the last one stops it.
-  const tracked = hasTracker(state.projects);
+  // A repo whose sync is `off` (#17) counts as no tracker here: its cache is
+  // not moving, so re-reading it every fifteen seconds would re-read the same
+  // bytes — and turning it back on refetches through the Trackers card's own
+  // answer, then this board's next mount or focus.
+  const tracked = hasSyncingTracker(state.projects);
   useEffect(() => {
     if (!tracked) return;
     const timer = setInterval(refetch, BOARD_TRACKER_POLL_MS);

@@ -1,7 +1,7 @@
 import { elapsedSince } from './item-age';
 import { runIsLive } from './run-time';
-import { CLAIM_STALE_MS } from '../../../shared/types';
-import type { BacklogItem, OrchestratorRun, ProjectSummary, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../../../shared/types';
+import { CLAIM_STALE_MS, SYNC_INTERVALS } from '../../../shared/types';
+import type { BacklogItem, OrchestratorRun, ProjectSummary, SyncInterval, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../../../shared/types';
 
 /**
  * What the board says about a connected tracker (task-45, spec §5.5) — the
@@ -52,6 +52,19 @@ export function pollAge(polledAt: string | null, now: number): string | null {
  */
 export const TRACKER_CYCLE_MS = 17_000;
 
+/**
+ * One repo's cycle on its own interval (#17): the interval plus the same tick slack `TRACKER_CYCLE_MS` carries over the 15 s tick, so `15s` — and the
+ * `null` a fixture or an older payload carries — is exactly that constant, and every existing reading of a 15 s repo is unchanged. `null` for `off`, which
+ * has no cycle at all: nothing is due, so nothing can be late.
+ *
+ * Interval plus slack, not interval plus a whole tick, because of how the server decides "due": `lastSyncAt` is stamped before the next tick is scheduled,
+ * so the first tick at least `interval` after it is the one that syncs — the repo is restamped a sweep's length after the interval, as a 15 s one is.
+ */
+export function syncCycleMs(interval: SyncInterval | null): number | null {
+  if (interval === 'off') return null;
+  return SYNC_INTERVALS[interval ?? '15s'] + TRACKER_CYCLE_MS - SYNC_INTERVALS['15s'];
+}
+
 /** Where a poll clock stands: how much of the cycle has elapsed (0–1), the whole seconds left until the next sweep, and whether two whole cycles have gone
  *  by with no poll at all. */
 export interface PollProgress {
@@ -68,15 +81,15 @@ export interface PollProgress {
  * fresh `polledAt` arrives. `overdue` waits a second whole cycle so that one slow tick — the server's own jitter, a fetch that landed late — reads as a full
  * bar at `0s`, not as an alarm.
  */
-export function pollProgress(polledAt: string | null, now: number): PollProgress | null {
+export function pollProgress(polledAt: string | null, now: number, cycleMs: number = TRACKER_CYCLE_MS): PollProgress | null {
   if (polledAt === null || polledAt === '') return null;
   const then = Date.parse(polledAt);
   if (Number.isNaN(then)) return null;
   const elapsed = Math.max(0, now - then);
   return {
-    fraction: Math.min(elapsed / TRACKER_CYCLE_MS, 1),
-    leftS: Math.max(Math.ceil((TRACKER_CYCLE_MS - elapsed) / 1000), 0),
-    overdue: elapsed >= 2 * TRACKER_CYCLE_MS
+    fraction: Math.min(elapsed / cycleMs, 1),
+    leftS: Math.max(Math.ceil((cycleMs - elapsed) / 1000), 0),
+    overdue: elapsed >= 2 * cycleMs
   };
 }
 
@@ -84,18 +97,28 @@ export function pollProgress(polledAt: string | null, now: number): PollProgress
  * The chip's one clock for every connected repo: `pollProgress` of the NEWEST github stamp. One sweep polls every repo, so the newest stamp is when the
  * last sweep landed; an older one belongs to a repo that failed in that sweep, which the caller reads from `access` (the red pip and bar), not from its
  * age. `files` rows never carry a meaningful stamp and are skipped whatever they hold. `null` when no github row has polled yet.
+ *
+ * Since #17 a sweep no longer polls every repo, so "the newest stamp" is taken among the repos on the FASTEST interval present, and run on that interval's
+ * cycle. A `5m` repo synced a moment after a `15s` one would otherwise flip the bar to a five-minute countdown for one sweep; and a board of `5m` repos
+ * alone would read `overdue` at 34 s. `off` repos are skipped outright — their stamp is when sync stopped, not when the next one lands — and a board whose
+ * every repo is off is `null` here, which the chip reads as `sync off` before it ever asks this.
  */
-export function sweepProgress(projects: readonly Pick<TrackerProjectRow, 'source' | 'polledAt'>[], now: number): PollProgress | null {
+export function sweepProgress(projects: readonly Pick<TrackerProjectRow, 'source' | 'polledAt' | 'interval'>[], now: number): PollProgress | null {
+  let fastest = Infinity;
+  for (const p of projects) {
+    const cycle = p.source === 'github' ? syncCycleMs(p.interval) : null;
+    if (cycle !== null && cycle < fastest) fastest = cycle;
+  }
   let newest: string | null = null;
   let newestMs = -Infinity;
   for (const p of projects) {
-    if (p.source !== 'github' || p.polledAt === null) continue;
+    if (p.source !== 'github' || p.polledAt === null || syncCycleMs(p.interval) !== fastest) continue;
     const ms = Date.parse(p.polledAt);
     if (Number.isNaN(ms) || ms <= newestMs) continue;
     newest = p.polledAt;
     newestMs = ms;
   }
-  return pollProgress(newest, now);
+  return fastest === Infinity ? null : pollProgress(newest, now, fastest);
 }
 
 /** The hourly API budget as the chip and popover read it. */
@@ -171,6 +194,40 @@ export function accessReason(project: Pick<ProjectSummary, 'access' | 'detail'>)
 }
 
 /**
+ * Why nothing may be written to this project's tracker from this machine, or `null` (#17, spec §8): the sentence the server's `syncOffBlock` composes, byte
+ * for byte, and the client's ONE home of it. The client cannot import the server's composer, so both sides pin the literal in a test and a wording change
+ * goes red on both. `null` for every interval but `off`, and for a row with no repo — a files project has no sync to turn off.
+ */
+export function syncOffReason(project: Pick<ProjectSummary, 'repo' | 'interval'>): string | null {
+  if (project.interval !== 'off' || project.repo === null) return null;
+  return `sync is off for ${project.repo} — turn it on in Settings › Shared › Trackers`;
+}
+
+/**
+ * `syncOffReason` for the project an item belongs to, looked up by `projectPath` — the stable key, since two checkouts of one repo share a name but never
+ * a path. The board and the Archive both hand it to `DispatchButton` beside the run block, so the lookup lives here once rather than in each view.
+ */
+export function itemSyncOff(item: Pick<BacklogItem, 'projectPath'>, projects: readonly ProjectSummary[] | null): string | null {
+  const project = (projects ?? []).find((p) => p.path === item.projectPath);
+  return project === undefined ? null : syncOffReason(project);
+}
+
+/**
+ * The state half of a tracker's line — everything after the repo — shared by the item modal's `trackerLine` and the Trackers card's row, which print one
+ * connection the same way. Precedence: an access reason (a broken token is the more urgent reading, and the fix it names is the one owed first), then
+ * `sync off` beside the age of the last poll, then the age alone.
+ */
+export function trackerState(project: Pick<ProjectSummary, 'access' | 'detail' | 'polledAt' | 'interval'>, now: number): string {
+  const reason = accessReason(project);
+  if (reason !== null) return reason;
+  const age = pollAge(project.polledAt, now);
+  if (project.interval === 'off') return age === null ? 'sync off · never polled' : `sync off · polled ${age} ago`;
+  // Before the first successful poll there is no age to print, and printing
+  // `polled 0 s ago` would claim a read that has not happened.
+  return age === null ? 'connecting…' : `polled ${age} ago`;
+}
+
+/**
  * The whole poll-age line for one connected project, as the item modal prints it:
  * `futin/x · polled 12 s ago`, or the access reason in place of the age.
  * `null` for a project that is not a tracker — the caller filters on this
@@ -179,13 +236,7 @@ export function accessReason(project: Pick<ProjectSummary, 'access' | 'detail'>)
  */
 export function trackerLine(project: ProjectSummary, now: number): string | null {
   if (project.source !== 'github') return null;
-  const repo = project.repo ?? project.name;
-  const reason = accessReason(project);
-  if (reason !== null) return `${repo} · ${reason}`;
-  const age = pollAge(project.polledAt, now);
-  // Before the first successful poll there is no age to print, and printing
-  // `polled 0 s ago` would claim a read that has not happened.
-  return age === null ? `${repo} · connecting…` : `${repo} · polled ${age} ago`;
+  return `${project.repo ?? project.name} · ${trackerState(project, now)}`;
 }
 
 /**
@@ -253,6 +304,12 @@ export function claimControl(item: Pick<BacklogItem, 'source' | 'holder'>, now: 
  *  shell has no `useBoard` to borrow `ProjectSummary[]` from. */
 export function hasTracker(projects: readonly Pick<ProjectSummary, 'source'>[] | null): boolean {
   return (projects ?? []).some((p) => p.source === 'github');
+}
+
+/** `hasTracker` narrowed to the repos this machine still syncs (#17) — the question a re-read schedule asks, since a payload whose every tracker is `off`
+ *  has nothing on the server moving it. `hasTracker` keeps the "is there a tracker to draw" callers: an off repo is still a tracker, and still shown. */
+export function hasSyncingTracker(projects: readonly Pick<ProjectSummary, 'source' | 'interval'>[] | null): boolean {
+  return (projects ?? []).some((p) => p.source === 'github' && p.interval !== 'off');
 }
 
 /**

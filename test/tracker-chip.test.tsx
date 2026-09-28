@@ -176,6 +176,40 @@ describe('TrackerChip', () => {
   });
 });
 
+/**
+ * #17 — a repo on its own interval. `off` reads as itself on the chip and in the popover, never as `overdue`: nothing is late when nothing was asked for.
+ * A slowed repo runs its own clock, so `1m` at 40 s is a countdown, not an alarm.
+ */
+describe('sync intervals on the chip (#17)', () => {
+  it('reads sync off on the POLL meter when every repo is off', () => {
+    renderChip(payload([row({ interval: 'off', polledAt: ago(600_000) }), beta({ interval: 'off' })]));
+    const poll = meterOf(chip(), 'POLL');
+    expect(within(poll).getByText('sync off')).toBeInTheDocument();
+    expect(poll).toHaveAttribute('data-tone', 'amber');
+  });
+
+  it('follows the syncing repo when another is off, and does not call the off one failing', () => {
+    renderChip(payload([row(), beta({ interval: 'off', access: 'forbidden' })]));
+    expect(within(meterOf(chip(), 'POLL')).getByText('12s')).toBeInTheDocument();
+  });
+
+  it('runs a 5m repo on a five-minute clock', () => {
+    renderChip(payload([row({ interval: '5m', polledAt: ago(40_000) })]));
+    const poll = meterOf(chip(), 'POLL');
+    expect(within(poll).getByText('262s')).toBeInTheDocument();
+    expect(poll).toHaveAttribute('data-tone', 'green');
+  });
+
+  it('draws an off repo’s popover row as sync off and a 1m repo’s as its own countdown', async () => {
+    renderChip(payload([row({ interval: '1m', polledAt: ago(40_000) }), beta({ interval: 'off', polledAt: ago(600_000) })]));
+    await user.click(chip());
+    const [slow, off] = screen.getAllByTestId('tracker-row');
+    expect(within(slow!).getByText('22s')).toBeInTheDocument();
+    expect(within(off!).getByText('sync off')).toBeInTheDocument();
+    expect(within(off!).queryByText('overdue')).toBeNull();
+  });
+});
+
 describe('TrackerPopover', () => {
   it('opens a read-only popover with one row per connected repo', async () => {
     renderChip(payload([row(), beta(), row({ name: 'gamma', path: '/abs/gamma', source: 'files', repo: null })]));
