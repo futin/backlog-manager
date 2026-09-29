@@ -308,6 +308,7 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-dot',
     '.ui-marker',
     '.ui-progress',
+    '.ui-meter',
     '.ui-ledger',
     '.ui-seg',
     '.ui-select',
@@ -393,5 +394,33 @@ describe('guard 8 — --magenta has a reader here, and a value in every theme (r
   it('every theme block declares --magenta', () => {
     const missing = themeBlocks.filter((b) => !/--magenta: *[^;]+/.test(b.body)).map((b) => b.selector);
     expect({ blocks: themeBlocks.length, missing }).toEqual({ blocks: 5, missing: [] });
+  });
+});
+
+/**
+ * Guard 9 — the tracker strip spec's one-token rule (§1.1, §7). The strip's height and the gap the well used to leave with `margin-top` are the same
+ * 50 px, and the Runs page subtracts it to fill the viewport exactly; three literals kept in step by hand is how a page gains a scrollbar of precisely the
+ * strip's height. So the token is declared twice — the default and the phone's `0px`, where the strip is not drawn — and read in exactly two places.
+ */
+describe('guard 9 — the strip’s height and the well’s gap are one token', () => {
+  it('--main-gap is declared on :root exactly twice: the default and the narrow override', () => {
+    const decls = styleRules.filter((r) => /--main-gap:/.test(r.body));
+    expect(decls.map((r) => r.selector)).toEqual([':root', ':root']);
+    expect(decls.map((r) => /--main-gap: *([^;]+)/.exec(r.body)?.[1]?.trim())).toEqual(['50px', '0px']);
+  });
+
+  it('no .main rule declares margin-top', () => {
+    const mains = styleRules.filter((r) => r.selector === '.main');
+    expect(mains.length).toBeGreaterThan(0);
+    expect(mains.filter((r) => /margin-top/.test(r.body)).map((r) => r.body.trim())).toEqual([]);
+  });
+
+  it('.topstrip and .runs-board read the token, and nothing else does', () => {
+    const topstrip = styleRules.filter((r) => r.selector === '.topstrip').map((r) => r.body);
+    const runsBoard = styleRules.filter((r) => r.selector === '.runs-board').map((r) => r.body);
+    expect(topstrip.some((b) => /height: *var\(--main-gap\)/.test(b))).toBe(true);
+    expect(runsBoard.some((b) => /- *var\(--main-gap\)/.test(b))).toBe(true);
+    const readers = styleRules.reduce((n, r) => n + (r.body.match(/var\(--main-gap\)/g) ?? []).length, 0);
+    expect(readers).toBe(2);
   });
 });

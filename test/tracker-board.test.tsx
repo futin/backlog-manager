@@ -13,7 +13,7 @@ import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, Pr
 
 /**
  * What a tracker project looks like ON THE BOARD (task-45, spec §5.5): the
- * band's poll age, the card's untyped badge, its link-out and its assignee,
+ * band's absence of a poll line (the shell chip owns it since #228), the card's untyped badge, its link-out and its assignee,
  * the item modal's age beside the cached body — and, since task-46, a dispatch
  * control exactly like every other card's.
  *
@@ -310,21 +310,12 @@ describe('the orchestrator:queued badge', () => {
 });
 
 describe('the band', () => {
-  it('shows the poll age while access is ok', async () => {
+  it('draws no tracker line in the band — the strip chip is that reading’s home now', async () => {
+    // The tracker strip spec, §6: the poll clock is a fact about the machine, so it moved into the shell's chip, and a second copy here would be two
+    // readings of one clock on one screen. The item modal keeps its own age line (below); the band keeps nothing.
     await renderBoard([issueItem()]);
-    expect(screen.getByTestId('tracker-line')).toHaveTextContent(/futin\/x · polled \d+ s ago/);
-  });
-
-  it('shows the access reason in place of the age when access is not ok', async () => {
-    await renderBoard([issueItem()], projects({ access: 'no-token', polledAt: null }));
-    const line = screen.getByTestId('tracker-line');
-    expect(line).toHaveTextContent('BM_GITHUB_TOKEN');
-    expect(line).not.toHaveTextContent('polled');
-  });
-
-  it('says nothing at all when no project is a tracker', async () => {
-    await renderBoard([item({})], [projects()[0]]);
     expect(screen.queryByTestId('tracker-line')).toBeNull();
+    expect(screen.queryByText(/polled \d+ s ago/)).toBeNull();
   });
 });
 
@@ -336,8 +327,8 @@ describe('the item modal', () => {
     await waitFor(() => expect(screen.getByText('the cached issue body')).toBeInTheDocument());
     // The age says how old the cached copy is — the point of drawing it beside
     // a body that was not fetched from GitHub on open (spec §5.5). Scoped to
-    // the dialog: the band prints the same line, and an unscoped query would
-    // pass on the band's copy while the modal drew nothing.
+    // the dialog: the band printed the same line before #228, and an unscoped
+    // query would pass on any other copy while the modal drew nothing.
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText(/futin\/x · polled \d+ s ago/)).toBeInTheDocument();
 

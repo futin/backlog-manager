@@ -37,6 +37,12 @@ export { SECTIONS, type Section };
 interface Props {
   section: Section;
   onChange: (s: Section) => void;
+  /**
+   * The tracker chip's narrow home (§8.0): drawn in the phone bar between the wordmark and ☰, because below 700 px the shell strip — its desktop home —
+   * is not drawn at all. `App` passes it only while `useNarrow` says narrow and draws it in the strip otherwise, so the chip is one element in one
+   * place, never two copies with CSS hiding one. Ignored at desktop width: the rail has no bar there to put it in.
+   */
+  chipSlot?: ReactNode;
 }
 
 /**
@@ -58,7 +64,7 @@ interface Props {
  * belongs beside the board, in the board toolbar, not in the switch that
  * decides which section is showing.
  */
-export function SideRail({ section, onChange }: Props) {
+export function SideRail({ section, onChange, chipSlot }: Props) {
   const narrow = useNarrow();
   const [menuOpen, setMenuOpen] = useState(false);
   const hidden = useRailHidden(narrow, menuOpen);
@@ -100,6 +106,7 @@ export function SideRail({ section, onChange }: Props) {
       {narrow ? (
         <div className="rail-bar">
           {brand}
+          {chipSlot}
           <button type="button" className="rail-menu" aria-label="Menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
             ☰
           </button>

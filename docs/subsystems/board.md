@@ -49,6 +49,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | rail wordmark, card foot, column header, run chip, Runs rows, modal facts       |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped\|queued\|queued-stale`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
 | `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
+| `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block |
 | `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
 | `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal` — the only modal in the app                                         |
 | `FormSheet`            | `.ui-form-sheet`  | `label`, `title`, `steps?`, `footer`, `children`, `onClose`                                      | `LaunchSheet`, `OrchestrateSheet`                                               |
@@ -233,15 +234,23 @@ the shell's narrow-Settings exception away.
 
 ### A connected tracker
 
-Three readings and no new surface (task-45, [spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md) §5.5), all derived in `lib/tracker.ts` and
-merely rendered by the components:
+One shell-level chip and two item readings (task-45, [spec](../superpowers/specs/2026-09-17-tracker-backed-backlog-design.md) §5.5; the chip since #228,
+[spec](../superpowers/specs/2026-09-28-tracker-header-strip-design.md)), all derived in `lib/tracker.ts` and merely rendered by the components:
 
-- **The band** prints one line per connected project — `futin/x · polled 12 s ago`, with the access reason in place of the age when the connection is not `ok`.
-  The band already carries the run chip, so it is the board's status line; a freshness fact about a whole project must not be repeated on forty cards.
+- **The tracker chip** (`TrackerChip`) is the connection's one freshness reading, and it belongs to the shell rather than to any page: a poll is a fact about
+  the whole tracker, so it is drawn once, in the strip above the well (`.topstrip`, `var(--main-gap)` tall) — or, below 700 px, where the strip does not exist,
+  in the rail's phone bar beside ☰, through `SideRail`'s `chipSlot`. `App` builds the one element and hands it to exactly one of those two homes. The chip is
+  drawn only while `hasTracker` finds a github row in the `/api/trackers` payload, and shows a status pip, the platform, and two `Meter`s: POLL (the sweep's
+  countdown, `sweepProgress` — the newest github stamp against `TRACKER_CYCLE_MS`, reading `overdue` past two cycles and the access reason when a row is not
+  `ok`) and API (`apiUsage` — the rate limit's used share, amber from 60 %, red from 90 %). Clicking it opens `TrackerPopover`, a read-only panel with one row
+  per connected repo (its own `pollProgress` countdown) and the API block (`N of M left · resets HH:MM`, `resetClock`), or the `BM_GITHUB_TOKEN` note when no
+  token is set. It has no buttons and no links; Escape closes it through `useDialogEscape`, as do a pointerdown outside and a section change.
+- **The band** carries no tracker reading any more — it used to print one `polled 12 s ago` line per project, and the chip is that reading's home now.
 - **The card** gains three things: an `untyped` marker (amber, like `stale` — both mark something a person must do before the board can be trusted), the
   assignee's login on the foot line (NOT on the live strip — it records who owns the issue, not who is working it right now; that is the claim's job), and a
   link-out to the issue that stops its click, and its Enter and Space, from opening the modal behind it — the same two-half guard `DispatchButton` uses.
-- **The item modal** prints the same line under the title, because the body it shows came out of the poller's cache rather than from GitHub on open.
+- **The item modal** prints its project's `polled 12 s ago` line under the title, because the body it shows came out of the poller's cache rather than from
+  GitHub on open — the one place a per-project poll age is still drawn, since it qualifies that one body.
 
 **A claim control in the item modal (#225).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a live claim whose
 session the board dispatched, `'release'` for any other live claim that is not a run's, and `null` otherwise — a files item, no holder, a run-held claim, a
@@ -279,8 +288,12 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker: a tracker's items move on the server's
-  poll clock, which this tab has no event for, and the band renders the poll age as a live reading. No tracker registered means no interval at all.
-- `hooks/useTrackers.ts` — mount and window focus only, for the Shared Settings Trackers card; the board is the surface that polls.
+  poll clock, which this tab has no event for. No tracker registered means no interval at all.
+- `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared
+  Settings Trackers card through `useTrackersContext`. Mount and window focus, plus a timer on the server's poll clock: `nextDelay` arms the next read
+  `TRACKER_FETCH_SLACK_MS` after the newest stamp's cycle ends, drops to a 1 s floor while any `ok` repo of the same sweep is still due (the server stamps repos
+  one after another, so the newest stamp lands before the sweep does), and waits one whole cycle — never the floor — once the newest deadline has passed with
+  nothing due (overdue or failing stamps do not move) and after an error. No github row means no timer at all.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.

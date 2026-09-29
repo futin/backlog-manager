@@ -404,13 +404,15 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      readings of one fact now, off one payload. */
   const hasLive = matched.some((i) => liveRank(i, runStageFor(i)) < 2);
   /* A registered tracker project is the board's second reason to hold a clock
-     (task-45). The band prints a POLL AGE, which goes stale with no event in
-     this tab exactly the way an in-progress card's elapsed does — and it goes
-     stale faster: the server polls every fifteen seconds, so a minute-long
-     period would show one number for four cycles. Hence one clock, running
-     faster while a tracker is registered, rather than a second interval beside
-     the first: every reading on this board is aged against one instant, which
-     is the rule `now` exists to keep. */
+     (task-45). The item modal prints a POLL AGE (`trackerLineFor` below), which
+     goes stale with no event in this tab exactly the way an in-progress card's
+     elapsed does — and it goes stale faster: the server polls every fifteen
+     seconds, so a minute-long period would show one number for four cycles.
+     Hence one clock, running faster while a tracker is registered, rather than
+     a second interval beside the first: every reading on this board is aged
+     against one instant, which is the rule `now` exists to keep. The band's own
+     poll-age lines left for the shell's tracker chip (the tracker strip spec,
+     §6), and this arm stays anyway: the modal's age is still read off `now`. */
   const tracked = hasTracker(projects);
   const now = useNow(hasLive || tracked, tracked ? 5_000 : 60_000);
 
@@ -462,15 +464,9 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
       ? `${visible.length} ${countWord} across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
       : `${visible.length} ${countWord}`;
 
-  /* One line per CONNECTED project — the poll age, or the access reason in
-     its place when the connection is not `ok` (spec §5.5). The band is where
-     the run chip lives, so it is already this page's status line, and a
-     tracker's freshness is exactly that kind of fact: not about any one card,
-     and wrong to repeat on forty of them.
-     Derived by `lib/tracker.ts` and merely rendered here, the same discipline
-     every other board derivation follows. `null` for every files project, so
-     a board with no tracker prints exactly what it printed before. */
-  const trackerLines = registered.map((p) => trackerLine(p, now)).filter((line): line is string => line !== null);
+  /* The band printed one `polled 12 s ago` line per connected project from task-45 until the tracker strip: that clock is a fact about the machine,
+     not about this section, so it lives in the shell's `TrackerChip` now — on every section, with a line timer per repo — and a copy here would be two
+     readings of one clock on one screen. The item modal's own age line stays (`trackerLineFor` below). */
 
   const missing = registered.filter((p) => p.missing);
   const warnings = [...missing.map((p) => `unreachable: ${p.name} — no backlog/ at ${p.path}`), ...(index?.errors ?? [])];
@@ -638,19 +634,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
           19/500 title over the 13 px count line, then right-aligned the run
           chip, the 36 px search field, the three filter chips and — last, and
           the page's ONE ink chip — Orchestrate. */}
-      <Band
-        title="Board"
-        sub={
-          <>
-            {countLine}
-            {trackerLines.map((line) => (
-              <span className="board-band-tracker" key={line} data-testid="tracker-line">
-                {line}
-              </span>
-            ))}
-          </>
-        }
-      >
+      <Band title="Board" sub={countLine}>
         {/* Left of the controls (spec §3.2). Everything the Board still says
             about runs, in one control that opens Runs; absent entirely when
             the payload carries no run and no starting entry. */}
@@ -865,8 +849,8 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
           onDispatch={() => openLaunchSheet(open)}
           runBlock={runBlockFor(open)}
           reverify={reverifyAgents}
-          /* The same line the band prints, for the project THIS item belongs
-             to: the modal shows a body that came out of the poller's cache, so
+          /* The poll-age line for the project THIS item belongs to (the band
+             printed it too until #228 moved that reading to the strip chip): the modal shows a body that came out of the poller's cache, so
              it says how old that cache is right beside it (spec §5.5). Derived
              here rather than in the modal because this view owns the clock and
              the project list, exactly as it does for `runBlock` and `now`. */

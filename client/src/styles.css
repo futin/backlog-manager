@@ -34,6 +34,9 @@
 
 :root {
   --body-pad: 24px;
+  /* The shell strip's height, and the gap the well leaves above itself — ONE token, read by `.topstrip` and subtracted by `.runs-board`, `0px` in
+     the 700 px block where the strip is not drawn (design guard 9; the tracker strip spec, §1.1). The dashboard's own figure. */
+  --main-gap: 50px;
   /* Split into three named edges, because the card's face is padded 14/16/12
      (DESIGN.md §8.3): the top edge is deeper than the bottom, since the title
      sits under a live strip that may or may not be there and the marker row
@@ -214,12 +217,22 @@ code, kbd, samp, pre { font-family: inherit }
   background: none; color: var(--ink); font-size: 15px; cursor: pointer;
 }
 
-/* .main sits on --board with a 24 px top margin and a 24 px top-LEFT radius —
-   the one corner the rail meets, which is the design's app-shell inset drawn
-   where it can actually be seen (§8.0). */
+/* The column right of the rail: the shell strip over the well. Painted --strip — the rail's paper — so the rail and the strip read as one white L
+   around the well, and so the well's 24 px top-left radius is drawn against white. Before the strip, `.main` carried a 24 px top margin for that
+   curve, but `body` paints --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
+.maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--strip) }
+/* The shell strip (§8.0): what is true of the machine wherever you stand — today the tracker chip, right-aligned. Its height is `--main-gap`, and it
+   keeps that height when empty, so the well's top edge never moves with whether a tracker is connected. */
+.topstrip {
+  height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 var(--body-pad);
+}
+/* The well: --board with a 24 px top-LEFT radius — the one corner the rail and the strip meet, the design's app-shell inset (§8.0), visible now that
+   the strip above it is white. No top margin: the strip IS the gap, one token (guard 9). `body` stays --board, so below the fold and behind a short
+   section the page is still the well's colour, which is what the rail's own bottom edge expects. */
 .main {
   flex: 1; min-width: 0; padding: var(--body-pad);
-  background: var(--board); margin-top: 24px; border-top-left-radius: 24px;
+  background: var(--board); border-top-left-radius: 24px;
 }
 
 /* Phone: the rail lies down into a top bar — wordmark left, ☰ right — with the
@@ -229,6 +242,11 @@ code, kbd, samp, pre { font-family: inherit }
    written by SideRail, which also pins it open while the menu is (the menu
    hangs off the bar, so a bar that slid away would take it along). */
 @media (max-width: 700px) {
+  /* No strip on a phone: the chip moves into the rail bar (App picks its home from `useNarrow`), so the gap is zero and the Runs page's calc holds. */
+  :root { --main-gap: 0px }
+  .topstrip { display: none }
+  /* `.main` goes back to being the shell column's direct flex item, as it was before the strip. */
+  .maincol { display: contents }
   .shell { flex-direction: column }
   .rail {
     flex: none; width: auto; height: auto; align-self: stretch;
@@ -238,13 +256,74 @@ code, kbd, samp, pre { font-family: inherit }
     transition: transform .2s ease;
   }
   .rail[data-hidden="true"] { transform: translateY(-100%) }
-  .rail-bar { display: flex; align-items: center }
+  /* Brand, the tracker chip when there is one, then ☰ — which keeps `margin-left: auto`, so the chip sits beside it and needs no margin of its own. */
+  .rail-bar { display: flex; align-items: center; gap: 8px }
   .rail-brand { margin-bottom: 0; padding: 0; font-size: 17px }
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
   .rail-link { min-height: 44px; border-radius: 12px }
   .rail-sublink { min-height: 40px }
-  .main { margin-top: 0; border-top-left-radius: 0 }
+  .main { border-top-left-radius: 0 }
+}
+
+/* ---------------------------------------------- Tracker chip
+   §8.0's shell strip, and the tracker strip spec §2: the dashboard's `.acct` pill applied to the connected tracker — 36 px bare pill, 26 px avatar,
+   12.5/600 login, two `Meter`s and an 11 px caret (the dashboard's 9 px caret is under guard 3's floor). Transparent at rest, --strip-hi on hover and
+   while its popover is open: the same fill the rail's active row uses, so "this is the thing you are looking at" reads one way across the shell.
+   The meters' look is `Meter`'s, in the primitives block; this section only lays them out. */
+.tracker-chip-root { position: relative; flex: none }
+.tracker-chip {
+  display: inline-flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px 0 5px;
+  border: 0; border-radius: 999px; background: none; color: var(--ink); cursor: pointer; font: inherit;
+  transition: background .15s;
+}
+.tracker-chip:hover, .tracker-chip[aria-expanded="true"] { background: var(--strip-hi) }
+.tracker-av {
+  position: relative; flex: none; width: 26px; height: 26px; border-radius: 999px; background: var(--strip-hi);
+  display: grid; place-items: center; font-size: 12px; font-weight: 600; color: var(--ink);
+}
+/* Two states only: amber for no token, red when some repo's access is not ok. No pip is the "all healthy" reading — a green dot on every healthy
+   screen would be a signal that never changes, which is decoration pretending to be status. The ring is the strip's paper so the pip reads as cut
+   out of the avatar rather than stuck on it. */
+.tracker-pip { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--strip) }
+.tracker-pip[data-tone="amber"] { background: var(--amber) }
+.tracker-pip[data-tone="red"] { background: var(--red) }
+.tracker-name { font-size: 12.5px; font-weight: 600; white-space: nowrap }
+/* At guard 3's 11 px label, `POLL overdue` is wider than the meter's 56 px, so the chip's meters grow to their content rather than wrapping — a
+   two-line head would change the pill's height the moment the clock goes overdue. The bar lengthens with them, which is only ever in a warning state.
+   The child combinator, not `.ui-meter`, because guard 7 lets a page lay a primitive out only from the page's own class. */
+.tracker-meters { display: flex; gap: 10px }
+.tracker-meters > * { min-width: max-content }
+.tracker-caret { font-size: 11px; color: var(--ink3); transition: transform .15s }
+.tracker-chip[aria-expanded="true"] .tracker-caret { transform: rotate(180deg) }
+/* 420 px, not the dashboard's 372: a repo name, a 120 px timer and its seconds do not fit 372 without wrapping. The dialogs' own shadow, so a floating
+   surface lifts one way everywhere. */
+.tracker-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 420px;
+  padding: 14px 16px; border-radius: 16px; background: var(--strip); color: var(--ink);
+  box-shadow: 0 24px 64px var(--shadow2); text-align: left;
+}
+.tracker-pop-id { display: flex; align-items: center; gap: 10px; margin-bottom: 12px }
+.tracker-pop-who { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
+.tracker-pop-sub { font-size: 12px; color: var(--ink3) }
+.tracker-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) 120px; align-items: center; gap: 12px;
+  padding: 6px 0; border-top: 1px solid var(--hairline);
+}
+.tracker-row-text { display: flex; flex-direction: column; gap: 1px; min-width: 0 }
+.tracker-row-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.tracker-row-repo { font-size: 12px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.tracker-pop-api {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink2);
+}
+.tracker-pop-note { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.45 }
+@media (max-width: 700px) {
+  /* On a phone the chip lives in the rail bar, and the narrow `.rail` is a scroll container (`overflow-x: hidden` computes `overflow-y` to auto), so an
+     absolute popover is clipped to the 53 px bar and paints nothing — and right-anchored under a chip beside ☰ it would start off-screen besides. Fixed
+     escapes the clip. `top` goes back to auto — the base rule's `100%` would now mean the viewport's height — so the panel keeps its static position just
+     under the chip, and it spans the viewport less the rail's own 12 px side padding. Its height is capped so a long repo list scrolls inside it. */
+  .tracker-pop { position: fixed; top: auto; margin-top: 6px; left: 12px; right: 12px; width: auto; max-height: 70vh; overflow-y: auto }
 }
 
 /* ---------------------------------------------- Board section
@@ -1381,8 +1460,10 @@ code, kbd, samp, pre { font-family: inherit }
    .shell carries `zoom: var(--font-scale, 1)`, which leaves 100vh resolving
    against the UNZOOMED viewport, so at 120% a plain 100vh box is drawn 20%
    taller than the screen. The two --body-pad gutters come off because .main
-   pads the page above and below this box. */
-.runs-board { height: calc(100vh / var(--font-scale, 1) - var(--body-pad) * 2) }
+   pads the page above and below this box, and --main-gap because the shell
+   strip sits above .main (guard 9): without it the page overflows by exactly
+   the strip's height. */
+.runs-board { height: calc(100vh / var(--font-scale, 1) - var(--body-pad) * 2 - var(--main-gap)) }
 
 /* Runs › Watchdog — the sweeper's own page (WatchdogMonitor.tsx, task-18,
    rebuilt as a console by task-26, redrawn as a page by task-38). One column:
@@ -2509,11 +2590,10 @@ code, kbd, samp, pre { font-family: inherit }
 .ui-marker-queued { color: var(--ink2) }
 .ui-marker-queued-stale { color: var(--ink3) }
 
-/* task-45's two tracker readings outside the card: the board band's poll-age
-   clause, and the same line under the item modal's title. Both are 12/400
-   --ink3, the sub-line ink this design already uses for anything that is
-   context rather than content (§8.1). */
-.board-band-tracker { margin-left: 10px; color: var(--ink3) }
+/* task-45's tracker reading outside the card: the poll-age line under the
+   item modal's title, 12/400 --ink3, the sub-line ink this design already uses
+   for anything that is context rather than content (§8.1). The band's matching
+   clause left for the shell's tracker chip (the tracker strip spec, §6). */
 .item-body-tracker { margin: -4px 0 12px; font-size: 12px; font-weight: 400; color: var(--ink3) }
 
 /* ProgressRow — §7's progress row: name + value, a 10 px bar, a caption under.
@@ -2535,6 +2615,20 @@ code, kbd, samp, pre { font-family: inherit }
    which §12.1 forbids and which would recolour every meter on the board. */
 .ui-progress-fill-warn { background: var(--amber) }
 .ui-progress-caption { font-size: 11px; font-weight: 400; color: var(--ink3) }
+
+/* Meter — the strip chip's line meter (§8.0 shell strip, §7's meter row at chip size; the tracker strip spec, §3). Label over value, both 11 px — guard 3's
+   floor, where the dashboard draws 9.5 — and a 3.5 px flat --steel track. The fill has NO transition: it advances once a second, and a tween would draw
+   the clock a second late forever. Tone is the root's `data-tone`, one of the three accents every theme declares. */
+.ui-meter { display: inline-flex; flex-direction: column; gap: 3px; flex: none }
+/* The head may wrap: a popover row's value can be a whole access sentence in a 120 px meter, and it breaks onto its own lines there rather than
+   running out of the track. The chip keeps its meters on one line by letting them grow instead (`.tracker-meters`). */
+.ui-meter-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 6px }
+.ui-meter-label { font-size: 11px; font-weight: 500; color: var(--ink3) }
+.ui-meter-value { font-size: 11px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums }
+.ui-meter-track { height: 3.5px; border-radius: 4px; background: var(--steel); overflow: hidden }
+.ui-meter-fill { display: block; height: 100%; border-radius: 4px; background: var(--green) }
+.ui-meter[data-tone="amber"] .ui-meter-fill { background: var(--amber) }
+.ui-meter[data-tone="red"] .ui-meter-fill { background: var(--red) }
 
 /* Ledger — "every table scrolls inside its own sheet" (§8.4). This element
    owns the overflow box; without it a wide table scrolls the PAGE and takes
