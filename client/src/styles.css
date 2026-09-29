@@ -258,6 +258,17 @@ code, kbd, samp, pre { font-family: inherit }
   .rail[data-hidden="true"] { transform: translateY(-100%) }
   /* Brand, the tracker chip when there is one, then ☰ — which keeps `margin-left: auto`, so the chip sits beside it and needs no margin of its own. */
   .rail-bar { display: flex; align-items: center; gap: 8px }
+  /* The bar has no slack (#229). At 375 px its content box is 351 px, and brand 83.8 + chip 224.3 + ☰ 36 + two gaps came to 360.1: 9 px over. The chip
+     is `flex: none`, its meters are pinned to `max-content` and the brand cannot go below its min-content, so the whole deficit landed on ☰ — measured
+     26.9 px wide, a thumb target already eaten — and once ☰ hit its own min-content the row overflowed the `overflow-x: hidden` rail and ☰ was cut off
+     (POLL `overdue` put it 0.9 px past the edge; a 19-character login, entirely off-screen). So ☰ no longer yields: it stays 36 × 36. */
+  .rail-menu { flex: none }
+  /* And the variable-width reading leaves the phone's bar instead. The login, not a meter: its width tracks the account (GitHub allows 39 characters),
+     so no fixed trim fixes it, and it is the least load-bearing reading here — the avatar carries its initial, the button's `aria-label` names it, and
+     the popover's `.tracker-pop-who` prints it in full one tap away. Scoped to `.tracker-chip`, the button, because the popover reuses `.tracker-name`;
+     and only when meters follow it, because the no-token chip renders none — it is avatar, label and caret with room to spare, and "no token" is the one
+     login text that is itself the message. With both rules the worst case (POLL `overdue`, API `100%`) leaves 28.7 px of slack, whatever the login. */
+  .rail-bar .tracker-chip .tracker-name:has(+ .tracker-meters) { display: none }
   .rail-brand { margin-bottom: 0; padding: 0; font-size: 17px }
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */

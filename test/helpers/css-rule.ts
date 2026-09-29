@@ -59,3 +59,32 @@ export function ruleBlocks(css: string, selector: string): string[] {
     from = close + 1;
   }
 }
+
+/**
+ * The body of every `atRule { ... }` block, in source order — nested rules included.
+ *
+ * `ruleBlocks` captures a flat selector's own `{...}` body by scanning to the very next `}` after its `{` — correct for one rule, but wrong for an at-rule
+ * that wraps several: the next `}` after `@media (...) {`'s own opening brace belongs to the FIRST nested rule, not to the media block itself. So this
+ * counts brace depth instead. It began local to run-track-style.test.ts (the reduced-motion carve-out) and moved here when rail-bar-style.test.ts became its
+ * second caller, for the reason `ruleBlock`'s own docblock gives: two copies of a parser this fiddly drift the moment one of them is fixed.
+ */
+export function mediaBlocks(source: string, atRule: string): string[] {
+  const found: string[] = [];
+  let from = 0;
+  for (;;) {
+    const at = source.indexOf(atRule, from);
+    if (at === -1) return found;
+    const open = source.indexOf('{', at);
+    if (open === -1) return found;
+    let depth = 1;
+    let i = open + 1;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '{') depth++;
+      else if (source[i] === '}') depth--;
+      i++;
+    }
+    if (depth !== 0) return found; // unbalanced — bail rather than mis-slice
+    found.push(source.slice(open + 1, i - 1));
+    from = i;
+  }
+}
