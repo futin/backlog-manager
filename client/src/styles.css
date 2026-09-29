@@ -662,6 +662,22 @@ code, kbd, samp, pre { font-family: inherit }
    here, because anyone putting the strip back into caps has to put this line
    back with it. */
 .board-card-live-mark { flex: none; white-space: nowrap }
+/* The queued band (DESIGN.md §8.3): the orchestrator:queued label, moved up from the marker row where a plain word got lost among the others. The live
+   strip's own band — height, inline padding, type — so the two read as one family across a column, and none of its paint: `--fill-live` under the hatch
+   says "somebody is on this right now", and the label is a plan, never a claim (docs/subsystems/invariants.md).
+   An INK band, `--ink2` under `--strip` text, not a lighter surface: the first cut used `--strip-hi`, and on daylight that is #f2f2f1 against a #ffffff
+   card — a band nobody could see, which was the whole complaint the move answered. Inverting the ink stays neutral (no accent spent on a plan) and holds
+   5.1:1 on daylight and 6.8–7.3:1 on the four dark palettes for 11 px type.
+   Stale steps back to `--hairline2` under `--ink2` rather than inverting at `--ink3`: white on daylight's #a0a0a0 is 2.6:1, and the lighter band keeps
+   3.6–4.3:1 across all five while still standing off the card. Dimmed, never recoloured, as the marker was: a leftover label is untidy, not wrong, and the
+   warning inks belong to `stale`/`untyped`, which mark an item the board is wrong about until someone acts. */
+.board-card-queued {
+  display: flex; align-items: center; gap: 8px;
+  height: 24px; padding: 0 var(--card-pad-x);
+  background: var(--ink2); color: var(--strip);
+  font-size: 11px; font-weight: 500;
+}
+.board-card-queued[data-state="stale"] { background: var(--hairline2); color: var(--ink2) }
 
 /* ---------------------------------------------- Settings section
    The page is a band over two hand-balanced columns of cards (DESIGN.md §8.6).
@@ -2584,11 +2600,6 @@ code, kbd, samp, pre { font-family: inherit }
    it — and no rule of its own beyond the colour, because a marker is a weight
    and an ink and nothing else (§8.3). */
 .ui-marker-untyped { color: var(--amber) }
-/* The orchestrator:queued label (the orchestrator:queued spec, §4.2). A plan, not a claim and not a warning, so no accent either way: `--ink2` while a live
-   run holds the project, one step dimmer at `--ink3` once none does — dimmed rather than recoloured, because a stale label is a leftover to tidy, and the
-   row's one warning ink belongs to `stale`/`untyped`, which mark an item the board is wrong about until someone acts. */
-.ui-marker-queued { color: var(--ink2) }
-.ui-marker-queued-stale { color: var(--ink3) }
 
 /* task-45's tracker reading outside the card: the poll-age line under the
    item modal's title, 12/400 --ink3, the sub-line ink this design already uses

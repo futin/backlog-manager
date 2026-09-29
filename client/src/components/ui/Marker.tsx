@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type MarkerTone = 'groomed' | 'kind' | 'done' | 'stale' | 'untyped' | 'queued' | 'queued-stale';
+export type MarkerTone = 'groomed' | 'kind' | 'done' | 'stale' | 'untyped';
 
 /**
  * Marker — the word on a card's marker row (.claude/DESIGN.md §8.3).
@@ -11,8 +11,9 @@ export type MarkerTone = 'groomed' | 'kind' | 'done' | 'stale' | 'untyped' | 'qu
  * the only one that takes an accent; `kind` and `done` are `--ink3` and
  * `stale` is the one warning the row can carry.
  *
- * `title` is optional and exists for the `queued · stale` marker (the orchestrator:queued spec, §4.2), the one marker whose word cannot say what to do about
- * it: the title names the way out. Every other marker is self-explanatory and passes none, so no empty `title` attribute is rendered for them.
+ * `title` is optional, and no marker passes one today: it existed for the `queued · stale` marker, which became the card's queued band
+ * (`queuedStripFor`, ItemCard.tsx). Kept because it is the one way a marker whose word cannot say what to do about it names the way out, and a caller
+ * that passes none renders no empty `title` attribute.
  */
 export function Marker({ children, tone, title }: { children: ReactNode; tone: MarkerTone; title?: string }) {
   return (

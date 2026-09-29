@@ -47,7 +47,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | rail wordmark, card foot, column header, run chip, Runs rows, modal facts       |
-| `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped\|queued\|queued-stale`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
+| `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
 | `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
 | `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block |
 | `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
@@ -278,8 +278,11 @@ verbatim, and on success shows `claim released` and calls `onReleased` so the Bo
 **A fourth card reading, `queued` (task-52, [spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md) §4.2).** An issue carrying the
 `orchestrator:queued` label maps to `BacklogItem.queued`, and `queuedReading` (`lib/tracker.ts`) turns it into `'live' | 'stale' | null`: `'live'` while the
 item's project has a local run that is `paused`, or `running` and not crashed, or a live remote run for the same repo; `'stale'` when the label is there and no
-live run holds the project — a crash, a run that died on another machine without its Stop, a label added by hand. The card draws the `Marker` tone `queued`
-for the first and a dimmed `queued-stale` (`queued · stale`, its title saying no live run holds it and where to remove it) for the second. It is a reading, never
+live run holds the project — a crash, a run that died on another machine without its Stop, a label added by hand. The card draws it as a band across its
+top edge, `.board-card-queued` (`queuedStripFor`, `ItemCard.tsx`): the live strip's geometry as a neutral ink band (`--ink2` fill, `--strip` text), reading `queued` for the first and a
+lighter `queued · stale` on `--hairline2` (its title saying no live run holds it and where to remove it) for the second. Any live strip wins over it — a run stage past `pending`,
+or the claim's `grooming`/`executing` during the poll the label takes to clear — and it is outside `liveRank`'s live set, so a queued card neither floats up its
+column nor counts as In progress. It is a reading, never
 a block: dispatch, the Orchestrate sheet and every gate ignore it, because the label is a plan and the claim is the only exclusion.
 
 **Dispatch is drawn exactly as it is for a files item (task-46).** Task-45 hid the control here, because a spawned session would have run the file-writing

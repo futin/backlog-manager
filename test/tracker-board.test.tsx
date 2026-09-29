@@ -6,10 +6,11 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
+import { queuedStripFor, type LiveBar } from '../client/src/components/board/ItemCard';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { BOARD_TRACKER_POLL_MS } from '../client/src/hooks/useBoard';
 import { TRACKER_POLL_MS } from '../server/src/tracker/poller.service';
-import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
+import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
 
 /**
  * What a tracker project looks like ON THE BOARD (task-45, spec §5.5): the
@@ -249,11 +250,9 @@ describe('the card’s untyped, link-out and assignee readings', () => {
   });
 });
 
-describe('the orchestrator:queued badge', () => {
-  /** A local run of the tracker project with an empty queue — it holds the
-   *  project, which is all the badge asks, and claims no card, so nothing else
-   *  on the card moves. Stamps are relative to the clock the assertion runs
-   *  under. */
+describe('the orchestrator:queued strip', () => {
+  /** A local run of the tracker project — it holds the project, which is all the strip asks. An empty queue by default, so it claims no card and nothing
+   *  else on the card moves; the precedence cases hand it an entry for the card. Stamps are relative to the clock the assertion runs under. */
   function trackerRun(over: Partial<OrchestratorRunsPayload['runs'][number]>): OrchestratorRunsPayload {
     const now = new Date().toISOString();
     return {
@@ -278,22 +277,35 @@ describe('the orchestrator:queued badge', () => {
     };
   }
 
-  it('reads `queued` while a live run holds the project', async () => {
+  /** The run's queue entry for the card, at `stage` — only the fields the board reads to find and paint it. */
+  function queueEntry(stage: RunStage): RunQueueItem {
+    return { id: '#31', title: 'an issue', stage, stageAt: { dispatched: new Date().toISOString() } } as unknown as RunQueueItem;
+  }
+
+  const strip = (title: string): HTMLElement | null => card(title).querySelector('.board-card-queued');
+
+  it('draws a live `queued` strip across the top while a live run holds the project, and no marker for it', async () => {
     await renderBoard([issueItem({ queued: true })], projects(), trackerRun({}));
-    await waitFor(() => expect(within(card('an issue')).getByText('queued')).toBeInTheDocument());
-    expect(within(card('an issue')).queryByText('queued · stale')).toBeNull();
+    await waitFor(() => expect(strip('an issue')).not.toBeNull());
+    expect(strip('an issue')).toHaveAttribute('data-state', 'live');
+    expect(strip('an issue')).toHaveTextContent(/^queued$/);
+    expect(card('an issue').querySelector('.board-card-live')).toBeNull();
+    expect(within(card('an issue')).getByTestId('marker-row')).not.toHaveTextContent('queued');
   });
 
-  it('reads a dimmed `queued · stale`, titled with the way out, when no live run does', async () => {
+  it('draws a dimmed `queued · stale` strip, titled with the way out, when no live run does', async () => {
     const crashed = new Date(Date.now() - 20 * 60_000).toISOString();
     await renderBoard([issueItem({ queued: true })], projects(), trackerRun({ updatedAt: crashed, fresh: false }));
-    const badge = await within(card('an issue')).findByText('queued · stale');
-    expect(badge).toHaveAttribute('title', expect.stringContaining('no live run holds it'));
-    expect(badge.getAttribute('title')).toContain('GitHub');
+    await waitFor(() => expect(strip('an issue')).not.toBeNull());
+    const band = strip('an issue') as HTMLElement;
+    expect(band).toHaveAttribute('data-state', 'stale');
+    expect(band).toHaveTextContent(/^queued · stale$/);
+    expect(band).toHaveAttribute('title', expect.stringContaining('no live run holds it'));
+    expect(band.getAttribute('title')).toContain('GitHub');
     expect(within(card('an issue')).queryByText('queued')).toBeNull();
   });
 
-  it('reads `queued` when the live run holding the project is another machine’s', async () => {
+  it('draws the live strip when the live run holding the project is another machine’s', async () => {
     // Spec §5's card case the plan's list left out, and the one that pins
     // BoardView's wiring rather than the derivation: the board must hand
     // `queuedReading` the REMOTE runs too, or every other machine's live queue
@@ -301,13 +313,72 @@ describe('the orchestrator:queued badge', () => {
     const local = trackerRun({});
     const remote = { ...local.runs[0], repo: 'futin/x', remote: true as const };
     await renderBoard([issueItem({ queued: true })], projects(), { runs: [], starting: [], remote: [remote] });
-    await waitFor(() => expect(within(card('an issue')).getByText('queued')).toBeInTheDocument());
+    await waitFor(() => expect(strip('an issue')).toHaveAttribute('data-state', 'live'));
   });
 
-  it('draws neither for an item without the label', async () => {
+  it('draws no strip for an item without the label', async () => {
     await renderBoard([issueItem()], projects(), trackerRun({}));
-    expect(within(card('an issue')).queryByText('queued')).toBeNull();
-    expect(within(card('an issue')).queryByText('queued · stale')).toBeNull();
+    expect(strip('an issue')).toBeNull();
+    expect(within(card('an issue')).queryByText(/queued/)).toBeNull();
+  });
+
+  it('gives way to the claim: a claimed item still carrying the label (one poll of cache lag) reads `executing`', async () => {
+    // The claim removes the label, but the cache can hold both facts for a poll. The live claim is the truth then — the label is a plan, never a claim.
+    await renderBoard([issueItem({ queued: true, started: daysAgoStamp(0), phase: 'execute' })], projects(), trackerRun({}));
+    await waitFor(() => expect(card('an issue').querySelector('.board-card-live')).toHaveTextContent('executing'));
+    expect(strip('an issue')).toBeNull();
+  });
+
+  it('gives way to the run’s own stage once the item is dispatched', async () => {
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({ queue: [queueEntry('dispatched')] }));
+    await waitFor(() => expect(card('an issue').querySelector('.board-card-live')).toHaveTextContent('dispatched'));
+    expect(strip('an issue')).toBeNull();
+  });
+
+  it('still reads queued while the run holds the item at `pending`, which draws no live strip', async () => {
+    await renderBoard([issueItem({ queued: true })], projects(), trackerRun({ queue: [queueEntry('pending')] }));
+    await waitFor(() => expect(strip('an issue')).toHaveAttribute('data-state', 'live'));
+    expect(card('an issue').querySelector('.board-card-live')).toBeNull();
+  });
+
+  it('is not live work: a queued card neither floats above an idle one nor counts as In progress', async () => {
+    // `liveRank`'s `< 2` half is the column order, the In progress filter and the clock at once, and nobody is on a queued item.
+    await renderBoard(
+      [issueItem({ queued: true, created: daysAgoDate(5) }), issueItem({ id: '#32', title: 'idle issue', created: daysAgoDate(1) })],
+      projects(),
+      trackerRun({})
+    );
+    await waitFor(() => expect(strip('an issue')).not.toBeNull());
+    // Newest first is the default sort, so the idle card leads — and must still lead.
+    expect(card('idle issue').compareDocumentPosition(card('an issue')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    await waitFor(() => expect(screen.queryByText('an issue')).toBeNull());
+  });
+});
+
+describe('queuedStripFor', () => {
+  const bar: LiveBar = { label: 'executing', tone: 'human', anchor: null, title: 'in progress since x' };
+
+  it('reads `queued` for a live label', () => {
+    expect(queuedStripFor('live', null)).toEqual({ word: 'queued', state: 'live' });
+  });
+
+  it('reads `queued · stale` for a stale label, titled with the way out', () => {
+    const got = queuedStripFor('stale', null);
+    expect(got).toMatchObject({ word: 'queued · stale', state: 'stale' });
+    expect(got?.title).toContain('no live run holds it');
+    expect(got?.title).toContain('GitHub');
+  });
+
+  it('draws nothing without a label', () => {
+    expect(queuedStripFor(null, null)).toBeNull();
+    expect(queuedStripFor(undefined, null)).toBeNull();
+  });
+
+  it('draws nothing under a live bar, whichever reading the label has', () => {
+    expect(queuedStripFor('live', bar)).toBeNull();
+    expect(queuedStripFor('stale', bar)).toBeNull();
   });
 });
 

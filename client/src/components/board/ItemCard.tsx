@@ -146,6 +146,39 @@ export function liveBarFor(item: BacklogItem, run?: RunCardState): LiveBar | nul
   return null;
 }
 
+/** What the queued strip prints, in a shape a test can assert directly — `LiveBar`'s sibling, minus the stamp, because the label carries none. */
+export type QueuedStrip = {
+  word: string;
+  /** Mirrors `queuedReading`: `live` while a live run holds the project, `stale` when none does. The stylesheet dims the second by this attribute. */
+  state: 'live' | 'stale';
+  /** Only the stale strip has one: its word alone cannot say what to do about it. */
+  title?: string;
+};
+
+/**
+ * The `orchestrator:queued` strip, or null for none. A SIBLING of `liveBarFor` and deliberately not a fifth row of its precedence, though it paints in the
+ * same 24 px band: `liveBarFor`'s set of cards is, by construction, `liveRank`'s `< 2` half in BoardView — the column order, the Status filter's "In
+ * progress" and the board clock all at once — and a queued item is none of those. Nobody is on it; the label is a plan, never a claim (invariants.md).
+ *
+ * So the one precedence rule between the two lives here, in the `bar` argument: any live bar wins. That is what makes the claim beat the label. A claim
+ * removes the label, but the tracker cache can hold both facts for a poll, and during that poll the card must read `executing`, not `queued`; the same goes
+ * for a run that has moved the item past `pending`. `pending` itself draws no live bar (`ACTIVE_RUN_STAGES` leaves it out), so a queued item a run has not
+ * reached yet keeps this strip — which is exactly what the label means.
+ *
+ * No elapsed reading on the right: the label has no timestamp to age, and the band stays empty there rather than inventing one.
+ */
+export function queuedStripFor(queued: 'live' | 'stale' | null | undefined, bar: LiveBar | null): QueuedStrip | null {
+  if (bar !== null) return null;
+  if (queued === 'live') return { word: 'queued', state: 'live' };
+  if (queued === 'stale')
+    return {
+      word: 'queued · stale',
+      state: 'stale',
+      title: 'orchestrator:queued is set but no live run holds it — remove the label on GitHub, or stop the crashed run if it is this machine’s'
+    };
+  return null;
+}
+
 /**
  * The two `kind:` values a refactor may carry. An enum here rather than a
  * clamp on the read side (see BacklogItem.kind in shared/types.ts): the server
@@ -256,7 +289,8 @@ export function ItemCard({
   reverify?: () => Promise<AgentsStatus>;
   /**
    * The `orchestrator:queued` reading (`queuedReading`, `lib/tracker.ts`), decided by BoardView and handed down for the same reason `stale` and `run` are:
-   * it needs the run payload and the clock, and this component owns neither. Absent and `null` both draw nothing — ArchiveView passes nothing, because a
+   * it needs the run payload and the clock, and this component owns neither. Drawn as the card's top band through `queuedStripFor`. Absent and `null`
+   * both draw nothing — ArchiveView passes nothing, because a
    * card that has left the Board is not in anyone's queue worth reading.
    */
   queued?: 'live' | 'stale' | null;
@@ -268,6 +302,8 @@ export function ItemCard({
      precedence, and reading it separately is how a card ends up wearing one
      state and printing another. */
   const bar = liveBarFor(item, run);
+  /* Null whenever `bar` is not — the one precedence rule between the two bands, stated in `queuedStripFor`. */
+  const queuedStrip = queuedStripFor(queued, bar);
   /* null when the anchor is not a value this can age — a hand-edited `started`
      (the CLI writes a UTC timestamp, and older files a bare date), or a queue
      entry carrying no stamp for the stage it reports. The strip still renders;
@@ -308,17 +344,8 @@ export function ItemCard({
        this board, which is the rule shared/types.ts states and this is the
        one place that reads the field at all. */
     item.untyped ? { tone: 'untyped' as const, word: 'untyped' } : null,
-    /* The orchestrator:queued label (spec §4.2) — where the item has got to, so it leads the two history markers. `'stale'` carries a title because its
-       word alone cannot say what to do about it: the label is advisory (no reader treats it as exclusion), so a leftover one is harmless but untidy, and
-       the two ways to clear it are GitHub itself or stopping the crashed run that left it. */
-    queued === 'live' ? { tone: 'queued' as const, word: 'queued' } : null,
-    queued === 'stale'
-      ? {
-          tone: 'queued-stale' as const,
-          word: 'queued · stale',
-          title: 'orchestrator:queued is set but no live run holds it — remove the label on GitHub, or stop the crashed run if it is this machine’s'
-        }
-      : null,
+    /* No `queued` marker: the orchestrator:queued label is drawn as the card's top band now (`queuedStripFor` above), and a word here as well would
+       draw one fact twice. */
     item.status === 'done' ? { tone: 'done' as const, word: 'done' } : null,
     stale ? { tone: 'stale' as const, word: 'stale' } : null
   ] as (CardMarker | null)[]).filter((m): m is CardMarker => m !== null);
@@ -368,6 +395,13 @@ export function ItemCard({
               The exact stored value is in the title above and spelled out in
               the drawer — the card never has room for it. */}
           {elapsed !== null && <span className="board-card-live-mark">{elapsed}</span>}
+        </div>
+      )}
+      {/* The queued band: the live strip's geometry as a neutral ink band (DESIGN.md §8.3), outside the face for the same reason, and never beside it —
+          `queuedStripFor` returns null under any live bar. The word is the whole reading; `data-state` is what the stylesheet dims the stale one by. */}
+      {queuedStrip !== null && (
+        <div className="board-card-queued" data-state={queuedStrip.state} title={queuedStrip.title}>
+          <span>{queuedStrip.word}</span>
         </div>
       )}
       <div className="board-card-face">

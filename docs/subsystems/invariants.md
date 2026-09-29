@@ -3152,10 +3152,10 @@ it could not clear come back in `StopResult.unqueueFailed`, and the spawned `--a
 `files` project has no writer, so its stop asks nothing.
 
 **Why stale is drawn, not hidden.** A crashed run, a run on another machine that died without its Stop, or a label added by hand all leave the label on the
-issue with no live run behind it. Hiding the badge then would make the board disagree with GitHub's own issue list, which still shows the label, and would
+issue with no live run behind it. Hiding the strip then would make the board disagree with GitHub's own issue list, which still shows the label, and would
 hide the one thing a reader can act on — remove the label, or Stop the crashed run when it is this machine's. So `queuedReading` (`client/src/lib/tracker.ts`)
 answers `'live'` only while a local run is `running` and not crashed, or `paused`, or a remote run for the same repo is live; otherwise `'stale'`, drawn as a
-dimmed `queued · stale` whose title says why. `paused` is accepted on its own because `runIsLive` is `running`-only, and a paused run is still the run that
+dimmed `queued · stale` band whose title says why. `paused` is accepted on its own because `runIsLive` is `running`-only, and a paused run is still the run that
 queued the item.
 
 ## `isItemId` accepts three shapes

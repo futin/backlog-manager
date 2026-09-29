@@ -126,6 +126,10 @@ const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem) => number> =
  * set of cards `liveBarFor` (ItemCard.tsx) draws a bar for — the rank and the
  * marker are the same claim, one sorted and one painted, which is why neither
  * restates the other's stage lists.
+ *
+ * The card's queued band (`queuedStripFor`) paints in the same place and is
+ * deliberately NOT in that set: an `orchestrator:queued` item is a plan nobody
+ * is on yet, so it neither floats up a column nor counts as In progress.
  */
 const liveRank = (item: BacklogItem, stage: RunStage | undefined): 0 | 1 | 2 => {
   if (stage !== undefined && ATTENTION_RUN_STAGES.includes(stage)) return 0;
