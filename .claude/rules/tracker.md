@@ -71,7 +71,8 @@ paths: ["server/src/tracker/**"]
   tick the repo is synced and is read by `TrackerPollerService.comments()`, which is what the claim protocol maps an item's `started`/`phase` and counters
   from — and, since task-48, what `RemoteRunsService` derives other machines' runs from, with no cache of its own. **Issues and comments have SEPARATE high-water marks and each paginates to the end** — sharing one mark asked for comments `since` the newest
   ISSUE's stamp, which hid every claim older than that from a fresh process, and `readClaim` therefore falls back to one fresh read on a cache miss
-  rather than reporting "unclaimed". **Every issue holding an unreleased cached claim is re-read per tick, and that list is the truth for its comments**
+  rather than reporting "unclaimed". Each read asks from its mark minus `SINCE_OVERLAP_MS` (`sinceFor`), never from the mark itself: GitHub's listing is
+  eventually consistent, and a mark moved past a row a lagging response missed excludes that row until restart (brickwright#28, 2026-09-29). **Every issue holding an unreleased cached claim is re-read per tick, and that list is the truth for its comments**
   (bug-55) — conditional on a per-issue ETag whose remembered ids a `304` is reconciled against, a comment younger than `RECONCILE_GRACE_MS` kept even when
   absent, `commentsHwm` never moved by it, a `404` read as an empty list — because the repo-wide `since` read can never see a deletion, and `forgetComment`
   only ever hears of the loser THIS process deleted.

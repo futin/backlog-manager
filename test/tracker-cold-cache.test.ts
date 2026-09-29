@@ -193,9 +193,10 @@ describe('a claim made before this process started', () => {
     expect(commentReads[0].url).not.toContain('since=');
     // And the issues read DID send its own mark forward on the next sweep, so
     // the two marks are provably separate rather than both simply disabled.
+    // Each mark is sent moved back by `SINCE_OVERLAP_MS` (five minutes).
     await sweep();
     const second = gh.calls.filter((c) => c.method === 'GET' && c.url.includes('/issues?state=all'));
-    expect(second[1].url).toContain(`since=${encodeURIComponent('2026-09-18T10:05:00Z')}`);
+    expect(second[1].url).toContain(`since=${encodeURIComponent('2026-09-18T10:00:00.000Z')}`);
   });
 
   /**
@@ -209,7 +210,7 @@ describe('a claim made before this process started', () => {
 
     const commentReads = gh.calls.filter((c) => c.method === 'GET' && c.url.includes('/issues/comments'));
     expect(commentReads).toHaveLength(2);
-    expect(commentReads[1].url).toContain(`since=${encodeURIComponent('2026-09-18T10:00:00Z')}`);
+    expect(commentReads[1].url).toContain(`since=${encodeURIComponent('2026-09-18T09:55:00.000Z')}`);
   });
 
   /**

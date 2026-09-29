@@ -201,13 +201,69 @@ describe('syncing', () => {
     await p.tick();
     expect(p.issues('futin/x')).toHaveLength(1);
 
-    // The second tick sends the high-water mark and GitHub answers with the
-    // same issue, because `since` is inclusive. The cache is keyed by issue
-    // number, so the count does not grow.
+    // The second tick sends the high-water mark, moved back by the overlap,
+    // and GitHub answers with the same issue, because `since` is inclusive.
+    // The cache is keyed by issue number, so the count does not grow.
     await p.tick();
     expect(p.issues('futin/x')).toHaveLength(1);
     const second = calls.filter((c) => c.url.includes('/issues?state=all'))[1];
-    expect(second.url).toContain(`since=${encodeURIComponent('2026-09-01T00:00:00Z')}`);
+    expect(second.url).toContain(`since=${encodeURIComponent('2026-08-31T23:55:00.000Z')}`);
+    p.disarm();
+  });
+
+  /**
+   * The brickwright#28 incident (2026-09-29). GitHub's listing is eventually consistent, so one response can carry an issue edited at 10:00:48 and still miss
+   * one created at 10:00:30. With `since` equal to the mark, every later read asks from 10:00:48 and the missing issue is never returned again. Asking
+   * from five minutes behind the mark is what lets the late row land.
+   */
+  it('asks from behind the mark, so an issue a lagging response missed still lands', async () => {
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      [
+        '/issues?',
+        (n): Canned =>
+          n === 1
+            ? { status: 200, body: [issue(27, '2026-09-29T14:50:24Z'), issue(22, '2026-09-29T14:50:48Z')] }
+            : { status: 200, body: [issue(28, '2026-09-29T14:50:30Z'), issue(22, '2026-09-29T14:50:48Z')] }
+      ],
+      ['/labels', LABELS_PRESENT]
+    ]);
+    await p.tick();
+    await p.tick();
+
+    const second = calls.filter((c) => c.url.includes('/issues?state=all'))[1];
+    expect(second.url).toContain(`since=${encodeURIComponent('2026-09-29T14:45:48.000Z')}`);
+    expect(p.issues('futin/x').map((i) => i.number)).toEqual([22, 27, 28]);
+    p.disarm();
+  });
+
+  /** `absorbIssue` moves the same mark, so a write absorbed before the poll has seen an older issue must not push the next `since` past that issue. */
+  it('asks from behind an absorbed write, not from the write itself', async () => {
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      ['/issues?', { status: 200, body: [issue(1, '2026-09-29T14:00:00Z')] }],
+      ['/labels', LABELS_PRESENT]
+    ]);
+    await p.tick();
+    p.absorbIssue('futin/x', issue(2, '2026-09-29T14:50:48Z') as never);
+    await p.tick();
+
+    const second = calls.filter((c) => c.url.includes('/issues?state=all'))[1];
+    expect(second.url).toContain(`since=${encodeURIComponent('2026-09-29T14:45:48.000Z')}`);
+    p.disarm();
+  });
+
+  /** The URL is a function of the mark alone — never of the clock — so a quiet repo re-sends the same URL and its ETag still earns a `304`. */
+  it('re-sends the same since and the ETag while the mark holds still', async () => {
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      ['/issues?', (n): Canned => (n === 1 ? { status: 200, body: [issue(1, '2026-09-01T00:00:00Z')], headers: { etag: 'W/"abc"' } } : { status: 304 })],
+      ['/labels', LABELS_PRESENT]
+    ]);
+    await p.tick();
+    await p.tick();
+    await p.tick();
+
+    const reads = calls.filter((c) => c.url.includes('/issues?state=all'));
+    expect(reads[1].url).toBe(reads[2].url);
+    expect(reads[2].headers['if-none-match']).toBe('W/"abc"');
     p.disarm();
   });
 

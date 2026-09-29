@@ -86,6 +86,29 @@ export const SECONDARY_BACKOFF_MS = 60_000;
  */
 export const RECONCILE_GRACE_MS = 10_000;
 
+/**
+ * How far BEHIND its high-water mark each incremental read asks from.
+ *
+ * GitHub's issue and comment listings are eventually consistent (the same fact `RECONCILE_GRACE_MS` rests on), so one response can carry an issue edited
+ * at 10:00:48 while still missing one created at 10:00:30. The mark then moves to 10:00:48, every later `since` excludes the missing issue, and — because
+ * no later response mentions an untouched issue again — it stays missing until the process restarts. That happened on 2026-09-29: brickwright#28, created
+ * on another machine seconds before a close on #22, never reached this cache while #27 and #29 around it did. `absorbIssue` moves the mark the same way,
+ * past anything the poll has not seen yet.
+ *
+ * Asking from `mark - overlap` re-reads the last few minutes on every tick, which costs nothing the cache notices: it upserts by number (and comments by
+ * id), and the URL stays the same while the mark does, so a quiet repo still answers `304` to the ETag. Five minutes is far past any replication lag seen,
+ * and the mark itself is still the newest stamp seen — only the REQUEST moves back.
+ */
+export const SINCE_OVERLAP_MS = 5 * 60_000;
+
+/** The `since` one incremental read sends for a stored mark: `null` (a first, full read) stays `null`, anything else is moved back by the overlap. A mark
+ *  that does not parse is sent as-is rather than dropped, so a surprise from GitHub degrades to the old behaviour instead of to a full re-read per tick. */
+export function sinceFor(mark: string | null): string | null {
+  if (mark === null) return null;
+  const at = Date.parse(mark);
+  return Number.isNaN(at) ? mark : new Date(at - SINCE_OVERLAP_MS).toISOString();
+}
+
 /** The connection state of one repo, as `ProjectSummary.access` spells it. */
 export type Access = NonNullable<SourceSummary['access']>;
 
@@ -568,7 +591,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     if (state.sleepUntil !== null && Date.now() < state.sleepUntil) return;
     state.sleepUntil = null;
 
-    const first = await this.client.issues(repo, { token, since: state.hwm, etag: state.issuesEtag });
+    const first = await this.client.issues(repo, { token, since: sinceFor(state.hwm), etag: state.issuesEtag });
     if (this.handleFailure(state, first)) return;
 
     if (first.status === 304) {
@@ -618,7 +641,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // more than a hundred comments newer than the mark would otherwise land
     // only its first page, and the claim the CLI needs is as likely to be on
     // the second as on the first.
-    const comments = await this.client.comments(repo, { token, since: state.commentsHwm, etag: state.commentsEtag });
+    const comments = await this.client.comments(repo, { token, since: sinceFor(state.commentsHwm), etag: state.commentsEtag });
     if (this.handleFailure(state, comments)) return;
     if (comments.status === 200) {
       state.commentsEtag = comments.etag;

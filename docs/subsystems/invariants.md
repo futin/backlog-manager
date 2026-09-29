@@ -2768,6 +2768,14 @@ comment again. Nothing read the cache before task-46, so the gap had been harmle
 started reading it, it meant a held item drawn as free and a claim the CLI could not give back. Pagination is the same rule one step on: the issues loop always
 followed `Link` and the comments read did not, so a claim past the first page was lost the same way.
 
+**Neither read asks from its mark itself — both ask from five minutes behind it (`SINCE_OVERLAP_MS`, `sinceFor`).** A separate mark per stream fixed the
+clocks, but not the fact that each stream's listing is eventually consistent. On 2026-09-29 another machine's groom promoted brickwright#22 into #28 and
+closed #22 eighteen seconds later; one poll here got #22's close and #27 but not #28 yet, the mark moved to #22's stamp, and every later `since` excluded #28 —
+the board lacked it for hours while #27 and #29 on either side of it showed, and only a restart's full read would have brought it back. `absorbIssue` moves
+the mark the same way, past anything the poll has not caught up with. The overlap re-reads a few minutes per tick at no cost the cache notices (it upserts by
+number and by id), and because the request is a function of the mark alone, never of the clock, a quiet repo re-sends the same URL and its ETag still earns a
+`304`. The mark itself stays the newest stamp seen; only the request moves back.
+
 **A deletion is invisible to that stream, so every claimed issue is reconciled on its own (bug-55).** `since` returns what was created or edited, and a
 deleted comment is neither, so no repo-wide response can ever say one is gone. `forgetComment` covered the one deletion the protocol makes — a loser removing
 its own claim — but only on the machine that made it: on 2026-09-22 two machines raced for one issue twice, the protocol picked the right winner both times, and
