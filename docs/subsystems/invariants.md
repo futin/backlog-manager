@@ -2826,6 +2826,14 @@ came out rather than being loosened: the skills detect a tracker project from it
 the claim protocol gives a tracker item a `started` for `progressBlock` to read, and `ItemsService.find` resolves a URN to the same `BacklogItem` a filesystem
 path resolves to, so `plan` and `dispatch` re-derive the action from exactly the object the board drew its button from.
 
+That block stopped being source-blind in #227, and the asymmetry is deliberate. A tracker claim has a heartbeat and a holder, a files stamp has neither, so only
+the tracker claim can be aged: `progressBlock` lets dispatch through over a STALE hand claim, because the protocol already lets any `start` retire it with no
+confirm and the spawned session's own `start` does exactly that, while a files stamp still blocks on ANY stamp, fresh or stale. Two stale tracker holders keep
+the block — a run (a stale run claim is a crashed run, the watchdog's and `--resume`'s) and a session this server dispatched (a `claude -p` waiting on a reply
+sends no heartbeat, so its age says nothing). And the server now re-checks a tracker item's claim at dispatch (`itemClaimBlock`, `agents.service.ts`, in
+`progressBlock`'s order, a stale claim going through `staleClaimProbe`), because the sheet's plan was read once and the claim moves under it; a files item is
+not re-checked there, since its stamp has no heartbeat to age and no holder to name, and refusing it is `start`'s job.
+
 The ORCHESTRATOR followed one phase later, and the two-phase shape is worth keeping on the record. Task-46 could not lift it with dispatch, so it gave the
 refusal a gate of its own on each side: `projectIsFiles` (`client/src/lib/tracker.ts`) hid the toolbar control, and `AgentsService.orchestrate` answered 400
 `orchestrating a tracker project arrives in phase 4` before `resolveIds` — necessary then because `resolveIds` scanned FILES and would otherwise have found

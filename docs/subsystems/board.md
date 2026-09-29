@@ -299,7 +299,9 @@ a block: dispatch, the Orchestrate sheet and every gate ignore it, because the l
 **Dispatch is drawn exactly as it is for a files item (task-46).** Task-45 hid the control here, because a spawned session would have run the file-writing
 skills against a project with no files; phase 3 made that false — the skills write through the API — so `deriveAction` asks nothing about an item's `source`
 and a tracker card gets the same chip on the same rules. The per-item block that stops a CLAIMED item is the ordinary one: `progressBlock` reads the `started`
-the mapper fills from a live claim, with no tracker-specific branch anywhere, and disables the control with its usual sentence.
+the mapper fills from an unreleased claim and disables the control with its usual sentence. Its one tracker-specific branch is #227's, described above under
+"A stale claim reads stale": a stale hand claim lets dispatch through, a stale run-held or board-dispatched one still blocks, and the server re-checks a tracker
+item's claim at dispatch (`itemClaimBlock`) where it never re-checks a files item's stamp.
 
 **The toolbar's Orchestrate control is drawn for a tracker project too, since task-47 (phase 4a).** Task-46 kept it off with a fifth condition,
 `projectIsFiles` (`lib/tracker.ts`), because a tracker project could not then be orchestrated at all; phase 4a made it orchestratable, so that predicate is
