@@ -9,7 +9,18 @@ import BoardView from '../client/src/components/board/BoardView';
 import { liveBarFor } from '../client/src/components/board/ItemCard';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { daysAgoDate } from './helpers/dates';
-import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage, RunWatchdog } from '../shared/types';
+import { CLAIM_STALE_MS } from '../shared/types';
+import type {
+  AgentsStatus,
+  BacklogItem,
+  ItemHolder,
+  OrchestratorRun,
+  OrchestratorRunsPayload,
+  ProjectSummary,
+  RunQueueItem,
+  RunStage,
+  RunWatchdog
+} from '../shared/types';
 
 /**
  * The card's live strip, driven through the real `BoardView` against the
@@ -335,7 +346,7 @@ describe('BoardView: card live strips', () => {
    * the case below this one, against relative stamps.
    */
   it('anchors the bar on stageAt.dispatched, falling back to the current stage', () => {
-    const active = liveBarFor(fakeItem({}), entry('task-14'));
+    const active = liveBarFor(fakeItem({}), entry('task-14'), Date.now());
     expect(active).toEqual({
       label: 'reviewing',
       tone: 'run',
@@ -348,7 +359,7 @@ describe('BoardView: card live strips', () => {
     // `dispatched` at all, so the fallback is not a defensive branch — it is
     // the only anchor an attention item has, and it reads as exactly the right
     // thing: how long this has been waiting on you.
-    const attention = liveBarFor(fakeItem({ id: 'task-21' }), entry('task-21'));
+    const attention = liveBarFor(fakeItem({ id: 'task-21' }), entry('task-21'), Date.now());
     expect(attention).toEqual({
       label: 'needs-answers',
       tone: 'human',
@@ -608,5 +619,75 @@ describe('BoardView: card live strips', () => {
     // wrong as one that swept in none of it.
     expect(screen.queryByText('still pending')).not.toBeInTheDocument();
     expect(screen.queryByText('already merged')).not.toBeInTheDocument();
+  });
+
+  /*
+   * #227 — a TRACKER card whose claim has gone stale. The mapper still sets `started`/`phase`/`holder` for it (an item shown as free while `claim` has to
+   * fight for it is the other lie), so every reader that means "is somebody on this" has to ask the second question itself: a stale holder draws a muted
+   * `stale` bar, not the amber `executing` one; sorts at rank 2; and is out of the "In progress" filter. What it does NOT do is leave the board — any
+   * unreleased claim keeps an item where the release control is, so an old bug stays put past `staleDays`.
+   */
+  function claimedBug(id: string, title: string, holder: ItemHolder, over: Partial<BacklogItem> = {}): BacklogItem {
+    return fakeItem({
+      id,
+      title,
+      section: 'bugs',
+      source: 'github',
+      path: `gh:futin/x${id}`,
+      created: daysAgoDate(60),
+      updated: `${daysAgoDate(60)}T00:00:00Z`,
+      started: agoISO(2 * HOUR),
+      phase: 'execute',
+      holder,
+      ...over
+    });
+  }
+
+  it('unit: a stale hand claim draws the stale bar with its age and host, and a live one is unchanged', () => {
+    const now = Date.parse('2026-09-25T12:00:00Z');
+    const beat = (ms: number): string => new Date(now - ms).toISOString();
+    const started = beat(2 * HOUR);
+    const item = (holder: ItemHolder): BacklogItem => claimedBug('#15', 'x', holder, { started });
+
+    expect(liveBarFor(item({ session: 's', host: 'aj_linux', heartbeat: beat(42 * MIN) }), undefined, now)).toEqual({
+      label: 'stale · no heartbeat 42m · aj_linux',
+      tone: 'stale',
+      anchor: null,
+      title: `claim stale — no heartbeat since ${beat(42 * MIN)}`
+    });
+    expect(liveBarFor(item({ session: 's', heartbeat: beat(42 * MIN) }), undefined, now)?.label).toBe('stale · no heartbeat 42m');
+    // A stale run-held claim reads stale too: the run surfaces already say crashed.
+    expect(liveBarFor(item({ session: 's', heartbeat: beat(CLAIM_STALE_MS), run: 'run-9' }), undefined, now)?.tone).toBe('stale');
+    expect(liveBarFor(item({ session: 's', host: 'aj_linux', heartbeat: beat(CLAIM_STALE_MS - 1) }), undefined, now)).toEqual({
+      label: 'executing',
+      tone: 'human',
+      anchor: started,
+      title: `in progress since ${started}`
+    });
+  });
+
+  it('renders a stale claim as stale, ranks it with idle work, keeps it out of In progress, and keeps it on the board', async () => {
+    stub(
+      [],
+      [
+        claimedBug('#15', 'stale claim', { session: 's', host: 'aj_linux', heartbeat: agoISO(42 * MIN) }, { created: daysAgoDate(90) }),
+        claimedBug('#16', 'live claim', { session: 't', host: 'aj_linux', heartbeat: agoISO(MIN) }, { created: daysAgoDate(91) }),
+        fakeItem({ id: 'bug-9', title: 'idle newest', section: 'bugs', path: '/abs/alpha/backlog/bugs/open/bug-9.md', created: daysAgoDate(1) })
+      ]
+    );
+    await renderBoard();
+
+    const bar = barOf('stale claim');
+    expect(bar).not.toBeNull();
+    expect(bar!.getAttribute('data-tone')).toBe('stale');
+    expect(bar!.textContent).toMatch(/^stale · no heartbeat 4\dm · aj_linux$/);
+    expect(bar!.classList.contains('hatch')).toBe(false);
+    expect(barOf('live claim')!.textContent).toMatch(/^executing/);
+    // Bugs is column 2: the live claim floats, the stale one sorts by `created` among the idle — newest first, so it lands last.
+    expect(titlesIn(2)).toEqual(['live claim', 'idle newest', 'stale claim']);
+
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    expect(screen.getByText('live claim')).toBeInTheDocument();
+    expect(screen.queryByText('stale claim')).not.toBeInTheDocument();
   });
 });

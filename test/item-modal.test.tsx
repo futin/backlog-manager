@@ -521,11 +521,11 @@ describe('ItemModal claim control', () => {
     expect(onReleased).not.toHaveBeenCalled();
   });
 
-  it('draws nothing for a files item, a run-held claim, a stale claim, or an unheld issue', () => {
+  it('draws nothing for a files item, a run-held claim — live or stale — or an unheld issue', () => {
     const cases: BacklogItem[] = [
       { ...ITEM, holder: { session: 's', heartbeat: new Date().toISOString(), dispatched: true } },
       held({ run: 'run-9' }),
-      held({ heartbeat: new Date(Date.now() - 16 * 60_000).toISOString() }),
+      held({ run: 'run-9', heartbeat: new Date(Date.now() - 16 * 60_000).toISOString() }),
       TRACKER
     ];
     for (const item of cases) {
@@ -533,6 +533,61 @@ describe('ItemModal claim control', () => {
       expect(screen.queryByTestId('claim-release')).toBeNull();
       unmount();
     }
+  });
+
+  /*
+   * #227: a stale hand claim used to draw nothing here, which left an item nobody was on reading as held with no way to let go of it. It draws Release
+   * claim now, with a confirm about the stale claim itself — its age, its machine, and what happens to a session that is somehow still alive.
+   */
+  it('draws Release claim for a stale hand claim, with a confirm naming its age and host, and posts abort once', async () => {
+    const onReleased = jest.fn();
+    render(
+      <ItemModal
+        item={held({ heartbeat: new Date(Date.now() - 42 * 60_000).toISOString(), host: 'aj_linux' })}
+        hues={HUES}
+        onClose={() => {}}
+        onReleased={onReleased}
+      />
+    );
+    await screen.findByText('body');
+
+    expect(screen.getByTestId('claim-release').textContent).toBe('Release claim');
+    await userEvent.click(screen.getByTestId('claim-release'));
+    expect(screen.getByTestId('claim-release-confirm').textContent).toMatch(
+      /^Release session b1c2d3e4's stale claim on #31\? No heartbeat for 4\dm on aj_linux\. If that session is still running, its next heartbeat is refused and it stops\./
+    );
+    await userEvent.click(screen.getByTestId('claim-release-confirm-accept'));
+    await waitFor(() => expect(screen.getByTestId('claim-released')).toBeInTheDocument());
+    expect(posts).toEqual([{ url: '/api/items/abort', body: { project: '/abs/alpha', id: '#31' } }]);
+    expect(onReleased).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Stop & release for a stale claim the board dispatched', async () => {
+    render(
+      <ItemModal
+        item={held({ dispatched: true, heartbeat: new Date(Date.now() - 42 * 60_000).toISOString() })}
+        hues={HUES}
+        onClose={() => {}}
+        onReleased={() => {}}
+      />
+    );
+    await screen.findByText('body');
+    expect(screen.getByTestId('claim-release').textContent).toBe('Stop & release');
+  });
+
+  it('reads a stale claim as a stale claim, not as in progress', async () => {
+    const beat = new Date(Date.now() - 42 * 60_000).toISOString();
+    render(
+      <ItemModal
+        item={{ ...held({ heartbeat: beat, host: 'aj_linux' }), started: beat, phase: 'execute' }}
+        hues={HUES}
+        onClose={() => {}}
+        onReleased={() => {}}
+      />
+    );
+    await screen.findByText('body');
+    expect(factValue('in progress')).toBeNull();
+    expect(factValue('stale claim')).toMatch(new RegExp(`^no heartbeat 4\\dm \\(since ${beat.replace(/[.]/g, '\\.')}\\) · aj_linux$`));
   });
 
   it('draws nothing when the render site has no payload to re-read', async () => {

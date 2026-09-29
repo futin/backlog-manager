@@ -316,7 +316,7 @@ export interface BacklogItem {
    * from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
    *
    * It carries the `heartbeat` rather than a liveness verdict because liveness is a function of the clock the READER holds: the client decides "live" against
-   * `CLAIM_STALE_MS` at render time (`claimControl` in `client/src/lib/tracker.ts`), the way it already ages `queued`. `dispatched` is `true` when this
+   * `CLAIM_STALE_MS` at render time (`claimReading` in `client/src/lib/tracker.ts`, which `claimControl`, the card bar and the board rank all read — #227), the way it already ages `queued`. `dispatched` is `true` when this
    * server's own dispatch record names the holding session — the board started it, so the board can stop it — and absent otherwise. `run` is the holding
    * run's id, and a run-held claim offers no control at all.
    */

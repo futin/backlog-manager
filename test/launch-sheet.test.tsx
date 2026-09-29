@@ -280,4 +280,25 @@ describe('LaunchSheet', () => {
     expect(row).toContainElement(screen.getByLabelText('Model'));
     expect(row).toContainElement(screen.getByLabelText('Effort'));
   });
+
+  /*
+   * #227: dispatch is offered over a stale hand claim, and the sheet says the new session takes it over — naming whose it was, on which machine, and how
+   * long it has been silent. A live claim never reaches this form, and an untracked item has no claim to name.
+   */
+  it('names the stale claim a launch will take over, and says nothing for a fresh one', async () => {
+    stub({});
+    const beat = new Date(Date.now() - 42 * 60_000).toISOString();
+    renderSheet({
+      item: { ...ITEM, source: 'github', started: beat, phase: 'execute', holder: { session: 'b1c2d3e4-5f6a', host: 'aj_linux', heartbeat: beat } },
+      onClose: () => {}
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'launch' })).toBeEnabled());
+    expect(screen.getByText(/^takes over a stale claim — session b1c2d3e4 on aj_linux, no heartbeat 4\dm$/)).toBeInTheDocument();
+  });
+
+  it('draws no takeover note for an unclaimed item', async () => {
+    stub({});
+    await openSheet();
+    expect(screen.queryByText(/takes over a stale claim/)).not.toBeInTheDocument();
+  });
 });

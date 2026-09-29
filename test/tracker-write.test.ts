@@ -797,6 +797,21 @@ describe('release', () => {
     expect(claimIn(100)?.released?.reason).toBe('aborted');
   });
 
+  /*
+   * #227: the board's release of a stale claim is `reason: 'stale'`, and nothing re-assigns the issue after it — so it unassigns for the `aborted`
+   * reasoning. The other half is the first case above: `stopped` still leaves the assignee standing.
+   */
+  it('a stale release clears the assignee too', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-progress' }], assignees: [{ login: 'futin' }] });
+    gh.claim(record({ session: 'A', heartbeat: new Date(Date.now() - 60 * 60_000).toISOString() }), 31, 100);
+    await sync();
+
+    await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'board', reason: 'stale' }).expect(201);
+
+    expect(gh.issues.get(31)?.assignees).toEqual([]);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'stale', by: 'board' });
+  });
+
   /**
    * The 404 the item's Test cases name by hand: "`removeLabel`'s 404 answers
    * `status: 404` (the poller/writer treats it as success — assert THAT in the

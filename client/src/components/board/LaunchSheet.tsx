@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { dispatchAgent, fetchAgentPlan, sessionUrl } from '../../lib/agents';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { useSettings } from '../../hooks/useSettings';
+import { staleTakeover } from '../../lib/tracker';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { Select } from '../ui/Select';
@@ -94,6 +95,8 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const blocked = plan?.blocked ?? planError;
   const form = sessionId === null && (blocked === null || blocked === undefined) && plan !== null;
 
+  const takeover = staleTakeover(item, Date.now());
+
   return (
     <FormSheet
       label={`dispatch ${item.id}`}
@@ -145,6 +148,11 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <span className="sheet-static">{plan.project}</span>
           </label>
 
+          {/* #227: dispatch is offered over a stale hand claim, and the spawned session's `start` retires that claim as its first act. Said here, before
+              Launch, because the item modal's Release claim is the other way to clear it and the user should know this one will. `staleTakeover` is
+              null for anything else — a live claim never reaches this form (`progressBlock` blocks it). */}
+          {takeover !== null && <div className="sheet-note">{takeover}</div>}
+
           <label className="sheet-field">
             <span className="set-name">Prompt</span>
             <textarea aria-label="Prompt" className="sheet-prompt" rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
@@ -177,12 +185,22 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 so an unknown name costs the flag, not the launch. */}
             <label className="sheet-field">
               <span className="set-name">Model</span>
-              <Select label="Model" value={model} onChange={setModel} options={[{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))]} />
+              <Select
+                label="Model"
+                value={model}
+                onChange={setModel}
+                options={[{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))]}
+              />
             </label>
 
             <label className="sheet-field">
               <span className="set-name">Effort</span>
-              <Select label="Effort" value={effort} onChange={setEffort} options={[{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))]} />
+              <Select
+                label="Effort"
+                value={effort}
+                onChange={setEffort}
+                options={[{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))]}
+              />
             </label>
           </div>
 

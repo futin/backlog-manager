@@ -9,7 +9,7 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useReverify } from '../../hooks/useReverify';
 import { useSettings } from '../../hooks/useSettings';
-import { isInProgress } from '../../lib/item-progress';
+import { isInProgress, isLiveWork } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { PROJECT_KEY } from '../../lib/view-keys';
@@ -108,8 +108,10 @@ const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem) => number> =
  *
  *   0 — a fresh run is BLOCKED on a person (`ATTENTION_RUN_STAGES`).
  *   1 — a fresh run is working it (`ACTIVE_RUN_STAGES`), or a hand-run session
- *       has stamped `started:` on the file (`isInProgress`).
- *   2 — everything else.
+ *       has stamped `started:` on the file (`isInProgress`) and, on a tracker
+ *       item, its claim still has a heartbeat inside `CLAIM_STALE_MS`
+ *       (`isLiveWork`, #227).
+ *   2 — everything else — a stale tracker claim among it.
  *
  * Rank 0 sits above running work because it is the only one of the three that
  * is waiting on the reader: a run that has stopped and will not restart on its
@@ -130,10 +132,16 @@ const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem) => number> =
  * The card's queued band (`queuedStripFor`) paints in the same place and is
  * deliberately NOT in that set: an `orchestrator:queued` item is a plan nobody
  * is on yet, so it neither floats up a column nor counts as In progress.
+ *
+ * `now` is the clock the claim is aged against, and `null` asks for the UNAGED
+ * reading — `isInProgress` alone, a stale claim still counted live. Exactly one
+ * reader wants that: the gate on the board's clock (`hasLive`), which has to be
+ * computed before the clock exists and has to run for a claim that is live now
+ * so the card can be seen going stale later. Every other reader passes `now`.
  */
-const liveRank = (item: BacklogItem, stage: RunStage | undefined): 0 | 1 | 2 => {
+const liveRank = (item: BacklogItem, stage: RunStage | undefined, now: number | null): 0 | 1 | 2 => {
   if (stage !== undefined && ATTENTION_RUN_STAGES.includes(stage)) return 0;
-  if ((stage !== undefined && ACTIVE_RUN_STAGES.includes(stage)) || isInProgress(item)) return 1;
+  if ((stage !== undefined && ACTIVE_RUN_STAGES.includes(stage)) || (now === null ? isInProgress(item) : isLiveWork(item, now))) return 1;
   return 2;
 };
 
@@ -145,7 +153,7 @@ const liveRank = (item: BacklogItem, stage: RunStage | undefined): 0 | 1 | 2 => 
  * comment for why), so the primary key can no longer be a pure function of one
  * item and the lookup has to come from the caller that holds the run payload.
  */
-function sortItems(items: BacklogItem[], sort: SortKey, stageFor: (item: BacklogItem) => RunStage | undefined): BacklogItem[] {
+function sortItems(items: BacklogItem[], sort: SortKey, stageFor: (item: BacklogItem) => RunStage | undefined, now: number): BacklogItem[] {
   const out = [...items];
   /* The `??` is not defensive noise, and the `SortKey` type is not a promise
      that it can't fire. `sort` arrives from localStorage through
@@ -166,7 +174,7 @@ function sortItems(items: BacklogItem[], sort: SortKey, stageFor: (item: Backlog
      "all".) The asymmetry is the point — a degraded board a user can reason
      about is a different class of problem from a page that isn't there. */
   const compare = COMPARATORS[sort] ?? COMPARATORS.created;
-  out.sort((a, b) => liveRank(a, stageFor(a)) - liveRank(b, stageFor(b)) || compare(a, b));
+  out.sort((a, b) => liveRank(a, stageFor(a), now) - liveRank(b, stageFor(b), now) || compare(a, b));
   return out;
 }
 
@@ -369,8 +377,11 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
        orchestrator was working — the precise opposite of what this view is
        for. Expressed as the rank rather than as its own copy of the two stage
        lists so the filter and the column order can never disagree about which
-       cards are live. */
-    (status === 'started' ? liveRank(i, runStageFor(i)) < 2 : status === 'all' || i.status === status);
+       cards are live.
+       UNAGED here (`null`), and narrowed by the aged rank in `visible` below:
+       whether a tracker claim is still live needs the clock, and the clock's
+       own gate is computed off this set (#227). */
+    (status === 'started' ? liveRank(i, runStageFor(i), null) < 2 : status === 'all' || i.status === status);
 
   /* Everything the toolbar admits, before the staleness split below. Named
      rather than inlined because `hasLive` has to be computed off THIS set —
@@ -405,8 +416,15 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      payload for exactly that reason, and the widening landed in item-stale.ts
      rather than in the filter below so ArchiveView gets the same answer by
      construction. `liveRank(...) < 2` and `leavesBoard` are consequently two
-     readings of one fact now, off one payload. */
-  const hasLive = matched.some((i) => liveRank(i, runStageFor(i)) < 2);
+     readings of one fact now, off one payload.
+
+     UNAGED (`null`) since #227, the one reader of the rank that is: a tracker
+     claim's liveness is aged against `now`, and `now` is what this gates. The
+     unaged set is a superset, so a live claim keeps the clock running — which
+     is exactly what lets its card be seen crossing into stale — and a claim
+     that is already stale costs at most a clock that `tracked` below runs for
+     it anyway, since only a tracker item carries a claim at all. */
+  const hasLive = matched.some((i) => liveRank(i, runStageFor(i), null) < 2);
   /* A registered tracker project is the board's second reason to hold a clock
      (task-45). The item modal prints a POLL AGE (`trackerLineFor` below), which
      goes stale with no event in this tab exactly the way an in-progress card's
@@ -435,7 +453,9 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      own `fresh` filter (its doc comment says why), and routing a
      pre-filtered list in would put that rule in two places — the same reason
      `runBlockFor` below reads the full list. */
-  const visible = matched.filter((i) => !leavesBoard(i, settings.staleDays, now, runs));
+  /* The "In progress" filter's aged half (#227): `matches` let every claimed item through unaged, and a stale claim is not live work. Applied here, the
+     first line that has the clock. */
+  const visible = matched.filter((i) => (status !== 'started' || liveRank(i, runStageFor(i), now) < 2) && !leavesBoard(i, settings.staleDays, now, runs));
 
   /* The marker a surviving stale card wears — in practice only ever a task,
      since `leavesBoard` has already taken every other stale section out of
@@ -819,7 +839,8 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
             const colItems = sortItems(
               visible.filter((i) => i.section === col.section),
               sort,
-              runStageFor
+              runStageFor,
+              now
             );
             return (
               <BoardColumn key={col.section} slug={col.slug} label={col.label} count={colItems.length}>

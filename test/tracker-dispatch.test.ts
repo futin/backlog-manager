@@ -51,6 +51,8 @@ let trackerPath: string;
 /** Every URL the DASHBOARD stub was asked for — a spawn in here is a session
  *  that would have started for real. */
 let spawned: string[];
+/** What the dashboard's session list answers — #227's stale probe is the one dispatch-route caller of it. */
+let sessionList: unknown;
 
 function project(name: string, marker?: string, items: Parameters<typeof makeProject>[1] = []): string {
   const root = makeProject(name, items, marker);
@@ -61,6 +63,7 @@ function project(name: string, marker?: string, items: Parameters<typeof makePro
 /** The dashboard, on global `fetch`: health, the project map, and `/api/spawn`. */
 function stubDashboard(): void {
   spawned = [];
+  sessionList = { sessions: [] };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     spawned.push(url);
@@ -69,7 +72,9 @@ function stubDashboard(): void {
       status: 200,
       json: () =>
         Promise.resolve(
-          url.endsWith('/api/management')
+          url.endsWith('/api/sessions')
+            ? sessionList
+            : url.endsWith('/api/management')
             ? {
                 projects: [
                   { dirName: '-abs-alpha', name: 'alpha', path: filesPath, lastActiveMs: 1 },
@@ -172,14 +177,14 @@ describe('plan', () => {
    * `started` and a `phase` read off the live claim, which is exactly what
    * `progressBlock` (`client/src/lib/item-progress.ts`) needs.
    *
-   * The block itself is NOT asserted here, because the server has never
-   * enforced it — for a files item either. `plan.blocked` is
-   * `dispatchBlock ?? runClaimBlock`; `progressBlock` is the client's own
-   * second of three per-item blocks and swallows the click in the browser.
-   * The task item's Test cases section expected a server-side 409 for a
-   * claimed tracker item, which would have been new asymmetric behaviour —
-   * enforced for a tracker item and not for a files one — so it is not what
-   * was built. `test/tracker-board.test.tsx` holds the rendered half.
+   * The block is NOT asserted on the PLAN, which still offers the dispatch:
+   * `plan.blocked` is `dispatchBlock ?? runClaimBlock`, and `progressBlock` is
+   * the client's own second of three per-item blocks. Task-46 built no server
+   * refusal for a claimed item at all, to keep tracker and files symmetric;
+   * #227 added one to `dispatch` for a TRACKER item alone (the `item claim`
+   * describe below), because a tracker claim has a heartbeat the server can
+   * age and a holder it can name, and a files stamp has neither.
+   * `test/tracker-board.test.tsx` holds the rendered half.
    */
   it('carries the live claim-s started and phase, which is what the client-s block reads', async () => {
     gh.claim(record({ session: 'A', phase: 'groom' }), 31, 100);
@@ -191,7 +196,7 @@ describe('plan', () => {
     expect(issue?.phase).toBe('groom');
 
     // And the plan still offers the dispatch: the claim is the CLIENT's reason
-    // to disable the control, not the server's reason to refuse it.
+    // to disable the control; the server's refusal is at dispatch time (#227).
     const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
     expect(res.body.action).toBe('execute');
   });
@@ -232,6 +237,78 @@ describe('dispatch', () => {
       .expect(409);
     expect(res.body.error).toMatch(/orchestrator run/i);
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+});
+
+/**
+ * #227 — the item-claim block, re-checked by `dispatch` for a tracker item the way `runClaimBlock` is. A live claim, a run's claim and a claim held by a
+ * session the board itself dispatched all refuse; a STALE hand claim proceeds — the spawned session's `start` retires it — unless this machine can show
+ * the holder is still running.
+ */
+describe('dispatch over an item claim', () => {
+  const HOST = 'laptop';
+  const STALE = (): string => new Date(Date.now() - 16 * 60_000).toISOString();
+  const send = (): request.Test =>
+    request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'Use the backlog-execute skill on #31.', permissionMode: 'acceptEdits' });
+  const spawnedAny = (): boolean => spawned.some((u) => u.endsWith('/api/spawn'));
+  async function claim(over: Partial<ClaimRecord>): Promise<void> {
+    gh.claim(record(over), 31, 100);
+    await app.get(TrackerPollerService).tick();
+    app.get(TrackerPollerService).disarm();
+    spawned = [];
+  }
+
+  beforeEach(() => {
+    process.env.BM_MACHINE_NAME = HOST;
+  });
+
+  it('spawns over a stale hand claim taken on another machine', async () => {
+    await claim({ host: 'another-machine', heartbeat: STALE() });
+    await send().expect(201);
+    expect(spawnedAny()).toBe(true);
+    expect(spawned.some((u) => u.endsWith('/api/sessions'))).toBe(false);
+  });
+
+  it('spawns over a same-host stale claim the dashboard reports idle', async () => {
+    sessionList = { sessions: [{ id: 'A', status: 'idle' }] };
+    await claim({ host: HOST, heartbeat: STALE() });
+    await send().expect(201);
+    expect(spawnedAny()).toBe(true);
+  });
+
+  it('409s a same-host stale claim the dashboard reports working, and spawns nothing', async () => {
+    sessionList = { sessions: [{ id: 'A', status: 'working' }] };
+    await claim({ host: HOST, heartbeat: STALE() });
+    const res = await send().expect(409);
+    expect(res.body.error).toBe('session A is working on this machine — its heartbeat is late, not stopped; stop it before taking its claim');
+    expect(spawnedAny()).toBe(false);
+  });
+
+  it('409s a live hand claim, and spawns nothing', async () => {
+    await claim({ host: HOST });
+    const res = await send().expect(409);
+    expect(res.body.error).toBe('#31 is in progress — session A holds its claim');
+    expect(spawnedAny()).toBe(false);
+  });
+
+  it('409s a claim a run holds, live or stale', async () => {
+    await claim({
+      heartbeat: STALE(),
+      run: { runId: 'run-9', startedAt: '2026-09-24T10:00:00Z', mergeMode: 'merge', questionMode: 'decide', maxItems: null, base: 'main' }
+    });
+    const res = await send().expect(409);
+    expect(res.body.error).toMatch(/run-9/);
+    expect(spawnedAny()).toBe(false);
+  });
+
+  it('409s a stale claim held by a session the board dispatched', async () => {
+    await send().expect(201);
+    await claim({ session: 'sess-1', host: HOST, heartbeat: STALE() });
+    const res = await send().expect(409);
+    expect(res.body.error).toBe("the board's own session sess-1 holds this item — Stop & release it first");
+    expect(spawnedAny()).toBe(false);
   });
 });
 

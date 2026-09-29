@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { marked } from 'marked';
 
 import { elapsedSince, formatSeconds } from '../../lib/item-age';
-import { isInProgress } from '../../lib/item-progress';
+import { isInProgress, isLiveWork } from '../../lib/item-progress';
+import { claimReading } from '../../lib/tracker';
 import type { ProjectHues } from '../../lib/project-hue';
 import { Dot } from '../ui/Dot';
 import { Modal } from '../ui/Modal';
@@ -294,9 +295,15 @@ export function ItemModal({
      Read once per render rather than twice inside the JSX below, where the
      null-check and the value would each call it. No injected clock, unlike the
      card: the modal is opened, read and closed, so a reading that aged in place
-     while it sat open would be motion for its own sake. */
-  const inProgress = isInProgress(item);
-  const elapsed = inProgress ? elapsedSince(item.started) : null;
+     while it sat open would be motion for its own sake.
+     That third condition arrived with #227: a tracker claim whose heartbeat is
+     past `CLAIM_STALE_MS` is not live work, so `isLiveWork` rather than
+     `isInProgress`, and the stale claim gets a fact of its own below. */
+  const at = Date.now();
+  const inProgress = isLiveWork(item, at);
+  const elapsed = inProgress ? elapsedSince(item.started, at) : null;
+  const staleHolder = isInProgress(item) && claimReading(item, at) === 'stale' ? item.holder : undefined;
+  const staleAge = staleHolder === undefined ? null : elapsedSince(staleHolder.heartbeat, at);
 
   useEffect(() => {
     let alive = true;
@@ -364,6 +371,15 @@ export function ItemModal({
             printing NaN. Gated on `isInProgress` the same way the card is, so
             an archived item reads as done rather than as still being worked. */}
         {inProgress && <Fact label="in progress">{elapsed === null ? `(since ${item.started})` : `${elapsed} (since ${item.started})`}</Fact>}
+        {/* #227: in place of `in progress` when the claim has gone quiet. Aged off the HEARTBEAT, not `started` — how long nobody has been on it is
+            the reading that decides whether to release it — with the stamp and, when the claim recorded one, the machine it was taken on. */}
+        {staleHolder !== undefined && (
+          <Fact label="stale claim">
+            {`${staleAge === null ? 'no heartbeat' : `no heartbeat ${staleAge}`} (since ${staleHolder.heartbeat})${
+              staleHolder.host === undefined || staleHolder.host === '' ? '' : ` · ${staleHolder.host}`
+            }`}
+          </Fact>
+        )}
         {item.status === 'done' && <Fact label="status">done</Fact>}
         {/* Accumulated time and tokens, unlike the in-progress row above, are
             NOT gated on `inProgress` or `item.status`: they are history, not a

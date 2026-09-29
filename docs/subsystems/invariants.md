@@ -1313,8 +1313,9 @@ answer:
 - **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the three derived from the item
   file itself. It is the exact mirror of the block below it: `started:` has one writer (`backlog.mjs start`) and one clearer (`stop`), so a session grooming or
   executing an item states that in the frontmatter the board is already reading — `isInProgress` had been deriving it for the card's amber bar since before
-  dispatch existed, and nothing ever wired that predicate into the dispatch path. It blocks on ANY stamp, fresh or stale, matching `start`'s own rule that any
-  stamp refuses: a stamp nobody is behind is a lie the board must not paper over, and `stop` is the one-command fix for it. What stops an ancient stamp from
+  dispatch existed, and nothing ever wired that predicate into the dispatch path. For a files item it blocks on ANY stamp, fresh or stale, matching `start`'s
+  own rule that any stamp refuses (a TRACKER claim is aged since #227: a stale hand claim no longer blocks, because the tracker's `start` retires it, while a
+  stale claim held by a run or by the board's own dispatched session still does): a stamp nobody is behind is a lie the board must not paper over, and `stop` is the one-command fix for it. What stops an ancient stamp from
   blocking forever is `isInProgress`'s `status === 'open'` half — `move` never rewrites content, so an archived item's stamp is history rather than a claim. It
   lives in `item-progress.ts` and not in `shared/agent.ts` beside `runClaimBlock`, breaking that file's otherwise complete ownership of the block vocabulary on
   purpose: it is built from `isInProgress` and `progressLabel`, which are both already there, `shared/` must not import from `client/`, and hoisting the pair
@@ -2914,9 +2915,20 @@ reading as in progress on every machine until the heartbeat went stale. It lives
 guard, and its release goes through `ItemWriter.release` on the same per-URN chain. Two proofs, one per case: a session THIS server dispatched (an in-memory
 `DispatchRecordsService` entry — lost on restart on purpose, like a starting run) is stopped through the dashboard first, and only a 200 or the `no live
 session` 404 lets the release through; any other session needs the claim's `host` to equal this server's `BM_MACHINE_NAME` and the dashboard's session list to
-report it neither `working` nor `question` — absent from the list is refused, because not found is not the same as not running. A run-held claim and a claim
-that is not live are refused before the dashboard is asked anything. The release carries `authority: 'board'`, the release rule's fifth clause, which the
-`release` route never parses — so no HTTP body can reach it, and the one caller that sets it has already made one of those two proofs.
+report it neither `working` nor `question` — absent from the list is refused, because not found is not the same as not running. A run-held claim, live or
+stale, and a released one are refused before the dashboard is asked anything. The release carries `authority: 'board'`, the release rule's fifth clause, which
+the `release` route never parses — so no HTTP body can reach it, and the one caller that sets it has already made one of those two proofs.
+
+**A STALE claim is the abort route's third case (#227), and its default is the opposite of case B's.** Before it, a claim past `CLAIM_STALE_MS` was refused as
+`not claimed` on the reasoning that the protocol retires it at the next `start` — while the board went on showing it held and offered no way to let go of it.
+A stale claim is forfeit by protocol: any `start`, on any machine, retires it with no confirm, so the board doing the same behind a confirm adds no authority.
+A holder this server dispatched still goes through case A, because its heartbeat age says nothing. Any other goes through `staleClaimProbe`
+(`agents.service.ts`), which refuses only on a POSITIVE answer — the claim's `host` is this machine's and the dashboard reports the holder `working` or
+`question`, a late heartbeat rather than a dead session — and proceeds on every unknown, agents off included: case B releases a LIVE claim, so every unknown
+there must refuse; here the claim is already forfeit and the probe is only a guard. The release is `reason: 'stale'`, `by: 'board'`, with no `authority`
+(`release` refuses only a live claim held by somebody else), and it unassigns the issue like `aborted` does, since nothing replaces the assignee after it. The
+dispatch route re-checks the same claim for a tracker item and shares the probe: a run's claim, the board's own session's, or a live one is a 409; a stale one
+proceeds unless the probe refuses.
 
 **Beside the nine there is one route that is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
 every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
@@ -3129,7 +3141,8 @@ for `heartbeat` between long steps and the protocol retires whatever stops answe
 
 **The mapper reads liveness NOWHERE.** `mapIssue` fills `started`/`phase` from an UNRELEASED claim without consulting its heartbeat, because the board's rule
 for a files item is "ANY stamp, fresh or stale" (`progressBlock`), and what retires a stale claim is the PROTOCOL, at the moment another session contests the
-issue. A mapper that expired claims on its own would show an item as free while the next `claim` call still had to fight for it. The counters come off the
+issue. A mapper that expired claims on its own would show an item as free while the next `claim` call still had to fight for it. The BOARD ages it instead
+(#227): `claimReading` on the client reads `holder.heartbeat` by the reader's clock, so a stale claim still carries `started` and reads `stale`, not `executing`. The counters come off the
 newest claim whether or not it is released, because they are the item's running totals rather than a fact about who holds it.
 
 ## `orchestrator:queued` is a plan, never a claim
@@ -3289,7 +3302,9 @@ assignee still on its issue. Five things this entry pins, because each looks arb
 in 15 minutes". That is true of the claim protocol's CONTEST rule and false of the board: the mapper fills `BacklogItem.started` from any unreleased claim,
 fresh or stale, and `progressBlock` gates on `started` being present rather than on its age, so the item's dispatch control was disabled on every machine
 indefinitely rather than for `CLAIM_STALE_MS`. The defect was the missing release, not the way the stamp is read — `progressBlock` and the mapper are
-deliberately unchanged, and so is `GithubSource.release` leaving the assignee alone as the record of who last worked the item. Items stranded by a past abort
+deliberately unchanged, and so is `GithubSource.release` leaving the assignee alone as the record of who last worked the item. (#227 later taught
+`progressBlock` to age a HAND tracker claim and `release` to unassign on `stale`; a run's claim, which is what this section is about, still blocks until it is
+released.) Items stranded by a past abort
 are recovered by hand with `backlog.mjs stop <id> --abandon`; there is no migration.
 
 And one command READS the issue: **`reconcile` adds a `claim` column** in a tracker project — `this-run` / `other` / `released` / `none` / `unknown` — and

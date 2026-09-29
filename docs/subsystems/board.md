@@ -268,12 +268,23 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
   whose click re-asks nothing for this reason because no status refetch could clear it.
 
-**A claim control in the item modal (#225).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a live claim whose
-session the board dispatched, `'release'` for any other live claim that is not a run's, and `null` otherwise — a files item, no holder, a run-held claim, a
-heartbeat `CLAIM_STALE_MS` old or unparseable. `ClaimRelease` draws the chip under the dispatch control, asks through `ui/Confirm` (the Release claim wording
-says a board-dispatched session waiting on a reply also looks stopped, the one thing the server cannot see), posts `POST /api/items/abort`, prints any refusal
+**A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
+whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
+claim that is not a run's; `'release-stale'` for one whose heartbeat is `CLAIM_STALE_MS` old or unparseable; and `null` for a files item, no holder, or a
+run-held claim. `ClaimRelease` draws the chip under the dispatch control, asks through `ui/Confirm` (the Release claim wording says a board-dispatched session
+waiting on a reply also looks stopped, the one thing the server cannot see; the stale wording names the heartbeat age and host, and says a session that is
+somehow still running is refused at its next heartbeat), posts `POST /api/items/abort`, prints any refusal
 verbatim, and on success shows `claim released` and calls `onReleased` so the Board re-reads its payload. It is drawn only where the modal is handed
 `onReleased` — the Board — and the card carries no claim control, because it carries no claim reading to hang one on.
+
+**A stale claim reads stale (#227).** The mapper still fills `started`/`phase` from any unreleased claim, so every reader that means "is somebody on this"
+asks `claimReading` (`lib/tracker.ts`) — `'live' | 'stale' | null` by the reader's clock — as its second question. A stale holder draws the card's live strip as
+`stale · no heartbeat <age> · <host>` in the stale queued band's muted pair instead of the hatched `executing` one (`liveBarFor`); ranks 2 and drops out of the
+Status filter's "In progress" (`isLiveWork` in `lib/item-progress.ts`, which `liveRank` reads with the board's clock); and reads `stale claim` in the item modal
+in place of `in progress`. It does NOT leave the board — `leavesBoard` is unchanged, because the release control lives on the Board and Archive has none. The
+clock's own gate, `hasLive`, reads the rank UNAGED: a claim that is live now has to keep the clock running to be seen going stale. `progressBlock` lets dispatch
+through over a stale hand claim — the spawned session's `start` retires it — and the Launch sheet says so (`staleTakeover`); a stale claim a run holds, or one
+the board's own session holds, still blocks.
 
 **A fourth card reading, `queued` (task-52, [spec](../superpowers/specs/2026-09-23-orchestrator-queued-label-design.md) §4.2).** An issue carrying the
 `orchestrator:queued` label maps to `BacklogItem.queued`, and `queuedReading` (`lib/tracker.ts`) turns it into `'live' | 'stale' | null`: `'live'` while the

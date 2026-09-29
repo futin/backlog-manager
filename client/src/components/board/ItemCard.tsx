@@ -1,5 +1,6 @@
 import { elapsedSince, formatCreated } from '../../lib/item-age';
 import { isInProgress, progressLabel } from '../../lib/item-progress';
+import { claimReading } from '../../lib/tracker';
 import type { ProjectHues } from '../../lib/project-hue';
 import { Dot } from '../ui/Dot';
 import { Marker, type MarkerTone } from '../ui/Marker';
@@ -73,8 +74,12 @@ export type LiveBar = {
    * test can read without a render, and because the card still marks the two
    * apart in its markup (`data-tone`) for anything that needs to tell them
    * apart without re-deriving the two stage lists.
+   *
+   * `stale` (#227) is the one tone the stylesheet DOES read: a tracker claim whose heartbeat is past `CLAIM_STALE_MS`. It is not a third kind of worker but
+   * the absence of one, so it drops the hatch and wears the stale queued band's muted ink — the amber `executing` strip on a card nobody has touched for
+   * a day is the lie #227 was filed against.
    */
-  tone: 'run' | 'human';
+  tone: 'run' | 'human' | 'stale';
   /** The stamp to age against, or null when nothing here can be aged. */
   anchor: string | null;
   /** The bar's title attribute — the one place the exact stamp is legible. */
@@ -118,7 +123,7 @@ export type LiveBar = {
  * `dispatched` at all, and there the current stage's arrival IS the right
  * reading: how long it has been waiting on you.
  */
-export function liveBarFor(item: BacklogItem, run?: RunCardState): LiveBar | null {
+export function liveBarFor(item: BacklogItem, run: RunCardState | undefined, now: number): LiveBar | null {
   const stage = run?.stage;
   if (stage !== undefined && (ATTENTION_RUN_STAGES.includes(stage) || ACTIVE_RUN_STAGES.includes(stage))) {
     const anchor = run?.stageAt.dispatched ?? run?.stageAt[stage] ?? null;
@@ -130,6 +135,21 @@ export function liveBarFor(item: BacklogItem, run?: RunCardState): LiveBar | nul
       // stamp behind it — omitted entirely rather than trailing an `undefined`
       // when there is none, the same rule the elapsed reading follows.
       title: anchor === null ? stage : `${stage} since ${anchor}`
+    };
+  }
+  /* #227: a tracker claim past its heartbeat window still carries `started`/`phase` (the mapper sets them for ANY unreleased claim, because an item shown
+     as free while `claim` would have to retire somebody first is the other lie), so row 3 below would paint it `executing` forever. It is checked here,
+     between the run's rows and the hand session's, and reads the heartbeat rather than `started`: how long the item has been worked is not the question
+     once nobody is working it — how long it has been silent is. The age is in the label and `anchor` is null, so the card prints no second, ticking
+     reading beside it. A run-held claim falls here too once its run stage is gone: the run surfaces already say crashed, and this card should agree. */
+  if (claimReading(item, now) === 'stale' && item.holder !== undefined) {
+    const age = elapsedSince(item.holder.heartbeat, now);
+    const host = item.holder.host === undefined || item.holder.host === '' ? '' : ` · ${item.holder.host}`;
+    return {
+      label: `stale · no heartbeat${age === null ? '' : ` ${age}`}${host}`,
+      tone: 'stale',
+      anchor: null,
+      title: `claim stale — no heartbeat since ${item.holder.heartbeat}`
     };
   }
   if (isInProgress(item)) {
@@ -301,7 +321,7 @@ export function ItemCard({
      `isInProgress` is no longer read directly here: it is row 3 of that
      precedence, and reading it separately is how a card ends up wearing one
      state and printing another. */
-  const bar = liveBarFor(item, run);
+  const bar = liveBarFor(item, run, at);
   /* Null whenever `bar` is not — the one precedence rule between the two bands, stated in `queuedStripFor`. */
   const queuedStrip = queuedStripFor(queued, bar);
   /* null when the anchor is not a value this can age — a hand-edited `started`
@@ -333,22 +353,24 @@ export function ItemCard({
      kind needs is an entry in REFACTOR_KINDS above. Silence, not a fallback
      marker: one reading `kind: whatevr` would present a typo as a category. */
   type CardMarker = { tone: MarkerTone; word: string; title?: string };
-  const markers = ([
-    item.section === 'refactors' && REFACTOR_KINDS.includes(item.kind) ? { tone: 'kind' as const, word: item.kind } : null,
-    item.section === 'bugs' && item.groomed ? { tone: 'groomed' as const, word: 'groomed' } : null,
-    /* task-45: a tracker issue with no `type:*` label. It leads the two
+  const markers = (
+    [
+      item.section === 'refactors' && REFACTOR_KINDS.includes(item.kind) ? { tone: 'kind' as const, word: item.kind } : null,
+      item.section === 'bugs' && item.groomed ? { tone: 'groomed' as const, word: 'groomed' } : null,
+      /* task-45: a tracker issue with no `type:*` label. It leads the two
        history markers and follows `kind`/`groomed` for the same reason the
        order already has: this says what the item IS (or rather, what nobody
        has said it is), and the two below say where it has got to. It is a
        RENDERED BADGE and nothing more — `untyped` reaches no predicate on
        this board, which is the rule shared/types.ts states and this is the
        one place that reads the field at all. */
-    item.untyped ? { tone: 'untyped' as const, word: 'untyped' } : null,
-    /* No `queued` marker: the orchestrator:queued label is drawn as the card's top band now (`queuedStripFor` above), and a word here as well would
+      item.untyped ? { tone: 'untyped' as const, word: 'untyped' } : null,
+      /* No `queued` marker: the orchestrator:queued label is drawn as the card's top band now (`queuedStripFor` above), and a word here as well would
        draw one fact twice. */
-    item.status === 'done' ? { tone: 'done' as const, word: 'done' } : null,
-    stale ? { tone: 'stale' as const, word: 'stale' } : null
-  ] as (CardMarker | null)[]).filter((m): m is CardMarker => m !== null);
+      item.status === 'done' ? { tone: 'done' as const, word: 'done' } : null,
+      stale ? { tone: 'stale' as const, word: 'stale' } : null
+    ] as (CardMarker | null)[]
+  ).filter((m): m is CardMarker => m !== null);
 
   /* Asked through `dispatchAvailable` rather than by re-deriving the action and
      the gate here: the row has to reserve its space exactly when the control
@@ -381,9 +403,10 @@ export function ItemCard({
           distinction now: `data-tone` keeps the precedence's verdict in the
           markup for anything that needs it, but nothing in the stylesheet
           reads it, because this design marks state by ink and never by accent
-          (DESIGN.md §5, §8.3). */}
+          (DESIGN.md §5, §8.3) — except `stale` (#227), which is not a live
+          state at all: no hatch, and the stylesheet mutes it by that value. */}
       {bar !== null && (
-        <div className="board-card-live hatch" data-tone={bar.tone} title={bar.title}>
+        <div className={bar.tone === 'stale' ? 'board-card-live' : 'board-card-live hatch'} data-tone={bar.tone} title={bar.title}>
           {/* Either the run's own stage word (`reviewing`, `needs-answers`)
               or which skill a hand-run session holds the item with
               ('grooming' / 'executing') — see `liveBarFor` for the

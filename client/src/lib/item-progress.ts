@@ -1,3 +1,4 @@
+import { claimReading } from './tracker';
 import type { BacklogItem } from '../../../shared/types';
 
 /**
@@ -12,6 +13,19 @@ import type { BacklogItem } from '../../../shared/types';
  */
 export function isInProgress(item: BacklogItem): boolean {
   return item.status === 'open' && item.started !== '';
+}
+
+/**
+ * Whether somebody is on this item right now (#227): `isInProgress`, minus a tracker claim that has gone stale by `now`.
+ *
+ * Two predicates rather than one widened, because they answer different questions and both are still asked. `isInProgress` is "does a claim stand" — the
+ * item modal's facts, `leavesBoard`/`isStale` (an item with ANY unreleased claim keeps its place on the board, where the release control is) and
+ * `progressLabel` all want that. This is "is it being worked": the column rank, the Status filter's "In progress" and the card's live bar read it, since a
+ * claim nobody has heartbeated for `CLAIM_STALE_MS` is litter the protocol retires at the next `start`, and drawing it as work in flight is what left #15
+ * untouched for a day. A files item has no `holder`, so `claimReading` is `null` for it and this is `isInProgress` exactly — its "ANY stamp" rule stands.
+ */
+export function isLiveWork(item: BacklogItem, now: number): boolean {
+  return isInProgress(item) && claimReading(item, now) !== 'stale';
 }
 
 /**
@@ -65,8 +79,8 @@ export function progressLabel(item: BacklogItem): string {
  * no use for — its dispatch route re-scans the item file itself and is
  * unchanged by this.
  *
- * No freshness window, matching `backlog.mjs start`'s own rule that ANY stamp
- * refuses, fresh or stale: a stamp nobody is behind is a lie the board should
+ * No freshness window for a FILES item, matching `backlog.mjs start`'s own rule that ANY stamp
+ * refuses, fresh or stale (a tracker claim does have one since #227 — see the branch below): a stamp nobody is behind is a lie the board should
  * not paper over, and `stop` is the one-command fix for it. What keeps an
  * ancient stamp from blocking forever is `isInProgress`'s status half — an
  * archived item's stamp is history, not a claim.
@@ -78,7 +92,16 @@ export function progressLabel(item: BacklogItem): string {
  * what someone greps the item file for when they want to know whose marker
  * this is.
  */
-export function progressBlock(item: BacklogItem): string | null {
+export function progressBlock(item: BacklogItem, now: number): string | null {
   if (!isInProgress(item)) return null;
+  /* #227 — a stale TRACKER claim is the one stamp that does not block, because the protocol already lets any `start`, on any machine, retire it with no
+     confirm: the spawned session's own `start` does exactly that, and the dispatch sheet names the claim being taken over (`staleTakeover`). Two holders
+     keep the block even stale. A run-held claim falls through to the sentence below — a stale run claim is a crashed run, which the watchdog and
+     `--resume` own. A board-dispatched one gets its own sentence, because a `claude -p` waiting on a reply has no process and sends no heartbeat, so
+     staleness alone says nothing about it; the way out is the modal's Stop & release. A files item has no `holder`, so none of this reaches it. */
+  const holder = item.holder;
+  if (holder !== undefined && holder.run === undefined && claimReading(item, now) === 'stale') {
+    return holder.dispatched === true ? `the board's own session ${holder.session} holds this item — Stop & release it first` : null;
+  }
   return `a session is already working this item (${progressLabel(item)} since ${item.started})`;
 }

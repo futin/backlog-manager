@@ -74,6 +74,9 @@ The ninth write route, `POST /api/items/abort` (#225, body `project, id`), is no
 `authority: 'board'` (a field `release` never parses) once one proof holds — the holder is a session this server dispatched, which it stops through the
 dashboard first (`POST /api/sessions/:id/stop`; a 200 or the `no live session` 404 proceeds, anything else is a 502 and the claim is untouched), or the claim's
 `host` equals `BM_MACHINE_NAME` and `GET /api/sessions` reports the holder neither `working` nor `question`. Every other case is a 409 naming what failed.
+A STALE non-run claim this server did not dispatch (#227) is released with `reason: 'stale'` and no `authority`, answering `stopped: false`, unless the claim was
+taken on this machine and `GET /api/sessions` reports the holder `working` or `question` — every unknown, agents off included, proceeds. `POST
+/api/agents/dispatch` re-checks a tracker item's claim with the same probe: a run's claim, a live one, or one held by a session this server dispatched is a 409.
 Answers `{ id, released: true, stopped }`. The dispatch record is `DispatchRecordsService` (`items/`, in memory, 24 h / 200 entries), written by
 `AgentsService.dispatch` and read by `GithubSource.list` to set `BacklogItem.holder.dispatched` — the mapper fills the rest of `holder` from the live claim.
 

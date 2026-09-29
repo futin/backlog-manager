@@ -662,6 +662,11 @@ code, kbd, samp, pre { font-family: inherit }
    here, because anyone putting the strip back into caps has to put this line
    back with it. */
 .board-card-live-mark { flex: none; white-space: nowrap }
+/* #227: a tracker claim whose heartbeat is past the window. The live strip's band, and the stale queued band's paint rather than `--fill-live` — nobody is
+   on this, so the "somebody is on this right now" fill is exactly what it must not wear (ItemCard also drops `.hatch` for it). The same `--hairline2` under
+   `--ink2` pair, for the contrast reasons given at `.board-card-queued` below: dimmed, never recoloured, because an abandoned claim is a fact to act on
+   with Release claim, not an alarm. This is the one `data-tone` value the stylesheet reads. */
+.board-card-live[data-tone="stale"] { background: var(--hairline2); color: var(--ink2) }
 /* The queued band (DESIGN.md §8.3): the orchestrator:queued label, moved up from the marker row where a plain word got lost among the others. The live
    strip's own band — height, inline padding, type — so the two read as one family across a column, and none of its paint: `--fill-live` under the hatch
    says "somebody is on this right now", and the label is a plan, never a claim (docs/subsystems/invariants.md).

@@ -6,17 +6,15 @@ import { answer, writable } from '../items/items-write.controller';
 import { isLive } from '../tracker/claim';
 import { TrackerPollerService } from '../tracker/poller.service';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
-import { authHeaders, dashboardError } from './agents.service';
+import { authHeaders, dashboardError, dashboardSessionStatus, staleClaimProbe } from './agents.service';
 import type { ItemAbortResult } from '../../../shared/types';
 
 /** The dashboard's stop answers at once — it signals a process, it does not wait for one — so the spawn call's budget is plenty. */
 const STOP_TIMEOUT_MS = 10_000;
-/** The session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
-const SESSIONS_TIMEOUT_MS = 15_000;
 
 /**
  * items-abort.service.ts — `POST /api/items/abort` (#225): the board's way to let go of a tracker claim whose session was stopped, or died, without
- * running its own closing `stop`.
+ * running its own closing `stop` — and, since #227, of one whose heartbeat has gone stale.
  *
  * ## Why this is in `agents/`, when the route is under `/api/items`
  *
@@ -27,8 +25,8 @@ const SESSIONS_TIMEOUT_MS = 15_000;
  *
  * ## The two cases, and why each proof is the one it is
  *
- * The holder is the live claim `readClaim` answers. No live claim, or one a RUN holds, is refused before the dashboard is asked anything: a stale claim is the
- * protocol's to retire at the next `start`, and a run owns its items for the whole item.
+ * The holder is the claim `readClaim` answers. No unreleased claim, or one a RUN holds, live or stale, is refused before the dashboard is asked anything: a
+ * run owns its items for the whole item, and a stale run claim is a crashed run, which the watchdog and `--resume` own.
  *
  * - **Case A — this server dispatched the holding session.** The board started it, so the board may stop it: ask the dashboard to stop the session, then
  *   release. A 200 (`stopped` or `stopping`) proceeds, and so does a 404 that says `no live session` — the process is already gone, which for a
@@ -42,6 +40,20 @@ const SESSIONS_TIMEOUT_MS = 15_000;
  *   finished session — which is why the client's confirm for this case says so.
  *
  * The release is `reason: 'aborted'`, `by: 'board'`, and carries `authority: 'board'` — the release rule's fifth clause, which no HTTP body can set.
+ *
+ * ## A stale claim (#227)
+ *
+ * Before #227 a claim past its heartbeat window was refused here as `not claimed`, on the reasoning that the protocol retires it at the next `start`. But
+ * the board went on showing it as held, and the item modal offered no way to let go of it — so an item nobody was on read as worked, on every machine,
+ * until somebody happened to dispatch it. A stale claim is forfeit by protocol: any `start`, anywhere, retires it with no confirm. The board releasing it
+ * behind a confirm naming the heartbeat age and host adds no authority the protocol does not already grant.
+ *
+ * - **Dispatched by this server** — case A, unchanged: a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing, and the stop is what
+ *   makes the release safe.
+ * - **Anything else** — `staleClaimProbe`, which refuses only when the claim was taken on this machine and the dashboard positively reports the holder
+ *   `working` or `question`. Every unknown proceeds, including agents off, which is why this branch runs before the agents-off 409 below. Released as
+ *   `reason: 'stale'`, `by: 'board'`, the word `claim`'s own retire loop writes, and with no `authority`: `release` refuses only a LIVE claim held by
+ *   somebody else, so it needs none.
  */
 @Injectable()
 export class ItemsAbortService {
@@ -59,12 +71,19 @@ export class ItemsAbortService {
     const syncOff = this.poller.syncOffBlock(project);
     if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
     const claim = answer(await w.writer.readClaim(w.project, w.marker, id));
-    if (claim === null || !isLive(claim.record, Date.now())) {
+    if (claim === null || claim.record.released !== undefined) {
       throw new HttpException({ error: `${id} is not claimed` }, 409);
     }
     const holder = claim.record;
     if (holder.run !== undefined) {
       throw new HttpException({ error: `${id} is held by orchestrator run ${holder.run.runId} — stop the run, not the item` }, 409);
+    }
+
+    if (!isLive(holder, Date.now()) && this.dispatches.get(holder.session) === null) {
+      const refusal = await staleClaimProbe(holder);
+      if (refusal !== null) throw new HttpException({ error: refusal }, 409);
+      answer(await w.writer.release(w.project, w.marker, { project, id, commentId: claim.commentId, session: 'board', reason: 'stale' }));
+      return { id, released: true, stopped: false };
     }
 
     const cfg = readAgentsConfig();
@@ -83,7 +102,7 @@ export class ItemsAbortService {
       if (typeof holder.host !== 'string' || holder.host.length === 0 || holder.host !== machine) {
         throw new HttpException({ error: `${id} is held on ${holder.host ?? 'a machine the claim did not record'}, not this one (${machine})` }, 409);
       }
-      const status = await this.sessionStatus(cfg, holder.session);
+      const status = await dashboardSessionStatus(cfg, holder.session);
       if (status === null) {
         throw new HttpException({ error: `the dashboard does not know session ${holder.session}, so nothing shows it is not running` }, 409);
       }
@@ -115,20 +134,5 @@ export class ItemsAbortService {
     if (res.status === 404 && body?.error === 'no live session') return false;
     const error = typeof body?.error === 'string' ? body.error : `answered ${res.status}`;
     throw new HttpException({ error: `the dashboard did not stop session ${session}: ${error} — the claim is untouched` }, 502);
-  }
-
-  /** The holder's status in the dashboard's session list, `null` when the list does not carry it; a 502 when the list cannot be read. */
-  private async sessionStatus(cfg: AgentsConfig, session: string): Promise<string | null> {
-    let res: Response;
-    try {
-      res = await fetch(`${cfg.url}/api/sessions`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
-    } catch (e) {
-      throw new HttpException({ error: dashboardError(e, 'the dashboard session list', SESSIONS_TIMEOUT_MS) }, 502);
-    }
-    if (!res.ok) throw new HttpException({ error: `the dashboard session list answered ${res.status}` }, 502);
-    const body = (await res.json().catch(() => null)) as { sessions?: unknown } | null;
-    if (!Array.isArray(body?.sessions)) throw new HttpException({ error: 'the dashboard session list carried no sessions' }, 502);
-    const found = (body.sessions as { id?: unknown; status?: unknown }[]).find((s) => s?.id === session);
-    return found === undefined ? null : typeof found.status === 'string' ? found.status : 'unknown';
   }
 }

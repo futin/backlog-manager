@@ -270,21 +270,58 @@ export function queuedReading(
 }
 
 /**
- * Which claim control the item modal draws for a tracker item's holder (#225): `stop-release` when this server dispatched the holding session — the board
- * started it, so **Stop & release** stops it through the dashboard and then releases — `release` for any other live claim, and `null` when there is nothing
- * the board may do.
+ * Whether a tracker item's holder is live by the reader's clock (#227): `live` inside `CLAIM_STALE_MS` of its heartbeat, `stale` at or past it — or when
+ * the heartbeat does not parse, since nothing can call that fresh — and `null` for a files item (the skills own its stamp) and for an item nobody holds.
  *
- * `null` for a files item (the skills own its stamp), for an item nobody holds, for a claim a RUN holds (the run owns its items for the whole item — stop
- * the run instead), and for a claim that is not live: past `CLAIM_STALE_MS` the protocol retires it at the next `start`, and an unreadable heartbeat is read
- * the same way, since nothing can call it fresh. The server re-decides every one of these at click time (`ItemsAbortService`); this only decides whether to
- * offer the click. `now` is required, for the reason this module's header gives.
+ * The protocol's own second question, and the one the board never used to ask. The mapper sets `holder` for ANY unreleased claim, deliberately (an item
+ * shown as free while `claim` still has to fight for it is the other lie), so "unreleased" is all the payload says; whether it is also live is decided here,
+ * against the reader's clock, by the rule the server's `isLive` (`server/src/tracker/claim.ts`) applies. Every surface that treats a claim differently once
+ * it has gone stale — the claim control, the card's bar, the column rank, the dispatch block and the dispatch sheet's take-over line — reads this, so no two
+ * of them can disagree about one item at one instant. `now` is required, for the reason this module's header gives.
  */
-export function claimControl(item: Pick<BacklogItem, 'source' | 'holder'>, now: number): 'stop-release' | 'release' | null {
+export function claimReading(item: Pick<BacklogItem, 'source' | 'holder'>, now: number): 'live' | 'stale' | null {
   const holder = item.holder;
-  if (item.source !== 'github' || holder === undefined || holder.run !== undefined) return null;
+  if (item.source !== 'github' || holder === undefined) return null;
   const beat = Date.parse(holder.heartbeat);
-  if (!Number.isFinite(beat) || now - beat >= CLAIM_STALE_MS) return null;
-  return holder.dispatched === true ? 'stop-release' : 'release';
+  return Number.isFinite(beat) && now - beat < CLAIM_STALE_MS ? 'live' : 'stale';
+}
+
+/** Enough of a session id to tell two apart in one sentence; the whole id is on the claim comment. */
+export function shortSession(session: string): string {
+  return session.length > 8 ? session.slice(0, 8) : session;
+}
+
+/**
+ * Which claim control the item modal draws for a tracker item's holder (#225, #227): `stop-release` when this server dispatched the holding session — the
+ * board started it, so **Stop & release** stops it through the dashboard and then releases, whatever the heartbeat age, because a `claude -p` waiting on a
+ * reply has no process and sends no heartbeat — `release` for any other live claim, `release-stale` for any other stale one, and `null` when there is
+ * nothing the board may do.
+ *
+ * `null` for a files item, for an item nobody holds, and for a claim a RUN holds, live or stale: the run owns its items for the whole item, and a stale run
+ * claim is a crashed run, which the watchdog and `--resume` own — stop the run, not the item. `release-stale` is its own answer rather than `release` because
+ * the two confirms say different things: a live claim's release needs proof the session ended, a stale one is already forfeit by protocol (any `start`, on
+ * any machine, retires it). The server re-decides every one of these at click time (`ItemsAbortService`); this only decides whether to offer the click.
+ */
+export function claimControl(item: Pick<BacklogItem, 'source' | 'holder'>, now: number): 'stop-release' | 'release' | 'release-stale' | null {
+  const reading = claimReading(item, now);
+  const holder = item.holder;
+  if (reading === null || holder === undefined || holder.run !== undefined) return null;
+  if (holder.dispatched === true) return 'stop-release';
+  return reading === 'live' ? 'release' : 'release-stale';
+}
+
+/**
+ * The dispatch sheet's one line when a launch goes ahead over a stale claim (#227), or `null` when it does not. Only a stale HAND claim is taken over —
+ * `progressBlock` still blocks a run-held one and a board-dispatched one — and the spawned session's own `start` retires it, exactly as it would from a
+ * terminal. The sheet says so because the launch is ending somebody's claim, and the reader should see whose before pressing it. The age clause drops out
+ * for a heartbeat that cannot be aged, the host clause for a claim that recorded none.
+ */
+export function staleTakeover(item: Pick<BacklogItem, 'source' | 'holder'>, now: number): string | null {
+  const holder = item.holder;
+  if (claimReading(item, now) !== 'stale' || holder === undefined || holder.run !== undefined || holder.dispatched === true) return null;
+  const age = elapsedSince(holder.heartbeat, now);
+  const host = holder.host === undefined || holder.host === '' ? '' : ` on ${holder.host}`;
+  return `takes over a stale claim — session ${shortSession(holder.session)}${host}, no heartbeat${age === null ? '' : ` ${age}`}`;
 }
 
 /* `projectIsFiles` lived here from task-46 until task-47 and is gone.

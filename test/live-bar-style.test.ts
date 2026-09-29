@@ -68,6 +68,17 @@ describe('live strip stylesheet rules', () => {
   });
 
   /**
+   * #227: a stale tracker claim is the one `data-tone` the sheet reads, and it takes the stale queued band's muted pair — never `--fill-live`, which says
+   * somebody is on the card right now.
+   */
+  it('mutes a stale claim with the stale queued pair, not the live fill', () => {
+    const stale = ruleBlock(css, '.board-card-live[data-tone="stale"]') as string;
+    expect(stale).toMatch(/background:\s*var\(--hairline2\)/);
+    expect(stale).toMatch(/color:\s*var\(--ink2\)/);
+    expect(stale).not.toMatch(/--fill-live/);
+  });
+
+  /**
    * The deletion, pinned as a deletion. A "restore the cyan for running items"
    * change would have to put one of these names back, and this is what catches
    * it — the rule that only one fill exists cannot be expressed by the presence
