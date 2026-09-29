@@ -247,7 +247,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
 
 - **The tracker chip** (`TrackerChip`) is the connection's one freshness reading, and it belongs to the shell rather than to any page: a poll is a fact about
   the whole tracker, so it is drawn once, in the strip above the well (`.topstrip`, `var(--main-gap)` tall) — or, below 700 px, where the strip does not exist,
-  in the rail's phone bar beside ☰, through `SideRail`'s `chipSlot`. `App` builds the one element and hands it to exactly one of those two homes. The chip is
+  in the rail's phone bar beside ☰, through `SideRail`'s `chipSlot` — where CSS alone drops the login whenever meters follow it and pins ☰ at 36 px, since
+  the bar has no slack for a reading whose width tracks the account (#229). `App` builds the one element and hands it to exactly one of those two homes. The chip is
   drawn only while `hasTracker` finds a github row in the `/api/trackers` payload, and shows a status pip, the platform, and two `Meter`s: POLL (the sweep's
   countdown, `sweepProgress` — the newest github stamp against `TRACKER_CYCLE_MS`, reading `overdue` past two cycles and the access reason when a row is not
   `ok`) and API (`apiUsage` — the rate limit's used share, amber from 60 %, red from 90 %). Clicking it opens `TrackerPopover`, a read-only panel with one row

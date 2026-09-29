@@ -1,4 +1,4 @@
-import { readStyles, ruleBlock } from './helpers/css-rule';
+import { mediaBlocks, readStyles, ruleBlock } from './helpers/css-rule';
 
 /**
  * StageTrack's reduced-motion carve-out — the `.run-track*` block's own
@@ -33,39 +33,6 @@ import { readStyles, ruleBlock } from './helpers/css-rule';
  */
 describe('stage-track reduced-motion stylesheet rules', () => {
   const css = readStyles();
-
-  /**
-   * `ruleBlocks` (helpers/css-rule.ts) captures a flat selector's own
-   * `{...}` body by scanning to the very next `}` after its `{` — correct
-   * for one rule, but wrong for an at-rule that wraps several: the next
-   * `}` after `@media (...) {`'s own opening brace belongs to the FIRST
-   * nested rule, not to the media block itself. Extracting the reduced-
-   * motion block's full body needs brace-depth counting instead, which is
-   * the one thing this file adds beyond the shared helper — kept local
-   * rather than folded into helpers/css-rule.ts because no other caller of
-   * that helper queries an at-rule's own body; every one of them looks up
-   * a flat selector.
-   */
-  function mediaBlocks(source: string, atRule: string): string[] {
-    const found: string[] = [];
-    let from = 0;
-    for (;;) {
-      const at = source.indexOf(atRule, from);
-      if (at === -1) return found;
-      const open = source.indexOf('{', at);
-      if (open === -1) return found;
-      let depth = 1;
-      let i = open + 1;
-      while (i < source.length && depth > 0) {
-        if (source[i] === '{') depth++;
-        else if (source[i] === '}') depth--;
-        i++;
-      }
-      if (depth !== 0) return found; // unbalanced — bail rather than mis-slice
-      found.push(source.slice(open + 1, i - 1));
-      from = i;
-    }
-  }
 
   // The file has two `@media (prefers-reduced-motion: reduce)` blocks: the
   // file-wide blanket reset near the top, and this section's own carve-out
