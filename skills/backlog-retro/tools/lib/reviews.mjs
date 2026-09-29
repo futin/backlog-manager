@@ -12,8 +12,11 @@ import path from 'node:path';
 
 import { sidecarFiles, sidecarRoots } from './paths.mjs';
 
-// `<id>-<pass>.md`. Anything else in the directory is not a review.
-const REVIEW_NAME = /^([a-z]+-\d+)-(\d+)\.md$/;
+// `<id>-<pass>.md`. Anything else in the directory is not a review. `<id>`
+// is a files project's `bug-21` or a tracker project's bare issue number,
+// `18` — the same two shapes, for the same reason, as sessions.mjs's
+// `LOG_NAME` (#223).
+const REVIEW_NAME = /^((?:[a-z]+-)?\d+)-(\d+)\.md$/;
 
 // The reviewer template puts `verdict: <word>` on its own line near the top.
 // First match wins: a later occurrence is the reviewer quoting itself in

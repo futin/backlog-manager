@@ -58,6 +58,20 @@ function headline(sweep) {
         `${t.fixLoops.count} loop(s), ${money(t.fixLoops.costUsd)}, ${num(t.fixLoops.minutes)} min`
     )
   );
+  // #226's split: a fix loop either resumed the session before it or started
+  // fresh, and the next review pass is how the two compare on outcome, not
+  // only on cost. A sweep object from before the split has no `byMode`;
+  // it prints no mode rows rather than a pair of invented zeros.
+  for (const mode of ['resumed', 'fresh']) {
+    const m = t.fixLoops.byMode?.[mode];
+    if (!m) continue;
+    lines.push(
+      row(
+        `fix loops, ${mode}`,
+        `${m.loops} loop(s), ${money(m.costUsd)}, median peak ${num(m.peakMedian)}, next pass approve ${m.nextPass.approve}, fix ${m.nextPass.fix}`
+      )
+    );
+  }
   lines.push(
     row(
       'median item wall',

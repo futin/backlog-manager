@@ -77,7 +77,7 @@ Reads, for every `<orchHome>/<encoded project>/`:
   durations**: `stageAt` entries sorted by timestamp, consecutive pairs differenced, `fixing` its own stage, `pending` reported separately as queue wait and
   never summed into pipeline time. `usage` entries (task-27) copied verbatim when present.
 - **logs** — every `logs/*.jsonl`. The file name classifies the session: `<id>.jsonl` execute, `<id>-fix-<n>.jsonl` fix loop `n`, `<id>-retry-<n>.jsonl` retry
-  `n`. From the last `type: "result"` event: `total_cost_usd`, `num_turns`, `duration_ms`, the four token counts, `permission_denials` count, `is_error`, and a
+  `n`. `<id>` is a files id (`bug-26`) or a tracker item's bare issue number (`18`), which reaches every sidecar path without its `#` (#223). From the last `type: "result"` event: `total_cost_usd`, `num_turns`, `duration_ms`, the four token counts, `permission_denials` count, `is_error`, and a
   `terminated` field that is `spend-limit` when `is_error` and the result text names a spend limit, `error` for any other `is_error`, else `ok`. From every
   `assistant` event's `usage`: context per message (`cache_read + cache_creation + input`), reduced to `floor` (the smallest of the first three), `peak`,
   `messages`. A log with no `result` event is reported with `result: null` and counted as killed. A log whose item has a `usage` entry for the same `sessionId`

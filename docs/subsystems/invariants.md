@@ -1673,8 +1673,9 @@ backlog-manager resume (`claude -p --session-id <new> … -n resume <project>`, 
 (`claude -p --resume <existing id>`, `buildSpawnArgs` in the dashboard's own repo). Nothing in backlog-manager requested the second, nothing here can see it,
 and no lock this repo adds to its own server could ever refuse it. The run file is the one component both shapes reach.
 
-`driver: { sessionId, at } | null` is written by `init` and by the new `claim` command and read by every mutating command; `status`, `plan`, `denials` and
-`reconcile` stay unchecked, because an evicted session must still be able to find out what happened. Identity is `CLAUDE_CODE_SESSION_ID` — the same id
+`driver: { sessionId, at } | null` is written by `init` and by the new `claim` command and read by every mutating command; `status`, `plan`, `denials`,
+`fix-mode` and `reconcile` stay unchecked, because an evicted session must still be able to find out what happened.
+Identity is `CLAUDE_CODE_SESSION_ID` — the same id
 `backlog.mjs` reads for token accounting, and never a synthetic per-process id, which would present a different identity on every invocation and lock a run out
 of its own second command. **Absent means unclaimed, never locked**: every run file written before this existed lacks the key. An unidentified caller (a
 hand-run terminal) warns and proceeds rather than being refused — refusing would strand the one person recovering a run by hand.

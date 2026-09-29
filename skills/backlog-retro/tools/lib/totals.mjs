@@ -68,6 +68,74 @@ export function itemWallMin(item) {
   return null;
 }
 
+// Where a session or review file is stored: its key with the last two
+// segments (`logs/<file>` or `reviews/<file>`) cut off, so `<project>` for
+// the live run and `<project>/runs/<stem>` for an archived one. Reviews
+// carry no run id, and this is the one thing a review and the sessions it
+// judged are guaranteed to share — `init` moves a run's logs and reviews
+// together, into the same directory (task-31).
+function storageRoot(key) {
+  return typeof key === 'string' ? key.split('/').slice(0, -2).join('/') : null;
+}
+
+// Execute first, then retries, then fix loops in loop order: the order the
+// runner dispatches them in, which is what "an earlier session" means below.
+const KIND_ORDER = { execute: 0, retry: 1, fix: 2 };
+
+// #226: every fix loop classified as RESUMED (it kept a session id some
+// earlier session of the same item already had — `claude --resume` keeps
+// the id it was handed) or FRESH (a session id nothing before it had, which
+// is what a new `claude -p` is given). No new field records the mode: the
+// ids alone derive it, and a run from before #226 therefore reads as all
+// resumed, which is what it was. A fix session with no id is in neither —
+// unknown is not a mode.
+//
+// Each loop is credited with the review that judged its work, pass `loop +
+// 1` of the same item in the same storage location, so the two modes can be
+// compared on what came of them and not only on what they cost. A loop
+// with no such review (the run ended, or the review was never written)
+// still counts in `loops` and in neither verdict.
+function fixLoopsByMode(sessions, reviews) {
+  const groups = new Map();
+  const groupOf = (project, itemId, root) => {
+    const key = JSON.stringify([project, itemId, root]);
+    if (!groups.has(key)) groups.set(key, { sessions: [], reviews: new Map() });
+    return groups.get(key);
+  };
+  for (const s of sessions) {
+    if (s.itemId === null || s.itemId === undefined || !(s.kind in KIND_ORDER)) continue;
+    groupOf(s.project, s.itemId, storageRoot(s.key)).sessions.push(s);
+  }
+  for (const r of reviews) {
+    groupOf(r.project, r.itemId, storageRoot(r.file)).reviews.set(r.pass, r.verdict);
+  }
+
+  const modes = { resumed: [], fresh: [] };
+  for (const group of groups.values()) {
+    const ordered = [...group.sessions].sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || (a.loop ?? 0) - (b.loop ?? 0));
+    const seen = new Set();
+    for (const s of ordered) {
+      const id = typeof s.sessionId === 'string' && s.sessionId !== '' ? s.sessionId : null;
+      if (s.kind === 'fix' && id !== null) {
+        const verdict = Number.isFinite(s.loop) ? group.reviews.get(s.loop + 1) : undefined;
+        modes[seen.has(id) ? 'resumed' : 'fresh'].push({ session: s, verdict });
+      }
+      if (id !== null) seen.add(id);
+    }
+  }
+
+  const fold = (loops) => ({
+    loops: loops.length,
+    costUsd: round2(loops.filter((l) => Number.isFinite(l.session.result?.costUsd)).reduce((a, l) => a + l.session.result.costUsd, 0)),
+    peakMedian: median(loops.map((l) => l.session.context?.peak)),
+    nextPass: {
+      approve: loops.filter((l) => l.verdict === 'approve').length,
+      fix: loops.filter((l) => l.verdict === 'fix').length
+    }
+  });
+  return { resumed: fold(modes.resumed), fresh: fold(modes.fresh) };
+}
+
 export function computeTotals(sweep) {
   const { runs, items, sessions, reviews, drivers } = sweep;
 
@@ -100,7 +168,8 @@ export function computeTotals(sweep) {
     count: items.reduce((a, i) => a + i.fixLoops, 0),
     itemsAffected: withFixLoop.length,
     costUsd: round2(sessions.filter((s) => REWORK_KINDS.has(s.kind) && Number.isFinite(s.result?.costUsd)).reduce((a, s) => a + s.result.costUsd, 0)),
-    minutes: round2(items.reduce((a, i) => a + (i.stages.fixing ?? 0), 0))
+    minutes: round2(items.reduce((a, i) => a + (i.stages.fixing ?? 0), 0)),
+    byMode: fixLoopsByMode(sessions, reviews)
   };
 
   // Verdicts by pass, because "reviews that came back `fix`" and "items that
@@ -119,10 +188,12 @@ export function computeTotals(sweep) {
     byPass
   };
 
-  // Context by project over EXECUTE sessions only. A fix loop resumes a
-  // session whose context is already grown, so folding its floor in would
+  // Context by project over EXECUTE sessions only. A resumed fix loop starts
+  // from a context that is already grown, so folding its floor in would
   // report a number nobody ever paid at turn one — and the floor is exactly
-  // the figure worth acting on, being the standing toll on every turn.
+  // the figure worth acting on, being the standing toll on every turn. A
+  // fresh fix loop (#226) is a different job with a different prompt, and
+  // its peak is reported per mode in `fixLoops.byMode` instead.
   const byProject = {};
   for (const project of sweep.projects) {
     const own = sessions.filter((s) => s.project === project.path && s.kind === 'execute' && s.context);
@@ -237,7 +308,7 @@ function ratio(numerator, denominator) {
   return round2(numerator / denominator);
 }
 
-// The nine measures a retro is actually judged on. Each is a function of a
+// The eleven measures a retro is actually judged on. Each is a function of a
 // `totals` object, so "then" and "now" are computed by the SAME expression
 // — a delta between two differently-derived numbers would be noise.
 const MEASURES = {
@@ -257,6 +328,11 @@ const MEASURES = {
     if (!first) return null;
     return ratio(first.fix, first.approve + first.fix);
   },
+  // How many fix loops ran in each mode (#226). A record written before
+  // the split has no `byMode`, which reads as `null` — not comparable —
+  // rather than as "no loops", which would report every loop since as new.
+  fixLoopsResumed: (t) => t?.fixLoops?.byMode?.resumed?.loops ?? null,
+  fixLoopsFresh: (t) => t?.fixLoops?.byMode?.fresh?.loops ?? null,
   itemWallMedianMin: (t) => t?.itemWallMin?.median ?? null,
   queueWaitMedianMin: (t) => t?.queueWaitMin?.median ?? null
 };

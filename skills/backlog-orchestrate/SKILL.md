@@ -691,8 +691,8 @@ project locally was silently absent from the one session doing the work, while t
 the `cd`, while `$PWD` is still the project root, and emptied when the file does not exist, so a project without one gets no flag at all rather than a
 `--settings` pointing at nothing. The expansion is unquoted on purpose and correct only because the body runs under `sh`: POSIX splits it into two words and
 keeps the quoted path whole, while zsh would pass `--settings <path>` as one argument the CLI rejects. It is a flag, never a copy or a link into the worktree,
-so there is nothing for §6's `add -A` to pick up and nothing for §4's exclude list to guard. **The retry line carries it too**, and so does every fix loop that
-reuses it. Rationale: `references/rationale.md` (§4).
+so there is nothing for §6's `add -A` to pick up and nothing for §4's exclude list to guard. **The retry line carries it too**, and so does every fix loop,
+resumed or fresh. Rationale: `references/rationale.md` (§4).
 
 **`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the prompt marker by another spelling.** It says "a run owns this process" to a reader
 that cannot see the prompt at all: the machine's `Stop` hook, which holds a finished turn open at the dashboard for up to ten minutes so a remote answer can
@@ -961,17 +961,54 @@ reports in this session's context.
 
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> fixing --fix-loop
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" fix-mode <id>
   ```
 
   `--fix-loop` is the only valueless flag on `stage`; it increments this item's `fixLoops` and echoes the new value back, so the line prints
-  `{"id":"<id>","stage":"fixing","fixLoops":1}`. Then **write the reviewer's findings, verbatim, to `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool** —
+  `{"id":"<id>","stage":"fixing","fixLoops":1}`. The second line, on the same invocation so it costs no turn, decides how this loop is spent and prints
+  `{"id":"<id>","mode":"resume"|"fresh","from":…,"loop":…,"sessionId":…,"peak":…,"threshold":150000}`. Copy its `mode` and `sessionId`; never compare the
+  numbers yourself. It reads the item's last recorded session (the last entry `usage` wrote — execute, retry or an earlier fix loop) and answers `fresh` when
+  that session peaked at or above the threshold or has no id to resume, `resume` otherwise, including when no peak was recorded.
+
+  Why two modes (#226; the design is this repo's `docs/superpowers/specs/2026-09-25-fresh-session-fix-loop-design.md`): a resumed fix loop inherits every token
+  the session it resumes ever read, and the 2026-09-24 retro put 69% of measured spend on sessions that peaked above 200k tokens — a tier the price fit does not
+  even model — with more than half of all fix sessions among them. Resuming keeps the executor's reasoning, which is worth keeping while it is cheap; past 150k
+  it is not, and the margin below 200k is there because a fix loop only grows the context it resumes. The decision is the tool's so that a `--resume`d driver
+  reaches the answer the crashed one would have, from the run file alone.
+
+  **`mode: "resume"`** → **write the reviewer's findings, verbatim, to `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool** —
   `<n>` being the `fixLoops` value that line just echoed back, so a second loop keeps the first one's prompt beside its own rather than over it — and resume the
-  item's own executor session with step 5's retry line. Unchanged but for the names that carry this loop's `<n>`, and every one of them does: the prompt file it
-  reads (`<dir>/prompts/<id>-fix-<n>.txt` in place of `<id>-retry-1.txt`, in the `test -s` guard and the `$(cat …)` alike), the transcript it writes
+  session `fix-mode` named with step 5's retry line, its `<sessionId>` taken from the `fix-mode` line rather than from `status --json`: that is the session
+  whose peak `fix-mode` just judged, so the id resumed is always the id the decision was about. Unchanged but for the names that carry this loop's `<n>`, and
+  every one of them does: the prompt file it reads (`<dir>/prompts/<id>-fix-<n>.txt` in place of `<id>-retry-1.txt`, in the `test -s` guard and the `$(cat …)`
+  alike), the transcript it writes
   (`<dir>/logs/<id>-fix-<n>.jsonl`), the stderr beside it (`<dir>/logs/<id>-fix-<n>.err`) and the session name (`-n "orch <id> fix <n>"`). The rule is one
   substitution, applied everywhere `retry 1` appears, so a second loop never overwrites the first one's evidence — the `.err` included, which is where this
-  whole item's symptom was found. Every flag it carries comes too, `--verbose` among them. Then `watch` it out as in step 4, **check that transcript for denials
-  before committing anything**, commit again (step 6), and review again with a fresh report path (`<dir>/reviews/<id>-2.md`).
+  whole item's symptom was found. Every flag it carries comes too, `--verbose` among them.
+
+  **`mode: "fresh"`** → a new headless session, not a resumed one, that starts from the findings instead of from the executor's whole context. Write
+  `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool, holding, in this order: one sentence saying this is a fix loop dispatched by `backlog-orchestrate` in an
+  unattended run, with no user to ask; "Never commit, push or merge."; the reviewer's findings, verbatim; the full report path (`<dir>/reviews/<id>-<k>.md`, the
+  one this verdict came from); the item file path the reviewer read (the worktree item file, or `<dir>/items/<n>.md` in a tracker project); this run's base
+  branch, with the instruction to read `git diff <base>...HEAD` and the files the findings name before changing anything, and nothing wider; the verification
+  commands to re-run, copied from the item's `## Outcome`; where to append a `### Fix loop <n>` record of what it changed and the command output that proves it
+  (the worktree item file's `## Outcome`, or `<dir>/outcomes/<n>.md` in a tracker project); "Anything you cannot resolve goes in your final message, not to a
+  person."; and last, word for word, "Never run a command in the background; run tests in the foreground." In those two tracker paths `<n>` is the issue
+  number, as in §5, not this loop's count. Never paste the diff into it — a large diff in the
+  prompt is exactly the context this mode exists to avoid, and the findings name `file:line`, which is what a narrow read needs. Then launch:
+
+  ```bash
+  nohup sh -c 'LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-fix-<n>.txt" && BM_ORCH_RUN=<runId> exec claude -p "$(cat "<dir>/prompts/<id>-fix-<n>.txt")" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> fix <n>"' > "<dir>/logs/<id>-fix-<n>.jsonl" 2> "<dir>/logs/<id>-fix-<n>.err" &
+  echo $! > "<dir>/logs/<id>.pid"
+  ```
+
+  Step 5's retry line without `--resume`, and every one of step 5's three bug-31 details holds for it unchanged. It carries no `[orchestrator-run` marker and no
+  `/backlog-execute` trigger: in a files project execute has already moved the item to `done/` and refuses a done item, so the prompt file is the whole brief.
+  The transcript, `.err` and session name are the resume mode's, so `usage` records it as `kind: 'fix'` exactly as before and `watch` overwrites the item's
+  session id with the fixer's — which is what the next loop's `fix-mode`, and `references/recovery.md`'s `resume-session`, then resume.
+
+  **Both modes continue identically.** `watch` it out as in step 4, **check that transcript for denials before committing anything**, commit again (step 6), in
+  a tracker project re-run §5's `snapshot <n>`, and review again with a fresh report path (`<dir>/reviews/<id>-2.md`).
 
   **The findings reach that file as the reviewer wrote them** — they name `file:line`, and paraphrasing them into "fix the review comments" hands the session a
   puzzle instead of a task. That verbatim copy is the whole reason the prompt is a file rather than an argument: reviewer prose is the text in this system most
@@ -1096,8 +1133,10 @@ call as the launch.
   complete one or none. **The gate is the exit code of the last attempt that produced one**, and no `.status` means there is none.
 - **exit `0`** — every command passed. Merge.
 - **exit `1`** — something is red. Treat the failing rows exactly like review findings: feed them into a fix loop, spent the same way
-  (`stage <id> fixing --fix-loop`, then resume, commit, re-review). The ceiling is the same two loops and it is _shared_ with review — an item does not get two
-  review loops _and_ two verify loops, which is exactly what one counter per item, incremented by whoever spends the loop, enforces.
+  (`stage <id> fixing --fix-loop`, then §7's `fix-mode` and whichever launcher it names, commit, re-review). In either mode's prompt file the failing rows —
+  each command and its tail — stand where the reviewer's findings would, and a fresh prompt names no report path, because no review asked for this loop. The
+  ceiling is the same two loops and it is _shared_ with review — an item does not get two review loops _and_ two verify loops, which is exactly what one counter
+  per item, incremented by whoever spends the loop, enforces.
 
   **When that shared ceiling runs out with verification still red, the item parks — with a channel or without one.** Do not fall through to §7's exhaustion
   paragraph: its "merge anyway" is an offer about an unresolved review _verdict_, and there is no equivalent judgement to make here. A red command is not an

@@ -3145,22 +3145,22 @@ test('abort with no run exits 3', (t) => {
 const SKILL_MD = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'SKILL.md');
 const SKILLS_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-test("both of SKILL.md's headless dispatch lines carry --permission-mode auto", () => {
+test("all three of SKILL.md's headless dispatch lines carry --permission-mode auto", () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
   // Every line that actually launches a headless session — the step 4
-  // dispatch and step 5's --resume retry. Matched by `claude -p` rather
+  // dispatch, step 5's --resume retry and §7's fresh fixer (#226). Matched by `claude -p` rather
   // than by line number so the assertion survives the file growing, which
   // it already did once between this bug being filed and being fixed.
   const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
-  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`);
+  assert.equal(dispatchLines.length, 3, `expected exactly 3 headless dispatch lines, found ${dispatchLines.length}`);
   for (const line of dispatchLines) {
     assert.ok(line.includes('--permission-mode auto'), `dispatch line is missing --permission-mode auto: ${line}`);
   }
 });
 
 test('no command anywhere under skills/ passes --dangerously-skip-permissions', () => {
-  // A whole-tree sweep rather than a check on the two dispatch lines above:
-  // the point is not that those two are clean, it is that nothing in the
+  // A whole-tree sweep rather than a check on the dispatch lines above:
+  // the point is not that those lines are clean, it is that nothing in the
   // published skill surface hands the flag to a CLI. Reinstating it would be
   // a one-word edit nobody reviewing a diff would necessarily flag, and it
   // buys back the top of the permission ladder for a job that measurably
@@ -3684,12 +3684,23 @@ const RUN_MARKER_TOKEN = '[orchestrator-run';
 test('exactly one dispatch line carries the run marker, and it is the fresh dispatch', () => {
   // The --resume retry deliberately does NOT repeat the marker: a resumed
   // session still carries its original prompt, so a second copy would be
-  // noise in the one string a human reads in the dashboard drawer.
+  // noise in the one string a human reads in the dashboard drawer. Nor does
+  // §7's fresh fixer (#226): it is not a /backlog-execute session at all —
+  // execute refuses an item already in done/ — and its prompt file carries
+  // the marker's constraints in its own words.
   const text = fs.readFileSync(SKILL_MD, 'utf8');
   const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
   const marked = dispatchLines.filter((l) => l.includes(RUN_MARKER_TOKEN));
   assert.equal(marked.length, 1, `expected exactly 1 dispatch line carrying ${RUN_MARKER_TOKEN}, found ${marked.length}`);
   assert.ok(!marked[0].includes('--resume'), 'the run marker landed on the --resume retry line rather than the fresh dispatch');
+  // The three launchers, told apart: the marked execute dispatch, the one
+  // --resume line, and a fresh fixer carrying neither and no trigger.
+  const resumed = dispatchLines.filter((l) => l.includes('--resume'));
+  assert.equal(resumed.length, 1, `expected exactly 1 --resume launcher, found ${resumed.length}`);
+  const fresh = dispatchLines.filter((l) => !l.includes('--resume') && !l.includes(RUN_MARKER_TOKEN));
+  assert.equal(fresh.length, 1, `expected exactly 1 fresh fix launcher, found ${fresh.length}`);
+  assert.ok(!fresh[0].includes('/backlog-execute'), `the fresh fix launcher invokes /backlog-execute, which refuses a done item: ${fresh[0]}`);
+  assert.ok(fresh[0].includes('-n "orch <id> fix <n>"'), `the launcher with neither --resume nor the marker is not the fix loop's: ${fresh[0]}`);
 });
 
 test('the marker follows the id rather than preceding it', () => {
@@ -3717,7 +3728,7 @@ test('no dispatch line contains an apostrophe', () => {
   // promising the line is clean.
   const text = fs.readFileSync(SKILL_MD, 'utf8');
   const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
-  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`);
+  assert.equal(dispatchLines.length, 3, `expected exactly 3 headless dispatch lines, found ${dispatchLines.length}`);
   for (const line of dispatchLines) {
     const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"));
     assert.ok(!body.includes("'"), `an apostrophe is back inside the single-quoted dispatch body: ${line}`);
@@ -3859,14 +3870,15 @@ test('backlog-execute forbids backgrounding inside its marker section, with the 
 // consumer cannot drift into two spellings of the same variable.
 const ORCH_RUN_ENV = 'BM_ORCH_RUN';
 
-test('both dispatch lines export the run id to the session they spawn', () => {
-  // Both lines, unlike the prompt marker above, which is deliberately on the
-  // fresh dispatch only. A resumed session is owned by the run exactly as much
-  // as the original was, and it is a separate `exec claude -p` process with a
-  // separate environment — the first line's assignment does not reach it.
+test('every dispatch line exports the run id to the session it spawns', () => {
+  // All three lines, unlike the prompt marker above, which is deliberately on
+  // the fresh dispatch only. A resumed session or a fresh fixer is owned by the
+  // run exactly as much as the original was, and each is a separate `exec
+  // claude -p` process with a separate environment — the first line's
+  // assignment does not reach it.
   const text = fs.readFileSync(SKILL_MD, 'utf8');
   const dispatchLines = text.split('\n').filter((l) => l.includes('exec claude -p'));
-  assert.equal(dispatchLines.length, 2, `expected exactly 2 headless dispatch lines, found ${dispatchLines.length}`);
+  assert.equal(dispatchLines.length, 3, `expected exactly 3 headless dispatch lines, found ${dispatchLines.length}`);
   for (const line of dispatchLines) {
     assert.ok(line.includes(`${ORCH_RUN_ENV}=<runId> exec claude -p`), `dispatch line does not assign ${ORCH_RUN_ENV} immediately before exec claude: ${line}`);
   }
@@ -3919,8 +3931,8 @@ test('SKILL.md names no environment variable but the three it owns', () => {
 const RETRY_PROMPT_FILE = '<dir>/prompts/<id>-retry-1.txt';
 const FIX_PROMPT_FILE = '<dir>/prompts/<id>-fix-<n>.txt';
 
-// The two `nohup sh -c '… exec claude -p …'` launchers, read off SKILL.md.
-// Named apart from `dispatchNames()` below, which parses the same two lines
+// The three `nohup sh -c '… exec claude -p …'` launchers, read off SKILL.md.
+// Named apart from `dispatchNames()` below, which parses the same three lines
 // for a different field.
 function execClaudeLines(text) {
   return text.split('\n').filter((l) => l.includes('exec claude -p'));
@@ -3932,9 +3944,49 @@ function retryLineOf(text) {
   return line;
 }
 
+// §7's fresh fixer (#226): the one launcher with neither `--resume` nor the
+// run marker. Its prompt is the most hostile text in the system — reviewer
+// findings verbatim — so it is held to bug-31's rules exactly as the retry is.
+function freshFixLineOf(text) {
+  const line = execClaudeLines(text).find((l) => !l.includes('--resume') && !l.includes('[orchestrator-run'));
+  assert.ok(line, "SKILL.md no longer carries §7's fresh fix launcher at all");
+  return line;
+}
+
+test('the fresh fix launcher takes its prompt from the fix prompt file, behind a test -s guard', () => {
+  const fresh = freshFixLineOf(fs.readFileSync(SKILL_MD, 'utf8'));
+  assert.ok(fresh.includes(`$(cat "${FIX_PROMPT_FILE}")`), `the fresh fix launcher does not read its prompt back from ${FIX_PROMPT_FILE}: ${fresh}`);
+  assert.ok(fresh.includes(`test -s "${FIX_PROMPT_FILE}" &&`), `the fresh fix launcher has no \`test -s\` guard on its prompt file: ${fresh}`);
+  assert.ok(
+    fresh.includes('> "<dir>/logs/<id>-fix-<n>.jsonl" 2> "<dir>/logs/<id>-fix-<n>.err"'),
+    `the fresh fixer writes somewhere usage will not look: ${fresh}`
+  );
+  for (const flag of ['--output-format stream-json', '--verbose', '--permission-mode auto', '--model opus', '${LOCAL:+--settings "$LOCAL"}']) {
+    assert.ok(fresh.includes(flag), `the fresh fix launcher dropped ${flag}: ${fresh}`);
+  }
+});
+
+// The §7 ordering a driver follows: ask the tool, then pick a launcher. Both
+// must still follow the verb — dropping either leaves one mode with nothing to run.
+test('§7 runs fix-mode before either fix launcher', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const review = text.slice(text.indexOf('## 7. Review'), text.indexOf('## 8. Verify'));
+  const verbAt = review.indexOf('orchestrate.mjs" fix-mode <id>');
+  assert.ok(verbAt !== -1, '§7 never runs `orchestrate.mjs fix-mode <id>`');
+  const after = review.slice(verbAt);
+  assert.match(after, /step 5's retry line/, 'no resume launcher follows fix-mode in §7');
+  assert.ok(after.includes(freshFixLineOf(text)), 'the fresh fix launcher does not sit in §7 after fix-mode');
+});
+
+test('recovery.md says which session resume-session resumes after a fresh fix loop', () => {
+  const text = fs.readFileSync(path.join(path.dirname(SKILL_MD), 'references', 'recovery.md'), 'utf8');
+  const bullet = text.slice(text.indexOf('- **`resume-session`**'), text.indexOf('- **`redispatch-after-stop`**'));
+  assert.match(bullet, /fix-mode|fresh fix loop/, "recovery.md's resume-session bullet says nothing about a fresh fix loop");
+});
+
 test('the retry launcher takes its prompt from a file, not from argv', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
-  assert.equal(execClaudeLines(text).length, 2, 'expected exactly 2 headless dispatch lines');
+  assert.equal(execClaudeLines(text).length, 3, 'expected exactly 3 headless dispatch lines');
   const retry = retryLineOf(text);
   assert.ok(retry.includes(`$(cat "${RETRY_PROMPT_FILE}")`), `the retry launcher does not read its prompt back from ${RETRY_PROMPT_FILE}: ${retry}`);
   assert.ok(!retry.includes('<what to do differently>'), `the retry launcher still interpolates prose into a command position: ${retry}`);
@@ -3994,7 +4046,7 @@ const HOSTILE = `${HOSTILE_SUBST} — it's wrong\n`;
 // `inline: true` reproduces the PRE-fix shape through the same harness —
 // prompt interpolated into the command, no `test -s` guard — which is what
 // makes a green result mean anything.
-function retryHarness(t, { prompt, inline = false, writePrompt = true }) {
+function retryHarness(t, { prompt, inline = false, writePrompt = true, launcher = 'retry' }) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-shell-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const dir = path.join(root, 'runstate');
@@ -4010,14 +4062,19 @@ function retryHarness(t, { prompt, inline = false, writePrompt = true }) {
   fs.writeFileSync(stub, `#!/bin/sh\n: > ${argvFile}\nfor a in "$@"; do printf '%s\\0' "$a" >> ${argvFile}; done\n`);
   fs.chmodSync(stub, 0o755);
 
-  const promptFile = path.join(dir, 'prompts', 'bug-1-retry-1.txt');
+  // `launcher: 'fix'` drives §7's fresh fixer (#226) through the same
+  // harness; its prompt file and logs carry the loop's `<n>`, substituted 1.
+  const slot = launcher === 'fix' ? 'fix-1' : 'retry-1';
+  const promptFile = path.join(dir, 'prompts', `bug-1-${slot}.txt`);
   if (writePrompt) fs.writeFileSync(promptFile, prompt);
 
-  let line = retryLineOf(fs.readFileSync(SKILL_MD, 'utf8'))
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  let line = (launcher === 'fix' ? freshFixLineOf(text) : retryLineOf(text))
     .replaceAll('<dir>', dir)
     .replaceAll('<id>', 'bug-1')
     .replaceAll('<runId>', 'run-1')
     .replaceAll('<sessionId>', 's1')
+    .replaceAll('<n>', '1')
     .replace('exec claude ', `exec ${stub} `);
   if (inline) {
     line = line.replace(`test -s "${promptFile}" && `, '').replace(`"$(cat "${promptFile}")"`, `"${prompt.trimEnd()}"`);
@@ -4029,7 +4086,7 @@ function retryHarness(t, { prompt, inline = false, writePrompt = true }) {
 
   const argv = fs.existsSync(argvFile) ? fs.readFileSync(argvFile, 'utf8').split('\0').slice(0, -1) : null;
   const owned = fs.readdirSync(root, { recursive: true }).filter((p) => String(p).endsWith('OWNED'));
-  const errFile = path.join(dir, 'logs', 'bug-1-retry-1.err');
+  const errFile = path.join(dir, 'logs', `bug-1-${slot}.err`);
   return { root, argv, owned, result, err: fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf8') : null };
 }
 
@@ -4055,6 +4112,22 @@ test('bug-31 red proof: a file-carried prompt reaches argv intact and executes n
   assert.equal(quoted.argv, null, 'an apostrophe in an inline prompt still managed to spawn a session');
 });
 
+// Review focus 5 of #226: the fresh fixer is a third launcher carrying
+// reviewer findings, so bug-31's hazard gets its own proof on it.
+test('the fresh fix launcher delivers hostile findings byte-identical and executes nothing', (t) => {
+  const fresh = retryHarness(t, { prompt: HOSTILE, launcher: 'fix' });
+  assert.ok(fresh.argv, `the fresh fix launcher spawned nothing at all: ${fresh.result.stderr}`);
+  // `-p <prompt> --output-format …` — no --resume, so the prompt is argv[1].
+  assert.equal(fresh.argv[0], '-p');
+  assert.equal(fresh.argv[1], HOSTILE.trimEnd());
+  assert.ok(!fresh.argv.includes('--resume'), 'the fresh fixer resumed a session');
+  assert.deepEqual(fresh.owned, [], 'the substitution in the findings was executed');
+  assert.equal(fresh.err, '', `stderr from the launcher: ${fresh.err}`);
+
+  const empty = retryHarness(t, { prompt: '', launcher: 'fix' });
+  assert.equal(empty.argv, null, 'an empty fix prompt file still spawned a fresh session');
+});
+
 test('an absent or empty prompt file spawns nothing', (t) => {
   const absent = retryHarness(t, { prompt: HOSTILE, writePrompt: false });
   assert.equal(absent.argv, null, 'the launcher resumed a session with no instruction at all');
@@ -4066,7 +4139,7 @@ test('an absent or empty prompt file spawns nothing', (t) => {
 // A per-item worktree is a checkout, and `.claude/settings.local.json` is
 // gitignored, so the session `cd`-ed into it ran without every rule the user
 // had granted the project locally while the driver one directory up had them
-// all. Both launchers now resolve the file BEFORE the `cd` and pass it through
+// all. Every launcher now resolves the file BEFORE the `cd` and passes it through
 // `--settings`, omitting the flag when there is no file. Executed out of
 // SKILL.md for the same reason bug-31's cases are: "this splits into two argv
 // words and keeps a spaced path whole" is a property of sh, and zsh — the
@@ -4079,6 +4152,7 @@ function launchHarness(t, line, { settingsLocal }) {
   fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'prompts'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'prompts', 'bug-1-retry-1.txt'), 'do it differently\n');
+  fs.writeFileSync(path.join(dir, 'prompts', 'bug-1-fix-1.txt'), 'fix what the review found\n');
   const cwd = path.join(root, 'project');
   fs.mkdirSync(path.join(cwd, '.worktrees', 'bug-1'), { recursive: true });
   const local = path.join(cwd, '.claude', 'settings.local.json');
@@ -4108,9 +4182,9 @@ function launchHarness(t, line, { settingsLocal }) {
   return { argv, local, result };
 }
 
-test("both launchers pass the main tree's settings.local.json to the worktree session", (t) => {
+test("every launcher passes the main tree's settings.local.json to the worktree session", (t) => {
   const lines = execClaudeLines(fs.readFileSync(SKILL_MD, 'utf8'));
-  assert.equal(lines.length, 2, 'expected exactly 2 headless dispatch lines');
+  assert.equal(lines.length, 3, 'expected exactly 3 headless dispatch lines');
   for (const line of lines) {
     const { argv, local, result } = launchHarness(t, line, { settingsLocal: true });
     assert.ok(argv, `the launcher spawned nothing: ${result.stderr}`);
@@ -5430,18 +5504,18 @@ test('a recorded pid is still signalled when the log file holds garbage — the 
   assert.equal(signal, 'SIGTERM');
 });
 
-test('SKILL.md still writes the pid to the file abort reads, on both launch lines', () => {
+test('SKILL.md still writes the pid to the file abort reads, on every launch line', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
   // A prose edit that renamed this file would blind `abort` silently — no
   // behavioural test in this suite reads SKILL.md's launcher, and the tool
-  // now depends on the name. Two occurrences: §4's dispatch and §5's retry,
-  // the same pair `dispatchNames()` asserts for `exec claude -p`.
+  // now depends on the name. Three occurrences: §4's dispatch, §5's retry and
+  // §7's fresh fixer, the same three `dispatchNames()` asserts for `exec claude -p`.
   // `logs/` only: §8's `verify/<id>.pid` is a DIFFERENT file holding a
   // deliberately different thing (the wrapper `sh`, not a `claude` process),
   // and abort's `ps` guard refuses it by construction — see the item's own
   // non-goals.
   const lines = text.split('\n').filter((l) => l.trim().startsWith('echo $!') && l.includes('logs/'));
-  assert.equal(lines.length, 2, `expected two \`echo $! > .../logs/<id>.pid\` lines, found ${lines.length}`);
+  assert.equal(lines.length, 3, `expected three \`echo $! > .../logs/<id>.pid\` lines, found ${lines.length}`);
   for (const line of lines) {
     assert.match(line, /echo \$! > "<dir>\/logs\/<id>\.pid"/, `launcher does not write the pid file abort reads: ${line}`);
   }
@@ -5587,7 +5661,7 @@ const NAME_CAP = 60;
 function dispatchNames() {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
   const lines = text.split('\n').filter((l) => l.includes('exec claude -p'));
-  assert.equal(lines.length, 2, `expected exactly 2 headless dispatch lines, found ${lines.length}`);
+  assert.equal(lines.length, 3, `expected exactly 3 headless dispatch lines, found ${lines.length}`);
   return lines.map((line) => {
     const m = /-n "([^"]*)"/.exec(line);
     assert.ok(m, `dispatch line passes no -n "<name>": ${line}`);
@@ -5595,7 +5669,7 @@ function dispatchNames() {
   });
 }
 
-test('both dispatch lines name the session they spawn', () => {
+test('every dispatch line names the session it spawns', () => {
   for (const { line, name } of dispatchNames()) {
     // Double-quoted, and inside the single-quoted sh -c body: the name holds a
     // space, so an unquoted one would split into `-n orch` plus a stray word
@@ -5607,8 +5681,8 @@ test('both dispatch lines name the session they spawn', () => {
   }
 });
 
-test('the two names are the documented spellings, and neither carries the run id', () => {
-  const [dispatch, retry] = dispatchNames();
+test('the three names are the documented spellings, and none carries the run id', () => {
+  const [dispatch, retry, fix] = dispatchNames();
   // Exact spellings rather than a pattern: this is where bug-28's one open
   // judgement is recorded. The run id is deliberately absent — the worktree
   // already gives the row its own project (`…--worktrees-<id>`), `run.json`
@@ -5623,15 +5697,18 @@ test('the two names are the documented spellings, and neither carries the run id
   // already spent on the dispatch prompt's `item <n> of <m>`, and two meanings
   // for one placeholder on adjacent lines is how a substitution goes wrong.
   assert.equal(retry.name, 'orch <id> retry 1');
+  // §7's fresh fixer (#226) keeps the name the resumed fix loop always had,
+  // so a row reads the same whichever mode `fix-mode` picked.
+  assert.equal(fix.name, 'orch <id> fix <n>');
 });
 
-test('both composed names satisfy the dashboard charset and cap', () => {
+test('every composed name satisfies the dashboard charset and cap', () => {
   // Rendered, not asserted as templates: `<id>` and `<n>` are placeholders the
   // run substitutes, and `<`/`>` are outside NAME_RE — so the raw line can
   // never be tested against the regex directly, and a test that did would
   // either be red forever or quietly weakened until it passed.
   for (const { name } of dispatchNames()) {
-    const rendered = name.replace('<id>', 'bug-28');
+    const rendered = name.replace('<id>', 'bug-28').replace('<n>', '2');
     assert.match(rendered, NAME_RE, `composed name is outside the dashboard charset: ${rendered}`);
     assert.ok(rendered.length <= NAME_CAP, `composed name is over the ${NAME_CAP}-char cap: ${rendered}`);
   }
@@ -5646,7 +5723,7 @@ test('a pathologically long id still composes a name under the cap', () => {
   // the run id out of the name is what buys the room.
   const id = 'x'.repeat(40);
   for (const { name } of dispatchNames()) {
-    const rendered = name.replace('<id>', id);
+    const rendered = name.replace('<id>', id).replace('<n>', '2');
     assert.ok(rendered.length <= NAME_CAP, `a ${id.length}-char id overflows the cap: ${rendered.length} chars`);
   }
 });
@@ -5708,10 +5785,10 @@ test('usage copies the result event onto the queue item and echoes the entry', (
   const [entry] = entries;
   // The exact key set, not a spot-check: this shape is written into an
   // archive read months later, and a field silently dropped by a future edit
-  // is invisible in every other assertion here. `loop` is the twelfth field
-  // and is deliberately ABSENT on an `execute` entry — there is no loop to
-  // count — which is why this list has eleven names; the fix-loop test below
-  // is where the twelfth appears.
+  // is invisible in every other assertion here. `loop` is the thirteenth
+  // field and is deliberately ABSENT on an `execute` entry — there is no loop
+  // to count — which is why this list has twelve names; the fix-loop test
+  // below is where the thirteenth appears.
   assert.deepEqual(Object.keys(entry).sort(), [
     'cacheCreationTokens',
     'cacheReadTokens',
@@ -5722,6 +5799,7 @@ test('usage copies the result event onto the queue item and echoes the entry', (
     'kind',
     'model',
     'outputTokens',
+    'peakContextTokens',
     'sessionId',
     'turns'
   ]);
@@ -5947,6 +6025,197 @@ test('readSessionUsage returns null for a transcript with no result event, and h
   for (const field of ['costUsd', 'turns', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'durationMs', 'model']) {
     assert.equal(holes[field], null, `${field} was filled with something rather than left a hole`);
   }
+});
+
+// --- #226: each session's peak context, the number `fix-mode` gates on ------
+//
+// Defined exactly as the retro defines a session's `context.peak`
+// (skills/backlog-retro/tools/lib/sessions.mjs): the largest input + cache
+// read + cache creation over every assistant event carrying usage. One
+// definition, so the runner and the retro can never disagree about which
+// sessions were long.
+
+// A transcript written line by line, so each case states its own numbers
+// rather than leaning on a shared fixture nobody reads. `turns` are
+// [input, cacheRead, cacheCreation] triples; `undefined` leaves a key out.
+function peakTranscript(t, turns, name = 'task-5.jsonl') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-peak-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lines = [{ type: 'system', subtype: 'init', session_id: 'peak-sess' }];
+  for (const [input, cacheRead, cacheCreation] of turns) {
+    const usage = { output_tokens: 1 };
+    if (input !== undefined) usage.input_tokens = input;
+    if (cacheRead !== undefined) usage.cache_read_input_tokens = cacheRead;
+    if (cacheCreation !== undefined) usage.cache_creation_input_tokens = cacheCreation;
+    lines.push({ type: 'assistant', message: { content: [], usage } });
+  }
+  lines.push({ type: 'result', subtype: 'success', session_id: 'peak-sess', total_cost_usd: 1, num_turns: turns.length, usage: {} });
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  return file;
+}
+
+test('usage records the peak context over every assistant turn, not the last one', (t) => {
+  const { home, project } = usageRun(t);
+  const file = peakTranscript(t, [
+    [10, 1000, 200],
+    [5, 90000, 100],
+    [3, 50000, 0]
+  ]);
+
+  const out = run(project, home, 'usage', 'task-5', '--jsonl', file);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(queueItem(home, project, 'task-5').usage[0].peakContextTokens, 90105);
+  assert.equal(JSON.parse(out.stdout).usage.peakContextTokens, 90105, 'the echo line carries it too');
+});
+
+test('readSessionUsage counts a missing cache_creation_input_tokens as 0', (t) => {
+  assert.equal(readSessionUsage(peakTranscript(t, [[7, 100, undefined]])).peakContextTokens, 107);
+});
+
+test('readSessionUsage leaves peakContextTokens null when no assistant event carries usage', () => {
+  // The shared fixture's one assistant event has no `usage` at all — the
+  // shape every transcript written before the CLI reported per-turn usage has.
+  const usage = readSessionUsage(STREAM_USAGE);
+  assert.equal(usage.peakContextTokens, null);
+  assert.equal(usage.costUsd, 2.641441, 'every other field reads as it always did');
+});
+
+// --- #226: `fix-mode`, resume the last session or start a fresh fixer ----
+//
+// The decision SKILL.md §7 copies rather than computes. Every case here seeds
+// the queue item's `usage` by hand, because what is under test is the choice
+// over whatever `usage` recorded, not the recording (which the block above pins).
+
+function fixModeRun(t, { usage, sessionId } = {}, sessionAs = 'sess-a') {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs(sessionAs, project, home, 'init', '--project', project).status, 0);
+  const file = runFile(home, project);
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const item = body.queue.find((q) => q.id === 'task-5');
+  if (usage !== undefined) item.usage = usage;
+  if (sessionId !== undefined) item.sessionId = sessionId;
+  fs.writeFileSync(file, JSON.stringify(body, null, 2));
+  return { home, project };
+}
+
+function usageEntry(kind, sessionId, peak, loop) {
+  const entry = {
+    sessionId,
+    kind,
+    costUsd: 1,
+    turns: 1,
+    inputTokens: 1,
+    outputTokens: 1,
+    cacheReadTokens: 1,
+    cacheCreationTokens: 1,
+    durationMs: 1,
+    model: null,
+    endedAt: '2026-09-25T00:00:00.000Z'
+  };
+  if (peak !== undefined) entry.peakContextTokens = peak;
+  if (loop !== undefined) entry.loop = loop;
+  return entry;
+}
+
+function fixMode(t, seed) {
+  const { home, project } = fixModeRun(t, seed);
+  const out = run(project, home, 'fix-mode', 'task-5');
+  assert.equal(out.status, 0, out.stderr);
+  return JSON.parse(out.stdout);
+}
+
+test('fix-mode resumes an execute session that peaked below the threshold', (t) => {
+  assert.deepEqual(fixMode(t, { usage: [usageEntry('execute', 's1', 120000)] }), {
+    id: 'task-5',
+    mode: 'resume',
+    from: 'execute',
+    loop: null,
+    sessionId: 's1',
+    peak: 120000,
+    threshold: 150000
+  });
+});
+
+test('fix-mode starts fresh at exactly the threshold, and still echoes the session it declined', (t) => {
+  const answer = fixMode(t, { usage: [usageEntry('execute', 's1', 150000)] });
+  assert.equal(answer.mode, 'fresh');
+  assert.equal(answer.sessionId, 's1');
+  assert.equal(answer.peak, 150000);
+});
+
+// Review focus 2: after a fresh first loop the thing to resume is the first
+// fixer, whose context is small — not the long execute session behind it.
+test('fix-mode picks the last recorded entry, so a second loop resumes a fresh first fixer', (t) => {
+  const answer = fixMode(t, { usage: [usageEntry('execute', 's1', 240000), usageEntry('fix', 's2', 40000, 1)] });
+  assert.equal(answer.mode, 'resume');
+  assert.equal(answer.sessionId, 's2');
+  assert.equal(answer.from, 'fix');
+  assert.equal(answer.loop, 1);
+});
+
+// Review focus 1, assumption A2: an entry written before #226 has no peak,
+// and the answer must be today's behaviour rather than a guess in the
+// expensive direction.
+test('fix-mode resumes when the entry predates peakContextTokens', (t) => {
+  const answer = fixMode(t, { usage: [usageEntry('execute', 's1')] });
+  assert.equal(answer.mode, 'resume');
+  assert.equal(answer.peak, null);
+  assert.equal(answer.sessionId, 's1');
+});
+
+test('fix-mode starts fresh when the entry has no session id to resume', (t) => {
+  const answer = fixMode(t, { usage: [usageEntry('execute', null, 90000)] });
+  assert.equal(answer.mode, 'fresh');
+  assert.equal(answer.sessionId, null);
+});
+
+test("fix-mode with no usage entries falls back to the item's own session id", (t) => {
+  assert.deepEqual(fixMode(t, { sessionId: 's9' }), {
+    id: 'task-5',
+    mode: 'resume',
+    from: 'execute',
+    loop: null,
+    sessionId: 's9',
+    peak: null,
+    threshold: 150000
+  });
+});
+
+test('fix-mode with no usage and no session id starts fresh', (t) => {
+  const answer = fixMode(t, {});
+  assert.equal(answer.mode, 'fresh');
+  assert.equal(answer.sessionId, null);
+});
+
+test('fix-mode refuses an unknown id, a missing id and a missing run', (t) => {
+  const { home, project } = fixModeRun(t, {});
+
+  const unknown = run(project, home, 'fix-mode', 'nope-9');
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /nope-9/);
+
+  const bare = run(project, home, 'fix-mode');
+  assert.equal(bare.status, 1);
+  assert.match(bare.stderr, /usage: orchestrate\.mjs fix-mode/);
+
+  const empty = orchFixture(t);
+  assert.equal(run(empty.project, empty.home, 'fix-mode', 'task-5').status, 3);
+});
+
+// Read-only, so no lease: a driver must be able to ask on a run another
+// session leads (review focus 3 — a resumed driver gets the crashed one's answer).
+test('fix-mode writes nothing and is not refused by another session holding the lease', (t) => {
+  const { home, project } = fixModeRun(t, { usage: [usageEntry('execute', 's1', 200000)] }, 'sess-a');
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
+
+  const out = runAs('sess-b', project, home, 'fix-mode', 'task-5');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(out.stdout).mode, 'fresh');
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before);
 });
 
 // --- bug-32: `git worktree remove` fails in two ways, not one -----------

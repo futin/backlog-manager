@@ -306,6 +306,52 @@ test('a session for an item no run holds is reported, not dropped', (t) => {
   assert.equal(sweep.sessions[0].runId, null);
 });
 
+// A tracker item's id is its bare issue number in the run file, and so in every sidecar name (#223). The join must treat it like any other id.
+function seedTrackerRun(fx) {
+  seedRun(fx, PROJECT_A, {
+    runId: 'R1',
+    startedAt: '2026-09-01T10:00:00Z',
+    queue: [
+      queueItem('7', {
+        stageAt: STAMPS('2026-09-01T10:00:00Z'),
+        usage: [{ sessionId: 's7', kind: 'execute', costUsd: 1.25, turns: 10 }]
+      })
+    ]
+  });
+}
+
+test('a tracker item’s transcript joins its usage entry and counts toward measured', (t) => {
+  const fx = retroFixture(t);
+  seedTrackerRun(fx);
+  seedLog(fx, PROJECT_A, '7.jsonl', { sessionId: 's7', contexts: [1000], result: okResult(1.25, 10) });
+
+  const sweep = sweepJson(fx);
+  const session = sweep.sessions.find((s) => s.itemId === '7');
+  assert.ok(session, JSON.stringify(sweep.sessions));
+  assert.equal(session.joinedBy, 'usage');
+  assert.deepEqual(sweep.items.find((i) => i.id === '7').sessionKeys, [session.key]);
+  assert.equal(sweep.totals.costUsd.measured, 1.25);
+  assert.deepEqual(
+    sweep.caveats.filter((c) => c.kind === 'unjoined'),
+    []
+  );
+});
+
+test('a usage entry no transcript joined is a caveat, and stays out of measured', (t) => {
+  const fx = retroFixture(t);
+  seedTrackerRun(fx);
+
+  const sweep = sweepJson(fx);
+  assert.equal(sweep.sessions.length, 0);
+  // `measured` stays sessions-only: the run file's figure is real money, but folding it in would make `measured` mean two things.
+  assert.equal(sweep.totals.costUsd.measured, 0);
+  const unjoined = sweep.caveats.filter((c) => c.kind === 'unjoined');
+  assert.equal(unjoined.length, 1);
+  assert.ok(unjoined[0].detail.includes(' 7 execute'), unjoined[0].detail);
+  assert.ok(unjoined[0].detail.includes('1.25'), unjoined[0].detail);
+  assert.ok(unjoined[0].detail.includes('R1'), unjoined[0].detail);
+});
+
 test('a transcript with no result event is a killed session and a caveat', (t) => {
   const fx = retroFixture(t);
   seedRun(fx, PROJECT_A, {
@@ -444,7 +490,18 @@ test('totals fold the fixture into the exact headline numbers', (t) => {
   assert.equal(totals.merged, 2);
   assert.equal(totals.costUsd.measured, 15);
   assert.equal(totals.costPerMerged.measured, 7.5);
-  assert.deepEqual(totals.fixLoops, { count: 1, itemsAffected: 1, costUsd: 2, minutes: 22 });
+  // bug-2's fix loop kept the execute session's id `s-b`, so it resumed,
+  // and pass 2 — the review of its work — approved.
+  assert.deepEqual(totals.fixLoops, {
+    count: 1,
+    itemsAffected: 1,
+    costUsd: 2,
+    minutes: 22,
+    byMode: {
+      resumed: { loops: 1, costUsd: 2, peakMedian: 40000, nextPass: { approve: 1, fix: 0 } },
+      fresh: { loops: 0, costUsd: 0, peakMedian: null, nextPass: { approve: 0, fix: 0 } }
+    }
+  });
   assert.deepEqual(totals.verdicts, {
     approve: 2,
     fix: 1,
@@ -590,6 +647,10 @@ test('--text renders the headline, the stage table and a first-record note', (t)
   const fixing = r.stdout.split('\n').find((l) => l.startsWith('fixing'));
   assert.ok(fixing && fixing.includes('22'), String(fixing));
   assert.ok(r.stdout.includes('first record'), r.stdout);
+  const resumed = r.stdout.split('\n').find((l) => l.trim().startsWith('fix loops, resumed'));
+  assert.ok(resumed && resumed.includes('1 loop(s), $2.00, median peak 40000, next pass approve 1, fix 0'), String(resumed));
+  const fresh = r.stdout.split('\n').find((l) => l.trim().startsWith('fix loops, fresh'));
+  assert.ok(fresh && fresh.includes('0 loop(s), $0.00, median peak —, next pass approve 0, fix 0'), String(fresh));
   // Nothing was estimated here, so the word must not appear anywhere — a
   // measured figure that reads as estimated is as wrong as the reverse.
   assert.ok(!r.stdout.includes('est.'), r.stdout);
@@ -697,6 +758,13 @@ test('a record in the retro home becomes the deltas of the next sweep', (t) => {
   assert.equal(sweep.previous.deltas.costMeasured.delta, 5);
   assert.equal(sweep.previous.labelRates.drift, 1);
   assert.equal(sweep.previous.candidates[0].status, 'declined');
+  // That record predates #226's mode split: its side of the two mode deltas
+  // is unknown, and the report says so instead of crashing or printing 0.
+  assert.deepEqual(sweep.previous.deltas.fixLoopsResumed, { then: null, now: 1, delta: null });
+  const text = run(fx, 'sweep', '--text');
+  assert.equal(text.status, 0, text.stderr);
+  const line = text.stdout.split('\n').find((l) => l.trim().startsWith('fixLoopsFresh'));
+  assert.ok(line && line.includes('not comparable'), String(line));
 });
 
 test('an empty retro home leaves previous null', (t) => {
