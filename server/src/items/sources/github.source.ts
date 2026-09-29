@@ -652,8 +652,8 @@ export class GithubSource implements ItemSource, ItemWriter {
          release of an already-clean claim with nothing going red. */
       await this.client.removeLabel(repo, number, 'in-progress', { token });
 
-      /* The assignee is left alone by every reason but ONE, and the exception
-         is `aborted` (bug-49's sibling).
+      /* The assignee is left alone by every reason but TWO: `aborted`
+         (bug-49's sibling) and `stale` (#227).
 
          Ordinarily it records who last worked the issue, which stays true after
          they stop, and clearing it would throw away the one field a person
@@ -670,11 +670,18 @@ export class GithubSource implements ItemSource, ItemWriter {
          `aborted` is the word `orchestrate.mjs abort` and `backlog.mjs abort`
          both already write, so there is no new vocabulary here to keep in step.
 
+         `stale` is the board's release of a claim whose heartbeat is past the
+         window (`ItemsAbortService`, #227) — the same word `claim`'s own retire
+         loop above writes, but that loop is not what reaches this line: its
+         winner re-assigns the issue anyway. After a board release nothing
+         replaces the assignee, so leaving it would name a holder that is gone,
+         which is exactly the `aborted` reasoning.
+
          The result is ignored for the same reason `removeLabel`'s is, and the
          cache is updated when it is not: by this point the claim comment is
          already edited and the release HAS happened, so a failure here must not
          report it as one that did not. */
-      if (req.reason === 'aborted') {
+      if (req.reason === 'aborted' || req.reason === 'stale') {
         const unassigned = await this.client.updateIssue(repo, number, { assignees: [] }, { token });
         if (unassigned.status === 200 && unassigned.data !== null) this.poller.absorbIssue(repo, unassigned.data);
       }

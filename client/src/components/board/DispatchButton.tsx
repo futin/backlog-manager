@@ -181,7 +181,7 @@ export function DispatchButton({
      bug-13's re-ask has to know WHICH of the three is speaking. Kept as one
      value because the answer it feeds is the same for both: refuse, ask
      nothing. */
-  const itemBlock = progressBlock(item) ?? runBlock;
+  const itemBlock = progressBlock(item, Date.now()) ?? runBlock;
   const blocked = gateBlock ?? itemBlock;
 
   /*

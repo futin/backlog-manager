@@ -100,6 +100,19 @@ async function seed(over: Partial<ClaimRecord> = {}): Promise<void> {
   await sync();
 }
 
+/**
+ * Seed #31 as claimed by a session the BOARD dispatched: the dispatch first, on an unclaimed issue, and the claim after — the order a real one happens in.
+ * Seeding the claim first and dispatching over it was how #225's cases read, and #227 made the dispatch route refuse that: an item somebody holds is not
+ * dispatchable, whether or not it is the id the stub dashboard is about to hand back.
+ */
+async function seedDispatched(over: Partial<ClaimRecord> = {}): Promise<void> {
+  gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-progress' }], assignees: [{ login: 'futin' }] });
+  await sync();
+  await dispatch();
+  gh.claim(record({ session: 'sess-1', ...over }), 31, 100);
+  await sync();
+}
+
 async function sync(): Promise<void> {
   const poller = app.get(TrackerPollerService);
   await poller.tick();
@@ -169,8 +182,7 @@ afterAll(() => {
 
 describe('case A — the board dispatched the holding session', () => {
   it('stops the session once, then releases the claim aborted, clearing in-progress and the assignee and keeping the counters', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
 
     const res = await abort().expect(201);
 
@@ -185,8 +197,7 @@ describe('case A — the board dispatched the holding session', () => {
   /* #17 (final review M2). On a repo whose sync is off the release is refused — so the stop must be too, or the board kills the session and then reports a
      refusal with the claim still live. The refusal comes first, before the dashboard or GitHub is asked anything. */
   it('refuses on a repo whose sync is off BEFORE stopping the session, and edits nothing', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     process.env.BM_TRACKER_SYNC_FILE = join(mkdtempSync(join(tmpdir(), 'bm-abort-sync-')), 'tracker-sync.json');
     writeSyncInterval(FAKE_REPO, 'off');
 
@@ -201,8 +212,7 @@ describe('case A — the board dispatched the holding session', () => {
   /* Case A needs no host match and no session list: the board started this session itself, so the stop it just sent is the proof. */
   it('needs neither a host match nor the session list', async () => {
     delete process.env.BM_MACHINE_NAME;
-    await seed({ session: 'sess-1', host: 'another-machine' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1', host: 'another-machine' });
 
     await abort().expect(201);
     expect(dashCalls.some((c) => c.url.endsWith('/api/sessions'))).toBe(false);
@@ -212,8 +222,7 @@ describe('case A — the board dispatched the holding session', () => {
   /* A 404 `no live session` is a session with no process right now — gone, or a board-dispatched `claude -p` between turns — and the person asked to
      stop it, so the claim goes. `stopped: false` because nothing was stopped by this request. */
   it('still releases when the dashboard answers 404 no live session, reporting stopped: false', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     dash.stop = { status: 404, body: { error: 'no live session' } };
 
     const res = await abort().expect(201);
@@ -222,8 +231,7 @@ describe('case A — the board dispatched the holding session', () => {
   });
 
   it('proceeds on a stopping answer too — the SIGTERM has been sent', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     dash.stop = { status: 200, body: { stopping: true } };
 
     const res = await abort().expect(201);
@@ -233,8 +241,7 @@ describe('case A — the board dispatched the holding session', () => {
   /* The dashboard answers 404 for a second reason with nothing to do with the session: remote answers switched off. That 404 says nothing about
      whether the process is alive, so it must not read as "no live session". */
   it('502s on a 404 that is NOT no-live-session, and edits nothing', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     dash.stop = { status: 404, body: { error: 'remote answers disabled' } };
 
     await abort().expect(502);
@@ -243,8 +250,7 @@ describe('case A — the board dispatched the holding session', () => {
   });
 
   it('502s on a 500 from the stop, and edits nothing — the session may still be running', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     dash.stop = { status: 500, body: { error: 'boom' } };
 
     await abort().expect(502);
@@ -253,8 +259,7 @@ describe('case A — the board dispatched the holding session', () => {
   });
 
   it('502s when the stop never comes back, and edits nothing', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     dash.stop = 'throw';
 
     const res = await abort().expect(502);
@@ -264,8 +269,7 @@ describe('case A — the board dispatched the holding session', () => {
 
   /* A second abort after a GitHub failure must still work: the record is kept until the release lands. */
   it('keeps the dispatch record until the release has landed', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     gh.failNext = { fragment: '/issues/comments/100', status: 500 };
 
     await abort().expect(502);
@@ -365,11 +369,10 @@ describe('case B — no dispatch record', () => {
 
 describe('refusals before any dashboard call', () => {
   it('refuses (409) a claim a run holds, naming the run', async () => {
-    await seed({
+    await seedDispatched({
       session: 'sess-1',
       run: { runId: 'run-9', startedAt: '2026-09-24T10:00:00Z', mergeMode: 'merge', questionMode: 'decide', maxItems: null, base: 'main' }
     });
-    await dispatch();
 
     const res = await abort().expect(409);
     expect(res.body.error).toMatch(/run-9/);
@@ -377,17 +380,12 @@ describe('refusals before any dashboard call', () => {
     expect(commentPatches()).toEqual([]);
   });
 
-  it('refuses (409) an item whose only claim is stale', async () => {
-    await seed({ heartbeat: new Date(Date.now() - CLAIM_STALE_MS - 1).toISOString() });
-
+  it('refuses (409) an item whose claim is already released — stale by any reading, but nothing is held', async () => {
+    await seed({ heartbeat: new Date(Date.now() - 60 * 60_000).toISOString(), released: { at: new Date().toISOString(), reason: 'stopped', by: 'A' } });
     const res = await abort().expect(409);
     expect(res.body.error).toMatch(/not claimed/);
     expect(dashCalls).toEqual([]);
-  });
-
-  it('refuses (409) an item whose claim is already released', async () => {
-    await seed({ released: { at: new Date().toISOString(), reason: 'stopped', by: 'A' } });
-    await abort().expect(409);
+    expect(commentPatches()).toEqual([]);
   });
 
   it('refuses (409) an item nobody ever claimed', async () => {
@@ -409,6 +407,90 @@ describe('refusals before any dashboard call', () => {
 
 /* The authority an abort carries is decided server-side and must never be reachable from a request body: `release` rebuilds its request field by field,
    so a caller that sends the field is still a stranger to somebody else's live claim. */
+/**
+ * #227 — a stale claim. Before, this route answered it `not claimed` and the board had no way to let go of an item nobody was on. A stale claim is forfeit
+ * by protocol, so the release proceeds on every unknown and refuses only when this machine can positively show the holder is still running.
+ */
+describe('a stale claim', () => {
+  const STALE = (): string => new Date(Date.now() - CLAIM_STALE_MS - 60_000).toISOString();
+  const busy = (status: string): Answer => ({ status: 200, body: { sessions: [{ id: 'A', status }] } });
+
+  it('releases a stale hand claim taken on another machine as stale, without asking the dashboard', async () => {
+    await seed({ host: 'another-machine', heartbeat: STALE() });
+
+    const res = await abort().expect(201);
+
+    expect(res.body).toEqual({ id: '#31', released: true, stopped: false });
+    expect(dashCalls).toEqual([]);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'stale', by: 'board' });
+    expect(claimIn(100)?.counters).toEqual({ groomElapsed: 11, executeElapsed: 22, groomTokens: 33, executeTokens: 44 });
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('in-progress');
+    expect(gh.issues.get(31)?.assignees).toEqual([]);
+  });
+
+  it('releases a same-host stale claim the dashboard reports idle', async () => {
+    dash.sessions = busy('idle');
+    await seed({ heartbeat: STALE() });
+
+    await abort().expect(201);
+
+    expect(dashCalls).toEqual([{ method: 'GET', url: 'http://dash.test:4173/api/sessions' }]);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'stale', by: 'board' });
+  });
+
+  for (const status of ['working', 'question']) {
+    it(`refuses (409) a same-host stale claim the dashboard reports ${status} — a late heartbeat, not a dead session`, async () => {
+      dash.sessions = busy(status);
+      await seed({ heartbeat: STALE() });
+
+      const res = await abort().expect(409);
+
+      expect(res.body.error).toBe(`session A is ${status} on this machine — its heartbeat is late, not stopped; stop it before taking its claim`);
+      expect(commentPatches()).toEqual([]);
+      expect(claimIn(100)?.released).toBeUndefined();
+    });
+  }
+
+  it('releases when the dashboard cannot be reached — the probe is a guard, not a gate', async () => {
+    dash.sessions = 'throw';
+    await seed({ heartbeat: STALE() });
+
+    await abort().expect(201);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'stale' });
+  });
+
+  it('releases when agents are off, asking nothing', async () => {
+    process.env.BM_AGENTS = 'off';
+    await seed({ heartbeat: STALE() });
+
+    await abort().expect(201);
+    expect(dashCalls).toEqual([]);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'stale' });
+  });
+
+  it('keeps case A for a stale claim the board dispatched: stops the session, then releases it aborted', async () => {
+    await seedDispatched({ heartbeat: STALE() });
+
+    const res = await abort().expect(201);
+
+    expect(res.body).toEqual({ id: '#31', released: true, stopped: true });
+    expect(stopCalls()).toEqual([{ method: 'POST', url: 'http://dash.test:4173/api/sessions/sess-1/stop' }]);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'aborted', by: 'board' });
+  });
+
+  it('refuses (409) a stale claim a run holds — a crashed run is the watchdog’s', async () => {
+    await seed({
+      heartbeat: STALE(),
+      run: { runId: 'run-9', startedAt: '2026-09-24T10:00:00Z', mergeMode: 'merge', questionMode: 'decide', maxItems: null, base: 'main' }
+    });
+
+    const res = await abort().expect(409);
+    expect(res.body.error).toMatch(/run-9/);
+    expect(dashCalls).toEqual([]);
+    expect(commentPatches()).toEqual([]);
+  });
+});
+
 it('POST /api/items/release ignores an authority field in the body — a non-holder is still refused', async () => {
   await seed();
 
@@ -432,8 +514,7 @@ describe('the item payload carries the holder', () => {
   });
 
   it('marks a holder the board dispatched', async () => {
-    await seed({ session: 'sess-1' });
-    await dispatch();
+    await seedDispatched({ session: 'sess-1' });
     expect((await item31())?.holder?.dispatched).toBe(true);
   });
 

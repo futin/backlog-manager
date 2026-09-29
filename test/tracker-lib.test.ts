@@ -2,6 +2,7 @@ import {
   accessReason,
   apiUsage,
   claimControl,
+  claimReading,
   hasSyncingTracker,
   hasTracker,
   itemSyncOff,
@@ -9,6 +10,7 @@ import {
   pollProgress,
   queuedReading,
   resetClock,
+  staleTakeover,
   sweepProgress,
   syncCycleMs,
   syncOffReason,
@@ -269,17 +271,49 @@ describe('queuedReading', () => {
   });
 });
 
-/* #225 — the item modal's claim control. The server re-decides every case at click time; this is only whether the click is offered. */
-describe('claimControl', () => {
+/* #227 — whether a tracker item's holder is live, by the reader's clock. The one rule `claimControl`, the card's bar, the rank and `progressBlock` all
+   read, and the rule the server's `isLive` applies: stale at exactly `CLAIM_STALE_MS`, and stale when the heartbeat cannot be read. */
+describe('claimReading', () => {
   const beat = (msAgo: number): string => new Date(NOW - msAgo).toISOString();
   const tracker = (holder?: ItemHolder) => ({ source: 'github' as const, ...(holder === undefined ? {} : { holder }) });
 
-  it('offers Stop & release for a live claim the board dispatched', () => {
-    expect(claimControl(tracker({ session: 's', heartbeat: beat(60_000), dispatched: true }), NOW)).toBe('stop-release');
+  it('is null for a files item, whatever it carries, and for an unheld issue', () => {
+    expect(claimReading({ source: 'files', holder: { session: 's', heartbeat: beat(0) } }, NOW)).toBeNull();
+    expect(claimReading(tracker(), NOW)).toBeNull();
   });
 
-  it('offers Release claim for any other live claim', () => {
-    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: beat(60_000) }), NOW)).toBe('release');
+  it('is live one millisecond short of CLAIM_STALE_MS and stale at exactly it', () => {
+    expect(claimReading(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS - 1) }), NOW)).toBe('live');
+    expect(claimReading(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS) }), NOW)).toBe('stale');
+  });
+
+  it('is stale for a heartbeat it cannot read — nothing can call it fresh', () => {
+    expect(claimReading(tracker({ session: 's', heartbeat: 'not a date' }), NOW)).toBe('stale');
+  });
+});
+
+/* #225, widened by #227 — the item modal's claim control over {live, stale} × {dispatched, hand, run-held}. The server re-decides every case at click
+   time; this is only whether the click is offered, and with which confirm. */
+describe('claimControl', () => {
+  const beat = (msAgo: number): string => new Date(NOW - msAgo).toISOString();
+  const tracker = (holder?: ItemHolder) => ({ source: 'github' as const, ...(holder === undefined ? {} : { holder }) });
+  const LIVE = beat(60_000);
+  const STALE = beat(CLAIM_STALE_MS + 60_000);
+
+  it('offers Stop & release for a claim the board dispatched, live or stale', () => {
+    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, dispatched: true }), NOW)).toBe('stop-release');
+    expect(claimControl(tracker({ session: 's', heartbeat: STALE, dispatched: true }), NOW)).toBe('stop-release');
+  });
+
+  it('offers Release claim for a live hand claim, and the stale release for a stale one', () => {
+    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: LIVE }), NOW)).toBe('release');
+    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: STALE }), NOW)).toBe('release-stale');
+  });
+
+  it('offers nothing for a run-held claim, live or stale, dispatched or not', () => {
+    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, run: 'run-9' }), NOW)).toBeNull();
+    expect(claimControl(tracker({ session: 's', heartbeat: STALE, run: 'run-9' }), NOW)).toBeNull();
+    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, run: 'run-9', dispatched: true }), NOW)).toBeNull();
   });
 
   it('offers nothing for a files item, whatever it carries', () => {
@@ -290,18 +324,34 @@ describe('claimControl', () => {
     expect(claimControl(tracker(), NOW)).toBeNull();
   });
 
-  it('offers nothing for a run-held claim, dispatched or not', () => {
-    expect(claimControl(tracker({ session: 's', heartbeat: beat(0), run: 'run-9' }), NOW)).toBeNull();
-    expect(claimControl(tracker({ session: 's', heartbeat: beat(0), run: 'run-9', dispatched: true }), NOW)).toBeNull();
-  });
-
-  it('offers nothing once the heartbeat reaches CLAIM_STALE_MS, and still offers it one millisecond short', () => {
-    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS) }), NOW)).toBeNull();
+  it('turns release into release-stale at exactly CLAIM_STALE_MS, and for a heartbeat it cannot read', () => {
     expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS - 1) }), NOW)).toBe('release');
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS) }), NOW)).toBe('release-stale');
+    expect(claimControl(tracker({ session: 's', heartbeat: 'not a date' }), NOW)).toBe('release-stale');
+  });
+});
+
+/* #227 — the dispatch sheet's line when a launch goes ahead over a stale hand claim: the spawned session's own `start` retires it. */
+describe('staleTakeover', () => {
+  const beat = (msAgo: number): string => new Date(NOW - msAgo).toISOString();
+  const tracker = (holder?: ItemHolder) => ({ source: 'github' as const, ...(holder === undefined ? {} : { holder }) });
+
+  it('names the session, its host and the heartbeat age', () => {
+    expect(staleTakeover(tracker({ session: 'b1c2d3e4-5555', host: 'aj_linux', heartbeat: beat(42 * 60_000) }), NOW)).toBe(
+      'takes over a stale claim — session b1c2d3e4 on aj_linux, no heartbeat 42m'
+    );
   });
 
-  it('offers nothing for a heartbeat it cannot read', () => {
-    expect(claimControl(tracker({ session: 's', heartbeat: 'not a date' }), NOW)).toBeNull();
+  it('drops the host clause when the claim recorded none', () => {
+    expect(staleTakeover(tracker({ session: 's', heartbeat: beat(42 * 60_000) }), NOW)).toBe('takes over a stale claim — session s, no heartbeat 42m');
+  });
+
+  it('is null for a live claim, a dispatched or run-held stale claim, an unheld issue and a files item', () => {
+    expect(staleTakeover(tracker({ session: 's', heartbeat: beat(60_000) }), NOW)).toBeNull();
+    expect(staleTakeover(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS), dispatched: true }), NOW)).toBeNull();
+    expect(staleTakeover(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS), run: 'run-9' }), NOW)).toBeNull();
+    expect(staleTakeover(tracker(), NOW)).toBeNull();
+    expect(staleTakeover({ source: 'files', holder: { session: 's', heartbeat: beat(CLAIM_STALE_MS) } }, NOW)).toBeNull();
   });
 });
 
@@ -384,12 +434,22 @@ describe('sync interval readings (#17)', () => {
       ...over
     });
     // An off repo's fresher stamp says nothing about the next sweep.
-    expect(sweepProgress([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ interval: 'off', polledAt: new Date(NOW - 1_000).toISOString() })], NOW)?.leftS).toBe(12);
+    expect(
+      sweepProgress([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ interval: 'off', polledAt: new Date(NOW - 1_000).toISOString() })], NOW)
+        ?.leftS
+    ).toBe(12);
     // Only 5m repos: the clock is five minutes long, and 40 s in is not overdue.
-    expect(sweepProgress([row({ interval: '5m', polledAt: new Date(NOW - 40_000).toISOString() })], NOW)).toEqual({ fraction: 40_000 / 340_000, leftS: 300, overdue: false });
+    expect(sweepProgress([row({ interval: '5m', polledAt: new Date(NOW - 40_000).toISOString() })], NOW)).toEqual({
+      fraction: 40_000 / 340_000,
+      leftS: 300,
+      overdue: false
+    });
     // A 15s repo beside a 5m one that synced a moment later: the chip follows the 15s one.
     expect(
-      sweepProgress([row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ path: '/abs/y', interval: '5m', polledAt: new Date(NOW - 4_000).toISOString() })], NOW)?.leftS
+      sweepProgress(
+        [row({ polledAt: new Date(NOW - 5_000).toISOString() }), row({ path: '/abs/y', interval: '5m', polledAt: new Date(NOW - 4_000).toISOString() })],
+        NOW
+      )?.leftS
     ).toBe(12);
     expect(sweepProgress([row({ interval: 'off', polledAt: new Date(NOW - 1_000).toISOString() })], NOW)).toBeNull();
   });

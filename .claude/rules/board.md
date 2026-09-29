@@ -43,7 +43,8 @@ paths: ["client/src/**"]
   [invariants.md](docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it)
 - **An environment-level block hides the dispatch control; the per-item ones disable it.** With `BM_AGENTS` off the board shows no dispatch buttons — do not
   "improve" that into disabled buttons. Three per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
-  local session's `started:` stamp (`progressBlock`, `client/src/lib/item-progress.ts` — ANY stamp, fresh or stale), an orchestrator claim (`runClaimBlock`).
+  local session's `started:` stamp (`progressBlock`, `client/src/lib/item-progress.ts` — ANY stamp, fresh or stale, for a files item; a tracker claim past
+  `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an orchestrator claim (`runClaimBlock`).
   Exactly one lets the click through: the visibility block re-asks the status through `useReverify` (`client/src/hooks/useReverify.ts`), which the toolbar
   Orchestrate control shares (bug-13, bug-16); the other two keep swallowing it. Why:
   [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)

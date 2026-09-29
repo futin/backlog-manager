@@ -37,8 +37,10 @@ paths: ["server/src/items/**"]
   `gh:<owner>/<repo>#<n>` URN to the tracker adapter, anything else to files — in ONE place each side calls, and the adapter gates on the registry exactly as
   the files allowlist does; and `untyped` is a rendered badge that NOTHING derived reads (no type label → `ideas` with the badge and no error; two → the first
   alphabetically AND one `errors` entry). A closed issue keeps its `type:*` label so the original type is recoverable. **Dispatch is derived like any other
-  item's since task-46** (the lift): `deriveAction` asks nothing about `source`, and the per-item block that stops a claimed tracker item is the LIVE CLAIM,
-  read by `progressBlock` off the `started` the mapper fills — no tracker-specific branch anywhere. **The ORCHESTRATOR lifted one phase later (task-47, phase
+  item's since task-46** (the lift): `deriveAction` asks nothing about `source`, and the per-item block that stops a claimed tracker item is the claim,
+  read by `progressBlock` off the `started` the mapper fills. Since #227 that block has ONE tracker-specific branch: a STALE hand claim lets dispatch through
+  (the spawned session's `start` retires it), while a stale claim held by a run or by a session the board dispatched still blocks; and `AgentsService.dispatch`
+  re-checks a tracker item's claim server-side (`itemClaimBlock`, same order, a stale claim going through `staleClaimProbe`) — a files item is not re-checked. **The ORCHESTRATOR lifted one phase later (task-47, phase
   4a)**: `projectIsFiles` is deleted and `AgentsService.orchestrate`'s `arrives in phase 4` 400 is gone, and what replaced them is `resolveIds` learning the
   vocabulary — `resolveTrackerIds` proves an id against `ItemsService` where the files path proves it against a directory scan, accepts `#31`, the URN and a
   bare `31`, and **emits bare digits alone**, so no `#` reaches the prompt. Why:
