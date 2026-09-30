@@ -239,6 +239,96 @@ describe('useTrackers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  /*
+   * #231: two reads can be in flight at once — the focus refetch, the timer's read, `saveInterval`'s refetch — and resolve out of order. Only the newest may
+   * write: a superseded answer that landed last used to repaint old stamps, re-aim the timer from them, and (if it failed) raise `error` over a good answer.
+   * Each case starts read 1 on mount and read 2 on focus, and settles them by hand; `login` tells the two payloads apart.
+   */
+  describe('overlapping reads', () => {
+    function deferred() {
+      let resolve!: (res: Response) => void;
+      let reject!: (err: Error) => void;
+      const promise = new Promise<Response>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+    const reply = (login: string, ageMs: number) =>
+      ({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ...payload([row({ polledAt: new Date(NOW - ageMs).toISOString() })]), platforms: [{ ...payload([]).platforms[0], login }] })
+      }) as Response;
+
+    function StateProbe() {
+      const { data, error } = useTrackers();
+      return <span>{`${data?.platforms[0]?.login ?? 'none'} ${error ? 'error' : 'fine'}`}</span>;
+    }
+
+    async function twoReads() {
+      const first = deferred();
+      const second = deferred();
+      fetchMock.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise);
+      render(<StateProbe />);
+      await flush();
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'));
+      });
+      await flush();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      return { first, second };
+    }
+
+    async function settle(fn: () => void): Promise<void> {
+      await act(async () => {
+        fn();
+      });
+      for (let i = 0; i < 4; i++) await flush();
+    }
+
+    it('keeps the newer answer when the older one lands last', async () => {
+      const { first, second } = await twoReads();
+      await settle(() => second.resolve(reply('new', 1_000)));
+      expect(screen.getByText('new fine')).toBeInTheDocument();
+      await settle(() => first.resolve(reply('old', 5_000)));
+      expect(screen.getByText('new fine')).toBeInTheDocument();
+    });
+
+    it('does not let the older answer re-aim the schedule', async () => {
+      // Read 2's stamp is 1 s old: deadline 17_000 + 500 − 1_000 = 16_500. Read 1's is 18 s old — DUE, so obeyed it would arm the one-second floor.
+      const { first, second } = await twoReads();
+      await settle(() => second.resolve(reply('new', 1_000)));
+      await settle(() => first.resolve(reply('old', 18_000)));
+      await advance(1_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await advance(16_500 - 1_000);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not raise error when the older read fails after the newer one succeeded', async () => {
+      const { first, second } = await twoReads();
+      await settle(() => second.resolve(reply('new', 1_000)));
+      await settle(() => first.reject(new Error('down')));
+      expect(screen.getByText('new fine')).toBeInTheDocument();
+      // No cycle-long retry replaced read 2's own timer: it still fires at 16_500, not at 17_000.
+      await advance(16_500);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('still applies both answers when they land in order', async () => {
+      // Read 1 (5 s old) would arm 12_500; read 2 (1 s old) re-arms 16_500 and renders.
+      const { first, second } = await twoReads();
+      await settle(() => first.resolve(reply('old', 5_000)));
+      await settle(() => second.resolve(reply('new', 1_000)));
+      expect(screen.getByText('new fine')).toBeInTheDocument();
+      await advance(12_500);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await advance(16_500 - 12_500);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+  });
+
   it('clears the pending timer on unmount', async () => {
     const { unmount } = render(<Probe />);
     await flush();

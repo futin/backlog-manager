@@ -24,6 +24,12 @@ import type { SyncInterval, TrackersPayload } from '../../../shared/types';
  *   so the deadline is the EARLIEST next stamp still ahead, each row's stamp plus its own `syncCycleMs`, and a row is DUE for one base cycle after its own
  *   cycle ends — never for its whole second cycle, which for a `5m` repo would be five minutes of asking every second.
  * - **Focus still refetches at once**, and re-arms from that answer — the pending timer is cleared first, so there is never more than one.
+ * - **Only the newest read may write** (#231). Two reads can be in flight at once — the focus refetch, the timer's read, `saveInterval`'s refetch — and
+ *   they can settle out of order. Clearing the timer cancels no fetch, so an older answer landing last would repaint older stamps (a countdown jumps back
+ *   up, a just-saved interval's pill snaps back), re-aim the timer from them, and, had it failed, raise `error` over a good answer. Each read takes a
+ *   sequence number and a superseded one does nothing at all when it settles. The newest always settles and arms its own timer, so the one-timer rule
+ *   holds. A counter rather than an `AbortController`: an abort rejects the fetch, and `catch` would then have to tell a superseded read from a real
+ *   failure or every overlap would raise `error` and arm a cycle-long retry.
  *
  * A failed fetch keeps whatever is in state and raises `error`, exactly as `useBoard` does: a card that emptied itself on one failed poll would report
  * "no trackers" for a network blip, which is a stronger claim than the failure supports.
@@ -92,6 +98,8 @@ export function useTrackers(): TrackersState {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // An answer that lands after unmount must not arm a timer nobody will clear.
   const mounted = useRef(true);
+  // The newest read's sequence number — see "Only the newest read may write" in the header.
+  const latest = useRef(0);
 
   const clear = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
@@ -100,6 +108,8 @@ export function useTrackers(): TrackersState {
 
   const reload = useCallback(() => {
     clear();
+    const seq = ++latest.current;
+    const current = (): boolean => mounted.current && seq === latest.current;
     const arm = (ms: number | null): void => {
       clear();
       if (ms === null || !mounted.current) return;
@@ -117,7 +127,7 @@ export function useTrackers(): TrackersState {
         // `error` path an unreachable API does — one "no usable answer"
         // state, not two.
         if (!isTrackersPayload(data)) throw new Error('malformed /api/trackers response');
-        if (!mounted.current) return;
+        if (!current()) return;
         setState({ data, loading: false, error: false });
         // A refusal survives a read that still shows the value it was refused against; one whose repo has since moved is about a setting that is gone.
         setRefused((prev) => {
@@ -130,7 +140,7 @@ export function useTrackers(): TrackersState {
         arm(nextDelay(data, Date.now()));
       })
       .catch(() => {
-        if (!mounted.current) return;
+        if (!current()) return;
         setState((prev) => ({ data: prev.data, loading: false, error: true }));
         arm(TRACKER_CYCLE_MS);
       });
