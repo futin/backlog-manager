@@ -11,8 +11,8 @@ import { readStyles, ruleBlocks } from './helpers/css-rule';
  * what a later cleanup can silently delete.
  *
  * "Silently" is the operative word for two of these in particular.
- * `.runs-split`'s `min-height: 0` reads like noise beside `flex: 1` and is
- * the single declaration whose removal turns the whole mechanism into a
+ * `.runs-split`'s definite `min-height` reads like noise beside `flex: 1` and
+ * is the single declaration whose removal turns the whole mechanism into a
  * no-op (a flex item's default `min-height: auto` refuses to shrink below
  * its content, so the box just grows to the full run list again). And
  * `.runs-board`'s height is DIVIDED by `--font-scale`, which reads like a
@@ -121,9 +121,11 @@ describe('runs list bounded-scroll stylesheet rules (task-16)', () => {
     expect(declares(base, '.runs-board', /height\s*:\s*calc\([^;}]*100vh\s*\/\s*var\(\s*--font-scale/)).toBe(true);
   });
 
-  it('makes .runs-split absorb the remainder, with the min-height:0 that lets it', () => {
+  it('makes .runs-split absorb the remainder, floored at a definite 240px so the strip is what yields', () => {
     expect(declares(base, '.runs-split', /(^|[\s;])flex\s*:\s*1\b/)).toBe(true);
-    expect(declares(base, '.runs-split', /(^|[\s;])min-height\s*:\s*0\b/)).toBe(true);
+    // Definite, so the split cannot fall back to `min-height: auto` and grow to the full run list; 240 px rather than 0 since #232, so that on a
+    // short laptop board the column's negative free space lands on the figure strip instead of the sheets overflowing a split with nothing left to give.
+    expect(declares(base, '.runs-split', /(^|[\s;])min-height\s*:\s*240px/)).toBe(true);
     // The 420 px list column (§8.4.1) — the figure every row design in this
     // redraw answers to, which is why it is pinned rather than left to a
     // fraction that would quietly widen the column and let a reading the
@@ -157,6 +159,17 @@ describe('runs list bounded-scroll stylesheet rules (task-16)', () => {
     }
   });
 
+  /* #232: the strip is the box that yields on a short board, and it must scroll what it gives up rather than clip it. The wide container block declares the
+     same selector with the same overflow, so the search runs over the sheet with every `@container` and `@media` block cut out — otherwise that block
+     alone would satisfy it. The `.runs-board >` parent is part of the assertion, for the reason the wide describe below gives. */
+  it('lets the figure strip shrink by scrolling itself, in the base sheet', () => {
+    const atRuleBodies = [...mediaBlocks(css, '@container'), ...mediaBlocks(css, '@media')];
+    const flat = atRuleBodies.reduce((text, body) => text.replace(body, ''), css);
+    const strip = '.runs-board > .runs-stats';
+    expect(declares(flat, strip, /(^|[\s;])overflow-y\s*:\s*auto\b/)).toBe(true);
+    expect(declares(flat, strip, /(^|[\s;])overscroll-behavior\s*:\s*contain\b/)).toBe(true);
+  });
+
   it('sticks the day kicker to the top of the box scrolling it, on an opaque background', () => {
     expect(declares(css, '.ui-ledger-day', /(^|[\s;])position\s*:\s*sticky\b/)).toBe(true);
     expect(declares(css, '.ui-ledger-day', /(^|[\s;])top\s*:\s*0\b/)).toBe(true);
@@ -176,6 +189,8 @@ describe('runs list bounded-scroll stylesheet rules (task-16)', () => {
     // rather than being narrowed.
     expect(declares(phone, '.runs-board', /(^|[\s;])height\s*:\s*auto\b/)).toBe(true);
     expect(declares(phone, '.runs-split', /grid-template-columns\s*:\s*minmax\(0, 1fr\)/)).toBe(true);
+    // The base 240 px floor comes off with the bound (#232): a stacked split sizes to its content, as it did when the base said `min-height: 0`.
+    expect(declares(phone, '.runs-split', /(^|[\s;])min-height\s*:\s*auto\b/)).toBe(true);
     for (const selector of ['.runs-col, .runs-list, .runs-history-sheet, .runs-detail']) {
       expect(declares(phone, selector, /(^|[\s;])max-height\s*:\s*none\b/)).toBe(true);
       expect(declares(phone, selector, /(^|[\s;])overflow\s*:\s*visible\b/)).toBe(true);
