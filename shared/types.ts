@@ -2215,9 +2215,10 @@ export interface ItemHeartbeatRequest extends ItemWriteRequest {
  * `updated_at` the caller read, checked against a FRESH `GET` before the patch,
  * so two grooms on two machines cannot silently overwrite each other. A moved
  * stamp alone is not a conflict (bug #220): the patch still goes through when
- * the cached copy at exactly this stamp holds the same body as the fresh read,
+ * the body the poller recorded at exactly this stamp equals the fresh read,
  * because the claim protocol's own label and comment writes move the stamp
- * too. `GithubSource.patchBody` carries the whole rule.
+ * too — and that record outlives the poll that absorbs the move (bug #234).
+ * `GithubSource.patchBody` carries the whole rule.
  */
 export interface ItemBodyRequest extends ItemWriteRequest {
   id: string;

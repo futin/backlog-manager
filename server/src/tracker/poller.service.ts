@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Injectable } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
@@ -109,6 +111,34 @@ export function sinceFor(mark: string | null): string | null {
   return Number.isNaN(at) ? mark : new Date(at - SINCE_OVERLAP_MS).toISOString();
 }
 
+/** How many stamps `RepoState.bodyStamps` keeps per issue (bug #234). A groom's read-to-write window spans its own claim writes plus whatever else touches
+ *  the issue meanwhile — a handful of stamps, not dozens — so 32 is generous, and still a few KB for a busy repo. */
+const BODY_STAMPS_PER_ISSUE = 32;
+
+/** sha256 of an issue body, `null` read as the empty body — the same reading `patchBody` compares against. Exported so the writer and the reader
+ *  cannot hash two different ways. */
+export function bodyHash(body: string | null | undefined): string {
+  return createHash('sha256').update(body ?? '').digest('hex');
+}
+
+/** Record one absorbed issue's body under its stamp, poisoning a stamp already seen with a different body and evicting the oldest stamp past the bound. */
+function recordBodyStamp(state: RepoState, issue: GithubIssue): void {
+  if (typeof issue.updated_at !== 'string') return;
+  let stamps = state.bodyStamps.get(issue.number);
+  if (stamps === undefined) {
+    stamps = new Map();
+    state.bodyStamps.set(issue.number, stamps);
+  }
+  const hash = bodyHash(issue.body);
+  if (stamps.has(issue.updated_at)) {
+    // `since` is inclusive, so the same copy comes back on the next poll: a match is the normal case and changes nothing, insertion order included.
+    if (stamps.get(issue.updated_at) !== hash) stamps.set(issue.updated_at, null);
+    return;
+  }
+  stamps.set(issue.updated_at, hash);
+  if (stamps.size > BODY_STAMPS_PER_ISSUE) stamps.delete(stamps.keys().next().value as string);
+}
+
 /** The connection state of one repo, as `ProjectSummary.access` spells it. */
 export type Access = NonNullable<SourceSummary['access']>;
 
@@ -120,6 +150,22 @@ interface RepoState {
   /** Issues by number — the cache proper. A `Map` so `since`'s inclusive
    *  re-send is an upsert rather than a duplicate (spec §5.1). */
   issues: Map<number, GithubIssue>;
+  /**
+   * Per issue, the sha256 of the body this cache saw under each `updated_at` it absorbed — or `null` for a stamp seen with two different bodies (bug #234).
+   *
+   * `issues` holds only the newest copy, so the moment a poll moves an issue past the stamp a caller read, the body that stamp named is gone — and
+   * `patchBody`'s "only the stamp moved, not the body" reading had nothing left to compare. At a 15 s poll that was nearly every groom: its own `start` and
+   * `heartbeat` bump the stamp, the next poll absorbs the bump, and the groom's `body` refused on its own bookkeeping. This record keeps the answer to "which
+   * body did the stamp you hold name" after any number of polls.
+   *
+   * A hash, not the body: the question is only ever equality, and an issue body can be large. Bounded to `BODY_STAMPS_PER_ISSUE` stamps per issue, oldest
+   * evicted first by insertion order; only an issue that actually changes adds entries, so a quiet repo costs one entry per issue.
+   *
+   * `null` is the poisoned mark. GitHub's `updated_at` has one-second resolution, so two edits inside one second can share a stamp with different bodies,
+   * and then the stamp names neither. It stays poisoned — a later absorb of either body does not clear it — because "which one did the caller read" is
+   * exactly what the stamp can no longer say.
+   */
+  bodyStamps: Map<number, Map<string, string | null>>;
   /** Comments by id. Written since phase 2; read since task-46 by `comments()`
    *  below, which is what the claim protocol maps an item's `started`/`phase`
    *  and counters from.
@@ -373,6 +419,18 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     this.absorbIssues(this.stateOf(repo), [issue]);
   }
 
+  /**
+   * The sha256 of the body this cache saw under `stamp` for one issue (bug #234), or `undefined` when it never saw that stamp, has evicted it, or saw it
+   * with two different bodies. `patchBody` is the one reader: it lets a body write through when the stamp the caller holds names the body GitHub still
+   * has, however many polls ago the cache moved past that stamp.
+   *
+   * Exact stamp only, never "the newest stamp at or before": a newer copy may already hold another session's body, and matching against it would approve
+   * the overwrite the check exists to prevent.
+   */
+  bodyHashAt(repo: string, number: number, stamp: string): string | undefined {
+    return this.repos.get(repo)?.bodyStamps.get(number)?.get(stamp) ?? undefined;
+  }
+
   /** The comment half of the same absorption: a claim this process just posted
    *  or edited is in the cache before the request that made it returns, so the
    *  next board read maps the item as claimed. Keyed by comment id, so an edit
@@ -563,6 +621,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     if (state === undefined) {
       state = {
         issues: new Map(),
+        bodyStamps: new Map(),
         comments: new Map(),
         hwm: null,
         commentsHwm: null,
@@ -786,6 +845,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       // repo, there so no other reader of the cache has to remember.
       if (issue.pull_request !== undefined && issue.pull_request !== null) continue;
       state.issues.set(issue.number, issue);
+      recordBodyStamp(state, issue);
       if (typeof issue.updated_at === 'string' && (state.hwm === null || issue.updated_at > state.hwm)) {
         state.hwm = issue.updated_at;
       }
