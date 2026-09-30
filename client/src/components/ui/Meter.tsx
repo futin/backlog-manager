@@ -10,6 +10,9 @@
  *
  * The text is the reading and the bar is decoration, so the track is `aria-hidden` and there is no `progressbar` role: unlike `ProgressRow` this meter's
  * value is already a sentence (`12s`, `overdue`, `1.4%`), and a second, numeric statement of it would be the one a screen reader got wrong.
+ * The literal space between the label and the value is part of that reading, not formatting: without it the text runs together as `POLL12s` wherever
+ * it is read without layout — copied, found in page, or concatenated into an accessible name or description (the tracker chip's, #230). `.ui-meter-head`
+ * is a flex container, where a whitespace-only text run is not rendered, so it moves nothing on screen.
  *
  * `fraction` is clamped rather than trusted, for `ProgressRow`'s reason: a bar drawn past its own track looks like a rendering bug rather than a number
  * being large. `null` draws the empty track — "nothing to read yet", which is not the same as a reading of zero.
@@ -34,7 +37,7 @@ export function Meter({
   return (
     <span className="ui-meter" data-tone={tone} style={{ width: width === 'fill' ? '100%' : `${width}px` }}>
       <span className="ui-meter-head">
-        <span className="ui-meter-label">{label}</span>
+        <span className="ui-meter-label">{label}</span>{' '}
         <span className="ui-meter-value">{value}</span>
       </span>
       <span className="ui-meter-track" aria-hidden="true">
