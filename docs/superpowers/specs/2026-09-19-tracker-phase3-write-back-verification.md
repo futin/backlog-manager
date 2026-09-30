@@ -9,7 +9,7 @@ from reading code.
 
 ## Setup
 
-- **Test repo:** [futin/test-claude-issues](https://github.com/futin/test-claude-issues), created empty for this purpose, throwaway.
+- **Test repo:** `futin/test-claude-issues`, created empty for this purpose, throwaway — deleted 2026-09-30, locally and on GitHub, and unregistered from the board.
 - **Registered** via `backlog.mjs init`, **connected** via `backlog.mjs connect github futin/test-claude-issues` — wrote `backlog/source.json` (`{"kind":"github","repo":"futin/test-claude-issues"}`) and the four issue-form templates, committed and pushed to `main`.
 - **Token:** a fine-grained PAT in the server's `.env` (`BM_GITHUB_TOKEN`), scoped to **Issues: read/write** + **Metadata: read** on this repo specifically. First attempt used a token not yet scoped to the repo — surfaced correctly as `access: "not-found"` on `GET /api/trackers`, not a silent failure; re-scoping the token and re-polling flipped it to `access: "ok"` with no restart needed (access is checked live per poll; only the token *value* needs a restart).
 - **Server:** the docker-compose stack (`server`/`client` containers), which bind-mounts the whole repo (`.:/app`) and runs `nest start --watch` — i.e. it was already serving `feature/tracker`'s live source before any merge. The server container was restarted once to pick up the corrected token (env vars are interpolated at `docker compose up`, not read live from `.env`).

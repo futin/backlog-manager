@@ -17,7 +17,7 @@ test repo's `origin/main` was still the `connect` commit `ff4da67`. Phase 5 move
 
 ## Setup
 
-- **Repo:** `futin/test-claude-issues` (throwaway, public), registered and connected on 2026-09-19; marker `{"kind":"github","repo":"futin/test-claude-issues"}`.
+- **Repo:** `futin/test-claude-issues` (throwaway, public; deleted 2026-09-30), registered and connected on 2026-09-19; marker `{"kind":"github","repo":"futin/test-claude-issues"}`.
 - **Stack:** the docker-compose stack, up 38 h, `BM_GITHUB_TOKEN` in the container env (`GET /api/trackers` → `hasToken: true`, login `futin`,
   4,972 of 5,000 remaining). Dashboard reachable, `spawnMaxPermission: auto`, the test repo in its `projectPaths`.
 - **Plugin:** `pnpm run plugin:sync` status "in sync — installed v0.1.1 is cb02cc2", so bug-40's and bug-41's fixes were the installed code.

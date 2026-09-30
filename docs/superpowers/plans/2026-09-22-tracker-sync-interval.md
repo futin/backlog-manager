@@ -297,6 +297,6 @@ Behaviour:
 - [ ] **Step 1: Edit** each file. New prose wraps at 160; do not reflow existing lines.
 - [ ] **Step 2: Run** `pnpm exec jest test/claude-rules.test.ts` and `pnpm test` — expected: PASS (guard 3: no mechanism text in a CLAUDE.md bullet; headlines
   byte-equal between CLAUDE.md and the rules file).
-- [ ] **Step 3: Verify in the running stack**: `pnpm run docker:sync`; on Shared › Trackers set `test-claude-issues` to `off` and confirm the board band reads
+- [ ] **Step 3: Verify in the running stack**: `pnpm run docker:sync`; on Shared › Trackers set a connected repo to `off` and confirm the board band reads
   `sync off`, that item's dispatch control is disabled with the sentence, and `~/.backlog-manager/settings/tracker-sync.json` holds the key; set it back to `15s`.
 - [ ] **Step 4: Commit** — `docs(tracker): sync interval invariants, rules and API`.
