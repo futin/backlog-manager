@@ -1692,14 +1692,21 @@ code, kbd, samp, pre { font-family: inherit }
    row designs answer to — every reading that does not survive that width is in
    the detail sheet instead, and the list is what has to stay legible when the
    detail is a scroll away.
-   `flex: 1; min-height: 0` makes this the child of `.runs-board` that absorbs
-   whatever height the band and the strip did not take. `min-height: 0` is not
-   decoration: a flex item's default `min-height: auto` refuses to shrink below
-   its content, so without it this box grows to the full run list and the whole
-   viewport bound silently does nothing. */
+   `flex: 1` makes this the child of `.runs-board` that absorbs whatever height
+   the band and the strip did not take. The `min-height` is not decoration, and
+   both halves of it matter. It must be DEFINITE: a flex item's default
+   `min-height: auto` refuses to shrink below its content, so without one this
+   box grows to the full run list and the whole viewport bound silently does
+   nothing. And it is 240 px rather than 0 since #232, because this box used to
+   be the only one in the column that gave way — the strip's flex basis is its
+   full content height — so on an ordinary laptop board (1440×900 at 120 %,
+   1366×768 at 100 %) it bottomed out at whatever the strip left, the sheets'
+   own 240 px floor below overflowed it, and the page scrolled by up to 56 px.
+   With the floor HERE, the column's negative free space lands on the strip
+   instead, which scrolls itself (`.runs-board > .runs-stats` below). */
 .runs-split {
   display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: var(--group-gap); align-items: stretch;
-  flex: 1; min-height: 0;
+  flex: 1; min-height: 240px;
 }
 /* The list column. It does NOT scroll itself — the History sheet inside it
    does, which is what lets the Live sheet stay put above a long history and
@@ -1710,13 +1717,26 @@ code, kbd, samp, pre { font-family: inherit }
 /* The one scroll box in the column. `overscroll-behavior: contain` because a
    nested scroll box that chains its scroll to the document at either end is
    worse than an unbounded page: the page would lurch the moment the list
-   bottomed out. The `min-height` floor is the graceful degrade for a viewport
-   so short (or a --font-scale so large) that the band and strip alone exceed
-   it — the box keeps a usable height and the PAGE scrolls again, rather than
-   the list collapsing to nothing. */
+   bottomed out. The `min-height` floor matches `.runs-split`'s own, and since
+   #232 it is that one which does the work: the strip shrinks and scrolls
+   first, so the split — and these two with it — keeps 240 px on any board
+   taller than the band, the two gaps and that floor together (about 315 CSS
+   px). Only below that does the PAGE scroll again, the graceful degrade for a
+   viewport so short (or a --font-scale so large) that nothing is left to give,
+   rather than the list collapsing to nothing. */
 .runs-history-sheet, .runs-detail {
   max-height: 100%; overflow-y: auto; overscroll-behavior: contain; min-height: 240px;
 }
+/* The figure strip is the box in this column that yields (#232). The primitive
+   already declares `overflow: hidden`, so its automatic minimum height is 0 and
+   flex could shrink it before this rule existed — but it shrank by CLIPPING,
+   the machine-time bars' last rows silently cut off. This makes that same
+   shrink scroll instead, contained for the reason the sheets above give. The
+   `.runs-board >` parent is load-bearing for the reason the wide block's rule
+   states at length: `.ui-figure-strip` is declared later in this file, so a
+   bare `.runs-stats` ties on specificity and loses on source order. The
+   primitive's 16 px radius still clips the scrolled content, so it stays. */
+.runs-board > .runs-stats { overflow-y: auto; overscroll-behavior: contain }
 /* The History sheet is BOTH the card and the scroll box, and that combination
    has one consequence worth stating outright, because it was reported from
    the running app as "the date is moving across the text when I scroll".
@@ -1836,7 +1856,7 @@ code, kbd, samp, pre { font-family: inherit }
    one column, and there is no fixed chrome left to preserve. */
 @media (max-width: 1100px) {
   .runs-board { height: auto }
-  .runs-split { grid-template-columns: minmax(0, 1fr) }
+  .runs-split { grid-template-columns: minmax(0, 1fr); min-height: auto }
   .runs-col, .runs-list, .runs-history-sheet, .runs-detail { max-height: none; overflow: visible; min-height: auto }
 }
 
