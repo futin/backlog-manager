@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { TrackerChip } from '../client/src/components/TrackerChip';
+import { Meter } from '../client/src/components/ui/Meter';
 import { TrackersContext } from '../client/src/hooks/TrackersContext';
 import type { TrackersState } from '../client/src/hooks/useTrackers';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
@@ -173,6 +174,49 @@ describe('TrackerChip', () => {
     renderChip(payload([row()], platform({ limit: null, remaining: null, reset: null })));
     expect(within(chip()).queryByText('API')).toBeNull();
     expect(within(chip()).getByText('POLL')).toBeInTheDocument();
+  });
+});
+
+/**
+ * #230 — what a screen reader hears. The button's NAME is the stable `Tracker: <login>`, because a focused element whose name changes is re-announced and
+ * the POLL value changes every second; the readings ride as its DESCRIPTION instead. The last case pins the literal space inside `Meter` that keeps
+ * `POLL 12s` from running together as `POLL12s` wherever text is read without layout.
+ */
+describe('the chip as a screen reader reads it (#230)', () => {
+  const named = (name: string) => screen.getByRole('button', { name });
+
+  it('names the button by its login and describes it by both readings', () => {
+    renderChip(payload());
+    expect(named('Tracker: futin')).toHaveAccessibleDescription('POLL 12s API 1.4%');
+  });
+
+  it('moves the description on the tick and never the name', () => {
+    renderChip(payload());
+    act(() => {
+      jest.advanceTimersByTime(1_000);
+    });
+    const button = named('Tracker: futin');
+    expect(button).toHaveAccessibleName('Tracker: futin');
+    expect(button).toHaveAccessibleDescription('POLL 11s API 1.4%');
+  });
+
+  it('carries no description, and no dangling aria-describedby, without a token', () => {
+    renderChip(payload([row()], platform({ hasToken: false, login: null })));
+    const button = named('Tracker: no token');
+    expect(button).not.toHaveAttribute('aria-describedby');
+    expect(button).toHaveAccessibleDescription('');
+  });
+
+  it('describes sync off when every repo is off', () => {
+    renderChip(payload([row({ interval: 'off' }), beta({ interval: 'off' })]));
+    expect(named('Tracker: futin')).toHaveAccessibleDescription('POLL sync off API 1.4%');
+  });
+
+  it('reads a Meter on its own as two words', () => {
+    // Text content, not the accessible name: jsdom's name computation already puts a space between any two element children, so a name assertion would
+    // pass without the literal space. A browser's does not for inline runs, and text content is what copy, find-in-page and a naive reader take.
+    const { container } = render(<Meter label="API" value="1.4%" fraction={0.014} />);
+    expect(container.textContent).toBe('API 1.4%');
   });
 });
 

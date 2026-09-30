@@ -127,7 +127,9 @@ outlives the section, the popover does not need to).
 dashboard's `.m`/`.mtop`/`.mini` triple, named for this board:
 
 - Props: `label: string`, `value: string`, `fraction: number | null` (0–1, clamped; `null` draws the empty track), `tone?: 'green' | 'amber' | 'red'`
-  (default green), `width?: number` (px, default 56). `aria-hidden` on the bar; the label and value are the accessible text.
+  (default green), `width?: number` (px, default 56). `aria-hidden` on the bar; the label and value are the accessible text. On the chip they are the
+  button's accessible DESCRIPTION, not its name: the name stays `Tracker: <login>`, because a focused element whose name changes is re-announced and the
+  POLL value changes every second (#230).
 - Draws: label (11 px, muted) over value (11 px, bold), and beneath them a 3.5 px track with a fill `width: fraction * 100%`. No transition on the fill —
   it advances once a second and a 1 s tween would smear the reading.
 

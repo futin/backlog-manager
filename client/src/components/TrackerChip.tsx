@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { Meter } from './ui/Meter';
 import { useTrackersContext } from '../hooks/TrackersContext';
@@ -31,6 +31,7 @@ export function TrackerChip({ section }: { section: Section }) {
   const now = useNow(visible, 1_000);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const metersId = useId();
 
   // The chip outlives every section; the popover has no reason to.
   useEffect(() => setOpen(false), [section]);
@@ -58,6 +59,10 @@ export function TrackerChip({ section }: { section: Section }) {
 
   return (
     <div className="tracker-chip-root" ref={root}>
+      {/* Name versus description (#230). The name stays `Tracker: <login>` and never moves, because a screen reader re-announces a focused element whose
+          name changes and the POLL countdown changes every second — a name built from the meters would be spoken once a second for as long as the chip held
+          focus. The readings ride as the DESCRIPTION instead, which is read on focus and not re-spoken on change. A no-token chip has no meters, so it
+          carries no `aria-describedby` at all rather than one pointing at nothing. */}
       <button
         type="button"
         className="tracker-chip"
@@ -65,6 +70,7 @@ export function TrackerChip({ section }: { section: Section }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Tracker: ${login}`}
+        aria-describedby={noToken ? undefined : metersId}
         onClick={() => setOpen((o) => !o)}
       >
         <span className="tracker-av">
@@ -73,8 +79,9 @@ export function TrackerChip({ section }: { section: Section }) {
         </span>
         <span className="tracker-name">{login}</span>
         {!noToken && (
-          <span className="tracker-meters">
-            <Meter label="POLL" {...sweepReading(githubRows, now)} />
+          <span className="tracker-meters" id={metersId}>
+            {/* The space keeps the description `POLL 12s API 1.4%` rather than `…12sAPI…`; `.tracker-meters` is flex, so it renders as nothing. */}
+            <Meter label="POLL" {...sweepReading(githubRows, now)} />{' '}
             {usage !== null && <Meter label="API" value={usage.label} fraction={usage.fraction} tone={usageTone(usage.fraction)} />}
           </span>
         )}
