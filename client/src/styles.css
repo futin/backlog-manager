@@ -1019,6 +1019,15 @@ code, kbd, samp, pre { font-family: inherit }
    its own content would be no slot at all. 28 px is the `Chip` size both
    surfaces draw here. */
 .run-detail-controls { display: flex; align-items: center; justify-content: flex-end; min-height: 28px }
+/* #233: a remote run's sentence stands in that slot instead of the controls, and the slot sits in `SheetHead`'s right-hand column, `.ui-sheet-head-right`,
+   which is `flex: none` — sized for chips and buttons, so it never shrinks and its width is whatever its content's max-content width is. Unbounded, the
+   sentence's max-content width is one 389 px line: at 375 px the title column collapsed to 0 and the slot still spilled 110 px past the sheet, widening
+   the whole page to 453 px, and at 1280 px it squeezed the project title to 65 px. So the cap lives on the sentence itself, unconditionally — the desktop
+   head is cramped too — rather than on the slot: loosening `.ui-sheet-head-right` would let every other sheet's chip row shrink, and a page may not name a
+   `.ui-` class in its own selector (design guard 7). 20ch is the widest cap that still leaves "brickwright" its full title width at 375 px; `text-align:
+   right` keeps the wrapped lines flush with the slot's `flex-end`. The type is `.ui-sheet-sub`'s secondary-text reading (§8.2): a note about where the
+   controls live is secondary, not a title-sized sentence. */
+.run-detail-remote { max-width: 20ch; text-align: right; font-size: 13px; color: var(--ink2) }
 
 /* ---------------------------------------------- the empty line
    All that survives of the item drawer. The right-hand panel the item opened
