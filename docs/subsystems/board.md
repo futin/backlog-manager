@@ -328,7 +328,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   one after another, so the newest stamp lands before the sweep does), and waits one whole cycle — never the floor — once the newest deadline has passed with
   nothing due (overdue or failing stamps do not move) and after an error. No github row means no timer at all. Since #17 each row counts on its own
   `syncCycleMs`: the deadline is the EARLIEST next stamp still ahead, a row is due for one base cycle after its own cycle ends, `off` rows are skipped, and a
-  payload whose every github row is off sets no timer — nothing on the server moves it, and the card's own save refetches.
+  payload whose every github row is off sets no timer — nothing on the server moves it, and the card's own save refetches. Reads that overlap (focus, timer,
+  the save's refetch) are sequenced, not cancelled (#231): only the newest may set state or arm the timer, so an older answer that settles last does nothing.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.
