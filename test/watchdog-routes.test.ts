@@ -67,7 +67,7 @@ describe('the two watchdog routes', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            url.endsWith('/api/management')
+            url.endsWith('/api/configs')
               ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
               : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
           )

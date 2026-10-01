@@ -50,7 +50,7 @@ const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeo
  * e2e suite owning its own fixtures and stubs rather than sharing test
  * infrastructure across files (agents-dispatch.test.ts and
  * agents-origin-guard.test.ts already do this independently of each other).
- * The three URLs it answers (/api/health, /api/management, /api/spawn) are
+ * The three URLs it answers (/api/health, /api/configs, /api/spawn) are
  * every call AgentsService.orchestrate can make, same as dispatch.
  */
 function stubDashboard(
@@ -68,7 +68,7 @@ function stubDashboard(
     const url = String(input);
     sent.push({ url, init });
     if (url.endsWith('/api/spawn')) {
-      // `reject` fails the spawn call ALONE — health and /api/management
+      // `reject` fails the spawn call ALONE — health and /api/configs
       // still resolve. The suite's existing 502 case rejects every fetch, so
       // the environment gate refuses on the health probe and spawn() is never
       // entered; that is why bug-26's escaping rejection had no case here.
@@ -84,7 +84,7 @@ function stubDashboard(
       status: 200,
       json: () =>
         Promise.resolve(
-          url.endsWith('/api/management')
+          url.endsWith('/api/configs')
             ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
             : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: ceiling }
         )
@@ -233,7 +233,7 @@ describe('POST /api/agents/orchestrate', () => {
             // project at all — the same "not in projectPaths" condition
             // dispatchGate's `disabled` case refuses on for a per-item
             // dispatch (shared/agent.ts).
-            url.endsWith('/api/management') ? { projects: [] } : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+            url.endsWith('/api/configs') ? { projects: [] } : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
           )
       } as Response);
     }) as jest.Mock;
@@ -287,7 +287,7 @@ describe('POST /api/agents/orchestrate', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            url.endsWith('/api/management')
+            url.endsWith('/api/configs')
               ? // The project IS visible here — proving this refusal fires
                 // for spawnAvailable specifically, not as a side effect of
                 // failing the later project-visibility check too.
@@ -346,7 +346,7 @@ describe('POST /api/agents/orchestrate', () => {
     global.fetch = jest.fn((input: RequestInfo | URL) => {
       const url = String(input);
       sent.push(url);
-      if (url.endsWith('/api/management')) {
+      if (url.endsWith('/api/configs')) {
         managementCalls += 1;
         if (managementCalls > 1) return Promise.reject(CONN_REFUSED);
         // The gate's read has landed. Push the clock past the TTL so the

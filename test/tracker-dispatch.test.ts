@@ -74,7 +74,7 @@ function stubDashboard(): void {
         Promise.resolve(
           url.endsWith('/api/sessions')
             ? sessionList
-            : url.endsWith('/api/management')
+            : url.endsWith('/api/configs')
             ? {
                 projects: [
                   { dirName: '-abs-alpha', name: 'alpha', path: filesPath, lastActiveMs: 1 },

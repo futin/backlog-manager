@@ -36,7 +36,7 @@ function stubDashboard(over: Record<string, unknown> = {}) {
       status: 200,
       json: () =>
         Promise.resolve(
-          url.endsWith('/api/management')
+          url.endsWith('/api/configs')
             ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
             : // `/api/spawn` answered too, for bug-21's starting-run case alone:
               // a starting entry has exactly one writer, `POST
@@ -186,7 +186,7 @@ describe('POST /api/agents/plan', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            String(input).endsWith('/api/management')
+            String(input).endsWith('/api/configs')
               ? { projects: [{ dirName: '-x', name: 'x', path: '/somewhere/else', lastActiveMs: 1 }] }
               : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
           )

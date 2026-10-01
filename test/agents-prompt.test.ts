@@ -302,7 +302,7 @@ describe('dashboardError', () => {
   it('leaves anything else exactly as message() reads it', () => {
     // The shape `get()` throws for a non-ok answer: already a sentence, and
     // re-wording it would only lose the status it carries.
-    expect(dashboardError(new Error('/api/management answered 500'), 'x', 1)).toBe('/api/management answered 500');
+    expect(dashboardError(new Error('/api/configs answered 500'), 'x', 1)).toBe('/api/configs answered 500');
     expect(dashboardError('a bare string', 'x', 1)).toBe('a bare string');
     expect(dashboardError(null, 'x', 1)).toBe('null');
   });

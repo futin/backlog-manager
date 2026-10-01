@@ -163,7 +163,7 @@ describe('POST /api/agents/orchestrate — a remote run never locks the project'
       const url = String(input);
       const body = url.endsWith('/api/spawn')
         ? { sessionId: 'sess-1' }
-        : url.endsWith('/api/management')
+        : url.endsWith('/api/configs')
           ? { projects: [{ dirName: '-gamma', name: 'gamma', path: gamma, lastActiveMs: 1 }] }
           : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' };
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);

@@ -28,7 +28,7 @@ function stubDashboard() {
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     calls.push(url);
-    const payload = url.endsWith('/api/management') ? MANAGEMENT : HEALTH;
+    const payload = url.endsWith('/api/configs') ? MANAGEMENT : HEALTH;
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
   return calls;
@@ -102,7 +102,7 @@ describe('GET /api/agents/status', () => {
 
   it('keeps a good health read when the heavy project scan fails', async () => {
     global.fetch = jest.fn((input: RequestInfo | URL) =>
-      String(input).endsWith('/api/management')
+      String(input).endsWith('/api/configs')
         ? Promise.reject(new Error('boom'))
         : Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(HEALTH) } as Response)
     ) as jest.Mock;
@@ -116,7 +116,7 @@ describe('GET /api/agents/status', () => {
       Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve(String(input).endsWith('/api/management') ? MANAGEMENT : { ...HEALTH, spawnMaxPermission: 'godmode' })
+        json: () => Promise.resolve(String(input).endsWith('/api/configs') ? MANAGEMENT : { ...HEALTH, spawnMaxPermission: 'godmode' })
       } as Response)
     ) as jest.Mock;
     const res = await request(app.getHttpServer()).get('/api/agents/status').expect(200);
@@ -127,7 +127,7 @@ describe('GET /api/agents/status', () => {
     const calls = stubDashboard();
     await request(app.getHttpServer()).get('/api/agents/status').expect(200);
     await request(app.getHttpServer()).get('/api/agents/status').expect(200);
-    expect(calls.filter((u) => u.endsWith('/api/management'))).toHaveLength(1);
+    expect(calls.filter((u) => u.endsWith('/api/configs'))).toHaveLength(1);
     expect(calls.filter((u) => u.endsWith('/api/health'))).toHaveLength(2);
   });
 
@@ -138,6 +138,6 @@ describe('GET /api/agents/status', () => {
     await request(app.getHttpServer()).get('/api/agents/status').expect(200);
     clock.mockReturnValue(start + 61_000);
     await request(app.getHttpServer()).get('/api/agents/status').expect(200);
-    expect(calls.filter((u) => u.endsWith('/api/management'))).toHaveLength(2);
+    expect(calls.filter((u) => u.endsWith('/api/configs'))).toHaveLength(2);
   });
 });

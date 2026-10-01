@@ -50,14 +50,14 @@ import type {
  * agents.service.ts — the only file in this app that makes an outbound call.
  *
  * Everything it talks to belongs to ../claude-agents-dashboard: GET /api/health
- * (cheap, per request), GET /api/management (a full scan of every project's
+ * (cheap, per request), GET /api/configs (a full scan of every project's
  * Claude config — cached), and POST /api/spawn. This app has no other network
  * dependency and should not grow one.
  */
 
 /** Health is a few fields off a warm process; a slow one means unreachable. */
 const HEALTH_TIMEOUT_MS = 4_000;
-/** /api/management walks every recent project's .claude tree. It earns more. */
+/** /api/configs walks every recent project's .claude tree. It earns more. */
 const MANAGEMENT_TIMEOUT_MS = 15_000;
 /**
  * How long a path→dirName map stays good. The list only changes when a Claude
@@ -1384,7 +1384,7 @@ export class AgentsService {
     // The second escaping seam bug-26 names, and wider than the spawn one:
     // `get()` rejects on a connection failure or a timeout AND throws a plain
     // Error for a non-ok answer, so a dashboard that merely 500s its own
-    // /api/management inside the TTL window reached the same unmapped 500.
+    // /api/configs inside the TTL window reached the same unmapped 500.
     //
     // Caught here rather than at the three post-gate call sites for the same
     // reason it is one function at all: one seam, three identical callers.
@@ -1399,7 +1399,10 @@ export class AgentsService {
     // an empty project list, not a 502.
     let data: DashboardManagement;
     try {
-      data = await this.get<DashboardManagement>(cfg, '/api/management', MANAGEMENT_TIMEOUT_MS);
+      // `/api/configs` was `/api/management` until the dashboard's dc3ade0 (2026-10-01) renamed it with no alias. The old path then fell through to
+      // the dashboard's SPA fallback — a 200 carrying index.html — whose JSON parse threw, the status route swallowed that, and every project
+      // showed as unseen, which disabled dispatch everywhere with no error on screen. A rename over there has to be followed here.
+      data = await this.get<DashboardManagement>(cfg, '/api/configs', MANAGEMENT_TIMEOUT_MS);
     } catch (e) {
       throw new HttpException({ error: dashboardError(e, 'the dashboard project list', MANAGEMENT_TIMEOUT_MS) }, 502);
     }

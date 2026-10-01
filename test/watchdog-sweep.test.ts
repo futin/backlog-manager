@@ -79,13 +79,13 @@ interface StubOptions {
   /** Reject every fetch, health included — an unreachable dashboard (case 10). */
   reject?: boolean;
   /**
-   * Reject `/api/spawn` ALONE, with this value, health and /api/management
+   * Reject `/api/spawn` ALONE, with this value, health and /api/configs
    * still resolving (bug-26). `reject` above never reaches `spawn()`: the
    * gate refuses on the health probe first, so it proves nothing about what
    * the seam inside `spawn()` does with a rejection.
    */
   spawnReject?: unknown;
-  /** What `/api/management` lists. Defaults to both projects. */
+  /** What `/api/configs` lists. Defaults to both projects. */
   projects?: Array<{ dirName: string; path: string }>;
 }
 
@@ -134,7 +134,7 @@ describe('watchdog sweeper', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            url.endsWith('/api/management')
+            url.endsWith('/api/configs')
               ? { projects: projects.map((p) => ({ ...p, name: p.dirName, lastActiveMs: 1 })) }
               : {
                   ok: true,
@@ -716,7 +716,7 @@ describe('watchdog sweeper', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            url.endsWith('/api/management')
+            url.endsWith('/api/configs')
               ? { projects: [{ dirName: '-abs-alpha', path: projectPath, name: '-abs-alpha', lastActiveMs: 1 }] }
               : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto' }
           )

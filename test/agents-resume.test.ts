@@ -44,7 +44,7 @@ const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeo
  * rather than imported, matching this repo's existing convention of every
  * e2e suite owning its own fixtures and stubs rather than sharing test
  * infrastructure across files. The three URLs it answers (/api/health,
- * /api/management, /api/spawn) are every call AgentsService.resume can make,
+ * /api/configs, /api/spawn) are every call AgentsService.resume can make,
  * same as orchestrate.
  */
 function stubDashboard(spawn: { ok?: boolean; status?: number; body?: unknown; reject?: unknown } = {}, ceiling: string = 'acceptEdits') {
@@ -54,7 +54,7 @@ function stubDashboard(spawn: { ok?: boolean; status?: number; body?: unknown; r
     const url = String(input);
     sent.push({ url, init });
     if (url.endsWith('/api/spawn')) {
-      // `reject` fails the spawn call ALONE, health and /api/management still
+      // `reject` fails the spawn call ALONE, health and /api/configs still
       // resolving — the shape bug-26 was invisible in, since case 3 below
       // rejects every fetch and so never reaches spawn() at all.
       if ('reject' in spawn) return Promise.reject(spawn.reject);
@@ -69,7 +69,7 @@ function stubDashboard(spawn: { ok?: boolean; status?: number; body?: unknown; r
       status: 200,
       json: () =>
         Promise.resolve(
-          url.endsWith('/api/management')
+          url.endsWith('/api/configs')
             ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
             : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: ceiling }
         )
@@ -199,7 +199,7 @@ describe('POST /api/agents/resume', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            url.endsWith('/api/management') ? { projects: [] } : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
+            url.endsWith('/api/configs') ? { projects: [] } : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
           )
       } as Response);
     }) as jest.Mock;

@@ -31,7 +31,7 @@ let projectPath: string;
  * rather than imported, matching this repo's existing convention that every
  * e2e suite owns its own fixtures and stubs (that file's own comment makes
  * the identical choice against agents-dispatch.test.ts). The three URLs it
- * answers (/api/health, /api/management, /api/spawn) are every call
+ * answers (/api/health, /api/configs, /api/spawn) are every call
  * AgentsService.orchestrate can make.
  */
 function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } = { ok: true }): Sent[] {
@@ -51,7 +51,7 @@ function stubDashboard(spawn: { ok: boolean; status?: number; body?: unknown } =
       status: 200,
       json: () =>
         Promise.resolve(
-          url.endsWith('/api/management')
+          url.endsWith('/api/configs')
             ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
             : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
         )

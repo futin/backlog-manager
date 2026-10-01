@@ -47,7 +47,7 @@ const SPAWN_TIMED_OUT = new DOMException('The operation was aborted due to timeo
  * Records every outbound call and answers the three the service makes.
  *
  * `reject` is the one mode this stub could not express before bug-26: the
- * spawn fetch *rejecting* while health and /api/management still resolve.
+ * spawn fetch *rejecting* while health and /api/configs still resolve.
  * Every 502 case in this suite before it rejected `/api/health` too, which
  * `dispatchBlock` answers long before `spawn()` is ever reached — so the
  * one path where a rejection escapes `spawn()` itself had no case at all,
@@ -72,7 +72,7 @@ function stubDashboard(spawn: { ok?: boolean; status?: number; body?: unknown; r
       status: 200,
       json: () =>
         Promise.resolve(
-          url.endsWith('/api/management')
+          url.endsWith('/api/configs')
             ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
             : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
         )
@@ -230,7 +230,7 @@ describe('POST /api/agents/dispatch', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            url.endsWith('/api/management')
+            url.endsWith('/api/configs')
               ? { projects: [{ dirName: '-abs-alpha', name: 'alpha', path: projectPath, lastActiveMs: 1 }] }
               : { ok: true, remoteAnswer: false, spawnAvailable: true, spawnMaxPermission: 'auto' }
           )
@@ -249,7 +249,7 @@ describe('POST /api/agents/dispatch', () => {
 
   /* The case above rejects EVERY fetch, so `dispatchBlock` refuses on the
      health probe and `spawn()` is never entered. These two let health and
-     /api/management through and fail only the spawn call itself — the path
+     /api/configs through and fail only the spawn call itself — the path
      that answered a bare `{ statusCode: 500, message: 'Internal server
      error' }` before bug-26, which the client degrades to
      `request failed (500)`. `statusCode` being absent is what actually pins
@@ -501,7 +501,7 @@ describe('POST /api/agents/dispatch', () => {
         status: 200,
         json: () =>
           Promise.resolve(
-            String(input).endsWith('/api/management')
+            String(input).endsWith('/api/configs')
               ? { projects: [] }
               : { ok: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'acceptEdits' }
           )

@@ -67,7 +67,7 @@ function stubDashboard(): void {
     dashCalls.push({ method: init?.method ?? 'GET', url });
     if (/\/api\/sessions\/[^/]+\/stop$/.test(url)) return answer(dash.stop);
     if (url.endsWith('/api/sessions')) return answer(dash.sessions);
-    if (url.endsWith('/api/management')) {
+    if (url.endsWith('/api/configs')) {
       return answer({ status: 200, body: { projects: [{ dirName: '-abs-gamma', name: 'gamma', path: trackerPath, lastActiveMs: 1 }] } });
     }
     if (url.endsWith('/api/spawn')) return answer({ status: 200, body: { sessionId: 'sess-1' } });
