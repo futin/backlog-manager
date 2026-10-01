@@ -30,15 +30,20 @@ Band, left to right on the right-hand side: run chip · search field · **filter
 - **Filter button state**: raised (`--strip` fill, `0 1px 2px var(--shadow)`) only while a filter is set — §8's "a raised control marks a state, never a
   button". The badge is a 16 px `--ink` disc with `--strip` text at **11 px** (the dashboard draws 10 px; design guard 3 puts this board's floor at 11).
 - **Popover panel** — the dashboard's `.pop` and `.acct-pop`, which share one paint (their width caps differ — `.acct-pop` leaves 24 px of viewport,
-  `.pop` 48 px; this board takes `.pop`'s 48): `--strip`, 1 px `--hairline` border, 12 px radius, `0 8px 24px var(--shadow2)`, 16 px padding, 8 px below
-  its button, right-aligned to it. Width is the caller's (300 px for the filter and sort popovers, 420 px for the tracker's), capped at the viewport less
+  `.pop` 48 px; this board takes `.pop`'s 48): `--strip`, 1 px `--hairline` border, 12 px radius, `0 8px 24px var(--shadow2)` (DESIGN.md §5's tooltip lift, so §8.7's one shell lift is not contradicted), 16 px padding, `z-index:
+  20` (both `.pop` and today's `.tracker-pop` carry it; without it Archive's sticky `.archive-month` kickers, `z-index: 1`, paint over the panel), 8 px
+  below the wrapper that holds its button and right-aligned to that wrapper — for the band, the whole track, as the dashboard's `.ctlwrap` does, so the
+  filter and sort panels share one right edge; for the tracker, the chip. Width is the caller's (300 px for the filter and sort popovers, 420 px for the tracker's), capped at the viewport less
   48 px, divided by `--font-scale` like every other viewport measure in this sheet.
 - **Popover below 700 px** — `position: fixed; top: auto; margin-top: 8px; left: 12px; right: 12px; width: auto; max-height: 70vh; overflow-y: auto`. That
   is the rule `.tracker-pop` carries in today's 700 px block, for the reason recorded there (the narrow `.rail` is a scroll container that clips an
-  absolute panel to the 53 px bar); it moves onto `.ui-popover`, so the band's two popovers get it too — the band's right slot wraps at that width, and a
-  right-aligned 300 px panel under a wrapped button would start off-screen. `top: auto` keeps the panel's static position, just under its button.
-- **Filter popover**: a header row `Filters` with `Clear all` at its right (12 px `--ink2`, `--ink3` and inert when nothing is set). `Project` — hint
-  `· one at a time — Orchestrate needs one` — over pick chips: `All projects`, then every registered project with its project-hue `Dot`. `Status` over a
+  absolute panel to the 53 px bar); it moves to `Popover`, so the band's two popovers get it too — the band's right slot wraps at that width, and a
+  right-aligned 300 px panel under a wrapped button would start off-screen. `top: auto` keeps the panel's static position, just under its button. It is
+  NOT a media-query override of `.ui-popover`: guard 7 counts a family's bare selector across the whole sheet, media blocks included, so a second
+  `.ui-popover {}` goes red. `Popover` reads `useNarrow()` and adds `ui-popover-narrow`, declared once in the primitives block with these eight
+  declarations — the shape `ui/Modal` (`ui-modal-narrow`) and `ui/FormSheet` (`ui-form-sheet-narrow`) already have.
+- **Filter popover**: a header row `Filters` with `Clear all` at its right (12 px `--ink2`, `--ink3` and inert when nothing is set). `Project` — on the
+  Board with the hint `· one at a time — Orchestrate needs one`; on Archive, which has no Orchestrate control, with no hint — over pick chips: `All projects`, then every registered project with its project-hue `Dot`. `Status` over a
   four-way switch: `Open`, `In progress`, `Done`, `All`.
 - **Sort popover**: header `Sort by`; three option rows, each label with an 11 px `--ink3` hint and a tick shown only on the chosen one — `Created` (when it
   was filed), `Name` (title, A–Z), `Project` (grouped by repo); a 1 px rule; an `Ascending` / `Descending` switch; an 11 px `--ink3` foot line,
@@ -46,11 +51,12 @@ Band, left to right on the right-hand side: run chip · search field · **filter
   live-first rank.
 - **Below 700 px** the sort label is not drawn; the two icons stay.
 
-Reuse, per §12.1's one-home rule: pick chips are `Chip` at `size={28}`, `pressed` on the chosen one, which draws `Chip`'s own pressed look — a `--strip-hi`
+Reuse, per the design spec's §12.1 one-home rule: pick chips are `Chip` at `size={28}`, `pressed` on the chosen one, which draws `Chip`'s own pressed look — a `--strip-hi`
 fill under an `--ink3` stroke, label colour unchanged (`.ui-chip.on`). **That differs from the mock and from the dashboard**, which both fill the chosen pick
 with ink: §8.3 makes Orchestrate the page's one ink chip, and an ink pick in a panel just below it would be a second. Both switches are `Segmented` with
-`pill`, the skin Settings' density and text-size rows already use; project dots are `Dot hue`. The track, the icon button, the divider, the sort label and
-the option row are new and live in `FilterBar`'s own class family, `.filter-bar*` — not `.ui-*`, which guard 7 rejects outside the primitives block.
+`pill`, the skin Settings' density and text-size rows already use — the four-way Status one laid out full width by `.filter-bar*`, its options `flex: 1`
+(the dashboard's `.sw button`), since content-sized it comes to ~270 px against the 300 px panel's 268 px content box; project dots are `Dot hue`. The track, the icon button, the divider, the sort label and
+the option row are new and live in `FilterBar`'s own class family, `.filter-bar*` — not `.ui-*`, the primitives' own namespace.
 
 ## 2. Components
 
@@ -69,12 +75,13 @@ Owns the panel and the two ways it closes; owns nothing about what is inside it.
   records). A pointerdown inside the panel or on the `anchor` is not "outside": the anchor's own click toggles it, and closing on its pointerdown first would
   reopen it on the click.
 - `role="dialog"` and `aria-label={label}`. It is not counted among the dialogs (it paints no scrim), exactly like `Confirm` and the tracker popover today.
-- Class family `ui-popover`, declared once inside the ui primitives block (design guard 7).
+- Class family `ui-popover`, declared once inside the ui primitives block (design guard 7), with its `ui-popover-narrow` modifier beside it (§1).
+- Reads `useNarrow()` for the phone shape — the single authority for the 700 px breakpoint, as in `Modal` and `FormSheet`.
 
 ### `TrackerPopover` (moved)
 
 Renders through `Popover` at 420 px with `label="Tracker"` (the dialog's accessible name today). Its own `.tracker-pop` shell rule goes — position,
-radius, padding and shadow are `Popover`'s now — and so does its 700 px rule, which `.ui-popover` carries instead (§1); its content rules
+`z-index`, radius, padding and shadow are `Popover`'s now — and so does its 700 px rule, which `ui-popover-narrow` replaces (§1); its content rules
 (`.tracker-pop-id`, rows, the API line) stay. Its `pointerdown` listener in `TrackerChip` goes too, because `Popover` carries it. What stays in
 `TrackerChip`: closing on a section change. Visible change: 16 → 12 px radius, the deep `0 24px 64px` shadow becomes the dashboard's `0 8px 24px`, a
 hairline border appears, padding 14/16 → 16, offset 6 → 8 px. DESIGN.md §8.0's tracker paragraph is rewritten to say so.
@@ -98,9 +105,11 @@ The track and its two popovers, used by Board and Archive.
   Picking a chip sets it; picking the chosen one again does nothing (there is always exactly one selection, `All projects` included).
 - **Status**: unchanged state and values (`open`, `started`, `done`, `all`), labels `Open`, `In progress`, `Done`, `All`, persisted under `STATUS_KEY`.
   The stored value stays deliberately unvalidated (`BoardView.tsx`'s comment above `COMPARATORS[sort] ?? …` says why). An unrecognised one lights no
-  option in the switch, counts as set (badge `1`, button raised), and the count line reads `0 items`; `Clear all` is the recovery. That comment names "the
+  option in the switch, counts as set (badge `1`, button raised), and the count line reads `0 items across 0 projects` (project `all`) or `0 items in
+  <name>` (one picked); `Clear all` is the recovery. That comment names "the
   select sitting right above it" as the recovery and is rewritten to name the raised filter button and `Clear all`.
-- **Count of filters set** = (project ≠ all) + (status ≠ open). The search query is not counted: it is visible in its own field.
+- **Count of filters set** = (`projectValue` ≠ all) + (status ≠ open) — `projectValue`, the fail-open value, so a stale stored path lights no badge while
+  `All projects` is the pressed chip. The search query is not counted: it is visible in its own field.
 - **Clear all** sets project to `all` and status to `open`. It does not clear the search and does not touch sort.
 - **Count line**: when a project is picked, the existing line gains ` in <project name>` — Board: `9 open in brickwright`, `4 in progress in brickwright`;
   `9 items in brickwright` under Status `All`; Archive builds the same suffix onto its own line (`<n> archived in brickwright`). With project `all` the line
@@ -138,10 +147,13 @@ project picked gain the suffix (`2 done` after picking `alpha` becomes `2 done i
 - Escape calls `onClose`; with a second stack entry mounted after it, Escape calls only the later one's.
 - Pointerdown on `document.body` calls `onClose`; pointerdown inside the panel does not; pointerdown on the anchor does not.
 - Unmounting removes its Escape entry and its pointerdown listener (a later Escape and a later body pointerdown call nothing).
+- Takes the phone shape from `useNarrow`: with `matchMedia` stubbed to match, the panel carries `ui-popover-narrow`; unstubbed, it does not (the case
+  `ui-modal.test.tsx` already has for `Modal`). A source check pins `.ui-popover-narrow` to `position: fixed`, `top: auto`, `left: 12px`, `right: 12px`,
+  `width: auto` — the five declarations today's phone guard asserts.
 
 **`FilterBar`**
 
-- Filter button label is `Filters` at count 0 and `Filters, 2 set` at count 2; the badge shows `2`; the button carries the raised state only when count > 0.
+- Filter button label is `Filters` at count 0 and `Filters, 2 set` at count 2; the badge shows `2`; the button carries class `on` (the dashboard's `.ictl.on`) only when count > 0.
 - Opening sort while filter is open closes filter; clicking the open button again closes it.
 - No sort prop → no sort button, no divider, no sort label.
 
@@ -156,8 +168,9 @@ project picked gain the suffix (`2 done` after picking `alpha` becomes `2 done i
 - An in-progress card sorts above the others under `Created` ascending as well as descending.
 - A stored unrecognised direction falls back to the key's natural direction; an unrecognised key still falls back to `created` (today's case).
 - Picking `Name` after `Created (desc)` lands on `Name (asc)`; re-picking `Created` while it reads `Created (asc)` leaves `asc`.
-- A stored unrecognised status: the switch shows no option pressed, the filter button reads `Filters, 1 set`, the count line reads `0 items`, and `Clear all`
-  restores `Open`.
+- A stored unrecognised status: the switch shows no option pressed, the filter button reads `Filters, 1 set`, the count line reads `0 items across 0
+  projects`, and `Clear all` restores `Open`.
+- Archive's Project section carries no hint; the Board's carries `· one at a time — Orchestrate needs one`.
 - Orchestrate appears once a project is picked through the popover, exactly where it appeared through the select.
 
 **Archive** (`archive.test.tsx`)
@@ -170,12 +183,12 @@ project picked gain the suffix (`2 done` after picking `alpha` becomes `2 done i
 
 - Every current behaviour holds through `Popover`: opens on click, Escape closes it, outside pointerdown closes it, a section change closes it, the dialog
   is named `Tracker`, its rows and API line render.
-- The phone guard (`escapes the phone rail: under 700 px the popover is fixed, not absolute`) reads `.ui-popover` inside the 700 px block instead of
-  `.tracker-pop`, with the same five declarations.
+- The phone guard (`escapes the phone rail: under 700 px the popover is fixed, not absolute`) moves to the `Popover` suite as the `useNarrow` case above;
+  the tracker suite keeps one case that the chip's panel, rendered under a matching `matchMedia`, carries `ui-popover-narrow`.
 
 **Design guards**
 
-- Guard 7's `FAMILIES` list gains `.ui-popover` (entries carry the leading dot), declared once inside the primitives block.
+- Guard 7's `FAMILIES` list gains `.ui-popover` (entries carry the leading dot), declared once inside the primitives block; no 700 px block restates it.
 - `test/dialog-count-docs.test.ts` and `test/claude-rules.test.ts` stay green after the doc edits in §5 — the first pins the Escape bullet's and entry's
   wording (`three dialogs`, `never a dialog`, …) and the hook comment's `Three of them now, not four`.
 - No px-literal font size in the new rules is under 11 (guard 3, unchanged — it will catch a copied 10 px badge).
@@ -187,10 +200,15 @@ project picked gain the suffix (`2 done` after picking `alpha` becomes `2 done i
 - `docs/subsystems/board.md` — the primitive table gains a `Popover` row (`.ui-popover`; `label`, `width`, `anchor`, `onClose`, children; used by the band's
   `FilterBar` and `TrackerChip`); the top-level `components/` list gains `FilterBar`; the sentences naming `Confirm` and `TrackerPopover` as the non-dialog
   stack entries, and the tracker paragraph's dismissal line, name `Popover`; any sentence naming the band's selects is rewritten.
-- `client/src/hooks/useDialogEscape.ts` — the header and the ref comment name `TrackerPopover` as the second non-dialog entry; they name `Popover` (the
-  tracker's and the band's). The `Three of them now, not four` sentence stays word for word.
+- `client/src/hooks/useDialogEscape.ts` — the header names `TrackerPopover` and the ref comment "the tracker popover" as the second non-dialog entry; both
+  name `Popover` (the tracker's and the band's). The `Three of them now, not four` sentence stays word for word.
 - `client/src/components/board/BoardView.tsx` — the query comment ("the selects … permanently state their own value in the bar") is rewritten: the raised
-  filter button and the count line's project name carry that now.
+  filter button and the count line's project name carry that now; so is the comment near the Orchestrate control that calls the filter "a live
+  `<select>`".
+- `client/src/components/archive/ArchiveView.tsx` — the three comments that name its project select.
+- `client/src/styles.css` — `.board-filter`, `.board-filter-mark` and the Board section's "one search field and one filter select, declared once" comment
+  go with the selects, and the Runs project select's comment ("Same shape the Board's own filters wear") drops that clause.
+- `client/src/lib/view-keys.ts` — its header names the Board-only keys kept local; the direction key joins them.
 - `.claude/DESIGN.md` §8.7 and `docs/subsystems/invariants.md`'s line that keeps `Modal` "to one composer and nothing else floating" — one clause each
   admitting `Popover`'s panels, which float without a scrim.
 - `.claude/rules/board.md` — the Escape bullet's list of non-dialog stack entries reads `Confirm` and `Popover` (the tracker's, and the band's two) instead
