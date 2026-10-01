@@ -160,6 +160,20 @@ describe('guard 2 — one --font stack, and nothing else picks a face', () => {
     expect(named).toEqual([{ selector: 'body', value: 'var(--font)' }]);
     for (const d of decls) expect(['var(--font)', 'inherit']).toContain(d.value);
   });
+
+  /**
+   * "Inherits everywhere else" is false by default for exactly four elements: the UA sheet gives `button`, `input`, `select` and `textarea` their own `font`
+   * shorthand, so a rule that sets only a size and a weight on one of them — `.rail-link`, `.ui-chip` — renders the system face at that size. It shipped that
+   * way: every rail row and all 31 card chips drew in Arial beside the dashboard's Hanken Grotesk, and no guard above could see it, because a missing
+   * declaration is not a declaration. The shorthand also resets `font-variant-numeric`, which is how a figure inside a button loses body's tabular digits.
+   */
+  it('the four form controls are told to inherit the face and its figures', () => {
+    const reset = styleRules.find((r) =>
+      ['button', 'input', 'select', 'textarea'].every((tag) => r.selector.split(',').map((s) => s.trim()).includes(tag))
+    );
+    expect(reset?.body).toMatch(/font-family: *inherit/);
+    expect(reset?.body).toMatch(/font-variant-numeric: *inherit/);
+  });
 });
 
 describe('guard 3 — 11 px is the floor', () => {

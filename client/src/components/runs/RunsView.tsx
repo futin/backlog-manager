@@ -1064,8 +1064,8 @@ export default function RunsView() {
   return (
     // `runs-frame` (2026-09-17, DESIGN.md §8.4.1 "Wide") is a measuring element and nothing else: no padding, no background, no border. It carries
     // `container-type: inline-size` so the rule below it can ask how wide this SECTION actually is — which a media query cannot answer here, because the
-    // board's width is the window minus a 280 px rail, minus `--body-pad` twice, minus whatever `.wrap`'s cap is doing, all of it divided by `.shell`'s
-    // `zoom`. At 120% text a 1920 px window leaves about 1112 CSS px of board, and a media query would happily lay three columns into it.
+    // board's width is the window minus a 240 px rail, minus `--body-pad` twice, minus whatever `.wrap`'s cap is doing, all of it divided by `.shell`'s
+    // `zoom`. At 120% text a 1920 px window leaves at most 1312 CSS px of board (1600 − 240 − 48), and a media query would happily lay three columns into it.
     //   It wraps History alone. Watchdog returns above this point and renders no frame: it has no figure strip to stand as a rail, and a container nobody
     // queries is a containment boundary for free.
     //   The frame is HERE rather than on `.wrap` or `.main` for a reason worth stating where someone might "simplify" it: `container-type: inline-size`

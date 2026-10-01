@@ -49,10 +49,11 @@ interface Props {
  * Top-level section switch: board · runs · archive · settings, and — for the
  * one section that has sub-views — the tree under it.
  *
- * .claude/DESIGN.md §8.0 is the whole specification of this component: 280 px,
- * 32 px padding-y, 36 px rows at 14/500 with a 16 px icon 12 px from the label,
- * an active row marked by a 3 px ink bar and a `--strip-hi` fill and never by a
- * colour change in the label, a sub-nav hung 24 px in and drawn only for the
+ * .claude/DESIGN.md §8.0 is the whole specification of this component: the
+ * dashboard's own rail — 240 px, 24 px padding, 36 px rows 4 px apart at 14/500
+ * with a 16 px icon 12 px from the label, an active row marked by a 3 px ink
+ * bar and a `--strip-hi` fill and never by a colour change in the label, the
+ * wordmark's dot left of the name, a sub-nav hung 24 px in and drawn only for the
  * open section, Settings under a 1 px rule, and — below 700 px — a top bar that
  * hides on a downward scroll.
  *
@@ -87,12 +88,13 @@ export function SideRail({ section, onChange, chipSlot }: Props) {
 
   const brand = (
     <h1 className="rail-brand">
-      <span className="rail-kicker">Backlog</span>
+      {/* Decoration, not status (§8.0) — which is why it is a Dot with no
+          tone that means anything and no text of its own. Left of the name,
+          at 10 px, because that is where the dashboard's sits. */}
+      <Dot tone="done" size={10} />
       <span className="rail-word">
+        <span className="rail-kicker">Backlog</span>
         Manager
-        {/* Decoration, not status (§8.0) — which is why it is a Dot with no
-            tone that means anything and no text of its own. */}
-        <Dot tone="done" />
       </span>
     </h1>
   );
