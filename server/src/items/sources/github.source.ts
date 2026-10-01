@@ -4,7 +4,7 @@ import { claimsByIssue, claimsFor, currentClaim, isLive, liveClaims, newestClaim
 import { GithubClient, isRepo, type GithubComment, type GithubIssue, type GithubResponse } from '../../tracker/github.client';
 import { QUEUED_LABEL } from '../../tracker/labels';
 import { issueNumberFor, issueUrn, mapIssue, parseUrn } from '../../tracker/map-issue';
-import { TrackerPollerService } from '../../tracker/poller.service';
+import { TrackerPollerService, bodyHash } from '../../tracker/poller.service';
 import { githubToken } from '../../tracker/token.util';
 import { DispatchRecordsService } from '../dispatch-records.service';
 import { resolveSource } from './resolve.util';
@@ -761,11 +761,10 @@ export class GithubSource implements ItemSource, ItemWriter {
    * Two readings of "not changed", either one enough:
    *
    * - the fresh `updated_at` equals the caller's stamp — nothing at all moved;
-   * - the cached copy of the issue carries exactly the caller's stamp, and its
-   *   body equals the fresh body. The caller's stamp names that cached copy
-   *   (it is what `show --json` printed), so its body is the body the caller
-   *   read — and GitHub still holds it. Whatever moved the stamp was not a
-   *   body edit.
+   * - the body the poller recorded under exactly the caller's stamp equals the
+   *   fresh body. The caller's stamp names a copy the cache served (it is what
+   *   `show --json` printed), so that body is the body the caller read — and
+   *   GitHub still holds it. Whatever moved the stamp was not a body edit.
    *
    * The stamp alone was wrong because the claim protocol's own writes move it
    * (bug #220): `claim` adds `in-progress` (the label endpoint answers with the
@@ -775,13 +774,22 @@ export class GithubSource implements ItemSource, ItemWriter {
    * at the write cannot close it. A groom's first `body` after `start` was a
    * guaranteed 409 on its own bookkeeping.
    *
-   * The cache is read BEFORE the fresh issue is absorbed into it, or the second
-   * reading would be comparing the fresh copy with itself. And it is strict
-   * equality on the cached stamp, never `>=`: a cached copy newer than the
-   * caller's read may already hold another session's body, and matching the
-   * fresh body against THAT would approve exactly the overwrite this check
-   * exists to prevent. A poll that refreshed the cache between `show` and
-   * `body` therefore still refuses — one retry, never an overwrite.
+   * The second reading used to compare against the cached copy itself, which
+   * only worked while the cache still held the caller's stamp — and a poll
+   * between `show` and `body` replaced it. At a 15 s poll that was nearly every
+   * groom, refused on its own `start`/`heartbeat` (bug #234). It now reads the
+   * poller's bounded per-stamp record (`bodyHashAt`), which remembers the body
+   * served under each stamp after the cache moves on, so a poll no longer
+   * defeats it. A stamp the record does not hold — the server restarted
+   * between `show` and `body`, the stamp was evicted, or it was seen with two
+   * bodies — still refuses: one retry, never an overwrite.
+   *
+   * The record is read BEFORE the fresh issue is absorbed, so the lookup is
+   * about what the cache knew when the caller read it. And it is strict
+   * equality on the caller's stamp, never "the newest at or before it": a copy
+   * newer than the caller's read may already hold another session's body, and
+   * matching the fresh body against THAT would approve exactly the overwrite
+   * this check exists to prevent.
    *
    * Fresh rather than cached for the first reading because the cache is up to
    * a poll interval old and a stale stamp would compare equal to a body
@@ -799,14 +807,12 @@ export class GithubSource implements ItemSource, ItemWriter {
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
     return this.writeChain(project, issueUrn(repo, number), async () => {
-      const cached = this.poller.issue(repo, number);
+      const served = this.poller.bodyHashAt(repo, number, req.ifUpdatedAt);
       const fresh = await this.client.issue(repo, number, { token });
       if (fresh.status !== 200 || fresh.data === null) return { ok: false as const, refusal: refusalFor(fresh) };
       this.poller.absorbIssue(repo, fresh.data);
 
-      const untouched =
-        fresh.data.updated_at === req.ifUpdatedAt ||
-        (cached !== undefined && cached.updated_at === req.ifUpdatedAt && (cached.body ?? '') === (fresh.data.body ?? ''));
+      const untouched = fresh.data.updated_at === req.ifUpdatedAt || (served !== undefined && served === bodyHash(fresh.data.body));
       if (!untouched) {
         return {
           ok: false as const,

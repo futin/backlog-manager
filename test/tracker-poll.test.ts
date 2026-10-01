@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { rmSync } from 'node:fs';
 
 import { GithubClient } from '../server/src/tracker/github.client';
@@ -249,6 +250,30 @@ describe('syncing', () => {
     const second = calls.filter((c) => c.url.includes('/issues?state=all'))[1];
     expect(second.url).toContain(`since=${encodeURIComponent('2026-09-29T14:45:48.000Z')}`);
     p.disarm();
+  });
+
+  /** Bug #234: the per-stamp body record `patchBody` reads. GitHub's stamp has one-second resolution, so two bodies under one stamp is two edits
+   *  inside a second — ambiguous, and never an answer. */
+  it('forgets a stamp seen with two different bodies', () => {
+    const { poller: p } = poller(registryOf(githubProject()), []);
+    p.absorbIssue('futin/x', issue(1, '2026-09-29T14:00:00Z', { body: 'first' }) as never);
+    expect(p.bodyHashAt('futin/x', 1, '2026-09-29T14:00:00Z')).toBe(createHash('sha256').update('first').digest('hex'));
+    p.absorbIssue('futin/x', issue(1, '2026-09-29T14:00:00Z', { body: 'second' }) as never);
+    expect(p.bodyHashAt('futin/x', 1, '2026-09-29T14:00:00Z')).toBeUndefined();
+    // Poisoned for good: the first body coming back under that stamp does not un-poison it.
+    p.absorbIssue('futin/x', issue(1, '2026-09-29T14:00:00Z', { body: 'first' }) as never);
+    expect(p.bodyHashAt('futin/x', 1, '2026-09-29T14:00:00Z')).toBeUndefined();
+  });
+
+  it('keeps the 32 most recent stamps per issue and evicts the oldest', () => {
+    const { poller: p } = poller(registryOf(githubProject()), []);
+    const stamps = Array.from({ length: 33 }, (_, i) => `2026-09-29T14:00:${String(i).padStart(2, '0')}Z`);
+    for (const stamp of stamps) p.absorbIssue('futin/x', issue(1, stamp) as never);
+    expect(p.bodyHashAt('futin/x', 1, stamps[0])).toBeUndefined();
+    expect(p.bodyHashAt('futin/x', 1, stamps[1])).toBeDefined();
+    expect(p.bodyHashAt('futin/x', 1, stamps[32])).toBe(createHash('sha256').update('x').digest('hex'));
+    expect(p.bodyHashAt('futin/x', 2, stamps[32])).toBeUndefined();
+    expect(p.bodyHashAt('futin/y', 1, stamps[32])).toBeUndefined();
   });
 
   /** The URL is a function of the mark alone — never of the clock — so a quiet repo re-sends the same URL and its ETag still earns a `304`. */
