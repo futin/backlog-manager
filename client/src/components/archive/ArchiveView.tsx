@@ -12,8 +12,8 @@ import { buildProjectHues } from '../../lib/project-hue';
 import { itemSyncOff } from '../../lib/tracker';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { runClaimBlock } from '../../../../shared/agent';
+import { FilterBar, ProjectPicks } from '../FilterBar';
 import { Band } from '../ui/Band';
-import { Chip } from '../ui/Chip';
 import { BoardColumn } from '../board/BoardColumn';
 import type { BoardColumnSlug } from '../board/BoardColumn';
 import { ItemCard } from '../board/ItemCard';
@@ -132,8 +132,10 @@ export default function ArchiveView() {
   /* Persisted project filter, sharing the Board's key (lib/view-keys.ts). The
      query is plain useState and deliberately not remembered, for the reason
      BoardView states: a remembered query is a surface that opens showing three
-     cards out of forty for no visible reason, where the select permanently
-     states its own value. */
+     cards out of forty for no visible reason. The project survives that
+     objection because the band still states it with the panel closed — the
+     filter button is raised and carries a count, and the count line names the
+     picked project. */
   const [query, setQuery] = useState('');
   const [project, setProject] = usePersistedState<string>(PROJECT_KEY, ALL);
 
@@ -148,7 +150,8 @@ export default function ArchiveView() {
 
   /* Fail-open on a stale stored project, same as the Board: an unmatched filter
      that emptied the surface would look like the server broke. The fallback
-     feeds back into the select, so control and columns agree. */
+     feeds the pressed chip, the filter count and the count line below, so the
+     panel, the button's badge and the columns agree. */
   const knownPaths = new Set(registered.map((p) => p.path));
   const projectValue = knownPaths.has(project) ? project : ALL;
 
@@ -174,24 +177,31 @@ export default function ArchiveView() {
   const needle = query.trim().toLowerCase();
   /* Project and search, and nothing else. No status filter, deliberately and
      per the design: Archive's contents are defined by staleness and rejection,
-     not by status, so a status select here would be a control that either does
+     not by status, so a status filter here would be a control that either does
      nothing or contradicts the surface it sits on. No sort control either —
      the month grouping below IS the ordering. */
   const visible = archived.filter((i) => (projectValue === ALL || i.projectPath === projectValue) && (needle === '' || i.title.toLowerCase().includes(needle)));
 
   /* The band's 13 px count line, the same shape the Board's carries (DESIGN.md
      §8.2/§8.5) and built the same way — see BoardView's own `countLine` for the
-     two rules restated here: the project half counts the projects the counted
+     rules restated here: the project half counts the projects the counted
      items actually belong to (an unreachable one contributes none and is named
-     by the warning line below anyway), and it drops entirely once the filter
-     names one project, because `across 1 project` is true of every board a
-     reader narrowed themselves.
+     by the warning line below anyway), and once the filter names one project
+     it gives way to ` in <name>`, because `across 1 project` is true of every
+     board a reader narrowed themselves and says nothing about which one. The
+     picker is behind a popover, so with the panel closed this line is the only
+     thing on the band that names the project the number counts. Read off
+     `projectValue`, so a stale stored path — which fails open to all — gets no
+     suffix; looked up by path because the path is the filter's identity, and
+     the `?? projectValue` cannot fire while `knownPaths` guards that value.
      The noun is a fixed `archived` where the Board's is its Status filter's
      word: this surface HAS no status filter, so there is no second reading for
      the noun to have to track. */
   const countProjects = new Set(visible.map((i) => i.projectPath)).size;
   const countLine =
-    projectValue === ALL ? `${visible.length} archived across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}` : `${visible.length} archived`;
+    projectValue === ALL
+      ? `${visible.length} archived across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
+      : `${visible.length} archived in ${registered.find((p) => p.path === projectValue)?.name ?? projectValue}`;
 
   const missing = registered.filter((p) => p.missing);
   /* Reported here as well as on the Board. A registered path with no `backlog/`
@@ -227,14 +237,14 @@ export default function ArchiveView() {
     <div className="board">
       {/* The page header is a band, not a card (DESIGN.md §8.2/§8.5): the
           19/500 title over the 13 px count line, then right-aligned the 36 px
-          search field and the project filter chip — and NOTHING else. No status
-          filter and no sort control, deliberately: Archive's contents are
-          defined by staleness and rejection rather than by status, so a status
-          select here would either do nothing or contradict the surface, and the
-          month grouping below already is the ordering a sort control would
-          offer. The band is the same `Band` primitive and the same two control
-          classes the Board's band uses, so the two surfaces cannot drift on the
-          one shape they both draw. */}
+          search field and the filter track — and NOTHING else. The track is
+          the Board's own `FilterBar`, drawn without its `sort` half: Archive's
+          contents are defined by staleness and rejection rather than by
+          status, so there is no Status group in its panel, and the month
+          grouping below already is the ordering a sort control would offer.
+          The band is the same `Band` primitive and the same search class the
+          Board's band uses, so the two surfaces cannot drift on the one shape
+          they both draw. */}
       <Band title="Archive" sub={countLine}>
         <input
           type="search"
@@ -244,30 +254,22 @@ export default function ArchiveView() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        {/* A `Chip` wrapping its own native select — `as: 'label'`, the mode the
-            primitive already has for exactly this. The chip owns the shell and
-            the select owns the value text and the picker, which is what keeps a
-            project list of any length working without this file growing a menu.
-            The `aria-label` stays on the select: it is the control, the chip is
-            only its shell. */}
-        <Chip as="label">
-          <select className="board-filter" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
-            <option value={ALL}>All projects</option>
-            {/* Valued by path, labelled by name — two checkouts of one repo
-                stay two selectable options. */}
-            {registered.map((p) => (
-              <option key={p.path} value={p.path}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          {/* The UA's own arrow went with `appearance: none` on `.board-filter`.
-              This is the design's own, at the board's size and ink; aria-hidden,
-              because the select already announces itself as a combobox. */}
-          <span className="board-filter-mark" aria-hidden="true">
-            ▾
-          </span>
-        </Chip>
+        {/* One element in one place on every render, for the reason BoardView
+            gives at length: `FilterBar` keeps which panel is open in its own
+            state and a pick does not close the panel, so a `key` that moved
+            with the filter, or a condition around it, would remount it on a
+            pick and shut the panel under the reader's pointer.
+
+            Project is the only filter, so the count is 0 or 1 — off
+            `projectValue`, the fail-open value, never the raw stored path —
+            and Clear all sets it back to all. `ProjectPicks` takes no hint:
+            the Board's says why its picks are single-select (Orchestrate needs
+            one), and this surface has no Orchestrate control to need it.
+            Chips are valued by path and labelled by name, so two checkouts of
+            one repo stay two picks. */}
+        <FilterBar count={projectValue === ALL ? 0 : 1} onClear={() => setProject(ALL)}>
+          <ProjectPicks projects={registered} value={projectValue} allValue={ALL} hues={hues} onPick={setProject} />
+        </FilterBar>
       </Band>
 
       {warnings.length > 0 && (

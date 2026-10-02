@@ -24,6 +24,7 @@ import type {
   StartingRun
 } from '../shared/types';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
+import { clearFilters, pickProject } from './helpers/filter-bar';
 
 /*
  * Every clock-dependent fixture here is RELATIVE to the moment the suite runs,
@@ -325,16 +326,76 @@ describe('ArchiveView', () => {
     expect(screen.getAllByTestId('board-col').map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['1', '1', '2', '1']);
   });
 
-  it('offers project and search, and neither a status nor a sort select', async () => {
+  it('offers search and the Filters button, and neither a sort control nor a Status group', async () => {
     await renderArchive();
-    expect(screen.getByLabelText('Project')).toBeInTheDocument();
     expect(screen.getByLabelText('Search items')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
     // Archive's contents are defined by staleness and rejection, not by status
-    // — a status select here would be a control that either does nothing or
+    // — a Status group here would be a control that either does nothing or
     // contradicts the surface it sits on. Sort is absent because the month
-    // grouping is the ordering.
-    expect(screen.queryByLabelText('Status')).not.toBeInTheDocument();
+    // grouping is the ordering: no button, and no `Sort: ...` label beside it.
+    expect(screen.queryByRole('button', { name: 'Change sort' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Sort')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Sort:/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const dialog = screen.getByRole('dialog', { name: 'Filters' });
+    expect(within(dialog).getByRole('group', { name: 'Project' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('group', { name: 'Status' })).not.toBeInTheDocument();
+    // The Board's hint says why ITS picks are single-select (Orchestrate needs one); Archive has no Orchestrate control, so the heading is the bare word.
+    expect(within(dialog).queryByText(/Orchestrate needs one/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Project')).toBeInTheDocument();
+  });
+
+  it('states the count across projects, and in the project once one is picked', async () => {
+    await renderArchive();
+    // alpha: stale bug, stale idea, stale refactor, declined thing; beta: stale beta bug.
+    expect(screen.getByText('5 archived across 2 projects')).toBeInTheDocument();
+
+    await pickProject('alpha');
+    expect(screen.getByText('4 archived in alpha')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
+  });
+
+  // FilterBar keeps which panel is open in its own state, and a pick does not close it — so the pick must not remount the bar. Same element before and
+  // after, so a remount that happened to reopen would still fail.
+  it('picking a project keeps the popover open, as the same element', async () => {
+    await renderArchive();
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const before = screen.getByRole('dialog', { name: 'Filters' });
+
+    await pickProject('beta');
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toBe(before);
+  });
+
+  it('Clear all restores all projects and leaves the search alone', async () => {
+    await renderArchive();
+    await userEvent.type(screen.getByLabelText('Search items'), 'bug');
+    await pickProject('alpha');
+    expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
+
+    await clearFilters();
+    const picks = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Project' });
+    expect(within(picks).getByRole('button', { pressed: true })).toHaveTextContent('All projects');
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Search items')).toHaveValue('bug');
+    // 'bug' matches alpha's stale bug and beta's: both projects are back.
+    expect(screen.getByText('2 archived across 2 projects')).toBeInTheDocument();
+  });
+
+  // The Board's fail-open rule, restated here: a stored path whose project has since been unregistered reads as All projects on the badge, the pressed
+  // chip and the count line alike, and the surface is not emptied by it.
+  it('a stale stored project path reads as All projects: no badge, All projects pressed, no suffix', async () => {
+    localStorage.setItem('backlog-manager.project', JSON.stringify('/abs/gone'));
+    await renderArchive();
+    const button = screen.getByRole('button', { name: 'Filters' });
+    expect(button.querySelector('.filter-bar-badge')).toBeNull();
+    expect(screen.getByText('5 archived across 2 projects')).toBeInTheDocument();
+
+    await userEvent.click(button);
+    const picks = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Project' });
+    expect(within(picks).getByRole('button', { pressed: true })).toHaveTextContent('All projects');
   });
 
   it('groups a column under month subheaders, newest month first', async () => {
@@ -418,7 +479,7 @@ describe('ArchiveView', () => {
   it('narrows to one project', async () => {
     await renderArchive();
     expect(within(column('Bugs')).getByText('stale beta bug')).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('Project'), '/abs/alpha');
+    await pickProject('alpha');
     expect(within(column('Bugs')).queryByText('stale beta bug')).not.toBeInTheDocument();
     expect(within(column('Bugs')).getByText('stale bug')).toBeInTheDocument();
   });

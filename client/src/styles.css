@@ -367,10 +367,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    `.board-bar`, `.board-title`, `.board-tools`, `.board-search` and
    `.board-select` — the old toolbar, kept alive through task-37 because Archive
    was still drawing it — are gone with task-39, which put Archive on the same
-   `Band` the Board uses. The two rules below are the whole of what either
-   surface's band needs beyond the primitive itself, and they are read by both:
-   one search field and one filter select, declared once, so the two bands
-   cannot come to disagree about a height or a radius. */
+   `Band` the Board uses. The search field's rules below are the whole of what
+   either surface's band needs beyond the primitive itself and the filter track
+   (`.filter-bar*`, further down), and they are read by both, declared once, so
+   the two bands cannot come to disagree about a height or a radius. The
+   native filter select that sat beside it went with the band-filter popover,
+   which put the project and status pickers behind the track's panel on both
+   surfaces. */
 
 /* The band's search field (§8.3): 36 px, 12 px radius, a `--hairline` stroke.
    Drawn by the Board's band and, since task-39, Archive's. */
@@ -456,24 +459,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .filter-bar-opt.on .filter-bar-tick { visibility: visible }
 .filter-bar-rule { height: 1px; margin: 12px 0; background: var(--hairline) }
 .filter-bar-foot { margin: 10px 0 0; font-size: 11px; color: var(--ink3) }
-/* The native select inside a filter `Chip`. The chip owns the shell; this
-   takes the UA's away so the two do not draw two boxes, and takes the UA arrow
-   with it — the glyph beside it is drawn at this board's own size and ink.
-   `color: inherit` so the value reads in the chip's ink whatever the chip's
-   variant paints, rather than restating it here and drifting from it. */
-.board-filter {
-  font-family: inherit; font-size: 13px; font-weight: 500; color: inherit;
-  background: none; border: 0; padding: 0; margin: 0;
-  max-width: 170px; text-overflow: ellipsis;
-  cursor: pointer; appearance: none;
-}
-.board-filter:focus { outline: none }
-.board-filter-mark { font-size: 11px; line-height: 1; color: var(--ink3) }
 
 /* The run chip (§8.3) — everything the Board still says about orchestrator
-   runs. Flat: it sits in a band beside two stroked chips and an ink one, and a
-   fourth stroke there would read as a fourth filter rather than as the one
-   thing on the row that navigates. `--strip-hi` on hover is the same "a fill
+   runs. Flat: it sits in a band beside the filter track and an ink chip, and a
+   stroke there would read as one more filter rather than as the one thing on
+   the row that navigates. `--strip-hi` on hover is the same "a fill
    is the affordance" move the rail's rows make. */
 .board-run-chip {
   display: inline-flex; align-items: center; gap: 8px;
@@ -1777,7 +1767,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .runs-figure-breakdown-item { white-space: nowrap }
 /* The project filter's native `<select>`, laid inside the `Chip` that is its
    label — the chip carries every visual decision, so this only strips the
-   control's own chrome. Same shape the Board's own filters wear. */
+   control's own chrome. */
 .runs-project {
   font-family: inherit; font-size: 13px; font-weight: 500;
   color: inherit; background: none; border: 0; padding: 0;

@@ -112,7 +112,9 @@ queue:
    function with `null` and gets `Merge into the base branch`; `null` there means "no base is knowable", never `main`.
 
 Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
-call `useDialogEscape` for whatever they wrap. `ui/Confirm` (bug-53) joins the same stack while it is drawn and is not a dialog — see the detail sheet below.
+call `useDialogEscape` for whatever they wrap. Two further entries join the same stack while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described
+with the detail sheet below, and `ui/Popover` — the tracker chip's panel and the band's Filters and Sort — which closes only itself, and whose click-outside is its
+own `pointerdown`, since the stack owns the key and not the pointer.
 
 ### What leaves the Board
 
@@ -131,8 +133,9 @@ instead.
 
 Where those land, in four columns — refactoring, ideas, bugs, out of scope — grouped under sticky month subheaders, newest month first. The column is the
 Board's own `BoardColumn` and the card its own `ItemCard`, not a second set: what differs is the fourth column, whose dot carries no type hue at all, because a
-rejection is a verdict rather than a type. There is no Tasks column, because a task never leaves the Board to fill one. It carries a project filter and a search
-box and nothing else: its contents are defined by staleness and rejection, not by status, so a status filter there would either do nothing or contradict the
+rejection is a verdict rather than a type. There is no Tasks column, because a task never leaves the Board to fill one. It carries a search box and the Board's
+own `FilterBar` without its sort half — a `Filters` popover holding the Project picks alone, and a picked project named on the count line (`4 archived in alpha`) —
+and nothing else: its contents are defined by staleness and rejection, not by status, so a status filter there would either do nothing or contradict the
 surface. No card here ever paints a live strip — whatever put an item in Archive already took it off the Board a run could be holding — which `ArchiveView`
 guarantees by handing `ItemCard` no run at all. A card opens the same item modal the Board opens.
 
