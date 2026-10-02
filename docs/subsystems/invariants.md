@@ -1586,7 +1586,8 @@ The count is still three because the shells have three composers, and `test/dial
 them.
 
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
-the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to one composer and nothing else floating. It calls
+the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to one composer and nothing else floating but `Popover`'s panels,
+which hang under their control without a scrim. It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 

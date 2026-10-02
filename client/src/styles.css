@@ -2909,6 +2909,36 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-form-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px }
 .ui-form-sheet-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--hairline) }
 
+/* Popover — the panel under a control (§8.7). Absolute against the caller's `position: relative` wrapper, which also holds the opening control, so it hangs
+   8 px below it with the right edges together and nothing is measured in JS. A hairline border and the SMALL lift (`0 8px 24px`) rather than the dialogs'
+   `0 24px 64px`: those mean "this is over the page", and a panel that hides nothing and has no scrim must not borrow the same word. `z-index: 20` clears the
+   page's own stacking — Archive's sticky month kickers are 1 and the rail is 5 — and stays below both dialog scrims (60, 70).
+
+   `width` reads `--ui-popover-width`, which the component sets inline; an inline `width` would outrank the phone rule below and keep the panel desktop-wide.
+   `max-width` is the viewport less the 24 px of air a side, divided by --font-scale for the reason `.rail`'s comment near the top of this file states in
+   full — the same idiom the modal and the form sheet use. */
+.ui-popover {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 20;
+  width: var(--ui-popover-width); max-width: calc(100vw / var(--font-scale, 1) - 48px);
+  padding: 16px; border-radius: 12px; border: 1px solid var(--hairline);
+  background: var(--strip); color: var(--ink); text-align: left;
+  box-shadow: 0 8px 24px var(--shadow2);
+}
+/* On a phone the control lives in the rail bar, and the narrow `.rail` is a scroll container (`overflow-x: hidden` computes `overflow-y` to auto), so an
+   absolute panel is clipped to the 53 px bar and paints nothing — and right-anchored under a control beside ☰ it would start off-screen besides. Fixed
+   escapes the clip. `top` goes back to auto — the base rule's `100% + 8px` would now resolve against the viewport's height — so the panel keeps its static
+   position just under the control, `margin-top` supplying the 8 px that `top` no longer does, and it spans the viewport less the rail's own 12 px side padding.
+   Its height is capped so a long panel scrolls inside itself.
+
+   Nine declarations, one more than the design spec's eight, on purpose: `max-width: none` releases the base rule's viewport cap (viewport less 48 px), which
+   would otherwise over-constrain `left: 12px; right: 12px` (viewport less 24 px) — the browser then drops `right`, and the panel comes out 24 px short and
+   flush left. The class comes from `useNarrow`, never from an `@media` rule of this family's own: a second copy of the breakpoint, and guard 7 counts the
+   bare family selector across the whole sheet. */
+.ui-popover-narrow {
+  position: fixed; top: auto; margin-top: 8px; left: 12px; right: 12px;
+  width: auto; max-width: none; max-height: 70vh; overflow-y: auto;
+}
+
 /* ── end ui primitives ────────────────────────────────────────────────────────
    A closing marker, not decoration. Guard 7 has to be able to say whether a
    selector is inside this block, and the block sits last in the file: with an
