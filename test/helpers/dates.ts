@@ -11,9 +11,10 @@
  * which is what lets a suite install a fake clock in `beforeEach` and still get a date that agrees with it — a module-level constant would have been
  * computed against the real clock before the fake one existed.
  *
- * Two functions rather than one because the shapes are not interchangeable and the fields that carry them are not either: `created` is a date (the
- * `YYYY-MM-DD` `backlog.mjs` writes into frontmatter), while `updated`, `lastCommit` and `started` are second-precision UTC stamps. They were already
- * hand-rolled three times before this file existed — `board.test.tsx`'s `daysAgoDate` returned the first shape and `archive.test.tsx`'s and
+ * Two functions rather than one because the shapes are not interchangeable and the fields that carry them are not either: a files item's `created` is a
+ * date (the `YYYY-MM-DD` `backlog.mjs` writes into frontmatter; a tracker item's is GitHub's full `created_at` stamp since #237), while `updated`,
+ * `lastCommit` and `started` are second-precision UTC stamps. They were already hand-rolled three times before this file existed — `board.test.tsx`'s
+ * `daysAgoDate` returned the first shape and `archive.test.tsx`'s and
  * `dialog-escape.test.tsx`'s `daysAgo` returned the second, under names one letter apart. The two exported names here keep that distinction visible,
  * which is the whole reason they are not one function with a flag. Same "one implementation" rule `listenLoopback` follows in `test/helpers/app.ts`.
  *
@@ -23,7 +24,7 @@
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** `YYYY-MM-DD`, `days` days before now — the shape `created` carries. */
+/** `YYYY-MM-DD`, `days` days before now — the shape a files item's `created` carries. */
 export function daysAgoDate(days: number): string {
   return new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
 }

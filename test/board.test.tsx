@@ -8,7 +8,7 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { buildProjectHues } from '../client/src/lib/project-hue';
-import { daysAgoDate } from './helpers/dates';
+import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { clearFilters, pickDirection, pickProject, pickSort, pickStatus } from './helpers/filter-bar';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
@@ -887,6 +887,40 @@ describe('BoardView', () => {
     expect(bugTitles()).toEqual(['a-new', 'a-old', 'b-new', 'b-old']);
     await pickDirection('Descending');
     expect(bugTitles()).toEqual(['b-new', 'b-old', 'a-new', 'a-old']);
+  });
+
+  /* A tracker item's `created` is GitHub's full `created_at` stamp (#237), where a files item's is a bare date. The comparator still compares strings,
+     and these three pin that this orders both shapes: two same-day issues by their time, not by API order (oldest issue number first — the order the
+     server hands them over in, and the order a tie used to keep); a stamp above the bare date of the same day; and the Project sort's newest-first
+     tie-break inside one project. One day's stamps are built from one `daysAgoStamp` by swapping its time of day, so both sit on the same date. */
+  const sameDay = (time: string): string => `${daysAgoStamp(1).slice(0, 10)}T${time}Z`;
+
+  it('Newest first orders two same-day tracker items by time, not by API order', async () => {
+    stubItems([
+      fakeItem({ id: '#164', title: 'morning', created: sameDay('08:00:00') }),
+      fakeItem({ id: '#170', title: 'evening', created: sameDay('21:00:00') })
+    ]);
+    await renderBoard();
+    expect(bugTitles()).toEqual(['evening', 'morning']);
+  });
+
+  it('Newest first puts a tracker stamp above a files date of the same day', async () => {
+    stubItems([
+      fakeItem({ id: 'bug-1', title: 'files-date', created: daysAgoStamp(1).slice(0, 10) }),
+      fakeItem({ id: '#164', title: 'tracker-stamp', created: sameDay('08:00:00') })
+    ]);
+    await renderBoard();
+    expect(bugTitles()).toEqual(['tracker-stamp', 'files-date']);
+  });
+
+  it('Project sort orders two same-day tracker items in one project newest first', async () => {
+    stubItems([
+      fakeItem({ id: '#164', title: 'morning', created: sameDay('08:00:00') }),
+      fakeItem({ id: '#170', title: 'evening', created: sameDay('21:00:00') })
+    ]);
+    await renderBoard();
+    await pickSort('Project');
+    expect(bugTitles()).toEqual(['evening', 'morning']);
   });
 
   // `liveRank` is the primary key in both directions. The live card is the MIDDLE one by date, so neither direction puts it first by accident.

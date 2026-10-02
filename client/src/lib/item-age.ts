@@ -103,9 +103,14 @@ export const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', '
  * `created` is written by the CLI but lives in a file a person can edit, and
  * showing what is actually on the line is what lets them find and fix it;
  * `''` stays `''` so the caller can drop the separator along with it.
+ *
+ * `created` has two shapes, the same fork `started` has above. A files item's is the bare `YYYY-MM-DD` `backlog.mjs new` writes, parsed as UTC midnight
+ * exactly as before. A tracker item's is GitHub's full `created_at` stamp (#237 — kept whole so "Newest first" can order same-day issues), handed to
+ * `Date.parse` as-is. Both then print through the same UTC month/day/year below, so a stamp reads as its UTC date: `2026-10-01T23:30:00-02:00` is `oct 2`,
+ * which is why this never splits the string on `T` and trusts the left half.
  */
 export function formatCreated(created: string, now: number = Date.now()): string {
-  const then = Date.parse(`${created}T00:00:00Z`);
+  const then = Date.parse(DATE_ONLY.test(created) ? `${created}T00:00:00Z` : created);
   if (Number.isNaN(then)) return created;
 
   const date = new Date(then);

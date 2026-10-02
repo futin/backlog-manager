@@ -47,7 +47,7 @@ function issue(over: Partial<GithubIssue> = {}): GithubIssue {
 const BASE: BacklogItem = {
   id: '#31',
   title: 'it breaks',
-  created: '2026-09-01',
+  created: '2026-09-01T10:11:12Z',
   started: '',
   updated: '2026-09-02T08:00:00Z',
   lastCommit: '',
@@ -216,9 +216,10 @@ describe('issue → BacklogItem', () => {
     expect(map({ state: 'closed', state_reason: 'completed' })?.item.lastCommit).toBe('');
   });
 
-  it('keeps updated verbatim and takes only the date part of created', () => {
+  // Both stamps verbatim (#237): a date-only `created` tied every same-day issue under "Newest first", and the tie kept API order.
+  it('keeps both created and updated verbatim, to the second', () => {
     const mapped = map({ created_at: '2026-09-01T23:59:59Z', updated_at: '2026-09-02T08:00:00Z' });
-    expect(mapped?.item.created).toBe('2026-09-01');
+    expect(mapped?.item.created).toBe('2026-09-01T23:59:59Z');
     expect(mapped?.item.updated).toBe('2026-09-02T08:00:00Z');
   });
 

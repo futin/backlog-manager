@@ -200,6 +200,9 @@ running (§5.6).
 | `project`, `projectPath`                     | the registry entry, as today                                                                                                         |
 | `source`                                     | `'github'`                                                                                                                           |
 
+**Amended 2026-10-02 (#237):** `created` is now `created_at` verbatim, not its date part — the date-only value tied every same-day issue under
+"Newest first", and the tie kept API order. Files items keep the bare `YYYY-MM-DD`, so every reader of `created` takes both shapes.
+
 A `runner-fix` label maps to the same `runnerFix` the gate reads today (§7.2). `untyped` is a rendered badge (§5.5) and nothing derived reads it: an untyped
 issue is an idea to every predicate until someone labels it.
 

@@ -140,6 +140,18 @@ describe('formatCreated', () => {
     expect(formatCreated('whenever', NOW)).toBe('whenever');
     expect(formatCreated('2026-13-45', NOW)).toBe('2026-13-45');
   });
+
+  // A tracker item's `created` is GitHub's full `created_at` stamp, not a bare date. It still prints as a date, and that date is the UTC one — never the
+  // string's left half, which for a non-`Z` offset names a different day than the instant does.
+  it('formats a timestamp as its UTC date', () => {
+    expect(formatCreated('2026-10-01T21:43:23Z', NOW)).toBe('oct 1');
+    expect(formatCreated('2026-12-31T23:59:59Z', at('2027-01-02T12:00:00Z'))).toBe("dec 31 '26");
+    expect(formatCreated('2026-10-01T23:30:00-02:00', NOW)).toBe('oct 2');
+  });
+
+  it('passes an unparseable timestamp straight through', () => {
+    expect(formatCreated('2026-10-01T25:00:00Z', NOW)).toBe('2026-10-01T25:00:00Z');
+  });
 });
 
 /**

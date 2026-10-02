@@ -190,10 +190,15 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   const item: BacklogItem = {
     id: `#${issue.number}`,
     title: issue.title,
-    // The DATE part only, matching what `backlog.mjs new` writes into
-    // frontmatter — `created` is a `YYYY-MM-DD` on every other row and the
-    // client's age arithmetic parses it as one.
-    created: issue.created_at.slice(0, 10),
+    // The full stamp, verbatim (#237) — the same second-precision UTC shape
+    // `updated` and `started` carry. It used to be cut to the date part to
+    // match the `YYYY-MM-DD` `backlog.mjs new` writes, and every same-day
+    // issue then tied under "Newest first" and kept the API's order, oldest
+    // issue first. Files items keep the bare date, so every reader takes both
+    // shapes: the card's date (`formatCreated`) and the CLI's `ageDays`
+    // (`ageDaysSince`) derive the UTC day from the stamp, and the board's
+    // string comparator orders the two shapes as they are.
+    created: issue.created_at,
     // Filled from the claim since task-46 — see `newest` above for which
     // question each of these answers. An issue nobody has ever claimed reads
     // exactly as it did in phase 2: `''`, `''`, four zeros.

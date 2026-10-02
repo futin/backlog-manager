@@ -1029,7 +1029,8 @@ the fixtures.
 **The rule.** `daysAgoDate` and `daysAgoStamp` (`test/helpers/dates.ts`) are the one home for a fixture date, and no `test/*.test.tsx` writes an absolute
 `created`/`updated`/`lastCommit`/`started` literal outside the guard's allowlist. Both read `Date.now()` at CALL time rather than at module load, which is what
 lets a suite install a fake clock in `beforeEach` and still get a date that agrees with it. Two functions rather than one because the shapes are not
-interchangeable — `created` is a `YYYY-MM-DD` date, the other three are second-precision UTC stamps — and the idiom had already been hand-rolled three times
+interchangeable — a files item's `created` is a `YYYY-MM-DD` date, the other three are second-precision UTC stamps (and so, since #237, is a tracker item's
+`created`, GitHub's full `created_at` — a fixture that needs one builds it from `daysAgoStamp`) — and the idiom had already been hand-rolled three times
 before this file existed, spelled `daysAgoDate` in `board.test.tsx` (first shape) and `daysAgo` in `archive.test.tsx` and `dialog-escape.test.tsx` (second
 shape). Two near-identical names returning two different shapes is its own trap, so the exported pair keeps the distinction visible. Same "one implementation"
 rule `listenLoopback` follows one section above.

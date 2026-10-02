@@ -100,6 +100,11 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
  * YYYY-MM-DD, where lexicographic order is chronological order, and an
  * unparseable value sorts predictably instead of NaN-scrambling the list.
  *
+ * A tracker item's `created` is the other shape — GitHub's full `created_at`, `YYYY-MM-DDTHH:MM:SSZ` (#237) — and string order still holds: every stamp is
+ * the same fixed-width UTC `Z` form, so two same-day issues order by their time instead of tying and keeping the API's order (oldest issue first). In a
+ * column mixing both shapes, a stamp sorts above the bare date of its own day (the date is its prefix), so a same-day files item lands below it under
+ * Newest first. That is accepted, and pinned in board.test.tsx, rather than parsed away.
+ *
  * A record keyed on `SortKey`, not the three-branch if/else this used to be:
  * `sortItems` below gives every sort a shared primary key (live work
  * first — `liveRank`), and a primary key that has to run in front of whichever comparator

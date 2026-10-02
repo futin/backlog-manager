@@ -67,7 +67,10 @@ export type SourceKind = 'files' | 'github';
 export interface BacklogItem {
   id: string;
   title: string;
-  /** YYYY-MM-DD from frontmatter; '' when the file lacks one (still renderable) */
+  /**
+   * When the item was filed. Two shapes: a files item's is the `YYYY-MM-DD` from its frontmatter; a tracker item's is the issue's full `created_at`,
+   * a second-precision UTC stamp (#237). '' when absent (still renderable).
+   */
   created: string;
   /**
    * When the item was picked up (`backlog.mjs start`), '' when nobody has.

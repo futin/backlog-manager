@@ -3996,6 +3996,47 @@ test('API mode: board reads /api/items once and prints only this project-s open 
   assert.equal(requests.filter((r) => r.path === '/api/items').length, 1)
 })
 
+// A tracker item's `created` is the issue's full `created_at` stamp (#237), not the bare date a files item carries. `ageDays` reads it by its UTC
+// calendar day, the same day the board's card prints — so midnight today is 0, and a non-`Z` stamp whose instant falls on the next UTC day ages from that
+// day, not from the date written in its left half.
+test('API mode: board --json ages a timestamped created by its UTC calendar day', async () => {
+  const { dir } = trackerFixture()
+  const DAY = 24 * 60 * 60 * 1000
+  const utcDate = (daysAgo) => new Date(Date.now() - daysAgo * DAY).toISOString().slice(0, 10)
+  const { out } = await withApi(
+    {
+      '/api/items': {
+        body: {
+          items: [
+            apiItem({ id: '#41', title: 'a week', projectPath: dir, created: `${new Date(Date.now() - 7 * DAY).toISOString().slice(0, 19)}Z` }),
+            apiItem({ id: '#42', title: 'midnight', projectPath: dir, created: `${utcDate(0)}T00:00:00Z` }),
+            apiItem({ id: '#43', title: 'offset', projectPath: dir, created: `${utcDate(7)}T23:30:00-02:00` }),
+          ],
+          errors: [],
+        },
+      },
+    },
+    async (port) => await runNode(dir, apiEnv(port), 'board', '--json'),
+  )
+
+  assert.equal(out.status, 0)
+  const ages = Object.fromEntries(JSON.parse(out.stdout).map((item) => [item.id, item.ageDays]))
+  assert.deepEqual(ages, { '#41': 7, '#42': 0, '#43': 6 })
+})
+
+test('API mode: the text board prints a timestamped created-s age in days, never NaNd', async () => {
+  const { dir } = trackerFixture()
+  const created = `${new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19)}Z`
+  const { out } = await withApi(
+    { '/api/items': { body: { items: [apiItem({ projectPath: dir, created })], errors: [] } } },
+    async (port) => await runNode(dir, apiEnv(port), 'board'),
+  )
+
+  assert.equal(out.status, 0)
+  assert.match(out.stdout, /#31\s+7d\s+the board lies/)
+  assert.doesNotMatch(out.stdout, /NaN/)
+})
+
 test('API mode: board --section filters', async () => {
   const { dir } = trackerFixture()
   const { out } = await withApi(

@@ -2085,8 +2085,20 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 // `new`) to right now, floored and never negative. Parsed as explicit UTC
 // midnight so this gives the same answer regardless of the machine's local
 // timezone.
+//
+// Two shapes reach this, not one: in API mode `board` reads a tracker
+// project's items from `/api/items`, and a tracker item's `created` is the
+// issue's full `created_at` stamp (#237). A stamp is floored to its UTC
+// calendar day and then aged exactly like a date, so a stamp at 23:59Z
+// yesterday is 1, never 0, and the CLI agrees with the board's card on which
+// day the item was filed. Floored from the parsed instant rather than sliced
+// off the string's left half: `...T23:30:00-02:00` is the next UTC day.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
 function ageDaysSince(created) {
-  const then = Date.parse(`${created}T00:00:00Z`)
+  const then = DATE_ONLY.test(created)
+    ? Date.parse(`${created}T00:00:00Z`)
+    : Math.floor(Date.parse(created) / MS_PER_DAY) * MS_PER_DAY
   return Math.max(0, Math.floor((Date.now() - then) / MS_PER_DAY))
 }
 
