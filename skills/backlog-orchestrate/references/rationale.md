@@ -146,6 +146,9 @@ The obvious alternative — pass them positionally and read the first and second
 rewritten to match, so it read as deliberate rather than corrupt. That failure was loud by luck; a substitution producing a readable path would fail silently,
 and this is the launcher the merge gate depends on.
 
+The substitution is 0-indexed — `$0` is the first argument, which is why `$1` became `bug-3` above — and it knows nothing about languages, so an awk program's
+`$0` is rewritten exactly like a shell positional. §9's base-tree lookup read `$0` that way until #238, and printed nothing on every run started with an id.
+
 `$PWD` needs none of this care — every shell sets it and no substitution pass touches it, which is why step 4's line uses it directly.
 
 ---
