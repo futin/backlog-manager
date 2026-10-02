@@ -33,7 +33,8 @@ import { useNarrow } from '../../hooks/useNarrow';
  * **The width travels as a custom property, never as an inline `width`.** `--ui-popover-width` is read by the base rule, and the phone rule
  * (`.ui-popover-narrow`, applied from `useNarrow` — the one place JS knows the 700 px breakpoint, so no `@media` rule of this family's own) sets
  * `width: auto`. An inline `width` outranks every stylesheet rule, so it would keep a 420 px panel 420 px wide in a 351 px rail bar; and since no suite loads
- * the stylesheet into jsdom, every render test would stay green while it did. The width lives in CSS for the same reason `.tracker-pop`'s always did.
+ * the stylesheet into jsdom, every render test would stay green while it did. The width lives in CSS for the same reason the tracker's own `.tracker-pop`
+ * rule kept it there before this component replaced it.
  */
 export function Popover({
   label,

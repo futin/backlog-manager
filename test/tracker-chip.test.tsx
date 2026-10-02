@@ -1,8 +1,6 @@
 /**
  * @jest-environment jsdom
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -67,7 +65,14 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.useRealTimers();
+  delete (window as unknown as { matchMedia?: unknown }).matchMedia;
 });
+
+/** `useNarrow` reads `window.matchMedia`, which jsdom does not implement; the stub is the shape `ui-popover.test.tsx` uses. */
+function stubNarrow(matches: boolean): void {
+  const matchMedia = jest.fn().mockReturnValue({ matches, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+  Object.defineProperty(window, 'matchMedia', { value: matchMedia, configurable: true, writable: true });
+}
 
 describe('TrackerChip', () => {
   it('renders nothing when no project is a tracker', () => {
@@ -139,20 +144,6 @@ describe('TrackerChip', () => {
     expect(within(c).getByText('futin')).toBeInTheDocument();
     expect(screen.getByTestId('tracker-pip')).toHaveAttribute('data-tone', 'red');
     expect(within(meterOf(c, 'POLL')).getByText('failing')).toBeInTheDocument();
-  });
-
-  it('escapes the phone rail: under 700 px the popover is fixed, not absolute', () => {
-    // The narrow `.rail` is a scroll container (`overflow-x: hidden` computes `overflow-y` to auto), so an absolute popover inside it is clipped to the
-    // 53 px bar and paints nothing; right-anchored under a chip beside ☰ it would start off-screen besides. jsdom does no layout, so this pins the rule.
-    const css = readFileSync(join(__dirname, '../client/src/styles.css'), 'utf8');
-    const narrow = [...css.matchAll(/@media \(max-width: 700px\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]).join('\n');
-    const rule = /\.tracker-pop \{([^}]*)\}/.exec(narrow);
-    expect(rule?.[1]).toMatch(/position: fixed/);
-    // The base rule's `top: calc(100% + 6px)` would resolve against the viewport once fixed and put the panel below the screen.
-    expect(rule?.[1]).toMatch(/top: auto/);
-    expect(rule?.[1]).toMatch(/left: 12px/);
-    expect(rule?.[1]).toMatch(/right: 12px/);
-    expect(rule?.[1]).toMatch(/width: auto/);
   });
 
   it('colours the API meter by the budget ramp: green under 60 %, amber from 60 %, red from 90 %', () => {
@@ -300,6 +291,25 @@ describe('TrackerPopover', () => {
     expect(within(dialog).queryAllByTestId('tracker-row')).toHaveLength(0);
   });
 
+  it('escapes the phone rail: under 700 px the popover carries ui-popover-narrow', async () => {
+    // The narrow `.rail` is a scroll container, so an absolute popover inside it is clipped to the 53 px bar; the fixed shape that escapes it is the
+    // `.ui-popover-narrow` class, which `Popover` applies from `useNarrow`. jsdom does no layout, so what this pins is that the tracker's panel asks —
+    // the CSS half of the phone shape is pinned where the rule lives, in `ui-popover.test.tsx`.
+    stubNarrow(true);
+    renderChip(payload());
+    await user.click(chip());
+    expect(screen.getByRole('dialog', { name: 'Tracker' })).toHaveClass('ui-popover', 'ui-popover-narrow');
+  });
+
+  it('is the plain desktop panel when the viewport is not narrow', async () => {
+    stubNarrow(false);
+    renderChip(payload());
+    await user.click(chip());
+    const dialog = screen.getByRole('dialog', { name: 'Tracker' });
+    expect(dialog).toHaveClass('ui-popover');
+    expect(dialog).not.toHaveClass('ui-popover-narrow');
+  });
+
   it('closes on a pointerdown outside and stays open on one inside', async () => {
     renderChip(payload([row(), beta()]));
     await user.click(chip());
@@ -309,6 +319,17 @@ describe('TrackerPopover', () => {
     await user.click(chip());
     fireEvent.pointerDown(screen.getAllByTestId('tracker-row')[0]!);
     expect(screen.getByRole('dialog', { name: 'Tracker' })).toBeInTheDocument();
+  });
+
+  it('closes on a second click of the chip rather than closing and reopening', async () => {
+    // The chip is `Popover`'s anchor: its pointerdown is not "outside", so the click that follows toggles the panel shut. Were the anchor treated as outside,
+    // the pointerdown would close it and that click would open it again, and the chip would appear to do nothing.
+    renderChip(payload());
+    await user.click(chip());
+    expect(screen.getByRole('dialog', { name: 'Tracker' })).toBeInTheDocument();
+    await user.click(chip());
+    expect(screen.queryByRole('dialog', { name: 'Tracker' })).toBeNull();
+    expect(chip()).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('closes when the section changes', async () => {

@@ -254,7 +254,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   countdown, `sweepProgress` — the newest github stamp against `TRACKER_CYCLE_MS`, reading `overdue` past two cycles and the access reason when a row is not
   `ok`) and API (`apiUsage` — the rate limit's used share, amber from 60 %, red from 90 %). Clicking it opens `TrackerPopover`, a read-only panel with one row
   per connected repo (its own `pollProgress` countdown) and the API block (`N of M left · resets HH:MM`, `resetClock`), or the `BM_GITHUB_TOKEN` note when no
-  token is set. It has no buttons and no links; Escape closes it through `useDialogEscape`, as do a pointerdown outside and a section change.
+  token is set. It has no buttons and no links. The panel is `ui/Popover`'s at 420 px, and its dismissals are `Popover`'s too — Escape through
+  `useDialogEscape`, and a pointerdown outside it and off the chip — beside the section change, the one close the chip keeps for itself.
   Since #17 each repo runs on its own clock, `syncCycleMs(interval)` — one `TRACKER_CYCLE_MS` per server tick the interval spans (`1m` is four, `5m`
   twenty), because the server restamps a slow repo on its n-th tick and every tick carries a sweep's length; `15s` is that constant exactly. POLL follows the newest stamp among the repos on the FASTEST interval present and skips `off` ones; it reads amber `sync off` when every
   repo is off, and `failing` only when every repo still syncing is failing. A popover row reads `sync off` for an off repo, never `overdue`.

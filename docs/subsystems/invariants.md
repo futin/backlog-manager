@@ -1591,11 +1591,12 @@ which hang under their control without a scrim. It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
-The second entry that is not a dialog is the tracker strip's popover, `TrackerPopover` in `components/TrackerChip.tsx`, and it joins for the same reason and
-in the same shape: a component of its own that MOUNTS only while open, calling `useDialogEscape` once, so a popover opened over the item modal takes the key
-from the modal and hands it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so the chip
-binds its own `pointerdown` on `document` while the popover is open. The dashboard's `useDismiss` bundles the two into one hook with its own `keydown`
-listener, which is exactly the second Escape owner this section forbids, and is why it was not copied. Still three dialogs counted.
+The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control: the tracker strip's (`TrackerPopover` in
+`components/TrackerChip.tsx`) and the band's Filters and Sort. It joins for the same reason and in the same shape: it MOUNTS only while open, calling
+`useDialogEscape` once, so a popover opened over the item modal takes the key from the modal and hands it back when it closes. What it does not take from the
+stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown` on `document` while it is open, ignoring a press on
+its panel and on the control that opened it (that control's click is what toggles it). The dashboard's `useDismiss` bundles the two into one hook with its own
+`keydown` listener, which is exactly the second Escape owner this section forbids, and is why it was not copied. Still three dialogs counted.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the

@@ -13,8 +13,9 @@ paths: ["client/src/**"]
   drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog again). Since task-40 the hook is called by the two overlay
   shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the three surfaces themselves. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline
   confirmation the run's Stop and the item modal's claim release (#225) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it —
-  it paints no scrim and is not counted. The second is `TrackerPopover` (`components/TrackerChip.tsx`), mounted only while open, which joins the same way and
-  closes only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still three dialogs counted.
+  it paints no scrim and is not counted. The second is `ui/Popover.tsx` — the tracker's (`components/TrackerChip.tsx`) and the band's Filters and Sort —
+  mounted only while open, which joins the same way and closes only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key
+  and not the pointer. Still three dialogs counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)

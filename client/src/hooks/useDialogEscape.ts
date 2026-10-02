@@ -27,8 +27,9 @@ import { useEffect, useRef } from 'react';
  * because the rule is about who owns the key — a listener of its own would run
  * beside this one, and one press would close it and the dialog under it.
  *
- * The second non-dialog entry is the tracker strip's `TrackerPopover` (`components/TrackerChip.tsx`), in the same shape: mounted only while open, one call
- * to this hook, closing only itself. Its click-outside is its own `pointerdown` listener — this module owns the key, not the pointer.
+ * The second non-dialog entry is `ui/Popover.tsx`, the panel that hangs under a control, in the same shape: mounted only while open, one call to this hook,
+ * closing only itself. It has three composers — the tracker strip's (`components/TrackerChip.tsx`) and the band's Filters and Sort — and each is its own
+ * entry while it is open. Its click-outside is its own `pointerdown` listener — this module owns the key, not the pointer.
  *
  * They stay `window` listeners rather than becoming element handlers because
  * none of these overlays traps focus (each one's own comment says so): Escape
@@ -69,7 +70,7 @@ function onKey(e: KeyboardEvent): void {
 export function useDialogEscape(onClose: () => void): void {
   const entry = useRef<Entry>({ onClose });
   /* Written on every render, deliberately: every call site — the two overlay
-     shells, `Confirm` and the tracker popover — is handed an inline arrow
+     shells, `Confirm` and `Popover` — is handed an inline arrow
      (`onClose={() => setOpen(null)}`), so the callback has a new
      identity every time its host re-renders. Reading it through the ref is
      what lets the registration effect below take an empty dependency array. */

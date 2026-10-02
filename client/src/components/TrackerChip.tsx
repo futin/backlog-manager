@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 
 import { Meter } from './ui/Meter';
+import { Popover } from './ui/Popover';
 import { useTrackersContext } from '../hooks/TrackersContext';
-import { useDialogEscape } from '../hooks/useDialogEscape';
 import { useNow } from '../hooks/useNow';
 import { accessReason, apiUsage, hasTracker, pollProgress, sweepProgress, syncCycleMs } from '../lib/tracker';
 import type { Section } from '../lib/sections';
@@ -16,10 +17,10 @@ import type { TrackerPlatform, TrackerProjectRow } from '../../../shared/types';
  * same whichever section is open. The dashboard's rule for its account header applies — what is true of the machine wherever you stand moves out of the
  * section and into the shell — so `App` renders this once, in the strip (or the rail bar below 700 px), from the shell's one `useTrackers`.
  *
- * **Dismissal has two owners on purpose.** Escape goes through `useDialogEscape`, which `TrackerPopover` calls while it is mounted, exactly as `ui/Confirm`
- * does: the stack is the only Escape listener in the client, so a popover opened over an item modal takes the key from the modal and hands it back. Click-
- * outside is this component's own `pointerdown` listener, because the stack owns a KEY, not the pointer — the dashboard's `useDismiss` bundles the two and
- * is exactly what must not be copied here.
+ * **The panel is `ui/Popover`'s, and so is its dismissal.** Escape and click-outside, and the phone shape that escapes the rail bar's clip,
+ * moved there when the band's Filters and Sort wanted the same panel: a second copy of any of them is how two panels come to behave differently. What
+ * stays here is the section-change close, which only this chip's host knows about, and the chip button as `Popover`'s anchor, so a second click on it
+ * toggles the panel shut instead of racing the outside-press listener.
  *
  * **No links and no buttons in the popover.** The rail's sub-nav tree is the only thing that switches sections or Settings' pages, and a "Trackers ›" link
  * here would be the in-page switch that rule forbids. The popover is a reading; the Settings card is one rail click away.
@@ -30,20 +31,12 @@ export function TrackerChip({ section }: { section: Section }) {
   // A one-second tick is what a seconds readout needs, and it runs only while a tracker exists — a machine with no tracker pays for no interval.
   const now = useNow(visible, 1_000);
   const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
+  // The popover's anchor: a press on the chip is not "outside" it — the chip's own click toggles — so `Popover` is told which element that is.
+  const button = useRef<HTMLButtonElement>(null);
   const metersId = useId();
 
   // The chip outlives every section; the popover has no reason to.
   useEffect(() => setOpen(false), [section]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent): void => {
-      if (root.current !== null && !root.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
-  }, [open]);
 
   if (!visible) return null;
 
@@ -58,12 +51,13 @@ export function TrackerChip({ section }: { section: Section }) {
   const usage = noToken ? null : apiUsage(plat);
 
   return (
-    <div className="tracker-chip-root" ref={root}>
+    <div className="tracker-chip-root">
       {/* Name versus description (#230). The name stays `Tracker: <login>` and never moves, because a screen reader re-announces a focused element whose
           name changes and the POLL countdown changes every second — a name built from the meters would be spoken once a second for as long as the chip held
           focus. The readings ride as the DESCRIPTION instead, which is read on focus and not re-spoken on change. A no-token chip has no meters, so it
           carries no `aria-describedby` at all rather than one pointing at nothing. */}
       <button
+        ref={button}
         type="button"
         className="tracker-chip"
         data-testid="tracker-chip"
@@ -89,7 +83,7 @@ export function TrackerChip({ section }: { section: Section }) {
           ▾
         </span>
       </button>
-      {open && <TrackerPopover platform={noToken ? undefined : plat} rows={githubRows} now={now} onClose={() => setOpen(false)} />}
+      {open && <TrackerPopover platform={noToken ? undefined : plat} rows={githubRows} now={now} anchor={button} onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -134,8 +128,8 @@ function usageTone(fraction: number): Reading['tone'] {
 }
 
 /**
- * The popover itself, a component of its own so that it MOUNTS only while open — the shape `ui/Confirm` has, and the reason it can join the Escape stack
- * with a plain `useDialogEscape` call: mounted last, it is topmost; unmounted, the key goes back to whatever is under it.
+ * The popover's content, a component of its own so that its `Popover` MOUNTS only while open — the shape `ui/Confirm` has, and the reason `Popover` can join
+ * the Escape stack with a plain `useDialogEscape` call: mounted last, it is topmost; unmounted, the key goes back to whatever is under it.
  *
  * Rows are read off the live payload on every render, never copied into state when it opened, so a repo disconnected or a token removed while it is up
  * drops out of it on the next answer rather than lingering.
@@ -144,19 +138,22 @@ function TrackerPopover({
   platform,
   rows,
   now,
+  anchor,
   onClose
 }: {
   platform: TrackerPlatform | undefined;
   rows: TrackerProjectRow[];
   now: number;
+  anchor: RefObject<HTMLElement>;
   onClose: () => void;
 }) {
-  useDialogEscape(onClose);
   const usage = platform === undefined ? null : apiUsage(platform);
   const connected = `GitHub · ${rows.length} ${rows.length === 1 ? 'repo' : 'repos'} connected`;
 
   return (
-    <div className="tracker-pop" role="dialog" aria-label="Tracker" data-testid="tracker-pop">
+    // 420 px, not the dashboard's 372: a repo name, a 120 px timer and its seconds do not fit 372 without wrapping. This number is the only thing the tracker
+    // asks of the panel — the look, the 8 px drop, the phone shape and both dismissals are `Popover`'s.
+    <Popover label="Tracker" width={420} anchor={anchor} onClose={onClose}>
       <div className="tracker-pop-id">
         <span className="tracker-av">{platform === undefined ? '—' : (platform.login?.[0]?.toUpperCase() ?? '·')}</span>
         <span className="tracker-pop-who">
@@ -191,6 +188,6 @@ function TrackerPopover({
           )}
         </>
       )}
-    </div>
+    </Popover>
   );
 }

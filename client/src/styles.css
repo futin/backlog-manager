@@ -333,13 +333,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .tracker-meters > * { min-width: max-content }
 .tracker-caret { font-size: 11px; color: var(--ink3); transition: transform .15s }
 .tracker-chip[aria-expanded="true"] .tracker-caret { transform: rotate(180deg) }
-/* 420 px, not the dashboard's 372: a repo name, a 120 px timer and its seconds do not fit 372 without wrapping. The dialogs' own shadow, so a floating
-   surface lifts one way everywhere. */
-.tracker-pop {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 420px;
-  padding: 14px 16px; border-radius: 16px; background: var(--strip); color: var(--ink);
-  box-shadow: 0 24px 64px var(--shadow2); text-align: left;
-}
+/* The panel's shell is `ui/Popover`'s (`.ui-popover`, in the primitives block); what follows is only what is drawn inside it. */
 .tracker-pop-id { display: flex; align-items: center; gap: 10px; margin-bottom: 12px }
 .tracker-pop-who { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
 .tracker-pop-sub { font-size: 12px; color: var(--ink3) }
@@ -355,13 +349,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink2);
 }
 .tracker-pop-note { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.45 }
-@media (max-width: 700px) {
-  /* On a phone the chip lives in the rail bar, and the narrow `.rail` is a scroll container (`overflow-x: hidden` computes `overflow-y` to auto), so an
-     absolute popover is clipped to the 53 px bar and paints nothing — and right-anchored under a chip beside ☰ it would start off-screen besides. Fixed
-     escapes the clip. `top` goes back to auto — the base rule's `100%` would now mean the viewport's height — so the panel keeps its static position just
-     under the chip, and it spans the viewport less the rail's own 12 px side padding. Its height is capped so a long repo list scrolls inside it. */
-  .tracker-pop { position: fixed; top: auto; margin-top: 6px; left: 12px; right: 12px; width: auto; max-height: 70vh; overflow-y: auto }
-}
 
 /* ---------------------------------------------- Board section
    Every registered project's backlog on one board, read via GET /api/projects
@@ -2565,9 +2552,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-chip-flat:hover:not(:disabled) { background: var(--strip-hi) }
 .ui-chip-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline2)) }
 /* `Confirm` (bug-53) — the question and its two answers, drawn in the row the clicked control came from rather than floating over it (§8.7: nothing
-   else on this board floats). Full `--ink` for the question rather than `.run-controls-note`'s quiet `--ink2`: that tone says "a state, not an alert",
-   and this one IS asking for attention. It wraps rather than holding one line, because it names an item id and the consequences, and a Watchdog row is
-   narrower than the detail sheet's head. */
+   else on this board floats but `Popover`'s panels). Full `--ink` for the question rather than `.run-controls-note`'s quiet `--ink2`: that tone says "a state,
+   not an alert", and this one IS asking for attention. It wraps rather than holding one line, because it names an item id and the consequences, and a Watchdog
+   row is narrower than the detail sheet's head. */
 .ui-confirm { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap }
 .ui-confirm-text { font-size: 12px; color: var(--ink); max-width: 52ch }
 /* `[aria-disabled]`, not `:disabled`, and it is a second state rather than a
@@ -2811,8 +2798,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 
 /* Modal — the sidecar (§8.7). The board's ONE modal: air on every side, the
    scrim over everything behind it, and the design's single shell lift (§5) —
-   nothing else on this board floats, which is what keeps the lift meaning
-   "this is over the page" rather than "this is a card".
+   the one other floating surface, `Popover`, takes a smaller lift and no scrim,
+   which is what keeps this lift meaning "this is over the page" rather than
+   "this is a card".
 
    Both dimensions are divided by --font-scale for the reason `.rail`'s
    comment near the top of this file states in full, and this is that idiom

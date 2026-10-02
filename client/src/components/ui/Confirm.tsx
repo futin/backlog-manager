@@ -12,9 +12,9 @@ import { Chip } from './Chip';
  * in `ui/` rather than inline in `RunControls`, so the next destructive control asks the same way instead of inventing a second way to ask.
  *
  * **Inline, in the row the click came from, and never a dialog layer.** §8.7 is explicit that `Modal` is composed by exactly one surface and that
- * nothing else on this board floats; a scrimmed box over the Runs page would be a second modal and would sit on top of the detail sheet it is asking
- * about, hiding the very run it names. So the control that was clicked is REPLACED in place by the question and its two answers — the reader's eye is
- * already there, and dismissing it puts the row back exactly as it was.
+ * nothing else on this board floats but `Popover`'s panels, which hang under their control and hide nothing; a scrimmed box over the Runs page would be a
+ * second modal and would sit on top of the detail sheet it is asking about, hiding the very run it names. So the control that was clicked is REPLACED in
+ * place by the question and its two answers — the reader's eye is already there, and dismissing it puts the row back exactly as it was.
  *
  * **Escape goes through `useDialogEscape`, even though this is not a dialog**, because bug-23's rule is about who owns the key, not about what paints a
  * scrim: a second `window` listener of this component's own would run beside the stack's, and an item modal opened over a Watchdog row would take its

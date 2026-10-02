@@ -9,7 +9,8 @@ import { useNarrow } from '../../hooks/useNarrow';
  *
  * A shell with air around it: `--scrim` over everything, a `--strip` panel at
  * 16 px radius carrying the design's ONE shell lift (§5 — `0 24px 64px` at
- * `--shadow2`; nothing else on this board floats), a 290 px facts column left
+ * `--shadow2`; popovers, via `ui/Popover`, are the one other floating
+ * surface and take a smaller lift and no scrim), a 290 px facts column left
  * of a body with a clean top edge.
  *
  * **This is the only modal anywhere in this app, and that is a decision rather
