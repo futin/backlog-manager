@@ -10,6 +10,7 @@ import { OrchestrateSheet } from '../client/src/components/board/OrchestrateShee
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { daysAgoDate } from './helpers/dates';
+import { pickProject } from './helpers/filter-bar';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
 
@@ -195,19 +196,24 @@ describe('toolbar Orchestrate button', () => {
 
   async function renderNarrowed(): Promise<void> {
     render(<BoardView />);
-    // Not just "the label exists" — the select renders with only "All
-    // projects" the instant BoardView mounts, before `/api/projects` has
-    // even resolved. Waiting for alpha's own option is what proves the
-    // fetch landed and selectOptions below has something to pick.
-    await waitFor(() => expect(screen.getByRole('option', { name: 'alpha' })).toBeInTheDocument());
-    await userEvent.selectOptions(screen.getByLabelText('Project'), '/abs/alpha');
+    // Not just "the button exists" — the Filters popover renders with only
+    // "All projects" the instant BoardView mounts, before `/api/projects`
+    // has even resolved. Waiting for alpha's own chip is what proves the
+    // fetch landed and the pick below has something to pick. The popover is
+    // left open, as `pickProject` leaves it: every case that asserts on
+    // dialogs next clicks outside the panel first, and that click's
+    // `pointerdown` is what closes it.
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const picks = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Project' });
+    await waitFor(() => expect(within(picks).getByRole('button', { name: 'alpha' })).toBeInTheDocument());
+    await pickProject('alpha');
   }
 
   // --- Test case 1 ---------------------------------------------------
   it('renders no button while the board is unfiltered, even with capability on', async () => {
     stub({});
     render(<BoardView />);
-    await waitFor(() => expect(screen.getByLabelText('Project')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Orchestrate' })).not.toBeInTheDocument();
   });
 

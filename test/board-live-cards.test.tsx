@@ -2,13 +2,13 @@
  * @jest-environment jsdom
  */
 import { act, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
 import { liveBarFor } from '../client/src/components/board/ItemCard';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { daysAgoDate } from './helpers/dates';
+import { pickStatus } from './helpers/filter-bar';
 import { CLAIM_STALE_MS } from '../shared/types';
 import type {
   AgentsStatus,
@@ -610,7 +610,7 @@ describe('BoardView: card live strips', () => {
       ]
     );
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    await pickStatus('In progress');
 
     expect(screen.getByText('orchestrator has it')).toBeInTheDocument();
     expect(screen.getByText('needs an answer')).toBeInTheDocument();
@@ -686,7 +686,7 @@ describe('BoardView: card live strips', () => {
     // Bugs is column 2: the live claim floats, the stale one sorts by `created` among the idle — newest first, so it lands last.
     expect(titlesIn(2)).toEqual(['live claim', 'idle newest', 'stale claim']);
 
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    await pickStatus('In progress');
     expect(screen.getByText('live claim')).toBeInTheDocument();
     expect(screen.queryByText('stale claim')).not.toBeInTheDocument();
   });

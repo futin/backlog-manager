@@ -8,6 +8,7 @@ import '@testing-library/jest-dom';
 import BoardView from '../client/src/components/board/BoardView';
 import { queuedStripFor, type LiveBar } from '../client/src/components/board/ItemCard';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
+import { pickProject, pickStatus } from './helpers/filter-bar';
 import { BOARD_TRACKER_POLL_MS } from '../client/src/hooks/useBoard';
 import { TRACKER_POLL_MS } from '../server/src/tracker/poller.service';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
@@ -198,10 +199,10 @@ describe('dispatch on a tracker project', () => {
   it('draws the Orchestrate control for a tracker project as well as a files one', async () => {
     await renderBoard([item({}), issueItem()]);
 
-    await userEvent.selectOptions(screen.getByLabelText('Project'), FILES_PATH);
+    await pickProject('alpha');
     expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('Project'), TRACKER_PATH);
+    await pickProject('tracker');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Orchestrate' })).toBeInTheDocument());
   });
 });
@@ -349,10 +350,10 @@ describe('the orchestrator:queued strip', () => {
       trackerRun({})
     );
     await waitFor(() => expect(strip('an issue')).not.toBeNull());
-    // Newest first is the default sort, so the idle card leads — and must still lead.
+    // Created (desc) is the default sort, so the idle card leads — and must still lead.
     expect(card('idle issue').compareDocumentPosition(card('an issue')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    await pickStatus('In progress');
     await waitFor(() => expect(screen.queryByText('an issue')).toBeNull());
   });
 });
@@ -468,7 +469,7 @@ describe('a tracker project whose sync is off (#17)', () => {
   it('disables Orchestrate for the project with the same sentence, and a click opens nothing', async () => {
     await renderBoard([item({}), issueItem()], projects({ interval: 'off' }));
 
-    await userEvent.selectOptions(screen.getByLabelText('Project'), TRACKER_PATH);
+    await pickProject('tracker');
     const chip = await screen.findByRole('button', { name: 'Orchestrate' });
     expect(chip).toHaveAttribute('aria-disabled', 'true');
     expect(chip).toHaveAttribute('title', SENTENCE);

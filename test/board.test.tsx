@@ -9,6 +9,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import { daysAgoDate } from './helpers/dates';
+import { clearFilters, pickDirection, pickProject, pickSort, pickStatus } from './helpers/filter-bar';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, RunQueueItem, RunStage } from '../shared/types';
 
@@ -23,7 +24,7 @@ import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRun, Orchestrat
  * runs, never literal. The card's in-progress label is now minutes-and-hours,
  * so a literal `started` would read as a different elapsed every day and the
  * suite would have to fake timers to say anything — and faking timers here
- * fights userEvent, which this file uses for the filter selects. Relative
+ * fights userEvent, which this file uses for the filter popovers. Relative
  * values also cannot drift the wrong way: elapsed only ever grows between the
  * fixture being built and the assertion running, and every rung floors, so
  * `3h` stays `3h`.
@@ -229,7 +230,8 @@ async function renderBoardWithSettings() {
 // grow to hold them: several tests above assert exact `col-count` numbers
 // against it, so a shared fixture is the one thing a sort-order test must
 // not touch.
-function stubItems(items: BacklogItem[], runs: RunPayload[] = []) {
+// `projects` is for the one case that needs a registry `PROJECTS` cannot be: two checkouts of one repo, sharing a name (Review Focus 2).
+function stubItems(items: BacklogItem[], runs: RunPayload[] = [], projects: ProjectSummary[] = PROJECTS) {
   (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
     const url = String(input);
     const payload: unknown = url.includes('/api/agents/status')
@@ -237,11 +239,18 @@ function stubItems(items: BacklogItem[], runs: RunPayload[] = []) {
       : url.includes('/api/orchestrator/runs')
         ? ({ runs, starting: [], remote: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects')
-          ? PROJECTS
+          ? projects
           : { items, errors: [] };
     return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
   });
 }
+
+/** The Bugs column's card titles, top to bottom — Bugs is index 2 (Refactoring · Ideas · Bugs · Tasks). Every sort case below reads it. */
+const bugTitles = (): (string | null)[] =>
+  Array.from(screen.getAllByTestId('board-col')[2].querySelectorAll('.board-card-title')).map((el) => el.textContent);
+
+/** The track's `Sort: <key> (<dir>)` reading. `/^Sort:/` and not `Sort by`, which is the sort popover's own header. */
+const sortLabel = (): HTMLElement => screen.getByText(/^Sort:/);
 
 describe('BoardView', () => {
   it('titles itself Board, matching the rail tab that opens it', async () => {
@@ -257,32 +266,33 @@ describe('BoardView', () => {
   });
 
   /**
-   * The band, composed (DESIGN.md §8.3): `Band` carries the title and the
-   * count line, its right slot carries the 36 px search field, the three
-   * filter chips and — last, and the page's ONE ink chip — Orchestrate.
+   * The band, composed (DESIGN.md §8.3): `Band` carries the title and the count line, its right slot carries the run chip, the 36 px search field, the
+   * filter track (`FilterBar` — the funnel, `Sort: <key> (<dir>)` and the sort button) and — last, and the page's ONE ink chip — Orchestrate.
    *
-   * What is being pinned is the COMPOSITION, because that is what the design
-   * spec's §12.1 rule is about: a page that re-drew a chip's look under its
-   * own class would pass every behavioural case in this file while putting a
-   * second radius and stroke on the board. The behaviour of the controls
-   * themselves is unchanged and stays pinned where it was — the filters by the
-   * narrowing cases below, Orchestrate's four visibility rules by
-   * `test/orchestrator-start-ui.test.tsx`.
+   * What is being pinned is the COMPOSITION, because that is what the design spec's §12.1 rule is about: the track's own look and mechanics are
+   * `test/filter-bar.test.tsx`'s, and this case only proves the Board puts it where the design says and that nothing of the old row of selects is left
+   * beside it. Orchestrate's four visibility rules stay pinned by `test/orchestrator-start-ui.test.tsx`; here it is only its place, after the track.
    */
-  it('composes the band: title, count line, search, and the three filters as chips', async () => {
+  it('composes the band: title, count line, search, the filter track, and Orchestrate after it once a project is picked', async () => {
     await renderBoard();
 
     const band = screen.getByText('Board').closest('.ui-band') as HTMLElement;
     expect(band).not.toBeNull();
-    expect(within(band).getByLabelText('Search items')).toHaveClass('board-band-search');
+    // The old row was three native selects; none survives anywhere in the band.
+    expect(band.querySelector('select')).toBeNull();
+    const search = within(band).getByLabelText('Search items');
+    expect(search).toHaveClass('board-band-search');
+    const filters = within(band).getByRole('button', { name: 'Filters' });
+    expect(within(band).getByRole('button', { name: 'Change sort' })).toBeInTheDocument();
+    expect(search.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // Each filter is a `Chip` wrapping its own select — the chip is the shell,
-    // the select is the control, and the label is what ties them together.
-    for (const name of ['Project', 'Status', 'Sort']) {
-      const select = within(band).getByLabelText(name);
-      expect(select.closest('.ui-chip')).not.toBeNull();
-      expect(select.closest('.ui-chip')).toHaveClass('ui-chip-outline');
-    }
+    await pickProject('alpha');
+    const orchestrate = await within(band).findByRole('button', { name: 'Orchestrate' });
+    const track = band.querySelector('.filter-bar-wrap') as HTMLElement;
+    expect(track).not.toBeNull();
+    expect(track.compareDocumentPosition(orchestrate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // After the track, not inside it: the track is filter and sort, and Orchestrate is the band's own control.
+    expect(track.contains(orchestrate)).toBe(false);
   });
 
   /**
@@ -302,15 +312,18 @@ describe('BoardView', () => {
     // ref-1. `ghost` holds none and is not counted.
     expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
+    await pickStatus('Done');
     expect(screen.getByText('2 done across 1 project')).toBeInTheDocument();
 
     // Narrowed to one project, the "across" half goes: it would read
     // `across 1 project` on every board a reader narrowed themselves.
     // Both done items are alpha's, so the number does not move — which is what
     // makes this assertion about the phrase rather than about the count.
-    await userEvent.selectOptions(screen.getByLabelText('Project'), '/abs/alpha');
-    expect(screen.getByText('2 done')).toBeInTheDocument();
+    // The project's NAME takes its place (the band-filter spec's §3): the
+    // picker is behind a popover now, so nothing else on the band says which
+    // project the number is counting.
+    await pickProject('alpha');
+    expect(screen.getByText('2 done in alpha')).toBeInTheDocument();
   });
 
   it('renders the four columns with counts of what they hold (open by default)', async () => {
@@ -553,7 +566,7 @@ describe('BoardView', () => {
   // or every item ever worked would read as live forever after it shipped.
   it('renders a done item that still carries a started date as done, not live', async () => {
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
+    await pickStatus('Done');
     const card = screen.getByText('finished task').closest('.board-card') as HTMLElement;
     expect(card.querySelector('.board-card-live')).toBeNull();
     expect(within(card).getByText('done')).toHaveClass('ui-marker', 'ui-marker-done');
@@ -580,7 +593,7 @@ describe('BoardView', () => {
   // its open siblings do.
   it('status filter: done shows only done items, inside their own type columns', async () => {
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
+    await pickStatus('Done');
     const cols = screen.getAllByTestId('board-col');
     expect(cols.map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['1', '0', '0', '1']);
     // ref-2 in Refactoring, task-9 in Tasks — not pooled into one "done" list.
@@ -589,18 +602,16 @@ describe('BoardView', () => {
     expect(screen.queryByText('a bug')).not.toBeInTheDocument();
   });
 
-  it('status select offers open, in progress, done and all, in that order', async () => {
+  it('the Status switch offers Open, In progress, Done and All, in that order', async () => {
     await renderBoard();
-    const select = screen.getByLabelText('Status') as HTMLSelectElement;
-    const labels = within(select)
-      .getAllByRole('option')
-      .map((o) => o.textContent);
-    expect(labels).toEqual(['Open', 'In progress', 'Done', 'All']);
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const group = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Status' });
+    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['Open', 'In progress', 'Done', 'All']);
   });
 
   it('status filter: in progress narrows to open items carrying a started stamp', async () => {
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'started');
+    await pickStatus('In progress');
     // Only bug-2 ("groomed bug") is open with a started stamp; task-9 is
     // started but done, and everything else carries no stamp at all.
     const cols = screen.getAllByTestId('board-col');
@@ -620,19 +631,133 @@ describe('BoardView', () => {
   // 'all', the one a re-added bypass would look most correct beneath.
   it('renders no out-of-scope item in any column, at any status filter value', async () => {
     await renderBoard();
-    for (const value of ['open', 'started', 'done', 'all']) {
-      await userEvent.selectOptions(screen.getByLabelText('Status'), value);
+    for (const label of ['Open', 'In progress', 'Done', 'All'] as const) {
+      await pickStatus(label);
       expect(screen.queryByText('declined thing')).not.toBeInTheDocument();
       // Nor a column to put it in.
       expect(screen.queryByText('Out of scope')).not.toBeInTheDocument();
     }
   });
 
-  it('project filter narrows every column by projectPath', async () => {
+  it('project filter narrows every column by projectPath, and the count line names the project', async () => {
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Project'), '/abs/beta');
+    await pickProject('beta');
     expect(screen.getByText('a task')).toBeInTheDocument();
     expect(screen.queryByText('a bug')).not.toBeInTheDocument();
+    // Every column, not only the one the assertion above happens to look at: beta's one open item is a task.
+    const cols = screen.getAllByTestId('board-col');
+    expect(cols.map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['0', '0', '0', '1']);
+    expect(screen.getByText('1 open in beta')).toBeInTheDocument();
+  });
+
+  /*
+   * The Filters popover, from the Board's side (the band-filter spec's §2, §3). `FilterBar`'s own mechanics — the badge, the raised look, Clear all's
+   * inertness, one popover at a time — are `test/filter-bar.test.tsx`'s; what is pinned here is what the BOARD hands it: its hint, its count, its reset,
+   * and the fail-open project value rather than the raw stored one.
+   */
+  it('the open Filters dialog carries the Board’s hint beside Project', async () => {
+    await renderBoard();
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(within(screen.getByRole('dialog', { name: 'Filters' })).getByText('· one at a time — Orchestrate needs one')).toBeInTheDocument();
+  });
+
+  it('passes count 0 on a default board, so Clear all is inert', async () => {
+    await renderBoard();
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('button', { name: 'Clear all' })).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('Clear all after picking alpha and Done restores all projects and Open', async () => {
+    await renderBoard();
+    await pickProject('alpha');
+    await pickStatus('Done');
+    expect(screen.getByRole('button', { name: 'Filters, 2 set' })).toBeInTheDocument();
+    expect(screen.getByText('2 done in alpha')).toBeInTheDocument();
+
+    await clearFilters();
+    const dialog = screen.getByRole('dialog', { name: 'Filters' });
+    expect(within(within(dialog).getByRole('group', { name: 'Project' })).getByRole('button', { pressed: true })).toHaveTextContent('All projects');
+    expect(within(within(dialog).getByRole('group', { name: 'Status' })).getByRole('button', { pressed: true })).toHaveTextContent('Open');
+    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
+  });
+
+  /* A status value this build never wrote — the Status filter's stored value is deliberately unvalidated (see the comment over `sortItems`' fallback
+     in BoardView.tsx). It lights nothing in the switch, counts as set, and narrows the board to nothing; the raised button and Clear all are the way
+     back. The board has no columns to wait on here — it renders the no-matches state — so the render waits on that instead of `renderBoard`. */
+  it('a stored unrecognised status lights no Status option, counts as one set, and Clear all recovers', async () => {
+    localStorage.setItem('backlog-manager.status', JSON.stringify('stale'));
+    render(<BoardView />);
+    expect(await screen.findByText('no matches')).toBeInTheDocument();
+    expect(screen.getByText('0 items across 0 projects')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Filters, 1 set' }));
+    const status = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Status' });
+    expect(within(status).queryAllByRole('button', { pressed: true })).toHaveLength(0);
+
+    await clearFilters();
+    expect(within(status).getByRole('button', { pressed: true })).toHaveTextContent('Open');
+    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
+  });
+
+  // Review Focus 2: two checkouts of one repo share a name and never a path. Both get a chip, and the second one narrows to the second path alone.
+  it('two registered projects named alpha get two chips, and picking the second shows only its items', async () => {
+    const twin = (path: string): ProjectSummary => ({ ...PROJECTS[0], path });
+    stubItems(
+      [
+        fakeItem({ id: 'bug-1', title: 'first checkout', projectPath: '/a/alpha' }),
+        fakeItem({ id: 'bug-1', title: 'second checkout', projectPath: '/b/alpha' })
+      ],
+      [],
+      [twin('/a/alpha'), twin('/b/alpha')]
+    );
+    await renderBoard();
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    expect(within(screen.getByRole('group', { name: 'Project' })).getAllByRole('button', { name: 'alpha' })).toHaveLength(2);
+
+    await pickProject('alpha', 1);
+    expect(screen.getByText('second checkout')).toBeInTheDocument();
+    expect(screen.queryByText('first checkout')).not.toBeInTheDocument();
+    expect(screen.getByText('1 open in alpha')).toBeInTheDocument();
+  });
+
+  // Review Focus 3: a stored path whose project has since been unregistered fails open — and the badge, the pressed chip and the count line all read
+  // the fail-open value, so none of them claims a filter the board is not applying.
+  it('a stale stored project path reads as All projects: no badge, All projects pressed, no suffix', async () => {
+    localStorage.setItem('backlog-manager.project', JSON.stringify('/abs/gone'));
+    await renderBoard();
+    const button = screen.getByRole('button', { name: 'Filters' });
+    expect(button.querySelector('.filter-bar-badge')).toBeNull();
+    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
+
+    await userEvent.click(button);
+    const picks = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Project' });
+    expect(within(picks).getByRole('button', { pressed: true })).toHaveTextContent('All projects');
+  });
+
+  // Review Focus 4: `FilterBar` keeps its own open state, so it must not remount when a pick changes the band around it — Orchestrate appearing after
+  // the track is exactly such a change. Same element before and after, so a remount that happened to reopen would still fail.
+  it('picking a project with the popover open keeps that popover open, alone, while Orchestrate appears', async () => {
+    await renderBoard();
+    await userEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    const before = screen.getByRole('dialog', { name: 'Filters' });
+
+    await pickProject('alpha');
+    expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toBe(before);
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+
+  // Review Focus 5: Clear all resets the two filters it counts, and nothing it does not — the search is visible in its own field, and sort is not a filter.
+  it('Clear all leaves the typed search and the chosen sort alone', async () => {
+    await renderBoard();
+    await userEvent.type(screen.getByLabelText('Search items'), 'bug');
+    await pickSort('Name');
+    await pickProject('alpha');
+    await clearFilters();
+    expect(screen.getByLabelText('Search items')).toHaveValue('bug');
+    expect(sortLabel()).toHaveTextContent('Sort: Name (asc)');
   });
 
   // The primary sort key: in-progress ranks above everything else, and the
@@ -640,7 +765,7 @@ describe('BoardView', () => {
   // the default in play here specifically so a broken primary key produces a
   // plausible-looking wrong answer (plain newest-on-top) instead of an
   // assertion that would pass by accident either way.
-  it('an in-progress card sorts above a newer one under Newest first', async () => {
+  it('an in-progress card sorts above a newer one under Created (desc), the default', async () => {
     stubItems([
       fakeItem({ id: 'bug-old-live', title: 'old-live', created: daysAgoDate(10), started: daysAgoDate(10) }),
       fakeItem({ id: 'bug-new-idle', title: 'new-idle', created: daysAgoDate(0) }),
@@ -667,7 +792,7 @@ describe('BoardView', () => {
       fakeItem({ id: 'bug-yankee', title: 'yankee-idle' })
     ]);
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Sort'), 'name');
+    await pickSort('Name');
     // Index 2: Bugs is the third column now — Refactoring · Ideas · Bugs · Tasks.
     const bugsCol = screen.getAllByTestId('board-col')[2];
     const titles = Array.from(bugsCol.querySelectorAll('.board-card-title')).map((el) => el.textContent);
@@ -700,6 +825,99 @@ describe('BoardView', () => {
     // old, new, mid, so a fallback that merely returned 0 and left the array
     // as fetched would pass a "didn't crash" check and fail this one.
     expect(titles).toEqual(['new-idle', 'mid-idle', 'old-idle']);
+  });
+
+  /*
+   * Sort direction (the band-filter spec's §3). Three idle bugs whose name order and created order disagree, fetched in an order that matches neither
+   * direction of either key — so every assertion below can only pass if the comparator it names actually ran, in the direction it names:
+   *   name asc  alpha-t, bravo, charlie      created desc  alpha-t (0d), charlie (2d), bravo (5d)
+   *   name desc charlie, bravo, alpha-t      created asc   bravo, charlie, alpha-t
+   */
+  const SORTABLE = (): BacklogItem[] => [
+    fakeItem({ id: 'bug-c', title: 'charlie', created: daysAgoDate(2) }),
+    fakeItem({ id: 'bug-a', title: 'alpha-t', created: daysAgoDate(0) }),
+    fakeItem({ id: 'bug-b', title: 'bravo', created: daysAgoDate(5) })
+  ];
+
+  it('Name orders A→Z ascending and Z→A descending; Created descending is newest first', async () => {
+    stubItems(SORTABLE());
+    await renderBoard();
+    await pickSort('Name');
+    await pickDirection('Ascending');
+    expect(bugTitles()).toEqual(['alpha-t', 'bravo', 'charlie']);
+    await pickDirection('Descending');
+    expect(bugTitles()).toEqual(['charlie', 'bravo', 'alpha-t']);
+
+    await pickSort('Created');
+    await pickDirection('Descending');
+    expect(bugTitles()).toEqual(['alpha-t', 'charlie', 'bravo']);
+    await pickDirection('Ascending');
+    expect(bugTitles()).toEqual(['bravo', 'charlie', 'alpha-t']);
+  });
+
+  // The direction flips the key's OWN comparison only: `project`'s tie-break is newest first inside each project in both directions.
+  it('Project descending orders projects Z→A and keeps newest first inside each project', async () => {
+    const beta = { project: 'beta', projectPath: '/abs/beta' };
+    stubItems([
+      fakeItem({ id: 'bug-1', title: 'a-old', created: daysAgoDate(5) }),
+      fakeItem({ id: 'bug-2', title: 'b-old', created: daysAgoDate(4), ...beta }),
+      fakeItem({ id: 'bug-3', title: 'a-new', created: daysAgoDate(1) }),
+      fakeItem({ id: 'bug-4', title: 'b-new', created: daysAgoDate(0), ...beta })
+    ]);
+    await renderBoard();
+    await pickSort('Project');
+    expect(bugTitles()).toEqual(['a-new', 'a-old', 'b-new', 'b-old']);
+    await pickDirection('Descending');
+    expect(bugTitles()).toEqual(['b-new', 'b-old', 'a-new', 'a-old']);
+  });
+
+  // `liveRank` is the primary key in both directions. The live card is the MIDDLE one by date, so neither direction puts it first by accident.
+  it('an in-progress card leads its column under Created in both directions', async () => {
+    stubItems([
+      fakeItem({ id: 'bug-new', title: 'new-idle', created: daysAgoDate(0) }),
+      fakeItem({ id: 'bug-old', title: 'old-idle', created: daysAgoDate(10) }),
+      fakeItem({ id: 'bug-mid', title: 'mid-live', created: daysAgoDate(5), started: agoISO(60 * 60 * 1000) })
+    ]);
+    await renderBoard();
+    expect(sortLabel()).toHaveTextContent('Sort: Created (desc)');
+    expect(bugTitles()).toEqual(['mid-live', 'new-idle', 'old-idle']);
+    await pickDirection('Ascending');
+    expect(bugTitles()).toEqual(['mid-live', 'old-idle', 'new-idle']);
+  });
+
+  /* Each key's natural direction: a DIFFERENT key arrives in its own (`Name` never opens Z→A because `Created` was descending), and re-picking the
+     current key leaves whatever direction the reader chose. */
+  it('picking a different key sets its natural direction; re-picking the current key leaves the direction', async () => {
+    await renderBoard();
+    expect(sortLabel()).toHaveTextContent('Sort: Created (desc)');
+    await pickSort('Name');
+    expect(sortLabel()).toHaveTextContent('Sort: Name (asc)');
+
+    await pickSort('Created');
+    expect(sortLabel()).toHaveTextContent('Sort: Created (desc)');
+    await pickDirection('Ascending');
+    expect(sortLabel()).toHaveTextContent('Sort: Created (asc)');
+    await pickSort('Created');
+    expect(sortLabel()).toHaveTextContent('Sort: Created (asc)');
+  });
+
+  it('a stored unrecognised direction falls back to the key’s natural one', async () => {
+    localStorage.setItem('backlog-manager.sort', JSON.stringify('name'));
+    localStorage.setItem('backlog-manager.sort-dir', JSON.stringify('sideways'));
+    stubItems(SORTABLE());
+    await renderBoard();
+    expect(sortLabel()).toHaveTextContent('Sort: Name (asc)');
+    expect(bugTitles()).toEqual(['alpha-t', 'bravo', 'charlie']);
+  });
+
+  // Review Focus 1: a reader who picked `By name` before the direction existed has the key stored and no direction at all. They land where they were —
+  // A→Z — and not on a board-wide `desc` default, which is why the direction's fallback is `null` and resolved per key.
+  it('a stored sort key with no direction stored lands on that key’s natural direction', async () => {
+    localStorage.setItem('backlog-manager.sort', JSON.stringify('name'));
+    stubItems(SORTABLE());
+    await renderBoard();
+    expect(sortLabel()).toHaveTextContent('Sort: Name (asc)');
+    expect(bugTitles()).toEqual(['alpha-t', 'bravo', 'charlie']);
   });
 
   it('search narrows by title, and no matches shows the empty state', async () => {
@@ -829,7 +1047,7 @@ describe('BoardView', () => {
       fakeItem({ id: 'bug-13', title: 'something open', updated: FRESH_STAMP })
     ]);
     await renderBoard();
-    await userEvent.selectOptions(screen.getByLabelText('Status'), 'done');
+    await pickStatus('Done');
     expect(screen.getByText('ancient fix')).toBeInTheDocument();
     expect(screen.queryByText('stale')).not.toBeInTheDocument();
   });

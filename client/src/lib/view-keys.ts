@@ -9,10 +9,11 @@
  * Archive's chunk and undo the split. A three-line module both can import
  * costs nothing and keeps the string stated once.
  *
- * `STATUS_KEY` and `SORT_KEY` deliberately stay local to BoardView. They are
- * Board-only questions: Archive carries no status filter (its contents are
- * defined by staleness and rejection, not by status — see the design) and no
- * sort control (month grouping is its ordering).
+ * `STATUS_KEY`, `SORT_KEY` and `SORT_DIR_KEY` deliberately stay local to
+ * BoardView. They are Board-only questions: Archive carries no status filter
+ * (its contents are defined by staleness and rejection, not by status — see
+ * the design) and no sort control (month grouping is its ordering), so it has
+ * no use for a sort direction either.
  */
 
 /**

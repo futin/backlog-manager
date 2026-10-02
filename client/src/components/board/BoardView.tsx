@@ -14,8 +14,11 @@ import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
+import { FilterBar, FilterSection, ProjectPicks } from '../FilterBar';
+import type { FilterBarSort, SortDir } from '../FilterBar';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
+import { Segmented } from '../ui/Segmented';
 import { BoardColumn } from './BoardColumn';
 import type { BoardColumnSlug } from './BoardColumn';
 import { ACTIVE_RUN_STAGES, ItemCard } from './ItemCard';
@@ -29,10 +32,14 @@ import type { BacklogItem, RunStage, Section } from '../../../../shared/types';
 
 /* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
    the two surfaces are separate lazy chunks — see lib/view-keys.ts for why a
-   shared module rather than an export off this file. The two below stay local
-   because Archive has neither control. */
+   shared module rather than an export off this file. The three below stay local
+   because Archive has none of these controls. */
 const STATUS_KEY = 'backlog-manager.status';
 const SORT_KEY = 'backlog-manager.sort';
+/* The sort's direction (the band-filter spec's §3), a key of its own beside SORT_KEY rather than folded into it: a reader who picked `By name` before
+   the direction existed has `"name"` under SORT_KEY and nothing under this one, and a merged `{ key, dir }` value would have made that reader's stored
+   string unreadable instead of merely incomplete. Its fallback is `null`, never a direction — see `sortDir` below for why that is load-bearing. */
+const SORT_DIR_KEY = 'backlog-manager.sort-dir';
 
 /** The "not narrowed" sentinel — a sentinel rather than '', so a stored value
  *  always reads as itself and never as "the field was cleared". */
@@ -57,6 +64,28 @@ const COUNT_WORDS: Record<StatusFilter, string> = {
   done: 'done',
   all: 'items'
 };
+
+/* The Status switch's four options, in the order the old select listed them. `started` is labelled `In progress` because that is what the filter
+   admits — live work by `liveRank`, not merely a `started:` stamp — and the value stays `started` because it is what STATUS_KEY has always stored. */
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'open', label: 'Open' },
+  { value: 'started', label: 'In progress' },
+  { value: 'done', label: 'Done' },
+  { value: 'all', label: 'All' }
+];
+
+/* The sort popover's three rows. `label` is also the track's reading (`Sort: Name (asc)`), so it is the key's name and nothing else; what the key
+   orders by is the hint's job. */
+const SORT_OPTIONS: FilterBarSort<SortKey>['options'] = [
+  { value: 'created', label: 'Created', hint: 'when it was filed' },
+  { value: 'name', label: 'Name', hint: 'title, A–Z' },
+  { value: 'project', label: 'Project', hint: 'grouped by repo' }
+];
+
+/* Each key's natural direction — the order the board drew for it before the direction existed: newest first for `created`, A–Z for the other two.
+   A key change lands on the new key's own (so `Name` never opens Z→A because `Created` was descending), and a missing or unrecognised stored direction
+   resolves to it; the dashboard leaves the direction alone on every pick, and this board deliberately does not. */
+const NATURAL_DIR: Record<SortKey, SortDir> = { created: 'desc', name: 'asc', project: 'asc' };
 
 /**
  * Fixed column order — the design's order (Refactoring · Ideas · Bugs ·
@@ -92,12 +121,54 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
  * first — `liveRank`), and a primary key that has to run in front of whichever comparator
  * is selected can only be written once against a record's shared call site —
  * three separate branches would each need their own copy of it.
+ *
+ * Each one is written ASCENDING and handed the direction as a `sign`, which it applies to its own key's comparison and to nothing else (the
+ * band-filter spec's §3). That is the whole reason the sign is a parameter rather than a negation of the comparator's result at the call site: `project`
+ * breaks its ties newest first, and a negated result would flip the tie-break with the key, so `Project (desc)` would read Z→A *and* oldest first inside
+ * every project. `created` was `b` against `a` before the direction existed; it is `a` against `b` now and arrives at the same newest-first order through
+ * its natural `desc`.
  */
-const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem) => number> = {
-  name: (a, b) => a.title.localeCompare(b.title),
-  project: (a, b) => a.project.localeCompare(b.project) || b.created.localeCompare(a.created),
-  created: (a, b) => b.created.localeCompare(a.created)
+const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem, sign: 1 | -1) => number> = {
+  name: (a, b, sign) => sign * a.title.localeCompare(b.title),
+  project: (a, b, sign) => sign * a.project.localeCompare(b.project) || b.created.localeCompare(a.created),
+  created: (a, b, sign) => sign * a.created.localeCompare(b.created)
 };
+
+/* The key the board orders by, out of whatever SORT_KEY holds.
+
+   The `SortKey` type is not a promise that the stored value is one. It
+   arrives from localStorage through `usePersistedState`, which JSON.parses
+   whatever is stored and hands back anything it finds — the type describes
+   what this build WRITES, never what it is capable of READING. A key
+   hand-edited, or written by a later build and then rolled back, misses
+   `COMPARATORS` entirely, and an unguarded miss is *called*: `undefined(a, b)`
+   throws inside render, and with no ErrorBoundary anywhere in client/src React
+   unmounts the tree to a blank page that only clearing site data recovers.
+   Degrading to `created` is precisely what the if/else chain the record
+   replaced did in its final `else`, so this restores behaviour rather than
+   adding a new rule.
+
+   Resolved here, once, rather than as a `COMPARATORS[sort] ?? COMPARATORS.created`
+   lookup inside `sortItems` (where it lived until the band's filter track):
+   the sort track reads the key too now — it prints `Sort: <label> (<dir>)` and
+   ticks the chosen row — and a raw value handed to it would print `Sort: newest`
+   over a board ordered by Created, or, for a stored object, render that object
+   as a React child, which is the same blank page by another road. One
+   resolution feeds the order, the label, the ticked row and the natural
+   direction, so the four cannot disagree. An own-property test rather than
+   `??`, because `COMPARATORS['constructor']` is not undefined.
+
+   Deliberately NOT matched by the Status filter, which reads the same
+   unvalidated storage and is left unguarded on purpose: a stale status value
+   just matches nothing in the four type columns, leaving a visibly narrowed
+   board — the filter button raised with a `1` on it, no option lit in the
+   Status switch — whose fix is `Clear all`, one click inside the panel that
+   button opens. (The Project filter goes further still and fails open to
+   "all".) The asymmetry is the point — a degraded board a user can reason
+   about is a different class of problem from a page that isn't there. */
+function resolveSortKey(stored: unknown): SortKey {
+  return typeof stored === 'string' && Object.prototype.hasOwnProperty.call(COMPARATORS, stored) ? (stored as SortKey) : 'created';
+}
 
 /**
  * The primary sort key every comparator shares, and the board's one answer to
@@ -152,29 +223,16 @@ const liveRank = (item: BacklogItem, stage: RunStage | undefined, now: number | 
  * item's file says nothing about the run working it (see `liveBarFor`'s own
  * comment for why), so the primary key can no longer be a pure function of one
  * item and the lookup has to come from the caller that holds the run payload.
+ *
+ * `sort` is already resolved (`resolveSortKey`, above), so the lookup cannot miss. `dir` reaches the key's own comparison only: `liveRank` stays the
+ * primary key in both directions, because "live cards first" is not an order the reader chose and so not one a direction can turn over — the sort
+ * popover's foot line says as much.
  */
-function sortItems(items: BacklogItem[], sort: SortKey, stageFor: (item: BacklogItem) => RunStage | undefined, now: number): BacklogItem[] {
+function sortItems(items: BacklogItem[], sort: SortKey, dir: SortDir, stageFor: (item: BacklogItem) => RunStage | undefined, now: number): BacklogItem[] {
   const out = [...items];
-  /* The `??` is not defensive noise, and the `SortKey` type is not a promise
-     that it can't fire. `sort` arrives from localStorage through
-     `usePersistedState`, which JSON.parses whatever is stored and hands back
-     any string it finds — the type describes what this build WRITES, never
-     what it is capable of READING. A key hand-edited, or written by a later
-     build and then rolled back, misses this record entirely, and an
-     unguarded miss is *called*: `undefined(a, b)` throws inside render, and
-     with no ErrorBoundary anywhere in client/src React unmounts the tree to a
-     blank page that only clearing site data recovers. Degrading to `created`
-     is precisely what the if/else chain this record replaced did in its final
-     `else`, so this restores behaviour rather than adding a new rule.
-     Deliberately NOT matched by the Status select below, which reads the same
-     unvalidated storage and is left unguarded on purpose: a stale status value
-     just matches nothing in the four type columns, leaving a visibly
-     narrowed board whose cause is the select sitting right above it and whose
-     fix is one click. (The Project select goes further still and fails open to
-     "all".) The asymmetry is the point — a degraded board a user can reason
-     about is a different class of problem from a page that isn't there. */
-  const compare = COMPARATORS[sort] ?? COMPARATORS.created;
-  out.sort((a, b) => liveRank(a, stageFor(a), now) - liveRank(b, stageFor(b), now) || compare(a, b));
+  const compare = COMPARATORS[sort];
+  const sign = dir === 'asc' ? 1 : -1;
+  out.sort((a, b) => liveRank(a, stageFor(a), now) - liveRank(b, stageFor(b), now) || compare(a, b, sign));
   return out;
 }
 
@@ -258,12 +316,29 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
 
   /* The query is plain useState — deliberately not remembered. A remembered
      query is a board that opens showing three cards out of forty for no
-     visible reason. The selects survive that objection because each one
-     permanently states its own value in the bar. */
+     visible reason. The filters survive that objection because the band still
+     states them with the panel closed: the filter button is raised and carries
+     a count while any is set, and the count line names the picked project
+     (`9 open in brickwright`). The sort survives it more simply — the track
+     prints it. */
   const [query, setQuery] = useState('');
   const [project, setProject] = usePersistedState<string>(PROJECT_KEY, ALL);
   const [status, setStatus] = usePersistedState<StatusFilter>(STATUS_KEY, 'open');
-  const [sort, setSort] = usePersistedState<SortKey>(SORT_KEY, 'created');
+  const [storedSort, setSort] = usePersistedState<SortKey>(SORT_KEY, 'created');
+  const [storedDir, setSortDir] = usePersistedState<SortDir | null>(SORT_DIR_KEY, null);
+  const sort = resolveSortKey(storedSort);
+  /* The stored direction when it is one, otherwise the resolved key's natural one. The `null` fallback is load-bearing: a reader who last picked
+     `By name` before the direction existed has no direction stored, and must land on `Name (asc)` — A–Z, as they left it — not on a fixed
+     board-wide default that happens to be right for `Created` alone. Validated like the key and for the same reason: the type is what this build
+     writes, and anything else reads as absent. */
+  const sortDir: SortDir = storedDir === 'asc' || storedDir === 'desc' ? storedDir : NATURAL_DIR[sort];
+  /* A DIFFERENT key stores itself and its natural direction; the current key re-picked stores nothing, so a direction the reader chose for it
+     survives (the band-filter spec's §3). "Current" is the resolved key — the one the track shows ticked. */
+  const pickSortKey = (k: SortKey): void => {
+    if (k === sort) return;
+    setSort(k);
+    setSortDir(NATURAL_DIR[k]);
+  };
 
   const all = index?.items ?? [];
   const registered = projects ?? [];
@@ -279,9 +354,19 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
 
   /* Fail-open on a stale stored project (unregistered since): an unmatched
      filter that emptied the board would look like the server broke. The
-     fallback feeds back into the select, so control and board agree. */
+     fallback feeds the pressed chip — `All projects` — and the filter count
+     below, so the panel, the button's badge and the board all agree. */
   const knownPaths = new Set(registered.map((p) => p.path));
   const projectValue = knownPaths.has(project) ? project : ALL;
+
+  /* How many filters are set, for the filter button's badge and raised look, and for whether Clear all does anything. Off `projectValue` — the
+     fail-open value — never the raw stored path, so a stale path lights no badge while `All projects` is the pressed chip. The search
+     is not counted: it states itself in its own field. Nor is the sort, which is not a filter and which Clear all leaves alone. */
+  const filterCount = (projectValue === ALL ? 0 : 1) + (status === 'open' ? 0 : 1);
+  const clearFilters = (): void => {
+    setProject(ALL);
+    setStatus('open');
+  };
 
   /* Fresh runs only: a stale run has stopped reporting, and a card's live
      strip is the claim "this item is being worked right now" — so it has to go
@@ -480,13 +565,22 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
    * no items and the warning line above already names it, so counting it here
    * would make the line disagree with the board under it. It is dropped
    * entirely once the filter names one project, because the answer would be
-   * `across 1 project` on every board a reader narrowed themselves. */
+   * `across 1 project` on every board a reader narrowed themselves.
+   *
+   * In its place, the project's NAME (`9 open in brickwright`, the band-filter
+   * spec's §3): the picker is behind a popover now, so with the panel closed
+   * this line is the only thing on the band that says which project the
+   * number counts. Read off `projectValue`, so a stale stored path — which
+   * fails open to all — gets no suffix, and looked up by path because the
+   * path is the filter's identity; the `?? projectValue` cannot fire while
+   * `knownPaths` guards that value, and is there because a lookup must
+   * resolve to SOME string. */
   const countWord = COUNT_WORDS[status] ?? 'items';
   const countProjects = new Set(visible.map((i) => i.projectPath)).size;
   const countLine =
     projectValue === ALL
       ? `${visible.length} ${countWord} across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
-      : `${visible.length} ${countWord}`;
+      : `${visible.length} ${countWord} in ${registered.find((p) => p.path === projectValue)?.name ?? projectValue}`;
 
   /* The band printed one `polled 12 s ago` line per connected project from task-45 until the tracker strip: that clock is a fact about the machine,
      not about this section, so it lives in the shell's `TrackerChip` now — on every section, with a line timer per repo — and a copy here would be two
@@ -663,8 +757,10 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
     <div className="board">
       {/* The page header is a band, not a card (DESIGN.md §8.2/§8.3): the
           19/500 title over the 13 px count line, then right-aligned the run
-          chip, the 36 px search field, the three filter chips and — last, and
-          the page's ONE ink chip — Orchestrate. */}
+          chip, the 36 px search field, the filter track — `FilterBar`: the
+          funnel that opens the Filters panel, `Sort: <key> (<dir>)` and the
+          button that opens Sort by — and, last, the page's ONE ink chip,
+          Orchestrate. */}
       <Band title="Board" sub={countLine}>
         {/* Left of the controls (spec §3.2). Everything the Board still says
             about runs, in one control that opens Runs; absent entirely when
@@ -678,62 +774,39 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        {/* Each filter is a `Chip` wrapping its own native select — `as:
-            'label'`, the mode the primitive already has for a chip that wraps
-            its own control. The chip owns the shell (32 px, 12 px radius, the
-            `--hairline2` stroke) and the select owns the value text and the
-            picker, which is what keeps a project list of any length working
-            without this file growing a menu of its own. The `aria-label` stays
-            on the select, as it always was: it is the control, the label is
-            only its shell. */}
-        <Chip as="label">
-          <select className="board-filter" aria-label="Project" value={projectValue} onChange={(e) => setProject(e.target.value)}>
-            <option value={ALL}>All projects</option>
-            {/* Valued by path, labelled by name — two checkouts of one repo
-                stay two selectable options. */}
-            {registered.map((p) => (
-              <option key={p.path} value={p.path}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          {/* The UA's own arrow went with `appearance: none` (the select had to
-              lose its box, and the arrow is part of it). This is the design's
-              own, at the board's size and ink; aria-hidden, because the select
-              already announces itself as a combobox. */}
-          <span className="board-filter-mark" aria-hidden="true">
-            ▾
-          </span>
-        </Chip>
-        <Chip as="label">
-          <select className="board-filter" aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)}>
-            <option value="open">Open</option>
-            <option value="started">In progress</option>
-            <option value="done">Done</option>
-            <option value="all">All</option>
-          </select>
-          {/* The UA's own arrow went with `appearance: none` (the select had to
-              lose its box, and the arrow is part of it). This is the design's
-              own, at the board's size and ink; aria-hidden, because the select
-              already announces itself as a combobox. */}
-          <span className="board-filter-mark" aria-hidden="true">
-            ▾
-          </span>
-        </Chip>
-        <Chip as="label">
-          <select className="board-filter" aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-            <option value="created">Newest first</option>
-            <option value="name">By name</option>
-            <option value="project">By project</option>
-          </select>
-          {/* The UA's own arrow went with `appearance: none` (the select had to
-              lose its box, and the arrow is part of it). This is the design's
-              own, at the board's size and ink; aria-hidden, because the select
-              already announces itself as a combobox. */}
-          <span className="board-filter-mark" aria-hidden="true">
-            ▾
-          </span>
-        </Chip>
+        {/* The filter track (the band-filter spec's §1–§3), which replaced
+            three native selects in outline chips. One element in one place on
+            EVERY render — never keyed on a filter value, never behind a
+            condition — because `FilterBar` keeps which panel is open in its
+            own state and a pick does not close the panel: a remount on a pick
+            would drop that state and shut the panel under the reader's
+            pointer. Orchestrate appearing after it on the first project pick
+            is exactly such a change to the band, and React keeps this element
+            because its position among the band's children does not move.
+
+            Project first, chips valued by path and labelled by name so two
+            checkouts of one repo stay two picks, with the hint that says why
+            it is single-select; then Status, a four-way pill switch laid out
+            the panel's full width (`fill`). `onPick` is the setter itself:
+            picking the chosen chip again stores the value it already holds,
+            which changes nothing. */}
+        <FilterBar<SortKey>
+          count={filterCount}
+          onClear={clearFilters}
+          sort={{ key: sort, dir: sortDir, options: SORT_OPTIONS, onKey: pickSortKey, onDir: setSortDir }}
+        >
+          <ProjectPicks
+            projects={registered}
+            value={projectValue}
+            allValue={ALL}
+            hues={hues}
+            hint="· one at a time — Orchestrate needs one"
+            onPick={setProject}
+          />
+          <FilterSection title="Status" fill>
+            <Segmented<StatusFilter> pill label="Status" value={status} options={STATUS_OPTIONS} onChange={setStatus} />
+          </FilterSection>
+        </FilterBar>
         {/* Task 13: the "drain this project's groomed queue" control.
             `showOrchestrate`/`orchestrateBlockedReason` (computed above)
             already encode all four visibility rules from the brief, so
@@ -784,9 +857,10 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
                   // Sync off alone: nothing to re-ask, and nothing to open.
                   if (orchestrateGateReason === null) return;
                   const syncOff = orchestrateSyncOff;
-                  // Captured, not re-read at resolve time: the filter is a
-                  // live <select>, and the sheet must open for the project
-                  // the reader actually clicked for. Deliberately no "the
+                  // Captured, not re-read at resolve time: the filter can
+                  // change between the click and the answer — the panel is a
+                  // click away and stays open across picks — and the sheet
+                  // must open for the project the reader actually clicked for. Deliberately no "the
                   // filter moved, discard the answer" guard — `orchestrating`
                   // is keyed on the project path precisely so a sheet
                   // outlives a filter change (see its declaration), and the
@@ -839,6 +913,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
             const colItems = sortItems(
               visible.filter((i) => i.section === col.section),
               sort,
+              sortDir,
               runStageFor,
               now
             );
