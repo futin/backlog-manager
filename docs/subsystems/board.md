@@ -70,8 +70,10 @@ deleting the family and the guard entry together, in one change.
 
 `SettingsRow` and `SettingsGroup` are not primitives — they are the Settings card's own composition of `Sheet` plus rows, and stay under `settings/`. Everything
 else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`, `RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`,
-`StageBars`, `WatchdogMonitor` (runs). `RunControls` and `RunRowTime` sit at the top level of `components/`, like `lib/view-keys.ts`, because two lazy chunks
-read each of them.
+`StageBars`, `WatchdogMonitor` (runs). `RunControls`, `RunRowTime` and `FilterBar` sit at the top level of `components/`, like `lib/view-keys.ts`, because two
+lazy chunks read each of them. `FilterBar.tsx` is three exports, not one: the band's filter-and-sort track with its two popovers (`FilterBar`), one section of
+the filter popover (`FilterSection`, whose `fill` flag lays a switch out full width) and the `Project` section both pages draw (`ProjectPicks`) — the last two
+so that no page draws a section heading or a project chip of its own. Its family is `.filter-bar*`, never `.ui-*`.
 
 ### Board
 

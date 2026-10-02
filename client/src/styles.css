@@ -381,6 +381,81 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .board-band-search::placeholder { color: var(--ink3) }
 .board-band-search:focus { outline: none; border-color: var(--ink3) }
+
+/* The band's filter track and its two popovers (§8.3; the band-filter spec's §1) — `FilterBar`'s own family. `.filter-bar*`, never `.ui-*`: that namespace is
+   the primitives' and guard 7 reads every class token outside the block at the end of this file, so nothing here names `.ui-seg` or `.ui-chip` — the panels'
+   chips and switches are those primitives, and this section only lays them out.
+
+   The wrapper is the panel's positioning parent AND carries `margin-left: auto`, the dashboard's `.ctlwrap`: `.ui-band-right` wraps, and the right-aligned
+   300 px panel only stays on-screen if the track stays at the right of whichever line it lands on. Both panels hang from it, which is what gives them one
+   right edge. */
+.filter-bar-wrap { position: relative; margin-left: auto; flex: none }
+/* The recessed track: the dashboard's `.seg` ground. 3 px of padding around a 30 px button is the 36 px the search field beside it stands at. */
+.filter-bar { display: flex; align-items: center; padding: 3px; border-radius: 12px; background: var(--hairline2) }
+.filter-bar-btn {
+  position: relative; display: grid; place-items: center;
+  width: 34px; height: 30px; padding: 0; border: 0; border-radius: 9px;
+  background: none; color: var(--ink2); cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.filter-bar-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round }
+/* An open panel reads from `aria-expanded`, the state the button already carries, rather than a second class the component would have to keep in step. */
+.filter-bar-btn:hover, .filter-bar-btn[aria-expanded='true'] { color: var(--ink) }
+/* Raised while a filter is set (§8: a raised control marks a state, never a button) — the sort button never takes it, it has no "set". */
+.filter-bar-btn.on { background: var(--strip); color: var(--ink); box-shadow: 0 1px 2px var(--shadow) }
+/* The count disc, hung off the button's top-right corner. 11 px, not the dashboard's 10: guard 3 puts this board's floor there. `min-width` plus the side
+   padding lets a two-digit count widen it into a pill instead of overflowing the circle. */
+.filter-bar-badge {
+  position: absolute; top: -4px; right: -4px;
+  display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+  background: var(--ink); color: var(--strip);
+  font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums;
+}
+.filter-bar-sep { flex: none; width: 1px; height: 18px; margin: 0 2px 0 6px; background: var(--ink3); opacity: .45 }
+.filter-bar-sortlab { padding: 0 2px 0 8px; font-size: 13px; color: var(--ink2); white-space: nowrap }
+.filter-bar-sortlab b { font-weight: 500; color: var(--ink) }
+/* Below the phone break the label is not drawn and the two icons stay. The divider keeps standing between them, so its margin goes symmetric — the
+   asymmetric 6/2 above is the gap to the label that is no longer there. */
+@media (max-width: 700px) {
+  .filter-bar-sortlab { display: none }
+  .filter-bar-sep { margin: 0 2px }
+}
+
+/* Inside the panels. The header row, then sections: the heading is 12 px `--ink2` with its hint in `--ink3`, and a section after another opens a 14 px gap. */
+.filter-bar-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; font-size: 14px; font-weight: 500; color: var(--ink) }
+.filter-bar-clear { margin-left: auto; padding: 0; border: 0; background: none; font-size: 12px; color: var(--ink2); cursor: pointer }
+.filter-bar-clear[aria-disabled='true'] { color: var(--ink3); cursor: default }
+.filter-bar-section + .filter-bar-section { margin-top: 14px }
+.filter-bar-heading { margin-bottom: 8px; font-size: 12px; color: var(--ink2) }
+.filter-bar-hint { color: var(--ink3) }
+/* `max-width` and `overflow` so a long project name clips inside the panel's content box rather than pushing the panel wider than it was told to be. */
+.filter-bar-picks { display: flex; flex-wrap: wrap; gap: 6px }
+.filter-bar-picks button { max-width: 100%; overflow: hidden }
+/* The Status switch, full width — the dashboard's `.sw button { flex: 1 }`. Content-sized it overflows the panel's 266 px content box by about 2 px. Keyed on
+   the section's own class and reached by `[role="group"]` and `button`, never `.ui-seg`: guard 7 would read a family token here as a restatement of the
+   primitive's look. Never on the Project section — its chips must not stretch.
+   `nowrap` is what lets `flex: 1` do its job: a button's text wraps by default, so the flex algorithm floors `In progress` at its longest word and then wraps
+   it onto two lines inside a 28 px pill. Held on one line, the four options' floors sum to ~260 px and the equal shares fit. */
+.filter-bar-section-fill [role="group"] { display: flex }
+.filter-bar-section-fill [role="group"] button { flex: 1; white-space: nowrap }
+
+/* The sort panel's rows: 36 px, label 13/500 with its hint at 11, and a tick that is laid out always and shown only on the chosen row so the label never
+   shifts. */
+.filter-bar-opt {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left;
+  font-size: 13px; font-weight: 500; color: var(--ink2); cursor: pointer;
+}
+.filter-bar-opt:hover { background: var(--strip-hi) }
+.filter-bar-opt.on { color: var(--ink) }
+.filter-bar-opt-hint { font-size: 11px; font-weight: 400; color: var(--ink3) }
+.filter-bar-tick {
+  flex: none; margin-left: auto; width: 16px; height: 16px; visibility: hidden;
+  stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.filter-bar-opt.on .filter-bar-tick { visibility: visible }
+.filter-bar-rule { height: 1px; margin: 12px 0; background: var(--hairline) }
+.filter-bar-foot { margin: 10px 0 0; font-size: 11px; color: var(--ink3) }
 /* The native select inside a filter `Chip`. The chip owns the shell; this
    takes the UA's away so the two do not draw two boxes, and takes the UA arrow
    with it — the glyph beside it is drawn at this board's own size and ink.
