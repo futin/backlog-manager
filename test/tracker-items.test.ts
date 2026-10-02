@@ -238,7 +238,7 @@ describe('both adapters in one payload', () => {
 
   it('answers known: false for a tracker project’s uncommitted read', async () => {
     // The fixture is a real repo on `main` with a clean tree, so the FILES
-    // answer here would be `{ paths: [], known: true }` — see `gitInit`.
+    // answer here would be `{ paths: [], absent: [], known: true }` — see `gitInit`.
     const filesAnswer = uncommittedItemPaths(tracker);
     expect(filesAnswer.known).toBe(true);
 
@@ -247,7 +247,7 @@ describe('both adapters in one payload', () => {
     // sheet's existing `known` gate keeps the chip off. Nothing derived reads
     // this, and it remains a sibling endpoint rather than a `BacklogItem`
     // field.
-    expect(res.body).toEqual({ paths: [], known: false });
+    expect(res.body).toEqual({ paths: [], absent: [], known: false });
   });
 
   it('never puts the token in a payload', async () => {

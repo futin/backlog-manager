@@ -13,7 +13,8 @@ files under `~/.backlog-manager/settings/`.
 `GET /api/projects` — one row per registered project, with open-item counts, a `missing` flag for a project whose `backlog/` disappeared, and that project's
 `source`. `GET /api/items/body?path=` — one item's Markdown body, resolved through an allowlist built from the registry, so a path outside every registered
 project's `backlog/` 404s. `GET /api/items/uncommitted?project=` — which of one project's item files differ from `main`, so the Orchestrate sheet can flag the
-rows whose bytes on disk are not the bytes a run will read: `{ paths, known }`, `known: false` for every git failure alike — and for a tracker project, where
+rows whose bytes on disk are not the bytes a run will read: `{ paths, absent, known }`, where `absent` is the subset of `paths` that `main` does not hold at all
+(the run skips those; every other flagged row is stale and runs on `main`'s copy), `known: false` for every git failure alike — and for a tracker project, where
 the question has no meaning — 404 for an unregistered project, and nothing cached.
 
 A project's source is resolved per request from its own committed `backlog/source.json` (`sources/resolve.util.ts`), never cached and never stored — the same

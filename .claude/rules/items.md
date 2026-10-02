@@ -51,7 +51,7 @@ paths: ["server/src/items/**"]
   [invariants.md](docs/subsystems/invariants.md#the-middle-rung-comes-from-git-not-the-item-file)
 - **The Orchestrate sheet's `uncommitted` flag is read from git per request, memoised nowhere, and must never join the memo one file over.**
   `uncommittedItemPaths` (`server/src/items/uncommitted.util.ts`), behind `GET /api/items/uncommitted`, is the one implementation. The question is "differs from
-  `main`", never "differs from `HEAD`"; two git reads (`diff` plus `ls-files --others`), never one; a sibling endpoint, never a `BacklogItem` field; `known`
-  gates the render; nothing derived reads it; it changes no default selection. Any surface stating a consequence must split it: absent from `main` is skipped,
-  present-but-edited is executed on `main`'s bytes. Why:
+  `main`", never "differs from `HEAD`"; three git reads (`diff` plus `ls-files --others` for membership, `ls-tree` at `main` for each row's fate), never fewer; a sibling endpoint, never a `BacklogItem` field; `known`
+  gates the render; nothing derived reads it; it changes no default selection. Any surface stating a consequence must split it, by the endpoint's per-row `absent`:
+  absent from `main` is skipped, present-but-edited is executed on `main`'s bytes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-orchestrate-sheets-uncommitted-flag-is-read-from-git-per-request-and-memoised-nowhere)

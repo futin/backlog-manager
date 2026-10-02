@@ -2234,7 +2234,7 @@ multi-hour unattended operation. The 2026-09-06 cross-run sweep counted five suc
 in claude-agents-dashboard, bug-16 in ixray). task-29 closes the other half of this at groom time, said by the skill that creates the state; this one is for the
 person who groomed yesterday and is launching today.
 
-### One question, two fates — and why the sheet has to say both
+### One question, two fates — and why the sheet has to say which
 
 The predicate is "does the working copy differ from `main`". The run's `not committed on main` verdict is strictly narrower: `readBlob(relPath) === null` in
 `buildGatedQueue`, i.e. the path is **absent** from `main`. So a flagged row has one of two futures, and they are not the same news:
@@ -2249,14 +2249,18 @@ The predicate is "does the working copy differ from `main`". The run's `not comm
 Review round 1 of task-32 caught the sheet's note asserting the first fate of both rows ("its gate will report 'not committed on main' and skip them"), which is
 false for the second and reachable by any working-tree touch of an already-groomed, already-committed item — `backlog.mjs start --as groom`'s own `updated:`
 stamp included. It is the predictable mistake, because only the narrow shape has a quotable verdict string, and quoting the run verbatim is one of the feature's
-own goals. **Any surface that states a consequence of this flag must split it**, and the resolution is what the note does now: lead with the fact true of every
-flagged row (the run reads `main`'s copy, not the file on screen), then name both fates, keeping the literal `not committed on main` on screen but attached to
-the case it describes.
+own goals. **Any surface that states a consequence of this flag must split it.** task-32's resolution split it by hedging — lead with the fact true of every
+flagged row (the run reads `main`'s copy, not the file on screen), then name both fates whenever anything was flagged — because the endpoint answered only
+membership. Since #235 it splits by data: the endpoint reports each row's fate (`absent`, the subset of `paths` that `main` does not hold, from the third read
+in §3), and the note keeps the same lead sentence and then states only the fates actually on screen, each with its own count — the literal
+`not committed on main` appears only when some row is absent, attached to the sentence that counts them, and a fate whose count is 0 is not mentioned at all.
 
 The chip word stays the single term `uncommitted` across the chip, the `deselect uncommitted (N)` button, the endpoint and these docs, even though a
 tracked-and-modified row is one whose _changes_ are uncommitted rather than the item. One vocabulary beats per-row precision here because the note directly
 above the rows now defines the term outright; a chip reading `differs from main` would be more precise about one row and would leave the button and the endpoint
-speaking a different language from it.
+speaking a different language from it. #235 re-decided this when the per-row fate became knowable and kept the one word: the fate rides in the pill's `title`
+(and the row's `data-fate`, for tests), never as a second visible word, and the note is where each fate is stated as fact. Forking the word would have left
+the button and the endpoint speaking a different language from the rows for the same reason as before.
 
 ### 1. No memo — and specifically not the one in the next file over
 
@@ -2267,7 +2271,8 @@ exists to report, moves **neither** of them. A memo on that key would therefore 
 negative the feature was built to remove, and it would do so silently — the sheet would simply stop flagging, which looks identical to a project with nothing to
 flag.
 
-The cost is affordable without one. Measured 2026-09-07 across the five projects in this machine's registry, both spawns together took 50–270ms per project —
+The cost is affordable without one. Measured 2026-09-07 across the five projects in this machine's registry, the two original read spawns together took
+50–270ms per project; #235's third read (`ls-tree`, §3) was re-measured 2026-10-02 on three of those projects at 4–9ms, with the whole call at 20–39ms warm —
 and unlike `lastCommitDates`, which runs for **every** registered project on both `/api/items` and `/api/projects` (the two the board fetches on mount and on
 every window focus), this runs for **one** project **once per sheet open**. That asymmetry is the whole reason one of these two functions needs a cache and the
 other must not have one. The client half enforces the cadence too: the effect is keyed on `[project]` alone, so walking the three steps or flipping a picker
@@ -2289,7 +2294,7 @@ each other: the plan said here that a present item never earns the "not committe
 row. The sentence that is true of all of them is the one the note now leads with — the run reads `main`'s copy rather than the file on screen — and the fates
 are split after it (see "One question, two fates" above).
 
-### 3. Two git reads, and the asymmetry between them
+### 3. Three git reads: two for membership, with an asymmetry between them, and one for the fate
 
 `git diff --name-only --no-renames main -- backlog` finds tracked files whose working-tree content differs from `main`. It cannot find a file git has never
 tracked — and a brand-new, never-committed item file is exactly that, which is the single most common shape of this failure.
@@ -2297,8 +2302,15 @@ tracked — and a brand-new, never-committed item file is exactly that, which is
 diff printed nothing and `ls-files --others` printed `backlog/bugs/open/bug-16-….md`, one of the five items the sweep had recorded as skipped. Case 3 in the
 suite asserts the util's answer **and** that the diff-only answer is empty, so a later "simplification" down to one spawn cannot leave the case green.
 
-A failure of _either_ read fails the whole question (`known: false`). Reporting the half that worked would be a confident, incomplete statement of fact about
-someone's repository, which is the one thing this render must never be.
+The third read, added by #235, answers each flagged row's fate: `git ls-tree -r --name-only main -- backlog` lists every path `main` holds, once per request,
+and a flagged path missing from that listing is `absent`. The fate is "does `main` hold this path at all", never "which of the two membership reads found it",
+because neither read implies a fate: an item committed on a branch `main` does not contain is reported by `diff` and is still absent from `main` (case 4), and an
+item `git rm --cached` from the index while still committed on `main` is reported by `ls-files --others` and is still present there (case 27). One spawn rather
+than `cat-file -e main:<path>` per flagged row, because this runs synchronously on a request path. It carries `-c core.quotePath=false` like the other two —
+an escaped listing would not contain a raw non-ASCII path and would misreport an edited item as absent (case 28).
+
+A failure of _any_ of the three reads fails the whole question (`known: false`). Reporting the part that worked — paths without their fates included — would be
+a confident, incomplete statement of fact about someone's repository, which is the one thing this render must never be.
 
 ### 4. Both preconditions mirror `blobReaderAt`, and `known: false` is why
 

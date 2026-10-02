@@ -77,7 +77,7 @@ describe('uncommittedItemPaths', () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], known: true });
+    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
   });
 
   // --- case 2 -----------------------------------------------------------
@@ -90,6 +90,7 @@ describe('uncommittedItemPaths', () => {
 
     expect(uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/bugs/open/bug-1.md')],
+      absent: [],
       known: true
     });
   });
@@ -111,6 +112,7 @@ describe('uncommittedItemPaths', () => {
 
     expect(uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/tasks/open/task-9.md')],
+      absent: [abs(root, 'backlog/tasks/open/task-9.md')],
       known: true
     });
 
@@ -135,6 +137,7 @@ describe('uncommittedItemPaths', () => {
 
     expect(uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/tasks/open/task-9.md')],
+      absent: [abs(root, 'backlog/tasks/open/task-9.md')],
       known: true
     });
   });
@@ -148,7 +151,7 @@ describe('uncommittedItemPaths', () => {
     // and this worktree holds exactly what a run's worktree from main would.
     git(root, 'add', 'backlog/bugs/open/bug-1.md');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], known: true });
+    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
   });
 
   // --- case 6 -----------------------------------------------------------
@@ -168,7 +171,7 @@ describe('uncommittedItemPaths', () => {
     commit(root, 'one');
     write(root, 'sub/backlog/bugs/open/bug-1.md', 'never committed\n');
 
-    expect(uncommittedItemPaths(join(root, 'sub'))).toEqual({ paths: [], known: false });
+    expect(uncommittedItemPaths(join(root, 'sub'))).toEqual({ paths: [], absent: [], known: false });
   });
 
   // --- case 7 -----------------------------------------------------------
@@ -194,7 +197,7 @@ describe('uncommittedItemPaths', () => {
     commit(root, 'one');
     write(root, 'backlog/tasks/open/task-9.md', 'uncommitted\n');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], known: false });
+    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: false });
   });
 
   // --- case 8 -----------------------------------------------------------
@@ -203,7 +206,7 @@ describe('uncommittedItemPaths', () => {
     roots.push(plain);
     write(plain, 'backlog/bugs/open/bug-1.md', 'no repo here\n');
     expect(() => uncommittedItemPaths(plain)).not.toThrow();
-    expect(uncommittedItemPaths(plain)).toEqual({ paths: [], known: false });
+    expect(uncommittedItemPaths(plain)).toEqual({ paths: [], absent: [], known: false });
   });
 
   // --- case 9 -----------------------------------------------------------
@@ -214,13 +217,14 @@ describe('uncommittedItemPaths', () => {
     commit(root, 'one');
     write(root, rel, 'never committed\n');
 
-    const { paths, known } = uncommittedItemPaths(root);
+    const { paths, absent, known } = uncommittedItemPaths(root);
     expect(known).toBe(true);
     // The escaped form git prints without `core.quotePath=false` would be
     // quoted and backslashed; asserting the exact absolute path is what
     // catches that, since a `\303\251` spelling matches no BacklogItem.path.
     expect(paths).toEqual([abs(root, rel)]);
     expect(paths[0]).toContain('café');
+    expect(absent).toEqual([abs(root, rel)]);
   });
 
   // --- case 10 ----------------------------------------------------------
@@ -235,7 +239,7 @@ describe('uncommittedItemPaths', () => {
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], known: true });
+    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
 
     const indexBefore = fs.statSync(join(root, '.git', 'index')).mtimeMs;
     write(root, 'backlog/bugs/open/bug-1.md', 'edited in the working tree\n');
@@ -243,6 +247,7 @@ describe('uncommittedItemPaths', () => {
 
     expect(uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/bugs/open/bug-1.md')],
+      absent: [],
       known: true
     });
   });
@@ -256,7 +261,84 @@ describe('uncommittedItemPaths', () => {
     write(root, 'README.md', 'dirty now\n');
     write(root, 'src/thing.ts', 'brand new, untracked\n');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], known: true });
+    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
+  });
+
+  // --- case 27 ----------------------------------------------------------
+  //
+  // The case that proves the fate is "does `main` hold this path", never
+  // "which of the two reads found it": `git rm --cached` makes the file
+  // untracked, so only `ls-files --others` reports it — yet `main` still
+  // holds it, so a run would gate and execute `main`'s copy, not skip it.
+  it('case 27: an untracked item that main still holds is flagged but not absent', () => {
+    const root = freshRepo();
+    write(root, 'backlog/tasks/open/task-1.md', 'committed\n');
+    commit(root, 'one');
+    git(root, 'rm', '-q', '--cached', 'backlog/tasks/open/task-1.md');
+
+    const untracked = cp.execFileSync('git', ['-C', root, 'ls-files', '--others', '--exclude-standard', '--', 'backlog'], { cwd: root, encoding: 'utf8' });
+    expect(untracked.trim()).toBe('backlog/tasks/open/task-1.md');
+
+    expect(uncommittedItemPaths(root)).toEqual({
+      paths: [abs(root, 'backlog/tasks/open/task-1.md')],
+      absent: [],
+      known: true
+    });
+  });
+
+  // --- case 28 ----------------------------------------------------------
+  //
+  // Pins `core.quotePath=false` on the THIRD read: an octal-escaped listing
+  // would not contain the raw path, so an edited non-ASCII item would be
+  // misreported as absent.
+  it('case 28: a non-ASCII item present at main and edited since is not absent', () => {
+    const root = freshRepo();
+    const rel = 'backlog/tasks/open/task-1-café-ø.md';
+    write(root, rel, 'committed\n');
+    commit(root, 'one');
+    write(root, rel, 'edited since\n');
+
+    const { paths, absent, known } = uncommittedItemPaths(root);
+    expect(known).toBe(true);
+    expect(paths).toEqual([abs(root, rel)]);
+    expect(absent).toEqual([]);
+  });
+
+  // --- case 29 ----------------------------------------------------------
+  it('case 29: a mixed tree splits into absent and stale, and absent is a subset of paths', () => {
+    const root = freshRepo();
+    write(root, 'backlog/tasks/open/task-1.md', 'committed\n');
+    commit(root, 'one');
+    write(root, 'backlog/tasks/open/task-1.md', 'edited since\n');
+    write(root, 'backlog/bugs/open/bug-2.md', 'never committed\n');
+
+    const { paths, absent, known } = uncommittedItemPaths(root);
+    expect(known).toBe(true);
+    expect([...paths].sort()).toEqual([abs(root, 'backlog/bugs/open/bug-2.md'), abs(root, 'backlog/tasks/open/task-1.md')].sort());
+    expect(absent).toEqual([abs(root, 'backlog/bugs/open/bug-2.md')]);
+    for (const p of absent) expect(paths).toContain(p);
+  });
+
+  // --- case 30 ----------------------------------------------------------
+  //
+  // Decision 1 again, over the new field: committing the item changes its
+  // fate, and a memo would keep reporting it absent.
+  it('case 30: caches nothing across a fate change — absent, then committed and edited, then stale', () => {
+    const root = freshRepo();
+    write(root, 'backlog/bugs/open/bug-1.md', 'anchor\n');
+    commit(root, 'one');
+    write(root, 'backlog/tasks/open/task-9.md', 'never committed\n');
+
+    expect(uncommittedItemPaths(root).absent).toEqual([abs(root, 'backlog/tasks/open/task-9.md')]);
+
+    commit(root, 'two');
+    write(root, 'backlog/tasks/open/task-9.md', 'edited since\n');
+
+    expect(uncommittedItemPaths(root)).toEqual({
+      paths: [abs(root, 'backlog/tasks/open/task-9.md')],
+      absent: [],
+      known: true
+    });
   });
 });
 
@@ -300,12 +382,17 @@ describe('GET /api/items/uncommitted', () => {
   });
 
   // --- case 12 ----------------------------------------------------------
-  it('case 12: 200s with { paths, known } for a registered project', async () => {
+  it('case 12: 200s with { paths, absent, known } for a registered project', async () => {
     const res = await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath }).expect(200);
     // The uncommitted file of THIS project, not the other registered one —
     // which is clean, so a service that resolved the wrong entry would answer
     // an empty list here.
-    expect(res.body).toEqual({ paths: [join(projectPath, 'backlog', 'tasks', 'open', 'task-9.md')], known: true });
+    expect(Object.keys(res.body).sort()).toEqual(['absent', 'known', 'paths']);
+    expect(res.body).toEqual({
+      paths: [join(projectPath, 'backlog', 'tasks', 'open', 'task-9.md')],
+      absent: [join(projectPath, 'backlog', 'tasks', 'open', 'task-9.md')],
+      known: true
+    });
   });
 
   // --- case 13 ----------------------------------------------------------

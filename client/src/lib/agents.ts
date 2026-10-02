@@ -576,7 +576,8 @@ export async function fetchMergeCheck(project: string): Promise<MergeCheckResult
  * Not "the rows that run is going to skip", which is what this said for one
  * review round: only the rows ABSENT from `main` are skipped, while a row
  * present there and merely edited since is gated and executed on `main`'s
- * copy. The sheet's own note is the one place that states both fates; see
+ * copy. The sheet's own note is the one place that states the fates, each
+ * only when a row has it (`absent` below says which); see
  * `server/src/items/uncommitted.util.ts`'s header for why the question is
  * deliberately the broad one.
  *
@@ -593,6 +594,12 @@ export interface UncommittedItems {
    *  the server builds them from the registry's own project path with the
    *  same construction `scanProject` uses, so neither side calls realpath. */
   paths: string[];
+  /** The subset of `paths` whose path `main` does not hold at all, so a run
+   *  refuses it with `not committed on main` and skips it (#235). Same
+   *  construction as `paths`, so it compares with `Set.has` the same way;
+   *  every flagged path NOT in it is stale — present at `main` with older
+   *  bytes, which the run gates and executes. */
+  absent: string[];
   /** False whenever the server could not make the read at all: no git, not a
    *  repo, the project is not the repo toplevel, no `main` ref. The sheet
    *  renders nothing in that case — see the guard below. */
@@ -610,6 +617,11 @@ export interface UncommittedItems {
  * silently start asserting the opposite the day the guard is `known !== false`
  * instead. So the guard throws and the caller's `.catch` stays the single
  * place a missing answer is handled.
+ *
+ * `absent` (#235) is required the same way and never defaulted to `[]`: a
+ * missing one read as "nothing is absent" would tell the sheet every flagged
+ * row is stale — a statement of fact about someone's repository the server
+ * never made.
  */
 function isUncommittedItems(data: unknown): data is UncommittedItems {
   return (
@@ -617,6 +629,8 @@ function isUncommittedItems(data: unknown): data is UncommittedItems {
     data !== null &&
     Array.isArray((data as UncommittedItems).paths) &&
     (data as UncommittedItems).paths.every((p) => typeof p === 'string') &&
+    Array.isArray((data as UncommittedItems).absent) &&
+    (data as UncommittedItems).absent.every((p) => typeof p === 'string') &&
     typeof (data as UncommittedItems).known === 'boolean'
   );
 }

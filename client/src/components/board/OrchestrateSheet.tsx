@@ -243,7 +243,8 @@ export function OrchestrateSheet({
    * Which of this project's item files differ from `main` (task-32) — the
    * rows whose bytes on disk are not the bytes the run will act on, which is
    * broader than "the rows it cannot see" and is the whole reason the note
-   * below states two fates rather than one. `null` covers the same three
+   * below splits by fate (`absent`, #235) rather than stating one. `null`
+   * covers the same three
    * states `mergeCoverage`'s
    * does — not asked, in flight, request failed — and all three render
    * nothing: this is a warning, not a gate, and no failure of it may cost
@@ -354,7 +355,7 @@ export function OrchestrateSheet({
    * merge-check — which is legitimately re-asked because `mergeMode` decides
    * whether the question applies at all — nothing on this sheet can change
    * the answer, since the answer is about someone's working tree and this
-   * screen has no writers. Two spawns of git per sheet open is the budget
+   * screen has no writers. Three git reads per sheet open is the budget
    * this feature was accepted at (see uncommitted.util.ts on why it is not
    * memoised server-side); making it per-step would multiply that by however
    * many times someone walks back and forth.
@@ -498,7 +499,7 @@ export function OrchestrateSheet({
    * it; this derivation only decides membership.
    *
    * `known` gates the whole derivation rather than being a decorative field:
-   * `{ paths: [], known: false }` means the server could not make the read at
+   * `{ paths: [], absent: [], known: false }` means the server could not make the read at
    * all — no git, the project is not the repo toplevel, no `main` ref — and an
    * absent answer must never render as "nothing is uncommitted", since the
    * chip below is a statement of fact about someone's repository. An empty set
@@ -516,9 +517,21 @@ export function OrchestrateSheet({
    * Ids, not paths, come out the far end: the selection, the order and the
    * request all speak in ids (see `selected` above), and `deselectUncommitted`
    * below has to hand `setSelected` the same currency `toggle` does.
+   *
+   * Each flagged row's FATE (#235) comes from the server's `absent`, gated on
+   * `known` the same way: `absent` when its path is in both sets — `main` does
+   * not hold it, so the run skips it — and `stale` when it is flagged and not
+   * absent — `main` holds older bytes, which the run gates and executes. An
+   * `absent` entry that is not also in `paths` is ignored, because membership
+   * stays decided by `paths` alone. The two counts are taken over the same
+   * queued rows `uncommittedIds` is, so they always sum to its length.
    */
   const uncommittedPaths = new Set(uncommitted?.known === true ? uncommitted.paths : []);
+  const absentPaths = new Set(uncommitted?.known === true ? uncommitted.absent : []);
+  const fateOf = (path: string): 'absent' | 'stale' | null => (uncommittedPaths.has(path) ? (absentPaths.has(path) ? 'absent' : 'stale') : null);
   const uncommittedIds = queue.filter(({ item }) => uncommittedPaths.has(item.path)).map(({ item }) => item.id);
+  const absentCount = queue.filter(({ item }) => fateOf(item.path) === 'absent').length;
+  const staleCount = uncommittedIds.length - absentCount;
   /** Only the flagged rows that are still ticked — the control's own count,
    *  so pressing it once disables it rather than leaving a button that claims
    *  there is still something to deselect. */
@@ -793,41 +806,40 @@ export function OrchestrateSheet({
                 )}
               </div>
 
-              {/* The uncommitted warning (task-32). Says the ONE fact that is
-                  true of every flagged row — the run reads main's copy, not
-                  the file on disk — and then splits the consequence, because
-                  the flag is deliberately broader than any single gate
-                  verdict and review round 1 caught this note claiming
-                  otherwise.
+              {/* The uncommitted warning (task-32, per-fate since #235). Opens
+                  with the ONE fact that is true of every flagged row — the run
+                  reads main's copy, not the file on disk — and then states
+                  only the fates actually on screen, each with its own count.
 
                   `uncommittedItemPaths` flags any item file whose working
-                  tree differs from main. `buildGatedQueue`'s
-                  `not committed on ${base}` reason fires on the strictly
-                  narrower `readBlob(relPath) === null`, i.e. the path is
-                  ABSENT from main. A row that is present at main, groomed
-                  there, and merely edited since is flagged here and gated
-                  `ready` by the run — which then executes MAIN'S bytes,
-                  so a plan written after the last commit is not the plan that
-                  runs. That is worth saying and worth a deselect control; it
-                  is not worth saying it will be skipped, because it will not
-                  be. (Any working-tree touch reaches it, `backlog.mjs start
-                  --as groom`'s own `updated:` stamp included.)
+                  tree differs from main, which is deliberately broader than
+                  `buildGatedQueue`'s `not committed on ${base}` reason: that
+                  fires only when the path is ABSENT from main. A row that is
+                  present at main and merely edited since is flagged here and
+                  gated by the run — which then executes MAIN'S bytes, so a
+                  plan written after the last commit is not the plan that
+                  runs. Review round 1 caught this note calling every flagged
+                  row a skip; the server now says which fate each row has
+                  (`absent`), so the note states each as fact instead of
+                  hedging over both, and a fate whose count is 0 is not
+                  mentioned at all. (Any working-tree touch reaches the stale
+                  fate, `backlog.mjs start --as groom`'s own `updated:` stamp
+                  included.)
 
-                  The verdict string stays on screen VERBATIM —
-                  `not committed on main` is what the run writes into the run
-                  file's reasons, so a person who finds the skip afterwards can
-                  match it up — but demoted to the case it actually describes.
-                  `Groomed on disk only` is task-29's wording, said by the
-                  groom skill at the moment the state is created; both phrases
-                  earn their place, as two sentences to two readers at two
-                  times. It is offered as the NAME of the usual case rather
-                  than asserted of all N rows (review round 2, Minor): the
-                  queue preview deliberately lists ungroomed bugs and tasks
-                  too — see `queue` above — so a flagged-and-ungroomed row
-                  exists and "groomed on disk only" is false of it. Keeping the
-                  shared phrase and scoping it costs one parenthesis; dropping
-                  it would cost the one link between this screen's words and
-                  the groom skill's.
+                  The verdict string stays on screen VERBATIM in the absent
+                  sentence — `not committed on main` is what the run writes
+                  into the run file's reasons, so a person who finds the skip
+                  afterwards can match it up. `Groomed on disk only` is
+                  task-29's wording, said by the groom skill at the moment the
+                  state is created; both phrases earn their place, as two
+                  sentences to two readers at two times. It is offered as the
+                  NAME of the usual case rather than asserted of all N rows
+                  (review round 2, Minor): the queue preview deliberately lists
+                  ungroomed bugs and tasks too — see `queue` above — so a
+                  flagged-and-ungroomed row exists and "groomed on disk only"
+                  is false of it. Keeping the shared phrase and scoping it
+                  costs one parenthesis; dropping it would cost the one link
+                  between this screen's words and the groom skill's.
 
                   Its own note rather than another clause on the preview
                   disclaimer above: that one says the run may re-gate an item
@@ -836,8 +848,20 @@ export function OrchestrateSheet({
               {uncommittedIds.length > 0 && (
                 <div className="sheet-note" data-testid="orchestrate-uncommitted-note">
                   {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item differs' : 'items differ'} from main — the run reads main's copy rather than the
-                  file here ("groomed on disk only", in the usual case). One missing from main altogether is skipped ("not committed on main"); one present but
-                  stale there is gated and run on main's bytes, so a plan written since the last commit is not the plan that runs.
+                  file here ("groomed on disk only", in the usual case).
+                  {absentCount > 0 && (
+                    <>
+                      {' '}
+                      {absentCount} {absentCount === 1 ? 'is' : 'are'} missing from main altogether and will be skipped ("not committed on main").
+                    </>
+                  )}
+                  {staleCount > 0 && (
+                    <>
+                      {' '}
+                      {staleCount} {staleCount === 1 ? 'is' : 'are'} on main but stale there, so the run gates and executes main's older copy — a plan written
+                      since the last commit is not the plan that runs.
+                    </>
+                  )}
                 </div>
               )}
 
@@ -880,7 +904,7 @@ export function OrchestrateSheet({
 
                   <div className="run-drawer-queue" data-testid="orchestrate-queue">
                     {queue.map(({ item, action }) => (
-                      <div key={item.path} className="run-drawer-item">
+                      <div key={item.path} className="run-drawer-item" data-fate={fateOf(item.path) ?? undefined}>
                         <div className="run-drawer-item-head">
                           {/* Labelled by id, which is both unique in this
                               list and the exact string the request carries —
@@ -911,17 +935,25 @@ export function OrchestrateSheet({
                               ungroomed row: this screen has no authority to
                               decide otherwise.
 
-                              The word stays `uncommitted` rather than
-                              narrowing to "differs from main" (review round 1,
-                              Minor): one vocabulary across the chip, the
-                              `deselect uncommitted (N)` button, the endpoint
-                              and the docs is worth more here than per-row
-                              precision the note directly above already
-                              supplies — it now opens by defining exactly what
-                              the chip means, and a row whose CHANGES are the
-                              uncommitted part is covered by that sentence
-                              rather than left to the chip to say alone. */}
-                          {uncommittedPaths.has(item.path) && <Pill tone="warn">uncommitted</Pill>}
+                              The word stays `uncommitted` rather than forking
+                              into one word per fate (review round 1, Minor;
+                              re-decided in #235): one vocabulary across the
+                              chip, the `deselect uncommitted (N)` button, the
+                              endpoint and the docs is worth more than a second
+                              visible word. The per-row fate rides in the
+                              pill's `title` and the row's `data-fate` instead,
+                              and the note directly above states each fate as
+                              fact with its count. */}
+                          {fateOf(item.path) === 'absent' && (
+                            <Pill tone="warn" title="missing from main — the run skips it (not committed on main)">
+                              uncommitted
+                            </Pill>
+                          )}
+                          {fateOf(item.path) === 'stale' && (
+                            <Pill tone="warn" title="on main but older there — the run executes main's copy, not this file">
+                              uncommitted
+                            </Pill>
+                          )}
                         </div>
                       </div>
                     ))}

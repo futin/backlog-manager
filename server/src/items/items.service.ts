@@ -201,7 +201,7 @@ export class ItemsService {
     // than a `BacklogItem` field, nothing derived reads it, and it still
     // changes no default selection. The rule this answers is CLAUDE.md's, and
     // answering it earlier for one kind of project does not move it.
-    if (resolveSource(entry.path, this.known).kind === 'tracker') return { paths: [], known: false };
+    if (resolveSource(entry.path, this.known).kind === 'tracker') return { paths: [], absent: [], known: false };
     return uncommittedItemPaths(entry.path);
   }
 

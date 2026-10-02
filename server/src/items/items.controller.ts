@@ -41,7 +41,9 @@ export class ItemsController {
    * that any surface stating a consequence split it. A docstring on the
    * transport is the wrong place to restate a two-branch rule that will drift
    * from the one copy of it, so this points at `uncommitted.util.ts`'s header
-   * and docs/subsystems/invariants.md's "One question, two fates" instead. (Review
+   * and docs/subsystems/invariants.md's "One question, two fates" instead —
+   * the body now carries each row's fate as `absent`, the subset of `paths`
+   * `main` does not hold, and the rule for stating it lives there too. (Review
    * round 2: this comment was the rule's own first counter-example, shipped
    * in the commit that wrote the rule.)
    *

@@ -26,11 +26,13 @@ import { join } from 'node:path';
  *     that happens, and no verdict in the run file says so.
  *
  * Both are worth knowing before a multi-hour unattended operation starts,
- * which is why the predicate is the broad one (Decision 2 below) and the
- * sheet's note carries both fates rather than one. Catching them with one
- * question is the point (task-32).
+ * which is why the predicate is the broad one (Decision 2 below). Catching
+ * them with one question is the point (task-32) — and since #235 the answer
+ * also says WHICH fate each flagged row has (`absent`, Decision 3), so the
+ * sheet's note can state only the fates actually on screen, each with its
+ * count, instead of hedging over both whenever anything is flagged.
  *
- * Two decisions a later reader will otherwise "fix", both deliberate:
+ * Three decisions a later reader will otherwise "fix", all deliberate:
  *
  * 1. **Nothing here is memoised, and this must never join `lastCommitDates`'
  *    memo** (git-dates.util.ts). That memo is keyed on the mtimes of `index`
@@ -39,8 +41,10 @@ import { join } from 'node:path';
  *    the exact event this module reports, moves NEITHER, so a memo on that
  *    key would answer "clean" forever after its first hit: it would
  *    reintroduce the false negative this feature exists to remove. The cost
- *    is affordable without one — both spawns together measured 50–270ms per
- *    project, and this runs for ONE project ONCE per sheet open, never on the
+ *    is affordable without one — the two original spawns together measured
+ *    50–270ms per project, and the third read (Decision 3) adds 4–9ms (re-measured
+ *    2026-10-02 on three of this machine's projects, warm cache: the whole
+ *    call 20–39ms) — and this runs for ONE project ONCE per sheet open, never on the
  *    board's poll path the way `lastCommitDates` does (which is the whole
  *    reason that one needed a memo and this one does not).
  * 2. **The question is "does the working copy differ from `main`", never
@@ -52,6 +56,19 @@ import { join } from 'node:path';
  *    (an item committed while ungroomed and groomed only in the working copy
  *    is *present* at `main`, so it earns plain `ungroomed` rather than "not
  *    committed") with one question instead of two.
+ * 3. **A row's fate is "does `main` hold this path at all", read by ONE
+ *    third spawn — never "which of the two reads found it", and never one
+ *    spawn per row.** The fate cannot be inferred from the read that reported
+ *    a path: an item committed on a branch `main` does not contain is found
+ *    by `diff` and is still absent from `main` (the run skips it), while an
+ *    item `git rm --cached` from the index but still committed on `main` is
+ *    found by `ls-files --others` and is still present there (the run
+ *    executes `main`'s older copy). So the question is asked directly:
+ *    `ls-tree -r --name-only main -- backlog` lists every path `main` holds,
+ *    once per request, and a flagged path missing from that listing is
+ *    absent. `cat-file -e main:<path>` per flagged path answers the same
+ *    question but costs one spawn per row on a synchronous request path,
+ *    which is the cost this module's whole shape avoids.
  */
 
 /**
@@ -67,6 +84,14 @@ export interface UncommittedItems {
   /** Absolute paths, built from `projectPath` verbatim so they compare equal
    *  to `BacklogItem.path` without either side calling `realpath`. */
   paths: string[];
+  /** The subset of `paths` whose path `main` does not hold at all, so a run
+   *  refuses it with `not committed on main` and skips it. Absolute, built
+   *  with the same construction as `paths` from the same relative strings,
+   *  so the two compare with `Set.has` byte for byte. Every other entry of
+   *  `paths` is STALE — present at `main` with older bytes, which the run
+   *  gates and executes — and is deliberately not named on the wire, so the
+   *  two lists cannot disagree about it (Decision 3 in the header). */
+  absent: string[];
   /** False whenever this read could not be made — no git, not a repo, the
    *  project is not the repo toplevel, no `main` ref, a timeout — and, since
    *  task-45, whenever it could not be ASKED: a tracker project has no item
@@ -81,7 +106,7 @@ export interface UncommittedItems {
 /** Fresh object per call — a shared constant would be one mutation away from
  *  leaking a previous caller's `paths` array. */
 function unknown(): UncommittedItems {
-  return { paths: [], known: false };
+  return { paths: [], absent: [], known: false };
 }
 
 /**
@@ -104,7 +129,7 @@ function run(cwd: string, args: string[]): string | null {
   }
 }
 
-/** Non-empty lines, which is all either git read produces. */
+/** Non-empty lines, which is all any of the three git reads produces. */
 function lines(out: string): string[] {
   return out.split('\n').filter((line) => line !== '');
 }
@@ -120,7 +145,7 @@ function lines(out: string): string[] {
  * divergence to warn about and a chip would be a false positive. `known:
  * false` is the honest answer at exactly the same seam the tool stops asking.
  *
- * `-c core.quotePath=false` on both spawns for `lastCommitDates`' reason: the
+ * `-c core.quotePath=false` on all three reads for `lastCommitDates`' reason: the
  * default octal-escapes non-ASCII filenames, and the client matches these
  * strings against `BacklogItem.path` exactly.
  *
@@ -162,13 +187,23 @@ export function uncommittedItemPaths(projectPath: string): UncommittedItems {
     'backlog'
   ]);
   const untracked = run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', 'backlog']);
-  // A failure of EITHER read is a failure of the question: reporting the half
-  // that worked would be a confident, incomplete statement of fact.
-  if (diffed === null || untracked === null) return unknown();
+  // The third read answers each row's fate (Decision 3 in the header): every
+  // path `main` holds under `backlog/`, so a flagged path missing from it is
+  // absent. Quoted-path off for the same reason as the other two — an escaped
+  // listing would not contain a raw non-ASCII path and would misreport an
+  // edited item as absent.
+  const atBase = run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', UNCOMMITTED_BASE_REF, '--', 'backlog']);
+  // A failure of ANY of the three reads is a failure of the question:
+  // reporting the part that worked — paths without their fates included —
+  // would be a confident, incomplete statement of fact.
+  if (diffed === null || untracked === null || atBase === null) return unknown();
 
-  const rels = new Set([...lines(diffed), ...lines(untracked)]);
+  const held = new Set(lines(atBase));
+  const rels = [...new Set([...lines(diffed), ...lines(untracked)])];
   // Built from `projectPath` verbatim with the same construction
   // `scanProject` uses for `BacklogItem.path`, so the client's `Set.has`
-  // compare needs no realpath on either side.
-  return { paths: [...rels].map((rel) => join(projectPath, ...rel.split('/'))), known: true };
+  // compare needs no realpath on either side — and both arrays come from the
+  // same relative strings, so `absent` is a subset of `paths` byte for byte.
+  const toAbs = (rel: string): string => join(projectPath, ...rel.split('/'));
+  return { paths: rels.map(toAbs), absent: rels.filter((rel) => !held.has(rel)).map(toAbs), known: true };
 }
