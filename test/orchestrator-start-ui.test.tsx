@@ -174,7 +174,7 @@ describe('toolbar Orchestrate button', () => {
               // gets a surprise DOM node. Note the ORDER — `/api/items/uncommitted`
               // also contains `/api/items`, so this branch has to precede it.
               url.includes('/api/items/uncommitted')
-              ? { paths: [], known: true }
+              ? { paths: [], absent: [], known: true }
               : url.includes('/api/agents/plan')
                 ? {
                     action: 'execute',
@@ -579,7 +579,7 @@ describe('OrchestrateSheet', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ paths: [], known: true })
+          json: () => Promise.resolve({ paths: [], absent: [], known: true })
         } as Response);
       }
       // task-44's on-mount read, answered and kept OUT of `calls` for exactly
@@ -1323,7 +1323,7 @@ describe('OrchestrateSheet', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ paths: [], known: true })
+          json: () => Promise.resolve({ paths: [], absent: [], known: true })
         } as Response);
       }
       // task-44's on-mount read, answered and kept OUT of `calls` for exactly

@@ -70,12 +70,16 @@ const TASK_3 = fakeItem({
 const THREE = [BUG_1, TASK_2, TASK_3];
 
 type UncommittedAnswer =
-  | { paths: string[]; known: boolean }
+  | { paths: string[]; absent: string[]; known: boolean }
   | 'reject'
   /** A 200 with no `paths` key at all. */
   | 'malformed'
   /** A 200 whose `paths` is not a list. */
-  | 'malformed-type';
+  | 'malformed-type'
+  /** A 200 with a well-formed `paths` but no `absent` key (#235). */
+  | 'malformed-absent'
+  /** A 200 whose `absent` is not a list of strings (#235). */
+  | 'malformed-absent-type';
 
 /**
  * Every request the sheet makes, with `/api/items/uncommitted` answered by
@@ -99,7 +103,21 @@ function stub(answer: UncommittedAnswer): { url: string; body: unknown }[] {
       // outcome rather than the guard. `paths: 5` is what the guard alone
       // catches: without it that value reaches `new Set(...)`, which throws
       // on a non-iterable and takes the whole sheet's render with it.
-      const body = answer === 'malformed' ? { known: true } : answer === 'malformed-type' ? { known: true, paths: 5 } : answer;
+      //
+      // The two `absent` shapes (#235) carry a VALID `paths` naming task-2, so
+      // only the guard's `absent` clause stands between them and a rendered
+      // pill: without it, a missing `absent` would read as "nothing is absent"
+      // and assert every flagged row is stale.
+      const body =
+        answer === 'malformed'
+          ? { known: true }
+          : answer === 'malformed-type'
+            ? { known: true, paths: 5 }
+            : answer === 'malformed-absent'
+              ? { known: true, paths: [TASK_2.path] }
+              : answer === 'malformed-absent-type'
+                ? { known: true, paths: [TASK_2.path], absent: [5] }
+                : answer;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
     }
     // task-44's on-mount read, answered and kept OUT of `calls` for the same
@@ -163,7 +181,7 @@ afterEach(() => {
 describe('OrchestrateSheet — the uncommitted flag', () => {
   // --- case 16 ----------------------------------------------------------
   it('case 16: chips only the rows the payload names', async () => {
-    stub({ paths: [TASK_2.path], known: true });
+    stub({ paths: [TASK_2.path], absent: [], known: true });
     renderSheet();
 
     await waitFor(() => expect(within(row('task-2')).getByText('uncommitted')).toBeInTheDocument());
@@ -181,7 +199,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
   // (ideas, refactors, done items, out-of-scope), and only bugs and tasks a
   // run can queue are on this screen at all.
   it('ignores an uncommitted path that is not a queued row', async () => {
-    stub({ paths: ['/abs/alpha/backlog/ideas/open/idea-4.md'], known: true });
+    stub({ paths: ['/abs/alpha/backlog/ideas/open/idea-4.md'], absent: [], known: true });
     renderSheet();
     await waitFor(() => expect(screen.getByTestId('orchestrate-queue')).toBeInTheDocument());
 
@@ -192,7 +210,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
 
   // --- case 17 ----------------------------------------------------------
   it("case 17: the step 1 note carries the count and the run's own verdict string", async () => {
-    stub({ paths: [BUG_1.path, TASK_3.path], known: true });
+    stub({ paths: [BUG_1.path, TASK_3.path], absent: [BUG_1.path], known: true });
     renderSheet();
 
     const note = await screen.findByTestId('orchestrate-uncommitted-note');
@@ -205,40 +223,77 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
   });
 
   /**
-   * Review round 1 (Important). The note used to read "the run reads them at
-   * main, so its gate will report 'not committed on main' and skip them",
-   * which is false for a flagged row that IS present at main and merely
-   * edited since: `uncommittedItemPaths` flags any working-tree difference,
-   * while the run's verdict fires only on `readBlob(relPath) === null` — an
-   * absent path. A present-but-stale row is gated `ready` on main's bytes and
-   * RUNS, so telling someone it will be skipped both misstates the run and
-   * invites them to press `deselect uncommitted` on an item that was going to
-   * work.
-   *
-   * Asserted as three separate claims rather than one string match, so the
-   * next rewording cannot lose one of them quietly: the fact true of every
-   * flagged row, the absent case's own verdict, and the present-but-stale
-   * case's different fate. The old sentence fails the third outright and the
-   * first as well — it never said which copy the run reads, only what the
-   * gate would report.
+   * #235 — the note states only the fates actually on screen. Review round 1
+   * of task-32 caught the note claiming every flagged row would be skipped,
+   * which is false for a row present at main and edited since; the fix then
+   * was to hedge over both fates whenever anything was flagged, because the
+   * server did not say which applied. It says now (`absent`), so these cases
+   * pin the opposite of the hedge: a fate whose count is 0 is not mentioned.
    */
-  it('case 17b: the note states the shared fact and splits the two fates, claiming no blanket skip', async () => {
-    stub({ paths: [TASK_2.path], known: true });
+  it('case 17d: only absent rows — the skip sentence with its count, and no stale sentence', async () => {
+    stub({ paths: [TASK_2.path, TASK_3.path], absent: [TASK_2.path, TASK_3.path], known: true });
     renderSheet();
     const note = await screen.findByTestId('orchestrate-uncommitted-note');
 
-    // 1. True of every flagged row, absent or stale alike.
+    expect(note).toHaveTextContent('2 items differ from main');
     expect(note).toHaveTextContent(/run reads main's copy rather than the file here/);
-    // 2. The absent case, in the run's own words, scoped to it.
-    expect(note).toHaveTextContent(/One missing from main altogether is skipped \("not committed on main"\)/);
-    // 3. The present-but-stale case, which is not a skip at all.
-    expect(note).toHaveTextContent(/present but stale there is gated\s+and run on main's bytes/);
-    // And no blanket claim about the whole set being skipped.
-    expect(note.textContent ?? '').not.toMatch(/and skip them/);
+    expect(note).toHaveTextContent(/2 are missing from main altogether and will be skipped \("not committed on main"\)/);
+    expect(note.textContent ?? '').not.toMatch(/stale/);
+    expect(note.textContent ?? '').not.toMatch(/main's older copy/);
+  });
+
+  it('case 17e: only stale rows — the stale sentence with its count, and no skip claim', async () => {
+    stub({ paths: [TASK_2.path], absent: [], known: true });
+    renderSheet();
+    const note = await screen.findByTestId('orchestrate-uncommitted-note');
+
+    expect(note).toHaveTextContent('1 item differs from main');
+    expect(note).toHaveTextContent(/1 is on main but stale there, so the run gates and executes main's older copy/);
+    expect(note).toHaveTextContent(/a plan written since the last commit is not the plan that runs/);
+    expect(note.textContent ?? '').not.toMatch(/not committed on main/);
+    expect(note.textContent ?? '').not.toMatch(/skipped/);
+  });
+
+  it('case 17f: mixed counts — each count governs its own verb', async () => {
+    stub({ paths: [BUG_1.path, TASK_2.path, TASK_3.path], absent: [BUG_1.path], known: true });
+    renderSheet();
+    const note = await screen.findByTestId('orchestrate-uncommitted-note');
+
+    expect(note).toHaveTextContent('3 items differ from main');
+    expect(note).toHaveTextContent(/1 is missing from main altogether/);
+    expect(note).toHaveTextContent(/2 are on main but stale there/);
+  });
+
+  it('case 17g: every flagged row carries its fate in data-fate and the pill title, and still reads uncommitted', async () => {
+    stub({ paths: [BUG_1.path, TASK_2.path, TASK_3.path], absent: [BUG_1.path], known: true });
+    renderSheet();
+    await waitFor(() => expect(within(row('bug-1')).getByText('uncommitted')).toBeInTheDocument());
+
+    expect(row('bug-1')).toHaveAttribute('data-fate', 'absent');
+    expect(within(row('bug-1')).getByText('uncommitted')).toHaveAttribute('title', expect.stringMatching(/the run skips it/));
+    for (const id of ['task-2', 'task-3']) {
+      expect(row(id)).toHaveAttribute('data-fate', 'stale');
+      expect(within(row(id)).getByText('uncommitted')).toHaveAttribute('title', expect.stringMatching(/main's copy/));
+    }
+    for (const pill of screen.getAllByText(/uncommitted/, { selector: '.ui-pill' })) expect(pill).toHaveTextContent(/^uncommitted$/);
+  });
+
+  // Membership is decided by `paths` alone: an `absent` entry the server did
+  // not also flag is ignored rather than inventing a flagged row.
+  it('case 17h: an absent entry outside paths is ignored', async () => {
+    stub({ paths: [TASK_3.path], absent: [TASK_2.path], known: true });
+    renderSheet();
+    const note = await screen.findByTestId('orchestrate-uncommitted-note');
+
+    expect(within(row('task-2')).queryByText('uncommitted')).not.toBeInTheDocument();
+    expect(row('task-2')).not.toHaveAttribute('data-fate');
+    expect(row('task-3')).toHaveAttribute('data-fate', 'stale');
+    expect(note).toHaveTextContent('1 item differs from main');
+    expect(note.textContent ?? '').not.toMatch(/missing from main/);
   });
 
   it('says "item differs" for one row and "items differ" for two', async () => {
-    stub({ paths: [BUG_1.path], known: true });
+    stub({ paths: [BUG_1.path], absent: [], known: true });
     renderSheet();
     expect(await screen.findByTestId('orchestrate-uncommitted-note')).toHaveTextContent('1 item differs from main');
   });
@@ -263,7 +318,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
       groomed: false,
       path: '/abs/alpha/backlog/bugs/open/bug-9.md'
     });
-    stub({ paths: [UNGROOMED.path], known: true });
+    stub({ paths: [UNGROOMED.path], absent: [], known: true });
     renderSheet([UNGROOMED, TASK_2]);
 
     const note = await screen.findByTestId('orchestrate-uncommitted-note');
@@ -285,7 +340,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
   // auto-excluded flagged rows would send a two-id list here — a run that
   // silently drops an item committed while the sheet sat open.
   it('case 18: an untouched sheet posts no ids at all, flagged rows and all', async () => {
-    const calls = stub({ paths: [TASK_2.path], known: true });
+    const calls = stub({ paths: [TASK_2.path], absent: [], known: true });
     renderSheet();
     await waitFor(() => expect(within(row('task-2')).getByText('uncommitted')).toBeInTheDocument());
     await toModes();
@@ -305,7 +360,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
 
   // --- case 19 ----------------------------------------------------------
   it('case 19: deselect uncommitted posts exactly the committed ids in queue order', async () => {
-    const calls = stub({ paths: [TASK_2.path], known: true });
+    const calls = stub({ paths: [TASK_2.path], absent: [], known: true });
     renderSheet();
 
     const deselect = await screen.findByRole('button', { name: 'deselect uncommitted (1)' });
@@ -347,7 +402,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
    * not the same instruction).
    */
   it('case 19b: select all after deselect uncommitted restores the no-ids request', async () => {
-    const calls = stub({ paths: [TASK_2.path], known: true });
+    const calls = stub({ paths: [TASK_2.path], absent: [], known: true });
     renderSheet();
 
     await userEvent.click(await screen.findByRole('button', { name: 'deselect uncommitted (1)' }));
@@ -364,7 +419,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
 
   // --- case 20 ----------------------------------------------------------
   it('case 20: deselecting every row falls into the existing empty-selection refusal, not a new one', async () => {
-    stub({ paths: [BUG_1.path, TASK_2.path, TASK_3.path], known: true });
+    stub({ paths: [BUG_1.path, TASK_2.path, TASK_3.path], absent: [], known: true });
     renderSheet();
 
     await userEvent.click(await screen.findByRole('button', { name: 'deselect uncommitted (3)' }));
@@ -382,13 +437,23 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     // `known: false` path today, and a payload with both is exactly what a
     // client that treated `known` as decorative would render a confident,
     // unfounded chip from. `known` is the gate.
-    stub({ paths: [TASK_2.path], known: false });
+    stub({ paths: [TASK_2.path], absent: [], known: false });
     renderSheet();
     await waitFor(() => expect(screen.getByTestId('orchestrate-queue')).toBeInTheDocument());
 
     await waitFor(() => expect(screen.queryByText('uncommitted')).not.toBeInTheDocument());
     expect(screen.queryByTestId('orchestrate-uncommitted-note')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /deselect uncommitted/ })).not.toBeInTheDocument();
+  });
+
+  it('case 21b: known: false renders no chip and no note, even with absent listed', async () => {
+    stub({ paths: [TASK_2.path], absent: [TASK_2.path], known: false });
+    renderSheet();
+    await waitFor(() => expect(screen.getByTestId('orchestrate-queue')).toBeInTheDocument());
+
+    await waitFor(() => expect(screen.queryByText('uncommitted')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('orchestrate-uncommitted-note')).not.toBeInTheDocument();
+    expect(row('task-2')).not.toHaveAttribute('data-fate');
   });
 
   // --- case 22 ----------------------------------------------------------
@@ -450,9 +515,32 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     await waitFor(() => expect(calls).toHaveLength(1));
   });
 
+  // #235 — `absent` is guarded exactly as `paths` is. A missing one must not
+  // default to `[]`: that would assert every flagged row is stale, a fact
+  // about someone's repository the server never stated.
+  it.each([['missing', 'malformed-absent'] as const, ['not a list of strings', 'malformed-absent-type'] as const])(
+    'case 23c: a 200 whose absent is %s is treated exactly like a rejection',
+    async (_label, answer) => {
+      const calls = stub(answer);
+      renderSheet();
+      await waitFor(() => expect(screen.getByTestId('orchestrate-queue')).toBeInTheDocument());
+      // A real tick past the resolved fetch, as in case 23b.
+      await waitFor(() => expect(screen.getByLabelText('select task-2')).toBeChecked());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(screen.queryByText('uncommitted')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('orchestrate-uncommitted-note')).not.toBeInTheDocument();
+      expect(screen.queryByText(/malformed/)).not.toBeInTheDocument();
+
+      await toModes();
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+    }
+  );
+
   // --- case 24 ----------------------------------------------------------
   it('case 24: fetches exactly once per sheet open, whatever is picked or walked', async () => {
-    stub({ paths: [TASK_2.path], known: true });
+    stub({ paths: [TASK_2.path], absent: [], known: true });
     renderSheet();
     await waitFor(() => expect(within(row('task-2')).getByText('uncommitted')).toBeInTheDocument());
 
@@ -476,7 +564,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
   // membership, and step 2 has no checkbox to act on it with. Pinned so the
   // omission reads as a decision rather than something nobody noticed.
   it('renders no chip on the order step', async () => {
-    stub({ paths: [TASK_2.path], known: true });
+    stub({ paths: [TASK_2.path], absent: [], known: true });
     renderSheet();
     await waitFor(() => expect(within(row('task-2')).getByText('uncommitted')).toBeInTheDocument());
 
