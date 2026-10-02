@@ -16,7 +16,7 @@ icon), each icon opening a popover; give Archive the filter button alone; move t
 `useNarrow`). One new component, `FilterBar` (the track, which popover is open, the sort popover's rows), used by Board and Archive, which keep owning their
 own state and pass their filter sections in as children. `TrackerChip` renders its panel through `Popover`. No server change, no shared type change.
 
-**Tech Stack:** React 19 + Vite client, jest + Testing Library (jsdom) for every suite this plan touches, plain CSS in `client/src/styles.css`.
+**Tech Stack:** React 18 (`^18.3.1`) + Vite client, jest + Testing Library (jsdom) for every suite this plan touches, plain CSS in `client/src/styles.css`.
 
 **Spec:** [docs/superpowers/specs/2026-10-01-band-filter-popover-design.md](../specs/2026-10-01-band-filter-popover-design.md) — read it whole before Task 1;
 its two review reports sit beside it under `docs/superpowers/reviews/`.
@@ -70,9 +70,11 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
 - Test: `test/ui-popover.test.tsx` (new)
 
 **Interfaces:**
-- Produces: `Popover({ label: string; width: number; anchor: RefObject<HTMLElement | null>; onClose: () => void; children: ReactNode })`, exported from
-  `ui/Popover.tsx`. Renders `<div className="ui-popover[ ui-popover-narrow]" role="dialog" aria-label={label}>` with the width applied inline as the
-  un-capped value (the CSS caps it). The caller mounts it conditionally and renders it inside a `position: relative` wrapper that also holds the anchor.
+- Produces: `Popover({ label: string; width: number; anchor: RefObject<HTMLElement>; onClose: () => void; children: ReactNode })`, exported from
+  `ui/Popover.tsx`. Renders `<div className="ui-popover[ ui-popover-narrow]" role="dialog" aria-label={label}>`. The width travels as a custom property,
+  `--ui-popover-width: <width>px`, set inline — **never as an inline `width`**: an inline `width` outranks `.ui-popover-narrow { width: auto }`, and the phone
+  panel would come out 420 px wide in a 351 px rail bar with every jsdom test still green (jsdom has no cascade). Today's `.tracker-pop` only works because
+  its width is in CSS. The caller mounts it conditionally and renders it inside a `position: relative` wrapper that also holds the anchor.
 
 - [ ] **Step 1: Write the failing suite** — `test/ui-popover.test.tsx`, rendering a harness with a button (the anchor), the popover mounted while a boolean
   is true, and a sibling outside both. Cases:
@@ -84,8 +86,12 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
   - Unmount, then Escape and a body `pointerdown`: `onClose` is not called again.
   - Narrow: with `window.matchMedia` stubbed to `{ matches: true, … }` (copy the stub shape from `test/ui-modal.test.tsx`'s
     `takes the full-screen shape from useNarrow` case, and restore it after), the dialog carries class `ui-popover-narrow`; unstubbed it does not.
-  - Source check (read `client/src/styles.css` the way `test/tracker-chip.test.tsx`'s phone guard does): the `.ui-popover-narrow` rule contains
-    `position: fixed`, `top: auto`, `left: 12px`, `right: 12px`, `width: auto`; the `.ui-popover` rule contains `z-index: 20` and `top: calc(100% + 8px)`.
+  - Width: rendered with `width={300}`, the dialog's inline style sets `--ui-popover-width` to `300px` and its `style.width` is `''` — both stubbed and
+    unstubbed. This is the only guard against the inline-width trap above.
+  - Source check (pull the rule out of the whole sheet with `ruleBlock` from `test/helpers/css-rule.ts` — NOT the tracker phone guard's media-block slicing,
+    because `.ui-popover-narrow` lives in the primitives block, not in a media query): the `.ui-popover-narrow` rule contains
+    `position: fixed`, `top: auto`, `left: 12px`, `right: 12px`, `width: auto`, `max-width: none`; the `.ui-popover` rule contains `z-index: 20`,
+    `top: calc(100% + 8px)` and `width: var(--ui-popover-width)`.
     Carry over the phone guard's comment on why `top: auto` matters (the base `top` resolves against the viewport once fixed).
 - [ ] **Step 2: Run it, see it fail** — `pnpm exec jest --runInBand test/ui-popover.test.tsx` → fails: cannot find module `ui/Popover`.
 - [ ] **Step 3: Implement.**
@@ -94,10 +100,13 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
     pointer — lift the reasoning from `TrackerChip.tsx`'s header), why it measures and portals nothing, why the anchor is ignored on pointerdown (the
     anchor's click toggles; closing on its pointerdown first would reopen it on the click), and that it is not counted among the dialogs (no scrim).
   - CSS, in the primitives block: `.ui-popover` — `position: absolute; top: calc(100% + 8px); right: 0; z-index: 20`, `--strip` fill, 1 px `--hairline`
-    border, 12 px radius, `0 8px 24px var(--shadow2)`, 16 px padding, `color: var(--ink)`, `text-align: left`, `max-width` = viewport less 48 px divided by
+    border, 12 px radius, `0 8px 24px var(--shadow2)`, 16 px padding, `color: var(--ink)`, `text-align: left`, `width: var(--ui-popover-width)`,
+    `max-width` = viewport less 48 px divided by
     `--font-scale` (copy the `calc(… / var(--font-scale, 1))` idiom the sheet already uses for viewport measures). `.ui-popover-narrow` — `position: fixed;
-    top: auto; margin-top: 8px; left: 12px; right: 12px; width: auto; max-width: none; max-height: 70vh; overflow-y: auto`. Comment: the phone reason (the
-    narrow `.rail` is a scroll container) and the z-index reason (Archive's sticky month kickers).
+    top: auto; margin-top: 8px; left: 12px; right: 12px; width: auto; max-width: none; max-height: 70vh; overflow-y: auto`. **Nine declarations, one more
+    than the spec's eight, deliberately:** without `max-width: none` the base rule's viewport cap (viewport − 48 px) over-constrains `left: 12px; right:
+    12px` (viewport − 24 px), and the browser drops `right`, so the panel comes out 24 px short and flush left. Say so in the comment, beside the phone
+    reason (the narrow `.rail` is a scroll container) and the z-index reason (Archive's sticky month kickers).
   - Guard 7: add `'.ui-popover'` to `FAMILIES`.
   - Docs: board.md's primitive table gains a `Popover` row (`.ui-popover`; `label`, `width`, `anchor`, `onClose`, children; used by `FilterBar` and
     `TrackerChip`). DESIGN.md §8.7 and invariants.md's "nothing else floating" sentence each gain one clause admitting `Popover`'s panels, which float
@@ -155,9 +164,14 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
     `Filters` / `Clear all` header.
   - `type FilterBarSort<K extends string> = { key: K; dir: SortDir; options: { value: K; label: string; hint: string }[]; onKey: (k: K) => void;
     onDir: (d: SortDir) => void }`. (Generic or `string`-keyed — your call; Board's `SortKey` must type-check through it.)
+  - `FilterSection({ title: string; hint?: string; fill?: boolean; children: ReactNode })` — one section of the filter popover: a 12 px `--ink2` heading
+    with the optional `--ink3` hint after it, then the children. `fill` marks a section whose child is a switch to be laid out full width (Status). Both
+    headings — Project's inside `ProjectPicks` and Board's Status — come from here, so they cannot drift.
   - `ProjectPicks({ projects: RegistryProject[]; value: string; allValue: string; hues: ProjectHues; hint?: string; onPick: (path: string) => void })` —
-    the `Project` section both pages use, so its markup has one home: the `Project` heading with the optional hint, then `All projects` and one chip per
-    project keyed by **path**, labelled by name, with its hue dot.
+    the `Project` section both pages use, built on `FilterSection`: `All projects` and one chip per project keyed by **path**, labelled by name, with its
+    hue dot, inside a `role="group"` named `Project`.
+  - Sort option rows: each `button` carries `aria-label` of its bare label (`Created`, `Name`, `Project`), so its accessible name is not
+    `Created when it was filed`; the hint stays visible text.
 
 - [ ] **Step 1: Write the failing suite** — `test/filter-bar.test.tsx`. Cases:
   - Count 0: the filter button is named `Filters`, shows no badge, lacks class `on`. Count 2: named `Filters, 2 set`, badge text `2`, has class `on`.
@@ -173,6 +187,7 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
     otherwise the chip whose path equals `value` (callers pass the fail-open `projectValue`, so a stale path never reaches it); clicking a chip calls `onPick`
     with that project's **path**; with two projects of the same name, two chips render and each reports its own path; `hint` renders after the heading only
     when given.
+  - `FilterSection`: renders its title and children; the hint only when given; `fill` adds its full-width class and its absence does not.
 - [ ] **Step 2: Run** `pnpm exec jest --runInBand test/filter-bar.test.tsx` → fails: module not found.
 - [ ] **Step 3: Implement.**
   - Wrapper: one `position: relative` element with `margin-left: auto` (the dashboard's `.ctlwrap`; comment why — the band's right slot wraps, and the
@@ -187,8 +202,9 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
     Section headings 12 px `--ink2`, hint `--ink3`. Picks wrap with a 6 px gap.
   - Sort popover: `Sort by` header; three 36 px option rows (label 13 px / 500, hint 11 px `--ink3`, tick visible only when chosen); 1 px `--hairline`
     rule; `Segmented pill` `Direction` with `Ascending` / `Descending`; foot line 11 px `--ink3`. Its comment notes the foot line is this board's own.
-  - Status switch full width: `.filter-bar-switch > [role="group"] { display: flex }` and `.filter-bar-switch button { flex: 1 }` — or equivalent with no
-    family token in the selector (Global Constraints). Comment: content-sized it overflows the 268 px content box by ~2 px.
+  - Status switch full width, keyed on `FilterSection`'s `fill` class (call it `.filter-bar-section-fill`): its `[role="group"]` child `display: flex` and
+    that group's buttons `flex: 1` — no family token in either selector (Global Constraints), and never on the Project section, whose chips must not
+    stretch. Comment: content-sized the switch overflows the 268 px content box by ~2 px.
   - Header comment: §8.3 (and §8.5 for Archive's use); one popover at a time; picks do not close it (the dashboard's behaviour).
 - [ ] **Step 4: Run** `test/filter-bar.test.tsx` and `test/design-guards.test.ts` → pass.
 - [ ] **Step 5: Commit** — `feat(board): add the FilterBar track and its popovers`.
@@ -205,7 +221,7 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
   `test/board-live-cards.test.tsx`
 
 **Interfaces:**
-- Consumes: `FilterBar`, `ProjectPicks`, `SortDir` (Task 3).
+- Consumes: `FilterBar`, `FilterSection`, `ProjectPicks`, `SortDir` (Task 3).
 - Produces (test-only): `test/helpers/filter-bar.ts` — `pickProject(name: string, nth = 0)`, `pickStatus(label: 'Open' | 'In progress' | 'Done' | 'All')`,
   `pickSort(label: 'Created' | 'Name' | 'Project')`, `pickDirection(label: 'Ascending' | 'Descending')`, `clearFilters()`. Each opens its popover if that
   dialog is not already open, then clicks within the dialog; none closes it. Async, using `userEvent`.
@@ -213,11 +229,18 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
 - [ ] **Step 1: Migrate the existing cases, then write the new ones.** Every `userEvent.selectOptions(getByLabelText('Project' | 'Status' | 'Sort'), …)` in
   the four suites becomes the matching helper (paths → project names: `/abs/alpha` → `alpha`; status values → labels: `started` → `In progress`; sort
   `name` → `Name`). Assertions about what the board shows stay, except count lines with a project picked gain the suffix (`2 done` → `2 done in alpha`).
+  Two lines in `orchestrator-start-ui.test.tsx` are not `selectOptions` calls and vanish with the `<select>` all the same — `renderNarrowed()` would time out
+  in every case that calls it: the `waitFor` on `getByRole('option', { name: 'alpha' })` (~202) becomes "open the `Filters` popover and wait for the
+  `alpha` chip", then `pickProject('alpha')`; the `waitFor` on `getByLabelText('Project')` (~210) waits on the `Filters` button instead. The helpers leave the
+  popover open after a pick; in those two suites the next step is always a click outside the panel, whose `pointerdown` closes it before the
+  `queryAllByRole('dialog')` / `queryByRole('dialog')` assertions run (`user-event` 14 dispatches `pointerdown`). Green, but by that ordering — keep it.
   `status select offers open, in progress, done and all, in that order` becomes: the `Status` switch's buttons read `Open`, `In progress`, `Done`, `All`.
   New cases in `board.test.tsx`:
   - The band holds no `<select>`; it holds `Search items`, the `Filters` button and `Change sort`, and Orchestrate renders after the track once a project is
     picked.
   - Picking `beta` narrows every column and the count line reads `<n> open in beta`.
+  - The open `Filters` dialog carries the Board hint `· one at a time — Orchestrate needs one`.
+  - `Clear all` is inert at count 0 (the inertness itself is `FilterBar`'s, pinned in Task 3; here it is one assertion that the Board passes count 0).
   - Clear all after picking `alpha` and `Done`: all projects, `Open`, count line `5 open across 2 projects`, button `Filters`.
   - Sort `Name` + `Ascending` orders A→Z and + `Descending` Z→A; `Created` + `Descending` is newest first; `Project` + `Descending` orders projects Z→A
     and keeps newest first inside each project.
@@ -243,11 +266,12 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
     does not flip. The `?? COMPARATORS.created` fallback stays, and its long comment's "the Status select sitting right above it" passage is rewritten:
     the recovery for a stale status is now the raised filter button and `Clear all`.
   - Filter count = (`projectValue` ≠ `ALL`) + (`status` ≠ `'open'`) — `projectValue`, the fail-open value. Clear all sets project `ALL` and status `open`.
-  - Band children, in order: `RunChip`, search, `FilterBar` (children: `ProjectPicks` with the Board hint, then the `Status` heading and its
-    `Segmented pill` switch; `sort` with the three options and hints), then Orchestrate. `FilterBar` must be one stable element whatever the filters are,
+  - Band children, in order: `RunChip`, search, `FilterBar` (children: `ProjectPicks` with the Board hint, then `FilterSection` titled `Status`
+    with `fill`, around the `Segmented pill` switch; `sort` with the three options and hints), then Orchestrate. `FilterBar` must be one stable element whatever the filters are,
     so its open state survives a pick (Review Focus 4).
   - Count line: append ` in ${name}` when `projectValue !== ALL`, the name read from `registered` by path.
   - Comments: the query comment ("the selects … permanently state their own value") now credits the raised filter button and the count line's project name;
+    the fail-open comment (~280-282, "the fallback feeds back into the select") says it feeds the pressed chip;
     the Orchestrate click comment's "the filter is a live `<select>`" says the filter can change between click and answer; the band's header comment
     describes the track instead of three filter chips.
   - Docs: DESIGN.md §8.3's band paragraph describes the track, both popovers, the pressed-chip look and why it is not ink; board.md ~77 the same in a line;
@@ -276,7 +300,7 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
 - [ ] **Step 2: Run** `pnpm exec jest --runInBand test/archive.test.tsx` → fails.
 - [ ] **Step 3: Implement.** Band: search, then `FilterBar` with no `sort` and `ProjectPicks` without a hint; count = (`projectValue` ≠ `ALL`); Clear all
   sets `ALL`. Count line gains ` in <name>`. Rewrite the three comments that name the select (the chip-wrapped select is gone; the raised button and the
-  suffixed count line now state the filter). Delete the `.board-filter*` rules — `grep -rn "board-filter" client/ test/` must come back empty — and the
+  suffixed count line now state the filter). Delete the `.board-filter*` rules — `grep -rn "board-filter" client/src/ test/` must come back empty — and the
   stale clauses in the two CSS comments. DESIGN.md §8.5: the band holds search and the filter button, Project only.
 - [ ] **Step 4: Run** `test/archive.test.tsx`, `test/design-guards.test.ts` → pass.
 - [ ] **Step 5: Commit** — `feat(archive): filter button replaces the project select`.
