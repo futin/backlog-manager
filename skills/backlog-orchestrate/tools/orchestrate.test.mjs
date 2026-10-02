@@ -3214,7 +3214,7 @@ test('no command anywhere under skills/ passes --dangerously-skip-permissions', 
 // --- bug-9: no positional parameters in a published skill body --------------
 
 test('no fenced block under skills/ reads a positional parameter', () => {
-  // Slash-command argument substitution rewrites `$1`..`$9` in a SKILL.md
+  // Slash-command argument substitution rewrites `$0`..`$9` in a SKILL.md
   // BEFORE the session reads it, and it does not exempt fenced code. Invoked
   // as `/backlog-orchestrate bug-2 bug-3 …`, step 8's verify launcher once
   // arrived in a live session as `node "bug-3/skills/…"` — with the bullet
@@ -3248,9 +3248,16 @@ test('no fenced block under skills/ reads a positional parameter', () => {
             inFence = !inFence;
             continue;
           }
-          // `$0` is excluded deliberately: it names the shell itself, is not
-          // an argument, and no substitution pass rewrites it.
-          if (inFence && /\$\{?[1-9]\b/.test(line)) {
+          // `$0` is included (#238). The substitution is 0-indexed: `$0` is
+          // the FIRST argument and `$1` the second — which is why bug-9's
+          // `/backlog-orchestrate bug-2 bug-3` turned `$1` into `bug-3`. An
+          // earlier version of this guard skipped `$0` as "the shell itself",
+          // and §9's base-tree awk program, which reads `$0` twice, arrived in
+          // a run started as `/backlog-orchestrate 172` as `substr(172,10)` —
+          // printing nothing, so a reviewed item parked instead of merging.
+          // awk's `$0` is the record, not a shell positional, and it is
+          // rewritten all the same: the pass knows nothing about languages.
+          if (inFence && /\$\{?[0-9]\b/.test(line)) {
             offenders.push(`${full}: ${line.trim()}`);
           }
         }

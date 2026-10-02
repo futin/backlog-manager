@@ -1214,8 +1214,12 @@ A worktree dedicated to the base cannot be the uniform answer, because **git ref
 "authority stops at worktrees it created itself" rule exists to avoid. So resolve, rather than create:
 
 ```bash
-git -C "$PWD" worktree list --porcelain | awk -v r="refs/heads/<base>" '/^worktree /{w=substr($0,10)} $0=="branch "r{print w; exit}'
+git -C "$PWD" worktree list --porcelain | grep -B2 -Fx "branch refs/heads/<base>" | sed -n 's/^worktree //p'
 ```
+
+Porcelain prints each tree as `worktree`, `HEAD`, then `branch` (or `detached`), so the two lines before an exact match on the branch line end at that tree's
+path. Never rewrite this as `awk` over `$0`: slash-command substitution rewrites `$0` to the run's first argument, so a run started as
+`/backlog-orchestrate 172` read `substr(172,10)` and always printed nothing (#238).
 
 Three outcomes, and they are exhaustive:
 
