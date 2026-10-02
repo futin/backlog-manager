@@ -104,7 +104,7 @@ The track and its two popovers, used by Board and Archive.
 - **Project**: unchanged state — `usePersistedState(PROJECT_KEY, 'all')`, path-valued, name-labelled, with the existing fail-open on a stale stored path.
   Picking a chip sets it; picking the chosen one again does nothing (there is always exactly one selection, `All projects` included).
 - **Status**: unchanged state and values (`open`, `started`, `done`, `all`), labels `Open`, `In progress`, `Done`, `All`, persisted under `STATUS_KEY`.
-  The stored value stays deliberately unvalidated (`BoardView.tsx`'s comment above `COMPARATORS[sort] ?? …` says why). An unrecognised one lights no
+  The stored value stays deliberately unvalidated (`BoardView.tsx`'s comment above `resolveSortKey` says why). An unrecognised one lights no
   option in the switch, counts as set (badge `1`, button raised), and the count line reads `0 items across 0 projects` (project `all`) or `0 items in
   <name>` (one picked); `Clear all` is the recovery. That comment names "the
   select sitting right above it" as the recovery and is rewritten to name the raised filter button and `Clear all`.

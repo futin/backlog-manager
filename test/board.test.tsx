@@ -803,7 +803,7 @@ describe('BoardView', () => {
   // by a later build the user has since rolled back. `usePersistedState` parses
   // whatever JSON it finds and hands the string straight back (the `SortKey`
   // type is a claim about what this build WRITES, never about what it can read),
-  // so the lookup in `sortItems` misses. Without a fallback that miss is called
+  // so it misses `COMPARATORS`. Without a fallback that miss is called
   // as a function, and the TypeError lands inside render with no ErrorBoundary
   // anywhere in client/src to catch it: the entire board unmounts to a blank
   // page that only clearing site data recovers. Three idle bugs, not two,
@@ -825,6 +825,35 @@ describe('BoardView', () => {
     // old, new, mid, so a fallback that merely returned 0 and left the array
     // as fetched would pass a "didn't crash" check and fail this one.
     expect(titles).toEqual(['new-idle', 'mid-idle', 'old-idle']);
+    // And the track says so. The order alone cannot tell `resolveSortKey` from a `COMPARATORS[sort] ?? COMPARATORS.created` lookup inside `sortItems` —
+    // both draw created-desc here — but only the resolved key reaches the track: the raw one prints `Sort: newest ()` (FilterBar's label falls back to
+    // the key, and `NATURAL_DIR` has no direction for it) over a board ordered by Created, and ticks no row in the panel.
+    expect(sortLabel()).toHaveTextContent('Sort: Created (desc)');
+    await userEvent.click(screen.getByRole('button', { name: 'Change sort' }));
+    const sortPanel = screen.getByRole('dialog', { name: 'Sort by' });
+    expect(within(sortPanel).getByRole('button', { name: 'Created' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(sortPanel).getByRole('button', { name: 'Name' })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(sortPanel).getByRole('button', { name: 'Project' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  // The same storage, holding something that is not a string at all. `usePersistedState` hands a number back as itself, and shallow-merges an object
+  // over the `'created'` fallback — so `{}` arrives as `{0: 'c', 1: 'r', …}`. A key looked up raw would survive the comparator (`?? COMPARATORS.created`
+  // catches the miss) and then reach the track: `42` prints as the sort's name, and the object is rendered as a React child, which throws inside render
+  // and — with no ErrorBoundary in client/src — blanks the page. `resolveSortKey` accepts own-property strings only, so both read as `Created (desc)`.
+  it.each([
+    ['an object', {}],
+    ['a number', 42]
+  ])('a stored sort key that is %s renders the board under Created (desc)', async (_what, stored) => {
+    localStorage.setItem('backlog-manager.sort', JSON.stringify(stored));
+    stubItems([
+      fakeItem({ id: 'bug-old', title: 'old-idle', created: daysAgoDate(10) }),
+      fakeItem({ id: 'bug-new', title: 'new-idle', created: daysAgoDate(0) }),
+      fakeItem({ id: 'bug-mid', title: 'mid-idle', created: daysAgoDate(5) })
+    ]);
+    await renderBoard();
+    expect(screen.getAllByTestId('board-col')).toHaveLength(4);
+    expect(bugTitles()).toEqual(['new-idle', 'mid-idle', 'old-idle']);
+    expect(sortLabel()).toHaveTextContent('Sort: Created (desc)');
   });
 
   /*
