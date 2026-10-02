@@ -113,7 +113,8 @@ What differs is gathered here, and each item names the section it belongs to. A 
   `#` opens a comment in a shell, and a `#31` substituted into one of these fenced blocks would swallow the rest of the line.
 - **The stack must be up.** Exit `8` from any command means it is not; start it and retry the same call. There is no offline mode on purpose.
 - **The driver holds the item's claim, not the execute session** (§3, §9). The run claims the issue at `stage <n> preflight`, before the worktree exists, and
-  releases it at the item's terminal stage — or at `abort`, which releases everything the run still holds before it ends the run (§10). The dispatched session
+  releases it at the item's terminal stage — or at `finish`, which releases everything the run still holds (a `needs-answers` item's claim, say) on every
+  status but `paused`, `abort` included (§10). The dispatched session
   never runs `start`, `stop`, `move` or `heartbeat` on the item — its SKILL.md says so.
 - **A claim refusal naming another run is a skip, not a failure** (§3). Another machine is draining the same project and got there first.
 - **The session's `## Outcome` goes to a file, and the file becomes the closing comment** (§4, §5, §9).
