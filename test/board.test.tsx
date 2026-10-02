@@ -682,7 +682,7 @@ describe('BoardView', () => {
     expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
   });
 
-  /* A status value this build never wrote — the Status filter's stored value is deliberately unvalidated (see the comment over `sortItems`' fallback
+  /* A status value this build never wrote — the Status filter's stored value is deliberately unvalidated (see the comment over `resolveSortKey`
      in BoardView.tsx). It lights nothing in the switch, counts as set, and narrows the board to nothing; the raised button and Clear all are the way
      back. The board has no columns to wait on here — it renders the no-matches state — so the render waits on that instead of `renderBoard`. */
   it('a stored unrecognised status lights no Status option, counts as one set, and Clear all recovers', async () => {

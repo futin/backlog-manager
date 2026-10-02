@@ -372,8 +372,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    (`.filter-bar*`, further down), and they are read by both, declared once, so
    the two bands cannot come to disagree about a height or a radius. The
    native filter select that sat beside it went with the band-filter popover,
-   which put the project and status pickers behind the track's panel on both
-   surfaces. */
+   which put the project picker (and, on the Board, the status picker) behind
+   the track's panel. */
 
 /* The band's search field (§8.3): 36 px, 12 px radius, a `--hairline` stroke.
    Drawn by the Board's band and, since task-39, Archive's. */
@@ -438,7 +438,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    the section's own class and reached by `[role="group"]` and `button`, never `.ui-seg`: guard 7 would read a family token here as a restatement of the
    primitive's look. Never on the Project section — its chips must not stretch.
    `nowrap` is what lets `flex: 1` do its job: a button's text wraps by default, so the flex algorithm floors `In progress` at its longest word and then wraps
-   it onto two lines inside a 28 px pill. Held on one line, the four options' floors sum to ~260 px and the equal shares fit. */
+   it onto two lines inside a 28 px pill. Held on one line, the four options' floors sum to less than that box and the equal shares fit. */
 .filter-bar-section-fill [role="group"] { display: flex }
 .filter-bar-section-fill [role="group"] button { flex: 1; white-space: nowrap }
 

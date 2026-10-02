@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -79,6 +79,48 @@ describe('Popover', () => {
     await userEvent.setup().keyboard('{Escape}');
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /* Escape unmounts the panel under a focused pick; without a hand-off the browser drops focus to `body` and the next Tab starts from the top of the
+     document. The harness closes the way a real host does — by unmounting on `onClose` — so the case is the whole path, not just the call. */
+  it('returns focus to the anchor when Escape closes the panel with focus inside it', async () => {
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return <Harness open={open} onClose={() => setOpen(false)} />;
+    }
+    render(<Host />);
+    const user = userEvent.setup();
+    screen.getByRole('button', { name: 'inside' }).focus();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'inside' }));
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'anchor' }));
+  });
+
+  it('leaves focus alone when Escape closes the panel with focus outside it, and when a press outside closes it', async () => {
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return <Harness open={open} onClose={() => setOpen(false)} />;
+    }
+    const { unmount } = render(<Host />);
+    const user = userEvent.setup();
+    // Focus on the anchor already is "outside the panel": nothing to hand back, and nothing may be stolen from elsewhere.
+    const other = document.createElement('input');
+    document.body.appendChild(other);
+    other.focus();
+    await user.keyboard('{Escape}');
+    expect(document.activeElement).toBe(other);
+    unmount();
+
+    // A press outside is the user choosing somewhere else to be: focus must not be pulled back to the anchor.
+    render(<Host />);
+    screen.getByRole('button', { name: 'inside' }).focus();
+    fireEvent.pointerDown(screen.getByText('outside'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'anchor' }));
+    other.remove();
   });
 
   it('gives Escape to a Confirm mounted after it and not to the popover', async () => {

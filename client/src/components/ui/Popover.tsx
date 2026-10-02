@@ -54,12 +54,20 @@ export function Popover({
 }) {
   const narrow = useNarrow();
   const panel = useRef<HTMLDivElement>(null);
-  useDialogEscape(onClose);
 
   /* Read through a ref so the listener below is added once, on mount, and not torn down and re-added on every render of a host that hands an inline arrow
      (`useDialogEscape` makes the same trade for the same reason). Written during render, like that hook's own. */
   const close = useRef(onClose);
   close.current = onClose;
+
+  /* Escape hands focus back to the anchor when it was inside the panel — a keyboard reader who tabbed to a pick. The panel unmounts under that focus, and a
+     browser drops focus from a removed element to `body`, so the next Tab would start from the top of the document instead of from the control that opened
+     the panel. Done BEFORE `onClose`, while the panel is still mounted and `contains` still answers. Deliberately the Escape path only: a click-outside close
+     means the user pressed somewhere else on purpose, and pulling focus back to the anchor would fight where they just went. */
+  useDialogEscape(() => {
+    if (panel.current?.contains(document.activeElement)) anchor.current?.focus();
+    close.current();
+  });
 
   useEffect(() => {
     const onDown = (e: PointerEvent): void => {

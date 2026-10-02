@@ -344,7 +344,8 @@ describe('ArchiveView', () => {
     expect(within(dialog).queryByRole('group', { name: 'Status' })).not.toBeInTheDocument();
     // The Board's hint says why ITS picks are single-select (Orchestrate needs one); Archive has no Orchestrate control, so the heading is the bare word.
     expect(within(dialog).queryByText(/Orchestrate needs one/)).not.toBeInTheDocument();
-    expect(within(dialog).getByText('Project')).toBeInTheDocument();
+    // `getByText('Project')` alone matches the title's own span and so passes with any hint beside it; the heading ELEMENT's whole text is what says "bare".
+    expect(within(dialog).getByText('Project').parentElement).toHaveTextContent(/^Project$/);
   });
 
   it('states the count across projects, and in the project once one is picked', async () => {

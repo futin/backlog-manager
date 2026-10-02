@@ -9,6 +9,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { groupByMonth } from '../../lib/item-month';
 import { leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
+import { projectName } from '../../lib/project-label';
 import { itemSyncOff } from '../../lib/tracker';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { runClaimBlock } from '../../../../shared/agent';
@@ -182,26 +183,15 @@ export default function ArchiveView() {
      the month grouping below IS the ordering. */
   const visible = archived.filter((i) => (projectValue === ALL || i.projectPath === projectValue) && (needle === '' || i.title.toLowerCase().includes(needle)));
 
-  /* The band's 13 px count line, the same shape the Board's carries (DESIGN.md
-     §8.2/§8.5) and built the same way — see BoardView's own `countLine` for the
-     rules restated here: the project half counts the projects the counted
-     items actually belong to (an unreachable one contributes none and is named
-     by the warning line below anyway), and once the filter names one project
-     it gives way to ` in <name>`, because `across 1 project` is true of every
-     board a reader narrowed themselves and says nothing about which one. The
-     picker is behind a popover, so with the panel closed this line is the only
-     thing on the band that names the project the number counts. Read off
-     `projectValue`, so a stale stored path — which fails open to all — gets no
-     suffix; looked up by path because the path is the filter's identity, and
-     the `?? projectValue` cannot fire while `knownPaths` guards that value.
-     The noun is a fixed `archived` where the Board's is its Status filter's
-     word: this surface HAS no status filter, so there is no second reading for
-     the noun to have to track. */
+  /* The band's 13 px count line, the same shape the Board's carries (DESIGN.md §8.2/§8.5) and built the same way — BoardView's own `countLine` owns the
+     rules (what the project half counts, why one picked project turns it into ` in <name>`, why the stale-path case gets no suffix). What is Archive's own:
+     the noun is a fixed `archived`, where the Board's is its Status filter's word, because this surface HAS no status filter and so no second reading for
+     the noun to track. */
   const countProjects = new Set(visible.map((i) => i.projectPath)).size;
   const countLine =
     projectValue === ALL
       ? `${visible.length} archived across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
-      : `${visible.length} archived in ${registered.find((p) => p.path === projectValue)?.name ?? projectValue}`;
+      : `${visible.length} archived in ${projectName(registered, projectValue)}`;
 
   const missing = registered.filter((p) => p.missing);
   /* Reported here as well as on the Board. A registered path with no `backlog/`

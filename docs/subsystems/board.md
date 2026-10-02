@@ -71,7 +71,7 @@ deleting the family and the guard entry together, in one change.
 `SettingsRow` and `SettingsGroup` are not primitives — they are the Settings card's own composition of `Sheet` plus rows, and stay under `settings/`. Everything
 else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`, `RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`,
 `StageBars`, `WatchdogMonitor` (runs). `RunControls`, `RunRowTime` and `FilterBar` sit at the top level of `components/`, like `lib/view-keys.ts`, because two
-lazy chunks read each of them. `FilterBar.tsx` is three exports, not one: the band's filter-and-sort track with its two popovers (`FilterBar`), one section of
+lazy chunks read each of them. `FilterBar.tsx` is three components, not one: the band's filter-and-sort track with its two popovers (`FilterBar`), one section of
 the filter popover (`FilterSection`, whose `fill` flag lays a switch out full width) and the `Project` section both pages draw (`ProjectPicks`) — the last two
 so that no page draws a section heading or a project chip of its own. Its family is `.filter-bar*`, never `.ui-*`.
 
@@ -112,9 +112,9 @@ queue:
    function with `null` and gets `Merge into the base branch`; `null` there means "no base is knowable", never `main`.
 
 Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
-call `useDialogEscape` for whatever they wrap. Two further entries join the same stack while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described
-with the detail sheet below, and `ui/Popover` — the tracker chip's panel and the band's Filters and Sort — which closes only itself, and whose click-outside is its
-own `pointerdown`, since the stack owns the key and not the pointer.
+call `useDialogEscape` for whatever they wrap. Two further entries join the same stack while they are drawn and are not dialogs: `ui/Confirm` (bug-53),
+described with the detail sheet below, and `ui/Popover` — the tracker chip's panel and the band's Filters and Sort — which closes only itself, and whose
+click-outside is its own `pointerdown`, since the stack owns the key and not the pointer.
 
 ### What leaves the Board
 
@@ -134,10 +134,10 @@ instead.
 Where those land, in four columns — refactoring, ideas, bugs, out of scope — grouped under sticky month subheaders, newest month first. The column is the
 Board's own `BoardColumn` and the card its own `ItemCard`, not a second set: what differs is the fourth column, whose dot carries no type hue at all, because a
 rejection is a verdict rather than a type. There is no Tasks column, because a task never leaves the Board to fill one. It carries a search box and the Board's
-own `FilterBar` without its sort half — a `Filters` popover holding the Project picks alone, and a picked project named on the count line (`4 archived in alpha`) —
-and nothing else: its contents are defined by staleness and rejection, not by status, so a status filter there would either do nothing or contradict the
-surface. No card here ever paints a live strip — whatever put an item in Archive already took it off the Board a run could be holding — which `ArchiveView`
-guarantees by handing `ItemCard` no run at all. A card opens the same item modal the Board opens.
+own `FilterBar` without its sort half — a `Filters` popover holding the Project picks alone, and a picked project named on the count line
+(`4 archived in alpha`) — and nothing else: its contents are defined by staleness and rejection, not by status, so a status filter there would either do nothing
+or contradict the surface. No card here ever paints a live strip — whatever put an item in Archive already took it off the Board a run could be holding — which
+`ArchiveView` guarantees by handing `ItemCard` no run at all. A card opens the same item modal the Board opens.
 
 Nothing in it is finished, and both halves come back by their own route — a stale item by dispatching a **groom**, which refreshes `updated:` and puts it back
 on the Board at the next load; a rejected one by dispatching a **capture**, which files a _new_ item citing `from: <id>` and leaves the original rejected on the

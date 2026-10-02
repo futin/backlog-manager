@@ -1,4 +1,4 @@
-import { projectLabel } from '../client/src/lib/project-label';
+import { projectLabel, projectName } from '../client/src/lib/project-label';
 
 /**
  * The tail `RunStrip`, `RunDrawer` and `RunsView` print in place of a run's
@@ -42,5 +42,22 @@ describe('projectLabel', () => {
   // instead of a table row.
   it('returns the path unchanged for a bare separator', () => {
     expect(projectLabel('/')).toBe('/');
+  });
+});
+
+/** The registry's display name by path; two checkouts of one repo share a name and never a path, so the path is the lookup key. */
+describe('projectName', () => {
+  const projects = [
+    { path: '/a/brickwright', name: 'brickwright' },
+    { path: '/b/brickwright', name: 'brickwright-fork' }
+  ];
+
+  it('names the project whose path matches, so same-named checkouts stay apart', () => {
+    expect(projectName(projects, '/b/brickwright')).toBe('brickwright-fork');
+  });
+
+  it('falls back to the raw path when no registered project carries it', () => {
+    expect(projectName(projects, '/gone/elsewhere')).toBe('/gone/elsewhere');
+    expect(projectName([], '/x')).toBe('/x');
   });
 });

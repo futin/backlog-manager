@@ -12,6 +12,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { isInProgress, isLiveWork } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
+import { projectName } from '../../lib/project-label';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { FilterBar, FilterSection, ProjectPicks } from '../FilterBar';
@@ -556,9 +557,9 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
    * because the count it sits beside is `visible`, which the filter decides:
    * a line reading `4 open` under the Done filter would be counting done
    * items and calling them open. `?? 'items'` for the same reason
-   * `COMPARATORS` above has a fallback — `status` comes back out of
-   * localStorage as whatever some other build wrote there, and the type
-   * describes what this build WRITES, never what it can read.
+   * `resolveSortKey` (above) resolves a stored sort key — `status` comes back
+   * out of localStorage as whatever some other build wrote there, and the
+   * type describes what this build WRITES, never what it can read.
    *
    * The project half is the projects the counted items actually belong to,
    * not `registered.length`: an unreachable project (`missing`) contributes
@@ -580,7 +581,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   const countLine =
     projectValue === ALL
       ? `${visible.length} ${countWord} across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
-      : `${visible.length} ${countWord} in ${registered.find((p) => p.path === projectValue)?.name ?? projectValue}`;
+      : `${visible.length} ${countWord} in ${projectName(registered, projectValue)}`;
 
   /* The band printed one `polled 12 s ago` line per connected project from task-45 until the tracker strip: that clock is a fact about the machine,
      not about this section, so it lives in the shell's `TrackerChip` now — on every section, with a line timer per repo — and a copy here would be two
@@ -645,7 +646,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   // "unregistered since" staleness `knownPaths`/`projectValue` above already
   // guard against, restated here since a fallback still has to resolve to
   // SOME string for a title attribute).
-  const orchestrateProjectName = orchestrateProject?.name ?? projectValue;
+  const orchestrateProjectName = projectName(registered, projectValue);
 
   /*
    * The dispatch half of the same run payload: why a run forbids dispatching
@@ -1009,7 +1010,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
           // while the sheet is still up, the same "keyed on identity, not on
           // whatever else changed" reasoning `orchestrating` itself is
           // declared with above.
-          projectName={registered.find((p) => p.path === orchestrating)?.name ?? orchestrating}
+          projectName={projectName(registered, orchestrating)}
           items={all.filter((i) => i.projectPath === orchestrating)}
           spawnMaxPermission={agents?.spawnMaxPermission ?? null}
           onClose={() => setOrchestrating(null)}

@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 /**
  * Driving the band's filter track the way a reader does (the band-filter spec's §3; `client/src/components/FilterBar.tsx`).
  *
- * The suites that used to `selectOptions` a native `<select>` — Board's own, the tracker board's, the live cards', the Orchestrate start UI's, and Archive's
- * from the next task — now reach the same state through a popover, and one home for that walk keeps the accessible names it relies on in one place: the
+ * The suites that used to `selectOptions` a native `<select>` — Board's own, the tracker board's, the live cards', the Orchestrate start UI's, and Archive's —
+ * now reach the same state through a popover, and one home for that walk keeps the accessible names it relies on in one place: the
  * dialogs `Filters` and `Sort by`, the buttons `Filters` / `Filters, N set` and `Change sort`, the groups `Project`, `Status` and `Direction`, and each sort
  * row's bare-label name. `test/filter-bar.test.tsx` pins those names on the component; a rename is a change there and here at once.
  *

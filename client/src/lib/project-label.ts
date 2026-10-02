@@ -18,3 +18,13 @@
 export function projectLabel(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path;
 }
+
+/**
+ * A registered project's display name, looked up by path — the path is a project's identity everywhere on the board (the filter stores it, the run payload
+ * carries it), and the registry's own name is what a title attribute or a count line should print. The fallback is the raw path, for the one case where the
+ * path names a project `projects` no longer carries (unregistered since the filter was stored): a lookup still has to resolve to SOME string. Board's count
+ * line and Orchestrate button, its sheet's header and Archive's count line each built this expression by hand before it was lifted here.
+ */
+export function projectName(projects: readonly { path: string; name: string }[], path: string): string {
+  return projects.find((p) => p.path === path)?.name ?? path;
+}
