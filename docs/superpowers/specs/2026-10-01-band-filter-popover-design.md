@@ -40,7 +40,7 @@ Band, left to right on the right-hand side: run chip · search field · **filter
   absolute panel to the 53 px bar); it moves to `Popover`, so the band's two popovers get it too — the band's right slot wraps at that width, and a
   right-aligned 300 px panel under a wrapped button would start off-screen. `top: auto` keeps the panel's static position, just under its button. It is
   NOT a media-query override of `.ui-popover`: guard 7 counts a family's bare selector across the whole sheet, media blocks included, so a second
-  `.ui-popover {}` goes red. `Popover` reads `useNarrow()` and adds `ui-popover-narrow`, declared once in the primitives block with these eight
+  `.ui-popover {}` goes red. `Popover` reads `useNarrow()` and adds `ui-popover-narrow`, declared once in the primitives block with these eight (nine in the plan, which adds `max-width: none` and says why)
   declarations — the shape `ui/Modal` (`ui-modal-narrow`) and `ui/FormSheet` (`ui-form-sheet-narrow`) already have.
 - **Filter popover**: a header row `Filters` with `Clear all` at its right (12 px `--ink2`, `--ink3` and inert when nothing is set). `Project` — on the
   Board with the hint `· one at a time — Orchestrate needs one`; on Archive, which has no Orchestrate control, with no hint — over pick chips: `All projects`, then every registered project with its project-hue `Dot`. `Status` over a

@@ -73,7 +73,7 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
 - Produces: `Popover({ label: string; width: number; anchor: RefObject<HTMLElement>; onClose: () => void; children: ReactNode })`, exported from
   `ui/Popover.tsx`. Renders `<div className="ui-popover[ ui-popover-narrow]" role="dialog" aria-label={label}>`. The width travels as a custom property,
   `--ui-popover-width: <width>px`, set inline — **never as an inline `width`**: an inline `width` outranks `.ui-popover-narrow { width: auto }`, and the phone
-  panel would come out 420 px wide in a 351 px rail bar with every jsdom test still green (jsdom has no cascade). Today's `.tracker-pop` only works because
+  panel would come out 420 px wide in a 351 px rail bar with every jsdom test still green (no suite loads `styles.css` into jsdom). Today's `.tracker-pop` only works because
   its width is in CSS. The caller mounts it conditionally and renders it inside a `position: relative` wrapper that also holds the anchor.
 
 - [ ] **Step 1: Write the failing suite** — `test/ui-popover.test.tsx`, rendering a harness with a button (the anchor), the popover mounted while a boolean
@@ -89,7 +89,8 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
   - Width: rendered with `width={300}`, the dialog's inline style sets `--ui-popover-width` to `300px` and its `style.width` is `''` — both stubbed and
     unstubbed. This is the only guard against the inline-width trap above.
   - Source check (pull the rule out of the whole sheet with `ruleBlock` from `test/helpers/css-rule.ts` — NOT the tracker phone guard's media-block slicing,
-    because `.ui-popover-narrow` lives in the primitives block, not in a media query): the `.ui-popover-narrow` rule contains
+    because `.ui-popover-narrow` lives in the primitives block, not in a media query; `ruleBlock` returns the FIRST block mentioning the selector and does
+    not skip comments, so keep the narrow rule's comment below the base rule, or assert over `ruleBlocks` with `some`): the `.ui-popover-narrow` rule contains
     `position: fixed`, `top: auto`, `left: 12px`, `right: 12px`, `width: auto`, `max-width: none`; the `.ui-popover` rule contains `z-index: 20`,
     `top: calc(100% + 8px)` and `width: var(--ui-popover-width)`.
     Carry over the phone guard's comment on why `top: auto` matters (the base `top` resolves against the viewport once fixed).
@@ -186,7 +187,7 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
   - `ProjectPicks`: `All projects` plus one chip per project in registry order; exactly one chip is `aria-pressed="true"` — `All projects` when `value === allValue`,
     otherwise the chip whose path equals `value` (callers pass the fail-open `projectValue`, so a stale path never reaches it); clicking a chip calls `onPick`
     with that project's **path**; with two projects of the same name, two chips render and each reports its own path; `hint` renders after the heading only
-    when given.
+    when given, and the group is still named exactly `Project` when it does (name it from the title, not from the whole heading).
   - `FilterSection`: renders its title and children; the hint only when given; `fill` adds its full-width class and its absence does not.
 - [ ] **Step 2: Run** `pnpm exec jest --runInBand test/filter-bar.test.tsx` → fails: module not found.
 - [ ] **Step 3: Implement.**
@@ -232,7 +233,7 @@ The five inputs most likely to bite a real reader that the spec's own tests do n
   Two lines in `orchestrator-start-ui.test.tsx` are not `selectOptions` calls and vanish with the `<select>` all the same — `renderNarrowed()` would time out
   in every case that calls it: the `waitFor` on `getByRole('option', { name: 'alpha' })` (~202) becomes "open the `Filters` popover and wait for the
   `alpha` chip", then `pickProject('alpha')`; the `waitFor` on `getByLabelText('Project')` (~210) waits on the `Filters` button instead. The helpers leave the
-  popover open after a pick; in those two suites the next step is always a click outside the panel, whose `pointerdown` closes it before the
+  popover open after a pick; in those suites (`orchestrator-start-ui` ~394-444, `tracker-board` ~471-476) the next step is always a click outside the panel, whose `pointerdown` closes it before the
   `queryAllByRole('dialog')` / `queryByRole('dialog')` assertions run (`user-event` 14 dispatches `pointerdown`). Green, but by that ordering — keep it.
   `status select offers open, in progress, done and all, in that order` becomes: the `Status` switch's buttons read `Open`, `In progress`, `Done`, `All`.
   New cases in `board.test.tsx`:
