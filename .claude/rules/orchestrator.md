@@ -34,7 +34,8 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   (`merged`, `branched`, `failed`, `skipped`, `parked`, `ungroomed` — never `needs-answers`), billing `executeElapsed`/`executeTokens` on top of the counters
   it reads first. **`abort` releases too, with the reason `aborted`** (bug-40): a torn-down run passes through no terminal stage, and an unreleased claim is
   not repaired by going stale — the mapper reads `started`/`phase` off any unreleased claim, fresh or stale, so the item's dispatch control stays disabled on
-  every machine until a person intervenes. The released set is the one `heartbeat` already uses ("still holds": `claim` set and the stage not one that
+  every machine until a person intervenes. Since #240 that loop lives in `finish`, which `abort` ends with: every status but `paused` releases what the
+  run still holds — a `needs-answers` item's claim on an ordinary `done`/`failed` finish — with the reason `finished`, or `aborted` on an abort. The released set is the one `heartbeat` already uses ("still holds": `claim` set and the stage not one that
   released it), the reason is deliberately NOT a `RunStage`, and the release runs before `finish` stamps `finished` on one of the same claims. **A failed heartbeat or release is one stderr line and never fails the command** — `run.json` is the journal of record and the claim is a
   published copy — while a failed CLOSE is exit `9` with nothing written, because it is the only record anywhere that the item is done. A 409 naming ANOTHER
   run skips the item (exit `0`, `claimed elsewhere`); a resumed driver re-claims its own run's items and the SERVER makes that a takeover, by `run.runId`.

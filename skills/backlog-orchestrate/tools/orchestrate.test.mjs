@@ -8075,6 +8075,64 @@ test('bug-40: a refused release is one stderr line and abort still exits 0 with 
   assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'aborted');
 });
 
+// --- #240: finish gives back what a finished run still holds ---------------
+//
+// `needs-answers` stays out of `CLAIM_RELEASE_STAGES` because a LIVE run comes
+// back to the item. A run that finishes `done` or `failed` never does, so
+// before #240 a parked question's claim outlived its run — and with it the
+// disabled dispatch control on every board, which going stale does not clear
+// (bug-40). `paused` is the one status that keeps them: a resume returns.
+
+const FINISH_ROUTES = {
+  '/api/items/claim': { body: { commentId: 0, record: { v: 1, counters: { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 } } } },
+  '/api/items/release': { status: 201, body: { commentId: 0, record: { v: 1 } } },
+  '/api/items/heartbeat': { status: 201, body: { commentId: 0, record: { v: 1 } } },
+  '/api/items/queue': (body) => ({ body: { id: body?.id } }),
+};
+
+test('#240: finish --status done releases a needs-answers claim, reason finished, before the finished stamp', async (t) => {
+  const { home, project, runId } = await seededTrackerRun(t, [
+    { id: '3', stage: 'merged', claim: 503 },
+    { id: '5', stage: 'needs-answers', claim: 505 },
+  ]);
+
+  const { out, requests } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'finish', '--status', 'done'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const released = posts(requests, 'release');
+  assert.deepEqual(released.map((r) => r.body.commentId), [505], 'exactly the claim the run still holds — the merged one was released at its stage');
+  assert.equal(released[0].body.id, '#5');
+  // Not a `RunStage`, so the item's last reported stage stays `needs-answers` on every other machine's Runs page.
+  assert.equal(released[0].body.reason, 'finished');
+  assert.equal(released[0].body.runId, runId);
+  const order = requests.filter((r) => r.method === 'POST' && ['/api/items/release', '/api/items/heartbeat'].includes(r.path)).map((r) => r.path);
+  assert.deepEqual(order, ['/api/items/release', '/api/items/heartbeat'], 'the finished stamp must land after the release');
+});
+
+test('#240: finish --status failed releases too', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [{ id: '5', stage: 'needs-answers', claim: 505 }]);
+  const { out, requests } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'finish', '--status', 'failed'));
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(posts(requests, 'release').map((r) => [r.body.commentId, r.body.reason]), [[505, 'finished']]);
+});
+
+test('#240: finish --status paused keeps every claim, because a resume returns to them', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '5', stage: 'needs-answers', claim: 505 },
+    { id: '7', stage: 'reviewing', claim: 507 },
+  ]);
+  const { out, requests } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'finish', '--status', 'paused'));
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(posts(requests, 'release').length, 0);
+});
+
+test('#240: abort releases each held claim once, not once in abort and again in the finish it ends with', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [{ id: '5', stage: 'needs-answers', claim: 505 }]);
+  const { out, requests } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'abort'));
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(posts(requests, 'release').map((r) => [r.body.commentId, r.body.reason]), [[505, 'aborted']]);
+});
+
 test('bug-40: a files run-s abort makes no API request on any path', async (t) => {
   const { home, project } = orchFixture(t);
   seedReadyTask(project, 'task-26', 'Some task');

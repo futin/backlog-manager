@@ -3321,6 +3321,14 @@ assignee still on its issue. Five things this entry pins, because each looks arb
   into a lie. Until bug-42 gave `release` that clause, every one of these releases came back a 409 and bug-40's fix was proved only for the one caller a
   holder-only check admits: the driver releasing its own claims.
 
+**Since #240 that loop is `finish`'s, and `abort` reaches it through its closing `cmdFinish` call.** An ordinary `finish --status done` or `failed` stranded a
+claim the same way: `needs-answers` is left out of `CLAIM_RELEASE_STAGES` because a LIVE run comes back to the item, and a finished one never does, so a parked
+question kept its claim — and its disabled dispatch control on every board — until someone ran `backlog.mjs stop` by hand. `finish` now releases every claim
+the run still holds on every status but `paused`, whose resume returns to those items. The reason is `aborted` for an abort and `finished` otherwise — neither a
+`RunStage`, for the reason the first bullet gives — and every point above still holds of the moved loop: it runs after `takeOverRun`, before the `finished`
+stamp, and before the `orchestrator:queued` sweep. One loop in the command both paths reach is one release per claim; a copy in each would send an abort's
+releases twice.
+
 **Why this was worth a bug rather than the non-goal task-48 recorded it as.** The non-goal's stated rationale was that leftover claims "go stale on their own
 in 15 minutes". That is true of the claim protocol's CONTEST rule and false of the board: the mapper fills `BacklogItem.started` from any unreleased claim,
 fresh or stale, and `progressBlock` gates on `started` being present rather than on its age, so the item's dispatch control was disabled on every machine
@@ -3354,8 +3362,8 @@ would make "which one is right" a per-field question.
 
 **Status is not the spec's "else the last-touched claim's outcome".** It is the newest `finished` stamp's status when no OTHER claim in the group heartbeated
 after it; otherwise `running`, `fresh` by the newest heartbeat. The spec's rule would report a crashed run as finished, and "a crashed run renders as crashed,
-never as nothing" holds for a remote run too. The stamped claim's own heartbeat is excluded because `finish` on an unreleased (`needs-answers`) claim moves it to
-the server's clock, milliseconds after `finished.at`; a resume never needs it, since a re-claim is a takeover that posts a NEW comment. A released claim whose
+never as nothing" holds for a remote run too. The stamped claim's own heartbeat is excluded because `finish` on an unreleased claim (a `needs-answers` item under a `paused` finish — every other status
+releases it first, #240) moves it to the server's clock, milliseconds after `finished.at`; a resume never needs it, since a re-claim is a takeover that posts a NEW comment. A released claim whose
 `reason` is a stage reads as that stage — the driver releases at a terminal stage without a final state heartbeat, so `state.stage` is the one before.
 
 **A remote run is read-only, and says so.** Pause, resume, abort and the watchdog are all local mechanisms on the machine holding the run file, so the Runs

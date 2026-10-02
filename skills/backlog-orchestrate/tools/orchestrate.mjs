@@ -1877,7 +1877,9 @@ function trackerCandidates(projectRoot, { ids }) {
 // issue back. `needs-answers` is deliberately NOT here: the run is waiting on
 // an answer and will come back to the item, so it keeps the claim — the same
 // split `RUN_HELD_STAGES` makes on the client side, where a `needs-answers`
-// item is still held.
+// item is still held. Only while the run lives, though: `cmdFinish` gives
+// back every claim a run still holds when it ends on any status but `paused`
+// (#240), because a finished run comes back to nothing.
 const CLAIM_RELEASE_STAGES = new Set(['merged', 'branched', 'failed', 'skipped', 'parked', 'ungroomed']);
 
 // The registry path a write route gates on. `resolveProjectRoot` already
@@ -2042,8 +2044,8 @@ function claimCountersFor(run, item) {
  * PROTOCOL only. Going stale entitles the next contestant to retire the claim;
  * it does not clear what the board reads off it (bug-40), so the repair is
  * worth relying on for a rare failed call and was never worth relying on for a
- * release nobody makes. `cmdAbort` is this function's second caller for that
- * reason.
+ * release nobody makes. `cmdFinish` is this function's second caller for that
+ * reason — the release of every claim a finished or aborted run still holds.
  */
 function trackerRelease(run, item, reason, counters = undefined) {
   if (item.claim === undefined) return;
@@ -2143,7 +2145,7 @@ function trackerQueueLabel(run, items, queued) {
 // The queue items a sweep takes the label off: every one this run never
 // claimed. A claimed item needs nothing — the server's claim swap removed the
 // label the moment the claim was won (§3.3) — so `claim === undefined` is the
-// whole test, the same one `cmdAbort`'s release loop is the complement of.
+// whole test, the same one `cmdFinish`'s release loop is the complement of.
 function unclaimedQueueItems(run) {
   return run.queue.filter((item) => item.claim === undefined);
 }
@@ -3623,7 +3625,34 @@ function cmdFinish(argv) {
   // re-adds nothing. `abort` reaches this through its own `cmdFinish` call,
   // after its claim releases, which is the one sweep it makes: the backstop
   // for a board Stop whose server-side sweep partly failed (§3.1).
+  //
+  // Before either of those, #240: every claim the run still holds is given
+  // back, on every status but `paused`. "Still holds" is `cmdHeartbeat`'s
+  // predicate, and what it catches on an ordinary `done` or `failed` finish is
+  // a `needs-answers` item — kept out of `CLAIM_RELEASE_STAGES` because a LIVE
+  // run comes back to it, and a finished one never does. Without this the
+  // claim outlived the run, and since going stale does not clear what the
+  // board reads (bug-40, the abort comment below), the item's dispatch control
+  // stayed disabled on every machine until someone ran `backlog.mjs stop` by
+  // hand. `paused` keeps them for the reason it keeps the queued label: a
+  // resume returns to those items. This is also `abort`'s release (bug-40) —
+  // it reaches here through `cmdFinish(['--status', 'aborted'])`, after its
+  // lease take, which is what authorises a `runId`-only release (bug-42).
+  //
+  // The reason is `aborted` for an abort and `finished` otherwise, and both
+  // are deliberately NOT a `RunStage`: `remote-runs.util.ts` reads a release
+  // reason as the item's stage when it is one, so either spelling leaves the
+  // item's last reported stage — `needs-answers`, say — intact on every other
+  // machine's Runs page. The releases land before `trackerFinish`'s stamp,
+  // which the heartbeat route accepts on a released claim, so the stamp is
+  // never on a claim this run was about to hand back.
   if (projectSource(run.project) === 'github') {
+    if (status !== 'paused') {
+      const reason = status === 'aborted' ? 'aborted' : 'finished';
+      for (const item of run.queue) {
+        if (item.claim !== undefined && !CLAIM_RELEASE_STAGES.has(item.stage)) trackerRelease(run, item, reason);
+      }
+    }
     trackerFinish(run, status);
     if (status !== 'paused') trackerQueueLabel(run, unclaimedQueueItems(run), false);
   }
@@ -5153,15 +5182,14 @@ function cmdAbort() {
   // making that assertion demonstrably holds the run's lease by the time it
   // makes it. Moving these releases above the lease take would turn the
   // assertion into a lie.
-  if (projectSource(projectRoot) === 'github') {
-    for (const item of run.queue) {
-      if (item.claim !== undefined && !CLAIM_RELEASE_STAGES.has(item.stage)) trackerRelease(run, item, 'aborted');
-    }
-    // The `orchestrator:queued` sweep over the items this run never claimed
-    // is NOT made here: the `cmdFinish(['--status', 'aborted'])` this command
-    // ends with makes it, after these releases, and a second copy here would
-    // send every removal twice.
-  }
+  //
+  // #240 moved the loop itself into `cmdFinish`, which this command ends with:
+  // an ordinary `done` or `failed` finish strands a `needs-answers` item's
+  // claim the same way, and one loop in the command both paths reach is one
+  // release per claim rather than two. Everything above still holds of it —
+  // the release set, the `'aborted'` reason, and the order: `cmdFinish` runs
+  // after `takeOverRun`, and releases before it stamps `finished` and before
+  // its `orchestrator:queued` sweep over the items this run never claimed.
 
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
