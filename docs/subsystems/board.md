@@ -77,7 +77,7 @@ so that no page draws a section heading or a project chip of its own. Its family
 
 ### Board
 
-A `Band` carrying the count line — which names the picked project (`9 open in brickwright`), since the picker is behind a popover — then search, the
+A `Band` titled with the scope — `All projects`, or the picked project's name, since the picker is behind a popover — and no count line, then search, the
 filter track (`FilterBar`: a `Filters` popover holding the Project picks and the Status switch, with `Clear all`; a `Sort by` popover holding the three
 keys and an `Ascending`/`Descending` switch, each key arriving in its natural direction) and the Orchestrate chip, then four fixed columns
 (refactors/ideas/bugs/tasks). Out-of-scope has no Board column at all; it belongs to Archive. A click on a card opens the **item modal** — `ItemModal`

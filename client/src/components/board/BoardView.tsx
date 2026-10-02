@@ -49,23 +49,6 @@ const ALL = 'all';
 type StatusFilter = 'open' | 'started' | 'done' | 'all';
 type SortKey = 'created' | 'name' | 'project';
 
-/**
- * The noun the band's count line uses for whatever the Status filter is
- * currently admitting (DESIGN.md §8.3). One word per filter value rather than
- * a fixed "open", because the number beside it is the filtered count: `4 open`
- * printed under the Done filter would be counting done items and calling them
- * open.
- *
- * `all` gets `items` rather than the filter's own label — "4 all" is not
- * English, and the line's job is to say what was counted.
- */
-const COUNT_WORDS: Record<StatusFilter, string> = {
-  open: 'open',
-  started: 'in progress',
-  done: 'done',
-  all: 'items'
-};
-
 /* The Status switch's four options, in the order the old select listed them. `started` is labelled `In progress` because that is what the filter
    admits — live work by `liveRank`, not merely a `started:` stamp — and the value stays `started` because it is what STATUS_KEY has always stored. */
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
@@ -359,6 +342,11 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      below, so the panel, the button's badge and the board all agree. */
   const knownPaths = new Set(registered.map((p) => p.path));
   const projectValue = knownPaths.has(project) ? project : ALL;
+  /* The band's title names the scope the board is showing: the picked project's name, or `All projects` — the same words as the pressed chip, so title
+     and panel never disagree. It replaced the 13 px count line (`9 open in brickwright`) that used to be the band's only reading of the picked project;
+     the columns' own counts already say how many. Off `projectValue`, so a stale stored path titles itself `All projects` like the board it fails open to. The rail tab
+     still says `Board`: that names the place, this names what is in it. */
+  const bandTitle = registered.find((p) => p.path === projectValue)?.name ?? 'All projects';
 
   /* How many filters are set, for the filter button's badge and raised look, and for whether Clear all does anything. Off `projectValue` — the
      fail-open value — never the raw stored path, so a stale path lights no badge while `All projects` is the pressed chip. The search
@@ -550,39 +538,6 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
      opinion about the window or the clock. */
   const staleFor = (item: BacklogItem): boolean => isStale(item, settings.staleDays, now, runs);
 
-  /* The band's 13 px count line — `21 open across 3 projects` (DESIGN.md
-     §8.3's own example reading).
-   *
-   * The noun is the Status filter's own word rather than a fixed "open",
-   * because the count it sits beside is `visible`, which the filter decides:
-   * a line reading `4 open` under the Done filter would be counting done
-   * items and calling them open. `?? 'items'` for the same reason
-   * `resolveSortKey` (above) resolves a stored sort key — `status` comes back
-   * out of localStorage as whatever some other build wrote there, and the
-   * type describes what this build WRITES, never what it can read.
-   *
-   * The project half is the projects the counted items actually belong to,
-   * not `registered.length`: an unreachable project (`missing`) contributes
-   * no items and the warning line above already names it, so counting it here
-   * would make the line disagree with the board under it. It is dropped
-   * entirely once the filter names one project, because the answer would be
-   * `across 1 project` on every board a reader narrowed themselves.
-   *
-   * In its place, the project's NAME (`9 open in brickwright`, the band-filter
-   * spec's §3): the picker is behind a popover now, so with the panel closed
-   * this line is the only thing on the band that says which project the
-   * number counts. Read off `projectValue`, so a stale stored path — which
-   * fails open to all — gets no suffix, and looked up by path because the
-   * path is the filter's identity; the `?? projectValue` cannot fire while
-   * `knownPaths` guards that value, and is there because a lookup must
-   * resolve to SOME string. */
-  const countWord = COUNT_WORDS[status] ?? 'items';
-  const countProjects = new Set(visible.map((i) => i.projectPath)).size;
-  const countLine =
-    projectValue === ALL
-      ? `${visible.length} ${countWord} across ${countProjects} ${countProjects === 1 ? 'project' : 'projects'}`
-      : `${visible.length} ${countWord} in ${projectName(registered, projectValue)}`;
-
   /* The band printed one `polled 12 s ago` line per connected project from task-45 until the tracker strip: that clock is a fact about the machine,
      not about this section, so it lives in the shell's `TrackerChip` now — on every section, with a line timer per repo — and a copy here would be two
      readings of one clock on one screen. The item modal's own age line stays (`trackerLineFor` below). */
@@ -757,12 +712,13 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   return (
     <div className="board">
       {/* The page header is a band, not a card (DESIGN.md §8.2/§8.3): the
-          19/500 title over the 13 px count line, then right-aligned the run
+          19/500 title alone — no count line under it, which the title naming
+          the scope made redundant — then right-aligned the run
           chip, the 36 px search field, the filter track — `FilterBar`: the
           funnel that opens the Filters panel, `Sort: <key> (<dir>)` and the
           button that opens Sort by — and, last, the page's ONE ink chip,
           Orchestrate. */}
-      <Band title="Board" sub={countLine}>
+      <Band title={bandTitle}>
         {/* Left of the controls (spec §3.2). Everything the Board still says
             about runs, in one control that opens Runs; absent entirely when
             the payload carries no run and no starting entry. */}

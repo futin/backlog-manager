@@ -449,9 +449,12 @@ describe('body', () => {
     const stamp = cachedStamp();
     await post('heartbeat', { project: trackerPath, id: '#31', commentId: claimed.body.commentId, session: 'A' }).expect(201);
     const issue = gh.issues.get(31)!;
-    gh.issues.set(31, { ...issue, updated_at: '2026-09-30T12:00:00Z' });
+    /* The late bump is relative to the stamp the heartbeat left, never a literal: the fake stamps a claim and a heartbeat with `Date.now()`, so a fixed
+       date goes stale the day the wall clock passes it, the poll's `since` then filters the issue out, and the cache never moves. */
+    const late = new Date(Date.parse(issue.updated_at) + 60_000).toISOString();
+    gh.issues.set(31, { ...issue, updated_at: late });
     await sync();
-    expect(cachedStamp()).toBe('2026-09-30T12:00:00Z');
+    expect(cachedStamp()).toBe(late);
 
     await post('body', { project: trackerPath, id: '#31', body: 'new text', ifUpdatedAt: stamp }).expect(201);
     expect(gh.matching('/issues/31', 'PATCH')).toHaveLength(1);

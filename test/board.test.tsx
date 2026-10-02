@@ -252,17 +252,26 @@ const bugTitles = (): (string | null)[] =>
 /** The track's `Sort: <key> (<dir>)` reading. `/^Sort:/` and not `Sort by`, which is the sort popover's own header. */
 const sortLabel = (): HTMLElement => screen.getByText(/^Sort:/);
 
+/** The band's title text — the picked project's name, or `All projects`. */
+const bandTitle = (): string | null | undefined => document.querySelector('.ui-band .ui-band-title')?.textContent;
+
+/** How many cards the four columns hold between them, read off each column's own count. */
+const shownCount = (): number =>
+  screen.getAllByTestId('board-col').reduce((n, c) => n + Number(within(c).getByTestId('col-count').textContent), 0);
+
 describe('BoardView', () => {
-  it('titles itself Board, matching the rail tab that opens it', async () => {
+  /* The band's title names the board's scope, not the place: the rail tab already says `Board`, and the title said it too until it was asked to say
+     what the board is showing. `All projects` with no project picked — the pressed chip's own words — and the project's name once one is. */
+  it('titles itself All projects, then the picked project, then All projects again', async () => {
     await renderBoard();
-    // Not "Projects", which is what this said while the rail tab said it too.
-    // A nav entry names a place, not a type, and this place holds bugs, ideas
-    // and refactors as well as tasks — narrowing to one project is the
-    // toolbar's job, one line to the right of this title.
-    // The band's own title element (task-37 — `Band`, a ui/ primitive), not
-    // the `.board-title` div the toolbar used to carry.
-    expect(screen.getByText('Board')).toHaveClass('ui-band-title');
+    expect(bandTitle()).toBe('All projects');
     expect(screen.queryByText('Projects')).not.toBeInTheDocument();
+
+    await pickProject('alpha');
+    expect(bandTitle()).toBe('alpha');
+
+    await pickProject('All projects');
+    expect(bandTitle()).toBe('All projects');
   });
 
   /**
@@ -276,7 +285,7 @@ describe('BoardView', () => {
   it('composes the band: title, count line, search, the filter track, and Orchestrate after it once a project is picked', async () => {
     await renderBoard();
 
-    const band = screen.getByText('Board').closest('.ui-band') as HTMLElement;
+    const band = document.querySelector('.ui-band') as HTMLElement;
     expect(band).not.toBeNull();
     // The old row was three native selects; none survives anywhere in the band.
     expect(band.querySelector('select')).toBeNull();
@@ -295,35 +304,12 @@ describe('BoardView', () => {
     expect(track.contains(orchestrate)).toBe(false);
   });
 
-  /**
-   * The count line, and the one thing about it that is not the design's own
-   * example string: the noun follows the Status filter. `4 open` printed under
-   * the Done filter would be counting done items and calling them open, which
-   * is the whole reason `COUNT_WORDS` exists rather than a literal.
-   *
-   * The project half counts the projects the VISIBLE items belong to, not the
-   * registry: `ghost` is registered and unreachable, contributes no item, and
-   * is already named on the warning line — counting it here would make the
-   * band disagree with the board under it.
-   */
-  it("reads the count line off what is actually shown, in the filter's own words", async () => {
+  /* The band's 13 px count line is gone: the title names the scope, and the columns count what they hold. */
+  it('draws no count line under the title', async () => {
     await renderBoard();
-    // Five open items across alpha and beta: bug-1, bug-2, task-1, idea-1,
-    // ref-1. `ghost` holds none and is not counted.
-    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
-
-    await pickStatus('Done');
-    expect(screen.getByText('2 done across 1 project')).toBeInTheDocument();
-
-    // Narrowed to one project, the "across" half goes: it would read
-    // `across 1 project` on every board a reader narrowed themselves.
-    // Both done items are alpha's, so the number does not move — which is what
-    // makes this assertion about the phrase rather than about the count.
-    // The project's NAME takes its place (the band-filter spec's §3): the
-    // picker is behind a popover now, so nothing else on the band says which
-    // project the number is counting.
+    expect(document.querySelector('.ui-band .ui-band-sub')).toBeNull();
     await pickProject('alpha');
-    expect(screen.getByText('2 done in alpha')).toBeInTheDocument();
+    expect(document.querySelector('.ui-band .ui-band-sub')).toBeNull();
   });
 
   it('renders the four columns with counts of what they hold (open by default)', async () => {
@@ -639,7 +625,7 @@ describe('BoardView', () => {
     }
   });
 
-  it('project filter narrows every column by projectPath, and the count line names the project', async () => {
+  it('project filter narrows every column by projectPath, and the title names the project', async () => {
     await renderBoard();
     await pickProject('beta');
     expect(screen.getByText('a task')).toBeInTheDocument();
@@ -647,7 +633,7 @@ describe('BoardView', () => {
     // Every column, not only the one the assertion above happens to look at: beta's one open item is a task.
     const cols = screen.getAllByTestId('board-col');
     expect(cols.map((c) => within(c).getByTestId('col-count').textContent)).toEqual(['0', '0', '0', '1']);
-    expect(screen.getByText('1 open in beta')).toBeInTheDocument();
+    expect(bandTitle()).toBe('beta');
   });
 
   /*
@@ -672,13 +658,15 @@ describe('BoardView', () => {
     await pickProject('alpha');
     await pickStatus('Done');
     expect(screen.getByRole('button', { name: 'Filters, 2 set' })).toBeInTheDocument();
-    expect(screen.getByText('2 done in alpha')).toBeInTheDocument();
+    expect(bandTitle()).toBe('alpha');
+    expect(shownCount()).toBe(2);
 
     await clearFilters();
     const dialog = screen.getByRole('dialog', { name: 'Filters' });
     expect(within(within(dialog).getByRole('group', { name: 'Project' })).getByRole('button', { pressed: true })).toHaveTextContent('All projects');
     expect(within(within(dialog).getByRole('group', { name: 'Status' })).getByRole('button', { pressed: true })).toHaveTextContent('Open');
-    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
+    expect(bandTitle()).toBe('All projects');
+    expect(shownCount()).toBe(5);
     expect(screen.getByRole('button', { name: 'Filters' })).toBeInTheDocument();
   });
 
@@ -689,7 +677,6 @@ describe('BoardView', () => {
     localStorage.setItem('backlog-manager.status', JSON.stringify('stale'));
     render(<BoardView />);
     expect(await screen.findByText('no matches')).toBeInTheDocument();
-    expect(screen.getByText('0 items across 0 projects')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Filters, 1 set' }));
@@ -698,7 +685,7 @@ describe('BoardView', () => {
 
     await clearFilters();
     expect(within(status).getByRole('button', { pressed: true })).toHaveTextContent('Open');
-    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
+    expect(shownCount()).toBe(5);
   });
 
   // Review Focus 2: two checkouts of one repo share a name and never a path. Both get a chip, and the second one narrows to the second path alone.
@@ -719,17 +706,19 @@ describe('BoardView', () => {
     await pickProject('alpha', 1);
     expect(screen.getByText('second checkout')).toBeInTheDocument();
     expect(screen.queryByText('first checkout')).not.toBeInTheDocument();
-    expect(screen.getByText('1 open in alpha')).toBeInTheDocument();
+    expect(bandTitle()).toBe('alpha');
   });
 
-  // Review Focus 3: a stored path whose project has since been unregistered fails open — and the badge, the pressed chip and the count line all read
+  // Review Focus 3: a stored path whose project has since been unregistered fails open — and the badge, the pressed chip and the title all read
   // the fail-open value, so none of them claims a filter the board is not applying.
-  it('a stale stored project path reads as All projects: no badge, All projects pressed, no suffix', async () => {
+  it('a stale stored project path reads as All projects: no badge, All projects pressed, All projects titled', async () => {
     localStorage.setItem('backlog-manager.project', JSON.stringify('/abs/gone'));
     await renderBoard();
     const button = screen.getByRole('button', { name: 'Filters' });
     expect(button.querySelector('.filter-bar-badge')).toBeNull();
-    expect(screen.getByText('5 open across 2 projects')).toBeInTheDocument();
+    expect(shownCount()).toBe(5);
+    // The title fails open with the board, never naming a project that is gone.
+    expect(bandTitle()).toBe('All projects');
 
     await userEvent.click(button);
     const picks = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Project' });
