@@ -30,11 +30,20 @@ long as that marker does:
   no better one: `orchestrate.mjs` refuses every command but `init` from inside a linked worktree, so this session _cannot_ park or stage itself. Parking is the
   orchestrator's decision, made from outside, on the evidence this session leaves behind.
 - **Unchanged: never commits, never pushes.** The marker adds a prohibition and removes none.
-- **Never run anything in the background, and never end a turn waiting on a notification.** Every test, typecheck and build runs in the foreground — no Bash
-  `run_in_background: true`, no `&`, no polling a background task's output file. A suite too slow for the default raises the Bash `timeout`, up to its 600000 ms
-  maximum, or is split into runs that each fit. This session is `claude -p`: the process exits the moment a turn ends, so the completion notification an
-  interactive session would wake on has no session left to wake. The habit from interactive work — background the long suite, end the turn, resume on the
-  notification — writes no `## Outcome`, leaves a final message that says only "waiting", and parks the item with its edits uncommitted (#221).
+- **Never run anything in the background, and never end a turn with one still running or waiting on a notification.** Every test, typecheck and build runs in
+  the foreground — no Bash `run_in_background: true`, no `&`, no polling a background task's output file. A suite too slow for the default raises the Bash
+  `timeout`, up to its 600000 ms maximum, or is split into runs that each fit. This session is `claude -p`: the process exits the moment a turn ends, so the
+  completion notification an interactive session would wake on has no session left to wake. The habit from interactive work — background the long suite, end
+  the turn, resume on the notification — writes no `## Outcome`, leaves a final message that says only "waiting", and parks the item with its edits
+  uncommitted (#221).
+
+  **One exception: a dev server for browser verification** (#242). Playwright drives a page across several MCP calls, and the server behind that page has to
+  stay up between them — so a blanket ban left UI changes unverified and handed to a human who was never coming. It is allowed only in this shape, all inside
+  one turn: start it on a port this session chose, recording the pid in the same Bash call (`nohup <server> > /tmp/<id>-server.log 2>&1 & echo $!`); poll that
+  port in the foreground until it answers; drive it with the Playwright MCP tools; then `kill <pid>` with the pid that call printed, and confirm the port is
+  closed, before the turn ends. Kill by that recorded pid, never by pattern — `pkill -f` and `killall` match the human's processes too, and the kill-guard
+  hook refuses them machine-wide. Tests, typecheck and build stay foreground-only: the exception is for a server the session itself talks to, never for work
+  whose result it would wait on.
 - **In a TRACKER project the marker carries a sixth rule, and an `outcome <path>` clause to go with it.** It reads
   `[orchestrator-run <runId> item <n> of <m> branch backlog/<n> outcome <absolute path>: …]`.
   - **Never run `start`, `stop`, `heartbeat`, `move` or `comment` on the item.** The driver holds the issue's claim for the whole item — it claimed before this
@@ -204,6 +213,11 @@ it was; a moved file with a half-written `## Outcome` is the one state re-runnin
 ## Before you call it done
 
 Once the fix or the plan's steps are actually done, run `superpowers:verification-before-completion` — that's what turns "should work" into proof.
+
+A change with a visible UI surface is not proven by its tests alone: verify it in the browser with the Playwright MCP tools, against a server started the way
+the marker section's exception describes. Check the layout, every interaction the item names, a narrow width (390 px), and the light theme — the four things a
+unit test cannot see. Write what each check showed into `## Outcome`. "Needs a human" for the browser check is acceptable only when no Playwright tool is
+loaded in this session, and the Outcome says that is why (#242).
 
 Verification proves the _work_ does what the item asked. Two further checks prove the _diff_ is finished, and they are here because these two findings dominate
 review: a 2026-09-06 sweep of every fix-verdict review on this machine (29 reviews, four projects) put 14 on "another statement of the old contract left

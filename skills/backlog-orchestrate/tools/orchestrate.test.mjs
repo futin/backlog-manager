@@ -3816,8 +3816,33 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
 // dispatched session reads — the fresh prompt, the retry prompt, and execute's
 // marker section — and each is pinned here, because each is prose under
 // constant pressure to be compressed away.
+//
+// #242 narrowed it. The blanket ban also forbade the one legitimate background
+// process — a dev server kept up across several Playwright calls inside ONE
+// turn — so a UI change went unverified and was handed to a human. The
+// exception is pinned with its two guard rails: the server dies by the pid
+// recorded when it started (never a pattern kill), and it dies before the turn
+// ends, so the #221 failure — a turn that ends with something still running —
+// stays banned outright.
 
-const BACKGROUND_RULE = 'Never run a command in the background; run tests in the foreground.';
+const BACKGROUND_RULE =
+  'Never run a command in the background, and never end a turn with one still running; run tests, typecheck and build in the foreground. ' +
+  'One exception: a dev server for Playwright browser verification, its pid recorded in the call that starts it and killed by that pid, never by pattern, ' +
+  'before the turn ends.';
+
+test('the background rule names its one exception with the recorded-pid kill and the turn-end deadline', () => {
+  assert.ok(BACKGROUND_RULE.includes('never end a turn with one still running'), 'the rule no longer bans ending a turn with a background process alive');
+  assert.ok(BACKGROUND_RULE.includes('killed by that pid, never by pattern'), 'the exception no longer names the recorded-pid kill');
+  assert.ok(BACKGROUND_RULE.includes('before the turn ends'), 'the exception no longer says the server dies before the turn ends');
+});
+
+test('the fix-loop prompt file is told to carry the same background rule', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const start = text.indexOf('**`mode: "fresh"`**');
+  assert.ok(start !== -1, 'the fresh fix-loop instructions are gone');
+  const paragraph = text.slice(start, text.indexOf('```', start));
+  assert.ok(paragraph.includes(BACKGROUND_RULE), `the fix-loop prompt instructions no longer carry the background rule: ${BACKGROUND_RULE}`);
+});
 
 test('the fresh dispatch prompt forbids backgrounded commands', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
@@ -3848,6 +3873,26 @@ test('backlog-execute forbids backgrounding inside its marker section, with the 
   assert.ok(section.includes('Never run anything in the background'), 'the marker section lost the no-background rule');
   assert.ok(section.includes('600000'), 'the marker section no longer names the foreground alternative: raising the Bash timeout');
   assert.ok(/exits the moment a turn ends/.test(section), 'the marker section lost the reason: headless -p exits when the turn ends');
+});
+
+test('backlog-execute allows exactly one background process — a browser-verification server killed by its recorded pid before the turn ends', () => {
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
+  const section = text.slice(text.indexOf('## Am I inside an orchestrator run?'), text.indexOf('No marker means a human started this session'));
+  assert.ok(section.includes('never end a turn with one still running'), 'the marker section no longer bans ending a turn with a background process alive');
+  assert.ok(section.includes('One exception'), 'the marker section lost the browser-verification exception');
+  assert.ok(section.includes('echo $!'), 'the exception no longer records the pid in the call that starts the server');
+  assert.ok(section.includes('kill <pid>'), 'the exception no longer kills by the recorded pid');
+  assert.ok(/never by pattern/.test(section), 'the exception no longer forbids a pattern kill');
+  assert.ok(/before the turn ends/.test(section), 'the exception no longer says the server dies before the turn ends');
+  assert.ok(/Tests, typecheck and build stay foreground-only/.test(section), 'the exception no longer keeps tests, typecheck and build in the foreground');
+});
+
+test('backlog-execute verifies a visible UI change in the browser, and "needs a human" only when no Playwright tool is loaded', () => {
+  const text = fs.readFileSync(EXECUTE_SKILL_MD, 'utf8');
+  const section = text.slice(text.indexOf('## Before you call it done'), text.indexOf('Verification proves the _work_'));
+  assert.ok(section.includes('Playwright'), 'the verification step no longer names browser verification with Playwright');
+  for (const what of ['layout', 'narrow width', 'light theme']) assert.ok(section.includes(what), `browser verification no longer checks the ${what}`);
+  assert.ok(/only when no Playwright tool is\s+loaded/.test(section), 'the verification step no longer limits "needs a human" to a session with no Playwright tool');
 });
 
 // --- bug-20: the environment marker the Stop hook reads ---------------------

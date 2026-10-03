@@ -659,7 +659,7 @@ dispatch line onto that same worktree — `references/recovery.md` names the sha
 
 ```bash
 mkdir -p "<dir>/logs"
-nohup sh -c 'LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background; run tests in the foreground. Anything you cannot resolve goes in your final message, not to a person.]" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
+nohup sh -c 'LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && BM_ORCH_RUN=<runId> exec claude -p "/backlog-execute <id> [orchestrator-run <runId> item <n> of <m> branch backlog/<id>: you are dispatched by backlog-orchestrate inside an unattended run. There is no user to ask. Never commit, push or merge. Never run a command in the background, and never end a turn with one still running; run tests, typecheck and build in the foreground. One exception: a dev server for Playwright browser verification, its pid recorded in the call that starts it and killed by that pid, never by pattern, before the turn ends. Anything you cannot resolve goes in your final message, not to a person.]" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id>"' > "<dir>/logs/<id>.jsonl" 2> "<dir>/logs/<id>.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
@@ -884,7 +884,7 @@ a report that no longer describes the branch.
 For both failure shapes, ask the user — best-effort, exactly like pre-flight — which of three they want: **retry**, **skip**, or **stop the run**. Retry resumes
 that item's own session so its context is not paid for twice. **Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first, with the Write tool**,
 and only then launch. §4's rule about prose in a command position covers this text: it quotes execute's failure `## Outcome`, which carries command output
-verbatim. **End that file with the fresh dispatch's background rule, word for word: "Never run a command in the background; run tests in the foreground."** A
+verbatim. **End that file with the fresh dispatch's background rule, word for word: "Never run a command in the background, and never end a turn with one still running; run tests, typecheck and build in the foreground. One exception: a dev server for Playwright browser verification, its pid recorded in the call that starts it and killed by that pid, never by pattern, before the turn ends."** A
 retry is exactly the session most tempted to background — it is re-running a suite it already watched take long — and a headless `-p` session that ends its
 turn waiting on a notification exits with no Outcome, so the one retry is spent on nothing (#221).
 
@@ -994,7 +994,7 @@ reports in this session's context.
   branch, with the instruction to read `git diff <base>...HEAD` and the files the findings name before changing anything, and nothing wider; the verification
   commands to re-run, copied from the item's `## Outcome`; where to append a `### Fix loop <n>` record of what it changed and the command output that proves it
   (the worktree item file's `## Outcome`, or `<dir>/outcomes/<n>.md` in a tracker project); "Anything you cannot resolve goes in your final message, not to a
-  person."; and last, word for word, "Never run a command in the background; run tests in the foreground." In those two tracker paths `<n>` is the issue
+  person."; and last, word for word, "Never run a command in the background, and never end a turn with one still running; run tests, typecheck and build in the foreground. One exception: a dev server for Playwright browser verification, its pid recorded in the call that starts it and killed by that pid, never by pattern, before the turn ends." In those two tracker paths `<n>` is the issue
   number, as in §5, not this loop's count. Never paste the diff into it — a large diff in the
   prompt is exactly the context this mode exists to avoid, and the findings name `file:line`, which is what a narrow read needs. Then launch:
 
