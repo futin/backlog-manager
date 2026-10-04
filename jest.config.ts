@@ -27,6 +27,9 @@ const config: Config = {
   // an assignment to `TZ` never reaches Node's timezone cache. See that file's
   // header for the measurement and for why an inherited TZ is discarded.
   globalSetup: '<rootDir>/test/helpers/global-setup.ts',
+  // Setup also points `TMPDIR` at one per-run directory so every suite's `mkdtempSync` lands inside it; teardown removes that directory. Without the pair
+  // the suite leaked every fixture into `/tmp` until the tmpfs ran out of inodes (#243, `test/helpers/tmp-root.ts`).
+  globalTeardown: '<rootDir>/test/helpers/global-teardown.ts',
   testTimeout: 30_000,
   // marked ships ESM-only (package.json "type": "module", no cjs entry), but
   // ts-jest compiles this repo's own code to CommonJS, so a plain `require`

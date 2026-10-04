@@ -15,7 +15,7 @@
     "dev:web": "vite",
     "test": "node scripts/test-all.mjs",
     "test:jest": "jest --runInBand",
-    "test:skills": "node --test skills/*/tools/*.test.mjs scripts/*.test.mjs",
+    "test:skills": "node scripts/test-tmpdir.mjs skills/*/tools/*.test.mjs scripts/*.test.mjs",
     "plugin:sync": "node scripts/sync-plugin.mjs",
     "tailnet": "node scripts/tailnet.mjs",
     "typecheck": "tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo",

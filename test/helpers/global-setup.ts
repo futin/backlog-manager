@@ -1,6 +1,9 @@
+import { claimTmpRoot } from './tmp-root';
+
 /**
- * The one thing that has to happen BEFORE the jest runtime boots: pin the
- * timezone, unconditionally.
+ * What has to happen BEFORE the jest runtime boots: pin the timezone,
+ * unconditionally — and, since #243, claim the run's temp root (see the
+ * comment at the call below and `tmp-root.ts`).
  *
  * `test/run-range.test.ts`'s DST block needs a known zone, and the obvious
  * `process.env.TZ = ...` inside a `beforeAll` does not work: jest hands each
@@ -43,4 +46,7 @@
  */
 export default async function globalSetup(): Promise<void> {
   process.env.TZ = 'America/New_York';
+  // Second job, same reason it lives here: `TMPDIR` must be set on the real `process.env` for `os.tmpdir()` to see it. Every suite's `mkdtempSync` then
+  // lands inside one per-run root that `global-teardown.ts` removes (#243 — `tmp-root.ts` has the incident and the reasoning).
+  process.env.BM_JEST_TMP_ROOT = claimTmpRoot();
 }

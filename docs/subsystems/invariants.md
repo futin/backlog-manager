@@ -947,7 +947,7 @@ The script has no test of its own on purpose: `scripts/test-all.test.mjs` would 
 ### Where a test file sits decides which runner executes it
 
 The union above is a statement about the one word `pnpm test`; this one is about the file. Each runner finds its suites by a glob and nothing else — jest's
-`testMatch` is `test/**/*.test.ts(x)`, `test:skills` is `node --test skills/*/tools/*.test.mjs scripts/*.test.mjs` — so a test file runs if and only if its
+`testMatch` is `test/**/*.test.ts(x)`, `test:skills` is `node scripts/test-tmpdir.mjs skills/*/tools/*.test.mjs scripts/*.test.mjs` (a `node --test` launcher, #243) — so a test file runs if and only if its
 path matches one of the three, and a file that matches none is not skipped in any way a gate can see: it is a file no runner opens, green by absence,
 indistinguishable at `pnpm test` from a file never written. That has happened in its most literal form: `test:skills` was first spelled
 `node --test skills/backlog/tools/`, node treated the bare directory as a module, and the script ran no tests at all (`e1f58e4`, 2026-08-26). The glob pair

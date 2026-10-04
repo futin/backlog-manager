@@ -97,6 +97,12 @@ not tidiness: any suite that builds `AppModule` arms the watchdog's bootstrap sc
 suite overrode `BM_ORCH_HOME` — and with `BM_AGENTS` genuinely on in that shell, a crashed run sitting there would have `pnpm test` start a real agent session
 against the developer's own repo.
 
+Every fixture either runner creates lands in one per-run temp root, not in `/tmp` itself: jest's `globalSetup` points `TMPDIR` at a `bm-jest-<pid>-…`
+directory and `globalTeardown` removes it (`test/helpers/tmp-root.ts`), and `test:skills` goes through `scripts/test-tmpdir.mjs`, which does the same around
+`node --test` with a `bm-nodetest-<pid>-…` root. A run killed before its teardown leaves its root behind, and the next run sweeps every root whose pid is dead.
+So a new suite can keep calling `mkdtempSync(join(tmpdir(), …))` without cleaning up — before this, ~69k leaked fixture directories exhausted the tmpfs's
+inodes and broke every `Bash` call on the machine (#243).
+
 A suite that hands a Nest app to supertest listens once through `listenLoopback` (`test/helpers/app.ts`), never with a bare `app.listen(0)` and never by leaving
 the bind to supertest. A host-less bind lands on the IPv6 wildcard while supertest dials `127.0.0.1`, so another process holding that port on loopback answers
 instead — about one request in 1,500 on a loaded machine, which is one unreproducible failure per full run and therefore a false red at the merge gate (bug-33;
