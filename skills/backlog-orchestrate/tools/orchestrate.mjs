@@ -3668,6 +3668,183 @@ function cmdMergeCheck(argv) {
   );
 }
 
+/* --- leftover and worktree: what an earlier run left for an item, and creating its worktree ----------------------
+   SKILL.md §3 and §4 each spelled out the same three probes (branch, registered worktree, directory) as shell a model ran
+   and read twice per item, then §4 created the worktree, proved the item survived the checkout and appended two lines to
+   `info/exclude`. All of that is deterministic, so it lives here and the body keeps the judgement: ask or park on
+   `resume-or-park`, write a pre-flight answer into the worktree's item file, and `stage <id> dispatched`.
+
+   `leftover` only reads. `worktree` re-runs the same probe itself before acting rather than trusting an earlier answer,
+   because the seconds between the two are enough for a leftover to appear, and it refuses anything but `none` or
+   `reattach`. Neither prunes, deletes or forces anything: this run's authority stops at worktrees it created itself. */
+
+const LEFTOVER_USAGE = 'usage: orchestrate.mjs leftover <itemId>';
+const WORKTREE_USAGE = 'usage: orchestrate.mjs worktree <itemId>';
+
+// Whole lines, fixed strings. `node_modules` is bare on purpose: a worktree gets a SYMLINK to the main tree's directory, git
+// stores a symlink as a blob, and a directory-only pattern (`node_modules/`) cannot match one (bug-37).
+const WORKTREE_EXCLUDES = ['.worktrees/', 'node_modules'];
+
+const BACKLOG_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'backlog', 'tools', 'backlog.mjs');
+
+// The verdict table, from the three probes and the archive check. The archive check is only meaningful for a branch with
+// no worktree and no directory — the shape a FINISHED branch-mode item leaves behind — so no other verdict depends on it.
+// Anything not named here is a state this skill never creates, so it does not get to guess what it means.
+export function classifyLeftover({ branch, worktree, dir, archived }) {
+  if (!branch && !worktree && !dir) return 'none';
+  if (branch && !worktree && !dir) return archived === true ? 'archived' : 'reattach';
+  if (branch && worktree && dir) return 'resume-or-park';
+  return 'park';
+}
+
+// The three probes, each answering present/absent. The directory is probed apart from git's own registration because the
+// two can disagree: a pruned registration leaves a plain directory git no longer knows about, and `worktree add` refuses
+// that exactly as hard as one it does know about. `worktree list` reports realpaths, so the target is compared in both its
+// spellings.
+function probeLeftover(root, itemId, base) {
+  const branchName = `backlog/${itemId}`;
+  const target = path.join(root, '.worktrees', itemId);
+  const spellings = new Set([target]);
+  try {
+    spellings.add(path.join(fs.realpathSync(root), '.worktrees', itemId));
+  } catch {
+    // the project root is always resolvable here; the plain spelling stands
+  }
+  const listed = spawnSync('git', ['-C', root, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  if (listed.status !== 0) {
+    throw new OrchestrateError(`could not list the worktrees of ${root} (git: ${(listed.stderr || '').trim().split('\n')[0] || `exit ${listed.status}`})`, 1);
+  }
+  const branch = branchExists(root, branchName);
+  const worktree = listed.stdout.split('\n').some((line) => line.startsWith('worktree ') && spellings.has(line.slice('worktree '.length)));
+  const dir = fs.existsSync(target);
+
+  let archived = null;
+  if (branch && !worktree && !dir) {
+    const diff = changedPaths(root, [`${base}...${branchName}`]);
+    if (diff.error !== undefined) {
+      return {
+        branch,
+        worktree,
+        dir,
+        archived,
+        verdict: 'park',
+        detail: `could not tell whether ${branchName} is a finished item: comparing it with ${base} failed (git: ${diff.error})`
+      };
+    }
+    archived = diff.paths.some((p) => p.includes(`/done/${itemId}-`));
+  }
+  const verdict = classifyLeftover({ branch, worktree, dir, archived });
+  const probe = { branch, worktree, dir, archived, verdict };
+  if (verdict === 'park') {
+    probe.detail =
+      `unexpected leftover state for ${itemId}: branch ${branchName} ${branch ? 'exists' : 'does not exist'}; ` +
+      `worktree ${target} is ${worktree ? 'registered' : 'not registered'}; directory ${target} ${dir ? 'exists' : 'does not exist'}`;
+  }
+  return probe;
+}
+
+function leftoverItemArg(argv, usage) {
+  const itemId = argv[0];
+  if (!itemId || itemId.startsWith('-') || argv.length > 1) throw new OrchestrateError(usage, 1);
+  return itemId;
+}
+
+function cmdLeftover(argv) {
+  const itemId = leftoverItemArg(argv, LEFTOVER_USAGE);
+  const root = resolveProjectRoot();
+  const run = readRun(projectDir(orchHome(), root));
+  assertDriver(run);
+  findQueueItem(run, itemId);
+  console.log(JSON.stringify(probeLeftover(root, itemId, run.base ?? BASE_REF_DEFAULT)));
+  return 0;
+}
+
+// Appends each pattern that is not already a whole line of `<commonDir>/info/exclude`, and returns what it appended. The
+// common dir, because `info/exclude` is one shared file for the repo and every worktree of it: a blind append grows
+// duplicates in a file the user owns. Whole-line equality, never a substring test: `node_modules_old` must not stand in for
+// `node_modules`. A final line with no newline gets one first, or the first append would glue itself onto it.
+// `info/exclude`, never `.gitignore`: `.gitignore` is tracked, and a stray commit would ride a merge into the base.
+export function ensureExcludeLines(commonDir, patterns) {
+  const file = path.join(commonDir, 'info', 'exclude');
+  let text = '';
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const present = new Set(text.split('\n'));
+  const missing = patterns.filter((p) => !present.has(p));
+  if (missing.length === 0) return [];
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${text !== '' && !text.endsWith('\n') ? '\n' : ''}${missing.map((p) => `${p}\n`).join('')}`);
+  return missing;
+}
+
+function cmdWorktree(argv) {
+  const itemId = leftoverItemArg(argv, WORKTREE_USAGE);
+  const root = resolveProjectRoot();
+  const dir = projectDir(orchHome(), root);
+  const run = readRun(dir);
+  assertDriver(run);
+  findQueueItem(run, itemId);
+  const base = run.base ?? BASE_REF_DEFAULT;
+  const branch = `backlog/${itemId}`;
+
+  const probe = probeLeftover(root, itemId, base);
+  if (probe.verdict !== 'none' && probe.verdict !== 'reattach') {
+    throw new OrchestrateError(
+      `worktree ${itemId}: the leftover verdict is ${probe.verdict}${probe.detail ? ` (${probe.detail})` : ''} — ` +
+        'only none and reattach may be given a worktree. Nothing was changed.',
+      1
+    );
+  }
+
+  const target = path.join(root, '.worktrees', itemId);
+  const created = probe.verdict === 'none' ? 'new' : 'reattached';
+  const addArgs = created === 'new' ? ['worktree', 'add', target, '-b', branch, base] : ['worktree', 'add', target, branch];
+  const added = spawnSync('git', ['-C', root, ...addArgs], { encoding: 'utf8' });
+  if (added.status !== 0) {
+    const lines = (added.stderr || '').split('\n').filter((l) => l.trim() !== '');
+    const said = lines.find((l) => l.startsWith('fatal:')) ?? lines[lines.length - 1] ?? `exit ${added.status}`;
+    throw new OrchestrateError(`worktree ${itemId}: git ${addArgs.join(' ')} failed (git: ${said}). Nothing was recorded.`, 1);
+  }
+
+  // Prove the item survived the checkout: the worktree holds `<base>`'s COMMIT, not the working copy, so an item groomed
+  // but never committed — the normal state of an item the moment grooming finishes — exists only in the main tree, and a
+  // session with no item file in its tree wanders off and works the main tree's copy: a silent success over a branch with
+  // no lifecycle move on it. Asked from INSIDE the worktree, so `backlog.mjs`'s own `.git`-ancestor walk resolves to it.
+  // A tracker item is an issue, not a file, and no tree holds one for a session to find, so the probe is skipped there.
+  if (projectSource(run.project) !== 'github') {
+    const shown = spawnSync('node', [BACKLOG_CLI, 'show', itemId], { cwd: target, encoding: 'utf8' });
+    if (shown.status !== 0) {
+      // Worktree and branch are kept, as every park path keeps them: nothing is deleted, pruned or forced.
+      const detail = `${itemId} is not present in the worktree checked out from ${base} — commit backlog/ on ${base}, then re-run`;
+      cmdAttention([itemId, '--kind', 'parked', '--detail', detail], () => {});
+      cmdStage([itemId, 'parked'], () => {});
+      console.log(JSON.stringify({ verdict: 'park', worktree: target, branch, created, detail }));
+      return 0;
+    }
+  }
+
+  // Keep the new directory, and anything the run later puts in a worktree to make verification possible, out of everybody's
+  // `git status`. Resolved against the project root: `--git-common-dir` prints a path relative to the cwd.
+  const common = spawnSync('git', ['-C', root, 'rev-parse', '--git-common-dir'], { encoding: 'utf8' });
+  if (common.status !== 0) {
+    throw new OrchestrateError(
+      `worktree ${itemId}: the worktree exists at ${target}, but git could not name its common directory (${(common.stderr || '').trim()})`,
+      1
+    );
+  }
+  try {
+    ensureExcludeLines(path.resolve(root, common.stdout.trim()), WORKTREE_EXCLUDES);
+  } catch (e) {
+    throw new OrchestrateError(`worktree ${itemId}: the worktree exists at ${target}, but info/exclude could not be written (${e.message})`, 1);
+  }
+
+  console.log(JSON.stringify({ worktree: target, branch, created }));
+  return 0;
+}
+
 const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{question, answer}, …]>';
 
 // The one writer of RunQueueItem.assumptions — what this run decided on its
@@ -5464,6 +5641,8 @@ commands:
   stage        move a queue item to a new stage
   merge-mode   record a merge mode downgrade (merge -> branch only)
   merge-check  find the base tree and test both merge preconditions (never merges)
+  leftover     say what an earlier run left for an item (read-only)
+  worktree     create an item's worktree, refusing any leftover but a bare branch
   heartbeat    re-stamp the run's updatedAt
   attention    record something a human should look at
   assume       record a question this run answered itself (decide mode only)
@@ -5561,6 +5740,8 @@ export function main(argv) {
     if (cmd === 'stage') return cmdStage(rest);
     if (cmd === 'merge-mode') return cmdMergeMode(rest);
     if (cmd === 'merge-check') return cmdMergeCheck(rest);
+    if (cmd === 'leftover') return cmdLeftover(rest);
+    if (cmd === 'worktree') return cmdWorktree(rest);
     if (cmd === 'heartbeat') return cmdHeartbeat(rest);
     if (cmd === 'attention') return cmdAttention(rest);
     if (cmd === 'assume') return cmdAssume(rest);

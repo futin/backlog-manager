@@ -339,30 +339,23 @@ Skip this check and the hunt finds the same unresolved `TBD` on every subsequent
 the exact failure this mode exists to avoid, one layer up.
 
 ```bash
-git -C "$PWD" show-ref --verify --quiet refs/heads/backlog/<id>; echo "branch=$?"
-git -C "$PWD" worktree list --porcelain | grep -qxF "worktree $PWD/.worktrees/<id>"; echo "worktree=$?"
-[ -e "$PWD/.worktrees/<id>" ]; echo "dir=$?"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" leftover <id>
 ```
 
-(Swallowed exit status, and the directory checked apart from git's own worktree registration — the same probe §4's "Create the worktree" reuses below; its own
-comment there has the full reasoning for both.)
+It only reads, and prints `{ branch, worktree, dir, archived, verdict }` with exit `0`: whether the branch exists, whether its worktree is registered, whether
+its directory exists, and — for a branch alone — whether its `<base>...backlog/<id>` diff moves the item to `done/`. §4's "Create the worktree" asks the same
+question again, and `worktree` re-asks it itself before it touches anything.
 
-- **`branch=0 worktree=1 dir=1`** (branch exists, worktree does not — what a _finished_ branch-mode item leaves behind) — confirm it actually finished:
+- **`archived`** (a branch and nothing else, whose diff archives the item — what a _finished_ branch-mode item leaves behind) — finished, waiting on a
+  hand-merge. Stage it and move straight to the **next** item; do not re-gate, hunt, dispatch, review or verify it again — that would spend a whole item's
+  budget re-proving what is already green.
 
   ```bash
-  git -C "$PWD" diff --name-only <base>...backlog/<id> | grep -q "/done/<id>-"; echo "archived=$?"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
   ```
 
-  - **`archived=0`** — finished, waiting on a hand-merge. Stage it and move straight to the **next** item; do not re-gate, hunt, dispatch, review or verify it
-    again — that would spend a whole item's budget re-proving what is already green.
-
-    ```bash
-    node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched --branch backlog/<id>
-    ```
-
-  - **`archived=1`** — a real leftover, not a finished item (a crash before this run re-checked the branch out). Continue below; §4 resumes it.
-
-- **Any other combination** — nothing to recognise yet. Continue below.
+- **Any other verdict** — nothing to recognise yet. Continue below. `reattach` (a branch alone, whose diff does not archive the item) is a real leftover, not a
+  finished item: a crash before this run re-checked the branch out. §4 resumes it.
 
 ### Re-check the gate
 
@@ -526,23 +519,21 @@ the other machine does not stop pushing while it does.
 
 **Probe for leftovers before creating anything.** Every park path in this file keeps the item's branch _and_ its worktree on purpose — fix-exhausted (§7),
 nothing to verify with (§8), a merge conflict and a base tree not on `<base>` (§9) — and `finish` cleans up none of it. The item most likely to be queued by the
-_next_ run is therefore exactly the one that already has both on disk, because parking is what leaves it open. `worktree add` fails on either: the directory is
-already there, and the branch answers `fatal: a branch named 'backlog/<id>' already exists`.
+_next_ run is therefore exactly the one that already has both on disk, because parking is what leaves it open.
 
 ```bash
-git -C "$PWD" show-ref --verify --quiet refs/heads/backlog/<id>; echo "branch=$?"
-git -C "$PWD" worktree list --porcelain | grep -qxF "worktree $PWD/.worktrees/<id>"; echo "worktree=$?"
-[ -e "$PWD/.worktrees/<id>" ]; echo "dir=$?"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" leftover <id>
 ```
 
-`0` means it is there, `1` means it is not. All three swallow their own exit status so the call itself always succeeds — a `1` from `show-ref` is an answer, not
-a failure. The directory is probed _separately_ from the worktree registration because the two can disagree: a pruned registration leaves a plain directory git
-no longer knows about, and `worktree add` refuses that just as hard as one it does know about. Then:
+Act on `verdict`:
 
-- **All three `1`** — nothing left over. Create it, below.
-- **`branch=0 worktree=0 dir=0`** — a previous run's work is sitting there. **Never delete either to make room.** That is the same rule §10's abort path spells
-  out, for the same reason: an unmerged worktree can hold uncommitted work that no commit and no reflog can bring back, and this run cannot know from outside
-  that it doesn't. Look first —
+- **`none`** — nothing left over. Create it, below.
+- **`reattach`** — a branch with no worktree. **A real leftover, not a finished item**: §3's own run of this probe already did the archive check for this exact
+  shape, and would have staged the item `branched` and skipped straight to the next item had it found one. What's left is a run that committed the item's work
+  and then crashed before re-checking the branch out. Create it, below: `worktree` checks the existing branch out into a fresh worktree _without_ `-b`.
+- **`resume-or-park`** — branch, worktree and directory all exist: a previous run's work is sitting there. **Never delete either to make room.** That is the
+  same rule §10's abort path spells out, for the same reason: an unmerged worktree can hold uncommitted work that no commit and no reflog can bring back, and
+  this run cannot know from outside that it doesn't. Look first —
 
   ```bash
   git -C "$PWD/.worktrees/<id>" status
@@ -566,83 +557,55 @@ no longer knows about, and `worktree add` refuses that just as hard as one it do
     node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
     ```
 
-- **`branch=0 worktree=1 dir=1`** — a branch with no worktree. **A real leftover, not a finished item**: §3's own copy of this probe (top of that section)
-  already ran the archive-move check for this exact shape, and would have staged the item `branched` and skipped straight to the next item had it found one — an
-  item cannot reach this point in this state any other way. What's left is the other cause of a branch with no worktree: a run committed the item's work and
-  then crashed before re-checking the branch out. Resume it: check the branch out into a fresh worktree _without_ `-b`:
+- **`park`** — any other combination: a registered worktree whose directory is gone, a directory git has no record of, a worktree sitting on a detached HEAD.
+  These are states this skill never creates, so it does not get to guess what they mean. Park, with the verdict's own `detail`, which names what each probe
+  found:
 
   ```bash
-  git -C "$PWD" worktree add .worktrees/<id> backlog/<id>
-  ```
-
-  then `stage <id> dispatched --worktree … --branch …` and Inspect, because the branch may already carry commits.
-
-- **Any other combination** — a registered worktree whose directory is gone, a directory git has no record of, a worktree sitting on a detached HEAD. These are
-  states this skill never creates, so it does not get to guess what they mean: park, with the detail naming exactly what the three probes said. Do not
-  `worktree prune`, do not `branch -D`, do not `--force` anything — this run's authority stops at worktrees it created itself.
-
-```bash
-git -C "$PWD" worktree add .worktrees/<id> -b backlog/<id> <base>
-```
-
-`<base>` is the run's base branch (§2) — `main` unless the run was started with `--base`. Read it off `status --json` rather than assuming, because a resumed
-session is exactly the one that would assume wrong.
-
-The main working tree is never touched by this, and a dirty main tree does not block it: the new worktree checks out `<base>`'s HEAD commit, not the working
-copy. Creating a worktree on a _new_ branch while `<base>` itself is checked out somewhere is legal — the branches differ, so nothing is locked. (It is the
-_same branch_ twice that git refuses, which is why §9 has to find the base rather than check it out again.)
-
-**Then prove the item survived the checkout, before writing any pre-flight answer and before dispatching anything.** That same sentence — the worktree checks
-out `<base>`'s _commit_, not the working copy — is also how an item can be missing from the tree the session is about to run in: an item groomed but never
-committed, which is the normal state of an item the moment grooming finishes, exists only in the main tree. Ask `backlog.mjs` from inside the new worktree, so
-its own `.git`-ancestor walk resolves to the worktree and not to the main tree (a subshell, per the rules at the top of this file):
-
-```bash
-( cd "$PWD/.worktrees/<id>" && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show <id> ); echo "present=$?"
-```
-
-- **`present=0`** — the item is in the worktree. Carry on below.
-- **`present=1`** — it is not. Park, and keep the worktree and the branch exactly as every other park path in this file does: delete nothing, `prune` nothing,
-  `-D` nothing.
-
-  ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<id> is not present in the worktree checked out from <base> — commit backlog/ on <base>, then re-run"
+  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "<the leftover verdict's detail>"
   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
   ```
 
-§1's gate refuses an uncommitted item before a run ever starts, so on the ordinary path this probe never fires. It is here because it catches strictly more than
-that gate can — and because what it prevents is not a crash but a _silent success_: a session with no item file in its tree finds the main tree's copy, works
-that one, and every stage of the run reports success over a branch carrying code with no lifecycle move on it. (`references/rationale.md`, §4, lists everything
-the probe catches that the gate cannot.)
+- **`archived`** — §3 stages these `branched` and moves on, so none reaches here; if one does, stage it the same way.
 
-**Skip this probe entirely in a tracker project.** It asks whether a committed file reached the worktree, and there is no such file — the item is an issue. The
-failure it guards against cannot happen either: a session with no item file in its tree cannot wander off and find the main tree's copy, because no tree has
-one.
+**Never `worktree prune`, `branch -D` or `--force` a leftover** — this run's authority stops at worktrees it created itself.
 
-Then keep the new directory — and anything this run itself puts in a worktree — out of everybody's `git status`, idempotently:
+For `none` and `reattach`, create it:
 
 ```bash
-EXCLUDE="$(git rev-parse --git-common-dir)/info/exclude"
-for PATTERN in '.worktrees/' 'node_modules'; do
-  grep -qxF "$PATTERN" "$EXCLUDE" 2>/dev/null || printf '%s\n' "$PATTERN" >> "$EXCLUDE"
-done
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" worktree <id>
 ```
 
-Run that from the project root (the path `git rev-parse` prints is relative to cwd). Four details, all load-bearing, all explained in `references/rationale.md`
-(§4):
+It re-runs the probe itself and refuses (exit `1`, nothing changed) on any other verdict. Otherwise it creates `.worktrees/<id>` — on a new `backlog/<id>` cut
+from the run's base branch (§2, `main` unless the run was started with `--base`) for `none`, on the existing branch for `reattach` — and prints `{ worktree,
+branch, created }`: `worktree` is absolute, and `created` is `"new"` or `"reattached"`. The main working tree is never touched by this, and a dirty main tree
+does not block it: the new worktree checks out `<base>`'s HEAD commit, not the working copy. Creating a worktree on a _new_ branch while `<base>` itself is
+checked out somewhere is legal — the branches differ, so nothing is locked. (It is the _same branch_ twice that git refuses, which is why §9 has to find the
+base rather than check it out again.)
 
-- **`--git-common-dir`, and the check before the append** — `info/exclude` is one shared file for the repo and every worktree of it, so a blind append grows
-  duplicates in a file the user owns and changes `git status` repo-wide.
-- **`grep -qxF`** — whole line, fixed string. Anything looser either misses an existing entry or matches an unrelated one and skips a needed append.
-- **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it is an uncommitted change in the user's repo at best, and a stray commit riding a
-  merge into the base at worst.
-- **The list is the runner's own scaffolding, and it is a list because there will be more of it.** Whatever this run writes into a worktree to make verification
-  possible — the `node_modules` link a fresh checkout needs before the project's own test command can resolve anything, a package-manager shim, a scratch config
-  — is excluded here, locally, before the first dispatch, and is **never committed**. The item's work is the only thing §6 is allowed to pick up, and §6 stages
-  with `add -A` precisely because that work is not enumerable in advance; the exclude is what keeps the runner's own files out of that net. `node_modules` is
-  listed **bare**, no trailing slash: a worktree gets a *symlink* to the main tree's directory, git stores a symlink as a blob (mode `120000`), and a
-  directory-only pattern cannot match one — which is exactly how bug-37 put a root-level `node_modules` blob on an item branch, ignored by nothing and reported
-  by no `git status`. This exclude is the guard that holds even in a repo whose own `.gitignore` has that same gap.
+It also proves the item survived the checkout, before anything is written into the worktree: the worktree holds `<base>`'s _commit_, so an item groomed but
+never committed exists only in the main tree, and a session with no item file in its tree finds the main tree's copy, works that one, and every stage of the run
+reports success over a branch with no lifecycle move on it. The probe is `backlog.mjs show <id>` from inside the new worktree; it is skipped in a tracker
+project, where an item is an issue and no tree holds a file to wander off to. (`references/rationale.md`, §4, lists everything it catches that §1's gate
+cannot.)
+
+And it keeps the new directory out of everybody's `git status`: `.worktrees/` and `node_modules` go into the **common** git dir's `info/exclude`, whole line,
+only if absent — never `.gitignore`, which is tracked. The entries are written to make verification possible and are **never committed**: the list is the
+runner's own scaffolding, and it is a list because there will be more of it. Whatever this run writes into a worktree to make verification possible — the
+`node_modules` link a fresh checkout needs, a package-manager shim, a scratch config — is excluded here, locally, before the first dispatch, because §6 stages
+with `add -A` and the exclude is what keeps the runner's own files out of that net. `node_modules` is listed **bare**, no trailing slash: a worktree gets a
+_symlink_, git stores it as a blob, and a directory-only pattern cannot match one (bug-37; `references/rationale.md`, §4).
+
+What it printed decides the next step:
+
+- **`created: "new"`** — carry on below.
+- **`created: "reattached"`** — record it with the `stage <id> dispatched --worktree … --branch …` line below, then go to **Inspect** (§5), _not_ to dispatch:
+  the branch may already carry commits.
+- **`verdict: "park"`**, exit `0` — the item is not present in the worktree checked out from `<base>`. The tool has already recorded the attention entry and
+  staged the item `parked`, and kept the worktree and the branch exactly as every other park path in this file does: delete nothing, `prune` nothing, `-D`
+  nothing. Move on to the next item.
+- **exit `1`** — nothing was changed. Either a leftover appeared since `leftover` ran (act on that verdict above), or `git worktree add` itself failed and
+  stderr quotes git: park it, `attention <id> --kind parked --detail "worktree creation failed — <what happened, your words>"`, then `stage <id> parked`.
 
 Now write any pre-flight answer into the worktree's copy of the item file (see above), and record the worktree on the run:
 

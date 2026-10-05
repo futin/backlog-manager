@@ -400,10 +400,10 @@ what the two-gate placement deliberately rules out, and widening it would make e
 Every other skill in this repo edits item files and nothing else; `backlog-orchestrate` is the first, and by this rule the only, one that touches git history at
 all. It can, because of what it alone controls: `backlog-execute`'s "never commits, never pushes" limit exists because a headless execute session runs inside a
 tree it does not own, and staging there could sweep up work that has nothing to do with it — an unscoped `git add` in the user's own checkout is not a call any
-skill gets to make. The orchestrator's worktree is different by construction: `git worktree add .worktrees/<id> -b backlog/<id> <base>` creates a tree that
-holds exactly one item's work and nothing else, so `add -A` inside it is safe in a way it never is in the main tree — the skill says so explicitly at the commit
-step rather than leaving the asymmetry to be inferred. The commit itself is conventional-commit shaped, names the orchestrator as committer in the body (so
-`git log` never implies a human read the diff before it existed), and lands on `backlog/<id>` alone.
+skill gets to make. The orchestrator's worktree is different by construction: `orchestrate.mjs worktree <id>` (`git worktree add .worktrees/<id> -b backlog/<id>
+<base>`) creates a tree that holds exactly one item's work and nothing else, so `add -A` inside it is safe in a way it never is in the main tree — the skill
+says so explicitly at the commit step rather than leaving the asymmetry to be inferred. The commit itself is conventional-commit shaped, names the orchestrator
+as committer in the body (so `git log` never implies a human read the diff before it existed), and lands on `backlog/<id>` alone.
 
 The merge target is **derived, not fixed**. It is `git -C "<base tree>" merge --no-ff --no-edit backlog/<id>`, where `<base>` is the run's own recorded base
 branch (`main` for a run that asked for nothing else) and `<base tree>` is whichever working tree currently has `<base>` checked out — see
@@ -581,11 +581,11 @@ terminal word — an item that has already reached one of the two success exits 
 run's `mergeModeEffective`, because a run downgraded at item 3 must not redraw items 1 and 2 as having branched when they merged.
 
 Not every `branched` stamp was written by the run that did the work. `SKILL.md` §3's "Recognise a leftover branched item" step, run before pre-flight on every
-item, can find a branch a _previous_ run finished and left waiting on a hand-merge, confirm it with an archive-move probe
-(`git diff --name-only <base>...backlog/<id> | grep -q "/done/<id>-"`), and stage it `branched` in the **current** run's own file without ever dispatching,
-reviewing or verifying it. This is deliberate — re-running that pipeline over already-green work would spend a whole item's budget re-proving what a prior run
-already proved — but it does mean a `branched` entry in a run's history is not proof that run executed the item, only that it correctly recognised the item was
-already done.
+item, can find a branch a _previous_ run finished and left waiting on a hand-merge, confirm it with an archive-move probe (`orchestrate.mjs leftover <id>`
+answers `archived` when the `<base>...backlog/<id>` diff moves the item to `done/`, and only for a branch with no worktree and no directory), and stage it
+`branched` in the **current** run's own file without ever dispatching, reviewing or verifying it. This is deliberate — re-running that pipeline over
+already-green work would spend a whole item's budget re-proving what a prior run already proved — but it does mean a `branched` entry in a run's history is not
+proof that run executed the item, only that it correctly recognised the item was already done.
 
 ## A classifier denial degrades the run; every other merge failure parks
 

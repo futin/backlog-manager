@@ -3640,8 +3640,7 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['--no-ff', 'every item merges as its own merge commit'],
     ['( cd ', 'worktree-scoped backlog.mjs calls run in a subshell'],
     ['--permission-mode auto', 'the dispatch rung'],
-    ['BM_PLUGIN_ROOT', "step 8's launcher carries its paths in named env variables"],
-    ['grep -qxF', 'the info/exclude append is checked first, whole-line and fixed-string']
+    ['BM_PLUGIN_ROOT', "step 8's launcher carries its paths in named env variables"]
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
@@ -4278,6 +4277,10 @@ const NOTE_PLACEHOLDERS = new Map([
   // Composed by the tool in this repo, not by a model: `plan --json`'s own
   // fixed refusal strings.
   ["<the gate's own reason>", "the ungroomed gate's own fixed wording"],
+  // `leftover`'s own `detail`: fixed words around the item id and two paths this
+  // run derived from its own project root, composed in `probeLeftover` and pinned
+  // by leftover/worktree 5 and 5b. Nothing a model or a person wrote.
+  ["<the leftover verdict's detail>", "`leftover`'s own fixed wording for an unexpected branch/worktree/directory combination"],
   // Spelled to say whose words they are. The verbatim text each of these
   // summarises lives where the same string points — the reviewer's report,
   // the rows in `status --json`, this session's transcript.
@@ -6661,48 +6664,10 @@ test('step 10 removes a run-created base worktree without failing the run', () =
 // whose own `.gitignore` has the identical gap, and safe for the next such file,
 // which will not be called `node_modules` either.
 //
-// The block is EXECUTED rather than read for a pattern: what it has to do is
-// leave two whole lines in `info/exclude` and leave them once, and only running
-// it proves the shell it is written in actually does that.
-
-/** §4's `info/exclude` block, taken off SKILL.md as the only fenced block that names the file. */
-function excludeBlock() {
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
-  const blocks = [...text.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]).filter((b) => b.includes('info/exclude'));
-  assert.equal(blocks.length, 1, `SKILL.md has ${blocks.length} fenced blocks writing info/exclude, expected exactly 1`);
-  return blocks[0];
-}
-
-/** Runs it the way §4 does — from the project root, in a repo that has never seen it. */
-function runExcludeBlock(times) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-exclude-'));
-  const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
-  git('init', '-q', '-b', 'main', '.');
-  const block = excludeBlock();
-  for (let i = 0; i < times; i += 1) {
-    const out = spawnSync('sh', ['-c', block], { cwd: dir, encoding: 'utf8' });
-    assert.equal(out.status, 0, `the exclude block failed: ${out.stderr}`);
-  }
-  const lines = fs.readFileSync(path.join(dir, '.git', 'info', 'exclude'), 'utf8').split('\n');
-  fs.rmSync(dir, { recursive: true, force: true });
-  return lines;
-}
-
-test("§4's exclude block covers the runner's node_modules link, not just .worktrees/", () => {
-  const lines = runExcludeBlock(1);
-  assert.ok(
-    lines.includes('.worktrees/'),
-    'the exclude block no longer keeps .worktrees/ out of git status'
-  );
-  assert.ok(
-    lines.includes('node_modules'),
-    "the exclude block no longer covers the runner's node_modules link, so a repo whose .gitignore has bug-37's gap commits it again"
-  );
-  // Bare, for the same reason `.gitignore` is: a trailing slash would match the
-  // directory a normal checkout has and miss the symlink a worktree gets, which
-  // is the entire defect.
-  assert.ok(!lines.includes('node_modules/'), 'the exclude entry has a trailing slash again, which cannot match a symlink');
-});
+// The executable half of this block moved with the mechanism: `worktree <id>` appends the two lines, and its cases
+// (leftover/worktree 6 and 7, plus the ensureExcludeLines unit case) run it for real. The three tests that executed
+// SKILL.md's fenced `info/exclude` block are retired in the same commit that took the block out of the body. What stays
+// below is the rule as prose, which no behaviour test can pin.
 
 test('§4 states the rule as a rule, not as one file name', () => {
   // Naming `node_modules` alone would be fixed the day the runner needs a pnpm
@@ -6714,17 +6679,6 @@ test('§4 states the rule as a rule, not as one file name', () => {
     '§4 no longer states the general rule about the runner\'s own scaffolding'
   );
   assert.ok(text.includes('never committed'), '§4 no longer says the scaffolding is excluded locally rather than committed');
-});
-
-test('the exclude block stays idempotent once it covers two patterns', () => {
-  // The existing rule (`grep -qxF`, whole line, fixed string) applied to one
-  // pattern. `info/exclude` is shared by the repo and every worktree of it and
-  // is the user's file, so a second pattern that appends blindly grows a
-  // duplicate per run rather than per repo.
-  const lines = runExcludeBlock(3);
-  for (const pattern of ['.worktrees/', 'node_modules']) {
-    assert.equal(lines.filter((l) => l === pattern).length, 1, `${pattern} was appended more than once`);
-  }
 });
 
 // --- bug-38: every post-merge command runs in the tree the merge happened in -
@@ -8664,4 +8618,304 @@ test('merge-check 13: a stop request exits 10 from the `stage merging` step — 
   assert.ok(before.equals(fs.readFileSync(file)), 'the refused call wrote the run file');
   assert.equal(readRunJson(fx).baseTree, undefined);
   assert.deepEqual(treeListing(fx.project), trees);
+});
+
+// --- leftover and worktree: §3's leftover probe and §4's worktree creation ---
+//
+// SKILL.md §3 and §4 each spelled out the same three-probe block (branch, registered worktree, directory) as shell a
+// model ran and read, then §4 went on to create the worktree, prove the item survived the checkout and append two
+// lines to `info/exclude`. `leftover <id>` is the read-only classification; `worktree <id>` re-runs it, refuses
+// anything but `none` or `reattach`, and does the rest. The cases below ARE the behaviour that prose described, run
+// against real temp git repos — including the `node_modules_old` input no happy path exercises.
+
+const LW_ID = 'task-1';
+
+/** A committed project with groomed tasks `ids` on `main`, and a run initialised on it. No item branch or worktree exists yet. */
+function leftoverFixture(t, { ids = [LW_ID] } = {}) {
+  const fx = basedFixture(t);
+  for (const id of ids) seedReadyTask(fx.project, id, `Item ${id}`);
+  commitEverything(fx.project, 'seed tasks');
+  assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project).status, 0);
+  return fx;
+}
+
+function leftover(fx, ...args) {
+  return run(fx.project, fx.home, 'leftover', ...args);
+}
+
+function worktreeCmd(fx, ...args) {
+  return run(fx.project, fx.home, 'worktree', ...args);
+}
+
+function verdictOf(out) {
+  assert.equal(out.status, 0, out.stderr);
+  return JSON.parse(out.stdout.trim());
+}
+
+/** Makes `backlog/<id>` with one extra commit via a throwaway worktree. `keep` leaves that worktree at `.worktrees/<id>`. */
+function seedItemBranch(fx, id, { keep = false, archive = false } = {}) {
+  const tree = path.join(fx.project, '.worktrees', id);
+  gitOk(fx.project, 'worktree', 'add', tree, '-b', `backlog/${id}`, 'main');
+  if (archive) {
+    fs.mkdirSync(path.join(tree, 'backlog', 'tasks', 'done'), { recursive: true });
+    gitOk(tree, 'mv', path.join('backlog', 'tasks', 'open', `${id}-fixture.md`), path.join('backlog', 'tasks', 'done', `${id}-fixture.md`));
+  } else {
+    fs.writeFileSync(path.join(tree, 'extra.txt'), `${id} extra\n`);
+    gitOk(tree, 'add', '-A');
+  }
+  gitOk(tree, 'commit', '-q', '-m', `${id} work`);
+  if (!keep) gitOk(fx.project, 'worktree', 'remove', tree);
+  return tree;
+}
+
+function branchList(project) {
+  return gitOk(project, 'branch', '--format=%(refname:short)').split('\n').filter(Boolean).sort();
+}
+
+test('leftover/worktree unit: the verdict table covers every probe combination, and the archive check only matters for a branch alone', () => {
+  const v = (branch, worktree, dir, archived = null) => orch.classifyLeftover({ branch, worktree, dir, archived });
+  assert.equal(v(false, false, false), 'none');
+  assert.equal(v(true, false, false, true), 'archived');
+  assert.equal(v(true, false, false, false), 'reattach');
+  assert.equal(v(true, true, true), 'resume-or-park');
+  assert.equal(v(true, true, true, true), 'resume-or-park', 'the archive check is not applied once a worktree exists');
+  for (const combo of [
+    [false, true, true],
+    [false, false, true],
+    [false, true, false],
+    [true, true, false],
+    [true, false, true]
+  ]) {
+    assert.equal(v(...combo), 'park', `branch=${combo[0]} worktree=${combo[1]} dir=${combo[2]}`);
+  }
+});
+
+test('leftover/worktree unit: ensureExcludeLines appends only absent whole lines, and a file with no trailing newline does not glue the first one on', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-exclude-unit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'info', 'exclude');
+  assert.deepEqual(orch.ensureExcludeLines(dir, ['.worktrees/', 'node_modules']), ['.worktrees/', 'node_modules'], 'a missing file and directory are created');
+  assert.equal(fs.readFileSync(file, 'utf8'), '.worktrees/\nnode_modules\n');
+  assert.deepEqual(orch.ensureExcludeLines(dir, ['.worktrees/', 'node_modules']), [], 'a second call appends nothing');
+
+  fs.writeFileSync(file, 'keep-me');
+  assert.deepEqual(orch.ensureExcludeLines(dir, ['.worktrees/']), ['.worktrees/']);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'keep-me\n.worktrees/\n');
+});
+
+test('leftover/worktree 1: a fresh item is `none`; worktree creates .worktrees/<id> on a new backlog/<id> cut from the base, absolute, created "new"', (t) => {
+  const fx = leftoverFixture(t);
+  const file = runFile(fx.home, fx.project);
+  const before = fs.readFileSync(file);
+
+  const probe = verdictOf(leftover(fx, LW_ID));
+
+  assert.deepEqual(probe, { branch: false, worktree: false, dir: false, archived: null, verdict: 'none' });
+  assert.ok(before.equals(fs.readFileSync(file)), 'leftover wrote the run file');
+  assert.deepEqual(branchList(fx.project), ['main'], 'leftover touched the repo');
+
+  const out = verdictOf(worktreeCmd(fx, LW_ID));
+
+  const tree = path.join(fx.project, '.worktrees', LW_ID);
+  assert.deepEqual(out, { worktree: tree, branch: `backlog/${LW_ID}`, created: 'new' });
+  assert.ok(path.isAbsolute(out.worktree));
+  assert.equal(gitOk(tree, 'symbolic-ref', 'HEAD').trim(), `refs/heads/backlog/${LW_ID}`);
+  assert.equal(gitOk(tree, 'rev-parse', 'HEAD').trim(), gitOk(fx.project, 'rev-parse', 'main').trim(), 'the branch is cut from the base');
+  assert.ok(treeListing(fx.project).includes(tree));
+  assert.ok(fs.existsSync(path.join(tree, 'backlog', 'tasks', 'open', `${LW_ID}-fixture.md`)), 'the item is in the new worktree');
+});
+
+test('leftover/worktree 1b: on a --base run the new branch is cut from that base, not from main', (t) => {
+  const fx = basedFixture(t);
+  seedReadyTask(fx.project, LW_ID, 'Item');
+  commitEverything(fx.project, 'seed');
+  gitOk(fx.project, 'branch', 'feature/x');
+  gitOk(fx.project, 'checkout', '-q', 'feature/x');
+  fs.writeFileSync(path.join(fx.project, 'only-on-feature.txt'), 'x\n');
+  commitEverything(fx.project, 'feature work');
+  gitOk(fx.project, 'checkout', '-q', 'main');
+  assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project, '--base', 'feature/x').status, 0);
+
+  verdictOf(worktreeCmd(fx, LW_ID));
+
+  assert.ok(fs.existsSync(path.join(fx.project, '.worktrees', LW_ID, 'only-on-feature.txt')), 'the worktree was cut from main, not from the run base');
+});
+
+test('leftover/worktree 2: a branch alone is `reattach`; worktree checks the existing branch out (extra commit present), created "reattached"', (t) => {
+  const fx = leftoverFixture(t);
+  seedItemBranch(fx, LW_ID);
+  const tip = gitOk(fx.project, 'rev-parse', `backlog/${LW_ID}`).trim();
+
+  const probe = verdictOf(leftover(fx, LW_ID));
+  assert.deepEqual(probe, { branch: true, worktree: false, dir: false, archived: false, verdict: 'reattach' });
+
+  const out = verdictOf(worktreeCmd(fx, LW_ID));
+
+  const tree = path.join(fx.project, '.worktrees', LW_ID);
+  assert.deepEqual(out, { worktree: tree, branch: `backlog/${LW_ID}`, created: 'reattached' });
+  assert.equal(fs.readFileSync(path.join(tree, 'extra.txt'), 'utf8'), `${LW_ID} extra\n`);
+  assert.equal(gitOk(tree, 'rev-parse', 'HEAD').trim(), tip, 'the branch was not recreated');
+});
+
+test('leftover/worktree 3: branch, worktree and dir all present is `resume-or-park`; worktree exits 1 and changes nothing', (t) => {
+  const fx = leftoverFixture(t);
+  const tree = seedItemBranch(fx, LW_ID, { keep: true });
+  fs.writeFileSync(path.join(tree, 'uncommitted.txt'), 'precious\n');
+  const file = runFile(fx.home, fx.project);
+  const before = fs.readFileSync(file);
+  const trees = treeListing(fx.project);
+  const excludeFile = path.join(fx.project, '.git', 'info', 'exclude');
+  const excludeBefore = fs.readFileSync(excludeFile, 'utf8');
+
+  const probe = verdictOf(leftover(fx, LW_ID));
+  assert.deepEqual(probe, { branch: true, worktree: true, dir: true, archived: null, verdict: 'resume-or-park' });
+
+  const out = worktreeCmd(fx, LW_ID);
+
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /resume-or-park/);
+  assert.ok(before.equals(fs.readFileSync(file)), 'the refusal wrote the run file');
+  assert.deepEqual(treeListing(fx.project), trees);
+  assert.equal(fs.readFileSync(path.join(tree, 'uncommitted.txt'), 'utf8'), 'precious\n');
+  assert.equal(fs.readFileSync(excludeFile, 'utf8'), excludeBefore, 'the refusal appended to info/exclude');
+});
+
+test('leftover/worktree 4: a branch alone whose diff moves the item to done/ is `archived`; with its worktree and dir too it is `resume-or-park`', (t) => {
+  const fx = leftoverFixture(t);
+  const tree = seedItemBranch(fx, LW_ID, { keep: true, archive: true });
+
+  assert.equal(verdictOf(leftover(fx, LW_ID)).verdict, 'resume-or-park', 'the archive check is not applied once the worktree exists');
+
+  gitOk(fx.project, 'worktree', 'remove', tree);
+  const probe = verdictOf(leftover(fx, LW_ID));
+  assert.deepEqual(probe, { branch: true, worktree: false, dir: false, archived: true, verdict: 'archived' });
+
+  const refused = worktreeCmd(fx, LW_ID);
+  assert.equal(refused.status, 1, 'an archived branch is staged `branched` by the body, never given a worktree');
+  assert.match(refused.stderr, /archived/);
+  assert.equal(fs.existsSync(tree), false);
+});
+
+test('leftover/worktree 5: a directory with no branch is `park`, the detail names the directory, and worktree refuses', (t) => {
+  const fx = leftoverFixture(t);
+  const dir = path.join(fx.project, '.worktrees', LW_ID);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const probe = verdictOf(leftover(fx, LW_ID));
+
+  assert.equal(probe.verdict, 'park');
+  assert.deepEqual([probe.branch, probe.worktree, probe.dir], [false, false, true]);
+  assert.ok(probe.detail.includes(dir), `the detail must name the directory: ${probe.detail}`);
+  assert.equal(worktreeCmd(fx, LW_ID).status, 1);
+  assert.ok(fs.existsSync(dir), 'nothing was removed');
+});
+
+test('leftover/worktree 5b: a registered worktree whose directory is gone is `park` too, and the detail names what each probe found', (t) => {
+  const fx = leftoverFixture(t);
+  const tree = seedItemBranch(fx, LW_ID, { keep: true });
+  fs.rmSync(tree, { recursive: true, force: true });
+
+  const probe = verdictOf(leftover(fx, LW_ID));
+
+  assert.equal(probe.verdict, 'park');
+  assert.deepEqual([probe.branch, probe.worktree, probe.dir], [true, true, false]);
+  assert.match(probe.detail, /branch/);
+  assert.match(probe.detail, /worktree/);
+  assert.match(probe.detail, /directory/);
+});
+
+test('leftover/worktree 6: info/exclude holding node_modules_old still gets node_modules and .worktrees/ lines, once — a second item adds neither', (t) => {
+  const fx = leftoverFixture(t, { ids: [LW_ID, 'task-2'] });
+  const excludeFile = path.join(fx.project, '.git', 'info', 'exclude');
+  fs.appendFileSync(excludeFile, 'node_modules_old\n');
+
+  verdictOf(worktreeCmd(fx, LW_ID));
+
+  const lines = fs.readFileSync(excludeFile, 'utf8').split('\n');
+  assert.ok(lines.includes('node_modules_old'), 'an existing line was lost');
+  assert.equal(lines.filter((l) => l === 'node_modules').length, 1, 'a substring match skipped the node_modules append');
+  assert.equal(lines.filter((l) => l === '.worktrees/').length, 1);
+  assert.ok(!lines.includes('node_modules/'), 'a trailing slash cannot match the symlink a worktree gets');
+  const afterFirst = fs.readFileSync(excludeFile, 'utf8');
+
+  verdictOf(worktreeCmd(fx, 'task-2'));
+
+  assert.equal(fs.readFileSync(excludeFile, 'utf8'), afterFirst, 'a second worktree run appended again');
+});
+
+test('leftover/worktree 7: the exclude lines land in the main repo’s .git/info/exclude, not in the worktree’s own gitdir', (t) => {
+  const fx = leftoverFixture(t);
+
+  verdictOf(worktreeCmd(fx, LW_ID));
+
+  const main = fs.readFileSync(path.join(fx.project, '.git', 'info', 'exclude'), 'utf8').split('\n');
+  assert.ok(main.includes('.worktrees/') && main.includes('node_modules'));
+  const own = path.join(fx.project, '.git', 'worktrees', LW_ID, 'info', 'exclude');
+  assert.equal(fs.existsSync(own), false, 'a per-worktree exclude was written');
+  assert.equal(gitOk(fx.project, 'status', '--porcelain').includes('.worktrees'), false, '.worktrees/ shows up in git status');
+});
+
+test('leftover/worktree 8: an item that is not committed on the base parks with the post-checkout template, stage parked, worktree and branch kept', (t) => {
+  const fx = leftoverFixture(t);
+  gitOk(fx.project, 'rm', '-q', '-r', 'backlog');
+  gitOk(fx.project, 'commit', '-q', '-m', 'item no longer on base');
+
+  const out = verdictOf(worktreeCmd(fx, LW_ID));
+
+  const detail = `${LW_ID} is not present in the worktree checked out from main — commit backlog/ on main, then re-run`;
+  assert.equal(out.verdict, 'park');
+  assert.equal(out.detail, detail);
+  const state = readRunJson(fx);
+  assert.equal(stageOf(fx), 'parked');
+  assert.deepEqual(state.attention.filter((a) => a.id === LW_ID).map((a) => [a.kind, a.detail]), [['parked', detail]]);
+  const tree = path.join(fx.project, '.worktrees', LW_ID);
+  assert.ok(treeListing(fx.project).includes(tree), 'the worktree must be kept');
+  assert.ok(branchList(fx.project).includes(`backlog/${LW_ID}`), 'the branch must be kept');
+});
+
+test('leftover/worktree 9: a tracker project has no item file, so no presence probe runs and nothing parks', async (t) => {
+  const fx = trackerFixture(t);
+  fs.writeFileSync(path.join(fx.project, 'README.md'), 'tracker fixture\n');
+  commitEverything(fx.project, 'seed');
+  const gate = gateRoutes([apiItem(fx.project, 3, { section: 'bugs' })], { 3: GROOMED_BUG_BODY });
+  const { out: init } = await withApi(gate, (port) => runApi(fx.project, fx.home, port, 'init', '--project', fx.project));
+  assert.equal(init.status, 0, init.stderr);
+
+  // `init` above ran as `sess-test` (runApi pins it), so this call must be the same driver.
+  const out = verdictOf(runAs('sess-test', fx.project, fx.home, 'worktree', '3'));
+
+  assert.equal(out.created, 'new');
+  assert.equal(out.verdict, undefined, 'a tracker worktree must not park for a missing item file');
+  assert.ok(treeListing(fx.project).includes(path.join(fx.project, '.worktrees', '3')));
+  assert.deepEqual(readRunJson(fx).attention ?? [], []);
+});
+
+test('leftover/worktree 10: no run exits 3, a foreign lease 7, a usage error or an unknown id 1 — and none of them touches the run file or git', (t) => {
+  for (const cmd of ['leftover', 'worktree']) {
+    const bare = basedFixture(t);
+    assert.equal(run(bare.project, bare.home, cmd, LW_ID).status, 3, `${cmd}: no run`);
+    assert.equal(fs.existsSync(runFile(bare.home, bare.project)), false);
+
+    const fx = leftoverFixture(t);
+    const file = runFile(fx.home, fx.project);
+    const before = fs.readFileSync(file);
+    const trees = treeListing(fx.project);
+    const branches = branchList(fx.project);
+    assert.equal(run(fx.project, fx.home, cmd).status, 1, `${cmd}: no id is a usage error`);
+    assert.equal(run(fx.project, fx.home, cmd, LW_ID, '--bogus').status, 1, `${cmd}: an unknown flag is a usage error`);
+    assert.equal(run(fx.project, fx.home, cmd, 'task-99').status, 1, `${cmd}: an unknown id`);
+    assert.ok(before.equals(fs.readFileSync(file)));
+    assert.deepEqual(treeListing(fx.project), trees);
+    assert.deepEqual(branchList(fx.project), branches);
+
+    const led = basedFixture(t);
+    seedReadyTask(led.project, LW_ID, 'Item');
+    commitEverything(led.project, 'seed');
+    assert.equal(runAs('sess-a', led.project, led.home, 'init', '--project', led.project).status, 0);
+    const ledBefore = fs.readFileSync(runFile(led.home, led.project));
+    const ledTrees = treeListing(led.project);
+    assert.equal(runAs('sess-b', led.project, led.home, cmd, LW_ID).status, 7, `${cmd}: foreign lease`);
+    assert.ok(ledBefore.equals(fs.readFileSync(runFile(led.home, led.project))));
+    assert.deepEqual(treeListing(led.project), ledTrees);
+  }
 });

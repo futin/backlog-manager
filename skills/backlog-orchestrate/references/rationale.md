@@ -252,8 +252,8 @@ the one the gate defaults to.
 - **`--git-common-dir`, and the check-before-append.** `info/exclude` lives in the repository's _shared common_ git directory — one file for the repo and every
   worktree of it, not one per worktree. Appending blindly on each item would grow duplicate lines in a file the user owns, and change `git status` output
   repo-wide, including in their main tree.
-- **`grep -qxF`** — whole line (`-x`), fixed string (`-F`). A substring or regex match would either miss an existing entry or match an unrelated one and skip an
-  append that was actually needed.
+- **Whole line, fixed string** (`worktree` compares exactly as `grep -qxF` did). A substring or regex match would either miss an existing entry or match an
+  unrelated one — `node_modules_old` — and skip an append that was actually needed.
 - **`info/exclude`, never `.gitignore`.** `.gitignore` is tracked: editing it would be an uncommitted change in the user's repo at best, and a stray commit
   riding a merge into the base at worst. `info/exclude` is local, untracked, and reversible by deleting a line.
 - **The list covers the runner's own scaffolding, not just `.worktrees/` (bug-37).** A per-item worktree is a fresh checkout with no `node_modules` of its own,
