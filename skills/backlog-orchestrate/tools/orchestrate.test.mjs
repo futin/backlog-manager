@@ -3647,6 +3647,57 @@ test('the body keeps the rules whose stories moved to references/', () => {
   }
 });
 
+// The whole text a tracker run reads: the body, then every `references/*.md`. Read from the directory rather than a list, so a reference added later is
+// picked up by every case that calls this without anybody remembering to add it here. A case whose needle may live in either place reads it; a case whose
+// needle must stay in the body (a literal git call, a launch line) keeps reading `SKILL_MD` on its own.
+function skillText() {
+  const files = fs
+    .readdirSync(REFERENCES)
+    .filter((f) => f.endsWith('.md'))
+    .sort();
+  return [fs.readFileSync(SKILL_MD, 'utf8'), ...files.map((f) => fs.readFileSync(path.join(REFERENCES, f), 'utf8'))].join('\n');
+}
+
+test('the body sends a github-source run to references/tracker.md, in a sentence that names github', () => {
+  // The trigger is the point, not the filename: a body that names the file but not WHEN to read it leaves a tracker run working from the files-project
+  // text alone, and a files run opening a file it never needed. The run file has no `source` field, so the predicate is the committed marker.
+  const body = fs.readFileSync(SKILL_MD, 'utf8');
+  const at = body.indexOf('references/tracker.md');
+  assert.ok(at !== -1, 'SKILL.md never names references/tracker.md');
+  const start = body.lastIndexOf('\n\n', at) + 2;
+  const end = body.indexOf('\n\n', at);
+  const paragraph = body.slice(start, end === -1 ? undefined : end).replace(/\s*\n\s*/g, ' ');
+  const sentence = paragraph.split(/(?<=[.!?])\s+(?=[A-Z*`])/).find((s) => s.includes('references/tracker.md'));
+  assert.match(sentence, /`github`/, `the sentence naming references/tracker.md does not say github: ${sentence}`);
+  assert.match(sentence, /backlog\/source\.json/, 'the trigger is not the committed source marker');
+  assert.match(sentence, /in full/, 'the trigger does not say to read the file in full');
+  assert.ok(fs.existsSync(path.join(REFERENCES, 'tracker.md')), 'references/tracker.md does not exist');
+});
+
+test('the tracker rules that left the body are still in body + references, and the body keeps a marker at every site', () => {
+  // Move, never delete: each needle is a rule or a `--detail` template that now lives in references/tracker.md. The body half is the marker, which has to
+  // name the file so a tracker run that skipped the up-front read still finds it at the step.
+  const all = skillText();
+  const flatAll = all.replace(/\s*\n\s*/g, ' ');
+  for (const [rule, needle] of [
+    ['the attention comment marker', '<!-- bm:attention kind=… run=… -->'],
+    ['a claim elsewhere is a skip', '"stage":"skipped"'],
+    ['the claim-refused park', 'the claim for this item was refused'],
+    ['the pull-failure park', 'cannot fast-forward onto origin'],
+    ['the outcome clause of the dispatch marker', 'outcome <dir>/outcomes/<n>.md'],
+    ['the snapshot the reviewer reads', 'snapshot <n>'],
+    ['the rejected-push park', 'merge landed locally but the push was rejected'],
+    ['the refused-close park', 'merged and pushed; the issue was not closed'],
+    ['finish stamps the last-touched claim', 'finished: { at, status }'],
+    ['abort releases every claim', 'gives every claim the run still holds back']
+  ]) {
+    assert.ok(flatAll.includes(needle), `the tracker rule is gone from body + references: ${rule} (${needle})`);
+  }
+  const body = fs.readFileSync(SKILL_MD, 'utf8');
+  const markers = body.match(/references\/tracker\.md/g) ?? [];
+  assert.ok(markers.length >= 12, `only ${markers.length} references/tracker.md pointers in the body — a moved site lost its marker`);
+});
+
 test('every file under references/ is named by the body', () => {
   // An unreferenced reference is a file no session will ever open. Reading
   // them is not automatic — the body has to say when.
@@ -4318,6 +4369,7 @@ test("every --detail and --note value is the driver's own words", () => {
     SKILL_MD,
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'recovery.md'),
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'rationale.md'),
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'tracker.md'),
     path.join(SKILLS_ROOT, '..', 'docs', 'subsystems', 'invariants.md')
   ];
   const seen = new Set();

@@ -4951,7 +4951,12 @@ test('backlog-execute names the outcome path and forbids the five item writes un
 test('the orchestrator dispatch line and backlog-execute agree on the outcome clause', () => {
   // One seam, two files: the driver writes `outcome <dir>/outcomes/<n>.md`
   // into the prompt, and the session reads the path back out of it.
-  const orch = flat(fileURLToPath(new URL('../../backlog-orchestrate/SKILL.md', import.meta.url)))
+  // The clause moved to references/tracker.md with the rest of the tracker-only dispatch text, so the whole orchestrator skill is read: the body plus every
+  // `references/*.md`, the same text `skillText()` in orchestrate.test.mjs reads.
+  const orchRoot = fileURLToPath(new URL('../../backlog-orchestrate/', import.meta.url))
+  const orch = [path.join(orchRoot, 'SKILL.md'), ...fs.readdirSync(path.join(orchRoot, 'references')).filter((f) => f.endsWith('.md')).map((f) => path.join(orchRoot, 'references', f))]
+    .map(flat)
+    .join(' ')
   assert.match(orch, /outcome <dir>\/outcomes\/<n>\.md/)
   assert.match(flat(EXECUTE_SKILL_MD), /\[orchestrator-run <runId> item <n> of <m> branch backlog\/<n> outcome <absolute path>/)
 })
