@@ -167,7 +167,8 @@ the outcomes are exhaustive: (1) a tree holds `<base>` — merge there (for a `m
 `.worktrees/_base-feature-tracker-backed`); the `_base-` prefix cannot collide with an item worktree because no id `backlog.mjs` mints begins with `_`, and a
 leftover at that path holding something other than `<base>` is a park, never a guess (a leftover holding `<base>` is outcome 1 and is reused); (3) none does and
 `worktree add` refuses — a tree that is mid-rebase or mid-bisect reports `detached` in `worktree list --porcelain`, so the scan cannot see it while git still
-knows it owns the branch (measured), and the create failing is how it is detected. All three outcomes run in the tool; outcome 3 parks quoting git's `fatal:` line.
+knows it owns the branch (measured), and the create failing is how it is detected. All three outcomes run in the tool; outcome 3 parks quoting git's `fatal:`
+line.
 
 **The scan is a tool, not an `awk` one-liner, for a reason that cost a run:** slash-command substitution rewrites `$0` to the run's first argument, so a run
 started as `/backlog-orchestrate 172` read `substr(172,10)` and the old `awk` form always printed nothing (#238).

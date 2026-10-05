@@ -3635,7 +3635,11 @@ function cmdMergeCheck(argv) {
   const staged = changedPaths(tree, ['--cached']);
   const failed = [branchSide, unstaged, staged].find((side) => side.error !== undefined);
   if (failed !== undefined) {
-    return park(`could not compare ${branch} with the uncommitted paths in ${tree} (git: ${failed.error}) — branch ${branch} kept for a manual merge`, tree, created);
+    return park(
+      `could not compare ${branch} with the uncommitted paths in ${tree} (git: ${failed.error}) — ` + `branch ${branch} kept for a manual merge`,
+      tree,
+      created
+    );
   }
   const branchPaths = [...new Set(branchSide.paths)].sort();
   const dirtyPaths = [...new Set([...unstaged.paths, ...staged.paths])].sort();
@@ -3657,7 +3661,8 @@ function cmdMergeCheck(argv) {
     return 0;
   }
   return park(
-    `merge would be refused: ${overlap.join(', ')} are uncommitted in ${tree} and this branch also touches them — commit or stash them, then merge ${branch} by hand`,
+    `merge would be refused: ${overlap.join(', ')} are uncommitted in ${tree} and this branch also touches them — ` +
+      `commit or stash them, then merge ${branch} by hand`,
     tree,
     created
   );

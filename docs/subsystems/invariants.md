@@ -458,15 +458,16 @@ exhaustive:
    and the park detail quotes git's own message because it names the tree the scan could not.
 
 **The run removes a base worktree only if it created it** — outcome 2 and nothing else, which `merge-check` records as `baseTree.created` (true only for the
-worktree this run made, and once true it stays true) so that §10 and a resumed session read it from the run file rather than from memory. This is not a second rule beside "authority stops at worktrees it
+worktree this run made, and once true it stays true) so that §10 and a resumed session read it from the run file rather than from memory. This is not a second
+rule beside "authority stops at worktrees it
 created itself"; it is that same sentence applied to a directory that happens to hold the base. A worktree the person made is theirs, however convenient it
 would be to tidy up, and a run that removed one would be deleting a working tree its owner may have uncommitted work in.
 
 **"The main tree" and "the tree holding `main`" are not synonyms**, and conflating them is the defect this whole section exists to prevent. The main tree is the
 project's original checkout — the one the registry points at, the one `orchestrate.mjs` refuses to run outside of — and it stays the main tree whatever branch
 it holds. The base tree is wherever `<base>` happens to be right now. On a default run they are one directory; on a `--base` run they are two, and every rule
-below has to name the right one: the `symbolic-ref` precondition and the dirty-path overlap probe (both `merge-check`'s) follow the merge into the **base** tree, because what can
-refuse a merge is the state of the tree being written to. A dirty main tree cannot block a merge that is not happening there.
+below has to name the right one: the `symbolic-ref` precondition and the dirty-path overlap probe (both `merge-check`'s) follow the merge into the **base**
+tree, because what can refuse a merge is the state of the tree being written to. A dirty main tree cannot block a merge that is not happening there.
 
 **And so does everything that follows the merge — every cleanup command belongs in the tree that merge happened in** (bug-38). Two of them kept the pre-base
 spelling, where `$PWD` was correct only because the base was always `main`: `git branch -d backlog/<id>`, and the `git diff --name-only HEAD^1 HEAD` that

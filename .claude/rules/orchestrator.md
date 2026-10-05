@@ -47,9 +47,9 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   reads each item's claim and suggests `skip` for another run's live one; a files run's output is byte-identical. Why:
   [invariants.md](docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item)
 - **The merge happens in whichever tree holds the base, and the run removes only the tree it made.** git refuses one branch in two trees and `--force` is not
-  the way round it, so the merge site is resolved per merge, by `orchestrate.mjs merge-check <id>` (which also runs both preconditions and records `baseTree: { path, created }` on
-  the run), into three exhaustive outcomes: a tree holds it → merge there; none does → create `.worktrees/_base-<sanitised ref>`, merge, remove at the end of
-  the run only if `baseTree.created`; none does and `worktree add` refuses → park. Outcome 3 is detected by
+  the way round it, so the merge site is resolved per merge, by `orchestrate.mjs merge-check <id>` (which also runs both preconditions and records `baseTree: {
+  path, created }` on the run), into three exhaustive outcomes: a tree holds it → merge there; none does → create `.worktrees/_base-<sanitised ref>`, merge,
+  remove at the end of the run only if `baseTree.created`; none does and `worktree add` refuses → park. Outcome 3 is detected by
   the create failing, never by the scan, because a worktree **mid-rebase reports `detached`** and so is invisible to it. A base worktree the run did not create
   is never removed — the same sentence as "authority stops at worktrees it created itself". **"The main tree" and "the tree holding `main`" are not synonyms**:
   the `symbolic-ref` precondition and the dirty-path probe both follow the merge into the BASE tree, and so does **every cleanup command that follows a merge**

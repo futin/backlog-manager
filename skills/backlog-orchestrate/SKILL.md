@@ -497,15 +497,19 @@ makes. So: hunt and ask here, write in step 4.
 
 ### Pull the base first — tracker projects only
 
+Find the tree that has `<base>` checked out, then pull in it — both commands run before every item's worktree:
+
 ```bash
+git -C "$PWD" worktree list --porcelain | grep -B2 -Fx "branch refs/heads/<base>" | sed -n 's/^worktree //p'
 git -C "<base tree>" pull --ff-only origin <base>
 ```
 
 **Before every item's worktree, not once per run.** A tracker project is shared by definition, and another machine draining the same queue pushes its merges to
 the same base; an item cut from a stale base is verified against a commit nobody else's base matches, and its own push is rejected at the end of the pipeline
-after the whole item has been spent. `<base tree>` is the tree that has `<base>` checked out — `baseTree.path` in `status --json` once §9's
-`merge-check` has resolved it, and before that whichever tree `git worktree list --porcelain` shows on the `branch refs/heads/<base>` line. On an ordinary
-`main` run it is the project root, and on a `--base` run it is not.
+after the whole item has been spent. `<base tree>` is the first command's output, re-resolved every time and never read back from the run file: a recorded
+`baseTree.path` can go stale between items, and a pull in a tree somebody has since switched to another branch fast-forwards that branch instead. On an ordinary
+`main` run the output is the project root, and on a `--base` run it is not. Never rewrite the scan as `awk` over `$0`: slash-command substitution rewrites `$0`
+to the run's first argument, so a run started as `/backlog-orchestrate 172` read `substr(172,10)` and always printed nothing (#238).
 
 A non-zero exit **parks the run**, because what cannot fast-forward is the branch every remaining item would be cut from:
 
@@ -1191,9 +1195,10 @@ failed push **parks** the item exactly as a failed merge does — `attention <n>
 and branch stay where they are.
 
 No `stage <id> merging` and no `merge-check` — nothing is merging. Everything `merge-check` does (the base tree, the `symbolic-ref` precondition, the dirty-path
-probe) exists to protect a write to the tree holding the base, and there is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy of this item's work anywhere. `remove` stays plain and never `--force`; if
-it does not exit `0`, the item stays `branched` and is never re-staged — read git's message and record the leftover exactly as the merge path's own removal
-outcome does at the end of this section, which branches on that message into a park and a finish-the-delete (with `branched` in place of `merged` wherever a
+probe) exists to protect a write to the tree holding the base, and there is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy
+of this item's work anywhere. `remove` stays plain and never `--force`; if it does not exit `0`, the item stays `branched` and is never re-staged — read git's
+message and record the leftover exactly as the merge path's own removal outcome does at the end of this section, which branches on that message into a park and
+a finish-the-delete (with `branched` in place of `merged` wherever a
 detail is written) — and carry on.
 
 `branched` is a success exit in the same terminal position `merged` occupies: the item is finished and the run holds nothing. The pairing is enforced by the
@@ -1207,16 +1212,16 @@ overlapping pairs, and that is the whole of what can be done here.
 
 ### Find the base tree and test both preconditions — one call
 
-The merge happens in whichever tree has `<base>` checked out, which on a `--base feature/x` run is not the main tree; merging in the wrong one writes an item into
-a branch nobody asked for.
+The merge happens in whichever tree has `<base>` checked out, which on a `--base feature/x` run is not the main tree; merging in the wrong one writes an item
+into a branch nobody asked for.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-check <id>
 ```
 
-It stages the item `merging`, finds the tree that has `<base>` checked out (creating `.worktrees/_base-<sanitised base>` when none does), tests both preconditions
-there, and prints `{ verdict, baseTree, created, paths?, detail? }` with exit `0` for every verdict. **`<base tree>` below is that `baseTree`.** A non-zero exit is
-no verdict: `10` is a stop request (§10 "Stopping"), `7` is another session driving the run (stop at once), the rest say what to fix.
+It stages the item `merging`, finds the tree that has `<base>` checked out (creating `.worktrees/_base-<sanitised base>` when none does), tests both
+preconditions there, and prints `{ verdict, baseTree, created, paths?, detail? }` with exit `0` for every verdict. **`<base tree>` below is that `baseTree`.** A
+non-zero exit is no verdict: `10` is a stop request (§10 "Stopping"), `7` is another session driving the run (stop at once), the rest say what to fix.
 
 | `verdict` | Meaning                                                                | You do                                                                 |
 | --------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
@@ -1224,10 +1229,10 @@ no verdict: `10` is a stop request (§10 "Stopping"), `7` is another session dri
 | `park`    | one failed; the tool wrote the `parked` entry and the stage (`detail`) | nothing; next item                                                     |
 | `overlap` | `paths` are dirty in `<base tree>` and the branch touches them         | worktree-side resolve below, else `merge-check <id> --park-on-overlap` |
 
-**Never check out `<base>` in the user's tree, and never stash, commit or check anything out on their behalf** — their uncommitted work is theirs, and this run's
-authority stops at worktrees it created itself. **The run removes a base worktree only if it created it** (`created: true`); `merge-check` records
-`baseTree: { path, created }` on the run so §10 and a resumed session read it from `status --json`, not from memory. (`references/rationale.md`, §9, has the three
-outcomes and why `--force` is never the way round.)
+**Never check out `<base>` in the user's tree, and never stash, commit or check anything out on their behalf** — their uncommitted work is theirs, and this
+run's authority stops at worktrees it created itself. **The run removes a base worktree only if it created it** (`created: true`); `merge-check` records
+`baseTree: { path, created }` on the run so §10 and a resumed session read it from `status --json`, not from memory. (`references/rationale.md`, §9, has the
+three outcomes and why `--force` is never the way round.)
 
 On `merge`, merge:
 
@@ -1295,7 +1300,8 @@ Please commit your changes or stash them before you merge.
 
 Nothing was modified, there is no `MERGE_HEAD`, and **`git merge --abort` is the wrong command** — it errors with `fatal: There is no merge to abort`. The tree
 is already in the state an abort would have restored. This is what `merge-check`'s overlap verdict is for; reaching it means it was skipped or the tree changed
-in the seconds since. Handle it exactly as that verdict does — `merge-check <id> --park-on-overlap` to park with the paths named, or resolve worktree-side — and issue no `--abort`.
+in the seconds since. Handle it exactly as that verdict does — `merge-check <id> --park-on-overlap` to park with the paths named, or resolve worktree-side — and
+issue no `--abort`.
 
 **A conflict** — the merge started and left markers behind:
 
@@ -1420,9 +1426,10 @@ So there are two readings, and they take opposite responses:
 command, so run it before believing either reading rather than after acting on the wrong one.
 
 The general rule this is one instance of: **every cleanup command that follows a merge belongs in the tree that merge happened in**. The merge itself, the
-`symbolic-ref` precondition and the dirty-path probe (now `merge-check`'s) were all re-pointed at `<base tree>` when run-scoped bases landed; this delete kept the pre-base spelling,
-where `$PWD` was correct only because the base was always `main`. Anything added to this block later inherits the same rule. Worktree administration is the one
-exception, and it is not really one — `git worktree remove` and `worktree list` are repo-wide, so they are correct from the project root and stay there.
+`symbolic-ref` precondition and the dirty-path probe (now `merge-check`'s) were all re-pointed at `<base tree>` when run-scoped bases landed; this delete kept
+the pre-base spelling, where `$PWD` was correct only because the base was always `main`. Anything added to this block later inherits the same rule. Worktree
+administration is the one exception, and it is not really one — `git worktree remove` and `worktree list` are repo-wide, so they are correct from the project
+root and stay there.
 
 Then the next item starts from the updated `<base>`, so later items build on earlier ones. On a `--base` run that is the whole point: item by item, a phased
 feature accumulates on its own branch and `main` is never written until a human decides it should be.
@@ -1479,8 +1486,8 @@ When the queue is drained:
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status done
 ```
 
-**If `status --json` shows `baseTree.created: true` (§9's `merge-check` made it), remove that worktree first — and only if `created` is true.** It is read from the
-run file, never from memory of the run's earlier turns: a resumed session reads it the same way.
+**If `status --json` shows `baseTree.created: true` (§9's `merge-check` made it), remove that worktree first — and only if `created` is true.** It is read from
+the run file, never from memory of the run's earlier turns: a resumed session reads it the same way.
 
 ```bash
 git -C "$PWD" worktree remove "$PWD/.worktrees/_base-<sanitised ref>"; echo "remove=$?"
@@ -1607,8 +1614,8 @@ Two rules stay here, because a reader who stops at this line still has to know t
 - **A resumed run takes its base from the run file, and re-resolves the base tree before its next merge.** The base itself is fixed — `status --json` carries
   it, and it is never re-derived from a flag the person resuming happened to type — but *which tree holds it* is a fact about right now, and the interruption is
   exactly the gap in which someone checks the base out somewhere else, removes the worktree that had it, or leaves a rebase half-finished in it. Run
-  `merge-check` as usual — it re-resolves rather than reusing a path from before the interruption — and the `baseTree` the interrupted run recorded stays in the run
-  file for §10's cleanup (`references/recovery.md`).
+  `merge-check` as usual — it re-resolves rather than reusing a path from before the interruption — and the `baseTree` the interrupted run recorded stays in the
+  run file for §10's cleanup (`references/recovery.md`).
 - **`--abort` runs before any marker is cleared, never after.** Clearing a mid-flight item's marker first makes `abort` classify that item as safe and
   `git worktree remove --force` it — which deletes uncommitted work that was never committed and never staged, with no reflog entry to recover it from.
 
