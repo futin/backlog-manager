@@ -204,9 +204,9 @@ Deleted branch backlog/task-19 (was 838048d).
 ```
 
 The bug filed against this blamed the ignored `dist/` step 8's build leaves behind, and proposed `--force`. Both halves are wrong, and the measurement is why
-the prose branches on git's message instead. Measured on `git version 2.50.1 (Apple Git-155)`, in a throwaway repo with `dist/` ignored — the same three cases
-the test `git worktree remove: ignored build output alone removes cleanly, and a failed delete deregisters first` re-measures on every run of
-`pnpm run test:skills`:
+`cleanup` branches on git's message instead (`classifyWorktreeRemove` in `orchestrate.mjs`). Measured on `git version 2.50.1 (Apple Git-155)`, in a throwaway
+repo with `dist/` ignored — the same three cases the test `git worktree remove: ignored build output alone removes cleanly, and a failed delete deregisters
+first` re-measures on every run of `pnpm run test:skills`:
 
 | Worktree contents                                | `git worktree remove`                                                                        | After it                                           |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------- | -------------------------------------------------- |
@@ -222,8 +222,8 @@ Three consequences, in the order §9 needs them:
   uncommitted can be in what survives.
 - **After the third row the worktree is not a worktree any more.** git removes `.git/worktrees/<id>` first and the directory second, so `git worktree list` no
   longer names it, `git worktree remove --force` answers `fatal: '<path>' is not a working tree` (exit `128`), and `git worktree prune` prunes nothing. Both
-  recorded attention details told a human to run `prune`; both were no-ops. That is why the prose names all three dead ends explicitly rather than leaving a
-  session to discover them.
+  recorded attention details told a human to run `prune`; both were no-ops. That is why `cleanup` never reaches for any of the three: it finishes the delete git
+  began and checks the path is gone, rather than leaving a session to discover the dead ends.
 
 Why only `dist/` survived in those two runs is the ordinary shape of a half-finished recursive delete, not a property of ignored files: git walks the tree and
 ends with `rmdir` on the root, which reports `ENOTEMPTY` for whatever the walk missed or could not unlink. In the reproduction here a _tracked_ `src/` survived.

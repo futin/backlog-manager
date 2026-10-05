@@ -261,8 +261,8 @@ For each preserved item, in this order:
 
    Plain `remove` again, for the reason it is plain everywhere else in this file: a `contains modified or untracked files` refusal means something is still
    uncommitted in there, and this is the one path where that is _likely_ rather than surprising. git's _other_ removal failure — it began the delete and could
-   not finish it — is not that, and SKILL.md §9's removal branch is the one home for telling them apart and for what to do about each. `-D` on the branch,
-   unlike the merge path's `-d`: an aborted branch was never merged anywhere, so a safe delete would always refuse it. These are the _preserved_ items only —
-   never run `-D` on a branch abort reported as **kept**, which is a finished `branched` item's whole deliverable.
+   not finish it — is not that, and `orchestrate.mjs cleanup` (`classifyWorktreeRemove`) is the one home for telling them apart and for what to do about each.
+   `-D` on the branch, unlike the merge path's `-d`: an aborted branch was never merged anywhere, so a safe delete would always refuse it. These are the
+   _preserved_ items only — never run `-D` on a branch abort reported as **kept**, which is a finished `branched` item's whole deliverable.
 
 Everything the run had already merged before the abort stays merged — abort ends a run, it does not undo one.

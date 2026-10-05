@@ -3848,6 +3848,174 @@ function cmdWorktree(argv) {
   return 0;
 }
 
+/* --- cleanup: what follows a merge (or a branch-mode stop) ---------------------------------------------------------
+   SKILL.md §9's tail spelled out, for a model to run command by command, the plain `git worktree remove` and its exit-code
+   split (two different failures that need opposite answers), the `branch -d` from the BASE tree, and the `diff HEAD^1 HEAD`
+   that tells the run whether it just merged a fix to its own runner. All of it is deterministic, so it lives here, and the
+   body keeps the judgement: the call itself, the runner-fix switch, and how to read a `branch -d` refusal.
+
+   Authority is unchanged. It never forces anything: `worktree remove` is plain, and the one destructive filesystem verb in the
+   skill — finishing a delete git began and could not complete — is licensed by git's own "failed to delete" message and by
+   the literal path this run created, exactly as the prose licensed it. It runs no `git merge` and no `git push`: both stay
+   literal Bash calls in the body, and `cleanup` is only ever called after them. */
+
+const CLEANUP_USAGE = 'usage: orchestrate.mjs cleanup <itemId>';
+
+// Which of git's `worktree remove` outcomes this is. Decided by git's own MESSAGE and never by what is left in the directory —
+// the leftovers of a half-finished delete are whatever the pass happened to miss, which carries no information — and the exit
+// status is no evidence either way (128 and 255 are what the two failures print today, not a contract). Recorded on git 2.50.1,
+// both from real runs and pinned by the cases beside this tool:
+//   `fatal: '<path>' contains modified or untracked files, use --force to delete it`  (exit 128) → 'leftovers'. The clean check
+//     refused: nothing was deleted, the worktree is still registered, and what stopped it was never committed, reviewed or merged.
+//   `error: failed to delete '<path>': Directory not empty`                            (exit 255) → 'failed-delete'. The clean check
+//     PASSED; git dropped the admin entry first and could not finish the directory, so the worktree is already unregistered.
+// Anything else is 'other', and gets no licence to delete anything.
+export function classifyWorktreeRemove({ status, stderr }) {
+  if (status === 0) return 'ok';
+  const text = stderr ?? '';
+  if (text.includes('contains modified or untracked files')) return 'leftovers';
+  if (/failed to delete/.test(text)) return 'failed-delete';
+  return 'other';
+}
+
+// Finishes the delete git began and could not complete, and PROVES it: the directory is checked for afterwards, because `rm -rf`
+// exiting 0 is not the question — whether the path is gone is. Only ever called with the literal `<root>/.worktrees/<id>` path
+// this run created and only after `classifyWorktreeRemove` said 'failed-delete'; never a path read back from anywhere else.
+export function finishFailedDelete(target) {
+  let error = null;
+  try {
+    fs.rmSync(target, { recursive: true, force: true });
+  } catch (e) {
+    error = e.message;
+  }
+  const gone = !fs.existsSync(target);
+  return { gone, error: gone ? null : (error ?? 'the directory is still there after the delete') };
+}
+
+// Whether `branch` is reachable from `base`, asked of `tree`. Used only to read a `branch -d` refusal: from the base tree it is
+// real evidence of a missing merge, and from anywhere else evidence only of a misaimed command, so the answer is reported and the
+// body's one-line reading decides what it means. `--format` so a `*`/`+` marker never has to be stripped off a line.
+function branchMergedInto(tree, base, branch) {
+  const listed = spawnSync('git', ['-C', tree, 'branch', '--merged', base, '--format=%(refname:short)'], { encoding: 'utf8' });
+  return listed.status === 0 && listed.stdout.split('\n').some((line) => line.trim() === branch);
+}
+
+const RUNNER_FIX_SKILL = 'skills/backlog-orchestrate/SKILL.md';
+const RUNNER_FIX_CLI = 'skills/backlog-orchestrate/tools/orchestrate.mjs';
+
+function cmdCleanup(argv) {
+  const itemId = leftoverItemArg(argv, CLEANUP_USAGE);
+  const root = resolveProjectRoot();
+  const dir = projectDir(orchHome(), root);
+  const run = readRun(dir);
+  assertDriver(run);
+  const item = findQueueItem(run, itemId);
+
+  // Everything that can refuse for a reason of THIS call does so before anything is removed. The stage is what says which half
+  // of §9 this item took: `merged` is the merge path, `branched` the branch path (and the classifier-denial path, which stages
+  // `branched` on a run that is still nominally in merge mode). Nothing else has a cleanup to run.
+  if (item.stage !== 'merged' && item.stage !== 'branched') {
+    throw new OrchestrateError(`cleanup ${itemId}: the stage is ${item.stage}; only merged and branched have a cleanup to run. Nothing was changed.`, 1);
+  }
+  const merged = item.stage === 'merged';
+  // "The base tree" is the one `merge-check` recorded — NEVER the project root, which on a `--base` run is sitting on `main`,
+  // where `branch -d` refuses a branch that merged perfectly and `diff HEAD^1 HEAD` reads some unrelated earlier merge (bug-38).
+  // Refused, not defaulted: falling back to the root is exactly that bug, and a merged item with no `baseTree` means nothing
+  // ever told this run which tree the merge happened in.
+  const baseTree = run.baseTree?.path;
+  if (merged && (typeof baseTree !== 'string' || baseTree === '')) {
+    throw new OrchestrateError(
+      `cleanup ${itemId}: the item is merged but the run file records no base tree — merge-check never ran for this run, so there is no ` +
+        'tree to delete the branch in and no tree to read the merge from. Nothing was changed.',
+      1
+    );
+  }
+  // A recorded tree that is no longer there answers nothing either, and finding that out after the worktree is gone would leave a
+  // branch -d that quietly reads as a refusal.
+  if (merged && !fs.existsSync(baseTree)) {
+    throw new OrchestrateError(`cleanup ${itemId}: the recorded base tree ${baseTree} no longer exists. Nothing was changed.`, 1);
+  }
+
+  const base = run.base ?? BASE_REF_DEFAULT;
+  const branch = `backlog/${itemId}`;
+  const target = path.join(root, '.worktrees', itemId);
+  const result = {};
+
+  // Plain `worktree remove`, run from the project root: worktree administration is repo-wide, so the root is correct for it and
+  // the only command here that may stay there. NEVER `--force` — the one state it would work in, a tree holding something never
+  // committed, is the one state it must never be used in.
+  const removed = spawnSync('git', ['-C', root, 'worktree', 'remove', target], { encoding: 'utf8' });
+  const kind = classifyWorktreeRemove({ status: removed.status, stderr: removed.stderr });
+  const said = (removed.stderr || '').split('\n').find((l) => l.trim() !== '') ?? `git worktree remove exited ${removed.status}`;
+  // Asked again, so a second call over a finished cleanup is a no-op rather than a failure.
+  const alreadyGone = kind === 'other' && /is not a working tree/.test(removed.stderr || '') && !fs.existsSync(target);
+  const word = merged ? 'merged' : 'branched';
+  const park = (detail) => cmdAttention([itemId, '--kind', 'parked', '--detail', detail], () => {});
+
+  // The stage never moves in this command: `stage <id> merged` already landed and was true — the branch is in the base — and a
+  // park here would tell the board an item that merged did not. What differs between the outcomes is only whether a human is paged.
+  let removeSettled = true;
+  if (kind === 'ok' || alreadyGone) {
+    result.removed = 'ok';
+  } else if (kind === 'leftovers') {
+    result.removed = 'leftovers';
+    removeSettled = false;
+    park(`${word}; worktree ${target} would not remove cleanly — uncommitted leftovers to look at`);
+  } else if (kind === 'failed-delete') {
+    // Nothing here needs a human unless the directory survives: the item merged green, git certified the tree clean before it
+    // began deleting, and the run finished a cleanup git left half-done. Paging someone over that is the defect this branch
+    // exists to remove.
+    const finished = finishFailedDelete(target);
+    if (finished.gone) {
+      result.removed = 'deleted';
+    } else {
+      result.removed = 'failed';
+      park(`${word}; worktree ${target} would not remove — git could not finish deleting it and neither could rm (${finished.error})`);
+    }
+  } else {
+    // Not a failure this tool has a response for. Nothing is deleted on a hunch, and the worktree may still be registered, so
+    // the branch is left alone too.
+    result.removed = 'failed';
+    removeSettled = false;
+    park(`${word}; worktree ${target} would not remove (git: ${said})`);
+    result.gitError = said;
+  }
+
+  // Merge path only: a branch-mode branch is the deliverable, the only copy of the item's work anywhere. Skipped while the
+  // worktree is still registered (leftovers), because git refuses to delete a branch a worktree has checked out.
+  result.branchDeleted = false;
+  if (merged && removeSettled) {
+    if (!branchExists(root, branch)) {
+      result.branchDeleted = true;
+    } else {
+      const deleted = spawnSync('git', ['-C', baseTree, 'branch', '-d', branch], { encoding: 'utf8' });
+      if (deleted.status === 0) {
+        result.branchDeleted = true;
+      } else {
+        // A refusal carries information only about the tree it ran in, and this one ran in the base tree: `--merged` settles
+        // whether the merge is real. git's own text rides beside it, never in a string the body puts on a command line.
+        result.branchMergedIntoBase = branchMergedInto(baseTree, base, branch);
+        result.branchError = (deleted.stderr || '').split('\n').find((l) => l.trim() !== '') ?? `git branch -d exited ${deleted.status}`;
+      }
+    }
+  }
+
+  // The runner-fix pickup: what did the merge bring in? `HEAD^1 HEAD` is relative to the HEAD of the tree it runs in, so it runs
+  // in the base tree, where HEAD is the merge commit.
+  result.runnerFix = { skill: false, cli: false };
+  if (merged) {
+    const diff = changedPaths(baseTree, ['HEAD^1', 'HEAD']);
+    if (diff.error !== undefined) {
+      result.runnerFixError = diff.error;
+    } else {
+      result.runnerFix = { skill: diff.paths.includes(RUNNER_FIX_SKILL), cli: diff.paths.includes(RUNNER_FIX_CLI) };
+    }
+  }
+
+  console.log(JSON.stringify(result));
+  return 0;
+}
+
 const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{question, answer}, …]>';
 
 // The one writer of RunQueueItem.assumptions — what this run decided on its
@@ -5646,6 +5814,7 @@ commands:
   merge-check  find the base tree and test both merge preconditions (never merges)
   leftover     say what an earlier run left for an item (read-only)
   worktree     create an item's worktree, refusing any leftover but a bare branch
+  cleanup      after a merge or a branch-mode stop: remove the worktree, delete the merged branch, report a runner fix
   heartbeat    re-stamp the run's updatedAt
   attention    record something a human should look at
   assume       record a question this run answered itself (decide mode only)
@@ -5745,6 +5914,7 @@ export function main(argv) {
     if (cmd === 'merge-check') return cmdMergeCheck(rest);
     if (cmd === 'leftover') return cmdLeftover(rest);
     if (cmd === 'worktree') return cmdWorktree(rest);
+    if (cmd === 'cleanup') return cmdCleanup(rest);
     if (cmd === 'heartbeat') return cmdHeartbeat(rest);
     if (cmd === 'attention') return cmdAttention(rest);
     if (cmd === 'assume') return cmdAssume(rest);

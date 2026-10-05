@@ -1143,7 +1143,7 @@ Fix the command or the environment, or park the item with that row quoted in the
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
-git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" cleanup <id>
 ```
 
 **In a tracker project, one command comes first** — the branch is pushed before the worktree that holds it is removed:
@@ -1159,10 +1159,8 @@ and branch stay where they are.
 
 No `stage <id> merging` and no `merge-check` — nothing is merging. Everything `merge-check` does (the base tree, the `symbolic-ref` precondition, the dirty-path
 probe) exists to protect a write to the tree holding the base, and there is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy
-of this item's work anywhere. `remove` stays plain and never `--force`; if it does not exit `0`, the item stays `branched` and is never re-staged — read git's
-message and record the leftover exactly as the merge path's own removal outcome does at the end of this section, which branches on that message into a park and
-a finish-the-delete (with `branched` in place of `merged` wherever a
-detail is written) — and carry on.
+of this item's work anywhere; `cleanup` runs none on this path. If it prints `removed` as anything but `ok` the item stays `branched` and is never re-staged —
+the end of this section says what each value means — and carry on.
 
 `branched` is a success exit in the same terminal position `merged` occupies: the item is finished and the run holds nothing. The pairing is enforced by the
 tool, not by this sentence — `stage <id> merged` under a branch-mode run exits `1` and writes nothing.
@@ -1241,13 +1239,13 @@ just been shown to fail:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge of <id>"
-git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" cleanup <id>
 ```
 
-Then continue with the next item, which now takes the branch path at the top of this section. Keep the branch — no `branch -d`, for the reason that path gives —
-and if `worktree remove` does not exit `0`, handle it exactly as that path says: the item stays `branched`, and which of git's two failures it is decides
-whether the leftover directory is parked or finished off without paging anyone. (A `merge-mode` exit `1` saying the run is already in branch mode is the right
-state, not a failure — a resumed, already-degraded run hits it, and the stage above has already landed.)
+Then continue with the next item, which now takes the branch path at the top of this section. `cleanup` keeps the branch on `branched` — no `branch -d`, for the
+reason that path gives — and if it prints `removed` as anything but `ok`, handle it exactly as that path says: the item stays `branched`. (A `merge-mode` exit
+`1` saying the run is already in branch mode is the right state, not a failure — a resumed, already-degraded run hits it, and the stage above has already
+landed.)
 
 **No `attention` entry here.** The attention list means "a human must look at _this item_", and a green, reviewed branch does not qualify; `ATTENTION_KINDS`
 stays the three kinds it has always taken. One classifier verdict is one run-level fact and is recorded once, in `mergeModeNote` — N identical rows would be N
@@ -1302,12 +1300,11 @@ uncommitted modification in the main tree along with the merge, unrecoverably; t
 rule out that the user has uncommitted work in the tree it is writing to, so the noisier history is the price, knowingly paid. `-m 1` names the first parent —
 `<base>` as it was before this merge. (`references/rationale.md`, §9, has the measurement.)
 
-**On success**, record it and clean up. Capture the removal's status — the rest of this section branches on it, and on what git printed:
+**On success**, record it and clean up:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged
-git -C "$PWD" worktree remove "$PWD/.worktrees/<id>"; echo "remove=$?"
-git -C "<base tree>" branch -d backlog/<id>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" cleanup <id>
 ```
 
 **In a tracker project the push comes between the merge and the stage, and the order is not negotiable** — as its own Bash call, never chained onto the
@@ -1333,66 +1330,26 @@ git -C "<base tree>" push origin <base>
 The close is tied to the STAGE rather than to the merge because the tool cannot see the push: it has no way to know whether the commit it is recording ever left
 this machine, so the driver calls `stage merged` only once the push has succeeded, and the tool closes the issue as part of that call.
 
-Plain `remove`, never `--force`. **`remove=0` is the ordinary case and needs nothing further** — including for a worktree holding only an ignored `dist/` that
-step 8's build wrote, which removes cleanly and takes the build output with it (measured; `references/rationale.md`, §9).
+`cleanup <id>` runs after the stage (and, in a tracker project, after the push) in both modes. It removes the item's worktree with a plain `git worktree remove`
+— **never `--force`**: the one state `--force` would work in, a tree holding something never committed, is the one state it must never be used in — and on the
+merge path only it then deletes `backlog/<id>` with `branch -d` from the base tree and reads the merge commit there for the runner-fix pickup below. It prints
+`{ removed, branchDeleted, branchMergedIntoBase?, runnerFix }`. A non-zero exit is no result: `1` says the item is not `merged` or `branched`, or that no
+`merge-check` recorded a base tree, and nothing was changed.
 
-**What happens to the item when that removal does not return `0`: nothing happens to the _item_. It stays `merged`.** The `stage <id> merged` above already
-landed and it was true — the branch is in the base — so do not re-stage it to `parked` on either branch below, which would tell the board and the run summary that
-an item which actually merged did not. What differs between the two is only whether a human is paged, and **that is decided by git's own message, never by
-looking at what is left in the directory**: the leftovers of a half-finished delete are whatever the pass happened to miss, which carries no information at all.
+**The item stays `merged` whatever `removed` says.** The `stage` above landed and was true — the branch is in the base — so never re-stage it to `parked`:
+`removed` only says whether a human is paged.
 
-**`fatal: '<path>' contains modified or untracked files, use --force to delete it`** (exit `128`) — git's clean check refused. **Nothing was deleted and the
-worktree is still registered**, and what stopped it was something in there that was never committed, never reviewed and never merged; forcing would delete it
-with no undo. This is the one state `--force` would work in and the one state it must never be used in. Park it:
-`attention <id> --kind parked --detail "merged; worktree <path> would not remove cleanly — uncommitted leftovers to look at"` (the `parked` kind is the
-attention list's closest fit, and the detail is what disambiguates it), leave the directory and the branch alone, and carry on to the next item. A human deletes
-it after looking; nothing in the run depends on it being gone.
+- **`ok`** or **`deleted`** — nothing further, and say nothing about it. `deleted` is a delete git began and could not finish, which `cleanup` finished and
+  checked; nothing here needs a human.
+- **`leftovers`** — something never committed sat in the worktree. `cleanup` recorded the `parked` attention entry and left the directory and the branch alone;
+  a human deletes it after looking. Carry on to the next item.
+- **`failed`** — the worktree could not be removed and `cleanup` recorded the `parked` attention entry with the reason. Carry on.
 
-**`error: failed to delete '<path>': <errno>`** (exit `255`, `Directory not empty` in both recorded occurrences) — a different failure with the opposite
-response. The clean check **passed** here: git certified the tree carried nothing modified and nothing untracked, began the delete, and could not finish it. git
-drops the admin entry `.git/worktrees/<id>` _first_ and the directory second, so by the time this prints **the worktree is already unregistered** —
-`git worktree list` no longer names it, a `--force` retry answers `fatal: '<path>' is not a working tree`, and `git worktree prune` has nothing left to prune.
-Do not reach for any of those three. Finish the removal git started:
-
-```bash
-rm -rf "$PWD/.worktrees/<id>"; echo "rm=$?"
-[ ! -e "$PWD/.worktrees/<id>" ]; echo "gone=$?"
-```
-
-**On `gone=0`, record no `attention` entry and say nothing about it.** Nothing here needs a human: the item merged green, git certified the tree clean before it
-started deleting, and the run finished a cleanup git left half-done. Paging someone over that is the defect this branch exists to remove. Only if the directory
-survives — `gone` is not `0` — park it, with `rm`'s own error quoted in the detail: a child git could not unlink is usually one `rm` cannot unlink either, and
-that _is_ a human's problem.
-
-**The guards on that `rm -rf`, which are its entire licence** — it is the only destructive filesystem verb in this skill:
-
-- **Only in this branch**, i.e. only after git's own delete-failure message above, whose precondition is that git's clean check already passed. Never after the
-  refusal above it, and never on a hunch about what is in the directory.
-- **Only the literal `"$PWD/.worktrees/<id>"` path this run created** — never a path read back from the run file, a `git worktree list`, or anywhere else, and
-  never a bare shell variable that can expand to nothing.
-- **Never as a substitute for the first attempt.** `git worktree remove` always runs first: dropping the registration stays git's job, and this command only
-  ever finishes what git already committed to.
-
-Likewise `branch -d` (safe delete) rather than `-D`: it only succeeds for a branch that is actually merged, so a refusal carries information — but **only about
-the tree the delete ran in**. `branch -d` has no `--merged-into`; it tests reachability from the HEAD of the repository the command runs in, so the invoking
-tree _is_ the parameter. That is why the `-C` above names the base tree rather than `$PWD`: the merge commit is on `<base>`, and on a `--base` run the project
-root is sitting on `main`, from which `backlog/<id>` is genuinely unreachable. Run it there and git refuses a branch that merged perfectly — measured, one line
-after `Merge made by the 'ort' strategy`.
-
-So there are two readings, and they take opposite responses:
-
-- **a refusal from the base tree** means the merge you think happened did not, and that _is_ worth stopping to understand before the next item builds on a base
-  you may have misread;
-- a refusal from anywhere else means only that the command was **pointed at the wrong tree**, and says nothing at all about the merge.
-
-`git branch --merged <base> | grep backlog/<id>` settles which one it is — if it prints the branch, the merge is real and the delete was misaimed. It costs one
-command, so run it before believing either reading rather than after acting on the wrong one.
-
-The general rule this is one instance of: **every cleanup command that follows a merge belongs in the tree that merge happened in**. The merge itself, the
-`symbolic-ref` precondition and the dirty-path probe (now `merge-check`'s) were all re-pointed at `<base tree>` when run-scoped bases landed; this delete kept
-the pre-base spelling, where `$PWD` was correct only because the base was always `main`. Anything added to this block later inherits the same rule. Worktree
-administration is the one exception, and it is not really one — `git worktree remove` and `worktree list` are repo-wide, so they are correct from the project
-root and stay there.
+`branch -d` is safe delete rather than `-D`, so a refusal carries information — but **only about the tree it ran in**, which is why `cleanup` runs it in the
+base tree and never `$PWD`. When `branchDeleted` is `false` and `branchMergedIntoBase` is present, it refused, and there are two readings:
+**a refusal from the base tree** (`branchMergedIntoBase: false`) means the merge you think happened did not, and that _is_ worth stopping to understand before the
+next item builds on a base you may have misread; `branchMergedIntoBase: true` means the delete was **pointed at the wrong tree**, and says nothing about the merge (`cleanup` asked
+`git branch --merged <base>`). The general rule: every cleanup command that follows a merge belongs in the tree that merge happened in.
 
 Then the next item starts from the updated `<base>`, so later items build on earlier ones. On a `--base` run that is the whole point: item by item, a phased
 feature accumulates on its own branch and `main` is never written until a human decides it should be.
@@ -1403,18 +1360,13 @@ A merged fix does **not** reach this run on its own. Every skill body and every 
 at load (`${CLAUDE_PLUGIN_ROOT}`) — the _installed plugin copy_ — while the merge just landed in this repo's base branch. Hoisting the item to the front of the
 queue (§1) buys ordering and nothing else unless the run is told, once, to follow the repo's copy for the rest of the run.
 
-So after every merge, print what it brought in — in the base tree, for the reason the cleanup rule above gives: `HEAD` here has to mean the merge commit, and on
-a `--base` run the project root's `HEAD` is `main`, which the merge never touched. Asked there this prints some unrelated earlier merge's file list, or nothing
-at all, and either way a merged runner fix goes unnoticed for the rest of the run.
+So after every merge, read `runnerFix` from `cleanup`'s output — it diffs the merge commit in the base tree, where `HEAD` means that commit; on a `--base` run
+the project root's `HEAD` is `main`, which the merge never touched, and a diff asked there reads some unrelated earlier merge or nothing at all.
 
-```bash
-git -C "<base tree>" diff --name-only HEAD^1 HEAD
-```
-
-- If those paths include **`skills/backlog-orchestrate/SKILL.md`**, re-read that file from this repo's working tree and follow it for the remainder of the run.
-  The body you were handed came from the installed copy and cannot know about the fix.
-- If they **also** include **`skills/backlog-orchestrate/tools/orchestrate.mjs`**, switch the CLI invocation to the repo copy for the remainder of the run as
-  well.
+- If `skill` is `true` (`skills/backlog-orchestrate/SKILL.md` is in the merge), re-read that file from this repo's working tree and follow it for the remainder
+  of the run. The body you were handed came from the installed copy and cannot know about the fix.
+- If `cli` is **also** `true` (`skills/backlog-orchestrate/tools/orchestrate.mjs` is in it too), switch the CLI invocation to the repo copy for the remainder of
+  the run as well. `cli` alone, with `skill` false, switches nothing: the switch hangs off the prose.
 
 **Prose and tool move together or not at all.** Following freshly merged prose while still invoking the installed tool is the one genuinely dangerous
 combination: the new body may name a flag the old tool refuses. Both come from the same checkout, so taking both keeps them consistent with each other, and

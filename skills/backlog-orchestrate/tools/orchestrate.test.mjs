@@ -6289,53 +6289,8 @@ function fencedLinesOf(text) {
   return out;
 }
 
-test('§9 names both worktree-removal failures as distinct cases, and the park template sits under the clean-check one', () => {
-  // Searched against a whitespace-flattened copy throughout: this file is
-  // hard-wrapped prose, so any of these sentences can cross a line break for
-  // reasons that have nothing to do with the rule being pinned.
-  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ');
-
-  const cleanCheck = text.indexOf('contains modified or untracked files');
-  const failedDelete = text.indexOf('failed to delete');
-  assert.ok(cleanCheck > 0, "§9 no longer quotes git's clean-check refusal");
-  assert.ok(failedDelete > 0, '§9 no longer names the failed recursive delete — the failure 2 of 2 real occurrences hit');
-
-  // The park template belongs to the clean check alone. Ordering is the
-  // assertion that survives rewording: leftovers nobody committed are parked,
-  // and that paragraph precedes the failed-delete one, which pages nobody.
-  const park = text.indexOf('would not remove cleanly');
-  assert.ok(park > 0, 'the park detail template is gone entirely');
-  assert.ok(
-    cleanCheck < park && park < failedDelete,
-    `the park template must sit under the clean-check branch and above the failed-delete branch (cleanCheck=${cleanCheck} park=${park} failedDelete=${failedDelete})`
-  );
-});
-
-test('the removal split has exactly one home, and the other two cleanups still delegate to it', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s+/g, ' ');
-
-  const copies = text.split('failed to delete').length - 1;
-  assert.equal(copies, 1, `the split is stated ${copies} times; it has one home and two delegating cross-references`);
-
-  // Branch mode (§9's opening) and the classifier denial both clean up a
-  // worktree and both already say "handle it exactly as that path says".
-  // A second copy of a three-branch rule is how the copies drift apart.
-  const branchMode = text.indexOf('record the leftover exactly as');
-  const denial = text.indexOf('handle it exactly as that path says');
-  assert.ok(branchMode > 0, 'the branch-mode cleanup no longer delegates its removal refusal');
-  assert.ok(denial > 0, 'the classifier-denial cleanup no longer delegates its removal refusal');
-  assert.ok(branchMode < text.indexOf('failed to delete') && denial < text.indexOf('failed to delete'));
-});
-
-test('exactly one `rm -rf` is executable in SKILL.md, and it is the worktree path this run created', () => {
-  // The first destructive filesystem verb in this file. It is licensed by
-  // branch 3 alone — git has already certified the tree clean and already
-  // dropped the registration — and by the literal path, never a variable
-  // that can expand empty and never a path read back from anywhere.
-  const lines = fencedLinesOf(fs.readFileSync(SKILL_MD, 'utf8')).filter((l) => l.includes('rm -rf'));
-  assert.equal(lines.length, 1, `expected exactly 1 executable rm -rf, found ${lines.length}:\n${lines.join('\n')}`);
-  assert.ok(lines[0].startsWith('rm -rf "$PWD/.worktrees/<id>"'), `the one rm -rf must target the literal worktree path, got: ${lines[0]}`);
-});
+// RETIRED with `cleanup` (see its block at the end of this file): the three pinned-text tests that stated the removal split in §9 and its one `rm -rf`.
+// Their failure is now a behaviour test: cleanup 2, 3a, 3b and 3c.
 
 test('`worktree remove --force` never enters a fenced block in any skill', () => {
   // §10's `--abort` mention is prose explaining why marker order matters,
@@ -6355,19 +6310,13 @@ test('`worktree remove --force` never enters a fenced block in any skill', () =>
   assert.ok(checked >= 6, `expected to have read every skill body, read ${checked}`);
 });
 
-test('the finished-cleanup branch pages nobody, and no attention detail template offers `worktree prune`', () => {
+test('no attention detail template offers `worktree prune`', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
-
-  // From `failed to delete` to the end of §9: the branch must say outright
-  // that nothing is recorded, or a session reaching it reaches for the park
-  // template one paragraph up — which is the whole bug.
-  const start = text.indexOf('failed to delete');
-  const end = text.indexOf('\n## ', start);
-  const branch = text.slice(start, end > 0 ? end : text.length);
-  assert.match(branch, /no `?attention`? entry/i, 'the failed-delete branch no longer says it records no attention entry');
 
   // Both recorded occurrences told a human to run `git worktree prune` on a
   // worktree git had already deregistered. The instruction was a no-op twice.
+  // (The other half of this test — that the failed-delete branch records no
+  // attention entry — is cleanup 3b/3c now.)
   const prune = text.split('\n').filter((l) => l.includes('--kind parked') && l.includes('worktree prune'));
   assert.deepEqual(prune, [], `an attention detail template still advises worktree prune:\n${prune.join('\n')}`);
 });
@@ -6704,52 +6653,9 @@ test('§4 states the rule as a rule, not as one file name', () => {
 // driver does, and the only way a wrong `-C` can be caught before it reaches
 // a run is by reading the file.
 
-test('no branch delete in SKILL.md runs in the project root', () => {
-  // `$PWD` is the project root, which on a `--base` run is not the tree
-  // holding the base. `worktree remove` is deliberately exempt — worktree
-  // administration is repo-wide and correct from the root — so this is
-  // scoped to the delete verb alone.
-  //
-  // Command lines only, matched by the line *starting* with `git`: the four
-  // other places this file says `branch -d` are prose — the branch-mode path
-  // saying it deliberately runs none, and the paragraph explaining how to
-  // read a refusal — and a guard that caught those would forbid the file
-  // from discussing its own rule.
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
-  const deletes = text.split('\n').filter((l) => /^git\b.*\bbranch -[dD]\b/.test(l.trim()));
-  assert.equal(deletes.length, 1, `expected exactly 1 branch-delete command, found ${deletes.length}`);
-  for (const line of deletes) {
-    assert.ok(
-      !line.includes('$PWD'),
-      `a branch delete is pointed at the project root, which is not the base tree on a --base run: ${line.trim()}`,
-    );
-    assert.ok(
-      line.includes('<base tree>'),
-      `a branch delete does not name the base tree it must run in: ${line.trim()}`,
-    );
-  }
-});
-
-test("the runner-fix pickup diffs the merge commit, which is the base tree's HEAD", () => {
-  // Same shape, one command further on. §9's "After a runner-fix item lands"
-  // prints what the merge brought in so the run can follow its own fix for
-  // the rest of the queue. Run in the project root on a `--base` run it
-  // reads `main`'s HEAD, which the merge never touched: either `fatal:
-  // ambiguous argument 'HEAD^1'` on a root with no merge in its history, or
-  // — worse — the file list of some unrelated earlier merge, silently. A
-  // merged runner fix then goes unnoticed for the remainder of the run.
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
-  const diffs = text.split('\n').filter((l) => l.includes('HEAD^1 HEAD'));
-  assert.equal(diffs.length, 1, `expected exactly 1 post-merge diff line, found ${diffs.length}`);
-  assert.ok(
-    !diffs[0].includes('$PWD'),
-    `the runner-fix diff reads the project root's HEAD, not the merge: ${diffs[0].trim()}`,
-  );
-  assert.ok(
-    diffs[0].includes('<base tree>'),
-    `the runner-fix diff does not name the base tree the merge happened in: ${diffs[0].trim()}`,
-  );
-});
+// RETIRED with `cleanup`: 'no branch delete in SKILL.md runs in the project root' and "the runner-fix pickup diffs the merge commit, which is the
+// base tree's HEAD". The body no longer holds either command, because `cleanup` runs both from the recorded base tree by construction; cleanup 1
+// and 4 run the delete, cleanup 6-7 the diff, and cleanup 10 runs both on a `--base` run where the project root would give the wrong answer.
 
 test('SKILL.md reads a branch -d refusal against the tree it was run in', () => {
   // The sentence that turned a stale command into a wrong instruction. A
@@ -6801,8 +6707,8 @@ test('every project-root git command in SKILL.md is on the HEAD-independent allo
   // below with the reason it is safe.
   //
   // That is the whole claim. This guard does not detect HEAD-dependence and
-  // is not a substitute for the three above it, which pin the two specific
-  // commands bug-38 moved and the prose that reads their refusals.
+  // is not a substitute for the `cleanup` cases, which run the two specific
+  // commands bug-38 moved, and the test above it, which pins the prose that reads their refusals.
   const allowed = [
     // A ref lookup by full name. Reads `refs/heads/…` directly; HEAD is not
     // consulted, and refs are shared by every tree in the repository.
@@ -8942,4 +8848,353 @@ test('leftover/worktree 10: no run exits 3, a foreign lease 7, a usage error or 
     assert.ok(ledBefore.equals(fs.readFileSync(runFile(led.home, led.project))));
     assert.deepEqual(treeListing(led.project), ledTrees);
   }
+});
+
+// --- cleanup: what follows a merge or a branch-mode stop ---------------------
+//
+// SKILL.md §9's tail ran, as prose, a plain `worktree remove` and its two-way exit-code split, `branch -d` from the base tree
+// and the runner-fix `diff HEAD^1 HEAD`. `cleanup <id>` runs all three. The cases below ARE that behaviour, against real temp
+// repos, and every one that pins a tree builds the fixture so the project root would give a DIFFERENT answer than the right tree.
+//
+// RETIRED, each replaced by the case named in the same commit:
+//   - '§9 names both worktree-removal failures as distinct cases, and the park template sits under the clean-check one'
+//     -> cleanup 2 (the clean-check refusal: exactly the template, stage unmoved) and cleanup 3a/3b (the classification, on the
+//     recorded 128 and 255 pairs) and 3c (the delete that cannot finish, run for real).
+//   - 'the removal split has exactly one home, and the other two cleanups still delegate to it' -> the same cases: the split
+//     now has one home, `classifyWorktreeRemove`, and the body no longer states it at all.
+//   - 'exactly one `rm -rf` is executable in SKILL.md ...' -> cleanup 3b/3c: the one destructive verb is `finishFailedDelete`,
+//     reached only through `classifyWorktreeRemove` saying 'failed-delete', and it is exercised on a real directory.
+//   - 'the finished-cleanup branch pages nobody' (first assertion only; the `worktree prune` guard stays) -> cleanup 3b/3c: a
+//     directory that is gone records nothing, and one that survives records an attention entry.
+//   - 'no branch delete in SKILL.md runs in the project root' and "the runner-fix pickup diffs the merge commit ..." -> cleanup 1,
+//     4 and 6-7, which run both commands, and cleanup 10, which runs them on a `--base` run where the root gives the wrong answer.
+
+const CL_ID = 'task-1';
+const RUNNER_SKILL = 'skills/backlog-orchestrate/SKILL.md';
+const RUNNER_CLI = 'skills/backlog-orchestrate/tools/orchestrate.mjs';
+
+function cleanupCmd(fx, ...args) {
+  return run(fx.project, fx.home, 'cleanup', ...args);
+}
+
+/**
+ * A `merge-check`-ed item on a real merge: the item branch also commits `touches` (any extra paths), `merge-check` records the
+ * base tree, the branch is merged into that tree with `--no-ff`, and the item is staged `merged`. `merge: false` leaves the
+ * branch unmerged (a refusal case); `check: false` skips `merge-check`, so the run file carries no `baseTree`.
+ */
+function mergedFixture(t, { base = 'main', touches = [], merge = true, check = true } = {}) {
+  const fx = mergeCheckFixture(t, { base });
+  const worktree = path.join(fx.project, '.worktrees', CL_ID);
+  for (const rel of touches) {
+    fs.mkdirSync(path.dirname(path.join(worktree, rel)), { recursive: true });
+    fs.writeFileSync(path.join(worktree, rel), `${rel} changed\n`);
+  }
+  if (touches.length > 0) {
+    gitOk(worktree, 'add', '-A');
+    gitOk(worktree, 'commit', '-q', '-m', 'touch runner files');
+  }
+  fx.baseTree = fx.project;
+  if (check) {
+    const verdict = JSON.parse(mergeCheck(fx, CL_ID).stdout.trim());
+    assert.equal(verdict.verdict, 'merge');
+    fx.baseTree = verdict.baseTree;
+  }
+  if (merge) gitOk(fx.baseTree, 'merge', '--no-ff', '--no-edit', `backlog/${CL_ID}`);
+  assert.equal(run(fx.project, fx.home, 'stage', CL_ID, 'merged').status, 0);
+  return fx;
+}
+
+const cleanupOut = (out) => {
+  assert.equal(out.status, 0, out.stderr);
+  return JSON.parse(out.stdout.trim());
+};
+
+test('cleanup 1: a clean worktree after a merge — removed ok, the directory is gone, the branch is deleted, no runner fix, stage still merged', (t) => {
+  const fx = mergedFixture(t);
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.deepEqual(out, { removed: 'ok', branchDeleted: true, runnerFix: { skill: false, cli: false } });
+  assert.equal(fs.existsSync(path.join(fx.project, '.worktrees', CL_ID)), false);
+  assert.ok(!treeListing(fx.project).some((p) => p.endsWith(`/.worktrees/${CL_ID}`)));
+  assert.deepEqual(branchList(fx.project), ['main']);
+  assert.equal(stageOf(fx), 'merged');
+  assert.deepEqual(readRunJson(fx).attention, []);
+});
+
+test('cleanup 1b: ignored build output alone removes cleanly and takes the output with it — nothing recorded', (t) => {
+  const fx = mergedFixture(t);
+  const tree = path.join(fx.project, '.worktrees', CL_ID);
+  // `dist/` is ignored through the repo's own info/exclude, the way the project's `.gitignore` ignores a real build directory.
+  fs.appendFileSync(path.join(fx.project, '.git', 'info', 'exclude'), 'dist/\n');
+  fs.mkdirSync(path.join(tree, 'dist'));
+  fs.writeFileSync(path.join(tree, 'dist', 'bundle.js'), 'x'.repeat(1000));
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.equal(out.removed, 'ok');
+  assert.equal(fs.existsSync(tree), false);
+  assert.deepEqual(readRunJson(fx).attention, []);
+});
+
+test('cleanup 2: an untracked file in the worktree — leftovers, the §9 template verbatim, stage still merged, nothing deleted, branch kept', (t) => {
+  const fx = mergedFixture(t);
+  const tree = path.join(fx.project, '.worktrees', CL_ID);
+  fs.writeFileSync(path.join(tree, 'never-committed.txt'), 'scratch\n');
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.deepEqual(out, { removed: 'leftovers', branchDeleted: false, runnerFix: { skill: false, cli: false } });
+  assert.deepEqual(readRunJson(fx).attention, [
+    { id: CL_ID, kind: 'parked', detail: `merged; worktree ${tree} would not remove cleanly — uncommitted leftovers to look at` }
+  ]);
+  assert.equal(stageOf(fx), 'merged', 'a park here would tell the board an item that merged did not');
+  assert.equal(fs.readFileSync(path.join(tree, 'never-committed.txt'), 'utf8'), 'scratch\n', 'the leftover was deleted');
+  assert.ok(treeListing(fx.project).includes(tree), 'the worktree was unregistered');
+  assert.ok(branchList(fx.project).includes(`backlog/${CL_ID}`), 'the branch was deleted over an unfinished worktree');
+});
+
+test('cleanup 2b: the leftovers entry says `branched` on a branch-mode item, and the branch is never touched', (t) => {
+  const fx = mergeCheckFixture(t);
+  const tree = path.join(fx.project, '.worktrees', CL_ID);
+  fs.writeFileSync(path.join(tree, 'never-committed.txt'), 'scratch\n');
+  assert.equal(run(fx.project, fx.home, 'stage', CL_ID, 'branched').status, 0);
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.equal(out.removed, 'leftovers');
+  assert.deepEqual(readRunJson(fx).attention, [
+    { id: CL_ID, kind: 'parked', detail: `branched; worktree ${tree} would not remove cleanly — uncommitted leftovers to look at` }
+  ]);
+  assert.equal(stageOf(fx), 'branched');
+});
+
+test("cleanup 3a (classification only): git's two recorded refusals are told apart by their message, and the exit status decides nothing", () => {
+  // The pair T:6303's comment records for both real occurrences: the clean check refuses with 128 and deletes nothing; a failed
+  // recursive delete exits 255 AFTER the clean check passed and AFTER the admin entry is gone. Opposite responses, so they must
+  // never collapse into one.
+  const cleanCheck = "fatal: '/p/.worktrees/task-1' contains modified or untracked files, use --force to delete it\n";
+  const failedDelete = "error: failed to delete '/p/.worktrees/task-1': Directory not empty\n";
+  assert.equal(orch.classifyWorktreeRemove({ status: 128, stderr: cleanCheck }), 'leftovers');
+  assert.equal(orch.classifyWorktreeRemove({ status: 255, stderr: failedDelete }), 'failed-delete');
+  assert.equal(orch.classifyWorktreeRemove({ status: 0, stderr: '' }), 'ok');
+  // The message is the evidence: swap the codes and the answers do not move.
+  assert.equal(orch.classifyWorktreeRemove({ status: 255, stderr: cleanCheck }), 'leftovers');
+  assert.equal(orch.classifyWorktreeRemove({ status: 128, stderr: failedDelete }), 'failed-delete');
+  // Anything git says that this tool has no response for gets no licence to delete.
+  assert.equal(orch.classifyWorktreeRemove({ status: 128, stderr: "fatal: '/p/.worktrees/task-1' is not a working tree\n" }), 'other');
+  assert.equal(orch.classifyWorktreeRemove({ status: 1, stderr: '' }), 'other');
+});
+
+test('cleanup 3b (remove-then-verify, real directories): a finished delete is proved by the path being gone; a survivor is reported with its error', (t) => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-finish-')));
+  t.after(() => {
+    try {
+      fs.chmodSync(path.join(dir, 'locked', 'inner'), 0o755);
+    } catch {
+      // the locked case did not run (root)
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const half = path.join(dir, 'half-deleted');
+  fs.mkdirSync(path.join(half, 'node', 'deep'), { recursive: true });
+  fs.writeFileSync(path.join(half, 'node', 'deep', 'left-behind.txt'), 'x\n');
+
+  assert.deepEqual(orch.finishFailedDelete(half), { gone: true, error: null });
+  assert.equal(fs.existsSync(half), false);
+  assert.deepEqual(orch.finishFailedDelete(half), { gone: true, error: null }, 'an already-absent path is already finished');
+
+  if (process.getuid?.() === 0) return; // root ignores the 0555 bit the survivor needs
+  const locked = path.join(dir, 'locked');
+  fs.mkdirSync(path.join(locked, 'inner'), { recursive: true });
+  fs.writeFileSync(path.join(locked, 'inner', 'file.txt'), 'x\n');
+  fs.chmodSync(path.join(locked, 'inner'), 0o555);
+  const survivor = orch.finishFailedDelete(locked);
+  assert.equal(survivor.gone, false);
+  assert.match(survivor.error, /EACCES|EPERM|permission/i);
+});
+
+test('cleanup 3c: a delete git cannot finish, run for real — unregistered, the directory survives, the entry quotes the error, the branch still goes', (t) => {
+  if (process.getuid?.() === 0) return; // root ignores the 0555 bit that makes git's delete fail
+  const fx = mergedFixture(t, { touches: ['locked/file.txt'] });
+  const tree = path.join(fx.project, '.worktrees', CL_ID);
+  // Tracked and unmodified, so git's clean check passes; the 0555 directory is what the delete cannot finish — and what `rm`
+  // cannot finish either, which is the "survivor" half of the rule. (`git worktree remove` does the same to a real race.)
+  // Unlocked in a `finally`, not an `after` hook: the fixture's own cleanup was registered first and would run first.
+  fs.chmodSync(path.join(tree, 'locked'), 0o555);
+  try {
+    const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+    assert.equal(out.removed, 'failed');
+    assert.equal(fs.existsSync(path.join(tree, 'locked', 'file.txt')), true, 'the survivor is still there');
+    assert.ok(!treeListing(fx.project).includes(tree), 'git unregistered it first, so nothing is still registered');
+    const attention = readRunJson(fx).attention;
+    assert.equal(attention.length, 1);
+    assert.equal(attention[0].id, CL_ID);
+    assert.equal(attention[0].kind, 'parked');
+    assert.ok(attention[0].detail.startsWith(`merged; worktree ${tree} would not remove`), attention[0].detail);
+    assert.match(attention[0].detail, /EACCES|EPERM|permission/i, 'the entry does not quote the error');
+    assert.equal(stageOf(fx), 'merged');
+    assert.equal(out.branchDeleted, true, 'the registration is gone, so the merged branch is deletable');
+  } finally {
+    fs.chmodSync(path.join(tree, 'locked'), 0o755);
+  }
+});
+
+test('cleanup 4: a branch with a commit the base lacks — branchDeleted false, branchMergedIntoBase false, the branch survives, nothing paged', (t) => {
+  const fx = mergedFixture(t, { merge: false });
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.equal(out.removed, 'ok');
+  assert.equal(out.branchDeleted, false);
+  assert.equal(out.branchMergedIntoBase, false);
+  assert.match(out.branchError, /not fully merged/, "git's own line rides in its own field");
+  assert.ok(branchList(fx.project).includes(`backlog/${CL_ID}`));
+  assert.deepEqual(readRunJson(fx).attention, [], "reading the refusal is the body's call, not an attention entry");
+});
+
+test('cleanup 4b: a refusal that --merged does not back up is reported as merged-into-base true — the misaimed-command reading', (t) => {
+  const fx = mergedFixture(t);
+  // A held ref lock makes `branch -d` fail on a branch that IS in the base, so the two answers disagree, which is exactly what the
+  // `branchMergedIntoBase` field exists to expose.
+  fs.writeFileSync(path.join(fx.project, '.git', 'refs', 'heads', 'backlog', `${CL_ID}.lock`), '');
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.equal(out.branchDeleted, false);
+  assert.equal(out.branchMergedIntoBase, true);
+});
+
+test('cleanup 5: branch mode — the worktree goes, the branch stays, no `branch -d` is attempted and no runner-fix diff is read', (t) => {
+  const fx = mergeCheckFixture(t);
+  // The base's last commit touches SKILL.md, so a diff that DID run in branch mode would report `skill: true` off it.
+  fs.mkdirSync(path.join(fx.project, 'skills', 'backlog-orchestrate'), { recursive: true });
+  fs.writeFileSync(path.join(fx.project, RUNNER_SKILL), 'a runner edit on the base\n');
+  commitEverything(fx.project, 'edit the runner on main');
+  assert.equal(run(fx.project, fx.home, 'stage', CL_ID, 'branched').status, 0);
+  assert.equal(readRunJson(fx).baseTree, undefined, 'branch mode never runs merge-check');
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.deepEqual(out, { removed: 'ok', branchDeleted: false, runnerFix: { skill: false, cli: false } });
+  assert.equal(fs.existsSync(path.join(fx.project, '.worktrees', CL_ID)), false);
+  assert.ok(branchList(fx.project).includes(`backlog/${CL_ID}`), 'the branch is the deliverable');
+  assert.equal(stageOf(fx), 'branched');
+});
+
+test('cleanup 6: a merge commit that touches SKILL.md — runnerFix.skill true, cli false', (t) => {
+  const fx = mergedFixture(t, { touches: [RUNNER_SKILL] });
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.deepEqual(out.runnerFix, { skill: true, cli: false });
+});
+
+test('cleanup 7: a merge commit that touches only orchestrate.mjs — skill false, cli true (each is its own flag)', (t) => {
+  const fx = mergedFixture(t, { touches: [RUNNER_CLI] });
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.deepEqual(out.runnerFix, { skill: false, cli: true });
+});
+
+test('cleanup 7b: both files, and look-alike paths that must not match — the comparison is exact', (t) => {
+  const both = mergedFixture(t, { touches: [RUNNER_SKILL, RUNNER_CLI] });
+  assert.deepEqual(cleanupOut(cleanupCmd(both, CL_ID)).runnerFix, { skill: true, cli: true });
+
+  const lookalikes = mergedFixture(t, {
+    touches: ['skills/backlog-orchestrate/SKILL.md.bak', 'skills/backlog-execute/SKILL.md', 'docs/skills/backlog-orchestrate/tools/orchestrate.mjs']
+  });
+  assert.deepEqual(cleanupOut(cleanupCmd(lookalikes, CL_ID)).runnerFix, { skill: false, cli: false });
+});
+
+test('cleanup 8: stage inspecting — exit 1, and nothing is removed', (t) => {
+  const fx = mergeCheckFixture(t);
+  assert.equal(run(fx.project, fx.home, 'stage', CL_ID, 'inspecting').status, 0);
+  const before = fs.readFileSync(runFile(fx.home, fx.project), 'utf8');
+
+  const out = cleanupCmd(fx, CL_ID);
+
+  assert.equal(out.status, 1, out.stdout + out.stderr);
+  assert.match(out.stderr, /inspecting/);
+  assert.equal(fs.existsSync(path.join(fx.project, '.worktrees', CL_ID)), true);
+  assert.ok(branchList(fx.project).includes(`backlog/${CL_ID}`));
+  assert.equal(fs.readFileSync(runFile(fx.home, fx.project), 'utf8'), before, 'the run file changed');
+});
+
+test('cleanup 9: merge mode with no recorded base tree — exit 1, the worktree and the branch untouched (no fallback to the project root)', (t) => {
+  const fx = mergedFixture(t, { check: false });
+  assert.equal(readRunJson(fx).baseTree, undefined);
+
+  const out = cleanupCmd(fx, CL_ID);
+
+  assert.equal(out.status, 1, out.stdout + out.stderr);
+  assert.match(out.stderr, /base tree/);
+  assert.equal(fs.existsSync(path.join(fx.project, '.worktrees', CL_ID)), true, 'the worktree was removed before the refusal');
+  assert.ok(branchList(fx.project).includes(`backlog/${CL_ID}`));
+  assert.equal(stageOf(fx), 'merged');
+  assert.deepEqual(readRunJson(fx).attention, []);
+});
+
+test('cleanup 9b: a recorded base tree that no longer exists — exit 1, nothing removed', (t) => {
+  const fx = mergedFixture(t, { base: 'feature/x' });
+  gitOk(fx.project, 'worktree', 'remove', '--force', fx.baseTree);
+  assert.equal(fs.existsSync(fx.baseTree), false);
+
+  const out = cleanupCmd(fx, CL_ID);
+
+  assert.equal(out.status, 1, out.stdout + out.stderr);
+  assert.match(out.stderr, /no longer exists/);
+  assert.equal(fs.existsSync(path.join(fx.project, '.worktrees', CL_ID)), true);
+  assert.ok(branchList(fx.project).includes(`backlog/${CL_ID}`));
+});
+
+test('cleanup 10: a --base run whose base tree is .worktrees/_base-…, not the project root — branch -d and the runner-fix diff both read that tree', (t) => {
+  const fx = mergedFixture(t, { base: 'feature/x', touches: [RUNNER_SKILL] });
+  const baseTree = path.join(fx.project, '.worktrees', '_base-feature-x');
+  assert.equal(fx.baseTree, baseTree, 'merge-check did not create the base worktree this case is about');
+  // The fixture's whole point: the project root is on `main`, which the merge never touched. Run there, `branch -d` refuses a
+  // branch that merged perfectly, and `diff HEAD^1 HEAD` reads the root's own last commit (which does not touch SKILL.md).
+  assert.equal(gitOk(fx.project, 'symbolic-ref', 'HEAD').trim(), 'refs/heads/main');
+  assert.equal(spawnSync('git', ['-C', fx.project, 'branch', '--merged', 'main'], { encoding: 'utf8' }).stdout.includes(`backlog/${CL_ID}`), false);
+  assert.ok(!gitOk(fx.project, 'diff', '--name-only', 'HEAD^1', 'HEAD').split('\n').includes(RUNNER_SKILL));
+
+  const out = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.equal(out.removed, 'ok');
+  assert.equal(out.branchDeleted, true, 'the delete ran in the project root, where main lacks the merge');
+  assert.deepEqual(out.runnerFix, { skill: true, cli: false }, 'the diff read the project root, not the merge commit');
+  assert.ok(treeListing(fx.project).includes(baseTree), 'cleanup removed a base worktree it has no authority over');
+  assert.equal(fs.existsSync(path.join(fx.project, '.worktrees', CL_ID)), false);
+});
+
+test('cleanup 11: a second call over a finished cleanup is a no-op — removed ok, the branch already gone, nothing paged', (t) => {
+  const fx = mergedFixture(t);
+  cleanupOut(cleanupCmd(fx, CL_ID));
+
+  const again = cleanupOut(cleanupCmd(fx, CL_ID));
+
+  assert.deepEqual(again, { removed: 'ok', branchDeleted: true, runnerFix: { skill: false, cli: false } });
+  assert.deepEqual(readRunJson(fx).attention, []);
+});
+
+test('cleanup 12: argv and item refusals — exit 1 with nothing written', (t) => {
+  const fx = mergedFixture(t);
+  const before = fs.readFileSync(runFile(fx.home, fx.project), 'utf8');
+
+  for (const args of [[], ['--force'], [CL_ID, 'extra'], ['task-99']]) {
+    const out = cleanupCmd(fx, ...args);
+    assert.equal(out.status, 1, `cleanup ${args.join(' ')}: ${out.stdout}${out.stderr}`);
+  }
+  assert.equal(fs.readFileSync(runFile(fx.home, fx.project), 'utf8'), before);
+  assert.equal(fs.existsSync(path.join(fx.project, '.worktrees', CL_ID)), true);
+});
+
+test('cleanup never forces a removal and never merges or pushes — the tool runs no `--force`, `git merge` or `git push` of its own on this path', () => {
+  const source = fs.readFileSync(SCRIPT, 'utf8');
+  const start = source.indexOf('function cmdCleanup(');
+  const body = source.slice(start, source.indexOf('\nconst ASSUME_USAGE', start)).replace(/\/\/.*$/gm, '');
+  assert.ok(body.includes("'worktree', 'remove', target"), 'the plain removal is no longer where this guard looks');
+  assert.doesNotMatch(body, /--force|'-D'|'merge'|'push'|'prune'|'reset'/);
 });

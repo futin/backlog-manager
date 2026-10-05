@@ -472,15 +472,16 @@ tree, because what can refuse a merge is the state of the tree being written to.
 **And so does everything that follows the merge — every cleanup command belongs in the tree that merge happened in** (bug-38). Two of them kept the pre-base
 spelling, where `$PWD` was correct only because the base was always `main`: `git branch -d backlog/<id>`, and the `git diff --name-only HEAD^1 HEAD` that
 §9's runner-fix pickup reads. Both are HEAD-relative — `branch -d` has no `--merged-into` and tests reachability from the HEAD of the repository it runs in, so
-the invoking tree _is_ the parameter — and the project root's HEAD is `main` while the merge commit is on `<base>`. Measured on run-20260918-081422: `error:
-the branch 'backlog/task-45' is not fully merged`, one line after `Merge made by the 'ort' strategy`, for a branch `git branch --merged feature/tracker-backed`
-listed.
+the invoking tree _is_ the parameter — and the project root's HEAD is `main` while the merge commit is on `<base>`. Both now run inside `orchestrate.mjs cleanup
+<id>`, in the `baseTree.path` that `merge-check` recorded on the run; for a `merged` item with no `baseTree` it exits `1` before removing anything, because the
+only alternative is the project root, which is this bug. Measured on run-20260918-081422: `error: the branch 'backlog/task-45' is not fully merged`, one line
+after `Merge made by the 'ort' strategy`, for a branch `git branch --merged feature/tracker-backed` listed.
 
 The leftover branch was the small half. The large half was the sentence attached to it, which told the driver a refusal proved the merge had not happened —
 wrong in the direction that stops a healthy run, on every item of every `--base` run, since a driver that believes the merge failed has every reason to
 re-merge or park an item already in the base. So the reading is now stated against the tree: a refusal **from the base tree** is real evidence of a missing
 merge, a refusal from anywhere else is evidence only of a misaimed command, and `git branch --merged <base> | grep backlog/<id>` settles which before either is
-believed.
+believed — `cleanup` asks it on every refusal and reports the answer as `branchMergedIntoBase`.
 
 **The line between the two kinds of command is whether it DEPENDS on the HEAD of the tree it runs in — never whether it names it.** `branch -d` is the
 counterexample that decides the wording, and it is the very command this bug is about: it contains no `HEAD` anywhere and is entirely HEAD-relative, because

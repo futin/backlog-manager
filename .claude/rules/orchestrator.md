@@ -53,7 +53,11 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   the create failing, never by the scan, because a worktree **mid-rebase reports `detached`** and so is invisible to it. A base worktree the run did not create
   is never removed — the same sentence as "authority stops at worktrees it created itself". **"The main tree" and "the tree holding `main`" are not synonyms**:
   the `symbolic-ref` precondition and the dirty-path probe both follow the merge into the BASE tree, and so does **every cleanup command that follows a merge**
-  (bug-38) — `branch -d` and the runner-fix pickup's `diff HEAD^1 HEAD` are both HEAD-relative and were both reading `main` on a `--base` run. A `branch -d`
+  (bug-38) — `branch -d` and the runner-fix pickup's `diff HEAD^1 HEAD` are both HEAD-relative and were both reading `main` on a `--base` run. Both are now
+  `orchestrate.mjs cleanup <id>`'s, which runs them in `baseTree.path` as `merge-check` recorded it and, for a `merged` item with no `baseTree` on the run,
+  exits `1` before removing anything: it never falls back to the project root, because that fallback is exactly this bug. Its `worktree remove` is plain, run
+  from the root (repo-wide, so correct there), and its one destructive step — finishing a delete git began and could not finish — is licensed by git's own
+  "failed to delete" message alone. A `branch -d`
   refusal is evidence of a missing merge ONLY from the base tree; from anywhere else it is evidence of a misaimed command, and `git branch --merged <base>`
   settles which. The line is whether a command **depends on** the HEAD of the tree it runs in, NEVER whether it names it — `branch -d` names no HEAD and is
   wholly HEAD-relative, as are `branch --merged`, `branch --contains`, a bare `diff` and a `status`, so a "names HEAD" criterion would reinstate this bug. The
