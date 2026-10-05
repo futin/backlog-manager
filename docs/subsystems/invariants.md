@@ -613,7 +613,7 @@ branch, in merge order, with overlapping pairs flagged — belongs in the run's 
 still park, still keep the worktree, still say why. Those are genuine "a human must decide" states and none of them is a permission problem. The one §9 failure
 that is not a merge failure — `git worktree remove` failing during the cleanup _after_ a green merge — splits in two on git's own message (bug-32) and only half
 of it parks: `contains modified or untracked files` parks, because something in there was never committed; `failed to delete` does not, because git's clean
-check already passed and the run simply finishes a delete git left half-done. SKILL.md §9's removal branch is that rule's one home.
+check already passed and the run simply finishes a delete git left half-done. `orchestrate.mjs cleanup` (`classifyWorktreeRemove`) is that rule's one home.
 
 The preflight probe in `SKILL.md` §2 — `git merge --no-ff --no-edit HEAD`, once per run, merge mode only — is early warning for the same failure and never a
 guarantee. Merging `HEAD` into itself prints `Already up to date.` and changes nothing that matters (no commit, no index change, no reflog entry, dirty tree or
