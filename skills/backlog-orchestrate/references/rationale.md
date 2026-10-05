@@ -155,6 +155,31 @@ The substitution is 0-indexed — `$0` is the first argument, which is why `$1` 
 
 ## §9 — Merge
 
+### Why the merge site is resolved per merge, into three outcomes — and why `merge-check` does it
+
+`merge-check` (`orchestrate.mjs`) is what §9's prose used to be: the scan for the tree that holds `<base>`, the create when none does, and the two
+preconditions. The reasoning that prose carried:
+
+**git refuses to check one branch out twice** — `fatal: '<base>' is already used by worktree at '<path>'` — and `--force` is not the way round it: two trees on
+one branch is exactly the state "this run's authority stops at worktrees it created itself" exists to avoid. So the site is resolved, not created uniformly, and
+the outcomes are exhaustive: (1) a tree holds `<base>` — merge there (for a `main` run that is the project root); (2) none does — create
+`.worktrees/_base-<sanitised>`, where **every character outside `A-Za-z0-9._-` becomes a single `-`** (`feature/tracker-backed` →
+`.worktrees/_base-feature-tracker-backed`); the `_base-` prefix cannot collide with an item worktree because no id `backlog.mjs` mints begins with `_`, and a
+leftover at that path holding something other than `<base>` is a park, never a guess (a leftover holding `<base>` is outcome 1 and is reused); (3) none does and
+`worktree add` refuses — a tree that is mid-rebase or mid-bisect reports `detached` in `worktree list --porcelain`, so the scan cannot see it while git still
+knows it owns the branch (measured), and the create failing is how it is detected. All three outcomes run in the tool; outcome 3 parks quoting git's `fatal:` line.
+
+**The scan is a tool, not an `awk` one-liner, for a reason that cost a run:** slash-command substitution rewrites `$0` to the run's first argument, so a run
+started as `/backlog-orchestrate 172` read `substr(172,10)` and the old `awk` form always printed nothing (#238).
+
+**Precondition 1 reads the exit status, not just the output.** `symbolic-ref HEAD` on a detached HEAD prints nothing and exits non-zero
+(`fatal: ref HEAD is not a symbolic ref`); a bare comparison of an empty string against `refs/heads/<base>` can look like a mismatch you handled rather than a
+command that failed. It is re-asked inside `merge-check` although the scan just answered it, because the seconds in between are enough for the person whose repo
+it is to switch branches. **Precondition 2 includes `diff --cached`** because a staged uncommitted change refuses a merge exactly as an unstaged one does, and a
+`git diff`-only probe reads clean over it; it runs in the base tree because that is the tree being written to (observed live on bug-4, run-20260901-112815:
+an item passed review and verification and then had its merge refused by uncommitted work). The tool also diffs with `--no-renames`, so a staged `git mv`
+reports both names.
+
 ### Why undoing a completed merge is `git revert -m 1`, never `git reset --hard`
 
 Proved empirically before this skill was written, not reasoned out. `reset --hard` resets the working tree and index in full, and it silently discarded an

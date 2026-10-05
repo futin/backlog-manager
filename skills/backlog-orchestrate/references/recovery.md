@@ -171,6 +171,12 @@ entry's identity is the transcript slot, so a second call replaces that slot rat
 therefore not a reason to skip it. A transcript whose session was killed mid-flight has no result event, and that call writes nothing and exits `0` saying so;
 that is the honest record, not a failure to chase.
 
+**A base worktree the crashed driver created is still on disk, and the run file still names it.** `merge-check` records `baseTree: { path, created }` on the run
+the moment it resolves the tree, so `status --json` is where a resumed session learns that `.worktrees/_base-<sanitised base>` belongs to this run — it needs no
+memory of the interrupted turns, and it must not infer it from the directory's presence (a worktree the person made looks identical). Do nothing for it here:
+the next item's `merge-check` finds the tree already holding `<base>`, reuses it, and keeps `created: true`; SKILL.md §10 removes it at the end of the run only
+if that field is `true`. A run that never reached a merge has no `baseTree` field at all, which means there is nothing to clean up.
+
 ### `--abort`
 
 **Run `abort` first. Clear markers afterwards, and only for the items abort names.** The order is the whole safety property of this section, so it comes before

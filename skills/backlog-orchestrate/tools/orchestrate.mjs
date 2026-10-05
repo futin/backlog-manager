@@ -3045,7 +3045,9 @@ function cmdPlan(argv) {
 const STAGE_USAGE =
   'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--pid P] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop] [--outcome <file>]';
 
-function cmdStage(argv) {
+// `out` is where the one-line result goes. `merge-check` composes this command and prints a verdict of its own, so it
+// passes a no-op; every other caller takes the default and the output is byte-identical to what it always was.
+function cmdStage(argv, out = console.log) {
   const itemId = argv[0];
   const stage = argv[1];
   let session;
@@ -3238,7 +3240,7 @@ function cmdStage(argv) {
       // Out of this run's plan, so off the label. Usually a no-op the route
       // answers 200 for: the winner's claim already removed it (§3.3).
       trackerQueueLabel(run, [item], false);
-      console.log(JSON.stringify({ id: itemId, stage: 'skipped', note: claimed.note }));
+      out(JSON.stringify({ id: itemId, stage: 'skipped', note: claimed.note }));
       return 0;
     }
     item.claim = { commentId: claimed.commentId };
@@ -3288,7 +3290,7 @@ function cmdStage(argv) {
   // round trip (and rather than counting in its own head, which a crash and
   // a `--resume` would reset). Every other stage call keeps the exact
   // two-key line it has always printed.
-  console.log(JSON.stringify(fixLoop ? { id: itemId, stage, fixLoops: item.fixLoops } : { id: itemId, stage }));
+  out(JSON.stringify(fixLoop ? { id: itemId, stage, fixLoops: item.fixLoops } : { id: itemId, stage }));
   return 0;
 }
 
@@ -3427,7 +3429,8 @@ function trackerAttention(run, itemId, kind, detail) {
   }
 }
 
-function cmdAttention(argv) {
+// `out`: see cmdStage — `merge-check` composes this and prints its own verdict.
+function cmdAttention(argv, out = console.log) {
   const itemId = argv[0];
   let kind;
   let detail;
@@ -3484,8 +3487,180 @@ function cmdAttention(argv) {
   // AFTER the write, as every tracker publish in this file is: the comment is
   // a copy of an entry this machine has already recorded.
   if (projectSource(run.project) === 'github') trackerAttention(run, itemId, kind, detail);
-  console.log(JSON.stringify({ id: itemId, kind }));
+  out(JSON.stringify({ id: itemId, kind }));
   return 0;
+}
+
+/* --- merge-check: the base tree and both merge preconditions ----------------
+   SKILL.md §9 used to spell this sequence out as prose for a model to run command by command: find the tree that has
+   `<base>` checked out, create one when none does, ask that tree two questions, and park on either "no". It is
+   deterministic, so it lives here and the body keeps only the verdict table.
+
+   What it deliberately does NOT do is the merge. `git merge` into the base and every push stay literal Bash calls in
+   the body, each its own call — the auto-mode classifier judges the call it sees, and the merge's wording is what the
+   §2 probe is byte-identical to. */
+
+const MERGE_CHECK_USAGE = 'usage: orchestrate.mjs merge-check <itemId> [--park-on-overlap]';
+
+// Precondition 1: the base tree must actually have `<base>` checked out. Re-asked here although the scan that chose the
+// tree just answered it, because the seconds between the two are enough for the person whose repo this is to switch
+// branches. Two failures, one answer: `symbolic-ref` printing another ref, and `symbolic-ref` EXITING NON-ZERO with
+// nothing printed (a detached HEAD — mid-rebase, mid-bisect, a tag). The exit status is read, never just the output: an
+// empty string compared against `refs/heads/<base>` reads as a mismatch you handled rather than a command that failed.
+//
+// Returns `null` when the tree is on the base, else the park verdict with the §9 template filled. The template has no
+// wording of its own for a detached HEAD; `<ref>` is filled as "a detached HEAD", which is the defined fill.
+//
+// Exported because the full command can no longer reach it with a bad tree: `treeHoldingBranch` only matches `branch
+// refs/heads/<base>`, so a detached or switched tree is never chosen, and the command creates `_base-<base>` instead.
+// What this guards now is the window inside one process, so it is tested directly on a prepared tree.
+export function baseTreePrecondition(tree, base, itemId) {
+  const head = spawnSync('git', ['-C', tree, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' });
+  const printed = head.status === 0 ? head.stdout.trim() : null;
+  if (printed === `refs/heads/${base}`) return null;
+  const ref = printed === null || printed === '' ? 'a detached HEAD' : printed;
+  return { verdict: 'park', detail: `base tree ${tree} is on ${ref}, not refs/heads/${base} — branch backlog/${itemId} kept for a manual merge` };
+}
+
+// `-z` so a path with a newline or a non-ASCII byte comes back as itself rather than quoted, and `--no-renames` so a
+// rename reports BOTH names: the merge touches the old path as well as the new one, and a probe that saw only the new
+// name would read clean over a staged `git mv`.
+function changedPaths(tree, args) {
+  const out = spawnSync('git', ['-C', tree, 'diff', '--name-only', '--no-renames', '-z', ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (out.status !== 0) return { error: (out.stderr || '').trim().split('\n')[0] || `git diff exited ${out.status}` };
+  return { paths: out.stdout.split('\0').filter((p) => p !== '') };
+}
+
+function samePath(a, b) {
+  const real = (p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(a) === real(b);
+}
+
+function cmdMergeCheck(argv) {
+  const itemId = argv[0];
+  let parkOnOverlap = false;
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--park-on-overlap') parkOnOverlap = true;
+    else throw new OrchestrateError(MERGE_CHECK_USAGE, 1);
+  }
+  if (!itemId || itemId.startsWith('-')) throw new OrchestrateError(MERGE_CHECK_USAGE, 1);
+
+  // Everything that can refuse for a reason of THIS call does so before the first write. After `stage merging` lands a
+  // refusal can only come from a step that command composes (a stop request, exit 10), and it still writes nothing.
+  const root = resolveProjectRoot();
+  const dir = projectDir(orchHome(), root);
+  const first = readRun(dir);
+  assertDriver(first);
+  findQueueItem(first, itemId);
+  const branch = `backlog/${itemId}`;
+  if (!branchExists(root, branch)) {
+    throw new OrchestrateError(`merge-check ${itemId}: there is no branch ${branch} in ${root} — nothing to merge. Nothing was written.`, 1);
+  }
+  const base = first.base ?? BASE_REF_DEFAULT;
+
+  // The same effect as `stage <id> merging`, by construction rather than by copy: it is the same function.
+  cmdStage([itemId, 'merging'], () => {});
+
+  // `baseTree` is recorded as soon as it is known, BEFORE the preconditions, so a parked item still leaves §10 the path
+  // of a worktree this run created. `created` is true only when this run created that path, and stays true across calls.
+  const prior = readRun(dir).baseTree;
+  const park = (detail, baseTree, created) => {
+    cmdAttention([itemId, '--kind', 'parked', '--detail', detail], () => {});
+    cmdStage([itemId, 'parked'], () => {});
+    console.log(JSON.stringify({ verdict: 'park', baseTree, created, detail }));
+    return 0;
+  };
+
+  let tree = treeHoldingBranch(root, base);
+  let created;
+  if (tree !== null) {
+    // Outcome 1 — a tree already holds the base. A worktree the person made is theirs, so `created` is only ever
+    // carried forward for the very path this run made.
+    created = prior !== undefined && prior.created === true && samePath(prior.path, tree);
+  } else {
+    // Outcome 2 — none does. The name is sanitised because a branch may contain `/`: every character outside
+    // `A-Za-z0-9._-` becomes a single `-`. The `_base-` prefix cannot collide with an item worktree (`.worktrees/<id>`,
+    // and no minted id begins with `_`).
+    const target = path.join(root, '.worktrees', `_base-${base.replace(/[^A-Za-z0-9._-]/g, '-')}`);
+    if (fs.existsSync(target)) {
+      // Two branches that sanitise to one name, or a leftover from a crashed run on another base. A leftover holding
+      // `<base>` itself never gets here: outcome 1 found it. Park rather than guess.
+      return park(
+        `cannot create the base worktree for ${base}: ${target} already exists and does not hold ${base} — branch ${branch} kept for a manual merge`,
+        null,
+        false
+      );
+    }
+    const added = spawnSync('git', ['-C', root, 'worktree', 'add', target, base], { encoding: 'utf8' });
+    if (added.status !== 0) {
+      // Outcome 3 — the branch is held by a tree that is mid-rebase / mid-bisect, which reports `detached` and so is
+      // invisible to the scan above, while git still knows it owns the branch. Detected by the CREATE failing, never
+      // by the scan. Same class as a detached base tree, same answer: park, quoting git, which names the tree.
+      // git prints a progress line ("Preparing worktree …") before the refusal, so the line quoted is the `fatal:` one.
+      const stderrLines = (added.stderr || '').split('\n').filter((l) => l.trim() !== '');
+      const message = stderrLines.find((l) => l.startsWith('fatal:')) ?? stderrLines[stderrLines.length - 1] ?? `git worktree add exited ${added.status}`;
+      const held = /(?:already used by worktree|already checked out) at '([^']*)'/.exec(message);
+      return park(
+        held
+          ? `${base} is checked out at ${held[1]} but not cleanly (git: ${message}) — branch ${branch} kept for a manual merge`
+          : `could not create a base worktree for ${base} at ${target} (git: ${message}) — branch ${branch} kept for a manual merge`,
+        null,
+        false
+      );
+    }
+    tree = target;
+    created = true;
+  }
+
+  const fresh = readRun(dir);
+  fresh.baseTree = { path: tree, created };
+  fresh.updatedAt = nowISO();
+  writeRunAtomic(dir, fresh);
+
+  const failedPrecondition = baseTreePrecondition(tree, base, itemId);
+  if (failedPrecondition !== null) return park(failedPrecondition.detail, tree, created);
+
+  // Precondition 2: the base tree's uncommitted paths must not overlap the branch's. A dirty base tree is fine — the run
+  // does not get to demand a clean one — but only while the dirt sits where the branch does not. Both halves run in the
+  // BASE tree: the dirt that can refuse this merge is the dirt in the tree being written to. `--cached` is not optional:
+  // a staged change refuses a merge exactly as an unstaged one does.
+  const branchSide = changedPaths(tree, [`${base}...${branch}`]);
+  const unstaged = changedPaths(tree, []);
+  const staged = changedPaths(tree, ['--cached']);
+  const failed = [branchSide, unstaged, staged].find((side) => side.error !== undefined);
+  if (failed !== undefined) {
+    return park(`could not compare ${branch} with the uncommitted paths in ${tree} (git: ${failed.error}) — branch ${branch} kept for a manual merge`, tree, created);
+  }
+  const branchPaths = [...new Set(branchSide.paths)].sort();
+  const dirtyPaths = [...new Set([...unstaged.paths, ...staged.paths])].sort();
+  const verifyDir = path.join(dir, 'verify');
+  fs.mkdirSync(verifyDir, { recursive: true });
+  const lines = (paths) => (paths.length === 0 ? '' : `${paths.join('\n')}\n`);
+  fs.writeFileSync(path.join(verifyDir, `${itemId}.branch-paths`), lines(branchPaths));
+  fs.writeFileSync(path.join(verifyDir, `${itemId}.dirty-paths`), lines(dirtyPaths));
+
+  const dirty = new Set(dirtyPaths);
+  const overlap = branchPaths.filter((p) => dirty.has(p));
+  if (overlap.length === 0) {
+    console.log(JSON.stringify({ verdict: 'merge', baseTree: tree, created }));
+    return 0;
+  }
+  // The body may still resolve on the worktree side, which is why the default parks nothing here.
+  if (!parkOnOverlap) {
+    console.log(JSON.stringify({ verdict: 'overlap', baseTree: tree, created, paths: overlap }));
+    return 0;
+  }
+  return park(
+    `merge would be refused: ${overlap.join(', ')} are uncommitted in ${tree} and this branch also touches them — commit or stash them, then merge ${branch} by hand`,
+    tree,
+    created
+  );
 }
 
 const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{question, answer}, …]>';
@@ -5283,6 +5458,7 @@ commands:
   plan         preview the gated queue init would build, without writing
   stage        move a queue item to a new stage
   merge-mode   record a merge mode downgrade (merge -> branch only)
+  merge-check  find the base tree and test both merge preconditions (never merges)
   heartbeat    re-stamp the run's updatedAt
   attention    record something a human should look at
   assume       record a question this run answered itself (decide mode only)
@@ -5379,6 +5555,7 @@ export function main(argv) {
     if (cmd === 'plan') return cmdPlan(rest);
     if (cmd === 'stage') return cmdStage(rest);
     if (cmd === 'merge-mode') return cmdMergeMode(rest);
+    if (cmd === 'merge-check') return cmdMergeCheck(rest);
     if (cmd === 'heartbeat') return cmdHeartbeat(rest);
     if (cmd === 'attention') return cmdAttention(rest);
     if (cmd === 'assume') return cmdAssume(rest);

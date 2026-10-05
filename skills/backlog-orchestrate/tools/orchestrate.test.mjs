@@ -21,6 +21,10 @@ import {
   trackerRetryDelayMs
 } from './orchestrate.mjs';
 
+// The namespace import is for exports a later case reaches for by name, so a missing export fails ITS case rather
+// than the whole file's link step.
+import * as orch from './orchestrate.mjs';
+
 const SCRIPT = fileURLToPath(new URL('./orchestrate.mjs', import.meta.url));
 
 // Task 5's own fixtures: a realistic `claude -p --output-format stream-json`
@@ -3297,24 +3301,11 @@ test('SKILL.md keeps merge --abort under the conflict branch only', () => {
   assert.ok(text.includes('would be overwritten by merge'), 'step 9 no longer names the pre-merge refusal as a distinct failure');
 });
 
-test('step 9 probes the base tree for paths the branch also touches', () => {
-  // The precondition used to be "is HEAD refs/heads/main" and nothing else,
-  // so an item could pass review and verification and then have its merge
-  // refused by uncommitted work — observed live on bug-4, run-20260901-112815.
-  // `diff --cached` is the half most likely to be dropped as redundant: a
-  // STAGED change refuses the merge exactly as an unstaged one does.
-  //
-  // task-44 moved both halves off `main`/`$PWD` and onto `<base>`/`<base tree>`:
-  // the dirt that can refuse a merge is the dirt in the tree being WRITTEN to,
-  // and on a `--base` run that is not the main tree. A probe that still read
-  // `$PWD` would pass every default run and silently read the wrong tree on
-  // exactly the runs this feature exists for, so the `-C` is asserted too.
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
-  assert.ok(text.includes('diff --name-only <base>...backlog/<id>'), 'step 9 lost the branch-paths probe');
-  assert.ok(text.includes('git -C "<base tree>" diff --name-only <base>...backlog/<id>'), 'the branch-paths probe no longer runs in the base tree');
-  assert.ok(text.includes('git -C "<base tree>" diff --cached --name-only'), 'step 9 lost the staged half of the dirty-paths probe, or it left the base tree');
-  assert.ok(text.includes('comm -12'), 'step 9 lost the intersection of the two path lists');
-});
+// RETIRED: 'step 9 probes the base tree for paths the branch also touches' pinned the three-line diff / diff --cached / comm
+// probe as prose. The probe is `merge-check`'s now, and `merge-check 6`, `7` and `8` (the end of this file) EXECUTE it: an
+// unstaged overlap, the STAGED-only overlap this test existed to protect (`diff --cached` is the half most likely to be dropped
+// as redundant, and a `git diff`-only probe reads clean over it), and a dirty file the branch does not touch. The `-C
+// <base tree>` half — the dirt that can refuse a merge is the dirt in the tree being WRITTEN to — is `merge-check 1` and `2`.
 
 test('step 9 documents resolving on the branch side before parking', () => {
   // Merging into a base that moved after step 8 puts content into it that
@@ -4277,20 +4268,13 @@ const NOTE_PLACEHOLDERS = new Map([
   ['<id>', 'a validated item id'],
   ['<dir>', 'the run-state directory this run resolved'],
   ['<path>', 'a worktree path this run created'],
-  ['<paths>', 'paths git printed as dirty'],
-  ['<ref>', 'the ref the base tree has checked out'],
-  // task-44. Both are read out of git, never composed by a model: `<base>` is
-  // the run's own recorded base, which `assertUsableBase` proved is a legal
-  // ref name before `init` wrote it, and `<base tree>` is a path `git worktree
-  // list --porcelain` printed. Neither can carry a backtick or an apostrophe
-  // by construction — a ref name cannot contain one, and a worktree path that
-  // did would already have broken every `git -C` in this file.
+  // task-44. Read out of git, never composed by a model: `<base>` is the run's
+  // own recorded base, which `assertUsableBase` proved is a legal ref name
+  // before `init` wrote it. (`<paths>`, `<ref>`, `<base tree>` and `<message>`
+  // left this list when `merge-check` took over the park details that used
+  // them: the tool composes those from git's own output now, and its cases pin
+  // the exact wording — including git's quoted refusal, merge-check 12.)
   ['<base>', "the run's own recorded base branch"],
-  ['<base tree>', 'a worktree path git printed for the base'],
-  // The one word of a park detail that is genuinely git's: outcome 3's refusal
-  // names the tree holding the base, and quoting git is the whole point — the
-  // scan above cannot see that it is a quote, so it is declared here.
-  ['<message>', "git's own refusal message, quoted"],
   // Composed by the tool in this repo, not by a model: `plan --json`'s own
   // fixed refusal strings.
   ["<the gate's own reason>", "the ungroomed gate's own fixed wording"],
@@ -6607,44 +6591,33 @@ test('claim leaves a recorded base alone — a resumed run does not fall back to
   assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).base, 'feature/x');
 });
 
-// --- task-44: the base-tree resolution is prose, so it is pinned as prose ----
-// This is the one piece of the feature that lives in SKILL.md rather than in
-// the tool: the run resolves where to merge by reading `git worktree list`,
-// and no code in this file does that. A rule that exists only in prose is
-// exactly the kind that drifts, so it is pinned here — beside §9's other prose
-// cases, rather than in backlog.test.mjs, which holds prose for the two skills
-// that have no tools/ suite of their own plus the genuine cross-skill seams.
+// --- task-44: the base-tree resolution ---------------------------------------
+// The scan, the create and both preconditions are `merge-check`'s now, and its cases (the end of this file) execute them.
+// What stays pinned as prose is what stays in SKILL.md: the merge line, and the removal boundary.
+//
+// RETIRED, each replaced by a `merge-check` case in the same commit:
+//   - 'step 9 states all three base-tree outcomes, including the one the scan cannot see' -> merge-check 1 (a tree holds it),
+//     2 (none does: created), 3 (the path is taken: park) and 12 (a mid-rebase tree reports `detached`, so the scan cannot see
+//     it and `worktree add` refuses with `is already used by worktree at` — a REAL rebase, not a quotation of git's message).
+//   - 'step 9 states the sanitisation of a base worktree name exactly, not vaguely' -> merge-check 2 and 10, which run it on
+//     `feature/tracker-backed` and require the second call to reuse the path rather than create a second worktree.
+//   - 'step 9 resolves the merge site from git ...' kept only its merge-line needle, below. Its `worktree list --porcelain` and
+//     `symbolic-ref HEAD` needles are merge-check 1-5.
 
-test('step 9 resolves the merge site from git rather than assuming the main tree', () => {
+test('step 9 merges in the base tree explicitly, never wherever cwd happens to be', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
-  assert.ok(text.includes('worktree list --porcelain'), 'step 9 no longer resolves the base tree from git');
   // The merge itself must carry `-C`. Without it the command lands wherever
   // cwd happens to be — correct only while the base is `main`, which is why
   // this would pass every default run and fail exactly the runs the feature
   // exists for.
   assert.ok(text.includes('git -C "<base tree>" merge --no-ff --no-edit backlog/<id>'), 'the merge no longer names the base tree explicitly');
-  assert.ok(text.includes('git -C "<base tree>" symbolic-ref HEAD'), 'the checked-out precondition no longer runs in the base tree');
-});
-
-test('step 9 states all three base-tree outcomes, including the one the scan cannot see', () => {
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
-  // 1 and 2 are the ordinary pair. 3 is the one a careful reader still gets
-  // wrong: a worktree mid-rebase reports `detached`, so the branch-line scan
-  // finds nothing and the run would happily try to create a base worktree —
-  // which git then refuses. Detected by the CREATE failing, never by the scan.
-  assert.ok(/a tree already holds/i.test(text), 'outcome 1 (a tree holds the base) is no longer stated');
-  assert.ok(text.includes('.worktrees/_base-'), 'outcome 2 (create a base worktree) is no longer stated');
-  assert.ok(/detached/.test(text) && /mid-rebase/.test(text), 'outcome 3 no longer explains why a mid-rebase tree is invisible to the scan');
-  assert.ok(text.includes("fatal: '<base>' is already used by worktree at"), 'outcome 3 no longer quotes the refusal that detects it');
-});
-
-test('step 9 states the sanitisation of a base worktree name exactly, not vaguely', () => {
-  // A branch may contain `/`, so the directory name cannot be the ref. Stating
-  // the rule rather than gesturing at it is the whole point: "sanitised" alone
-  // would leave the next implementer to invent a second, different scheme.
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
-  assert.ok(text.includes('A-Za-z0-9._-'), 'the sanitisation rule is no longer stated as an explicit character set');
-  assert.ok(text.includes('feature/tracker-backed'), 'the sanitisation rule no longer shows a worked example');
+  // The merge stays a literal Bash call in the body and `merge-check` never runs it: one classifier verdict per call.
+  assert.ok(text.includes('merge-check <id>'), 'step 9 no longer calls merge-check before the merge');
+  assert.doesNotMatch(
+    fs.readFileSync(SCRIPT, 'utf8').replace(/\/\/.*$/gm, ''),
+    /spawnSync\('git',\s*\[[^\]]*'(merge|push)'/,
+    'orchestrate.mjs runs git merge or git push itself — those stay literal Bash calls in the skill body'
+  );
 });
 
 test('step 9 and the hard limits both say the run removes only a base worktree it created', () => {
@@ -6663,6 +6636,9 @@ test('step 9 and the hard limits both say the run removes only a base worktree i
 test('step 10 removes a run-created base worktree without failing the run', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8');
   assert.ok(text.includes('worktree remove "$PWD/.worktrees/_base-'), 'finishing no longer removes the base worktree this run created');
+  // Re-pointed: the decision to remove is read from the run file (merge-check 11 pins that the field is there and true),
+  // never from the driver's memory of which outcome it took — a resumed session has none.
+  assert.ok(text.includes('baseTree.created: true'), 'finishing no longer reads baseTree.created from status --json');
   // Flattened before matching, for the reason `noteValues` above already
   // gives: this sentence wraps mid-phrase in the prose, and a raw scan misses
   // it — a missed site reads as a missing rule.
@@ -8389,4 +8365,303 @@ test('Q-7: finish with the API down warns once for the whole sweep and exits as 
   const down = out.stderr.split('\n').filter((line) => /API down/.test(line));
   assert.deepEqual(down, ['orchestrator:queued: API down — label not removed on 3 item(s)']);
   assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'done');
+});
+
+// --- merge-check: the base tree and both merge preconditions -----------------
+//
+// SKILL.md §9 used to spell out finding the tree that holds the base, creating
+// one when none does, and the two preconditions on it, as ~7.6k chars of prose a
+// model re-read every turn. `merge-check <id>` runs that sequence. The cases
+// below ARE the behaviour the prose used to describe, run against real temp git
+// repos — including the three outcomes of the base-tree scan, which no test
+// could execute while they lived in markdown.
+
+const MC_ID = 'task-1';
+
+/** Runs `git -C <cwd> <args>` and throws on failure, so a fixture that cannot be built says so rather than testing nothing. */
+function gitOk(cwd, ...args) {
+  const out = spawnSync('git', ['-C', cwd, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', ...args], { encoding: 'utf8' });
+  if (out.status !== 0) throw new Error(`git ${args.join(' ')} failed in ${cwd}: ${out.stderr}`);
+  return out.stdout;
+}
+
+/**
+ * A committed project with `src/a.ts`, `README.md` and one groomed task per id in `ids`, each with a `backlog/<id>`
+ * worktree whose branch changes `src/a.ts`; a run initialised on `base` (a branch name that is created off `main` when
+ * it is not `main`). The project root stays on `main` unless the case moves it.
+ */
+function mergeCheckFixture(t, { base = 'main', ids = [MC_ID], branchTouches = ['src/a.ts'] } = {}) {
+  const fx = basedFixture(t);
+  fs.mkdirSync(path.join(fx.project, 'src'));
+  fs.writeFileSync(path.join(fx.project, 'src', 'a.ts'), 'one\n');
+  for (const id of ids) seedReadyTask(fx.project, id, `Item ${id}`);
+  commitEverything(fx.project, 'seed src and tasks');
+  if (base !== 'main') gitOk(fx.project, 'branch', base);
+  assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project, '--base', base).status, 0);
+  for (const id of ids) {
+    const worktree = path.join(fx.project, '.worktrees', id);
+    gitOk(fx.project, 'worktree', 'add', worktree, '-b', `backlog/${id}`, 'main');
+    for (const rel of branchTouches) fs.writeFileSync(path.join(worktree, rel), `${id} changed ${rel}\n`);
+    gitOk(worktree, 'add', '-A');
+    gitOk(worktree, 'commit', '-q', '-m', `${id} work`);
+  }
+  return fx;
+}
+
+function mergeCheck(fx, ...args) {
+  return run(fx.project, fx.home, 'merge-check', ...args);
+}
+
+function readRunJson(fx) {
+  return JSON.parse(fs.readFileSync(runFile(fx.home, fx.project), 'utf8'));
+}
+
+function stageOf(fx, id = MC_ID) {
+  return readRunJson(fx).queue.find((q) => q.id === id).stage;
+}
+
+function treeListing(project) {
+  return gitOk(project, 'worktree', 'list', '--porcelain')
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length));
+}
+
+test('merge-check 1: base checked out in the project root and clean — merge, root is the base tree, nothing created, stage merging', (t) => {
+  const fx = mergeCheckFixture(t);
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  const verdict = JSON.parse(out.stdout.trim());
+  assert.equal(verdict.verdict, 'merge');
+  assert.equal(verdict.baseTree, fx.project);
+  assert.equal(verdict.created, false);
+  assert.equal(stageOf(fx), 'merging');
+  assert.deepEqual(readRunJson(fx).baseTree, { path: fx.project, created: false });
+  // The two scratch files go under the run's own directory, as the prose always put them.
+  const verifyDir = path.join(path.dirname(runFile(fx.home, fx.project)), 'verify');
+  assert.equal(fs.readFileSync(path.join(verifyDir, `${MC_ID}.branch-paths`), 'utf8').trim(), 'src/a.ts');
+  assert.equal(fs.readFileSync(path.join(verifyDir, `${MC_ID}.dirty-paths`), 'utf8').trim(), '');
+});
+
+test('merge-check 2: a base held by no tree gets .worktrees/_base-<sanitised> — created true on stdout and in the run file, merge', (t) => {
+  const fx = mergeCheckFixture(t, { base: 'feature/tracker-backed' });
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  const expected = path.join(fx.project, '.worktrees', '_base-feature-tracker-backed');
+  const verdict = JSON.parse(out.stdout.trim());
+  assert.equal(verdict.verdict, 'merge');
+  assert.equal(verdict.baseTree, expected);
+  assert.equal(verdict.created, true);
+  assert.deepEqual(readRunJson(fx).baseTree, { path: expected, created: true });
+  assert.equal(gitOk(expected, 'symbolic-ref', 'HEAD').trim(), 'refs/heads/feature/tracker-backed');
+  assert.ok(treeListing(fx.project).includes(expected));
+  assert.equal(stageOf(fx), 'merging');
+});
+
+test('merge-check 3: _base-<x> already exists and holds another branch — park naming that path, no new worktree', (t) => {
+  const fx = mergeCheckFixture(t, { base: 'x' });
+  const squatter = path.join(fx.project, '.worktrees', '_base-x');
+  gitOk(fx.project, 'worktree', 'add', squatter, '-b', 'something-else', 'main');
+  const before = treeListing(fx.project);
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  const verdict = JSON.parse(out.stdout.trim());
+  assert.equal(verdict.verdict, 'park');
+  assert.ok(verdict.detail.includes(squatter), `the detail does not name the path: ${verdict.detail}`);
+  assert.ok(verdict.detail.includes('kept for a manual merge'));
+  assert.equal(stageOf(fx), 'parked');
+  assert.deepEqual(readRunJson(fx).attention, [{ id: MC_ID, kind: 'parked', detail: verdict.detail }], 'the park is the same attention entry the prose wrote');
+  assert.deepEqual(treeListing(fx.project), before, 'a worktree was created');
+  assert.equal(readRunJson(fx).baseTree, undefined, 'nothing was created or found, so no base tree is recorded');
+});
+
+// Cases 4-5 are NOT reachable through the full command: treeHoldingBranch only matches
+// `branch refs/heads/<base>`, so a detached or switched tree is never chosen as the base tree and the tool creates
+// `_base-<base>` instead, as the prose did. Precondition 1 now guards the window inside one process, which is why it
+// is exercised here as an exported function on a prepared tree.
+test('merge-check 4 (precondition-1 function, not the full command): a base tree on a detached HEAD parks, with the template filled as "a detached HEAD"', (t) => {
+  const fx = mergeCheckFixture(t);
+  const tree = path.join(fx.project, '.worktrees', 'detached-tree');
+  gitOk(fx.project, 'worktree', 'add', '--detach', tree, 'main');
+
+  const result = orch.baseTreePrecondition(tree, 'main', MC_ID);
+
+  assert.equal(result.verdict, 'park');
+  assert.equal(result.detail, `base tree ${tree} is on a detached HEAD, not refs/heads/main — branch backlog/${MC_ID} kept for a manual merge`);
+  assert.ok(result.detail.includes('is on a detached HEAD, not refs/heads/main'));
+});
+
+test('merge-check 5 (precondition-1 function, not the full command): a base tree on refs/heads/other parks naming that ref', (t) => {
+  const fx = mergeCheckFixture(t);
+  const tree = path.join(fx.project, '.worktrees', 'other-tree');
+  gitOk(fx.project, 'worktree', 'add', tree, '-b', 'other', 'main');
+
+  const result = orch.baseTreePrecondition(tree, 'main', MC_ID);
+
+  assert.equal(result.verdict, 'park');
+  assert.equal(result.detail, `base tree ${tree} is on refs/heads/other, not refs/heads/main — branch backlog/${MC_ID} kept for a manual merge`);
+  assert.equal(orch.baseTreePrecondition(fx.project, 'main', MC_ID), null, 'a tree on the base passes');
+});
+
+test('merge-check 6: an unstaged edit the branch also touches is an overlap — nothing parked; --park-on-overlap parks with the exact template', (t) => {
+  const fx = mergeCheckFixture(t);
+  fs.writeFileSync(path.join(fx.project, 'src', 'a.ts'), 'edited by a person\n');
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  const verdict = JSON.parse(out.stdout.trim());
+  assert.equal(verdict.verdict, 'overlap');
+  assert.deepEqual(verdict.paths, ['src/a.ts']);
+  assert.equal(stageOf(fx), 'merging', 'an overlap parks nothing — the body may still resolve on the worktree side');
+  assert.deepEqual(readRunJson(fx).attention, []);
+
+  const parked = mergeCheck(fx, MC_ID, '--park-on-overlap');
+
+  assert.equal(parked.status, 0, parked.stderr);
+  const parkVerdict = JSON.parse(parked.stdout.trim());
+  assert.equal(parkVerdict.verdict, 'park');
+  assert.equal(
+    parkVerdict.detail,
+    `merge would be refused: src/a.ts are uncommitted in ${fx.project} and this branch also touches them — commit or stash them, then merge backlog/${MC_ID} by hand`
+  );
+  assert.equal(stageOf(fx), 'parked');
+  assert.deepEqual(readRunJson(fx).attention, [{ id: MC_ID, kind: 'parked', detail: parkVerdict.detail }]);
+});
+
+test('merge-check 7: a STAGED-only edit the branch also touches is an overlap (a git-diff-only probe reads clean over it)', (t) => {
+  const fx = mergeCheckFixture(t);
+  fs.writeFileSync(path.join(fx.project, 'src', 'a.ts'), 'staged by a person\n');
+  gitOk(fx.project, 'add', 'src/a.ts');
+  assert.equal(gitOk(fx.project, 'diff', '--name-only'), '', 'the fixture must be staged-only');
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  const verdict = JSON.parse(out.stdout.trim());
+  assert.equal(verdict.verdict, 'overlap');
+  assert.deepEqual(verdict.paths, ['src/a.ts']);
+});
+
+test('merge-check 8: a dirty file the branch does not touch is not an overlap — merge', (t) => {
+  const fx = mergeCheckFixture(t);
+  fs.writeFileSync(path.join(fx.project, 'README.md'), 'a person is editing this\n');
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(out.stdout.trim()).verdict, 'merge');
+  const verifyDir = path.join(path.dirname(runFile(fx.home, fx.project)), 'verify');
+  assert.equal(fs.readFileSync(path.join(verifyDir, `${MC_ID}.dirty-paths`), 'utf8').trim(), 'README.md');
+});
+
+test('merge-check 9: no run exits 3, a foreign lease 7, an unknown id 1, a missing backlog/<id> 1 — and none of them writes the run file', (t) => {
+  // No run at all.
+  const bare = basedFixture(t);
+  assert.equal(run(bare.project, bare.home, 'merge-check', MC_ID).status, 3);
+  assert.equal(fs.existsSync(runFile(bare.home, bare.project)), false);
+
+  const fx = mergeCheckFixture(t, { ids: [MC_ID, 'task-2'] });
+  // task-2 is queued but its branch is deleted.
+  gitOk(fx.project, 'worktree', 'remove', '--force', path.join(fx.project, '.worktrees', 'task-2'));
+  gitOk(fx.project, 'branch', '-D', 'backlog/task-2');
+  const file = runFile(fx.home, fx.project);
+  const before = fs.readFileSync(file);
+
+  assert.equal(run(fx.project, fx.home, 'merge-check').status, 1, 'no id is a usage error');
+  assert.equal(run(fx.project, fx.home, 'merge-check', MC_ID, '--bogus').status, 1, 'an unknown flag is a usage error');
+  assert.equal(run(fx.project, fx.home, 'merge-check', 'task-99').status, 1, 'an unknown id');
+  const missing = run(fx.project, fx.home, 'merge-check', 'task-2');
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /backlog\/task-2/);
+  assert.ok(before.equals(fs.readFileSync(file)), 'a refusal wrote the run file');
+
+  // A foreign driver: the run is led by sess-a, so sess-b is refused.
+  const led = basedFixture(t);
+  seedReadyTask(led.project, MC_ID, 'Item');
+  commitEverything(led.project, 'seed');
+  assert.equal(runAs('sess-a', led.project, led.home, 'init', '--project', led.project).status, 0);
+  gitOk(led.project, 'branch', `backlog/${MC_ID}`);
+  const ledBefore = fs.readFileSync(runFile(led.home, led.project));
+  assert.equal(runAs('sess-b', led.project, led.home, 'merge-check', MC_ID).status, 7);
+  assert.ok(ledBefore.equals(fs.readFileSync(runFile(led.home, led.project))), 'a foreign lease refusal wrote the run file');
+});
+
+test('merge-check 10: a second item on a run that created the base tree reuses it — same path, created still true, one worktree', (t) => {
+  const fx = mergeCheckFixture(t, { base: 'feature/tracker-backed', ids: [MC_ID, 'task-2'] });
+  const first = JSON.parse(mergeCheck(fx, MC_ID).stdout.trim());
+  assert.equal(first.created, true);
+  const trees = treeListing(fx.project);
+
+  const out = mergeCheck(fx, 'task-2');
+
+  assert.equal(out.status, 0, out.stderr);
+  const second = JSON.parse(out.stdout.trim());
+  assert.equal(second.verdict, 'merge');
+  assert.equal(second.baseTree, first.baseTree);
+  assert.equal(second.created, true, 'once true, created stays true — the run still owns that worktree');
+  assert.deepEqual(readRunJson(fx).baseTree, { path: first.baseTree, created: true });
+  assert.deepEqual(treeListing(fx.project), trees, 'a second base worktree was created');
+});
+
+test('merge-check 11: status --json after a created base tree carries baseTree.created true (what §10 and a resumed run read)', (t) => {
+  const fx = mergeCheckFixture(t, { base: 'feature/tracker-backed' });
+  assert.equal(mergeCheck(fx, MC_ID).status, 0);
+
+  const status = run(fx.project, fx.home, 'status', '--json');
+
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(JSON.parse(status.stdout).baseTree.created, true);
+  assert.equal(JSON.parse(status.stdout).baseTree.path, path.join(fx.project, '.worktrees', '_base-feature-tracker-backed'));
+});
+
+test('merge-check 12: a base held only by a worktree mid-rebase is invisible to the scan, `worktree add` refuses, and it parks quoting git — nothing created, created not set', (t) => {
+  const fx = mergeCheckFixture(t, { base: 'feature/x' });
+  // A REAL mid-rebase tree: feature/x conflicts with main, so `rebase` stops and leaves HEAD detached.
+  const holder = path.join(fx.project, '.worktrees', 'rebasing');
+  gitOk(fx.project, 'worktree', 'add', holder, 'feature/x');
+  fs.writeFileSync(path.join(holder, 'src', 'a.ts'), 'feature side\n');
+  gitOk(holder, 'commit', '-q', '-am', 'feature side');
+  fs.writeFileSync(path.join(fx.project, 'src', 'a.ts'), 'main side\n');
+  gitOk(fx.project, 'commit', '-q', '-am', 'main side');
+  const rebase = spawnSync('git', ['-C', holder, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'rebase', 'main'], { encoding: 'utf8' });
+  assert.notEqual(rebase.status, 0, 'the fixture needs a rebase that stops on a conflict');
+  assert.ok(gitOk(fx.project, 'worktree', 'list', '--porcelain').includes('detached'), 'the holder must report detached, or this is not outcome 3');
+  const before = treeListing(fx.project);
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  const verdict = JSON.parse(out.stdout.trim());
+  assert.equal(verdict.verdict, 'park');
+  assert.equal(
+    verdict.detail,
+    `feature/x is checked out at ${holder} but not cleanly (git: fatal: 'feature/x' is already used by worktree at '${holder}') — branch backlog/${MC_ID} kept for a manual merge`
+  );
+  assert.equal(stageOf(fx), 'parked');
+  assert.equal(verdict.created, false);
+  assert.equal(readRunJson(fx).baseTree, undefined, 'a refused add must not record a base tree');
+  assert.deepEqual(treeListing(fx.project), before, 'a worktree was created');
+});
+
+test('merge-check 13: a stop request exits 10 from the `stage merging` step — no baseTree written, no worktree created', (t) => {
+  const fx = mergeCheckFixture(t, { base: 'feature/x' });
+  effectiveStop(fx.home, fx.project);
+  const file = runFile(fx.home, fx.project);
+  const before = fs.readFileSync(file);
+  const trees = treeListing(fx.project);
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 10, out.stderr);
+  assert.match(out.stderr, /stop was requested/);
+  assert.ok(before.equals(fs.readFileSync(file)), 'the refused call wrote the run file');
+  assert.equal(readRunJson(fx).baseTree, undefined);
+  assert.deepEqual(treeListing(fx.project), trees);
 });

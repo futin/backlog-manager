@@ -1272,6 +1272,16 @@ export interface OrchestratorRun {
    */
   base: string;
   /**
+   * The working tree the run merges in, as `orchestrate.mjs merge-check` last resolved it — the tree that has `base`
+   * checked out. **Absent until the first `merge-check`**, and absent for every run file written before it existed (and
+   * for a branch-mode run, which never merges), so a reader treats absence as "nothing to clean up", never as an error.
+   *
+   * `created` is true only when THIS run made that worktree (`.worktrees/_base-<sanitised base>`), and once true it
+   * stays true for that path: it is what lets §10's finishing step, and a resumed session that never saw the run's
+   * earlier turns, remove exactly the base worktree the run made and nothing the person made.
+   */
+  baseTree?: { path: string; created: boolean };
+  /**
    * What this run was ASKED to do — `init --merge-mode`'s value, or
    * `'merge'` when the flag was omitted. Never rewritten after `init`: it is
    * the answer to "what did the user request", and `mergeModeEffective`

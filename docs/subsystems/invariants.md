@@ -443,8 +443,9 @@ fatal: 'main' is already used by worktree at '/Users/andrejajevtic/Documents/cus
 
 `--force` is not the way round it. Two trees on one branch is exactly the state the skill's "this run's authority stops at worktrees it created itself" rule
 exists to avoid: the second tree's HEAD moves under the first, and an unattended run has no way to know what the person in the first tree was doing. So the rule
-is not "merge in a base worktree", it is **merge in whichever tree has `<base>` checked out** — resolved per merge with `git worktree list --porcelain`, into
-three outcomes that are exhaustive:
+is not "merge in a base worktree", it is **merge in whichever tree has `<base>` checked out** — resolved per merge by `orchestrate.mjs merge-check <id>` (a
+`git worktree list --porcelain` scan, then both preconditions, then `baseTree: { path, created }` recorded on the run), into three outcomes that are
+exhaustive:
 
 1. **A tree holds it** — merge there. For a `main`-based run on an ordinary machine that is the main tree, so the resulting commands are byte-identical to the
    pre-`--base` ones except for an explicit `-C`.
@@ -456,14 +457,15 @@ three outcomes that are exhaustive:
    `worktree add` with `fatal: '<base>' is already used by worktree at '<path>'`. Measured. So outcome 3 is detected by the create failing, never by the scan,
    and the park detail quotes git's own message because it names the tree the scan could not.
 
-**The run removes a base worktree only if it created it** — outcome 2 and nothing else. This is not a second rule beside "authority stops at worktrees it
+**The run removes a base worktree only if it created it** — outcome 2 and nothing else, which `merge-check` records as `baseTree.created` (true only for the
+worktree this run made, and once true it stays true) so that §10 and a resumed session read it from the run file rather than from memory. This is not a second rule beside "authority stops at worktrees it
 created itself"; it is that same sentence applied to a directory that happens to hold the base. A worktree the person made is theirs, however convenient it
 would be to tidy up, and a run that removed one would be deleting a working tree its owner may have uncommitted work in.
 
 **"The main tree" and "the tree holding `main`" are not synonyms**, and conflating them is the defect this whole section exists to prevent. The main tree is the
 project's original checkout — the one the registry points at, the one `orchestrate.mjs` refuses to run outside of — and it stays the main tree whatever branch
 it holds. The base tree is wherever `<base>` happens to be right now. On a default run they are one directory; on a `--base` run they are two, and every rule
-below has to name the right one: the `symbolic-ref` precondition and the dirty-path overlap probe both follow the merge into the **base** tree, because what can
+below has to name the right one: the `symbolic-ref` precondition and the dirty-path overlap probe (both `merge-check`'s) follow the merge into the **base** tree, because what can
 refuse a merge is the state of the tree being written to. A dirty main tree cannot block a merge that is not happening there.
 
 **And so does everything that follows the merge — every cleanup command belongs in the tree that merge happened in** (bug-38). Two of them kept the pre-base
