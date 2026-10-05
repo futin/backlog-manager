@@ -4279,7 +4279,9 @@ const NOTE_PLACEHOLDERS = new Map([
   ["<the gate's own reason>", "the ungroomed gate's own fixed wording"],
   // `leftover`'s own `detail`: fixed words around the item id and two paths this
   // run derived from its own project root, composed in `probeLeftover` and pinned
-  // by leftover/worktree 5 and 5b. Nothing a model or a person wrote.
+  // by leftover/worktree 5, 5b and 5c (5c is the archive-diff failure, whose git
+  // error rides in a separate `gitError` field the body never quotes).
+  // Nothing a model or a person wrote.
   ["<the leftover verdict's detail>", "`leftover`'s own fixed wording for an unexpected branch/worktree/directory combination"],
   // Spelled to say whose words they are. The verbatim text each of these
   // summarises lives where the same string points — the reviewer's report,
@@ -8859,6 +8861,9 @@ test('leftover/worktree 8: an item that is not committed on the base parks with 
   const fx = leftoverFixture(t);
   gitOk(fx.project, 'rm', '-q', '-r', 'backlog');
   gitOk(fx.project, 'commit', '-q', '-m', 'item no longer on base');
+  // Present in the MAIN tree, uncommitted: the state grooming leaves. A probe run from the project root would find it, so
+  // only a probe whose cwd is the new worktree parks here.
+  seedReadyTask(fx.project, LW_ID, `Item ${LW_ID}`);
 
   const out = verdictOf(worktreeCmd(fx, LW_ID));
 
@@ -8871,6 +8876,25 @@ test('leftover/worktree 8: an item that is not committed on the base parks with 
   const tree = path.join(fx.project, '.worktrees', LW_ID);
   assert.ok(treeListing(fx.project).includes(tree), 'the worktree must be kept');
   assert.ok(branchList(fx.project).includes(`backlog/${LW_ID}`), 'the branch must be kept');
+});
+
+test('leftover/worktree 5c: when the archive diff fails the park detail is fixed wording, and git\'s own line rides in gitError', (t) => {
+  const fx = basedFixture(t);
+  seedReadyTask(fx.project, LW_ID, 'Item');
+  commitEverything(fx.project, 'seed');
+  gitOk(fx.project, 'branch', 'feature/x');
+  assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project, '--base', 'feature/x').status, 0);
+  seedItemBranch(fx, LW_ID);
+  gitOk(fx.project, 'branch', '-D', 'feature/x');
+
+  const probe = verdictOf(leftover(fx, LW_ID));
+
+  assert.equal(probe.verdict, 'park');
+  assert.equal(probe.archived, null);
+  assert.equal(probe.detail, `could not tell whether backlog/${LW_ID} is a finished item: the comparison with feature/x failed`);
+  assert.match(probe.gitError, /feature\/x|fatal|unknown revision/);
+  assert.ok(!probe.detail.includes(probe.gitError), 'git\'s line must not be inside the detail the body puts on a command line');
+  assert.equal(worktreeCmd(fx, LW_ID).status, 1);
 });
 
 test('leftover/worktree 9: a tracker project has no item file, so no presence probe runs and nothing parks', async (t) => {

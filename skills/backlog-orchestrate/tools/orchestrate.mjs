@@ -3728,7 +3728,10 @@ function probeLeftover(root, itemId, base) {
         dir,
         archived,
         verdict: 'park',
-        detail: `could not tell whether ${branchName} is a finished item: comparing it with ${base} failed (git: ${diff.error})`
+        // Fixed words only: the body puts `detail` on an `attention --detail` command line, and a captured error never rides one
+        // (SKILL.md, the no-prose-in-argv rule). Git's own line travels beside it in `gitError`, which the body never quotes.
+        detail: `could not tell whether ${branchName} is a finished item: the comparison with ${base} failed`,
+        gitError: diff.error
       };
     }
     archived = diff.paths.some((p) => p.includes(`/done/${itemId}-`));
