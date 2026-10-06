@@ -4656,6 +4656,18 @@ test('every park instruction gives fixed --detail words and never quotes tool te
       'references/check-failures.md',
       '--detail "a check could not run: <the failing command names> — fix the command or the environment"',
       'a check that never ran parks naming the command, not quoting its row'
+    ],
+    // Fix loop 1: the exit-9 row and its tracker.md restatement said "park the item with the server's own sentence in the detail" — the same defect in a
+    // phrasing the first guard did not know.
+    [
+      'SKILL.md',
+      '--detail "the API refused this step — <what the API refused, your words>"',
+      "an unabsorbed API refusal (exit 9) parks with the driver's summary, not the server's sentence"
+    ],
+    [
+      'references/tracker.md',
+      '--detail "the API refused this step — <what the API refused, your words>"',
+      'tracker.md restates the exit-9 park with the same fixed words as the body'
     ]
   ];
   for (const [file, needle, rule] of RULES) {
@@ -4666,7 +4678,9 @@ test('every park instruction gives fixed --detail words and never quotes tool te
     const text = read(file);
     assert.doesNotMatch(
       text,
-      /naming git's message|the classifier's message quoted|quoted in the detail/i,
+      // The last alternative is the general shape — somebody else's text "in the detail" — so a new phrasing of the same instruction is caught by its
+      // grammar, not only by the three spellings that already happened.
+      /naming git's message|the classifier's message quoted|quoted in the detail|(?:server|git|classifier|tool|check|row)'s (?:own )?[a-z]+ in the detail/i,
       `${file} tells the driver to put tool text into a park detail — give fixed --detail words instead`
     );
   }

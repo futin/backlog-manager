@@ -37,7 +37,9 @@ What differs is gathered here, and each item names the section it belongs to. A 
 - **`8`** — **tracker projects only**: the backlog-manager API is not running. **Nothing is written.** Start the stack (`pnpm run dev` or `pnpm run docker:up`) and
   retry the same command; a files project can never see this code.
 - **`9`** — **tracker projects only**: an API refusal this command could not absorb (no token, a 502 from GitHub, a 400 naming a field). **Nothing is written.**
-  Not a call to fix and retry: park the item with the server's own sentence in the detail.
+  Not a call to fix and retry: park the item with `attention <n> --kind parked --detail "the API refused this step — <what the API refused, your words>"`,
+  then `stage <n> parked`. The server's sentence is composed from what GitHub said, so it is read in this session's output and summarised — never pasted into
+  the detail, which is published on the issue.
 
 ## §2 Start the run — the merge-mode probe
 
