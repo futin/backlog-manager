@@ -686,38 +686,30 @@ that file itself, and why `status --json` is where the session id is read back f
 ## 5. Inspect what the session left behind
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> inspecting
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>.jsonl"
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" inspect <id>
 ```
 
-**Both lines, one Bash invocation** — that is the whole reason `usage` is its own command and not a flag on something else: it costs this step no extra turn. It
-copies what the session cost (dollars, turns, the four token counts, the model) off the transcript's own `result` event onto the queue item, which is the only
-place that number survives once the logs are pruned. Exit `0` with a stderr line means the transcript never reached a result event — a killed session — and
-nothing was recorded, which is the honest answer and not a failure to work around. Run it once per transcript: again on the retry line below with `--jsonl`
-pointed at `<id>-retry-<n>.jsonl`, and again in step 7's fix loop.
+One call: it stages `inspecting`, copies what the session cost onto the queue item (the only place that number survives once the logs are pruned), counts the
+permission denials in the transcript, and reads the item file **in the worktree** — the main tree's copy has not changed and will not until the merge. It reads
+`<dir>/logs/<id>.jsonl`; `--jsonl "<file>"` names another transcript, as on the retry line below. Step 7's fix loop keeps its own `denials` and `usage` lines.
+It prints one JSON line:
 
-**First, before the item file: did the session get refused anything?**
+- **`usage`** — `"recorded"`, or `"no-result"`: the transcript never reached a result event (a killed session) and nothing was recorded, which is the honest
+  answer.
+- **`denials`**, the refused calls in `refused` — **non-zero means the item is not clean even if it looks done**: the session ran `auto` into a call the
+  classifier refused (step 4's rationale), and a denied run reports `success` and exits `0` like any other, so this is the only place it shows. Whatever it
+  built, it built around a command that never ran. Treat it exactly like the two failure shapes below — ask the user, and do not merge the diff. On the retry
+  path it is the _retry's_ transcript that is read.
+- **`item`**, **`itemPath`** — `"done"` (moved to `backlog/<section>/done/`, with an `## Outcome`), `"open-with-outcome"` (still open, with one: execute's own
+  failure path — it tried, verification failed, and it left the item where it was, the most useful record you have) or `"no-outcome"` (neither: the session died
+  — a crash, a usage cap, a dropped connection). **Whether an Outcome carries real verification output is still yours to judge**; `done` with one that does not
+  is no success.
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>.jsonl"
-```
+Exit `1` is an unreadable transcript, not a clean run — look at it before deciding anything. Exit `10` is a stop request, nothing written after it.
 
-Prints `{"count":N,"denials":[…]}`. A non-zero `count` means the session ran `auto` into a call the classifier refused (see step 4's rationale) — and because a
-denied run reports `success` and exits `0` like any other, this is the only place it shows. **A non-zero count means the item is not clean even if it looks
-done**: whatever the session built, it built around a command that never ran. Treat it exactly like the two failure shapes below — ask the user, and do not
-merge the diff. Exit `1` here is an unreadable transcript, not a clean run; look at it before deciding anything. On the retry path below, re-run this against
-the _retry's_ transcript.
-
-Then look at the item file **in the worktree**, not in the main tree — the main tree's copy has not changed and will not until the merge, which is exactly what
-the board shows and exactly what the run strip exists to compensate for.
-
-- **Moved to `backlog/<section>/done/`, with an `## Outcome` carrying real verification output** → execute succeeded on its own terms. Continue to Commit.
-- **Still open, with a failure `## Outcome`** → execute's own failure path: it tried, verification failed, and it deliberately left the item where it was. That
-  record is the most useful thing you have.
-- **Neither** (no `## Outcome` at all, item still open, session gone) → the session died: a crash, a usage cap, a dropped connection.
-
-Tracker: the evidence is `<dir>/outcomes/<n>.md` (non-empty success, non-empty failure, or empty/absent = died — the three readings above), and `orchestrate.mjs
-snapshot <n>` then writes `<dir>/items/<n>.md` for the reviewer and `verify` — **again after every fix loop** (`references/tracker.md` §5).
+Tracker: `item` is `"outcome"` for a non-empty `<dir>/outcomes/<n>.md` (success or failure — you read which) and `"no-outcome"` for an empty or absent one
+(died). `inspect` has also written `<dir>/items/<n>.md` (`snapshot` in the output) for the reviewer and `verify` — run `snapshot <n>` **again after every fix
+loop** (`references/tracker.md` §5).
 
 For both failure shapes, ask the user — best-effort, exactly like pre-flight — which of three they want: **retry**, **skip**, or **stop the run**. Retry resumes
 that item's own session so its context is not paid for twice. **Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first, with the Write tool**,
@@ -849,7 +841,7 @@ reports in this session's context.
 
   The second line is step 5's `usage` call again, on this loop's own transcript — one entry per transcript, so it lands beside the first session's rather than
   replacing it, and "the fix loop cost more than the item did" stays an answerable question. It is on the same invocation as the denials check for the same
-  reason it rides `stage <id> inspecting` up there: no extra turn.
+  reason `inspect` carries both up there: no extra turn.
 
   **This is the same gate step 5 runs, and it is not optional here.** A fix loop is a headless session under `--permission-mode auto` exactly like the first
   one, so it can be refused a call exactly like the first one — and this path reaches Commit without passing through step 5, so nothing else on it would ever

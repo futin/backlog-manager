@@ -118,15 +118,17 @@ middle two take exactly the branches of the three readings in §5:
 - **Non-empty, describing a failure** → execute's own failure path. Same branch as the second reading in §5.
 - **Empty or absent** → the session died. An empty outcome file is the same evidence an unmoved item file is, and takes the same branch.
 
-Then, in a tracker project only, write the snapshot the reviewer and `verify` both read:
+`orchestrate.mjs inspect <n>` reads that file for you: `item` is `"outcome"` for a non-empty one (which of the first two readings is yours to judge) and
+`"no-outcome"` for an empty or absent one. In a tracker project it also writes the snapshot the reviewer and `verify` both read, which is the same command you
+run by hand after a fix loop:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" snapshot <n>
 ```
 
-It writes `<dir>/items/<n>.md` — the issue's body, then `## Outcome`, then that outcome file — which is byte for byte what a files run's item file looks like at
-this point in the loop. **Run it again after every fix loop**: the Outcome grows with each one, and a reviewer handed the first loop's snapshot would be reading
-a report that no longer describes the branch.
+The snapshot is `<dir>/items/<n>.md` — the issue's body, then `## Outcome`, then that outcome file — which is byte for byte what a files run's item file looks
+like at this point in the loop. **Run it again after every fix loop**: the Outcome grows with each one, and a reviewer handed the first loop's snapshot would be
+reading a report that no longer describes the branch.
 
 ## §7 Review — the item file path, and the fix loop's paths
 

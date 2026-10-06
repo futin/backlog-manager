@@ -137,9 +137,9 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   flag, no server-side kill. Why:
   [invariants.md](docs/subsystems/invariants.md#a-stop-is-the-control-files-second-kind-and-nothing-resumes-a-stopped-run)
 - **A session's cost is recorded per transcript, and a transcript's identity is its file name, not its session id** (task-27).
-  `orchestrate.mjs usage <id> --jsonl <file>` is the one writer of `RunQueueItem.usage`: one entry per transcript, never one summed figure; identity is `kind` +
-  `loop`, both from the file name, never `sessionId`. Absence is a value: no result event writes no entry, a renamed numeric field reads `null` never `0`, and
-  `usage` stays optional so an older run renders nothing rather than `$0.00`. Why:
+  `orchestrate.mjs usage <id> --jsonl <file>` is the one writer of `RunQueueItem.usage` — `inspect <id>` (§5) calls the same write: one entry per transcript,
+  never one summed figure; identity is `kind` + `loop`, both from the file name, never `sessionId`. Absence is a value: no result event writes no entry, a
+  renamed numeric field reads `null` never `0`, and `usage` stays optional so an older run renders nothing rather than `$0.00`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-sessions-cost-is-recorded-per-transcript-and-a-transcripts-identity-is-its-file-name)
 - **`orchestrator:queued` is a plan, never a claim: the driver adds it, the claim and the Stop remove it, and no reader treats it as exclusion.** Adds:
   `orchestrate.mjs init` on a tracker project, to every queue item as built (already cut to `--max`), through `POST /api/items/queue` — the driver's only way to

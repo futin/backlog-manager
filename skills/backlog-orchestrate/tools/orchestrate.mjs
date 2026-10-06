@@ -2303,6 +2303,13 @@ function cmdSnapshot(argv) {
   const dir = projectDir(orchHome(), resolveProjectRoot());
   const run = readRun(dir);
   const item = findQueueItem(run, itemId);
+  const target = writeSnapshot(dir, run, itemId);
+  console.log(JSON.stringify({ id: itemId, snapshot: target, title: item.title }));
+  return 0;
+}
+
+// The write itself, shared with `inspect`, which runs it as the last step of §5 for a tracker project. Returns the path written.
+function writeSnapshot(dir, run, itemId) {
   if (projectSource(run.project) !== 'github') {
     throw new OrchestrateError('snapshot is for a tracker project — a files item already has a file, in the worktree the session wrote it in', 1);
   }
@@ -2322,8 +2329,7 @@ function cmdSnapshot(argv) {
   const target = snapshotFilePath(dir, itemId);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, `${text.replace(/\s*$/, '')}\n\n## Outcome\n\n${outcome.replace(/^\s*/, '')}`);
-  console.log(JSON.stringify({ id: itemId, snapshot: target, title: item.title }));
-  return 0;
+  return target;
 }
 
 // The repo a tracker project is connected to, read from the same committed
@@ -4016,6 +4022,82 @@ function cmdCleanup(argv) {
   return 0;
 }
 
+/* --- inspect: SKILL.md §5's four steps as one call --------------------------------------------------------------------
+   `stage <id> inspecting`, `usage`, `denials` and the item-file location check were four commands a model ran and read in turn,
+   and every one of them is deterministic. This runs them in that order and prints what each found; the body keeps the one thing
+   that is judgement — whether an Outcome is real verification output — and what to do about a denial or a failure shape.
+
+   It composes the existing internals rather than copying them: `cmdStage` (so a stop request still exits `10`, and a pause is not
+   a gate here), `applyUsageEntry`, `readPermissionDenials`, `findItemFilePath` and, for a tracker project, `writeSnapshot`.
+   Everything that can refuse for a reason of THIS call — argv, the lease, the item, the transcript's name and readability — does so
+   before the first write, so an unreadable transcript is exit `1` with the stage untouched, as `denials` is today; after `stage`
+   lands the only refusal left is a tracker API one from the snapshot, which leaves `inspecting` and the usage entry written and is
+   safe to re-run (replace-by-slot, and a re-stamp of a stage the item already occupies). */
+const INSPECT_USAGE = 'usage: orchestrate.mjs inspect <itemId> [--jsonl <file>]';
+
+function cmdInspect(argv) {
+  const itemId = argv[0];
+  let jsonlFile;
+  if (!itemId || itemId.startsWith('-')) throw new OrchestrateError(INSPECT_USAGE, 1);
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i] === '--jsonl' && argv[i + 1] !== undefined) jsonlFile = argv[++i];
+    else throw new OrchestrateError(INSPECT_USAGE, 1);
+  }
+
+  const root = resolveProjectRoot();
+  const dir = projectDir(orchHome(), root);
+  const first = readRun(dir);
+  assertDriver(first);
+  const firstItem = findQueueItem(first, itemId);
+  // The first dispatch's transcript is where §4 sent it; a retry or a fix loop names its own.
+  jsonlFile ??= path.join(dir, 'logs', `${itemId}.jsonl`);
+  const slot = transcriptSlotOrThrow(itemId, jsonlFile);
+
+  let parsed;
+  let denials;
+  try {
+    parsed = readSessionUsage(jsonlFile);
+    denials = readPermissionDenials(jsonlFile);
+  } catch (e) {
+    // An unreadable transcript answering "no denials" would be indistinguishable from a clean run, and §5 merges on clean.
+    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1);
+  }
+
+  // The same effect as `stage <id> inspecting`, by construction: it is the same function. A stop request refuses here, exit `10`,
+  // and nothing below it runs.
+  cmdStage([itemId, 'inspecting'], () => {});
+
+  // `stage` wrote the run file, so the usage entry is applied to a fresh read of it, never to `first`.
+  const run = readRun(dir);
+  const item = findQueueItem(run, itemId);
+  if (parsed !== null) applyUsageEntry(dir, run, item, slot, parsed);
+
+  const result = { id: itemId, usage: parsed === null ? 'no-result' : 'recorded', denials: denials.length, refused: denials };
+
+  if (projectSource(run.project) === 'github') {
+    // The evidence is `<dir>/outcomes/<n>.md`: non-empty is a success OR a failure (the body reads which), empty or absent is a
+    // session that died. The snapshot is written either way — §5's next steps read it, and an empty Outcome in it is accurate.
+    result.snapshot = writeSnapshot(dir, run, itemId);
+    const outcomePath = outcomeFilePath(dir, itemId);
+    const hasOutcome = fs.existsSync(outcomePath) && fs.readFileSync(outcomePath, 'utf8').trim() !== '';
+    result.item = hasOutcome ? 'outcome' : 'no-outcome';
+    result.itemPath = hasOutcome ? outcomePath : null;
+  } else {
+    // In the WORKTREE: the main tree's copy has not changed and will not until the merge. A worktree the run recorded wins over the
+    // conventional path, and an absent one is the same answer as an item with no Outcome — the session left nothing.
+    const recorded = firstItem.worktree;
+    const worktree = recorded && fs.existsSync(recorded) ? recorded : path.join(root, '.worktrees', itemId);
+    const found = fs.existsSync(worktree) ? findItemFilePath(worktree, itemId) : null;
+    const outcome = found === null ? undefined : extractSection(fs.readFileSync(found.path, 'utf8'), 'Outcome');
+    const hasOutcome = outcome !== undefined && outcome.trim() !== '';
+    result.item = !hasOutcome ? 'no-outcome' : found.state === 'done' ? 'done' : 'open-with-outcome';
+    result.itemPath = found === null ? null : found.path;
+  }
+
+  console.log(JSON.stringify(result));
+  return 0;
+}
+
 const ASSUME_USAGE = 'usage: orchestrate.mjs assume <itemId> --json <file of [{question, answer}, …]>';
 
 // The one writer of RunQueueItem.assumptions — what this run decided on its
@@ -4742,6 +4824,45 @@ function usageSlotKey(entry) {
   return `${entry.kind}#${entry.loop ?? ''}`;
 }
 
+// A transcript's slot from its file name, or the refusal that tells the caller which three names are legal.
+function transcriptSlotOrThrow(itemId, jsonlFile) {
+  const slot = transcriptSlot(itemId, jsonlFile);
+  if (slot === null) {
+    throw new OrchestrateError(
+      `--jsonl ${jsonlFile}: a transcript for ${itemId} must be named ` +
+        `${itemId}.jsonl, ${itemId}-retry-<n>.jsonl or ${itemId}-fix-<n>.jsonl — ` +
+        `the file name is what says which dispatch this is, and the transcript itself cannot`,
+      1
+    );
+  }
+  return slot;
+}
+
+// The write half of `usage`, shared with `inspect`. `run` and `item` are the caller's own reads of the run file, so a caller that has
+// written it in between (`inspect` stages `inspecting` first) re-reads before calling rather than clobbering that write. Returns the entry.
+function applyUsageEntry(dir, run, item, slot, parsed) {
+  const entry = { ...parsed, kind: slot.kind, endedAt: nowISO() };
+  if (slot.loop !== undefined) entry.loop = slot.loop;
+
+  // `?? []` covers a queue item written before this field existed, which a
+  // `--resume` against an older run file genuinely produces. Replace-by-slot
+  // rather than append-always, so a resumed driver re-running this over a
+  // transcript it already recorded (references/recovery.md) leaves one entry
+  // rather than two; every OTHER slot is copied through untouched, which is
+  // what keeps a fix loop's entry beside the first session's.
+  const existing = item.usage ?? [];
+  const key = usageSlotKey(entry);
+  const replaced = existing.some((e) => usageSlotKey(e) === key);
+  item.usage = replaced ? existing.map((e) => (usageSlotKey(e) === key ? entry : e)) : [...existing, entry];
+
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  // task-47: a command that changed the item's fields publishes them. After
+  // the write, best-effort, and a no-op for a files project.
+  if (projectSource(run.project) === 'github') trackerHeartbeat(run, item);
+  return entry;
+}
+
 // Named `usage` for the command, which collides awkwardly with this file's
 // `<CMD>_USAGE` convention for help strings. Kept anyway: the command name a
 // person types matters more than the constant name nobody does.
@@ -4770,15 +4891,7 @@ function cmdUsage(argv) {
   // Before the run file is opened: a bad file name is a problem with this
   // call, and the caller has to be told which of the three shapes it should
   // have used rather than being told the item is fine and the entry landed.
-  const slot = transcriptSlot(itemId, jsonlFile);
-  if (slot === null) {
-    throw new OrchestrateError(
-      `--jsonl ${jsonlFile}: a transcript for ${itemId} must be named ` +
-        `${itemId}.jsonl, ${itemId}-retry-<n>.jsonl or ${itemId}-fix-<n>.jsonl — ` +
-        `the file name is what says which dispatch this is, and the transcript itself cannot`,
-      1
-    );
-  }
+  const slot = transcriptSlotOrThrow(itemId, jsonlFile);
 
   const dir = projectDir(orchHome(), resolveProjectRoot());
   const run = readRun(dir);
@@ -4806,25 +4919,7 @@ function cmdUsage(argv) {
     return 0;
   }
 
-  const entry = { ...parsed, kind: slot.kind, endedAt: nowISO() };
-  if (slot.loop !== undefined) entry.loop = slot.loop;
-
-  // `?? []` covers a queue item written before this field existed, which a
-  // `--resume` against an older run file genuinely produces. Replace-by-slot
-  // rather than append-always, so a resumed driver re-running this over a
-  // transcript it already recorded (references/recovery.md) leaves one entry
-  // rather than two; every OTHER slot is copied through untouched, which is
-  // what keeps a fix loop's entry beside the first session's.
-  const existing = item.usage ?? [];
-  const key = usageSlotKey(entry);
-  const replaced = existing.some((e) => usageSlotKey(e) === key);
-  item.usage = replaced ? existing.map((e) => (usageSlotKey(e) === key ? entry : e)) : [...existing, entry];
-
-  run.updatedAt = nowISO();
-  writeRunAtomic(dir, run);
-  // task-47: a command that changed the item's fields publishes them. After
-  // the write, best-effort, and a no-op for a files project.
-  if (projectSource(run.project) === 'github') trackerHeartbeat(run, item);
+  const entry = applyUsageEntry(dir, run, item, slot, parsed);
   console.log(JSON.stringify({ id: itemId, usage: entry }));
   return 0;
 }
@@ -5815,6 +5910,7 @@ commands:
   leftover     say what an earlier run left for an item (read-only)
   worktree     create an item's worktree, refusing any leftover but a bare branch
   cleanup      after a merge or a branch-mode stop: remove the worktree, delete the merged branch, report a runner fix
+  inspect      §5 in one call: stage inspecting, record the session's cost, count its denials, say where the item stands
   heartbeat    re-stamp the run's updatedAt
   attention    record something a human should look at
   assume       record a question this run answered itself (decide mode only)
@@ -5915,6 +6011,7 @@ export function main(argv) {
     if (cmd === 'leftover') return cmdLeftover(rest);
     if (cmd === 'worktree') return cmdWorktree(rest);
     if (cmd === 'cleanup') return cmdCleanup(rest);
+    if (cmd === 'inspect') return cmdInspect(rest);
     if (cmd === 'heartbeat') return cmdHeartbeat(rest);
     if (cmd === 'attention') return cmdAttention(rest);
     if (cmd === 'assume') return cmdAssume(rest);

@@ -3452,12 +3452,14 @@ test('every step that runs a headless session checks its transcript for denials 
       sections.get(current).push(line);
     }
   }
+  // Step 5 may satisfy this with `inspect <id>`, which counts the denials as one of its four steps (its behaviour is pinned by the `inspect` cases
+  // below); step 7's fix loop reaches Commit without passing back through step 5, so it keeps the literal `denials` line.
   const MUST_CHECK = ['5. Inspect what the session left behind', '7. Review'];
   for (const title of MUST_CHECK) {
     assert.ok(sections.has(title), `section not found (renamed?): ${title}`);
     const body = sections.get(title).join('\n');
     assert.ok(
-      body.includes('orchestrate.mjs" denials --jsonl'),
+      body.includes('orchestrate.mjs" denials --jsonl') || (title.startsWith('5.') && body.includes('orchestrate.mjs" inspect <id>')),
       `section "${title}" runs a session and then commits, but never checks its transcript for denials`
     );
   }
@@ -6264,8 +6266,9 @@ test('every step that runs a headless session records what it cost', () => {
   }
   for (const title of ['5. Inspect what the session left behind', '7. Review']) {
     assert.ok(sections.has(title), `section not found (renamed?): ${title}`);
+    const body = sections.get(title).join('\n');
     assert.ok(
-      sections.get(title).join('\n').includes('orchestrate.mjs" usage <id> --jsonl'),
+      body.includes('orchestrate.mjs" usage <id> --jsonl') || (title.startsWith('5.') && body.includes('orchestrate.mjs" inspect <id>')),
       `section "${title}" runs a headless session but never records what it cost`
     );
   }
@@ -9446,4 +9449,250 @@ test('cleanup never forces a removal and never merges or pushes — the tool run
   const body = source.slice(start, source.indexOf('\nconst ASSUME_USAGE', start)).replace(/\/\/.*$/gm, '');
   assert.ok(body.includes("'worktree', 'remove', target"), 'the plain removal is no longer where this guard looks');
   assert.doesNotMatch(body, /--force|'-D'|'merge'|'push'|'prune'|'reset'/);
+});
+
+/* --- inspect: §5's four steps as one call ------------------------------------------------------------------------
+   `stage <id> inspecting`, `usage`, `denials` and the item-file location check, in that order. The tests pin the three things
+   a body-prose version could not: the file is read in the WORKTREE (the main tree carries the opposite state in every case, so
+   a wrong tree is a red test), a refusal writes nothing, and a transcript that cannot be read is exit 1 rather than a clean run. */
+
+const INSPECT_ID = 'task-5';
+
+function inspectLogs(fx) {
+  return path.join(fx.home, encodeURIComponent(fx.project), 'logs');
+}
+
+// A files-project run with a real linked worktree for `task-5`, a transcript at `<dir>/logs/task-5.jsonl`, and the item file in
+// the worktree in the requested shape. The MAIN tree's copy is always put in the opposite shape, so reading it gives the wrong answer.
+function inspectFixture(t, { state, outcome, transcript = STREAM_USAGE }) {
+  const fx = orchFixture(t);
+  seedReadyTask(fx.project, INSPECT_ID, 'Some task');
+  assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project).status, 0);
+  fx.worktree = addWorktree(fx.project, INSPECT_ID, `backlog/${INSPECT_ID}`);
+  fx.logs = inspectLogs(fx);
+  fs.mkdirSync(fx.logs, { recursive: true });
+  if (transcript !== null) fs.copyFileSync(transcript, path.join(fx.logs, `${INSPECT_ID}.jsonl`));
+
+  const shape = (tree, wantState, wantOutcome) => {
+    const open = path.join(tree, 'backlog', 'tasks', 'open', `${INSPECT_ID}-fixture.md`);
+    const done = path.join(tree, 'backlog', 'tasks', 'done', `${INSPECT_ID}-fixture.md`);
+    if (wantState === 'done') {
+      fs.mkdirSync(path.dirname(done), { recursive: true });
+      fs.renameSync(open, done);
+    }
+    if (wantOutcome) fs.appendFileSync(wantState === 'done' ? done : open, '\n## Outcome\n\nVerification: pnpm test — 12 passed\n');
+  };
+  shape(fx.worktree, state, outcome);
+  // The opposite shape in the main tree, so a read of the wrong tree is caught.
+  shape(fx.project, state === 'done' ? 'open' : 'done', !outcome);
+  return fx;
+}
+
+function inspectCmd(fx, ...args) {
+  return run(fx.project, fx.home, 'inspect', ...args);
+}
+
+function inspectOut(out) {
+  assert.equal(out.status, 0, `${out.stdout}${out.stderr}`);
+  return JSON.parse(out.stdout.trim());
+}
+
+test('inspect 1: a done item with an Outcome — item "done", the worktree path, usage recorded, no denials, stage inspecting', (t) => {
+  const fx = inspectFixture(t, { state: 'done', outcome: true });
+
+  const result = inspectOut(inspectCmd(fx, INSPECT_ID));
+
+  assert.equal(result.item, 'done');
+  assert.equal(result.itemPath, path.join(fx.worktree, 'backlog', 'tasks', 'done', `${INSPECT_ID}-fixture.md`));
+  assert.equal(result.usage, 'recorded');
+  assert.equal(result.denials, 0);
+  const queued = queueItem(fx.home, fx.project, INSPECT_ID);
+  assert.equal(queued.stage, 'inspecting');
+  assert.equal(queued.usage.length, 1);
+  assert.equal(queued.usage[0].kind, 'execute');
+});
+
+test('inspect 2: an open item with an Outcome — "open-with-outcome" (execute\'s own failure path)', (t) => {
+  const fx = inspectFixture(t, { state: 'open', outcome: true });
+
+  const result = inspectOut(inspectCmd(fx, INSPECT_ID));
+
+  assert.equal(result.item, 'open-with-outcome');
+  assert.equal(result.itemPath, path.join(fx.worktree, 'backlog', 'tasks', 'open', `${INSPECT_ID}-fixture.md`));
+});
+
+test('inspect 3: an open item with no Outcome, and a done item with none — both "no-outcome"', (t) => {
+  const open = inspectFixture(t, { state: 'open', outcome: false });
+  assert.equal(inspectOut(inspectCmd(open, INSPECT_ID)).item, 'no-outcome');
+
+  const done = inspectFixture(t, { state: 'done', outcome: false });
+  const result = inspectOut(inspectCmd(done, INSPECT_ID));
+  assert.equal(result.item, 'no-outcome', 'a lifecycle move with no Outcome is not execute succeeding on its own terms');
+});
+
+test('inspect 4: no worktree directory at all — "no-outcome" with a null itemPath, and nothing else is refused', (t) => {
+  const fx = inspectFixture(t, { state: 'done', outcome: true });
+  assert.equal(spawnSync('git', ['-C', fx.project, 'worktree', 'remove', '--force', fx.worktree], { encoding: 'utf8' }).status, 0);
+
+  const result = inspectOut(inspectCmd(fx, INSPECT_ID));
+
+  assert.equal(result.item, 'no-outcome');
+  assert.equal(result.itemPath, null);
+});
+
+test('inspect 5: a transcript with a permission denial — denials 1, the refused call is listed, exit 0', (t) => {
+  const fx = inspectFixture(t, { state: 'done', outcome: true, transcript: STREAM_DENIAL });
+
+  const result = inspectOut(inspectCmd(fx, INSPECT_ID));
+
+  assert.equal(result.denials, 1);
+  assert.equal(result.refused.length, 1);
+  assert.equal(result.refused[0].tool_name, 'Bash');
+});
+
+test('inspect 6: a transcript with no result event — usage "no-result", exit 0, nothing recorded, the stage still written', (t) => {
+  const fx = inspectFixture(t, { state: 'open', outcome: false, transcript: STREAM_NO_RESULT });
+
+  const result = inspectOut(inspectCmd(fx, INSPECT_ID));
+
+  assert.equal(result.usage, 'no-result');
+  assert.equal(result.denials, 0);
+  const queued = queueItem(fx.home, fx.project, INSPECT_ID);
+  assert.equal(queued.usage, undefined, 'a killed session must record nothing');
+  assert.equal(queued.stage, 'inspecting');
+});
+
+test('inspect 7: an unreadable transcript — exit 1 naming the file, and nothing written (not even the stage)', (t) => {
+  const missing = inspectFixture(t, { state: 'done', outcome: true, transcript: null });
+  const before = fs.readFileSync(runFile(missing.home, missing.project), 'utf8');
+  const out = inspectCmd(missing, INSPECT_ID);
+  assert.equal(out.status, 1, `${out.stdout}${out.stderr}`);
+  assert.match(out.stderr, /could not be read/);
+  assert.equal(fs.readFileSync(runFile(missing.home, missing.project), 'utf8'), before, 'the run file changed');
+
+  // A directory where the transcript should be: never a clean run either.
+  const dirAt = inspectFixture(t, { state: 'done', outcome: true, transcript: null });
+  fs.mkdirSync(path.join(dirAt.logs, `${INSPECT_ID}.jsonl`));
+  const beforeDir = fs.readFileSync(runFile(dirAt.home, dirAt.project), 'utf8');
+  assert.equal(inspectCmd(dirAt, INSPECT_ID).status, 1);
+  assert.equal(fs.readFileSync(runFile(dirAt.home, dirAt.project), 'utf8'), beforeDir);
+});
+
+test('inspect 8: a stop request — exit 10 from the stage step it composes, and nothing is written', (t) => {
+  const fx = inspectFixture(t, { state: 'done', outcome: true });
+  effectiveStop(fx.home, fx.project);
+  const before = fs.readFileSync(runFile(fx.home, fx.project));
+
+  const out = inspectCmd(fx, INSPECT_ID);
+
+  assert.equal(out.status, 10, `${out.stdout}${out.stderr}`);
+  assert.match(out.stderr, /stop was requested/);
+  assert.ok(before.equals(fs.readFileSync(runFile(fx.home, fx.project))), 'run.json was modified after the refusing step');
+});
+
+test("inspect 9: refusals — another session's lease is 7, an unknown item and bad argv are 1, each with nothing written", (t) => {
+  const fx = orchFixture(t);
+  seedReadyTask(fx.project, INSPECT_ID, 'Some task');
+  assert.equal(runAs('sess-a', fx.project, fx.home, 'init', '--project', fx.project).status, 0);
+  fx.logs = inspectLogs(fx);
+  fs.mkdirSync(fx.logs, { recursive: true });
+  fs.copyFileSync(STREAM_USAGE, path.join(fx.logs, `${INSPECT_ID}.jsonl`));
+  const before = fs.readFileSync(runFile(fx.home, fx.project), 'utf8');
+
+  const leased = runAs('sess-b', fx.project, fx.home, 'inspect', INSPECT_ID);
+  assert.equal(leased.status, 7, leased.stderr);
+  assert.match(leased.stderr, /sess-a/);
+
+  for (const args of [[], ['--jsonl', 'x'], [INSPECT_ID, 'extra'], ['task-99'], [INSPECT_ID, '--jsonl'], [INSPECT_ID, '--jsonl', path.join(fx.logs, 'other-1.jsonl')]]) {
+    const out = runAs('sess-a', fx.project, fx.home, 'inspect', ...args);
+    assert.equal(out.status, 1, `inspect ${args.join(' ')}: ${out.stdout}${out.stderr}`);
+  }
+  assert.equal(fs.readFileSync(runFile(fx.home, fx.project), 'utf8'), before);
+});
+
+test("inspect 10: --jsonl names a retry transcript — usage is recorded in the retry slot, beside the first session's", (t) => {
+  const fx = inspectFixture(t, { state: 'open', outcome: true });
+  assert.equal(run(fx.project, fx.home, 'usage', INSPECT_ID, '--jsonl', path.join(fx.logs, `${INSPECT_ID}.jsonl`)).status, 0);
+  const retry = path.join(fx.logs, `${INSPECT_ID}-retry-1.jsonl`);
+  fs.copyFileSync(STREAM_USAGE, retry);
+
+  const result = inspectOut(inspectCmd(fx, INSPECT_ID, '--jsonl', retry));
+
+  assert.equal(result.usage, 'recorded');
+  const kinds = queueItem(fx.home, fx.project, INSPECT_ID).usage.map((u) => `${u.kind}#${u.loop ?? ''}`);
+  assert.deepEqual(kinds, ['execute#', 'retry#1']);
+});
+
+test('inspect 11: the same entry `usage` would have written, and the same count `denials` would have printed', (t) => {
+  const viaInspect = inspectFixture(t, { state: 'done', outcome: true, transcript: STREAM_DENIAL });
+  const viaParts = inspectFixture(t, { state: 'done', outcome: true, transcript: STREAM_DENIAL });
+  const strip = (entry) => ({ ...entry, endedAt: undefined });
+
+  const result = inspectOut(inspectCmd(viaInspect, INSPECT_ID));
+  const transcript = path.join(viaParts.logs, `${INSPECT_ID}.jsonl`);
+  const denials = JSON.parse(run(viaParts.project, viaParts.home, 'denials', '--jsonl', transcript).stdout);
+  assert.equal(run(viaParts.project, viaParts.home, 'usage', INSPECT_ID, '--jsonl', transcript).status, 0);
+
+  assert.equal(result.denials, denials.count);
+  assert.deepEqual(
+    queueItem(viaInspect.home, viaInspect.project, INSPECT_ID).usage.map(strip),
+    queueItem(viaParts.home, viaParts.project, INSPECT_ID).usage.map(strip)
+  );
+});
+
+// --- inspect, tracker project: the outcome file is the evidence, and the snapshot is written in the same call -----------
+
+async function trackerInspect(t, outcomeText) {
+  const { home, project } = trackerFixture(t);
+  const dir = path.join(home, encodeURIComponent(project));
+  const { out } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    fs.mkdirSync(path.join(dir, 'outcomes'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
+    fs.copyFileSync(STREAM_USAGE, path.join(dir, 'logs', '3.jsonl'));
+    if (outcomeText !== null) fs.writeFileSync(path.join(dir, 'outcomes', '3.md'), outcomeText);
+    return runApi(project, home, port, 'inspect', '3');
+  });
+  return { out, dir, home, project };
+}
+
+test('inspect 12: tracker, an EMPTY outcome file — "no-outcome", and <dir>/items/<n>.md is written anyway', async (t) => {
+  const { out, dir } = await trackerInspect(t, '');
+
+  assert.equal(out.status, 0, out.stderr);
+  const result = JSON.parse(out.stdout.trim());
+  assert.equal(result.item, 'no-outcome');
+  assert.equal(result.usage, 'recorded');
+  const snapshot = path.join(dir, 'items', '3.md');
+  assert.equal(result.snapshot, snapshot);
+  assert.match(fs.readFileSync(snapshot, 'utf8'), /## Cause/);
+});
+
+test('inspect 13: tracker, an absent outcome file — "no-outcome" as well, the snapshot still written', async (t) => {
+  const { out, dir } = await trackerInspect(t, null);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(out.stdout.trim()).item, 'no-outcome');
+  assert.equal(fs.existsSync(path.join(dir, 'items', '3.md')), true);
+});
+
+test("inspect 14: tracker, a non-empty outcome file — \"outcome\" with the file as itemPath; success or failure is the body's judgement", async (t) => {
+  const { out, dir } = await trackerInspect(t, 'Verification: pnpm test — 12 passed\n');
+
+  assert.equal(out.status, 0, out.stderr);
+  const result = JSON.parse(out.stdout.trim());
+  assert.equal(result.item, 'outcome');
+  assert.equal(result.itemPath, path.join(dir, 'outcomes', '3.md'));
+  assert.match(fs.readFileSync(path.join(dir, 'items', '3.md'), 'utf8'), /## Outcome\n\nVerification: pnpm test/);
+});
+
+test('inspect composes the existing internals and runs no git of its own', () => {
+  const source = fs.readFileSync(SCRIPT, 'utf8');
+  const start = source.indexOf('function cmdInspect(');
+  assert.ok(start !== -1, 'cmdInspect is gone');
+  const body = source.slice(start, source.indexOf('\nconst ASSUME_USAGE', start)).replace(/\/\/.*$/gm, '');
+  for (const needle of ['cmdStage(', 'applyUsageEntry(', 'readPermissionDenials(', 'findItemFilePath(', 'writeSnapshot(']) {
+    assert.ok(body.includes(needle), `cmdInspect no longer calls ${needle}`);
+  }
+  assert.doesNotMatch(body, /spawnSync|'merge'|'push'/);
 });

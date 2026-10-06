@@ -2120,8 +2120,9 @@ terminal stamp that is not chronologically last WILL open a span and the filter 
 ## A session's cost is recorded per transcript, and a transcript's identity is its file name
 
 A session's cost is recorded per transcript, and a transcript's identity is its file name, not its session id (task-27).
-`orchestrate.mjs usage <id> --jsonl <file>` is the one writer of `RunQueueItem.usage`, called at inspect time (SKILL.md §5, on `stage <id> inspecting`'s own
-Bash invocation, so it costs the driver no turn) and again per retry or fix-loop transcript; `references/recovery.md` has a resumed driver pick up whatever the
+`orchestrate.mjs usage <id> --jsonl <file>` is the one writer of `RunQueueItem.usage`, called at inspect time (SKILL.md §5, by
+`orchestrate.mjs inspect <id>`, which composes `stage <id> inspecting`, this write and the `denials` count in one call, so it costs the driver no turn) and
+again per retry or fix-loop transcript; `references/recovery.md` has a resumed driver pick up whatever the
 crashed one missed.
 
 One entry per transcript, never one summed figure — "the fix loop cost more than the item did" is a question an early fold destroys.
