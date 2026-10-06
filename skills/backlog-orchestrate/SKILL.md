@@ -41,8 +41,8 @@ narrow case in pre-flight (see below).
 
 Reference files sit beside this one and are **not** loaded with it. Read them at the moment they apply, not up front:
 
-- **`references/tracker.md`** — the tracker path: if the project's committed `backlog/source.json` says `github`, read it **in full** before §1; a files project
-  never opens it.
+- **`references/tracker.md`** — the tracker path: if the project's committed `backlog/source.json` says `github`, read it **in full** before §1 — or, on
+  `--resume`, in `references/recovery.md`'s step after `claim` and before `reconcile`, since a resumed run never executes §1; a files project never opens it.
 - **`references/recovery.md`** — the whole of `--resume` and `--abort`. Read it **in full** before running either, before any other command.
 - **`references/rationale.md`** — the measurements and the failures behind the rules here. Read the matching section before arguing with a rule, or before
   simplifying one away.
@@ -106,7 +106,8 @@ That `3` carries two meanings for `watch` deliberately: "no run yet" and "still 
 ## In a tracker project
 
 A project whose committed `backlog/source.json` says `github` has no item files — its items are GitHub issues — and its run takes the tracker path: **read
-`references/tracker.md` in full before §1.** Every site that differs from a files project carries a one-line `Tracker:` marker below; the file holds the rest.
+`references/tracker.md` in full before §1** (on `--resume`, after `claim` and before `reconcile`). Every site that differs from a files project carries a
+one-line `Tracker:` marker below; the file holds the rest.
 Ids inside a run are bare issue numbers, `31`, never `#31` (`#` opens a shell comment).
 
 ## 1. Preview the queue — `plan` first, always

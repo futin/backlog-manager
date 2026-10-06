@@ -1,6 +1,7 @@
 # backlog-orchestrate — the github-source (tracker) path
 
-Read this file **in full, once, before §1**, when the project's committed `backlog/source.json` says `github`. A files project never opens it. Everything here is
+Read this file **in full, once**, when the project's committed `backlog/source.json` says `github` — before §1 on a fresh run, or on `--resume` after `claim` and
+before `reconcile` (`references/recovery.md`). A files project never opens it. Everything here is
 the tracker-only part of the steps in `SKILL.md`; each heading names the step it belongs to, and the body leaves a one-line `Tracker:` marker at every site that
 moved. Where the body keeps a literal git call (the §2 probe, the §4 pull, the §9 push, the merge), only its explanation lives here.
 

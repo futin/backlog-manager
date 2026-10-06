@@ -3658,19 +3658,35 @@ function skillText() {
   return [fs.readFileSync(SKILL_MD, 'utf8'), ...files.map((f) => fs.readFileSync(path.join(REFERENCES, f), 'utf8'))].join('\n');
 }
 
-test('the body sends a github-source run to references/tracker.md, in a sentence that names github', () => {
+test('the body and recovery.md both send a github-source run to references/tracker.md, in a sentence that names github', () => {
   // The trigger is the point, not the filename: a body that names the file but not WHEN to read it leaves a tracker run working from the files-project
-  // text alone, and a files run opening a file it never needed. The run file has no `source` field, so the predicate is the committed marker.
-  const body = fs.readFileSync(SKILL_MD, 'utf8');
-  const at = body.indexOf('references/tracker.md');
-  assert.ok(at !== -1, 'SKILL.md never names references/tracker.md');
-  const start = body.lastIndexOf('\n\n', at) + 2;
-  const end = body.indexOf('\n\n', at);
-  const paragraph = body.slice(start, end === -1 ? undefined : end).replace(/\s*\n\s*/g, ' ');
-  const sentence = paragraph.split(/(?<=[.!?])\s+(?=[A-Z*`])/).find((s) => s.includes('references/tracker.md'));
-  assert.match(sentence, /`github`/, `the sentence naming references/tracker.md does not say github: ${sentence}`);
-  assert.match(sentence, /backlog\/source\.json/, 'the trigger is not the committed source marker');
-  assert.match(sentence, /in full/, 'the trigger does not say to read the file in full');
+  // text alone, and a files run opening a file it never needed. The run file has no `source` field, so the predicate is the committed marker. There are
+  // TWO entry paths and each has to carry it: a fresh run reads the file before §1, but a `--resume` or unpaused run goes recovery.md -> `reconcile` ->
+  // the loop and never executes §1, so recovery.md must say it too — after `claim`, before `reconcile`.
+  const sentenceNaming = (text) => {
+    const at = text.indexOf('references/tracker.md');
+    assert.ok(at !== -1, 'the text never names references/tracker.md');
+    // A paragraph, cut at the nearest blank line or bullet, so a neighbouring bullet cannot lend its words to the sentence.
+    const start = Math.max(text.lastIndexOf('\n\n', at), text.lastIndexOf('\n- ', at)) + 1;
+    const ends = [text.indexOf('\n\n', at), text.indexOf('\n- ', at)].filter((i) => i !== -1);
+    const end = ends.length ? Math.min(...ends) : text.length;
+    const paragraph = text.slice(start, end).replace(/\s*\n\s*/g, ' ');
+    return paragraph.split(/(?<=[.!?])\s+(?=[A-Z*`])/).find((s) => s.includes('references/tracker.md'));
+  };
+  const bodySentence = sentenceNaming(fs.readFileSync(SKILL_MD, 'utf8'));
+  const recoverySentence = sentenceNaming(fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8'));
+  for (const [name, sentence] of [
+    ['SKILL.md', bodySentence],
+    ['recovery.md', recoverySentence]
+  ]) {
+    assert.match(sentence, /`github`/, `${name}: the sentence naming references/tracker.md does not say github: ${sentence}`);
+    assert.match(sentence, /backlog\/source\.json/, `${name}: the trigger is not the committed source marker`);
+    assert.match(sentence, /in full/, `${name}: the trigger does not say to read the file in full`);
+  }
+  assert.match(bodySentence, /before §1/, 'SKILL.md: the fresh-run trigger does not say before §1');
+  assert.match(bodySentence, /--resume/, 'SKILL.md: the trigger does not cover a resumed run');
+  assert.match(recoverySentence, /after `claim`/, 'recovery.md: the trigger does not say when, relative to `claim`');
+  assert.match(recoverySentence, /before `reconcile`/, 'recovery.md: the trigger does not say it comes before `reconcile`');
   assert.ok(fs.existsSync(path.join(REFERENCES, 'tracker.md')), 'references/tracker.md does not exist');
 });
 
