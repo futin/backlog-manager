@@ -845,9 +845,9 @@ reports in this session's context.
   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" usage <id> --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
   ```
 
-  The second line is step 5's `usage` call again, on this loop's own transcript — one entry per transcript, so it lands beside the first session's rather than
-  replacing it, and "the fix loop cost more than the item did" stays an answerable question. It is on the same invocation as the denials check for the same
-  reason `inspect` carries both up there: no extra turn.
+  The second line is the same usage write `inspect` does in step 5, on this loop's own transcript — one entry per transcript, so it lands beside the first
+  session's rather than replacing it, and "the fix loop cost more than the item did" stays an answerable question. Both lines go in one invocation so they cost
+  no extra turn.
 
   **This is the same gate step 5 runs, and it is not optional here.** A fix loop is a headless session under `--permission-mode auto` exactly like the first
   one, so it can be refused a call exactly like the first one — and this path reaches Commit without passing through step 5, so nothing else on it would ever
@@ -1074,7 +1074,8 @@ merge path only it then deletes `backlog/<id>` with `branch -d` from the base tr
 
 `branch -d` runs in the base tree, never `$PWD`: a refusal says something only about the tree it ran in. When `branchDeleted` is `false` and `branchMergedIntoBase`
 is present, `false` means the merge you think happened did not — stop and understand that before the next item builds on a base you may have misread — and
-`true` says nothing about the merge (`references/rationale.md`, §9). The general rule: every cleanup command that follows a merge belongs in the tree that merge happened in.
+`true` means the merge is real and the refusal had another cause — `cleanup` asked `git branch --merged <base>` (`references/rationale.md`, §9). The general
+rule: every cleanup command that follows a merge belongs in the tree that merge happened in.
 
 Then the next item starts from the updated `<base>`, so later items build on earlier ones. On a `--base` run that is the whole point: item by item, a phased
 feature accumulates on its own branch and `main` is never written until a human decides it should be.
@@ -1084,7 +1085,8 @@ feature accumulates on its own branch and `main` is never written until a human 
 After every merge, read `runnerFix` from `cleanup`'s output — it diffs the merge commit in the base tree. When `cleanup` prints `runnerFix` with `skill` or
 `cli` true, the item that just merged changed the runner itself: read `references/merge-failures.md` in full. It says which copy of the prose and of the tool
 the rest of this run follows, and the `--note` that records the switch. **Prose and tool move together or not at all**, and a resumed session re-derives the
-switch from that note (`references/recovery.md`). Both false: nothing to do.
+switch from that note (`references/recovery.md`). Both false, with no `runnerFixError`: nothing to do. `runnerFixError` present means unknown, never "no
+runner fix": run `git -C "<base tree>" diff --name-only HEAD^1 HEAD` by hand and read it the same way.
 
 ## 10. Finishing, resuming, aborting
 

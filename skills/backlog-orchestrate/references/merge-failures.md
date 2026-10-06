@@ -72,9 +72,10 @@ touched the same lines); resolving it is a human's judgement call, and the branc
 
 ## `merge-check` printed `overlap`, or the base moved under the run
 
-On `verdict: overlap` the tool wrote nothing: the paths it names are dirty in `<base tree>` and the branch touches them, so the merge would be refused. Resolve
-on the branch side as below, or park with `merge-check <id> --park-on-overlap`, which records the `parked` entry with those paths named and stages the item
-`parked`.
+On `verdict: overlap` the tool wrote nothing: the paths it names are dirty in `<base tree>` and the branch touches them, so the merge would be refused. Park
+with `merge-check <id> --park-on-overlap`, which records the `parked` entry with those paths named and stages the item `parked`. The branch-side resolve below
+cannot clear an overlap — the dirty paths are a person's uncommitted work in the base tree, and merging `<base>` into the worktree does not touch them — so it
+is only for a refusal or a conflict caused by `<base>` having moved.
 
 **When the base moved under the run, resolving on the _branch_ side is better than parking — and it is the only option that keeps the merge gate honest.** Those
 two failures — the refusal and the conflict, not the denial above them — have the same root cause: `<base>` is no longer the commit this item was verified
