@@ -3699,6 +3699,29 @@ test('the SKILL.md body carries no bug-N / task-N / (#N) history outside fenced 
   assert.deepEqual(offenders, [], `history is back in the SKILL.md body (move it to references/rationale.md):\n${offenders.join('\n')}`);
 });
 
+test('the SKILL.md body size is reported against its baselines — informational, it can never fail', (t) => {
+  // INFORMATIONAL ONLY, and it must never become an assertion. The body is resident for every turn of a run, so its growth is a cost nobody sees in a diff;
+  // this line makes it visible in every test run instead. A hard budget was the rejected alternative: a size cap is how a load-bearing rule gets compressed
+  // away to fit, which has already happened twice on this machine. When the size and a rule disagree, the rule wins and the number moves — edit
+  // AFTER_SHRINK to the new measurement, do not turn the comparison into a check.
+  //
+  // Units: the 2026-09-01 baseline is CHARACTERS (read off a transcript's injected skill text), the 2026-10-05 "before" figure is BYTES (`wc -c`, em dashes
+  // count three), and AFTER_SHRINK is characters (`wc -m`) — so each baseline is compared in its own unit, and both sizes are printed.
+  const BASELINE_2026_09_01_CHARS = 60168;
+  const BEFORE_SHRINK_2026_10_05_BYTES = 151246;
+  const AFTER_SHRINK_CHARS = 104745; // `wc -m skills/backlog-orchestrate/SKILL.md` when the body-shrink plan landed
+  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const chars = text.length;
+  const bytes = Buffer.byteLength(text, 'utf8');
+  const fmt = (n) => n.toLocaleString('en-US');
+  const delta = (now, from) => `${now >= from ? '+' : '-'}${fmt(Math.abs(now - from))}`;
+  t.diagnostic(
+    `SKILL.md body: ${fmt(chars)} chars (${fmt(bytes)} bytes) — ${delta(chars, BASELINE_2026_09_01_CHARS)} chars vs the 2026-09-01 trim (${fmt(BASELINE_2026_09_01_CHARS)}), ` +
+      `${delta(bytes, BEFORE_SHRINK_2026_10_05_BYTES)} bytes vs before the 2026-10-05 shrink (${fmt(BEFORE_SHRINK_2026_10_05_BYTES)}), ` +
+      `${delta(chars, AFTER_SHRINK_CHARS)} chars vs when the shrink landed (${fmt(AFTER_SHRINK_CHARS)})`
+  );
+});
+
 // The whole text a tracker run reads: the body, then every `references/*.md`. Read from the directory rather than a list, so a reference added later is
 // picked up by every case that calls this without anybody remembering to add it here. A case whose needle may live in either place reads it; a case whose
 // needle must stay in the body (a literal git call, a launch line) keeps reading `SKILL_MD` on its own.

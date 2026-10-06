@@ -897,6 +897,32 @@ another push — on every skills edit. A reinstall from a sparse source is cheap
 matches HEAD, verifies the landed `skills/` by hash, and prunes older version copies — skipping any marked `.in_use`, which a running session still has open.
 New skills load on the next Claude Code restart, not in the session that ran the sync.
 
+## A new orchestrate rule enters `SKILL.md` as one statement; its story and its rare branches go to `references/`
+
+`skills/backlog-orchestrate/SKILL.md` is injected whole into the driver's context and re-read on every turn of a run, and a run is a few hundred turns. The
+cost of a sentence in it is therefore the sentence times the turns, whether or not the run ever acts on it. Two measurements, both in characters of the body:
+the 2026-09-01 floor trim took it to **60,168**, and by 2026-10-05 it stood at **151,246** — 2.5 times as large in five weeks. The growth was the habit, not
+the rules: each new rule landed with the incident that motivated it written out beside it (the bug number, what the first version did wrong, the measurement
+that proved it), each failure path landed inline in the section it interrupted, and each fixed sequence of repository and file checks landed as prose the
+driver re-derived into commands every time. The run read all of it, all the time.
+`docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md` is the shrink; this section is what stops the next one.
+
+The three levers, and why exactly these three. **A story moves to `references/rationale.md`**, because the reader of the body needs the instruction and the
+reader of the rationale needs the evidence, and they are different readers at different moments. **A branch a clean run never takes moves to its own
+`references/*.md` file**, named in the body on a trigger the driver can observe, because only text that is _never read_ actually leaves the floor: a reference
+the driver opens stays in its context for the rest of the session, so a file read in every run — a "reference per phase" layout — is the same bytes in a
+different file plus the tool-call overhead of fetching it. That is also why the trigger must be an observable (a verdict, an exit code, a field of the
+committed `backlog/source.json`) and reachable on both the fresh and the `--resume` entry path: a pointer the driver has to decide it needs is a pointer that is
+skipped, and a pointer that sits in a section a resumed run never reads is not there at all. **A fixed sequence of commands becomes an `orchestrate.mjs`
+subcommand** (`merge-check`, `leftover`, `worktree`, `cleanup`, `inspect`), because prose a tool call can replace is the one saving that costs nothing in
+behaviour — and the sequence is then unit-tested against real repositories, which the prose never was.
+
+Moving text is where a rule gets lost, so each statement the body keeps has a `[needle, rule]` pair in `orchestrate.test.mjs` and a guard keeps `bug-N` /
+`task-N` / `#NN` history out of the prose. The first fails by the rule's name when a later trim drops it; the second is what makes the convention checkable
+rather than hoped for. What this section deliberately does **not** add is a size budget. The body's size is reported on every test run (`t.diagnostic`, never
+an assertion) so growth is visible where the work happens, but a hard cap has compressed load-bearing rules away twice on this machine, and the one failure
+this convention can have is a lost rule. When a target and a rule disagree, the rule wins and the target moves.
+
 ## `pnpm test` is the union of both runners
 
 `pnpm test` is the union of BOTH runners — `scripts/test-all.mjs` runs `test:jest` and then `test:skills`, always both, and exits `1` if either failed. Do not

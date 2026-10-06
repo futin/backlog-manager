@@ -151,6 +151,8 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **Editing `skills/` changes nothing until it is committed, pushed, and `pnpm run plugin:sync` runs.**
   Why: [invariants.md](docs/subsystems/invariants.md#editing-skills-changes-nothing-until-commit--push--pluginsync)
 - **`agents/` is part of the plugin's publish surface.** Why: [invariants.md](docs/subsystems/invariants.md#agents-is-part-of-the-plugins-publish-surface)
+- **A new orchestrate rule enters SKILL.md as one statement; its story and its rare branches go to references/.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-new-orchestrate-rule-enters-skillmd-as-one-statement-its-story-and-its-rare-branches-go-to-references)
 - **The tailnet serve is a script, and its port is read where compose reads it.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-tailnet-serve-is-a-script-and-its-port-is-read-where-compose-reads-it)
 - **Both processes bind `127.0.0.1` by default; loopback is the access control**

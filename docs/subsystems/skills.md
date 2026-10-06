@@ -125,9 +125,13 @@ be tuned from what each mode came to. Design: `docs/superpowers/specs/2026-09-25
 
 ### `references/`
 
-`skills/backlog-orchestrate/references/` holds the two parts its `SKILL.md` deliberately does **not** carry inline, because a run re-reads its whole body on
-every one of its several hundred turns: `recovery.md` (all of `--resume`/`--abort`, read in full before either) and `rationale.md` (the measurements behind the
-rules).
+`skills/backlog-orchestrate/references/` holds the parts its `SKILL.md` deliberately does **not** carry inline, because a run re-reads its whole body on
+every one of its several hundred turns: `recovery.md` (all of `--resume`/`--abort`, read in full before either), `rationale.md` (the measurements and the
+incident stories behind the rules), `tracker.md` (the github-source path, read only when the committed `backlog/source.json` says `github`, on a fresh and on a
+resumed run), and four failure paths a clean run never takes, each read on an observable trigger: `questions.md`, `stopping.md` (pause and stop),
+`merge-failures.md` and `check-failures.md`. The convention that keeps the body that way — a rule enters it as one statement, its story and its rare branches
+go here — is [invariants.md](invariants.md#a-new-orchestrate-rule-enters-skillmd-as-one-statement-its-story-and-its-rare-branches-go-to-references); the body's
+size is printed as a `t.diagnostic` line by every `pnpm run test:skills` run, as information and never as a budget.
 
 `skills/backlog-retro/references/rationale.md` is the same idea: why a tool computes and a session labels, why the label set is closed, and the 2026-09-06
 baseline the first record is measured against.

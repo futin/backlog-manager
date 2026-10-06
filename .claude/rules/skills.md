@@ -60,3 +60,16 @@ paths: ["skills/**", "agents/**"]
   `sparsePaths` both list. The machine-local half is declared in `~/.claude/settings.json` → `extraKnownMarketplaces.<marketplace>.source.sparsePaths`, never in
   `known_marketplaces.json` — a cache, and hand-editing it triggers the revert. The sync measures every published path on both sides (bug-10). Why:
   [invariants.md](docs/subsystems/invariants.md#agents-is-part-of-the-plugins-publish-surface)
+- **A new orchestrate rule enters SKILL.md as one statement; its story and its rare branches go to references/.** The body of
+  `skills/backlog-orchestrate/SKILL.md` is resident for every turn of a run, so a new rule enters it as ONE imperative statement and nothing else. The
+  incident that earned the rule — the bug or task id, the date, the measurement, what the failed version did — goes to `references/rationale.md`; the body
+  carries no `bug-N` / `task-N` / `#NN` history outside a fenced block, and the guard in `orchestrate.test.mjs` names the line that has one. A branch a clean
+  run never takes (a failure path, a rare mode, one source kind) goes to its own `references/*.md` file, and the body names that file on a trigger the run
+  can OBSERVE — a verdict, an exit code, a field of `backlog/source.json` — never on the driver's judgement that the case "might apply". The trigger has to
+  be reachable on BOTH entry paths: a fresh run and a `--resume`, which skips the sections a fresh run finds the pointer in. Prose that only tells the driver
+  to run a fixed sequence of commands and read the answer becomes an `orchestrate.mjs` subcommand, and the body keeps "run X, act on its verdict". Each
+  statement the body keeps gets a `[needle, rule]` pair in the `RULES` list of the "the body keeps the rules whose stories moved to references/" case in
+  `orchestrate.test.mjs` — the needle a phrase of the statement, the rule a sentence naming what was lost — so a later trim fails by rule name. The size
+  report beside it (the body's size against its baselines, via `t.diagnostic`) is informational and must never become an assertion: a hard budget is how a
+  load-bearing rule gets compressed away. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-new-orchestrate-rule-enters-skillmd-as-one-statement-its-story-and-its-rare-branches-go-to-references)
