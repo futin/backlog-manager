@@ -58,6 +58,7 @@ One fix commit (`457cfc4`); a scoped re-review found all four fixed and no new C
 
 ## Deferred
 
-The final review ruled each known Minor safe to defer (its "Rulings on Already known" table) and listed 11 Minors, M1-M11, in the review file linked above.
+The final review ruled each known Minor safe to defer (its "Rulings on Already known" table) and listed 11 Minors, M1-M11, in the review file linked above. M1, M3, M5 and M6 were fixed before the merge, at the user's choice (`82b3ae0`), M3 and M6
+because they changed what a run does on a rare path; the other seven stay deferred.
 Out of this plan's scope and worth their own backlog items: the pre-existing `--detail` sites that quote git's or the classifier's message
 (`references/tracker.md`, `SKILL.md` §9, `references/check-failures.md`), and extending the no-history guard to run ids.
