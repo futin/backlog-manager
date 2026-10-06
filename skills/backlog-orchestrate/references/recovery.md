@@ -264,8 +264,11 @@ For each preserved item, in this order:
    ```
 
    Plain `remove` again, for the reason it is plain everywhere else in this file: a `contains modified or untracked files` refusal means something is still
-   uncommitted in there, and this is the one path where that is _likely_ rather than surprising. git's _other_ removal failure — it began the delete and could
-   not finish it — is not that, and `orchestrate.mjs cleanup` (`classifyWorktreeRemove`) is the one home for telling them apart and for what to do about each.
+   uncommitted in there, and this is the one path where that is _likely_ rather than surprising. git's _other_ removal failure — `failed to delete '<path>'`, it
+   began the delete and could not finish it — is not that: git certified the tree clean and has already unregistered the worktree, so `--force` and `prune` both
+   do nothing. Finish it with `rm -rf "$PWD/.worktrees/<id>"` — that literal path, never a variable or a computed one — and confirm with
+   `test ! -e "$PWD/.worktrees/<id>"`. (`orchestrate.mjs cleanup` is no way round it: it refuses an item that is not `merged` or `branched`, which an aborted
+   one never is.)
    `-D` on the branch, unlike the merge path's `-d`: an aborted branch was never merged anywhere, so a safe delete would always refuse it. These are the
    _preserved_ items only — never run `-D` on a branch abort reported as **kept**, which is a finished `branched` item's whole deliverable.
 

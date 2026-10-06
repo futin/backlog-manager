@@ -696,6 +696,8 @@ It prints one JSON line:
 
 - **`usage`** — `"recorded"`, or `"no-result"`: the transcript never reached a result event (a killed session) and nothing was recorded, which is the honest
   answer.
+- **`usage: "no-transcript"`, `denials: null`** — this run has no transcript for the item (a reattached one): `null` means unknown, never clean. Go on to review
+  as usual and say "denials unknown" wherever the run would report a denial count for this item.
 - **`denials`**, the refused calls in `refused` — **non-zero means the item is not clean even if it looks done**: the session ran `auto` into a call the
   classifier refused (step 4's rationale), and a denied run reports `success` and exits `0` like any other, so this is the only place it shows. Whatever it
   built, it built around a command that never ran. Treat it exactly like the two failure shapes below — ask the user, and do not merge the diff. On the retry
@@ -729,8 +731,12 @@ Three details on that line (`references/rationale.md`, §4):
 - **`test -s "<file>" &&` ahead of the assignment**, so a missing or empty prompt file spawns nothing and `watch` sees a dead pid.
 - **The Write tool, never a heredoc and never `printf`.**
 
-Then `watch` again exactly as in step 4, with `--jsonl` pointed at the new transcript and `--pid` at the pid you just recorded, and come back to this step when
-it exits.
+Then `watch` again exactly as in step 4, with `--jsonl` pointed at the new transcript and `--pid` at the pid you just recorded. When it exits, inspect the
+retry's own transcript — never the first session's, which this step's first call already read:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" inspect <id> --jsonl "<dir>/logs/<id>-retry-1.jsonl"
+```
 
 The session id comes from `status --json` (recorded by `watch`); a null there means the session died before its init event ever landed, and there is nothing to
 resume — a fresh dispatch is the only retry available. With no channel to ask through, do not guess:

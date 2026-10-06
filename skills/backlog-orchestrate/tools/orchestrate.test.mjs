@@ -3666,7 +3666,10 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['The entries are **never committed**', "the runner's own exclude entries are never committed"],
     ['`node_modules` is listed **bare**', 'the node_modules exclude entry is bare, so it matches a symlink'],
     ['walked by this skill and', 'the merge, the only door back into the base, is walked by the orchestrator and never by the session'],
-    ['`fix-mode` decides fresh or resume', 'the fix loop mode is the tool\'s decision, not the driver\'s']
+    ['`fix-mode` decides fresh or resume', 'the fix loop mode is the tool\'s decision, not the driver\'s'],
+    // Final-review fixes: the retry's own transcript is inspected, and a null denial count is unknown rather than clean.
+    ['inspect <id> --jsonl "<dir>/logs/<id>-retry-1.jsonl"', "after a retry the run inspects the RETRY's transcript, never the first session's again"],
+    ['`null` means unknown, never clean', 'an item with no transcript in this run reports denials unknown, never a clean zero']
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
@@ -3855,6 +3858,16 @@ test('the body no longer carries the rare-path prose, and the four references ho
     ['stopping.md', 'inspect any worktree', 'an abort refused with 7 inspects no worktree'],
     ['merge-failures.md', 'Blocked by classifier.', 'the classifier denial'],
     ['merge-failures.md', 'would be overwritten by merge', 'the pre-merge refusal'],
+    [
+      'merge-failures.md',
+      '--detail "merge refused before it started: local changes in the base tree would be overwritten — worktree and branch kept"',
+      'a pre-merge refusal the overlap probe cannot see (untracked files) is parked by hand with fixed words, never looped on merge-check'
+    ],
+    [
+      'recovery.md',
+      'rm -rf "$PWD/.worktrees/<id>"',
+      'an abort whose worktree removal fails with "failed to delete" finishes the delete by hand on the literal path — cleanup refuses an aborted item'
+    ],
     ['merge-failures.md', 'merge --no-edit <base>', 'the worktree-side resolve'],
     ['merge-failures.md', 'runner fix — the remainder of this run follows the repo copy', 'the runner-fix switch'],
     ['check-failures.md', '2 fix loops, still:', 'the exhausted review loop'],
@@ -9586,19 +9599,44 @@ test('inspect 6: a transcript with no result event — usage "no-result", exit 0
 });
 
 test('inspect 7: an unreadable transcript — exit 1 naming the file, and nothing written (not even the stage)', (t) => {
+  // An EXPLICITLY named transcript that is missing: the caller said which file, so its absence is a problem, never a clean run.
   const missing = inspectFixture(t, { state: 'done', outcome: true, transcript: null });
   const before = fs.readFileSync(runFile(missing.home, missing.project), 'utf8');
-  const out = inspectCmd(missing, INSPECT_ID);
+  const out = inspectCmd(missing, INSPECT_ID, '--jsonl', path.join(missing.logs, `${INSPECT_ID}-retry-1.jsonl`));
   assert.equal(out.status, 1, `${out.stdout}${out.stderr}`);
   assert.match(out.stderr, /could not be read/);
   assert.equal(fs.readFileSync(runFile(missing.home, missing.project), 'utf8'), before, 'the run file changed');
 
-  // A directory where the transcript should be: never a clean run either.
+  // A directory where the DEFAULT transcript should be: it exists but cannot be read — never a clean run either.
   const dirAt = inspectFixture(t, { state: 'done', outcome: true, transcript: null });
   fs.mkdirSync(path.join(dirAt.logs, `${INSPECT_ID}.jsonl`));
   const beforeDir = fs.readFileSync(runFile(dirAt.home, dirAt.project), 'utf8');
   assert.equal(inspectCmd(dirAt, INSPECT_ID).status, 1);
   assert.equal(fs.readFileSync(runFile(dirAt.home, dirAt.project), 'utf8'), beforeDir);
+});
+
+test('inspect 7b: no default transcript and no --jsonl — a reattached item: stage inspecting, usage "no-transcript", denials null, item still read', (t) => {
+  // `init` archived the previous run's logs/, so on a reattach the default file is simply not there. The item is seeded with an Outcome so
+  // `item: "done"` can only come from the worktree read — a version that bailed before reading the item would fail here.
+  const fx = inspectFixture(t, { state: 'done', outcome: true, transcript: null });
+  const result = inspectOut(inspectCmd(fx, INSPECT_ID));
+
+  assert.equal(result.usage, 'no-transcript');
+  assert.equal(result.denials, null);
+  assert.equal(result.refused, null);
+  assert.equal(result.item, 'done');
+  assert.equal(result.itemPath, path.join(fx.worktree, 'backlog', 'tasks', 'done', `${INSPECT_ID}-fixture.md`));
+  const queued = queueItem(fx.home, fx.project, INSPECT_ID);
+  assert.equal(queued.stage, 'inspecting');
+  assert.equal((queued.usage ?? []).length, 0, 'usage was recorded with no transcript');
+});
+
+test('inspect 7c: no default transcript, but a stop request — still exit 10 and nothing written', (t) => {
+  const fx = inspectFixture(t, { state: 'done', outcome: true, transcript: null });
+  effectiveStop(fx.home, fx.project);
+  const before = fs.readFileSync(runFile(fx.home, fx.project));
+  assert.equal(inspectCmd(fx, INSPECT_ID).status, 10);
+  assert.ok(before.equals(fs.readFileSync(runFile(fx.home, fx.project))), 'run.json was modified after the refusing step');
 });
 
 test('inspect 8: a stop request — exit 10 from the stage step it composes, and nothing is written', (t) => {

@@ -54,8 +54,11 @@ Please commit your changes or stash them before you merge.
 
 Nothing was modified, there is no `MERGE_HEAD`, and **`git merge --abort` is the wrong command** — it errors with `fatal: There is no merge to abort`. The tree
 is already in the state an abort would have restored. This is what `merge-check`'s overlap verdict is for; reaching it means it was skipped or the tree changed
-in the seconds since. Handle it exactly as that verdict does — `merge-check <id> --park-on-overlap` to park with the paths named, or resolve worktree-side — and
-issue no `--abort`.
+in the seconds since. Handle it exactly as that verdict does — run `merge-check <id> --park-on-overlap` once, which parks with the paths named when its verdict is
+`overlap`, or resolve worktree-side — and issue no `--abort`. The probe lists tracked changes only, so git's `untracked working tree files would be overwritten
+by merge` variant of this message, and a tracked change made after the probe, are the same case it cannot see: if `merge-check` prints anything but `overlap` and
+parks nothing, park by hand with fixed words — `attention <id> --kind parked --detail "merge refused before it started: local changes in the base tree would be
+overwritten — worktree and branch kept"`, then `stage <id> parked` with no `--abort`, and continue with the next item.
 
 **A conflict** — the merge started and left markers behind:
 

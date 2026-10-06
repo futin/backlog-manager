@@ -4050,17 +4050,33 @@ function cmdInspect(argv) {
   assertDriver(first);
   const firstItem = findQueueItem(first, itemId);
   // The first dispatch's transcript is where §4 sent it; a retry or a fix loop names its own.
+  const named = jsonlFile !== undefined;
   jsonlFile ??= path.join(dir, 'logs', `${itemId}.jsonl`);
   const slot = transcriptSlotOrThrow(itemId, jsonlFile);
 
-  let parsed;
-  let denials;
-  try {
-    parsed = readSessionUsage(jsonlFile);
-    denials = readPermissionDenials(jsonlFile);
-  } catch (e) {
-    // An unreadable transcript answering "no denials" would be indistinguishable from a clean run, and §5 merges on clean.
-    throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1);
+  // `init` archives the previous run's `logs/` beside its run file, so an item a reattach or a resume routes straight to Inspect has no
+  // default transcript in THIS run — absent, not unreadable. Only that exact case (the default name, ENOENT) proceeds: the stage and the
+  // item read still happen and the output says what was not read (`usage: "no-transcript"`, `denials: null`, which the body reads as
+  // "unknown", never "clean"). A transcript the caller NAMED that is missing, or a default one that exists and cannot be read, stays exit `1`.
+  let noTranscript = false;
+  if (!named) {
+    try {
+      fs.statSync(jsonlFile);
+    } catch (e) {
+      noTranscript = e.code === 'ENOENT';
+    }
+  }
+
+  let parsed = null;
+  let denials = null;
+  if (!noTranscript) {
+    try {
+      parsed = readSessionUsage(jsonlFile);
+      denials = readPermissionDenials(jsonlFile);
+    } catch (e) {
+      // An unreadable transcript answering "no denials" would be indistinguishable from a clean run, and §5 merges on clean.
+      throw new OrchestrateError(`--jsonl ${jsonlFile}: could not be read (${e.message})`, 1);
+    }
   }
 
   // The same effect as `stage <id> inspecting`, by construction: it is the same function. A stop request refuses here, exit `10`,
@@ -4072,7 +4088,12 @@ function cmdInspect(argv) {
   const item = findQueueItem(run, itemId);
   if (parsed !== null) applyUsageEntry(dir, run, item, slot, parsed);
 
-  const result = { id: itemId, usage: parsed === null ? 'no-result' : 'recorded', denials: denials.length, refused: denials };
+  const result = {
+    id: itemId,
+    usage: noTranscript ? 'no-transcript' : parsed === null ? 'no-result' : 'recorded',
+    denials: denials === null ? null : denials.length,
+    refused: denials,
+  };
 
   if (projectSource(run.project) === 'github') {
     // The evidence is `<dir>/outcomes/<n>.md`: non-empty is a success OR a failure (the body reads which), empty or absent is a
