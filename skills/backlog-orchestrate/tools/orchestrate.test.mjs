@@ -3643,11 +3643,51 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['--no-ff', 'every item merges as its own merge commit'],
     ['( cd ', 'worktree-scoped backlog.mjs calls run in a subshell'],
     ['--permission-mode auto', 'the dispatch rung'],
-    ['BM_PLUGIN_ROOT', "step 8's launcher carries its paths in named env variables"]
+    ['BM_PLUGIN_ROOT', "step 8's launcher carries its paths in named env variables"],
+    // Task 6 of the body shrink: each rule below had a paragraph of evidence moved to references/rationale.md; the needle is a phrase of the one statement
+    // the body kept.
+    ['`--model opus` stays on the line', 'every launch line carries --model opus, the retry and fix-loop lines included'],
+    ['never run this body under zsh', 'the --settings expansion is correct only under sh'],
+    ['never in front of `nohup`', 'BM_ORCH_RUN is a prefix on exec inside the sh -c body'],
+    ['and no `:` or `/` in it', "the session's -n name is the item id, with a space separator and no : or /"],
+    ['retry names itself `orch <id> retry 1`**', "the retry's -n name carries the retry counter"],
+    ['If this call exits `10` a stop landed in the gap', 'a refused pid record is not retried or worked around'],
+    ['`<dir>/logs/<id>.pid` — `--abort` reads that file first', 'the echo $! line writes exactly the path abort reads'],
+    ['No apostrophes" above governs only the fixed marker text', 'prose this run did not compose is the general form of the no-apostrophes rule'],
+    ['**`test -s "<file>" &&` ahead of the assignment**', "the retry launcher guards its prompt file so an empty one spawns nothing"],
+    ['**The Write tool, never a heredoc and never `printf`.**', 'retry and fix prompts are written with the Write tool'],
+    ['retry is the session most tempted to background', 'the retry prompt ends with the fresh dispatch background rule'],
+    ['**That note is fixed text, not the classifier\'s message.**', 'the merge-mode probe note is fixed text'],
+    ['do **not** "tighten" it to `dontAsk`', '`auto` is not tightened to dontAsk plus an allowlist'],
+    ['Substitute `<dir>` once, into `env`', "step 8's launcher substitutes <dir> once"],
+    ['`branch -d` runs in the base tree, never `$PWD`', 'cleanup commands that follow a merge run in the tree the merge happened in'],
+    ['The entries are **never committed**', "the runner's own exclude entries are never committed"],
+    ['`node_modules` is listed **bare**', 'the node_modules exclude entry is bare, so it matches a symlink']
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
   }
+});
+
+test('the SKILL.md body carries no bug-N / task-N / (#N) history outside fenced blocks; history lives in references/rationale.md', () => {
+  // A backstory that names the defect it came from is evidence, not instruction: it costs every turn of every run for a sentence the run never acts on. The
+  // body keeps the rule as one imperative statement and `references/rationale.md` keeps the story. Fenced blocks are exempt because they hold text the run
+  // TYPES or is shown (the `plan` sample board, example ids), and an id there is data, not history. ALLOWED lists any prose line that must keep a number
+  // anyway, each with the reason it is an instruction; it is empty on purpose.
+  const ALLOWED = [];
+  const offenders = [];
+  let inFence = false;
+  fs.readFileSync(SKILL_MD, 'utf8')
+    .split('\n')
+    .forEach((line, i) => {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        return;
+      }
+      if (inFence) return;
+      if (/\b(bug|task)-[0-9]+|\(#[0-9]+\)/.test(line) && !ALLOWED.some((a) => line.includes(a))) offenders.push(`${i + 1}: ${line.trim().slice(0, 140)}`);
+    });
+  assert.deepEqual(offenders, [], `history is back in the SKILL.md body (move it to references/rationale.md):\n${offenders.join('\n')}`);
 });
 
 // The whole text a tracker run reads: the body, then every `references/*.md`. Read from the directory rather than a list, so a reference added later is
@@ -6859,7 +6899,10 @@ test('SKILL.md reads a branch -d refusal against the tree it was run in', () => 
   // the wrong tree. `git branch --merged <base>` is what settles which, and
   // is named here so a driver has something cheap to run before believing
   // either reading.
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  //
+  // RE-POINTED (body shrink, Task 6): the two readings and the command that settles them moved to references/rationale.md §9, so those three needles
+  // read the body + references; the general rule stays one statement in the body and keeps its own body-only assertion. Needles unchanged.
+  const text = skillText();
   for (const [rule, needle] of [
     ['the refusal is stated against the base tree', 'a refusal from the base tree'],
     ['the wrong-tree reading is stated too', 'pointed at the wrong tree'],
@@ -6871,6 +6914,10 @@ test('SKILL.md reads a branch -d refusal against the tree it was run in', () => 
   ]) {
     assert.ok(text.includes(needle), `SKILL.md §9 lost the rule: ${rule} (${needle})`);
   }
+  assert.ok(
+    fs.readFileSync(SKILL_MD, 'utf8').includes('every cleanup command that follows a merge belongs in the tree that merge happened in'),
+    'the body no longer states the general rule: every cleanup command that follows a merge belongs in the tree that merge happened in',
+  );
   assert.ok(
     !text.includes('so a refusal here is real information'),
     'SKILL.md still carries the unqualified "a refusal here is real information" reading',

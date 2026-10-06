@@ -102,6 +102,103 @@ Probed on this machine: a headless `claude -p --permission-mode auto` under `sh 
 So the file's rules are live in exactly the mode this skill dispatches under. The same probe typed straight into zsh failed with `unknown option '--settings
 <path>'`, because zsh does not split an unquoted `${VAR:+word}` — the line is only correct inside the `sh -c` body it lives in.
 
+### Why `--model opus` is spelled on every launch line
+
+A bare `claude -p` takes whatever model the host's CLI defaults to, and on this machine that was Sonnet: task-48's execute session ran on it twice while the
+driver, spawned with `--model opus`, did not — so the run looked Opus from the board and was not. The flag is on the retry line and the fix-loop line too, for
+the same reason; `--resume` does not promise to carry a model forward.
+
+### Why `BM_ORCH_RUN` rides the launch line, and where on it
+
+It says "a run owns this process" to a reader that cannot see the prompt at all: the machine's `Stop` hook, which holds a finished turn open at the dashboard
+for up to ten minutes so a remote answer can arrive. That hold is right for a hand-started headless session — no terminal to type into means the dashboard is
+its only channel — and pure wall-clock for a dispatched one, which nobody is going to answer and which is under orders to ignore a dashboard message anyway. A
+hook set up to read the variable notifies and exits instead; a machine without that hook is unaffected, so the assignment costs nothing either way.
+
+It is substituted from this run exactly like the prompt marker's own `<runId>`, and safe inside the single-quoted body by construction: a run id is
+`run-YYYYMMDD-HHMMSS`, no quote, space or metacharacter in it. It goes **inside** the `sh -c '…'` body as a prefix on `exec` — POSIX puts a simple command's
+assignments in the environment of the program it execs — rather than in front of `nohup`, where it would be one more thing a stray space can detach from the
+command. §5's `--resume` retry carries it too, unlike the prompt marker, which that line deliberately does not repeat: a resumed session keeps its original
+prompt but gets a brand-new environment, so the assignment has to be made again or the retry pays the hold the fresh dispatch was spared.
+
+### Why `-n` names the session by item id
+
+The prompt marker is read by the model, `BM_ORCH_RUN` by a hook, and `-n` by whoever opens the dashboard mid-run to see what is happening — the channel follows
+the reader, three times on one line. Without it this was the one session in the whole system with no display name: every other spawn goes through the board's
+own server, which composes one (`orchestrate <project>`, `bl <project> <id>`, `resume <project>`, `watchdog resume <project>`) and posts it to the dashboard,
+while this line spawns `claude` itself and reached none of that code. An unnamed session's row falls back to the bare project name, so the session actually
+doing the work read exactly like one somebody started in a terminal, identifiable only by opening its transcript.
+
+The name is the **item id**, not the project and not the run id. The worktree cwd already files the row under a project of its own
+(`…backlog-manager--worktrees-<id>`), `run.json` maps session id to run for anything machine-side, and `BM_ORCH_RUN` carries the run id to the one reader that
+needs it — so spending the name on either would repeat what is already on screen instead of the one thing a reader is looking for. It also keeps the whole name
+far under the dashboard's 60-character cap, which matters because going over it is silent (`parseSpawnRequest` drops an over-long or mis-charactered name and the
+row falls back to the project name, with no failed request anywhere to notice). Same reason there is no `:` or `/` in it and the separator is a space: the
+dashboard's `NAME_RE` is `/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/`, which is what the three server-side helpers each concluded independently.
+
+§5's `--resume` retry names itself `orch <id> retry 1`, the same counter its own `<id>-retry-1.jsonl` carries. `-n` on a resume renames the existing row rather
+than adding a second one (measured on CLI 2.1.250: the flag appends a fresh `custom-title` record to the same transcript, and the dashboard reads the newest),
+which is what should happen — the row says the item is on its retry, while still reading as the same item. Double-quoted inside the single-quoted body because the
+name holds a space; unquoted it would split, and `claude` would take `orch` as the name and the id as a stray argument.
+
+### Why the dispatch prompt carries a marker at all
+
+The prompt is the _entire_ channel from this run to that session — after it the two processes share nothing but a directory — and everything else the session
+could infer is genuinely ambiguous: a worktree cwd is also what a human makes by hand, and a `backlog/<id>` branch is also what a _previous_ run leaves behind
+for a hand-merge (§3 has a probe for exactly that state). Left as the bare trigger, a dispatched session reads as a hand-started one, and the one that was
+messaged through the dashboard mid-run answered the user instead of leaving the problem for this run to find — three message round-trips with the whole queue
+idle behind it.
+
+### Why prose this run did not compose never rides a command line (bug-31)
+
+"No apostrophes" governs the fixed marker text _this run writes itself_, and can be obeyed by choosing different words. The words in a fix-loop or retry prompt
+belong to somebody else — a reviewer quoting `` `rowId` `` is simply what a code review looks like, and no rule aimed at the driver can make that text safe in a
+command position. Every `"…"` inside the single-quoted `sh -c` body is still a command position: `sh` performs command substitution (`` `x` `` and `$(x)`) and
+parameter expansion (`$x`) there, and one apostrophe ends the body outright. Three `.err` files across three projects on this machine are that rule being
+learned the other way. The tool already works this way for the payloads it takes — `attention --questions-json <file>` and `assume --json <file>` — and §5's
+retry launcher, §7's fix loop and §3's two questions payloads are the prose halves that now match it.
+
+`attention --detail`, `stage --note` and `merge-mode --note` stay inline arguments on purpose: they are one short line each, they are what the run drawer
+renders, and routing every one of them through a file would trade a real cost for a hazard that paraphrasing removes outright. What makes that safe is that the
+copy of record already exists somewhere else and the entry names it — the reviewer's report at `<dir>/reviews/<id>-<n>.md`, a verify attempt's rows in
+`status --json`, a session's own `<dir>/logs/<id>.jsonl`. So each value is a pointer plus a sentence, and pasting the thing it points at both duplicates the
+record and puts model output on a command line.
+
+The marker also arrives in the session as `$2`…`$N`, substituted into `backlog-execute`'s SKILL.md before it is read. That is safe only because no fenced block
+under `skills/` reads a positional parameter — the bug-9 guard, which this line makes load-bearing for a second, unrelated reason.
+
+### Why the retry launcher has the shape it has (bug-31)
+
+Each of the three details was a defect before it was a rule. `$(cat "<file>")`: the _output_ of a command substitution is not re-scanned for expansions, so argv
+arrives byte-identical to what the Write tool put on disk — backticks, `$(…)`, `var(--ink)` and apostrophes all intact, nothing executed; the inner double quotes
+around the path keep a path containing a space in one piece, and both sit inside the single-quoted body, which is otherwise unchanged. `test -s "<file>" &&`
+ahead of the assignment: a missing or empty prompt file spawns nothing at all — `sh` exits, `watch` sees a dead pid within a second, and the driver treats it as
+the dispatch failure it is — whereas without the guard `$(cat …)` degrades to `""` and the run spends its one retry on a session resumed with no instruction,
+which on every surface looks exactly like a session that simply failed to improve. The Write tool, never a heredoc and never `printf`: a heredoc delimiter that
+happens to appear in the text ends the document early, and `printf '%s' '…'` re-introduces the apostrophe problem the file-carried prompt exists to remove; the
+prompt is prose, and the tool that writes prose takes it as an argument rather than as shell syntax.
+
+The fix-loop launcher is the same line without `--resume`, and all three details hold for it unchanged. Reviewer prose is the text in this system most certain to
+carry the backticks, `$(…)` and apostrophes the prose-in-argv rule is about, and pasting it into the launcher instead is what bug-31 was.
+
+### Why the retry prompt ends with the fresh dispatch's background rule (#221)
+
+A retry is exactly the session most tempted to background — it is re-running a suite it already watched take long — and a headless `-p` session that ends its
+turn waiting on a notification exits with no Outcome, so the one retry is spent on nothing.
+
+### Why the pid is recorded twice (bug-39, bug-43)
+
+`stage <id> dispatched --pid` puts the number `watch --pid` reads where `status --json` and anyone reading the run can see it. It is the **second** copy of that
+number, not the only one: a stop landing between the `echo $!` and that call refuses it with exit `10` — the stop gate refuses every transition — and the child is
+still reachable, because `--abort` reads `<dir>/logs/<id>.pid` itself and prefers it to the run file's copy. So a refusal there costs a field on the run file and
+nothing more. What the tool depends on is the `echo $!` line writing **that exact path**; renaming it would blind `abort` silently.
+
+### Why `watch` exit `10` leaves the session id alone (bug-39, bug-50)
+
+A stop makes `watch` signal the child by the pid it was given and return `10`, after which every `stage` transition refuses with the same `10`. If that last
+tick had just read the child's init event, the session id is already on the run file — recorded on the way out (bug-50) — so §10's recovery can still tell a
+resumable session from an item that never got one.
+
 ---
 
 ## §8 — Verify
@@ -150,6 +247,14 @@ The substitution is 0-indexed — `$0` is the first argument, which is why `$1` 
 `$0` is rewritten exactly like a shell positional. §9's base-tree lookup read `$0` that way until #238, and printed nothing on every run started with an id.
 
 `$PWD` needs none of this care — every shell sets it and no substitution pass touches it, which is why step 4's line uses it directly.
+
+### Why `BM_RUN_DIR` stands in for the `<dir>` placeholder inside the verify launcher (bug-31)
+
+`<dir>` was pasted three times into that one line, and each paste was a chance to redirect an attempt's output at the wrong run's directory, so it is substituted
+once, into `env`. The other line that pastes `<dir>` more than once is §5's retry launcher — four times since bug-31 (the `test -s` guard, the `$(cat …)`, the
+`.jsonl` and the `.err`) — and it cannot take the same treatment, because its body is single-quoted so that `$(cat …)` runs in the child, and an `env` name would
+be a fourth `BM_` variable the file does not own. Its protection is different: the guard and the `$(cat …)` name the same file, so a mismatched paste between those
+two spawns **nothing** rather than reading the wrong prompt.
 
 ---
 
@@ -231,6 +336,15 @@ So the response keys on git's message, which is exact, and never on inspecting t
 
 `--abort`'s `git worktree remove --force` (§10) is untouched by all of this: it acts on a worktree that is still registered and may hold uncommitted work the
 run is deliberately discarding, which is the one state where forcing means anything.
+
+### Why `branch -d` is read only as a statement about the tree it ran in
+
+`branch -d` is safe delete rather than `-D`, so a refusal carries information — but **only about the tree it ran in**, which is why `cleanup` runs it in the base
+tree and never `$PWD`: it is HEAD-relative, and on a `--base` run the project root's HEAD is a different branch (bug-38). When `branchDeleted` is `false` and
+`branchMergedIntoBase` is present there are two readings: **a refusal from the base tree** (`branchMergedIntoBase: false`) means the merge you think happened
+did not, and that _is_ worth stopping to understand before the next item builds on a base you may have misread. `branchMergedIntoBase: true` means the delete
+was **pointed at the wrong tree**, and says nothing about the merge — `cleanup` asked `git branch --merged <base>`, which settles it. The general rule: every
+cleanup command that follows a merge belongs in the tree that merge happened in.
 
 ---
 
@@ -315,6 +429,14 @@ one. That is all of it, and it is enough on its own.
 The attention list means "a human must look at _this item_", and a green, reviewed branch does not qualify — four green branches reported as four parks is
 exactly what made 2026-09-03 read as a failed run. One classifier verdict is one run-level fact and is recorded once, in `mergeModeNote`; N per-item rows would
 be N copies of the same sentence in a list whose whole meaning is per item.
+
+### Why the probe's downgrade note is fixed text
+
+The denial's second half is a free-text `Reason:` written by a model, so the prose-in-argv rule (§4) applies to it exactly as it applies to a reviewer's findings:
+it does not go on a command line. What is lost by paraphrasing is small — `mergeModeNote` answers "why is this run in branch mode", and which of the two denial
+sites asked is the whole of that answer; the `Reason:` text itself is in the session's own transcript, beside the command that provoked it, which is where a
+person goes when the one line is not enough. A resumed or unpaused session probes before its first merge because the verdict belongs to the session asking: a run
+paused before item 1 and unpaused later reaches §9 having never asked at all, which is how #222's run met its first denial at a real merge.
 
 ---
 

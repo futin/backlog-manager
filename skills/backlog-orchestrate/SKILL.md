@@ -84,7 +84,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `4`  | lock held: a `run.json` still marked `running` (fresh _or_ stale) refusing a plain `init`                                                                                                                                                                                          |
 | `5`  | `verify` only: nothing resolvable to verify with                                                                                                                                                                                                                                   |
 | `6`  | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; read `references/stopping.md`                                                                                                                                |
-| `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ — or, for `abort`, one another session is **already aborting** (bug-54), which a stop does not override: inspect no worktree, end the turn |
+| `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ — or, for `abort`, one another session is **already aborting**, which a stop does not override: inspect no worktree, end the turn |
 | `8`  | **tracker projects only** — the API is not running. **Nothing is written.** Start the stack and retry the same command (`references/tracker.md`)                                                                                                                      |
 | `9`  | **tracker projects only** — an API refusal this command could not absorb. **Nothing is written.** Not a call to retry: park the item with the server's own sentence in the detail (`references/tracker.md`)                                                         |
 | `10` | a **stop** was requested for this run: `stage` refuses **every** transition with it, and `watch` returns it after signalling the child. **Nothing is written** by the `stage` refusal; read `references/stopping.md`                                           |
@@ -284,7 +284,7 @@ git merge --no-ff -m "Merge probe: <runId>" -m "Fixes nothing: merge-mode probe"
 Same effect — `Already up to date.`, exit `0`, no commit — and it pushes nothing.
 
 **A resumed or unpaused run that has not probed in this session probes before its first merge.** The verdict belongs to the session asking, and a run that was
-paused before item 1 and unpaused by a later session reaches §9 having never asked at all — which is how #222's run met its first denial at a real merge.
+paused before item 1 and unpaused by a later session reaches §9 having never asked at all.
 
 - **Allowed** → carry on in merge mode.
 - **Denied** (`Permission for this action was denied by the Claude Code auto mode classifier`) → record the downgrade and run the **whole queue** in branch
@@ -297,10 +297,8 @@ paused before item 1 and unpaused by a later session reaches §9 having never as
   `--note` is mandatory (omitting it exits `1`), and the command only ever moves `merge` → `branch`, only once per run — a second call exits `1` rather than
   overwriting the first note.
 
-  **That note is fixed text, not the classifier's message.** The denial's second half is a free-text `Reason:` written by a model, so §4's rule applies to it
-  exactly as it applies to a reviewer's findings: it does not go on a command line. What is lost by paraphrasing is small and the trade is worth stating —
-  `mergeModeNote` answers "why is this run in branch mode", and which of the two denial sites asked is the whole of that answer; the `Reason:` text itself is in
-  this session's own transcript, beside the command that provoked it, which is where a person goes when the one line is not enough.
+  **That note is fixed text, not the classifier's message.** The denial's `Reason:` is model-written, so §4's prose-in-argv rule keeps it off the command line;
+  the full text stays in this session's transcript (`references/rationale.md`, §2).
 
 **The probe is early warning, not a guarantee.** The verdict is per call, not per project: an identical merge command was allowed in one run and denied in the
 next, with no permission rule anywhere in either (`references/rationale.md`, §2 — merge mode). So a probe that passes can still be followed by a denied merge,
@@ -531,11 +529,9 @@ reports success over a branch with no lifecycle move on it. The probe is `backlo
 cannot.)
 
 And it keeps the new directory out of everybody's `git status`: `.worktrees/` and `node_modules` go into the **common** git dir's `info/exclude`, whole line,
-only if absent — never `.gitignore`, which is tracked. The entries are written to make verification possible and are **never committed**: the list is the
-runner's own scaffolding, and it is a list because there will be more of it. Whatever this run writes into a worktree to make verification possible — the
-`node_modules` link a fresh checkout needs, a package-manager shim, a scratch config — is excluded here, locally, before the first dispatch, because §6 stages
-with `add -A` and the exclude is what keeps the runner's own files out of that net. `node_modules` is listed **bare**, no trailing slash: a worktree gets a
-_symlink_, git stores it as a blob, and a directory-only pattern cannot match one (bug-37; `references/rationale.md`, §4).
+only if absent — never `.gitignore`, which is tracked. The entries are **never committed**. Whatever else this run writes into a worktree to make verification
+possible (a package-manager shim, a scratch config) goes on that list too, locally, before the first dispatch, so §6's `add -A` never stages it.
+`node_modules` is listed **bare**, no trailing slash — a worktree gets a _symlink_, and a directory-only pattern cannot match one (`references/rationale.md`, §4).
 
 What it printed decides the next step:
 
@@ -572,7 +568,7 @@ nohup sh -c 'LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
-**Then record that pid on the run** (bug-39):
+**Then record that pid on the run:**
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> dispatched --pid "$(cat '<dir>/logs/<id>.pid')"
@@ -581,65 +577,34 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" st
 A re-stamp of the stage the item already occupies, exactly like the `--session` line further down, so the pause gate lets it through. It is the same number
 `watch --pid` reads, put where `status --json` and anyone reading the run can see it. Run it on the retry line in §5 too.
 
-It is the **second** copy of that number, not the only one (bug-43). A stop landing between the `echo $!` above and this line refuses this call with exit `10`
-— the stop gate refuses every transition — and the child is still reachable, because `--abort` reads `<dir>/logs/<id>.pid` itself and prefers it to the run
-file's copy. So a refusal here costs a field on the run file and nothing more: do not retry it, do not work around it, read `references/stopping.md`. What the tool now depends on
-is the `echo $!` line writing **that exact path**; renaming it would blind `abort` silently.
+If this call exits `10` a stop landed in the gap: do not retry it, do not work around it, read `references/stopping.md`. The `echo $!` line must write **exactly**
+`<dir>/logs/<id>.pid` — `--abort` reads that file first, and renaming it blinds `abort` silently (`references/rationale.md`, §4).
 
 Both lines in **one** Bash invocation — each invocation gets its own shell, so `$!` is only readable in the call that backgrounded the child; that is why the
 pid goes straight into a file. `exec` matters too: it makes the pid you recorded the `claude` process itself rather than a wrapper shell around it, and `watch`
 polls exactly that pid. `nohup` and the redirects are what let the session outlive the single tool call that started it. stdout is the stream-json transcript
 and goes to the `.jsonl` that `watch` reads; stderr goes to its own file, so a warning printed by the CLI never lands in the middle of the transcript.
 
-**`--model opus` is on the line on purpose.** A bare `claude -p` takes whatever model the host's CLI defaults to, and on this machine that was Sonnet: task-48's
-execute session ran on it twice while the driver, spawned with `--model opus`, did not — so the run looked Opus from the board and was not. The flag is on the
-retry line below too, for the same reason; `--resume` does not promise to carry a model forward.
+**`--model opus` stays on the line, and on the retry and fix-loop lines too.** A bare `claude -p` takes whatever model the host's CLI defaults to, and `--resume`
+does not promise to carry one forward (`references/rationale.md`, §4).
 
-**`${LOCAL:+--settings "$LOCAL"}` hands the session the main tree's `.claude/settings.local.json`, because the worktree has none.** Claude Code reads project
-settings from the session's cwd, and that file is gitignored by design, so `worktree add` never checks it out: every allow and deny rule the user granted this
-project locally was silently absent from the one session doing the work, while the driver — at the project root — had them all. `LOCAL` is resolved **before**
-the `cd`, while `$PWD` is still the project root, and emptied when the file does not exist, so a project without one gets no flag at all rather than a
-`--settings` pointing at nothing. The expansion is unquoted on purpose and correct only because the body runs under `sh`: POSIX splits it into two words and
-keeps the quoted path whole, while zsh would pass `--settings <path>` as one argument the CLI rejects. It is a flag, never a copy or a link into the worktree,
-so there is nothing for §6's `add -A` to pick up and nothing for §4's exclude list to guard. **The retry line carries it too**, and so does every fix loop,
-resumed or fresh. Rationale: `references/rationale.md` (§4).
+**`${LOCAL:+--settings "$LOCAL"}` hands the session the main tree's `.claude/settings.local.json`, because the worktree has none.** `LOCAL` is resolved
+**before** the `cd`, while `$PWD` is still the project root, and emptied when the file does not exist, so a project without one gets no flag at all. The
+expansion is unquoted on purpose and correct only because the body runs under `sh` — never run this body under zsh. It is a flag, never a copy or a link into
+the worktree. **The retry line carries it too**, and so does every fix loop, resumed or fresh (`references/rationale.md`, §4).
 
-**`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the prompt marker by another spelling.** It says "a run owns this process" to a reader
-that cannot see the prompt at all: the machine's `Stop` hook, which holds a finished turn open at the dashboard for up to ten minutes so a remote answer can
-arrive. That hold is right for a hand-started headless session — no terminal to type into means the dashboard is its only channel — and pure wall-clock for this
-one, which nobody is going to answer and which is under orders to ignore a dashboard message anyway. A hook set up to read the variable notifies and exits
-instead; a machine without that hook is unaffected, so the assignment costs nothing either way. Substituted from this run, exactly like the prompt marker's own
-`<runId>`, and safe inside the single-quoted body by construction: a run id is `run-YYYYMMDD-HHMMSS`, no quote, space or metacharacter in it. It goes **inside**
-the `sh -c '…'` body as a prefix on `exec` — POSIX puts a simple command's assignments in the environment of the program it execs — rather than in front of
-`nohup`, where it would be one more thing a stray space can detach from the command. **§5's `--resume` retry carries it too**, unlike the prompt marker, which
-that line deliberately does not repeat: a resumed session keeps its original prompt but gets a brand-new environment, so the assignment has to be made again or
-the retry pays the hold the fresh dispatch was spared.
+**`BM_ORCH_RUN=<runId>` is the second marker on this line, and it is not the prompt marker by another spelling.** It tells the machine's `Stop` hook that a run
+owns the process, so the hook does not hold the finished turn open for a dashboard answer nobody will give. Substitute `<runId>` from this run, and put the
+assignment **inside** the `sh -c '…'` body as a prefix on `exec`, never in front of `nohup`. **§5's `--resume` retry carries it too**, unlike the prompt marker:
+a resumed session keeps its original prompt but gets a brand-new environment (`references/rationale.md`, §4).
 
-**`-n "orch <id>"` is the third marker, and its reader is a person.** The prompt marker is read by the model, `BM_ORCH_RUN` by a hook, and this one by whoever
-opens the dashboard mid-run to see what is happening — the channel follows the reader, three times on one line. Without it this was the one session in the whole
-system with no display name: every other spawn goes through the board's own server, which composes one (`orchestrate <project>`, `bl <project> <id>`,
-`resume <project>`, `watchdog resume <project>`) and posts it to the dashboard, while this line spawns `claude` itself and reached none of that code. An unnamed
-session's row falls back to the bare project name, so the session actually doing the work read exactly like one somebody started in a terminal, identifiable
-only by opening its transcript.
+**`-n "orch <id>"` is the third marker, and its reader is a person.** The name is the **item id** — never the project or the run id — with a space as the
+separator and no `:` or `/` in it: the dashboard's `NAME_RE` is `/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/`, and a name that fails it is dropped silently. **§5's `--resume`
+retry names itself `orch <id> retry 1`**, the same counter its own `<id>-retry-1.jsonl` carries; the name is double-quoted inside the single-quoted body because
+it holds a space (`references/rationale.md`, §4).
 
-The name is the **item id**, not the project and not the run id. The worktree cwd already files the row under a project of its own
-(`…backlog-manager--worktrees-<id>`), `run.json` maps session id to run for anything machine-side, and `BM_ORCH_RUN` above carries the run id to the one reader
-that needs it — so spending the name on either would repeat what is already on screen instead of the one thing a reader is looking for. It also keeps the whole
-name far under the dashboard's 60-character cap, which matters because going over it is silent (`parseSpawnRequest` drops an over-long or mis-charactered name
-and the row falls back to the project name, with no failed request anywhere to notice). Same reason there is no `:` or `/` in it and the separator is a space:
-the dashboard's `NAME_RE` is `/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/`, which is what the three server-side helpers each concluded independently.
-
-**§5's `--resume` retry names itself too, and differently** — `orch <id> retry 1`, the same counter its own `<id>-retry-1.jsonl` carries. `-n` on a resume
-renames the existing row rather than adding a second one (measured on CLI 2.1.250: the flag appends a fresh `custom-title` record to the same transcript, and
-the dashboard reads the newest), which is exactly what should happen — the row should say the item is on its retry, while still reading as the same item.
-Double-quoted inside the single-quoted body because the name holds a space; unquoted it would split, and `claude` would take `orch` as the name and the id as a
-stray argument.
-
-**The prompt is spent on more than the trigger, and every word of the marker is load-bearing.** The prompt is the _entire_ channel from this run to that session
-— after it the two processes share nothing but a directory — and everything else the session could infer is genuinely ambiguous: a worktree cwd is also what a
-human makes by hand, and a `backlog/<id>` branch is also what a _previous_ run leaves behind for a hand-merge (§3 has a probe for exactly that state). Left as
-the bare trigger, a dispatched session reads as a hand-started one, and the one that was messaged through the dashboard mid-run answered the user instead of
-leaving the problem for this run to find — three message round-trips with the whole queue idle behind it. Six constraints on that string:
+**The prompt is spent on more than the trigger, and every word of the marker is load-bearing.** The prompt is the _entire_ channel from this run to that session,
+and left as the bare trigger a dispatched session reads as a hand-started one (`references/rationale.md`, §4). Six constraints on that string:
 
 - **The id stays the first token after the trigger**, marker after it. `backlog-execute`'s "Pick an item" reads the trigger's own words for an id. Putting
   anything between the two is how this line teaches it to guess.
@@ -661,40 +626,30 @@ Tracker: the marker gains a mandatory clause, `outcome <dir>/outcomes/<n>.md` (a
 before the closing `.]` (`references/tracker.md` §4, _the `outcome` clause_).
 
 **Prose this run did not compose — reviewer findings, execute's `## Outcome`, a captured error — never rides a shell command line; it goes in a file and the
-command names the file.** This is the general form of the constraint above it, and it is stated separately because the two have different reach: "no
-apostrophes" governs the fixed marker text _this run writes itself_, and can be obeyed by choosing different words, while the words in a fix-loop or retry
-prompt belong to somebody else — a reviewer quoting `` `rowId` `` is simply what a code review looks like, and no rule aimed at the driver can make that text
-safe in a command position. Every `"…"` inside the single-quoted `sh -c` body is still a command position: `sh` performs command substitution (`` `x` `` and
-`$(x)`) and parameter expansion (`$x`) there, and one apostrophe ends the body outright. Three `.err` files across three projects on this machine are that rule
-being learned the other way (bug-31). The tool already works this way for the payloads it takes — `attention --questions-json <file>` and `assume --json <file>`
-— and §5's retry launcher, §7's fix loop and §3's two questions payloads are the prose halves that now match it.
+command names the file.** "No apostrophes" above governs only the fixed marker text this run writes itself; every `"…"` inside the single-quoted `sh -c` body is
+still a command position, so a backtick, `$(…)` or apostrophe in somebody else's words breaks it. The tool takes its own payloads the same way —
+`attention --questions-json <file>` and `assume --json <file>` — and §5's retry launcher, §7's fix loop and §3's two questions payloads match it
+(`references/rationale.md`, §4).
 
 The Write tool creates the directory on its way to the file, so none of those paths needs a `mkdir -p` ahead of it — unlike `<dir>/logs/` and `<dir>/verify/`,
 which a shell redirect will not create for itself.
 
-**The rule has a second half, and it is the one that looks harmless: `attention --detail`, `stage --note` and `merge-mode --note` take the driver's own short
-words — a summary in your voice, never a verbatim quote of text this run did not compose.** Those three values stay inline arguments on purpose: they are one
-short line each, they are what the run drawer renders, and routing every one of them through a file would trade a real cost for a hazard that paraphrasing
-removes outright. What makes that safe is that the copy of record already exists somewhere else and the entry names it — the reviewer's report at
-`<dir>/reviews/<id>-<n>.md`, a verify attempt's rows in `status --json`, a session's own `<dir>/logs/<id>.jsonl`. So each value is a pointer plus a sentence,
-and pasting the thing it points at both duplicates the record and puts model output on a command line. Every placeholder in one of those values is spelled to
-say whose words it is, and a test reads them out of this file against a closed list: a new placeholder there is a decision to make, not a blank to fill.
+**The rule has a second half: `attention --detail`, `stage --note` and `merge-mode --note` take the driver's own short words — a summary in your voice,
+never a verbatim quote of text this run did not compose.** Each value is a pointer plus a sentence: the copy of record is the reviewer's report at
+`<dir>/reviews/<id>-<n>.md`, a verify attempt's rows in `status --json` or a session's `<dir>/logs/<id>.jsonl`, and the entry names it. Every placeholder in one
+of those values is spelled to say whose words it is, and a test reads them out of this file against a closed list: a new placeholder there is a decision to
+make, not a blank to fill.
 
 The marker also arrives in that session as `$2`…`$N`, substituted into `backlog-execute`'s SKILL.md before it is read. That is safe only because no fenced block
-under `skills/` reads a positional parameter — the bug-9 guard, which this line makes load-bearing for a second, unrelated reason.
+under `skills/` reads a positional parameter (`references/rationale.md`, §4).
 
 **`--verbose` is required, not a contingency.** With `--print`, the installed CLI refuses the stream-json format without it, and in `-p` mode `--verbose` is
 also what _produces_ the event stream at all. Leaving it off is the quietest failure in this whole file: every item in the queue parks as a crashed session, and
 the run merges nothing. `references/rationale.md` has the exact error and the full chain.
 
-**`--permission-mode auto`, and not the rung above it.** What makes an unattended session tolerable is not trust in the session, it is four walls: a
-**disposable worktree** created seconds ago from `<base>`, an **independent review** before anything moves, **verification commands** that must come back
-green, and the **merge as the only door back into the base**, walked by this skill and never by the session. Remove any one and dispatching unattended stops being
-defensible at any rung.
-
-`auto` is the lowest rung that clears an execute session's real workload — `acceptEdits` below it still prompts on `pnpm test` and on `git`. Do **not**
-"tighten" it to `dontAsk` plus `--allowedTools`: that was probed and it is dead on arrival, because it requires enumerating every command before the work
-starts. The measurements behind both claims are in `references/rationale.md`.
+**`--permission-mode auto`, and not the rung above it.** The run is defensible because of four walls, not trust in the session: a **disposable worktree**, an
+**independent review**, **verification commands** that must come back green, and the **merge as the only door back into the base**. `auto` is the lowest rung
+that clears an execute session's workload; do **not** "tighten" it to `dontAsk` plus `--allowedTools` (`references/rationale.md`, §4).
 
 **A denial is silent in every signal but one.** A refused call comes back as an ordinary `tool_result` the session improvises around; the run still reports
 `subtype: "success"`, `is_error: false`, and exit `0` **even when every call was refused**. The one machine-readable trace is `permission_denials` on the result
@@ -723,10 +678,9 @@ that file itself, and why `status --json` is where the session id is read back f
   gets cut off.
 - **exit `1`** — a problem with this call: a missing `.jsonl` after the first interval, or one that cannot be read at all. The session may still be running; do
   not assume it died. Inspect the worktree and the `.err` file before deciding anything.
-- **exit `10`** — a stop was requested for this run (bug-39). `watch` has already signalled the child by the pid you gave it, so the session is ending. Do
-  **not** call `watch` again and do not stage anything: every `stage` transition now refuses with the same `10`. If that last tick had just read the child's
-  init event, the session id is already on the run file — recorded on the way out (bug-50), so §10's recovery can still tell a resumable session from an item
-  that never got one. Read `references/stopping.md` (_Stopping_) straight away.
+- **exit `10`** — a stop was requested for this run. `watch` has already signalled the child by the pid you gave it, so the session is ending. Do
+  **not** call `watch` again and do not stage anything: every `stage` transition now refuses with the same `10`. Read `references/stopping.md` (_Stopping_)
+  straight away (`references/rationale.md`, §4, covers the session id this exit leaves on the run file).
 
 ## 5. Inspect what the session left behind
 
@@ -768,25 +722,19 @@ For both failure shapes, ask the user — best-effort, exactly like pre-flight �
 that item's own session so its context is not paid for twice. **Write what to do differently into `<dir>/prompts/<id>-retry-1.txt` first, with the Write tool**,
 and only then launch. §4's rule about prose in a command position covers this text: it quotes execute's failure `## Outcome`, which carries command output
 verbatim. **End that file with the fresh dispatch's background rule, word for word: "Never run a command in the background, and never end a turn with one still running; run tests, typecheck and build in the foreground. One exception: a dev server for Playwright browser verification, its pid recorded in the call that starts it and killed by that pid, never by pattern, before the turn ends."** A
-retry is exactly the session most tempted to background — it is re-running a suite it already watched take long — and a headless `-p` session that ends its
-turn waiting on a notification exits with no Outcome, so the one retry is spent on nothing (#221).
+retry is the session most tempted to background, and a headless `-p` session that ends its turn waiting on a notification exits with no Outcome
+(`references/rationale.md`, §4).
 
 ```bash
 nohup sh -c 'LOCAL="$PWD/.claude/settings.local.json"; [ -f "$LOCAL" ] || LOCAL=; cd "$PWD/.worktrees/<id>" && test -s "<dir>/prompts/<id>-retry-1.txt" && BM_ORCH_RUN=<runId> exec claude -p --resume <sessionId> "$(cat "<dir>/prompts/<id>-retry-1.txt")" ${LOCAL:+--settings "$LOCAL"} --output-format stream-json --verbose --permission-mode auto --model opus -n "orch <id> retry 1"' > "<dir>/logs/<id>-retry-1.jsonl" 2> "<dir>/logs/<id>-retry-1.err" &
 echo $! > "<dir>/logs/<id>.pid"
 ```
 
-Three details on that line, each of which was a defect before it was a rule (bug-31):
+Three details on that line (`references/rationale.md`, §4):
 
-- **`$(cat "<file>")`, and the prompt is the file's bytes.** The _output_ of a command substitution is not re-scanned for expansions, so argv arrives
-  byte-identical to what the Write tool put on disk — backticks, `$(…)`, `var(--ink)` and apostrophes all intact, nothing executed. The inner double quotes
-  around the path are what keep a path containing a space in one piece; both sit inside the single-quoted body, which is otherwise unchanged.
-- **`test -s "<file>" &&` ahead of the assignment.** A missing or empty prompt file then spawns nothing at all: `sh` exits, `watch` sees a dead pid within a
-  second, and the driver treats it as the dispatch failure it is. Without the guard `$(cat …)` degrades to `""` and the run spends its one retry on a session
-  resumed with no instruction — which on every surface looks exactly like a session that simply failed to improve.
-- **The Write tool, never a heredoc and never `printf`.** A heredoc delimiter that happens to appear in the text ends the document early, and `printf '%s' '…'`
-  re-introduces the apostrophe problem the file-carried prompt exists to remove. The prompt is prose; the tool that writes prose takes it as an argument rather
-  than as shell syntax.
+- **`$(cat "<file>")`, and the prompt is the file's bytes** — the inner double quotes around the path stay, inside the single-quoted body.
+- **`test -s "<file>" &&` ahead of the assignment**, so a missing or empty prompt file spawns nothing and `watch` sees a dead pid.
+- **The Write tool, never a heredoc and never `printf`.**
 
 Then `watch` again exactly as in step 4, with `--jsonl` pointed at the new transcript and `--pid` at the pid you just recorded, and come back to this step when
 it exits.
@@ -815,8 +763,7 @@ and the user reading history next month, both need to know which commits arrived
 
 `add -A` is safe _here specifically_: the worktree holds this item's work and nothing else. Never run it in the main tree. "Nothing else" is a claim §4 has to
 keep true, not a property of a fresh checkout — this run may itself have written scaffolding into the tree to make verification possible, and §4's `info/exclude`
-list is what keeps that scaffolding out of this `add -A`. A run that adds a new piece of scaffolding adds it to that list in the same edit; bug-37 is what the
-missed half costs.
+list is what keeps that scaffolding out of this `add -A`. A run that adds a new piece of scaffolding adds it to that list in the same edit.
 
 ## 7. Review
 
@@ -885,7 +832,7 @@ reports in this session's context.
   echo $! > "<dir>/logs/<id>.pid"
   ```
 
-  Step 5's retry line without `--resume`, and every one of step 5's three bug-31 details holds for it unchanged. It carries no `[orchestrator-run` marker and no
+  Step 5's retry line without `--resume`, and every one of step 5's three details holds for it unchanged. It carries no `[orchestrator-run` marker and no
   `/backlog-execute` trigger: in a files project execute has already moved the item to `done/` and refuses a done item, so the prompt file is the whole brief.
   The transcript, `.err` and session name are the resume mode's, so `usage` records it as `kind: 'fix'` exactly as before and `watch` overwrites the item's
   session id with the fixer's — which is what the next loop's `fix-mode`, and `references/recovery.md`'s `resume-session`, then resume.
@@ -894,8 +841,8 @@ reports in this session's context.
   a tracker project re-run §5's `snapshot <n>`, and review again with a fresh report path (`<dir>/reviews/<id>-2.md`).
 
   **The findings reach that file as the reviewer wrote them** — they name `file:line`, and paraphrasing them into "fix the review comments" hands the session a
-  puzzle instead of a task. That verbatim copy is the whole reason the prompt is a file rather than an argument: reviewer prose is the text in this system most
-  certain to carry the backticks, `$(…)` and apostrophes §4's rule is about, and pasting it into the launcher instead is what bug-31 was.
+  puzzle instead of a task. That verbatim copy is the whole reason the prompt is a file rather than an argument: reviewer prose is the text most certain to carry
+  the backticks, `$(…)` and apostrophes §4's rule is about.
 
   ```bash
   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" denials --jsonl "<dir>/logs/<id>-fix-<n>.jsonl"
@@ -955,12 +902,9 @@ Five details in those lines, none of them the same as step 4's:
   substitution rewrites positional parameters in this file before the session reads it, fenced code included — it has corrupted this exact line in a live run.
   Keep the plugin root and the run directory in `BM_PLUGIN_ROOT` / `BM_RUN_DIR`, and do not reintroduce a positional anywhere in this file. `$PWD` needs none of
   this care, which is why step 4's line uses it directly. (`references/rationale.md`, §8.)
-- **`BM_RUN_DIR` also retires the `<dir>` placeholder inside this command.** It was pasted three times into this one line, and each paste was a chance to
-  redirect an attempt's output at the wrong run's directory. Substitute it once, into `env`. The other line that pastes `<dir>` more than once is §5's retry
-  launcher — four times since bug-31 (the `test -s` guard, the `$(cat …)`, the `.jsonl` and the `.err`) — and it cannot take the same treatment, because its
-  body is single-quoted so that `$(cat …)` runs in the child, and an `env` name would be a fourth `BM_` variable this file does not own. Its protection is
-  different and worth knowing: the guard and the `$(cat …)` name the same file, so a mismatched paste between those two spawns **nothing** rather than reading
-  the wrong prompt.
+- **`BM_RUN_DIR` also retires the `<dir>` placeholder inside this command.** Substitute `<dir>` once, into `env`, never into the quoted body. §5's retry
+  launcher pastes `<dir>` several times and cannot take this treatment (its body is single-quoted so `$(cat …)` runs in the child); there the `test -s` guard
+  and the `$(cat …)` name the same file, so a mismatched paste spawns **nothing** rather than reading the wrong prompt (`references/rationale.md`, §8).
 - **The tool still runs from the project root.** `nohup` inherits this session's cwd and there is no `cd` anywhere in the line; the worktree is named by
   `--cwd`, which is exactly what that flag is for (see "Where commands run" at the top of this file).
 
@@ -1132,11 +1076,10 @@ merge path only it then deletes `backlog/<id>` with `branch -d` from the base tr
   a human deletes it after looking. Carry on to the next item.
 - **`failed`** — the worktree could not be removed and `cleanup` recorded the `parked` attention entry with the reason. Carry on.
 
-`branch -d` is safe delete rather than `-D`, so a refusal carries information — but **only about the tree it ran in**, which is why `cleanup` runs it in the
-base tree and never `$PWD`. When `branchDeleted` is `false` and `branchMergedIntoBase` is present, it refused, and there are two readings:
-**a refusal from the base tree** (`branchMergedIntoBase: false`) means the merge you think happened did not, and that _is_ worth stopping to understand before the
-next item builds on a base you may have misread; `branchMergedIntoBase: true` means the delete was **pointed at the wrong tree**, and says nothing about the merge (`cleanup` asked
-`git branch --merged <base>`). The general rule: every cleanup command that follows a merge belongs in the tree that merge happened in.
+`branch -d` runs in the base tree, never `$PWD`: a refusal says something only about the tree it ran in. When `branchDeleted` is `false` and `branchMergedIntoBase`
+is present, `false` means the merge you think happened did not — stop and understand that before the next item builds on a base you may have misread — and
+`true` says nothing about the merge (`references/rationale.md`, §9). The general rule:
+every cleanup command that follows a merge belongs in the tree that merge happened in.
 
 Then the next item starts from the updated `<base>`, so later items build on earlier ones. On a `--base` run that is the whole point: item by item, a phased
 feature accumulates on its own branch and `main` is never written until a human decides it should be.
