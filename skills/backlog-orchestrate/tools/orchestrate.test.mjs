@@ -3662,7 +3662,9 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['Substitute `<dir>` once, into `env`', "step 8's launcher substitutes <dir> once"],
     ['`branch -d` runs in the base tree, never `$PWD`', 'cleanup commands that follow a merge run in the tree the merge happened in'],
     ['The entries are **never committed**', "the runner's own exclude entries are never committed"],
-    ['`node_modules` is listed **bare**', 'the node_modules exclude entry is bare, so it matches a symlink']
+    ['`node_modules` is listed **bare**', 'the node_modules exclude entry is bare, so it matches a symlink'],
+    ['walked by this skill and', 'the merge, the only door back into the base, is walked by the orchestrator and never by the session'],
+    ['`fix-mode` decides fresh or resume', 'the fix loop mode is the tool\'s decision, not the driver\'s']
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
@@ -3673,8 +3675,13 @@ test('the SKILL.md body carries no bug-N / task-N / (#N) history outside fenced 
   // A backstory that names the defect it came from is evidence, not instruction: it costs every turn of every run for a sentence the run never acts on. The
   // body keeps the rule as one imperative statement and `references/rationale.md` keeps the story. Fenced blocks are exempt because they hold text the run
   // TYPES or is shown (the `plan` sample board, example ids), and an id there is data, not history. ALLOWED lists any prose line that must keep a number
-  // anyway, each with the reason it is an instruction; it is empty on purpose.
-  const ALLOWED = [];
+  // anyway, each with the reason it is an instruction. The pattern is `#` plus two or more digits, not only the parenthesised `(#N)` form: `(#226;` slipped
+  // past the narrower one once.
+  const ALLOWED = [
+    // "Ids inside a run are bare issue numbers, `31`, never `#31`" — an instruction about what to type (`#` opens a shell comment), not a backstory; the
+    // number is an example id, not a reference to a defect.
+    'never `#31`'
+  ];
   const offenders = [];
   let inFence = false;
   fs.readFileSync(SKILL_MD, 'utf8')
@@ -3685,7 +3692,7 @@ test('the SKILL.md body carries no bug-N / task-N / (#N) history outside fenced 
         return;
       }
       if (inFence) return;
-      if (/\b(bug|task)-[0-9]+|\(#[0-9]+\)/.test(line) && !ALLOWED.some((a) => line.includes(a))) offenders.push(`${i + 1}: ${line.trim().slice(0, 140)}`);
+      if (/\b(bug|task)-[0-9]+|#[0-9]{2,}/.test(line) && !ALLOWED.some((a) => line.includes(a))) offenders.push(`${i + 1}: ${line.trim().slice(0, 140)}`);
     });
   assert.deepEqual(offenders, [], `history is back in the SKILL.md body (move it to references/rationale.md):\n${offenders.join('\n')}`);
 });

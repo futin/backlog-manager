@@ -201,6 +201,18 @@ resumable session from an item that never got one.
 
 ---
 
+## §7 — Review
+
+### Why the fix loop has two modes, and why `fix-mode` decides (#226)
+
+The design is this repo's `docs/superpowers/specs/2026-09-25-fresh-session-fix-loop-design.md`. A resumed fix loop inherits every token the session it resumes ever
+read, and the 2026-09-24 retro put 69% of measured spend on sessions that peaked above 200k tokens — a tier the price fit does not even model — with more than
+half of all fix sessions among them. Resuming keeps the executor's reasoning, which is worth keeping while it is cheap; past 150k it is not, and the margin below
+200k is there because a fix loop only grows the context it resumes. The decision is the tool's so that a `--resume`d driver reaches the answer the crashed one
+would have, from the run file alone.
+
+---
+
 ## §8 — Verify
 
 ### Why the verification is detached rather than run inline

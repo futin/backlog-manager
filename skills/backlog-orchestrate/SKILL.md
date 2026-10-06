@@ -648,7 +648,8 @@ also what _produces_ the event stream at all. Leaving it off is the quietest fai
 the run merges nothing. `references/rationale.md` has the exact error and the full chain.
 
 **`--permission-mode auto`, and not the rung above it.** The run is defensible because of four walls, not trust in the session: a **disposable worktree**, an
-**independent review**, **verification commands** that must come back green, and the **merge as the only door back into the base**. `auto` is the lowest rung
+**independent review**, **verification commands** that must come back green, and the **merge as the only door back into the base**, walked by this skill and
+never by the session. `auto` is the lowest rung
 that clears an execute session's workload; do **not** "tighten" it to `dontAsk` plus `--allowedTools` (`references/rationale.md`, §4).
 
 **A denial is silent in every signal but one.** A refused call comes back as an ordinary `tool_result` the session improvises around; the run still reports
@@ -800,11 +801,8 @@ reports in this session's context.
   numbers yourself. It reads the item's last recorded session (the last entry `usage` wrote — execute, retry or an earlier fix loop) and answers `fresh` when
   that session peaked at or above the threshold or has no id to resume, `resume` otherwise, including when no peak was recorded.
 
-  Why two modes (#226; the design is this repo's `docs/superpowers/specs/2026-09-25-fresh-session-fix-loop-design.md`): a resumed fix loop inherits every token
-  the session it resumes ever read, and the 2026-09-24 retro put 69% of measured spend on sessions that peaked above 200k tokens — a tier the price fit does not
-  even model — with more than half of all fix sessions among them. Resuming keeps the executor's reasoning, which is worth keeping while it is cheap; past 150k
-  it is not, and the margin below 200k is there because a fix loop only grows the context it resumes. The decision is the tool's so that a `--resume`d driver
-  reaches the answer the crashed one would have, from the run file alone.
+  `fix-mode` decides fresh or resume, and the decision is the tool's so that a `--resume`d driver reaches the answer the crashed one would have, from the run file
+  alone (`references/rationale.md`, §7).
 
   **`mode: "resume"`** → **write the reviewer's findings, verbatim, to `<dir>/prompts/<id>-fix-<n>.txt` with the Write tool** —
   `<n>` being the `fixLoops` value that line just echoed back, so a second loop keeps the first one's prompt beside its own rather than over it — and resume the
@@ -1078,8 +1076,7 @@ merge path only it then deletes `backlog/<id>` with `branch -d` from the base tr
 
 `branch -d` runs in the base tree, never `$PWD`: a refusal says something only about the tree it ran in. When `branchDeleted` is `false` and `branchMergedIntoBase`
 is present, `false` means the merge you think happened did not — stop and understand that before the next item builds on a base you may have misread — and
-`true` says nothing about the merge (`references/rationale.md`, §9). The general rule:
-every cleanup command that follows a merge belongs in the tree that merge happened in.
+`true` says nothing about the merge (`references/rationale.md`, §9). The general rule: every cleanup command that follows a merge belongs in the tree that merge happened in.
 
 Then the next item starts from the updated `<base>`, so later items build on earlier ones. On a `--base` run that is the whole point: item by item, a phased
 feature accumulates on its own branch and `main` is never written until a human decides it should be.
