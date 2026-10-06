@@ -94,12 +94,22 @@ function orchFixture(t) {
 // pipe of the two.
 const CLI_MAX_BUFFER = 64 * 1024 * 1024;
 
+// #246: the session identity is pinned too, for the same reason BM_ORCH_HOME
+// is — the ambient value must not decide what a test sees. The driver lease is
+// keyed on CLAUDE_CODE_SESSION_ID, and inheriting it meant `run()` behaved as a
+// leased session inside Claude Code and as a hand-run terminal everywhere else:
+// `unpause`'s case asserted on `driver.at` and passed in a session, then read
+// `driver: null` from a plain terminal and threw. Every `run()` caller is now one
+// fixed session wherever the suite runs; a case that wants the terminal (or a
+// second session) says so through `runAs` below.
+const TEST_SESSION_ID = 'sess-test';
+
 function run(cwd, home, ...args) {
   return spawnSync('node', [SCRIPT, ...args], {
     encoding: 'utf8',
     cwd,
     maxBuffer: CLI_MAX_BUFFER,
-    env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control` }
+    env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control`, CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID }
   });
 }
 
@@ -202,7 +212,7 @@ function spawnChild(t, ms) {
 // … &` and `orchestrate.mjs watch` as separate, unrelated processes) would
 // never have this problem in the first place.
 async function runAsync(cwd, home, ...args) {
-  const proc = spawn('node', [SCRIPT, ...args], { cwd, env: { ...process.env, BM_ORCH_HOME: home } });
+  const proc = spawn('node', [SCRIPT, ...args], { cwd, env: { ...process.env, BM_ORCH_HOME: home, CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID } });
   let stdout = '';
   let stderr = '';
   proc.stdout.on('data', (d) => {
@@ -2362,7 +2372,7 @@ test('watch heartbeats at least twice before its budget elapses, then exits 3 wi
   const watchProc = spawn(
     'node',
     [SCRIPT, 'watch', 'task-11', '--pid', String(child.pid), '--jsonl', STREAM_NOINIT, '--interval-ms', '100', '--budget-ms', '300'],
-    { cwd: project, env: { ...process.env, BM_ORCH_HOME: home } }
+    { cwd: project, env: { ...process.env, BM_ORCH_HOME: home, CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID } }
   );
   t.after(() => {
     try {
@@ -4901,6 +4911,26 @@ test('unpause returns a paused run to running and stamps unpausedAt', (t) => {
   });
 });
 
+// #246: the other branch of the same write, pinned on purpose. A hand-run
+// terminal has no session to lease to, so `unpause` leaves `driver: null` —
+// and must still resume the run and stamp `unpausedAt`, since that terminal is
+// exactly who recovers a paused run when no board is up.
+test('unpause from a hand-run terminal resumes the run and leaves driver null', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(runAs(null, project, home, 'init', '--project', project).status, 0);
+  assert.equal(runAs(null, project, home, 'finish', '--status', 'paused').status, 0);
+
+  const out = runAs(null, project, home, 'unpause');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'running');
+  assert.equal(after.unpausedAt, after.updatedAt);
+  assert.equal(after.driver, null);
+  assert.deepEqual(JSON.parse(out.stdout), { status: 'running', unpausedAt: after.unpausedAt, driver: null });
+});
+
 test('unpause refuses any status but paused, writing nothing', (t) => {
   const { home, project } = orchFixture(t);
   seedReadyTask(project, 'task-5', 'Some task');
@@ -7169,7 +7199,7 @@ function runApi(cwd, home, port, ...args) {
   return new Promise((resolve) => {
     const proc = spawn('node', [SCRIPT, ...args], {
       cwd,
-      env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control`, BM_API_PORT: String(port), CLAUDE_CODE_SESSION_ID: 'sess-test' },
+      env: { ...process.env, BM_ORCH_HOME: home, BM_ORCH_CONTROL_HOME: `${home}-control`, BM_API_PORT: String(port), CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID },
     });
     let stdout = '';
     let stderr = '';
