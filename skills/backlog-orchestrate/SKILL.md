@@ -86,7 +86,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `6`  | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; read `references/stopping.md`                                                                                                                                |
 | `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ — or, for `abort`, one another session is **already aborting**, which a stop does not override: inspect no worktree, end the turn |
 | `8`  | **tracker projects only** — the API is not running. **Nothing is written.** Start the stack and retry the same command (`references/tracker.md`)                                                                                                                      |
-| `9`  | **tracker projects only** — an API refusal this command could not absorb. **Nothing is written.** Not a call to retry: park the item with the server's own sentence in the detail (`references/tracker.md`)                                                         |
+| `9`  | **tracker projects only** — an API refusal this command could not absorb. **Nothing is written.** Not a call to retry: park the item, `--detail "the API refused this step — <what the API refused, your words>"`; the server's sentence is read, never pasted (`references/tracker.md`) |
 | `10` | a **stop** was requested for this run: `stage` refuses **every** transition with it, and `watch` returns it after signalling the child. **Nothing is written** by the `stage` refusal; read `references/stopping.md`                                           |
 
 `6`, `7` and `10` are the codes whose reaction is neither a fix nor a retry, which is exactly why none of them is a `1`. A `1` means "this call was wrong". A `6` means
@@ -959,8 +959,9 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" cl
 git -C "$PWD/.worktrees/<n>" push -u origin backlog/<n>
 ```
 
-The issue stays **open**, and a failed push **parks** the item exactly as a failed merge does — `attention <n> --kind parked` naming git's message, then
-`stage <n> parked`, worktree and branch left where they are (`references/tracker.md` §9, _branch mode_).
+The issue stays **open**, and a failed push **parks** the item exactly as a failed merge does — `attention <n> --kind parked --detail "push of the item branch
+to origin failed — branch and worktree kept, nothing merged"`, then `stage <n> parked`, worktree and branch left where they are (`references/tracker.md` §9,
+_branch mode_). Git's refusal is read, never put in the detail: it stays in this session's own output.
 
 No `stage <id> merging` and no `merge-check` — nothing is merging. Everything `merge-check` does (the base tree, the `symbolic-ref` precondition, the dirty-path
 probe) exists to protect a write to the tree holding the base, and there is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy

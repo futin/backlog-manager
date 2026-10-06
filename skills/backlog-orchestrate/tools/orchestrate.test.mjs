@@ -4629,6 +4629,63 @@ test("every --detail and --note value is the driver's own words", () => {
   assert.ok(count >= 15, `only ${count} --detail/--note values found — the scan is no longer reaching them`);
 });
 
+// #244. The scan above checks the --detail values a file spells out; it cannot see a park instruction that spells out no value at all and
+// tells the driver, in prose, to fill one with text a tool wrote — "naming git's message", "with the classifier's message quoted", "that row
+// quoted in the detail". Three such sentences survived the body shrink verbatim, each an instruction to put git's error line, the auto-mode
+// classifier's `Reason:` or a check's captured output inside a double-quoted argument. So each park site is pinned to its fixed template here,
+// and the prose shape that produced them is refused across every file the scan above reads.
+test('every park instruction gives fixed --detail words and never quotes tool text', () => {
+  const read = (rel) => fs.readFileSync(path.join(SKILLS_ROOT, 'backlog-orchestrate', rel), 'utf8').replace(/\s*\n\s*/g, ' ');
+  const RULES = [
+    [
+      'SKILL.md',
+      '--detail "push of the item branch to origin failed — branch and worktree kept, nothing merged"',
+      'a failed branch-mode push parks with fixed words, not git\'s message'
+    ],
+    [
+      'references/tracker.md',
+      '--detail "push of the item branch to origin failed — branch and worktree kept, nothing merged"',
+      'tracker.md restates the branch-mode push park with the same fixed words as the body'
+    ],
+    [
+      'references/tracker.md',
+      '--detail "merge landed locally but the auto-mode classifier denied the push to <base> — push it by hand"',
+      'a classifier-denied push parks with fixed words, not the classifier\'s message'
+    ],
+    [
+      'references/check-failures.md',
+      '--detail "a check could not run: <the failing command names> — fix the command or the environment"',
+      'a check that never ran parks naming the command, not quoting its row'
+    ],
+    // Fix loop 1: the exit-9 row and its tracker.md restatement said "park the item with the server's own sentence in the detail" — the same defect in a
+    // phrasing the first guard did not know.
+    [
+      'SKILL.md',
+      '--detail "the API refused this step — <what the API refused, your words>"',
+      "an unabsorbed API refusal (exit 9) parks with the driver's summary, not the server's sentence"
+    ],
+    [
+      'references/tracker.md',
+      '--detail "the API refused this step — <what the API refused, your words>"',
+      'tracker.md restates the exit-9 park with the same fixed words as the body'
+    ]
+  ];
+  for (const [file, needle, rule] of RULES) {
+    assert.ok(read(file).includes(needle), `${file} lost the rule: ${rule} (${needle})`);
+  }
+  const FILES = ['SKILL.md', ...fs.readdirSync(REFERENCES).filter((name) => name.endsWith('.md')).map((name) => `references/${name}`)];
+  for (const file of FILES) {
+    const text = read(file);
+    assert.doesNotMatch(
+      text,
+      // The last alternative is the general shape — somebody else's text "in the detail" — so a new phrasing of the same instruction is caught by its
+      // grammar, not only by the three spellings that already happened.
+      /naming git's message|the classifier's message quoted|quoted in the detail|(?:server|git|classifier|tool|check|row)'s (?:own )?[a-z]+ in the detail/i,
+      `${file} tells the driver to put tool text into a park detail — give fixed --detail words instead`
+    );
+  }
+});
+
 test('the classifier denial records the run fact, not the classifier prose', () => {
   // Both denial sites — §2's pre-flight probe and §9's real merge — and the
   // note has to name which one asked, because that IS the answer

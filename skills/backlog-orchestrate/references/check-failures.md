@@ -67,4 +67,6 @@ Exit `0` (merge) and the two "has not finished" cases stay in `SKILL.md` §8; th
 On an exit `1`, read the rows themselves (`status --json`) before spending a loop, because one of them is not what it looks like. A row whose `tail` begins
 **`could not run this command (…)`** never executed at all — a missing binary, a command string the OS refused, output too large to capture. It is red like any
 other red row and it gates the merge identically, but sending a fix loop after the _code_ over it wastes a session on an item nothing was ever tested against.
-Fix the command or the environment, or park the item with that row quoted in the detail.
+Fix the command or the environment, or park the item with `attention <id> --kind parked --detail "a check could not run: <the failing command names> — fix the
+command or the environment"`, then `stage <id> parked`. The row's `tail` is the tool's text, not this run's: it stays in `status --json` and never goes in
+the detail.

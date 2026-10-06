@@ -37,7 +37,9 @@ What differs is gathered here, and each item names the section it belongs to. A 
 - **`8`** — **tracker projects only**: the backlog-manager API is not running. **Nothing is written.** Start the stack (`pnpm run dev` or `pnpm run docker:up`) and
   retry the same command; a files project can never see this code.
 - **`9`** — **tracker projects only**: an API refusal this command could not absorb (no token, a 502 from GitHub, a 400 naming a field). **Nothing is written.**
-  Not a call to fix and retry: park the item with the server's own sentence in the detail.
+  Not a call to fix and retry: park the item with `attention <n> --kind parked --detail "the API refused this step — <what the API refused, your words>"`,
+  then `stage <n> parked`. The server's sentence is composed from what GitHub said, so it is read in this session's output and summarised — never pasted into
+  the detail, which is published on the issue.
 
 ## §2 Start the run — the merge-mode probe
 
@@ -142,8 +144,10 @@ reading a report that no longer describes the branch.
 
 The literal call stays in the body, at the top of §9. A branch left on one machine is invisible to every other, and the whole point of a tracker project is that
 the work is not on one machine. The issue stays **open**: nothing has landed on the base, and the pushed branch's own merge commit closes it whenever a person
-merges it, through the `Fixes #<n>` of the tracker merge. A failed push **parks** the item exactly as a failed merge does — `attention <n> --kind parked` naming
-git's message, then `stage <n> parked` — and the worktree and branch stay where they are.
+merges it, through the `Fixes #<n>` of the tracker merge. A failed push **parks** the item exactly as a failed merge does — `attention <n> --kind parked --detail
+"push of the item branch to origin failed — branch and worktree kept, nothing merged"`, then `stage <n> parked` — and the worktree and branch stay where they
+are. The detail is those fixed words and nothing of git's: git's refusal can carry a backtick, a `$` or a newline into a double-quoted argument, and it is not
+this run's text to publish on the issue either — read it, then park.
 
 ## §9 Merge — the tracker merge's shape
 
@@ -169,8 +173,10 @@ The literal call stays in the body, with a one-line version of each outcome. The
   `push --force` and do not reset.
 - **It is denied by the auto-mode classifier** → **park it too.** This is the one place the classifier-denial rule does _not_ apply: a denied MERGE
   degrades the run to branch mode, because nothing landed and "branched" is then a true description. A denied PUSH is the opposite — the merge has already
-  landed in the base tree, so staging the item `branched` would write a falsehood into the run file and into the summary a person reads afterwards. Park, with
-  the classifier's message quoted, and leave the merge where it is.
+  landed in the base tree, so staging the item `branched` would write a falsehood into the run file and into the summary a person reads afterwards. Park with
+  `attention <n> --kind parked --detail "merge landed locally but the auto-mode classifier denied the push to <base> — push it by hand"`, then
+  `stage <n> parked`, and leave the merge where it is. The classifier's `Reason:` is model-written prose, so it is read and never put in the detail — the same
+  rule §2's `merge-mode branch --note` follows for a denied merge.
 
 The close is tied to the STAGE rather than to the merge because the tool cannot see the push: it has no way to know whether the commit it is recording ever left
 this machine, so the driver calls `stage merged` only once the push has succeeded, and the tool closes the issue as part of that call.
