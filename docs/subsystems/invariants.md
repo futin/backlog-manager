@@ -724,7 +724,7 @@ fix that was going to fall outside the cap now lands inside it. The gate itself 
 
 **Ordering alone would buy nothing.** Every skill body and every `orchestrate.mjs` invocation in a run resolves through the plugin-root path the skill text was
 loaded with — the installed plugin copy — while the merge lands in this repo's `main`, so a merged fix does not reach the run that merged it. SKILL.md §9's
-"After a runner-fix item lands" is the within-run half: print `git diff --name-only HEAD^1 HEAD` **in the base tree** (bug-38 — `HEAD` there has to mean the
+"After a runner-fix item lands" (the mechanism is in `references/merge-failures.md`) is the within-run half: print `git diff --name-only HEAD^1 HEAD` **in the base tree** (bug-38 — `HEAD` there has to mean the
 merge commit, and on a `--base` run the project root's is `main`), and if it names `skills/backlog-orchestrate/SKILL.md`, follow the repo's copy for the rest of
 the run — plus the repo's `orchestrate.mjs` if that moved too. **Prose and tool move together or not at all**: following freshly merged prose while still
 invoking the installed tool is the one genuinely dangerous combination, because the new body may name a flag the old tool refuses.

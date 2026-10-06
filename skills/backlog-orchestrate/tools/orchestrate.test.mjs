@@ -3274,6 +3274,9 @@ test('no fenced block under skills/ reads a positional parameter', () => {
 
 // --- bug-8: the merge gate's two failures are not the same failure --------
 
+// RE-POINTED (task 5 of the body-shrink plan): the conflict branch moved to references/merge-failures.md, so this reads body + references. The count it pinned —
+// exactly one executable `merge --abort` under the conflict branch — is now exactly one that targets the BASE tree: the worktree-side resolve gained its own
+// abort in the item's worktree (the gap this task closed), which `merge-failures.md aborts the worktree-side merge …` (below) pins by itself.
 test('SKILL.md keeps merge --abort under the conflict branch only', () => {
   // A pre-merge refusal ("your local changes would be overwritten") and a
   // conflict are different states: the first never started, has no MERGE_HEAD,
@@ -3281,20 +3284,20 @@ test('SKILL.md keeps merge --abort under the conflict branch only', () => {
   // Collapsing the two branches back into one is the plausible future edit —
   // they sit adjacent and read alike — and it would send an unattended run to
   // a failing command at the one gate with no margin for an unhandled state.
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const text = skillText();
   const aborts = text.split('\n').filter((l) => l.includes('merge --abort') && !l.trimStart().startsWith('*'));
-  // One in a fenced block (the conflict recovery), and prose references that
-  // explain when it does NOT apply. The fenced occurrence is the one pinned.
+  // One in a fenced block that targets the base tree (the conflict recovery), and prose references that
+  // explain when it does NOT apply. The fenced base-tree occurrence is the one pinned.
   const fenced = [];
   let inFence = false;
   for (const line of text.split('\n')) {
-    if (line.startsWith('```')) {
+    if (line.trimStart().startsWith('```')) {
       inFence = !inFence;
       continue;
     }
-    if (inFence && line.includes('merge --abort')) fenced.push(line.trim());
+    if (inFence && line.includes('-C "<base tree>" merge --abort')) fenced.push(line.trim());
   }
-  assert.equal(fenced.length, 1, `expected exactly 1 executable merge --abort, found ${fenced.length}:\n${fenced.join('\n')}`);
+  assert.equal(fenced.length, 1, `expected exactly 1 executable base-tree merge --abort, found ${fenced.length}:\n${fenced.join('\n')}`);
   assert.ok(aborts.length >= 1);
   // And the refusal must be named as its own case somewhere in step 9, so the
   // distinction survives a reader who only skims the fences.
@@ -3317,7 +3320,7 @@ test('step 9 documents resolving on the branch side before parking', () => {
   // `main`. A `--base` run that pulled `main` here would verify the item
   // against a branch it is not merging into — the exact hole this recovery
   // exists to close, reopened.
-  const text = fs.readFileSync(SKILL_MD, 'utf8');
+  const text = skillText();
   assert.ok(text.includes('.worktrees/<id>" merge --no-edit <base>'), 'step 9 lost the worktree-side merge of the base');
   assert.ok(/re-run \*\*all of step 8\*\*/.test(text), 'step 9 no longer requires re-verification after the worktree-side merge');
 });
@@ -3723,6 +3726,124 @@ test('every file under references/ is named by the body', () => {
   for (const f of files) {
     assert.ok(text.includes(`references/${f}`), `references/${f} is never named in SKILL.md`);
   }
+});
+
+// Task 5 of the body-shrink plan: four rare-path sections left the body. Each is read on an OBSERVABLE event inside the loop (an exit code, a merge result, a
+// `merge-check`/`cleanup`/`verify` output, a found question), and the loop is the one place a fresh run and a resumed run both pass through — a resumed run goes
+// recovery.md -> `claim` -> `reconcile` -> the loop, never §1, so a trigger phrased on "before §1" would miss it. These cases pin that the trigger is in the
+// SAME SENTENCE as the file's name, never a "see also".
+
+// Every sentence of `text` that names `needle`, each cut from its own paragraph (a blank line, a bullet or a table row bounds it) so a neighbour cannot lend
+// its words.
+function sentencesNaming(text, needle) {
+  const found = [];
+  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+    const start = Math.max(text.lastIndexOf('\n\n', at), text.lastIndexOf('\n- ', at), text.lastIndexOf('\n|', at)) + 1;
+    const ends = [text.indexOf('\n\n', at), text.indexOf('\n- ', at), text.indexOf('\n|', at)].filter((i) => i !== -1);
+    const end = ends.length ? Math.min(...ends) : text.length;
+    const paragraph = text.slice(start, end).replace(/\s*\n\s*/g, ' ');
+    for (const s of paragraph.split(/(?<=[.!?])\s+(?=[A-Z*`|])/)) if (s.includes(needle)) found.push(s);
+  }
+  return found;
+}
+
+const RARE_PATH_REFERENCES = [
+  ['questions.md', [/question/i]],
+  ['stopping.md', [/exits `6` or `10`/]],
+  ['merge-failures.md', [/merge call does not succeed/, /`overlap`/, /`runnerFix`/]],
+  ['check-failures.md', [/`verify` exits non-zero/, /second review says/]]
+];
+
+test('the body names each rare-path reference in the sentence that states its trigger', () => {
+  const body = fs.readFileSync(SKILL_MD, 'utf8');
+  for (const [file, triggers] of RARE_PATH_REFERENCES) {
+    assert.ok(fs.existsSync(path.join(REFERENCES, file)), `references/${file} does not exist`);
+    const sentences = sentencesNaming(body, `references/${file}`);
+    assert.ok(sentences.length > 0, `SKILL.md never names references/${file}`);
+    for (const trigger of triggers) {
+      assert.ok(
+        sentences.some((s) => trigger.test(s)),
+        `no sentence naming references/${file} carries the trigger ${trigger}: ${sentences.join(' | ')}`
+      );
+    }
+  }
+});
+
+test('the body no longer carries the rare-path prose, and the four references hold it', () => {
+  // Flattened, so a needle that prose wrapping splits across two lines still matches.
+  const flatten = (s) => s.replace(/\s*\n\s*/g, ' ');
+  const body = flatten(fs.readFileSync(SKILL_MD, 'utf8'));
+  const read = (f) => flatten(fs.readFileSync(path.join(REFERENCES, f), 'utf8'));
+  // Moved, not deleted: each needle is a rule or a template that now lives in exactly one reference, and is absent from the body.
+  for (const [file, needle, rule] of [
+    ['questions.md', 'assume <id> --json', 'a decided answer is recorded with `assume`'],
+    ['questions.md', 'A decided answer is an assumption', 'a decided answer is written as an assumption, never as a human ruling'],
+    ['stopping.md', 'You are here because `stage <id> preflight` or `stage <id> dispatched` exited `6`', 'the pause path'],
+    ['stopping.md', 'You are here because a command exited `10`', 'the stop path'],
+    ['stopping.md', 'inspect any worktree', 'an abort refused with 7 inspects no worktree'],
+    ['merge-failures.md', 'Blocked by classifier.', 'the classifier denial'],
+    ['merge-failures.md', 'would be overwritten by merge', 'the pre-merge refusal'],
+    ['merge-failures.md', 'merge --no-edit <base>', 'the worktree-side resolve'],
+    ['merge-failures.md', 'runner fix — the remainder of this run follows the repo copy', 'the runner-fix switch'],
+    ['check-failures.md', '2 fix loops, still:', 'the exhausted review loop'],
+    ['check-failures.md', '2 fix loops, verification still red', 'the exhausted verify loop'],
+    ['check-failures.md', 'could not run this command', 'a verify row that never executed']
+  ]) {
+    assert.ok(read(file).includes(needle), `references/${file} lost ${rule} (${needle})`);
+    assert.ok(!body.includes(needle), `SKILL.md still carries ${rule} (${needle}) — it should now live only in references/${file}`);
+  }
+  // What stays in the body, each with the reason it cannot leave.
+  for (const [needle, rule] of [
+    ['git -C "<base tree>" merge --no-ff --no-edit backlog/<id>', 'the literal merge — the classifier judges the call it sees'],
+    ['git revert -m 1', 'undoing a completed merge is a revert'],
+    ['At most two fix loops per item', 'the fix-loop ceiling, counted in the run file'],
+    ['Never merge red', 'a red verification never merges'],
+    ['Never restate an unanswered question in prose', 'a prose question ends the turn']
+  ]) {
+    assert.ok(body.includes(needle), `SKILL.md lost ${rule} (${needle})`);
+  }
+});
+
+test('merge-failures.md aborts the worktree-side merge in the worktree before parking, and the base-tree abort stays the one fenced base-side command', () => {
+  // The gap this closes: the worktree-side resolve said "on conflicts, park per the conflict branch", and that branch's `merge --abort` targets the BASE tree
+  // — so the half-merged worktree was never aborted, and a parked item kept the markers and MERGE_HEAD in the tree a human opens first.
+  const text = fs.readFileSync(path.join(REFERENCES, 'merge-failures.md'), 'utf8');
+  const fenced = [];
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (line.trimStart().startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence && line.includes('merge --abort')) fenced.push(line.trim());
+  }
+  assert.equal(fenced.filter((l) => l.includes('-C "<base tree>"')).length, 1, `expected exactly 1 base-tree merge --abort: ${fenced.join(' | ')}`);
+  assert.equal(fenced.filter((l) => l.includes('-C "$PWD/.worktrees/<id>"')).length, 1, `expected exactly 1 worktree-side merge --abort: ${fenced.join(' | ')}`);
+  assert.equal(fenced.length, 2, `an unexpected extra executable merge --abort: ${fenced.join(' | ')}`);
+  // Ordered: the worktree abort comes after the worktree-side merge that can conflict and before the park that follows it.
+  const resolveAt = text.indexOf('merge --no-edit <base>');
+  const worktreeAbortAt = text.indexOf('-C "$PWD/.worktrees/<id>" merge --abort');
+  assert.ok(resolveAt !== -1 && worktreeAbortAt > resolveAt, 'the worktree-side abort does not follow the worktree-side merge');
+  const parkAfter = text.indexOf('attention', worktreeAbortAt);
+  assert.ok(parkAfter !== -1, 'nothing parks after the worktree-side abort');
+  // And the body keeps no executable `merge --abort` of its own: both live in the reference now.
+  const body = fs.readFileSync(SKILL_MD, 'utf8');
+  let bodyFence = false;
+  for (const line of body.split('\n')) {
+    if (line.startsWith('```')) {
+      bodyFence = !bodyFence;
+      continue;
+    }
+    assert.ok(!(bodyFence && line.includes('merge --abort')), `SKILL.md still carries an executable merge --abort: ${line}`);
+  }
+});
+
+test('the body sends every exit 6 and exit 10 to references/stopping.md, never to a §10 heading that no longer exists', () => {
+  const body = fs.readFileSync(SKILL_MD, 'utf8');
+  assert.ok(!/§10,? _?(Pausing|Stopping)/.test(body) && !/§10 "Stopping"/.test(body), 'SKILL.md still points at a §10 Pausing/Stopping heading');
+  assert.ok(sentencesNaming(body, 'references/stopping.md').length >= 5, 'a site that said "go to §10, Pausing/Stopping" lost its pointer');
+  const stopping = fs.readFileSync(path.join(REFERENCES, 'stopping.md'), 'utf8');
+  assert.ok(stopping.includes('### Pausing') && stopping.includes('### Stopping'));
 });
 
 // --- bug-18: the dispatch prompt has to say the session is inside a run ------
@@ -4386,6 +4507,11 @@ test("every --detail and --note value is the driver's own words", () => {
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'recovery.md'),
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'rationale.md'),
     path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'tracker.md'),
+    // The four rare-path references (task 5 of the body-shrink plan) carry `--detail` templates that left the body with their prose.
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'questions.md'),
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'stopping.md'),
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'merge-failures.md'),
+    path.join(SKILLS_ROOT, 'backlog-orchestrate', 'references', 'check-failures.md'),
     path.join(SKILLS_ROOT, '..', 'docs', 'subsystems', 'invariants.md')
   ];
   const seen = new Set();
@@ -4422,7 +4548,7 @@ test('the classifier denial records the run fact, not the classifier prose', () 
   // Both denial sites — §2's pre-flight probe and §9's real merge — and the
   // note has to name which one asked, because that IS the answer
   // `mergeModeNote` exists to give.
-  const flat = fs.readFileSync(SKILL_MD, 'utf8').replace(/\s*\n\s*/g, ' ');
+  const flat = skillText().replace(/\s*\n\s*/g, ' ');
   const notes = [...flat.matchAll(/merge-mode branch --note "([^"]*)"/g)].map((m) => m[1]);
   assert.equal(notes.length, 2, `expected exactly 2 \`merge-mode branch --note\` sites, found ${notes.length}`);
   assert.deepEqual(notes.sort(), ['auto mode classifier denied the merge of <id>', 'auto mode classifier denied the merge probe']);
@@ -5236,11 +5362,12 @@ test('bug-54: spawned abort first — the driver then stands down on watch (7) a
   assert.equal(fs.readFileSync(file, 'utf8'), before, 'the stood-down driver wrote to the run file');
 });
 
-test('bug-54: SKILL.md §10 Stopping and recovery.md\'s --abort both tell an abort refused with 7 to inspect no worktree', () => {
+test('bug-54: references/stopping.md\'s Stopping and recovery.md\'s --abort both tell an abort refused with 7 to inspect no worktree', () => {
   // The tool refuses the second abort; it cannot refuse a `git status` made before that abort is called, which is the read the observed run made. Only
   // the prose reaches that, so the prose is pinned.
-  const skill = fs.readFileSync(SKILL_MD, 'utf8');
-  const stopping = skill.slice(skill.indexOf('### Stopping'), skill.indexOf('### `--resume` and `--abort`'));
+  // RE-POINTED (task 5): `### Stopping` moved to references/stopping.md, where it is the last section, so the slice runs from its heading to the end of the file.
+  const skillStopping = fs.readFileSync(path.join(REFERENCES, 'stopping.md'), 'utf8');
+  const stopping = skillStopping.slice(skillStopping.indexOf('### Stopping'));
   assert.match(stopping, /exits `7` saying the run is already being aborted/);
   assert.match(stopping, /inspect any worktree/);
   const recovery = fs.readFileSync(path.join(REFERENCES, 'recovery.md'), 'utf8');

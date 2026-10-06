@@ -83,21 +83,21 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `3`  | no run exists for this project — and, for `watch` only, "budget elapsed, child still alive"                                                                                                                                                                                        |
 | `4`  | lock held: a `run.json` still marked `running` (fresh _or_ stale) refusing a plain `init`                                                                                                                                                                                          |
 | `5`  | `verify` only: nothing resolvable to verify with                                                                                                                                                                                                                                   |
-| `6`  | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; go to §10, _Pausing_                                                                                                                                         |
+| `6`  | `stage <id> preflight` and `stage <id> dispatched` only: a pause was requested for this run — **nothing is written**; read `references/stopping.md`                                                                                                                                |
 | `7`  | another session holds this run's driver lease — **nothing is written**; stop immediately, write nothing more, and exit. `unpause` and `abort` take the lease instead of checking it, so neither can be refused this way except on a run another session is _actively heartbeating_ — or, for `abort`, one another session is **already aborting** (bug-54), which a stop does not override: inspect no worktree, end the turn |
 | `8`  | **tracker projects only** — the API is not running. **Nothing is written.** Start the stack and retry the same command (`references/tracker.md`)                                                                                                                      |
 | `9`  | **tracker projects only** — an API refusal this command could not absorb. **Nothing is written.** Not a call to retry: park the item with the server's own sentence in the detail (`references/tracker.md`)                                                         |
-| `10` | a **stop** was requested for this run: `stage` refuses **every** transition with it, and `watch` returns it after signalling the child. **Nothing is written** by the `stage` refusal; go to §10, _Stopping_                                                   |
+| `10` | a **stop** was requested for this run: `stage` refuses **every** transition with it, and `watch` returns it after signalling the child. **Nothing is written** by the `stage` refusal; read `references/stopping.md`                                           |
 
 `6`, `7` and `10` are the codes whose reaction is neither a fix nor a retry, which is exactly why none of them is a `1`. A `1` means "this call was wrong". A `6` means
-"this call was right and the run is being asked to stop": never retry it, never work around it, go to §10. A `7` means "this call was right and this session is
+"this call was right and the run is being asked to stop": never retry it, never work around it, read `references/stopping.md`. A `7` means "this call was right and this session is
 no longer the one driving this run": another `--resume` session claimed it, and two sessions past that point both stage-write one `run.json` and both end in a
 merge into the base. Stop — do not retry, do not re-claim, do not finish the run. (That prohibition is about a session refused mid-run. It does not stop `--abort` taking a
 _driver's_ lease, which it opens by doing on purpose: see `references/recovery.md`. A live _abort's_ lease is the one lease `--abort` respects — one board Stop
 reaches a live run twice, through this driver's `watch` and through the session the server spawns, and whichever `abort` comes second gets `7` while the first
 runs, or a one-line no-op `0` once it has finished.) A `10` means "a person ended this run": it is `6`'s sibling and not `6` itself,
-because a pause stops at the next item boundary and a stop stops **now**, abandoning whatever item is in flight. Never retry it, never work around it — go to
-§10, _Stopping_, which is `--abort` and not `finish`. `references/recovery.md` has the whole of the lease, including the `claim` a
+because a pause stops at the next item boundary and a stop stops **now**, abandoning whatever item is in flight. Never retry it, never work around it — read
+`references/stopping.md` (_Stopping_), which is `--abort` and not `finish`. `references/recovery.md` has the whole of the lease, including the `claim` a
 resume opens with.
 
 That `3` carries two meanings for `watch` deliberately: "no run yet" and "still running, call me again" are the same shape of retry from here. And unlike
@@ -368,7 +368,7 @@ Then say so on the record before doing anything slow:
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> preflight
 ```
 
-**Exit `6`** — the board asked this run to pause. Do not pre-flight the item, do not create anything: go straight to §10, _Pausing_. Nothing was written, the
+**Exit `6`** — the board asked this run to pause. Do not pre-flight the item, do not create anything: read `references/stopping.md` (_Pausing_). Nothing was written, the
 item is still `pending`, and a resumed run picks it up from here as if this turn had never happened.
 
 Tracker: that call also takes the issue's claim — `"stage":"skipped"` (exit `0`) means another run holds it, so move to the next item; exit `9` parks the item
@@ -412,38 +412,20 @@ item being treated as still in flight. Then continue with the next item; a `need
 Tracker: every `attention` call also comments on the issue, so `--detail` is published text — your own words, never a quote (`references/tracker.md` §3,
 _`attention` becomes a comment_).
 
-**Not answered, `questionMode: decide`** → decide each question yourself, then record what you decided:
+**Not answered, `questionMode: decide`** → decide each question yourself, then record what you decided. When a question goes unanswered under `decide`, read
+`references/questions.md` in full: it answers from the item, the repo's `CLAUDE.md`, its scoped rules and the code, writes each answer into the item through
+"Writing an answer into the item" below (inside the worktree, in step 4), and records the pairs on the queue item with `assume`, which the tool refuses on a
+`park` run. Then continue to the loop and dispatch the item like any other.
 
-1. Answer every question, using the item, the repo's `CLAUDE.md`, the `.claude/rules/` files scoped to the files in play, and the code as it actually is.
-   Prefer the smallest answer that lets the plan proceed.
-2. Write those answers into the item body through the **same** path an answered question takes — "Writing an answer into the item" below, inside the worktree,
-   in step 4. That is what makes the answer ride the branch into the base and show up in the item's own diff, instead of living only in a run file nobody reads.
-3. Record the pairs on the queue item, so the archive can answer months later whether this item's plan was written by a human or filled in by the runner:
+One rule goes with all three outcomes, and it carries its reason because a bare prohibition is exactly what drifts:
 
-Write `<dir>/questions/<id>-assumed.json` with the **Write tool** too — an array of `{"question":…,"answer":…}` pairs,
-`[{"question":"question one","answer":"what you decided"}]` — and pass it in:
+**Never restate an unanswered question in prose**, in either mode. A prose question ends the turn. In a board-started run that exits the session, `watch`
+sees it die, and the whole run then needs `--resume` — so "ask in prose and wait" is not a milder park, it is stopping the entire run. Someone who wants a
+question actually put to a human starts the run from a harness that has `AskUserQuestion`; a run started from the board is choosing between skipping the item
+and answering it itself.
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" assume <id> --json "<dir>/questions/<id>-assumed.json"
-```
-
-Then continue to the loop and dispatch the item like any other. `assume` appends rather than replaces, so a second question decided later in this same
-pre-flight does not erase the first. It **exits `1` on a `park` run**, nothing written — the tool enforces this, not this file, because this file is re-read on
-every one of a run's several hundred turns and prose drifts across them where a refusal does not. It is the same division of labour `stage <id> merged` under
-branch mode already keeps.
-
-Two rules go with all three outcomes, and both carry their reasons because a bare prohibition is exactly what drifts:
-
-1. **Never restate an unanswered question in prose**, in either mode. A prose question ends the turn. In a board-started run that exits the session, `watch`
-   sees it die, and the whole run then needs `--resume` — so "ask in prose and wait" is not a milder park, it is stopping the entire run. Someone who wants a
-   question actually put to a human starts the run from a harness that has `AskUserQuestion`; a run started from the board is choosing between skipping the item
-   and answering it itself.
-2. **A decided answer is an assumption, and is written as one.** The item body records what was assumed and that the runner assumed it — never phrased as though
-   a human had settled it. Someone reading that item in six months has to be able to tell the two apart without opening a run file.
-
-And one thing `decide` does **not** change: `attention <id> --kind needs-answers` stays legal and stays right under it. `decide` is permission to answer, never
-an obligation to invent. A question that genuinely cannot be answered — a plan citing a section nobody wrote, an either/or between two products — still parks
-its item, in either mode.
+Under `decide` the answer is recorded as the runner's own assumption and never as a human ruling, and `attention <id> --kind needs-answers` stays legal for a
+question that genuinely cannot be answered — `references/questions.md` has both.
 
 ### Writing an answer into the item
 
@@ -579,7 +561,7 @@ relative path that resolves for one of them may not for the other.
 exists so that a denial found in a transcript has the mode that produced it recorded beside it, and a field recording the wrong mode is worse than no field.
 
 **Exit `6` here** — the pause request arrived during pre-flight. Leave the worktree and the branch exactly as they are (the worktree may carry the pre-flight
-answer you just wrote into it; nothing else has happened in it), leave the item at `preflight`, and go to §10, _Pausing_. A resumed run re-enters at this same
+answer you just wrote into it; nothing else has happened in it), leave the item at `preflight`, and read `references/stopping.md` (_Pausing_). A resumed run re-enters at this same
 dispatch line onto that same worktree — `references/recovery.md` names the shape.
 
 ### Dispatch the headless session
@@ -601,7 +583,7 @@ A re-stamp of the stage the item already occupies, exactly like the `--session` 
 
 It is the **second** copy of that number, not the only one (bug-43). A stop landing between the `echo $!` above and this line refuses this call with exit `10`
 — the stop gate refuses every transition — and the child is still reachable, because `--abort` reads `<dir>/logs/<id>.pid` itself and prefers it to the run
-file's copy. So a refusal here costs a field on the run file and nothing more: do not retry it, do not work around it, go to §10. What the tool now depends on
+file's copy. So a refusal here costs a field on the run file and nothing more: do not retry it, do not work around it, read `references/stopping.md`. What the tool now depends on
 is the `echo $!` line writing **that exact path**; renaming it would blind `abort` silently.
 
 Both lines in **one** Bash invocation — each invocation gets its own shell, so `$!` is only readable in the call that backgrounded the child; that is why the
@@ -744,7 +726,7 @@ that file itself, and why `status --json` is where the session id is read back f
 - **exit `10`** — a stop was requested for this run (bug-39). `watch` has already signalled the child by the pid you gave it, so the session is ending. Do
   **not** call `watch` again and do not stage anything: every `stage` transition now refuses with the same `10`. If that last tick had just read the child's
   init event, the session id is already on the run file — recorded on the way out (bug-50), so §10's recovery can still tell a resumable session from an item
-  that never got one. Go straight to §10, _Stopping_.
+  that never got one. Read `references/stopping.md` (_Stopping_) straight away.
 
 ## 5. Inspect what the session left behind
 
@@ -928,7 +910,7 @@ reports in this session's context.
   one, so it can be refused a call exactly like the first one — and this path reaches Commit without passing through step 5, so nothing else on it would ever
   look. A refused fix session is the worst-placed denial in the whole loop: it has already been told what is wrong, so whatever it produced instead of the
   refused command looks like a response to the review, and the next reviewer reads a diff that was shaped by a command that never ran. A non-zero `count` means
-  **do not commit this loop's work** — treat it as the fix loop failing, and take it to the fix-exhausted menu below rather than spending the second loop on a
+  **do not commit this loop's work** — treat it as the fix loop failing, and take it to the exhausted-loop path in `references/check-failures.md` rather than spending the second loop on a
   session that was not actually able to work.
 
 **At most two fix loops per item, counted in the run file — not in your own head.** `fixLoops` is what `--fix-loop` maintains, and reading the ceiling off it
@@ -936,24 +918,9 @@ reports in this session's context.
 that was counting is gone and a fresh one takes over an item that has already burned both its loops. A ceiling held in a session's memory silently resets there;
 one held in the run file does not. It is also the number the run drawer renders, so an item that took two loops says so afterwards.
 
-After the second `fix` verdict (`fixLoops` is now `2`), stop looping and hand it to a human:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, still: <verdict summary, your words> — report at <dir>/reviews/<id>-2.md"
-```
-
-`<verdict summary, your words>` is one line of your own on what the reviewer still objects to — never a quote from the report. The report path sitting beside it
-in the same string is the verbatim copy, which is precisely why the entry points at the report rather than carrying it (§4's rule, second half).
-
-Then, **with a channel**, ask: merge anyway, keep fixing, skip, or stop the run — their call, on their repo. **With no channel**, `stage <id> parked` and
-continue to the next item, keeping the branch and worktree for them to look at. Never merge unreviewed-through changes silently just because the loop ran out:
-"merge anyway" is a decision a person makes, not a default.
-
-**That menu belongs to an unresolved review verdict and to nothing else.** A reviewer's findings are a judgement, and a person is entitled to read the report
-and decide they do not block a merge. A failing verification is not a judgement — it is a command that came back red — so when the shared ceiling runs out with
-`verify` still failing, this paragraph is _not_ the paragraph that applies: §8 says what happens there, and what happens there is always a park. Arriving here
-from §8 and reading "merge anyway" as still on offer is the one way to talk this system into breaking its own Hard limit, so the offer is scoped here rather
-than left to be inferred.
+When a second review says `fix` (`fixLoops` is now `2`), stop looping and read `references/check-failures.md` in full: the item is handed to a human, never
+merged silently because the loop ran out — "merge anyway" is a decision a person makes, not a default — and that menu belongs to an unresolved review verdict
+and to nothing else.
 
 ## 8. Verify
 
@@ -1033,41 +1000,9 @@ call as the launch.
   the run file exactly as it found it and a fresh attempt simply appends a fresh set of rows — the merge gate never sees a half-written verification, only a
   complete one or none. **The gate is the exit code of the last attempt that produced one**, and no `.status` means there is none.
 - **exit `0`** — every command passed. Merge.
-- **exit `1`** — something is red. Treat the failing rows exactly like review findings: feed them into a fix loop, spent the same way
-  (`stage <id> fixing --fix-loop`, then §7's `fix-mode` and whichever launcher it names, commit, re-review). In either mode's prompt file the failing rows —
-  each command and its tail — stand where the reviewer's findings would, and a fresh prompt names no report path, because no review asked for this loop. The
-  ceiling is the same two loops and it is _shared_ with review — an item does not get two review loops _and_ two verify loops, which is exactly what one counter
-  per item, incremented by whoever spends the loop, enforces.
-
-  **When that shared ceiling runs out with verification still red, the item parks — with a channel or without one.** Do not fall through to §7's exhaustion
-  paragraph: its "merge anyway" is an offer about an unresolved review _verdict_, and there is no equivalent judgement to make here. A red command is not an
-  opinion.
-
-  ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind fix-exhausted --detail "2 fix loops, verification still red: <the failing command names> — rows in status --json"
-  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
-  ```
-
-  `<the failing command names>` is the names alone — `pnpm test`, `pnpm run typecheck` — and never their output. The rows in `status --json` carry the output
-  and the exit codes, and the detail says so rather than repeating it: captured output is exactly the text §4's rule keeps off a command line.
-
-  With a channel you may still say so and ask whether to keep fixing, skip, or stop the run — three of §7's four options. Never the fourth. Never merge red:
-  nothing green-lights a merge except the commands passing.
-
-- **exit `5`** — nothing resolvable to verify with: no `verify.json`, no `test`/`typecheck`/`build` script, no fenced `## Done when` command. Nothing was
-  written, and this item cannot prove itself. **Park it**:
-
-  ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" attention <id> --kind parked --detail "nothing to verify with — add backlog/verify.json or a ## Done when block"
-  node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> parked
-  ```
-
-  Annoying on an unconfigured repo, and correct anyway: "merged, verified by nothing" is the false-done this entire system exists to prevent.
-
-On an exit `1`, read the rows themselves (`status --json`) before spending a loop, because one of them is not what it looks like. A row whose `tail` begins
-**`could not run this command (…)`** never executed at all — a missing binary, a command string the OS refused, output too large to capture. It is red like any
-other red row and it gates the merge identically, but sending a fix loop after the _code_ over it wastes a session on an item nothing was ever tested against.
-Fix the command or the environment, or park the item with that row quoted in the detail.
+- **exit `1` or `5`** — when `verify` exits non-zero, read `references/check-failures.md` in full. Red rows feed a fix loop that shares §7's two-loop ceiling;
+  when the ceiling runs out with verification still red the item parks, with a channel or without one; exit `5` (nothing to verify with) parks at once. **Never
+  merge red** — nothing green-lights a merge except the commands passing.
 
 ## 9. Merge — the only door into the base
 
@@ -1112,13 +1047,13 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" me
 
 It stages the item `merging`, finds the tree that has `<base>` checked out (creating `.worktrees/_base-<sanitised base>` when none does), tests both
 preconditions there, and prints `{ verdict, baseTree, created, paths?, detail? }` with exit `0` for every verdict. **`<base tree>` below is that `baseTree`.** A
-non-zero exit is no verdict: `10` is a stop request (§10 "Stopping"), `7` is another session driving the run (stop at once), the rest say what to fix.
+non-zero exit is no verdict: `10` is a stop request (`references/stopping.md`), `7` is another session driving the run (stop at once), the rest say what to fix.
 
 | `verdict` | Meaning                                                                | You do                                                                 |
 | --------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `merge`   | both preconditions hold                                                | merge, below                                                           |
 | `park`    | one failed; the tool wrote the `parked` entry and the stage (`detail`) | nothing; next item                                                     |
-| `overlap` | `paths` are dirty in `<base tree>` and the branch touches them         | worktree-side resolve below, else `merge-check <id> --park-on-overlap` |
+| `overlap` | `paths` are dirty in `<base tree>` and the branch touches them         | read `references/merge-failures.md`                                    |
 
 **Never check out `<base>` in the user's tree, and never stash, commit or check anything out on their behalf** — their uncommitted work is theirs, and this
 run's authority stops at worktrees it created itself. **The run removes a base worktree only if it created it** (`created: true`); `merge-check` records
@@ -1150,78 +1085,10 @@ a denied push parks the item. Chain them and the push's question is answered as 
 `git merge …; git push origin main` in one call was denied as `[Merge Without Review]` for an item whose review had approved it, and the run degraded to
 branch mode for the rest of its queue. Read the merge's exit status from the tool result, then issue the push (tracker) as the next call.
 
-**Three different failures, and they take different commands. Do not conflate them: only the first one degrades the run, and the other two park the item exactly
-as they always have.**
-
-**A permission denial** — the command never reached git at all:
-
-```
-Permission for this action was denied by the Claude Code auto mode
-classifier. Reason: Blocked by classifier.
-```
-
-Nothing was attempted, the base is untouched, and **the work is fine** — every step before this one was green and the last step of the pipeline was refused. That
-is not something a human must look at, so this item takes the _branch_ outcome instead of a park, and the rest of the queue stops attempting a merge that has
-just been shown to fail:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> branched
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge of <id>"
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" cleanup <id>
-```
-
-Then continue with the next item, which now takes the branch path at the top of this section. `cleanup` keeps the branch on `branched` — no `branch -d`, for the
-reason that path gives — and if it prints `removed` as anything but `ok`, handle it exactly as that path says: the item stays `branched`. (A `merge-mode` exit
-`1` saying the run is already in branch mode is the right state, not a failure — a resumed, already-degraded run hits it, and the stage above has already
-landed.)
-
-**No `attention` entry here.** The attention list means "a human must look at _this item_", and a green, reviewed branch does not qualify; `ATTENTION_KINDS`
-stays the three kinds it has always taken. One classifier verdict is one run-level fact and is recorded once, in `mergeModeNote` — N identical rows would be N
-copies of it. The actionable part, the merge command per branch in order, belongs in §10's summary.
-
-**A pre-merge refusal** — git declined before touching anything:
-
-```
-error: Your local changes to the following files would be overwritten by merge:
-	client/src/components/board/ItemCard.tsx
-Please commit your changes or stash them before you merge.
-```
-
-Nothing was modified, there is no `MERGE_HEAD`, and **`git merge --abort` is the wrong command** — it errors with `fatal: There is no merge to abort`. The tree
-is already in the state an abort would have restored. This is what `merge-check`'s overlap verdict is for; reaching it means it was skipped or the tree changed
-in the seconds since. Handle it exactly as that verdict does — `merge-check <id> --park-on-overlap` to park with the paths named, or resolve worktree-side — and
-issue no `--abort`.
-
-**A conflict** — the merge started and left markers behind:
-
-```bash
-git -C "<base tree>" merge --abort
-```
-
-then `attention <id> --kind parked --detail "merge conflict with <base> — worktree and branch kept"`, `stage <id> parked`, keep the worktree and the branch
-exactly as they are, and continue with the next item. A conflict means the base moved under the run (the user pushed, or an earlier item in this same run
-touched the same lines); resolving it is a human's judgement call, and the branch is the thing that makes that possible later.
-
-**When the base moved under the run, resolving on the _branch_ side is better than parking — and it is the only option that keeps the merge gate honest.** Those
-two failures — the refusal and the conflict, not the denial above them — have the same root cause: `<base>` is no longer the commit this item was verified
-against. Merging into it anyway would put content into the base that nothing green ever ran — every individual step was green, and the combination was never
-tested. That is a hole in the "never merges red" hard limit which is invisible precisely because nothing reports red. A `--base` run is *more* exposed to this,
-not less: a feature branch is likelier to be touched by a human mid-run than `main` is.
-
-So bring `<base>` into the worktree, prove the combination there, and only then merge out:
-
-```bash
-git -C "$PWD/.worktrees/<id>" merge --no-edit <base>
-```
-
-- **It merges cleanly** — re-run **all of step 8** against the combined content, starting with its `rm -f`. This is exactly the second-attempt case that rule
-  exists for, and skipping it reads the first attempt's `0` for a suite that never saw the base's changes. Green, then merge into the base as above, which is
-  now conflict-free. Red, then it is an ordinary §8 failure: a fix loop if the shared ceiling allows one, a park if it does not.
-- **It conflicts** — park, per the conflict branch above. Resolving real content conflicts is a human judgement call and that has not changed; what changed is
-  that this is now the _second_ thing tried, not the first.
-
-Nothing here touches the user's working tree: the merge, the resolution and the verification all happen inside a worktree this run created, which is the same
-reason the pre-flight amendment rule insists the item file is only ever edited there.
+**If the merge call does not succeed, read `references/merge-failures.md` in full before issuing anything else.** It tells three failures apart — a permission
+denial of the call itself, a pre-merge refusal and a conflict — and gives each one its own commands. **Only the first degrades the run to branch mode; the other
+two park the item**, with the worktree and the branch kept. The same file holds the worktree-side resolve, which brings a moved `<base>` into the item's
+worktree and re-verifies there before merging out: when `merge-check` prints `verdict: overlap`, read `references/merge-failures.md` too.
 
 **Undoing a merge that already completed is `git revert -m 1 <merge-sha>`, never `git reset --hard`.** `reset --hard` was measured destroying an unrelated,
 uncommitted modification in the main tree along with the merge, unrecoverably; the same undo by revert left it byte-for-byte intact. An unattended run can never
@@ -1276,40 +1143,10 @@ feature accumulates on its own branch and `main` is never written until a human 
 
 ### After a runner-fix item lands
 
-A merged fix does **not** reach this run on its own. Every skill body and every `orchestrate.mjs` invocation here resolves through the plugin root filled in
-at load (`${CLAUDE_PLUGIN_ROOT}`) — the _installed plugin copy_ — while the merge just landed in this repo's base branch. Hoisting the item to the front of the
-queue (§1) buys ordering and nothing else unless the run is told, once, to follow the repo's copy for the rest of the run.
-
-So after every merge, read `runnerFix` from `cleanup`'s output — it diffs the merge commit in the base tree, where `HEAD` means that commit; on a `--base` run
-the project root's `HEAD` is `main`, which the merge never touched, and a diff asked there reads some unrelated earlier merge or nothing at all.
-
-- If `skill` is `true` (`skills/backlog-orchestrate/SKILL.md` is in the merge), re-read that file from this repo's working tree and follow it for the remainder
-  of the run. The body you were handed came from the installed copy and cannot know about the fix.
-- If `cli` is **also** `true` (`skills/backlog-orchestrate/tools/orchestrate.mjs` is in it too), switch the CLI invocation to the repo copy for the remainder of
-  the run as well. `cli` alone, with `skill` false, switches nothing: the switch hangs off the prose.
-
-**Prose and tool move together or not at all.** Following freshly merged prose while still invoking the installed tool is the one genuinely dangerous
-combination: the new body may name a flag the old tool refuses. Both come from the same checkout, so taking both keeps them consistent with each other, and
-taking neither leaves the run exactly as it was. Never one.
-
-Record the switch on the item that carried the fix, through the note channel that already exists rather than a new field:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" stage <id> merged --note "runner fix — the remainder of this run follows the repo copy"
-```
-
-(or `branched` under branch mode, same note). **No `attention` entry** — `ATTENTION_KINDS` is the closed set of three and means "a human must look at this
-item", which a run that successfully picked up its own fix does not warrant.
-
-**A resumed session does not inherit the switch, and has to re-derive it.** The switch is session state; nothing on disk carries it. A run that crashes after
-picking up its own fix is continued by a _fresh_ headless session — the board's Resume control, or the server's watchdog resuming it unattended — and that
-session is handed the **installed** SKILL.md again, exactly as the first one was. Both halves revert together, so nothing becomes inconsistent; what lapses
-silently is the whole point of the marker, at the one moment a broken runner makes a crash most likely. The note written just above is the durable record: a
-resumed session that finds any queue item staged `merged` or `branched` carrying that note takes the switch again before it works the rest of the queue.
-`references/recovery.md` carries that step for `--resume`.
-
-**None of this substitutes for the sync.** A merged runner fix is inert for the _next_ run either way until this repo's HEAD is pushed and
-`pnpm run plugin:sync` has run — git is the publishing boundary. This subsection is a within-run workaround for one run, nothing more.
+After every merge, read `runnerFix` from `cleanup`'s output — it diffs the merge commit in the base tree. When `cleanup` prints `runnerFix` with `skill` or
+`cli` true, the item that just merged changed the runner itself: read `references/merge-failures.md` in full. It says which copy of the prose and of the tool
+the rest of this run follows, and the `--note` that records the switch. **Prose and tool move together or not at all**, and a resumed session re-derives the
+switch from that note (`references/recovery.md`). Both false: nothing to do.
 
 ## 10. Finishing, resuming, aborting
 
@@ -1372,57 +1209,11 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" he
 
 Tracker: `heartbeat` also heartbeats every claim the run still holds; nothing extra to run (`references/tracker.md` §10).
 
-### Pausing
+### Pausing and stopping
 
-You are here because `stage <id> preflight` or `stage <id> dispatched` exited `6`. Nothing was written by that call. Finish the run:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" finish --status paused
-```
-
-Then summarise exactly as _Finishing_ above does — what merged or branched, what parked and why, the branch list and its conflict pairs if any item finished
-`branched` — **plus the items still pending, by name**. Those are what a resume will pick up, and naming them is the difference between a summary and a receipt.
-
-Close with one sentence: the run resumes from the board's Resume control, on the strip or in the Runs view, or by `/backlog-orchestrate --resume` in a terminal
-at the project root.
-
-Then end the turn. Do not ping, do not ask whether to continue, do not wait: the board's own control is what asked for this pause, so the person who asked is
-already looking at the surface that will restart it.
-
-### Stopping
-
-You are here because a command exited `10`. A person asked for this run to **end**, from the board's Stop control. Nothing was written by the call that
-refused.
-
-**Do not finish the queue, and do not retry anything.** This is the one difference from _Pausing_ above and it is the whole difference: a pause stops at the
-next item boundary and leaves the item in flight to complete, a stop abandons it. Every `stage` transition now refuses with `10`, so there is no path forward
-even if you tried.
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" abort
-```
-
-Read `references/recovery.md`'s abort section first, as always — abort's order of operations is its entire safety property, and it is unchanged here. Five
-things are worth knowing before you run it:
-
-- **It will not be refused on a driver's lease.** `abort` takes the run over on the strength of the stop request itself, even from a driver the run file still
-  reads as alive. That is what a stop is for: the run file's freshness measures the FILE, never the process. The one lease it respects is another abort's —
-  see the last bullet.
-- **It signals the children.** Any item still in flight is sent `SIGTERM` first, at whichever pid `resolveItemPid` answers with — `<dir>/logs/<id>.pid` if
-  the launcher wrote one, else the pid the run file recorded (§4). It is deliberately not "a pid this run recorded": a stop landing in §4's window refuses
-  the `--pid` call, so the run file's field can be null for a child that is very much alive, which is the whole of bug-43. What is signalled is still only a
-  live process whose command line names `claude` — never a pattern, and never a pid that has not passed all three checks first.
-- **It recovers the session id the same way.** The same stop never reaches `watch`, the only other reader of the child's init event, so an item whose run file
-  still says `sessionId: null` gets it from `<dir>/logs/<id>.jsonl` (bug-52). A recorded id is never replaced, and a missing or init-less log leaves it null.
-- **A worktree carrying an in-progress marker is still left in place**, with an `attention` entry naming it. A stop may abandon an item; it may not destroy
-  uncommitted work.
-- **An `abort` that exits `7` saying the run is already being aborted means another session is ending this run** (bug-54). The board's Stop also spawns an
-  `--abort` session, so one stop always reaches a live run twice, and the tool lets exactly one of them tear anything down. Do **not** read, `git status` or
-  otherwise inspect any worktree — the other abort is emptying it, and what you would see is its teardown, not the child's work. Report that session's id,
-  from the refusal, and end the turn. An `abort` that prints `already aborted` and exits `0` is the same fact arriving late: nothing was done, end the turn.
-
-Then summarise as _Finishing_ does — what merged or branched, what was abandoned mid-flight and where its worktree is — and end the turn. Do not ping and do
-not ask whether to continue: the person who stopped the run is already looking at the surface they stopped it from.
+When any call exits `6` or `10`, read `references/stopping.md` in full. `6` means a pause was requested: the run finishes `paused` at the item boundary. `10`
+means a stop was requested: the run ends with `abort`, and nothing resumes a stopped run. Neither is retried, worked around or asked about; both end the turn
+after the summary.
 
 ### `--resume` and `--abort`
 

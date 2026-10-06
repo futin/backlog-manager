@@ -3191,14 +3191,14 @@ function cmdStage(argv, out = console.log) {
   // rule currently stated in one sentence.
   if (stopRequestEffective(control, run)) {
     throw new OrchestrateError(
-      `a stop was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. End the run with \`--abort\` (SKILL.md §10, "Stopping").`,
+      `a stop was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. End the run with \`--abort\` (\`references/stopping.md\`, "Stopping").`,
       EXIT_STOP_REQUESTED
     );
   }
 
   if ((stage === 'preflight' || stage === 'dispatched') && item.stage !== stage && pauseRequestEffective(control, run)) {
     throw new OrchestrateError(
-      `a pause was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. Finish the run with \`finish --status paused\` (SKILL.md §10, "Pausing").`,
+      `a pause was requested for this run — ${itemId} is not being staged '${stage}'. Nothing was written. Finish the run with \`finish --status paused\` (\`references/stopping.md\`, "Pausing").`,
       6
     );
   }
@@ -4945,7 +4945,7 @@ function cmdWatch(argv) {
           console.error(`could not record ${itemId}'s session id ${newlyFoundSessionId} before stopping: ${e.message}`);
         }
       }
-      console.error(`a stop was requested for this run — signalled pid ${pid} and stopped watching ${itemId}. End the run with \`--abort\` (SKILL.md §10, "Stopping").`);
+      console.error(`a stop was requested for this run — signalled pid ${pid} and stopped watching ${itemId}. End the run with \`--abort\` (\`references/stopping.md\`, "Stopping").`);
       return EXIT_STOP_REQUESTED;
     }
 
@@ -5872,7 +5872,7 @@ commands:
 //      those, and why a re-stamp is exempt). Nothing is written. It is not a
 //      `1` because a `1` means "fix this call and retry" and this one must
 //      never be retried: the reaction is a DIFFERENT command entirely,
-//      `finish --status paused` — SKILL.md §10, "Pausing".
+//      `finish --status paused` — `references/stopping.md`, "Pausing".
 //   7  another session holds this run's driver lease (bug-19): every mutating
 //      command refuses it, and `claim`/`abort` refuse to take over a run that
 //      is `running`, FRESH and already led. Nothing is written. Its own number

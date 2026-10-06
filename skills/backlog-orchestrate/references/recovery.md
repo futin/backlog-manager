@@ -33,7 +33,7 @@ it — not you — is the one carrying the queue forward. (`unpause` and `abort`
 file gives at each of them; every other write checks it.) Two sessions past this point both stage-write one `run.json` and both end in a merge into the base; that
 is the failure the lease exists to make impossible, and it only works if the loser stops on the first refusal instead of retrying.
 
-**`paused`** — this run was not crashed, it was stopped on purpose at an item boundary (SKILL.md §10, _Pausing_). Put it back to `running` first:
+**`paused`** — this run was not crashed, it was stopped on purpose at an item boundary (`references/stopping.md`, _Pausing_). Put it back to `running` first:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" unpause
@@ -69,7 +69,7 @@ coordinate with the other. The later `claim` wins — that is the one place in t
 exactly one claim survives the write and every subsequent write is checked against it. The loser finds out on its very next command, and its whole job then is
 to stop.
 
-Then re-derive the runner-fix switch, before the first item is taken over. A run that picked up its own merged fix (§9, "After a runner-fix item lands")
+Then re-derive the runner-fix switch, before the first item is taken over. A run that picked up its own merged fix (`references/merge-failures.md`, "After a runner-fix item lands")
 switched to following this repo's copy of `SKILL.md` and `orchestrate.mjs` for the rest of the run — but that switch is _session_ state, and this is a fresh
 session, handed the installed copy again exactly as the crashed one was. Nothing on disk carries the switch itself; the note does. So read the queue and look
 for any item staged `merged` or `branched` whose note says the remainder of the run follows the repo copy:
@@ -78,7 +78,7 @@ for any item staged `merged` or `branched` whose note says the remainder of the 
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" status --json
 ```
 
-If one is there, take the switch again — **both halves or neither**, per §9: re-read `skills/backlog-orchestrate/SKILL.md` from this repo's working tree and
+If one is there, take the switch again — **both halves or neither**, per `references/merge-failures.md`: re-read `skills/backlog-orchestrate/SKILL.md` from this repo's working tree and
 invoke the repo's `orchestrate.mjs` for the rest of this run. If none is, change nothing. Doing this here rather than later matters because the whole value of
 the marker is that the _remaining_ queue is not executed by the broken version, and a crash is most likely at precisely the moment the runner is broken.
 
