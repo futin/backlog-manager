@@ -3,10 +3,10 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan
 > task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** implemented 2026-10-06, Tasks 1-8 landed; `SKILL.md` is 105,465 bytes / 104,745 chars (from 151,246 bytes; the 2026-09-01 trim was 60,168 chars). The acceptance measurement is
-the next real run's injected skill size, off its transcript, still to be recorded here. Originally: draft 2026-10-05, awaiting review. Bounded change — no spec
-document; this plan is the whole written record, as with [2026-09-01-orchestrate-skill-floor-trim.md](2026-09-01-orchestrate-skill-floor-trim.md), which it
-continues.
+**Status:** implemented 2026-10-06, Tasks 1-8 landed; `SKILL.md` is 105,465 bytes / 104,745 chars (from 151,246 bytes / 150,227 chars; the 2026-09-01
+trim was 60,168 chars). The acceptance measurement is the next real run's injected skill size, off its transcript, still to be recorded here.
+Originally: draft 2026-10-05, awaiting review. Bounded change — no spec document; this plan is the whole written record, as with
+[2026-09-01-orchestrate-skill-floor-trim.md](2026-09-01-orchestrate-skill-floor-trim.md), which it continues.
 
 **Note on this plan's form — read before writing any code.** It specifies _behaviour_, _interfaces_ and _exact test cases_, never literal implementation
 code; that overrides the writing-plans template's "code blocks required" rule. Where an interface below looks wrong once you are in the code, say so and

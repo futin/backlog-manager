@@ -899,13 +899,13 @@ New skills load on the next Claude Code restart, not in the session that ran the
 
 ## A new orchestrate rule enters `SKILL.md` as one statement; its story and its rare branches go to `references/`
 
-`skills/backlog-orchestrate/SKILL.md` is injected whole into the driver's context and re-read on every turn of a run, and a run is a few hundred turns. The
-cost of a sentence in it is therefore the sentence times the turns, whether or not the run ever acts on it. Two measurements, both in characters of the body:
-the 2026-09-01 floor trim took it to **60,168**, and by 2026-10-05 it stood at **151,246** — 2.5 times as large in five weeks. The growth was the habit, not
-the rules: each new rule landed with the incident that motivated it written out beside it (the bug number, what the first version did wrong, the measurement
-that proved it), each failure path landed inline in the section it interrupted, and each fixed sequence of repository and file checks landed as prose the
-driver re-derived into commands every time. The run read all of it, all the time.
-`docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md` is the shrink; this section is what stops the next one.
+`skills/backlog-orchestrate/SKILL.md` is injected whole into the driver's context and re-read on every turn of a run, and a run is a few hundred turns. The cost
+of a sentence in it is therefore the sentence times the turns, whether or not the run ever acts on it. Two measurements, in characters of the body: the
+2026-09-01 floor trim took it to **60,168**, and by 2026-10-05 it stood at **150,227** (151,246 bytes) — 2.5 times as large in five weeks. The growth was the
+habit, not the rules: each new rule landed with the incident that motivated it written out beside it (the bug number, what the first version did wrong, the
+measurement that proved it), each failure path landed inline in the section it interrupted, and each fixed sequence of repository and file checks landed as
+prose the driver re-derived into commands every time. The run read all of it, all the time. `docs/superpowers/plans/2026-10-05-orchestrate-body-shrink.md` is
+the shrink; this section is what stops the next one.
 
 The three levers, and why exactly these three. **A story moves to `references/rationale.md`**, because the reader of the body needs the instruction and the
 reader of the rationale needs the evidence, and they are different readers at different moments. **A branch a clean run never takes moves to its own
