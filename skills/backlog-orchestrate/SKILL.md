@@ -959,8 +959,9 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" cl
 git -C "$PWD/.worktrees/<n>" push -u origin backlog/<n>
 ```
 
-The issue stays **open**, and a failed push **parks** the item exactly as a failed merge does — `attention <n> --kind parked` naming git's message, then
-`stage <n> parked`, worktree and branch left where they are (`references/tracker.md` §9, _branch mode_).
+The issue stays **open**, and a failed push **parks** the item exactly as a failed merge does — `attention <n> --kind parked --detail "push of the item branch
+to origin failed — branch and worktree kept, nothing merged"`, then `stage <n> parked`, worktree and branch left where they are (`references/tracker.md` §9,
+_branch mode_). Git's refusal is read, never put in the detail: it stays in this session's own output.
 
 No `stage <id> merging` and no `merge-check` — nothing is merging. Everything `merge-check` does (the base tree, the `symbolic-ref` precondition, the dirty-path
 probe) exists to protect a write to the tree holding the base, and there is no write. And **no `git branch -d`. The branch is the deliverable**, the only copy

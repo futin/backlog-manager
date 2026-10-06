@@ -4629,6 +4629,49 @@ test("every --detail and --note value is the driver's own words", () => {
   assert.ok(count >= 15, `only ${count} --detail/--note values found — the scan is no longer reaching them`);
 });
 
+// #244. The scan above checks the --detail values a file spells out; it cannot see a park instruction that spells out no value at all and
+// tells the driver, in prose, to fill one with text a tool wrote — "naming git's message", "with the classifier's message quoted", "that row
+// quoted in the detail". Three such sentences survived the body shrink verbatim, each an instruction to put git's error line, the auto-mode
+// classifier's `Reason:` or a check's captured output inside a double-quoted argument. So each park site is pinned to its fixed template here,
+// and the prose shape that produced them is refused across every file the scan above reads.
+test('every park instruction gives fixed --detail words and never quotes tool text', () => {
+  const read = (rel) => fs.readFileSync(path.join(SKILLS_ROOT, 'backlog-orchestrate', rel), 'utf8').replace(/\s*\n\s*/g, ' ');
+  const RULES = [
+    [
+      'SKILL.md',
+      '--detail "push of the item branch to origin failed — branch and worktree kept, nothing merged"',
+      'a failed branch-mode push parks with fixed words, not git\'s message'
+    ],
+    [
+      'references/tracker.md',
+      '--detail "push of the item branch to origin failed — branch and worktree kept, nothing merged"',
+      'tracker.md restates the branch-mode push park with the same fixed words as the body'
+    ],
+    [
+      'references/tracker.md',
+      '--detail "merge landed locally but the auto-mode classifier denied the push to <base> — push it by hand"',
+      'a classifier-denied push parks with fixed words, not the classifier\'s message'
+    ],
+    [
+      'references/check-failures.md',
+      '--detail "a check could not run: <the failing command names> — fix the command or the environment"',
+      'a check that never ran parks naming the command, not quoting its row'
+    ]
+  ];
+  for (const [file, needle, rule] of RULES) {
+    assert.ok(read(file).includes(needle), `${file} lost the rule: ${rule} (${needle})`);
+  }
+  const FILES = ['SKILL.md', ...fs.readdirSync(REFERENCES).filter((name) => name.endsWith('.md')).map((name) => `references/${name}`)];
+  for (const file of FILES) {
+    const text = read(file);
+    assert.doesNotMatch(
+      text,
+      /naming git's message|the classifier's message quoted|quoted in the detail/i,
+      `${file} tells the driver to put tool text into a park detail — give fixed --detail words instead`
+    );
+  }
+});
+
 test('the classifier denial records the run fact, not the classifier prose', () => {
   // Both denial sites — §2's pre-flight probe and §9's real merge — and the
   // note has to name which one asked, because that IS the answer
