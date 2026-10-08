@@ -37,6 +37,14 @@ Then open **http://localhost:5177**. `docker:sync` is down-then-up when you want
 from the same dev image and receive the source through a bind mount, so a code change needs no rebuild — but [`vite.config.ts`](../../vite.config.ts) is read at
 server start, so editing it needs `docker compose restart client`.
 
+`pnpm run docker:run` is the same stack without the development half: [`docker-compose.run.yml`](../../docker-compose.run.yml) layers over the base file, turns
+the server's command into `pnpm run build` then `node dist/server/src/main.js`, publishes the web port on the server too, and parks the client behind a `dev`
+profile so it never starts. One container, about 110 MiB at idle against about 800 MiB for the watch-mode pair. It tears the stack down first because a
+still-running client would hold `:5177`; `docker:up` and `docker:down` switch back and stop it as before.
+
+The client runs Vite without `CHOKIDAR_USEPOLLING`. Docker Desktop's VirtioFS delivers host edits to the container as inotify events, so HMR fires on its own.
+If an edit on the host ever stops reaching the browser, putting `CHOKIDAR_USEPOLLING: 'true'` back on the client service is the fallback.
+
 ### Host only
 
 ```bash
@@ -155,6 +163,7 @@ stack topology (`host.docker.internal`), not a policy default, so it is overrida
     - vite.config.ts
     - pnpm-workspace.yaml
     - docker-compose.yml
+    - docker-compose.run.yml
     - Dockerfile
     - .env.example
     - scripts/test-all.mjs

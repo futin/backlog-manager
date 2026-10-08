@@ -65,6 +65,10 @@ That brings up two containers — the Nest API on `:4322` and the Vite dev serve
 `pnpm run docker:down` stops it; `pnpm run docker:sync` tears down and rebuilds — useful after a dependency change, since `node_modules` lives in a named volume
 seeded from the image rather than in the bind mount.
 
+Using the board rather than working on it? `pnpm run docker:run` builds once and runs a single container that serves the built client from the API — same URLs
+(`:5177` and `:4322`), no Nest watcher or Vite, and roughly 700 MiB less resident than the dev stack. It does not reload: rerun it after pulling, or go back to
+`pnpm run docker:up` for hot reload. See [`docker-compose.run.yml`](docker-compose.run.yml).
+
 To run the Node processes on the host instead, install the dependencies first — Quick start never needs this, because the image does its own install:
 
 ```bash
@@ -211,6 +215,7 @@ node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init
 | --------------------------------------- | ----------------------------------------------- |
 | Whole stack (api + client, no database) | `pnpm run docker:up`                            |
 | Rebuild the stack from scratch          | `pnpm run docker:sync`                          |
+| Board only, built, no watchers          | `pnpm run docker:run`                           |
 | Stop the stack                          | `pnpm run docker:down`                          |
 | API only, on the host                   | `pnpm run dev`                                  |
 | Client only, on the host                | `pnpm run dev:web`                              |
@@ -310,6 +315,7 @@ drop the image at `docs/board.png`._
     - scripts
     - package.json
     - docker-compose.yml
+    - docker-compose.run.yml
     - Dockerfile
     - vite.config.ts
     - .env.example

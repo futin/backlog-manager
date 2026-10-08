@@ -1,0 +1,30 @@
+# Run mode: the board as a tool, not as something being developed.
+#
+#   pnpm run docker:run
+#
+# Layered over docker-compose.yml, so every environment line, mount and comment
+# there still holds. What changes is only what the stack keeps resident: one
+# container instead of two, and a compiled server instead of the Nest watcher.
+# The API builds both halves once at start, then serves the client bundle
+# itself (server/src/static.ts) — no Vite, no watcher, no polling. Roughly
+# 400 MiB less than the dev stack at idle.
+#
+# The board stays on the same URL. The server publishes the web port as well as
+# its own, so http://localhost:5177, bookmarks and the `pnpm run tailnet` serve
+# (which reads BM_WEB_PORT) all keep working. Same-origin still holds for the
+# agents origin guard: Host and Origin both arrive as localhost:5177.
+#
+# A code change needs `pnpm run docker:run` again — this mode does not reload.
+# Switch back to hot reload with `pnpm run docker:up`.
+services:
+  server:
+    # exec, so node replaces the shell as PID 1's child and gets compose's
+    # SIGTERM directly instead of through a wrapper that would not forward it.
+    command: sh -c 'pnpm run build && exec node dist/server/src/main.js'
+    ports:
+      - '127.0.0.1:${BM_WEB_PORT:-5177}:4322'
+
+  client:
+    # Not started in run mode. A profile rather than deletion because an
+    # override file cannot remove a service, only reshape it.
+    profiles: ['dev']

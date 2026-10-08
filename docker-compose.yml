@@ -151,9 +151,11 @@ services:
       # Same reason as the server service: the publish is the boundary, the
       # bind inside the container has to be open for it to reach anything.
       BM_BIND: '0.0.0.0'
-      # Bind-mount file events are unreliable on Docker Desktop; polling
-      # always notices.
-      CHOKIDAR_USEPOLLING: 'true'
+      # No CHOKIDAR_USEPOLLING. Docker Desktop's VirtioFS forwards host edits
+      # to the container as inotify events (checked 2026-10-08: a host touch
+      # fires fs.watch inside this container), and polling re-scanned the
+      # whole bind mount on a timer for nothing. If a host edit ever stops
+      # reaching HMR, set CHOKIDAR_USEPOLLING: 'true' here again.
       # Same pin as the server service, and it matters twice over here: both
       # services share the node_modules volume, so an unpinned store had the
       # two of them running the same full install into it concurrently.

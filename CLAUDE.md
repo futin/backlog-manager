@@ -11,6 +11,7 @@ one kanban-by-type board. No database: the registry file and each project's `bac
 | ----------------------------------------- | ------------------------------------------------------ |
 | Whole stack (api + client, no db)         | `pnpm run docker:up`                                   |
 | Rebuild the stack from scratch            | `pnpm run docker:sync`                                 |
+| Board only, built, no watchers (less RAM) | `pnpm run docker:run`                                  |
 | API only, on the host                     | `pnpm run dev`                                         |
 | Client only, on the host                  | `pnpm run dev:web`                                     |
 | Tests (both runners)                      | `pnpm test` (`scripts/test-all.mjs` — jest, then node) |

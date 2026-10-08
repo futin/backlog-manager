@@ -20,6 +20,7 @@
     "tailnet": "node scripts/tailnet.mjs",
     "typecheck": "tsc --noEmit --tsBuildInfoFile node_modules/.cache/tsconfig.tsbuildinfo",
     "docker:up": "docker compose up --build -d",
+    "docker:run": "docker compose down && docker compose -f docker-compose.yml -f docker-compose.run.yml up --build -d",
     "docker:down": "docker compose down",
     "docker:sync": "pnpm run docker:down && pnpm run docker:up"
   },
