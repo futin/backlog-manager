@@ -30,5 +30,15 @@ export default defineConfig({
       '/api': { target: API_TARGET }
     }
   },
-  build: { outDir: 'dist', emptyOutDir: true }
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    // Fonts always ship as files. The served build's CSP (server/src/security.ts)
+    // has no font-src, so fonts fall under default-src 'self' and a data: URI
+    // is refused — which is what Vite's 4 KiB default did to the smallest
+    // @fontsource subsets. `undefined` hands every other asset back to that
+    // default; images may still inline, since img-src admits data:.
+    // test/csp.test.ts pins both halves.
+    assetsInlineLimit: (filePath) => (/\.woff2?$/.test(filePath) ? false : undefined)
+  }
 });
