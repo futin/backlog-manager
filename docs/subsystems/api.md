@@ -175,6 +175,27 @@ visible before `init` writes a run file), and two files it genuinely writes: `wa
 tool. The third, `settings/tracker-sync.json` (#17), is written through `tracker-sync.controller.ts` here and owned by `tracker/sync-config.util.ts` — see
 "Each repo on its own interval" under `tracker/` for why the route lives in this module.
 
+### `hub/` — Hub widgets
+
+`/api/hub/widgets` serves Lookout's widget catalog contract v1 through the `lookout-widgets` package (#249): `hub.controller.ts` hands every method and path
+under that prefix to the package's handler, which owns the contract's routing and answers 404 for anything not declared. `hub-widgets.ts` declares three tiles,
+each opening `/` because the client has no URL routing:
+
+- **`open-total`** (stat, 60 s) — open bugs plus open tasks across every registered project; `warn` while any bug is open. Ideas and refactors are not work
+  until promoted.
+- **`projects`** (list, 60 s) — one row per registered project, keyed by path, its non-zero open sections as the subtitle; a missing store is `error`, an
+  unsupported source `warn`.
+- **`run`** (status, 15 s) — this machine's run files reduced to one state, worst wins: crashed, then paused or needing a person, then running. A finished run
+  is `idle`. `remote` is ignored, the posture the watchdog takes.
+
+Read-only by construction: no widget declares an action, so every POST is the package's 404. The package does no authentication and Lookout's POST carries no
+`Origin`, so an action could not pass the guard every other POST here carries — that is why there are none, not an omission. `hub.module.ts` reads
+`OrchestratorService.runs()`, the pure read, never `OrchestratorController.runs()`, so a hub poll neither arms the watchdog nor sweeps starting entries.
+
+The package declares its types only through `package.json#exports`, which this repo's `moduleResolution: "node"` ignores. `hub/lookout-widgets.d.ts` is an
+ambient shim that re-exports the dist types; `compilerOptions.paths` was the other option, and is wrong here because `nest build` rewrites any import matching a
+`paths` entry into a relative path to the mapped file — a `.d.ts`, at runtime. The shim's header has the detail.
+
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 
 `GET /api/health` is a plain liveness check. `static.ts` serves `client/dist` only when it has been built — registering the static module against a missing
@@ -197,6 +218,7 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
 - **`api.github.com`** — reached only from `tracker/`, with a token read per call from `BM_GITHUB_TOKEN`, and never by the browser: every call goes board → this
   API → GitHub, and the token reaches no payload.
 - **The client** — same-origin `fetch` against these routes, plus the built bundle when `static.ts` finds one.
+- **A Lookout hub** — polls `/api/hub/widgets` server-side over the tailnet, read-only; the existing `.ts.net` Host allowance is what admits it.
 
 ## Invariants
 
