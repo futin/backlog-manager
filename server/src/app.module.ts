@@ -6,11 +6,12 @@ import { HealthController } from './health/health.controller';
 import { ItemsModule } from './items/items.module';
 import { AgentsModule } from './agents/agents.module';
 import { OrchestratorModule } from './orchestrator/orchestrator.module';
+import { HubModule } from './hub/hub.module';
 import { applySecurityMiddleware } from './security';
 import { clientDistModules } from './static';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ItemsModule, AgentsModule, OrchestratorModule, ...clientDistModules()],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ItemsModule, AgentsModule, OrchestratorModule, HubModule, ...clientDistModules()],
   controllers: [HealthController]
 })
 export class AppModule implements NestModule {

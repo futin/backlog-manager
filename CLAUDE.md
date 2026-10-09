@@ -34,7 +34,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   server makes to anybody's items), `agents/` (the
   dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
   `trackers` route and `tracker-sync.json`'s reader/writer) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
-  in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `registry/`, `static.ts` (serves `client/dist` only when built),
+  in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (#249 — three read-only
+  Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, no actions), `registry/`, `static.ts` (serves `client/dist` only when built),
   `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
