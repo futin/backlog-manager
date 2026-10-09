@@ -127,6 +127,9 @@ importers:
       '@nestjs/serve-static':
         specifier: ^5.0.5
         version: 5.0.5(@nestjs/common@11.2.2(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@11.2.2)(express@5.2.1(supports-color@8.1.1))
+      lookout-widgets:
+        specifier: github:futin/lookout-widgets#v0.1.0
+        version: https://codeload.github.com/futin/lookout-widgets/tar.gz/4c33ee02c31525b0db9db3ca006b8ed170981ee7
       marked:
         specifier: ^16.4.1
         version: 16.4.2
@@ -2366,6 +2369,11 @@ packages:
   log-symbols@4.1.0:
     resolution: {integrity: sha512-8XPvpAA8uyhfteu8pIvQxpJZ7SYYdpUivZpGy6sFsBuKRY/7rQGavedeB8aK+Zkyq6upMFVL/9AW6vOYzfRyLg==}
     engines: {node: '>=10'}
+
+  lookout-widgets@https://codeload.github.com/futin/lookout-widgets/tar.gz/4c33ee02c31525b0db9db3ca006b8ed170981ee7:
+    resolution: {gitHosted: true, integrity: sha512-OAzAbTCZLmKszH3iut3EaxdWz0NL9SK6AmE1xxnP9+/MuXPBOlOkDpE3lSLpU8ScKtNhjPQit0G9HHIGHjEZKQ==, tarball: https://codeload.github.com/futin/lookout-widgets/tar.gz/4c33ee02c31525b0db9db3ca006b8ed170981ee7}
+    version: 0.1.0
+    engines: {node: '>=20'}
 
   loose-envify@1.4.0:
     resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
@@ -5778,6 +5786,8 @@ snapshots:
     dependencies:
       chalk: 4.1.2
       is-unicode-supported: 0.1.0
+
+  lookout-widgets@https://codeload.github.com/futin/lookout-widgets/tar.gz/4c33ee02c31525b0db9db3ca006b8ed170981ee7: {}
 
   loose-envify@1.4.0:
     dependencies:
