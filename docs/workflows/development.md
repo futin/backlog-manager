@@ -136,6 +136,15 @@ prefix: pnpm reads `PNPM_CONFIG_*` and silently ignores the npm-compatible `npm_
 on an image without `procps` the real server survived as an orphan holding the port and every later rebuild died. Fixed twice over: `procps` in the image, and
 `--no-shell` in the `dev` script so the server is the CLI's direct child.
 
+**The server keeps serving the old build after a merge.** `nest start --watch` runs TypeScript's own watcher, not chokidar, and by default it binds one
+`fs.watch` to each source file's inode — which on Docker Desktop's virtiofs bind mount failed silently two ways (#15). A file replaced on the host (`git merge`,
+`git checkout`, an atomic-write editor) gets a new inode, the container never learns the old one died, and that path is never watched again. And the
+long-lived inotify instance can stop being fed at all, even for in-place writes a fresh `fs.watch` still sees. Either way Nest never recompiles or restarts, and
+nothing on the board says which build is live. The server service therefore sets `TSC_WATCHFILE` and `TSC_WATCHDIRECTORY` to `DynamicPriorityPolling` in
+[`docker-compose.yml`](../../docker-compose.yml), which tsc honours only while no tsconfig carries `watchOptions` — keep it that way, or the host `pnpm run dev`
+polls too. `CHOKIDAR_USEPOLLING` cannot help here: tsc never reads it. A changed compose environment needs `docker compose up -d --force-recreate server` (or
+`pnpm run docker:sync`); a plain `docker compose restart` keeps the container's old environment.
+
 **Every item's date looks like its `created:` date.** `git` is missing from the container, or git refuses the read-only host mounts as dubiously owned. The scan
 derives each item's `lastCommit` through `git log` and **degrades silently** to `created` on any failure, which is the exact staleness bug that rung exists to
 fix. The image installs `git` and adds `safe.directory` to _system_ config — `safe.directory` is honoured only from protected configuration, so neither `-c` nor

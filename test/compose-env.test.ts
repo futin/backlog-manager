@@ -118,3 +118,20 @@ describe('docker-compose BM_MACHINE_NAME', () => {
     expect(assignments('BM_MACHINE_NAME')).toEqual(['${BM_MACHINE_NAME:-}']);
   });
 });
+
+/**
+ * #15 — the server's TypeScript watch polls, in the container only. `nest start --watch` runs tsc's own `createWatchProgram`, not chokidar, and on a Docker
+ * Desktop virtiofs bind mount its inode-bound `fs.watch` per file went silent twice over: a file replaced by `git merge` lost its watch for good, and the
+ * long-lived inotify instance later stopped being fed at all — so the stack kept serving a pre-merge build with nothing on the board to say so. tsc reads
+ * these two variables only while no tsconfig carries `watchOptions`, which is why they live here and not in a tsconfig the host `pnpm run dev` and every
+ * editor would also read.
+ */
+describe('docker-compose TSC_WATCHFILE / TSC_WATCHDIRECTORY', () => {
+  it('polls source files with dynamic priority', () => {
+    expect(assignments('TSC_WATCHFILE')).toEqual(['DynamicPriorityPolling']);
+  });
+
+  it('polls directories with dynamic priority', () => {
+    expect(assignments('TSC_WATCHDIRECTORY')).toEqual(['DynamicPriorityPolling']);
+  });
+});

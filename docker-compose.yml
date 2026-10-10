@@ -114,6 +114,28 @@ services:
       # in here would be the container id, so it has to be passed through, and
       # `:-` so an unset one reads as empty — which that release refuses.
       BM_MACHINE_NAME: '${BM_MACHINE_NAME:-}'
+      # Make the server's watch POLL (#15). `nest start --watch` is not
+      # chokidar: it runs TypeScript's own createWatchProgram, which watches
+      # every source file with one fs.watch bound to that file's inode. On a
+      # Docker Desktop virtiofs bind mount that went silent two ways. A file
+      # REPLACED on the host — `git merge`, `git checkout`, an atomic-write
+      # editor — gets a new inode, the guest never learns the old one died,
+      # and tsc never re-watches that path again. And later the long-lived
+      # inotify instance stopped being fed at all, even for in-place writes
+      # a fresh fs.watch in the same container still saw. Either way Nest
+      # never recompiled, kept serving the pre-merge build, and nothing said
+      # so; `docker compose restart server` "fixed" it only by starting a new
+      # inotify instance. Polling compares mtimes by stat, so neither failure
+      # can reach it.
+      #
+      # CHOKIDAR_USEPOLLING would do nothing here — tsc never reads it. And
+      # tsc reads THESE two only while no tsconfig carries `watchOptions`, so
+      # keep the setting out of tsconfig.json / tsconfig.build.json: there it
+      # would switch the host `pnpm run dev` and every editor to polling too.
+      # Dynamic priority polling checks recently-changed files every 250 ms
+      # and backs unchanged ones off to 2 s, over a few hundred files.
+      TSC_WATCHFILE: 'DynamicPriorityPolling'
+      TSC_WATCHDIRECTORY: 'DynamicPriorityPolling'
     ports:
       - '127.0.0.1:${BM_API_PORT:-4322}:4322'
     volumes:
