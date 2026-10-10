@@ -1022,9 +1022,8 @@ _the merge's shape_).
 
 **The merge is one Bash call of its own: the driver never chains `git merge` with anything else** — not the push, not an `echo`, not the stage. There is one
 classifier verdict per Bash call, judged over the whole call, and the failure it produces decides which path the item takes: a denied merge degrades the run,
-a denied push parks the item. Chain them and the push's question is answered as a merge denial — in run-20260923-154625 (claude-agents-dashboard)
-`git merge …; git push origin main` in one call was denied as `[Merge Without Review]` for an item whose review had approved it, and the run degraded to
-branch mode for the rest of its queue. Read the merge's exit status from the tool result, then issue the push (tracker) as the next call.
+a denied push parks the item. Chain them and the push's question is answered as a merge denial, and the run degrades to branch mode for the rest of its queue
+(`references/rationale.md` §9). Read the merge's exit status from the tool result, then issue the push (tracker) as the next call.
 
 **If the merge call does not succeed, read `references/merge-failures.md` in full before issuing anything else.** It tells three failures apart — a permission
 denial of the call itself, a pre-merge refusal and a conflict — and gives each one its own commands. **Only the first degrades the run to branch mode; the other

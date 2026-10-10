@@ -3686,29 +3686,67 @@ test('the body keeps the rules whose stories moved to references/', () => {
   }
 });
 
-test('the SKILL.md body carries no bug-N / task-N / (#N) history outside fenced blocks; history lives in references/rationale.md', () => {
+// The scan behind the no-history guard below, factored out so its pattern is proved on synthetic text (the self-tests after it) rather than only on whatever
+// SKILL.md happens to contain today — a guard whose only input is the file it guards cannot show it would catch the next offender. Returns each offending line
+// as `"<lineNo>: <trimmed line>"`, 1-based. A fence opens and closes on a line whose first non-blank characters are three backticks or three tildes; the
+// fence lines and everything between them are exempt. History is `bug-N` / `task-N`, `#N` with one digit or more (a single-digit `#3` is the same backstory as
+// `#226`), or a run id, `run-` + 8 digits + `-` + 6 digits — the full shape only, so `run-2026` or `run-id` prose stays clean. A line containing any
+// allowlisted substring is exempt.
+function historyOffenders(text, allowed) {
+  const offenders = [];
+  let inFence = false;
+  text.split('\n').forEach((line, i) => {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      return;
+    }
+    if (inFence) return;
+    if (/\b(bug|task)-[0-9]+|#[0-9]+|\brun-[0-9]{8}-[0-9]{6}\b/.test(line) && !allowed.some((a) => line.includes(a))) {
+      offenders.push(`${i + 1}: ${line.trim().slice(0, 140)}`);
+    }
+  });
+  return offenders;
+}
+
+test('historyOffenders flags bug-N, task-N, #N of any width and full run ids, and nothing shaped like them but shorter', () => {
+  assert.deepEqual(historyOffenders('see bug-7 for why', []), ['1: see bug-7 for why']);
+  assert.deepEqual(historyOffenders('task-12 moved', []), ['1: task-12 moved']);
+  assert.deepEqual(historyOffenders('(#3)', []), ['1: (#3)']);
+  assert.deepEqual(historyOffenders('(#226;', []), ['1: (#226;']);
+  assert.deepEqual(historyOffenders('in run-20260923-154625 it failed', []), ['1: in run-20260923-154625 it failed']);
+  assert.deepEqual(historyOffenders('a run-2026 note', []), []);
+  assert.deepEqual(historyOffenders('the run-id field', []), []);
+});
+
+test('historyOffenders exempts backtick and tilde fences, indented openers included, and only until the fence closes', () => {
+  const json = ['```json', '{ "runId": "run-20260831-123118" }', '```', '{ "runId": "run-20260831-123118" }'].join('\n');
+  assert.deepEqual(historyOffenders(json, []), ['4: { "runId": "run-20260831-123118" }']);
+  const tilde = ['~~~', 'bug-4', '~~~', 'bug-4'].join('\n');
+  assert.deepEqual(historyOffenders(tilde, []), ['4: bug-4']);
+  const indented = ['   ```bash', 'echo bug-4', '   ```'].join('\n');
+  assert.deepEqual(historyOffenders(indented, []), []);
+});
+
+test('historyOffenders honours the allowlist and reports 1-based line numbers with the line trimmed', () => {
+  const line = 'Ids are `31`, never `#31` (`#` opens a shell comment).';
+  assert.deepEqual(historyOffenders(line, ['never `#31`']), []);
+  assert.deepEqual(historyOffenders(line, []), [`1: ${line}`]);
+  assert.deepEqual(historyOffenders(['clean', '', '   bug-9 here  '].join('\n'), []), ['3: bug-9 here']);
+});
+
+test('the SKILL.md body carries no bug-N / task-N / #N / run-id history outside fenced blocks; history lives in references/rationale.md', () => {
   // A backstory that names the defect it came from is evidence, not instruction: it costs every turn of every run for a sentence the run never acts on. The
-  // body keeps the rule as one imperative statement and `references/rationale.md` keeps the story. Fenced blocks are exempt because they hold text the run
-  // TYPES or is shown (the `plan` sample board, example ids), and an id there is data, not history. ALLOWED lists any prose line that must keep a number
-  // anyway, each with the reason it is an instruction. The pattern is `#` plus two or more digits, not only the parenthesised `(#N)` form: `(#226;` slipped
-  // past the narrower one once.
+  // body keeps the rule as one imperative statement and `references/rationale.md` keeps the story. Fenced blocks — ``` or ~~~ — are exempt because they hold
+  // text the run TYPES or is shown (the `plan` sample board, example ids, the sample `init` output's run id), and an id there is data, not history. ALLOWED
+  // lists any prose line that must keep a number anyway, each with the reason it is an instruction. The pattern is `#` plus one or more digits, not only the
+  // parenthesised `(#N)` form: `(#226;` slipped past a narrower one once. A run id (`run-YYYYMMDD-HHMMSS`) is history too — it names the run an incident
+  // happened in, which is exactly the story rationale.md exists to hold (#247). The scan itself is `historyOffenders`, above.
   const ALLOWED = [
     // "Ids inside a run are bare issue numbers, `31`, never `#31`" — an instruction about what to type (`#` opens a shell comment), not a backstory; the
     // number is an example id, not a reference to a defect.
     'never `#31`'
   ];
-  const offenders = [];
-  let inFence = false;
-  fs.readFileSync(SKILL_MD, 'utf8')
-    .split('\n')
-    .forEach((line, i) => {
-      if (/^\s*```/.test(line)) {
-        inFence = !inFence;
-        return;
-      }
-      if (inFence) return;
-      if (/\b(bug|task)-[0-9]+|#[0-9]{2,}/.test(line) && !ALLOWED.some((a) => line.includes(a))) offenders.push(`${i + 1}: ${line.trim().slice(0, 140)}`);
-    });
+  const offenders = historyOffenders(fs.readFileSync(SKILL_MD, 'utf8'), ALLOWED);
   assert.deepEqual(offenders, [], `history is back in the SKILL.md body (move it to references/rationale.md):\n${offenders.join('\n')}`);
 });
 

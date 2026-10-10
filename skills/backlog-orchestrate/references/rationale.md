@@ -298,6 +298,15 @@ it is to switch branches. **Precondition 2 includes `diff --cached`** because a 
 an item passed review and verification and then had its merge refused by uncommitted work). The tool also diffs with `--no-renames`, so a staged `git mv`
 reports both names.
 
+### Why the merge is one Bash call of its own
+
+The permission classifier returns one verdict per Bash call, judged over the whole call, and the two failures a merge-and-push can meet take different paths:
+a denied merge degrades the run to branch mode, a denied push parks the item. Chaining them makes the push's question get answered on the merge's path. That
+is what happened in run-20260923-154625 (claude-agents-dashboard): `git merge …; git push origin main` went out as one call, the classifier denied it as
+`[Merge Without Review]` for an item whose review had approved it and whose verification was green, and the run degraded to branch mode for the rest of its
+queue. #222 introduced the rule that the merge is a call of its own, chained with nothing — not the push, not an `echo`, not the stage — so the exit status
+the driver reads, and the verdict the classifier gives, belong to the merge alone.
+
 ### Why undoing a completed merge is `git revert -m 1`, never `git reset --hard`
 
 Proved empirically before this skill was written, not reasoned out. `reset --hard` resets the working tree and index in full, and it silently discarded an

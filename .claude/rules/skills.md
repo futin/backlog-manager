@@ -63,7 +63,8 @@ paths: ["skills/**", "agents/**"]
 - **A new orchestrate rule enters SKILL.md as one statement; its story and its rare branches go to references/.** The body of
   `skills/backlog-orchestrate/SKILL.md` is resident for every turn of a run, so a new rule enters it as ONE imperative statement and nothing else. The
   incident that earned the rule — the bug or task id, the date, the measurement, what the failed version did — goes to `references/rationale.md`; the body
-  carries no `bug-N` / `task-N` / `#NN` history outside a fenced block, and the guard in `orchestrate.test.mjs` names the line that has one. A branch a clean
+  carries no `bug-N` / `task-N` / `#N` (any width) / run-id (`run-YYYYMMDD-HHMMSS`) history outside a ``` or ~~~ fenced block, and the guard in
+  `orchestrate.test.mjs` names the line that has one. A branch a clean
   run never takes (a failure path, a rare mode, one source kind) goes to its own `references/*.md` file, and the body names that file on a trigger the run
   can OBSERVE — a verdict, an exit code, a field of `backlog/source.json` — never on the driver's judgement that the case "might apply". The trigger has to
   be reachable on BOTH entry paths: a fresh run and a `--resume`, which skips the sections a fresh run finds the pointer in. Prose that only tells the driver

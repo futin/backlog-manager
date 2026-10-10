@@ -918,7 +918,7 @@ subcommand** (`merge-check`, `leftover`, `worktree`, `cleanup`, `inspect`), beca
 behaviour — and the sequence is then unit-tested against real repositories, which the prose never was.
 
 Moving text is where a rule gets lost, so each statement the body keeps has a `[needle, rule]` pair in `orchestrate.test.mjs` and a guard keeps `bug-N` /
-`task-N` / `#NN` history out of the prose. The first fails by the rule's name when a later trim drops it; the second is what makes the convention checkable
+`task-N` / `#N` / run-id (`run-YYYYMMDD-HHMMSS`) history out of the prose, fenced blocks (``` or ~~~) exempt. The first fails by the rule's name when a later trim drops it; the second is what makes the convention checkable
 rather than hoped for. What this section deliberately does **not** add is a size budget. The body's size is reported on every test run (`t.diagnostic`, never
 an assertion) so growth is visible where the work happens, but a hard cap has compressed load-bearing rules away twice on this machine, and the one failure
 this convention can have is a lost rule. When a target and a rule disagree, the rule wins and the target moves.
