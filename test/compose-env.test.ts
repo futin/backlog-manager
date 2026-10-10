@@ -131,7 +131,9 @@ describe('docker-compose TSC_WATCHFILE / TSC_WATCHDIRECTORY', () => {
     expect(assignments('TSC_WATCHFILE')).toEqual(['DynamicPriorityPolling']);
   });
 
-  it('polls directories with dynamic priority', () => {
-    expect(assignments('TSC_WATCHDIRECTORY')).toEqual(['DynamicPriorityPolling']);
+  it('polls directories with dynamic priority, in the directory variable\'s own vocabulary', () => {
+    // Not the file variable's spelling: tsc's updateOptionsForWatchDirectory accepts only the two `RecursiveDirectoryUsing…` values and falls back to
+    // inotify for anything else without a word, so `'DynamicPriorityPolling'` here read as configured and changed nothing (review of #15, fix loop 1).
+    expect(assignments('TSC_WATCHDIRECTORY')).toEqual(['RecursiveDirectoryUsingDynamicPriorityPolling']);
   });
 });

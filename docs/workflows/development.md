@@ -140,8 +140,9 @@ on an image without `procps` the real server survived as an orphan holding the p
 `fs.watch` to each source file's inode — which on Docker Desktop's virtiofs bind mount failed silently two ways (#15). A file replaced on the host (`git merge`,
 `git checkout`, an atomic-write editor) gets a new inode, the container never learns the old one died, and that path is never watched again. And the
 long-lived inotify instance can stop being fed at all, even for in-place writes a fresh `fs.watch` still sees. Either way Nest never recompiles or restarts, and
-nothing on the board says which build is live. The server service therefore sets `TSC_WATCHFILE` and `TSC_WATCHDIRECTORY` to `DynamicPriorityPolling` in
-[`docker-compose.yml`](../../docker-compose.yml), which tsc honours only while no tsconfig carries `watchOptions` — keep it that way, or the host `pnpm run dev`
+nothing on the board says which build is live. The server service therefore sets `TSC_WATCHFILE: DynamicPriorityPolling` and
+`TSC_WATCHDIRECTORY: RecursiveDirectoryUsingDynamicPriorityPolling` in [`docker-compose.yml`](../../docker-compose.yml) — two vocabularies, and tsc treats any
+other directory value, the file variable's spelling included, as its inotify default without a word. tsc honours both only while no tsconfig carries `watchOptions` — keep it that way, or the host `pnpm run dev`
 polls too. `CHOKIDAR_USEPOLLING` cannot help here: tsc never reads it. A changed compose environment needs `docker compose up -d --force-recreate server` (or
 `pnpm run docker:sync`); a plain `docker compose restart` keeps the container's old environment.
 
