@@ -3253,7 +3253,9 @@ commands, so anything that weakens or routes around the normalisation needs prov
 ## The driver owns a tracker item's claim for the whole item
 
 Task-47, spec §7.1. On a tracker project the orchestrator's driver claims an item's issue at `stage <n> preflight` — **before the worktree exists** — and
-releases it at the item's terminal stage, or at `abort` for anything that never reached one (bug-40, below). The dispatched `backlog-execute` session never
+releases it at the item's terminal stage, or at `abort` for anything that never reached one (bug-40, below). Parking is one of those terminal stages, and a
+parked item is regularly carried forward by hand once its cause is fixed, so the first `stage` out of `parked` to a non-release stage claims again (#250) —
+without it the item ran review and verification on a released claim, every heartbeat refused, and the issue free to any other machine. The dispatched `backlog-execute` session never
 runs `start`, `stop`, `heartbeat`, `move` or `comment` on the item at all, which is the exact opposite of the files arrangement, where execute stamps the item
 file itself.
 
