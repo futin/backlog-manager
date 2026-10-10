@@ -7794,6 +7794,133 @@ test('every stage after preflight publishes the queue item onto the claim', asyn
   assert.equal(beats[1].body.state.sessionId, 's1');
 });
 
+/* #250. Parking RELEASES the claim (`parked` is in `CLAIM_RELEASE_STAGES`), and a parked item is regularly carried forward by hand once its cause is fixed —
+   `stage <n> inspecting` and on to `merged`, often after the run itself has finished. Before this, nothing on that path claimed: the preflight claim is
+   behind its own transition and `--resume`'s re-claim skips a release stage, so the item ran review and verification on an issue whose only claim was
+   released, every heartbeat refused, and another machine free to take it. Leaving `parked` for a stage that is not itself a release now re-claims. */
+async function parkTracked(project, home, port) {
+  assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+  const wt = path.join(project, '.worktrees', '3');
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'dispatched', '--worktree', wt, '--branch', 'backlog/3')).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'parked')).status, 0);
+  assert.equal((await runApi(project, home, port, 'finish', '--status', 'done')).status, 0);
+  return wt;
+}
+
+test('#250: leaving parked re-claims the issue once and the heartbeat lands on the new comment', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    await parkTracked(project, home, port);
+    const out = await runApi(project, home, port, 'stage', '3', 'inspecting');
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(out.stderr, '', 'the heartbeat after the re-claim is accepted, not refused');
+    // A stage the item moves on to from there is not a re-claim: the claim is live again.
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'reviewing')).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'reviewing')).status, 0);
+  });
+
+  const claims = posts(requests, 'claim');
+  assert.equal(claims.length, 2, 'the preflight claim, and exactly one re-claim on leaving parked');
+  assert.equal(claims[1].body.phase, 'execute');
+  assert.equal(claims[1].body.id, '#3');
+
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.deepEqual(written.queue[0].claim, { commentId: 502 });
+  assert.equal(written.queue[0].stage, 'reviewing');
+  const beats = posts(requests, 'heartbeat');
+  assert.equal(beats.at(-1).body.commentId, 502);
+  assert.equal(beats.at(-1).body.state.stage, 'reviewing');
+});
+
+test('#250: a stage that is not a transition out of parked posts no claim', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(claimRoutes(project), async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    for (const stage of ['preflight', 'dispatched', 'inspecting', 'inspecting', 'parked', 'parked']) {
+      assert.equal((await runApi(project, home, port, 'stage', '3', stage)).status, 0);
+    }
+    // parked → skipped is a release stage to a release stage: still nothing to claim.
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'skipped')).status, 0);
+  });
+
+  assert.equal(posts(requests, 'claim').length, 1, 'only the preflight claim');
+});
+
+test('#250: leaving parked when another run holds the issue skips the item and names the tree it left, exit 0', async (t) => {
+  const { home, project } = trackerFixture(t);
+  let claimsSeen = 0;
+  const heldOnSecond = {
+    '/api/items/claim': (body, _url, method) => {
+      if (method === 'GET') return { body: null };
+      claimsSeen += 1;
+      return claimsSeen === 1
+        ? { status: 201, body: { commentId: 501, record: { v: 1, session: body?.session } } }
+        : {
+            status: 409,
+            body: { error: '#3 is already in progress', holder: { session: 'other-machine', host: 'futin@mac', heartbeat: '…', ageMs: 42_000, commentId: 9 } },
+          };
+    },
+  };
+
+  let wt;
+  const { requests } = await withApi(claimRoutes(project, heldOnSecond), async (port) => {
+    wt = await parkTracked(project, home, port);
+    const out = await runApi(project, home, port, 'stage', '3', 'inspecting');
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /"stage":"skipped"/);
+  });
+
+  const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  const item = written.queue[0];
+  assert.equal(item.stage, 'skipped');
+  assert.match(item.note, /^claimed elsewhere \(session other-machine on futin@mac, heartbeat 42s ago\)/);
+  assert.ok(item.note.includes(wt), `the note names the worktree left in place: ${item.note}`);
+  assert.ok(item.note.includes('backlog/3'), `the note names the branch left in place: ${item.note}`);
+  assert.equal(item.worktree, wt);
+  assert.equal(item.branch, 'backlog/3');
+  // The park already released this run's claim; nothing is beaten or released on the other run's issue.
+  assert.equal(posts(requests, 'release').length, 1, 'only the park-s own release');
+  assert.equal(posts(requests, 'heartbeat').filter((b) => b.body.state?.stage === 'inspecting').length, 0);
+});
+
+test('#250: a re-claim the API cannot answer exits 9 and writes nothing', async (t) => {
+  const { home, project } = trackerFixture(t);
+  let claimsSeen = 0;
+  const downOnSecond = {
+    '/api/items/claim': (body, _url, method) => {
+      if (method === 'GET') return { body: null };
+      claimsSeen += 1;
+      return claimsSeen === 1 ? { status: 201, body: { commentId: 501, record: { v: 1 } } } : { status: 503, body: { error: 'no token' } };
+    },
+  };
+
+  await withApi(claimRoutes(project, downOnSecond), async (port) => {
+    await parkTracked(project, home, port);
+    const before = fs.readFileSync(runFile(home, project), 'utf8');
+    const out = await runApi(project, home, port, 'stage', '3', 'inspecting');
+    assert.equal(out.status, 9, out.stderr);
+    assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before, 'run.json is byte-identical');
+  });
+});
+
+test('#250: a files run carries a parked item forward with no API request, port closed', async (t) => {
+  const { home, project } = orchFixture(t);
+  const port = await closedPort();
+  seedReadyTask(project, 'task-1', 'a task');
+  assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+  for (const stage of ['preflight', 'dispatched', 'parked', 'inspecting', 'reviewing']) {
+    const out = await runApi(project, home, port, 'stage', 'task-1', stage);
+    assert.equal(out.status, 0, `${stage}: ${out.stderr}`);
+    assert.equal(out.stderr, '');
+  }
+  const run = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(run.queue[0].stage, 'reviewing');
+  assert.equal(run.queue[0].claim, undefined);
+});
+
 test('a heartbeat the API refuses is one stderr line and never fails the stage', async (t) => {
   const { home, project } = trackerFixture(t);
   const broken = { '/api/items/heartbeat': { status: 500, body: { error: 'boom' } } };

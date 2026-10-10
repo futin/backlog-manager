@@ -29,7 +29,8 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   degrades** — the merge has already landed, so `branched` would be false — which is the one exception to the classifier-denial rule. Why:
   [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-commits-or-merges)
 - **On a tracker project the DRIVER owns each item's claim, and the execute session never touches the issue** (task-47). The run claims at
-  `stage <n> preflight` — before the worktree exists — with `phase: 'execute'` and a `ClaimRun` naming the run; it publishes the queue item as `ClaimState`
+  `stage <n> preflight` — before the worktree exists — and again on a `stage` out of `parked` to a non-release stage (#250), with `phase: 'execute'` and a
+  `ClaimRun` naming the run; it publishes the queue item as `ClaimState`
   through `heartbeat` from every command that changes one (`stage`, `usage`, `verify`, `assume`, `watch`'s tick); and it releases at a terminal stage
   (`merged`, `branched`, `failed`, `skipped`, `parked`, `ungroomed` — never `needs-answers`), billing `executeElapsed`/`executeTokens` on top of the counters
   it reads first. **`abort` releases too, with the reason `aborted`** (bug-40): a torn-down run passes through no terminal stage, and an unreleased claim is

@@ -1843,7 +1843,9 @@ function trackerCandidates(projectRoot, { ids }) {
 // ## Who owns the claim
 //
 // **The driver does, for the whole item.** It claims at `stage <n> preflight`
-// — before the worktree exists — and releases at the terminal stage. The
+// — before the worktree exists — and releases at the terminal stage. A parked
+// item carried forward by hand claims again on leaving `parked` (#250), since
+// the park released it. The
 // dispatched `backlog-execute` session never runs `start`, `stop`, `move` or
 // `heartbeat` on a tracker item (its SKILL.md says so, and W-3 pins the
 // sentence), which is the opposite of the files arrangement where execute
@@ -3233,20 +3235,36 @@ function cmdStage(argv, out = console.log) {
      only, exactly like the pause gate above and for the same reason: a
      re-stamp of a stage the item already occupies must not post a second
      claim comment on an issue this run already holds. */
-  if (tracker && stage === 'preflight' && item.stage !== stage) {
+  /* **Leaving `parked` re-claims** (#250), because parking RELEASED the
+     claim — `parked` is in `CLAIM_RELEASE_STAGES` — and a parked item is
+     carried forward by hand once its cause is fixed, often after the run has
+     finished. Neither of the other two claim sites sees that path: the one
+     above is `preflight`'s transition, and `cmdClaim` (`--resume`) skips every
+     item in a release stage. Without this the item ran review and
+     verification on an issue whose only claim was released, every heartbeat
+     refused, and another machine free to take it. Same transition-only rule
+     and same won/held/throw handling as `preflight`; a move from `parked` to
+     another release stage holds nothing, so claims nothing. */
+  const leavingParked = item.stage === 'parked' && !CLAIM_RELEASE_STAGES.has(stage);
+  if (tracker && ((stage === 'preflight' && item.stage !== stage) || leavingParked)) {
     const claimed = trackerClaim(run, item);
     if (!claimed.won) {
       /* Another run holds it. The item is SKIPPED and the loop moves on, exit
          `0` — a refusal here is information about the world, not a failure of
          this call. This is the one place a `stage` command writes a stage
-         other than the one it was given, and it says so in the note. */
-      applyQueueItemFields(item, { stage: 'skipped', note: claimed.note });
+         other than the one it was given, and it says so in the note. An item
+         leaving `parked` already has a worktree and a branch, which this
+         leaves in place and names, so whoever reads the skip knows what is
+         still on disk. */
+      const kept = [item.worktree ?? worktree, item.branch ?? branch].filter((v) => typeof v === 'string' && v !== '');
+      const note = leavingParked && kept.length > 0 ? `${claimed.note}; left in place: ${kept.join(', ')}` : claimed.note;
+      applyQueueItemFields(item, { stage: 'skipped', note });
       run.updatedAt = nowISO();
       writeRunAtomic(dir, run);
       // Out of this run's plan, so off the label. Usually a no-op the route
       // answers 200 for: the winner's claim already removed it (§3.3).
       trackerQueueLabel(run, [item], false);
-      out(JSON.stringify({ id: itemId, stage: 'skipped', note: claimed.note }));
+      out(JSON.stringify({ id: itemId, stage: 'skipped', note }));
       return 0;
     }
     item.claim = { commentId: claimed.commentId };
