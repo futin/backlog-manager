@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { SECTIONS } from '../client/src/lib/sections';
 import { CONTENT_WIDTHS, DEFAULT_SETTINGS, FONT_SCALES, LIMITS, SETTINGS_SCOPES, STALE_WINDOWS, THEMES, clampSettings } from '../client/src/lib/settings';
 import { EFFORTS, MODELS } from '../shared/agent';
@@ -263,7 +266,7 @@ describe('contentWidth', () => {
  */
 it('keeps both new keys when a sibling is bad', () => {
   const s = clampSettings({ theme: 'chartreuse', settingsScope: 'shared', contentWidth: 'full' });
-  expect(s.theme).toBe('midnight');
+  expect(s.theme).toBe(DEFAULT_SETTINGS.theme);
   expect(s.settingsScope).toBe('shared');
   expect(s.contentWidth).toBe('full');
 });
@@ -279,4 +282,38 @@ it('keeps both new keys when a sibling is bad', () => {
 it('holds exactly two settings scopes and two content widths', () => {
   expect(SETTINGS_SCOPES).toEqual(['local', 'shared']);
   expect(CONTENT_WIDTHS).toEqual(['fixed', 'full']);
+});
+
+/**
+ * Daylight is the default theme and listed first (dashboard e882365). `shared/theme.css`'s `:root` block still holds Midnight, so the default is a STAMP, not a
+ * palette: the pre-paint script in `client/index.html` writes `data-theme` before it reads storage, and this block pins the three things that have to agree.
+ */
+describe('the default theme', () => {
+  it('is Daylight, and Daylight leads the picker with the other four in their old order', () => {
+    expect(DEFAULT_SETTINGS.theme).toBe('daylight');
+    expect(THEMES[0].id).toBe('daylight');
+    expect(THEMES.slice(1).map((t) => t.id)).toEqual(['midnight', 'graphite', 'amber', 'nightshift']);
+  });
+
+  it('falls back to Daylight for no theme or an unknown one, and keeps a stored Midnight', () => {
+    expect(clampSettings({ density: 'compact' }).theme).toBe('daylight');
+    expect(clampSettings({ theme: 'bogus' }).theme).toBe('daylight');
+    // The stored-theme-survives half: anyone who already chose Midnight keeps it across the flip.
+    expect(clampSettings({ theme: 'midnight' }).theme).toBe('midnight');
+  });
+
+  /**
+   * Read as source for the same reason `content-width-style.test.ts` does: `client/index.html` is never loaded by any suite. The FIRST `dataset.theme = '<x>'`
+   * must sit outside the `try` — inside it, blocked storage or a throwing `JSON.parse` would skip it and paint the `:root` palette (Midnight) instead — and `<x>`
+   * must be the default, or a fresh browser paints one theme and React then re-stamps another.
+   */
+  it('stamps the default in index.html before the try, so a corrupt or blocked store still paints it', () => {
+    const html = readFileSync(join(__dirname, '..', 'client', 'index.html'), 'utf8');
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '';
+    const stamp = /dataset\.theme *= *'([^']*)'/.exec(script);
+
+    expect(stamp).not.toBeNull();
+    expect(stamp![1]).toBe(DEFAULT_SETTINGS.theme);
+    expect(stamp!.index).toBeLessThan(script.indexOf('try {'));
+  });
 });

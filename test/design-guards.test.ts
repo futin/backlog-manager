@@ -265,7 +265,7 @@ describe('guard 5 — the daylight palette and the two fill tokens', () => {
    * Both fill tokens, and the ink that goes on them. `--on-fill` joined them in
    * task-37 for the reason `shared/theme.css`'s own comment records: the card's
    * live strip sets 11 px type on `--fill-live`, `--ink` is near-white in four
-   * of the five palettes, and 1.4:1 on the DEFAULT theme is not a contrast. A
+   * of the five palettes, and 1.4:1 on the `:root` palette is not a contrast. A
    * token declared in four blocks out of five is the failure this guards —
    * every miss resolves to nothing and paints the inherited colour, which on a
    * dark theme is exactly the unreadable pairing it was added to fix.

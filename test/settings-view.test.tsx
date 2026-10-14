@@ -101,7 +101,7 @@ describe('SettingsView', () => {
   it('offers the five themes and persists a pick under the backlog-manager key', async () => {
     renderView();
     expect(screen.getAllByRole('button', { pressed: false }).length).toBeGreaterThan(0);
-    await userEvent.click(screen.getByRole('button', { name: /Daylight Strip/ }));
+    await userEvent.click(screen.getByRole('button', { name: /^Daylight/ }));
     const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
     expect(stored.theme).toBe('daylight');
     expect(document.documentElement.dataset.theme).toBe('daylight');

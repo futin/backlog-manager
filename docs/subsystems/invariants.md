@@ -2697,7 +2697,7 @@ the right from the rail rather than re-centring on the window, which would read 
 ### The CSP hash is not optional
 
 `server/src/security.ts`'s `THEME_SCRIPT_SHA256` pins the sha256 of that inline script's exact bytes. Editing the script without recomputing the hash ships a
-served build whose theme script the browser refuses to run: the page paints in the default palette at 100% on every load, and **nothing in dev shows it**,
+served build whose theme script the browser refuses to run: the page paints in the `:root` palette (Midnight) at 100%, even for a Daylight default, on every load, and **nothing in dev shows it**,
 because dev has no CSP (see `security.ts`'s own comment for why the policy is a response header rather than a `<meta>` tag). `test/csp.test.ts` recomputes the
 hash from `client/index.html` and is the proof the step was taken.
 

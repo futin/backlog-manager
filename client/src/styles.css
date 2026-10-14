@@ -727,8 +727,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    `--on-fill`, the token task-37 added to every theme block for exactly this
    (§8.2): DESIGN.md §8.3 wrote the ink as `--ink`, which is right on daylight
    (#131313 on #F5A15C, 7.3:1) and wrong on the four dark themes, where `--ink`
-   is near-white and this fill is a bright amber — 1.4:1 on midnight, the
-   DEFAULT theme, for 11 px type. `--on-accent` fails the other way round, for
+   is near-white and this fill is a bright amber — 1.4:1 on midnight (the `:root` palette),
+   for 11 px type. `--on-accent` fails the other way round, for
    the reason its own name gives. `--on-fill` is the dark end of each palette,
    whichever token that happens to be there.
    The inline padding is the face's own `--card-pad-x`, so the word lines up

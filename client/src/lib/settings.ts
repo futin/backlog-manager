@@ -17,11 +17,11 @@ import { MERGE_MODES, QUESTION_MODES, type MergeMode, type QuestionMode } from '
 import { SECTIONS, type Section } from './sections';
 
 export const THEMES = [
+  { id: 'daylight', label: 'Daylight', hint: 'the reference light board — warm grey, white cards, green ramp' },
   { id: 'midnight', label: 'Midnight Radar', hint: 'the original — deep navy scope room' },
   { id: 'graphite', label: 'Graphite', hint: 'neutral dark, no blue cast' },
   { id: 'amber', label: 'Amber CRT', hint: 'black glass and amber phosphor' },
-  { id: 'nightshift', label: 'Nightshift', hint: 'deep green radar scope' },
-  { id: 'daylight', label: 'Daylight Strip', hint: 'light manila paper, dark ink' }
+  { id: 'nightshift', label: 'Nightshift', hint: 'deep green radar scope' }
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]['id'];
@@ -148,7 +148,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  theme: 'midnight',
+  theme: 'daylight',
   density: 'comfortable',
   fontScale: 100,
   landing: 'last',

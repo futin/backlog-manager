@@ -40,7 +40,7 @@ describe('live strip stylesheet rules', () => {
    * The ink is `--on-fill` and not the `--ink` DESIGN.md §8.3 writes, and that
    * is the one place this task departed from the design's letter to keep its
    * intent: `--ink` is near-white in four of the five palettes, so 11 px type
-   * on a bright amber fill measured 1.4:1 on midnight — the DEFAULT theme.
+   * on a bright amber fill measured 1.4:1 on midnight — the `:root` palette.
    * `--on-fill` is the token task-37 added to every theme block for it, and
    * guard 5 (`test/design-guards.test.ts`) is what stops it being declared in
    * four blocks out of five — a miss resolves to nothing and inherits exactly
