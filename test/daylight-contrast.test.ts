@@ -153,7 +153,9 @@ describe('daylight status tokens hold AA', () => {
   it('every text token clears 4.5:1 on each surface text is set on', () => {
     const fails: string[] = [];
     // `--amber-ink` is here as well as on its tints: Review Focus 5 sends it onto bare surfaces too, at every amber word with no amber mark beside it.
-    for (const fg of ['--ink', '--ink2', '--ink3', '--green', '--mustard', '--cyan', '--red', '--magenta', '--amber-text', '--amber-ink']) {
+    // `--live-ink` is the live/paused status word's text twin of `--fill-live` (final review I1): before it, three rules set `running` in the fill itself,
+    // 2.07:1 on `--strip` in daylight.
+    for (const fg of ['--ink', '--ink2', '--ink3', '--green', '--mustard', '--cyan', '--red', '--magenta', '--amber-text', '--amber-ink', '--live-ink']) {
       if (DAY[fg] === undefined) {
         fails.push(`${fg} is not declared for daylight`);
         continue;
@@ -188,6 +190,55 @@ describe('daylight status tokens hold AA', () => {
     expect(fails).toEqual([]);
   });
 
+  /**
+   * The list above says which TOKENS are text; this case says which tokens the stylesheet actually SETS text in, and holds every one of them to the same
+   * line. It exists because the list could not catch the failure it was meant to: `.runs-status-live`, `.runs-status-paused` and `.watchdog-kind-live` set
+   * their words in `--fill-live`, a fill that was never on the list, and so passed it at 2.07:1 while the list was green (final review I1). Read off the
+   * stylesheet rather than enumerated, so a new rule that sets a word in a fill or a `-solid` mark goes red here the day it lands.
+   *
+   * Three kinds of rule are not measured against the four surfaces:
+   * - a rule that paints its own `background` — reverse type on a fill, or a word on a tint. Its text does not sit on a surface; the tints are the case
+   *   above, measured at their own percentage, and reverse type (`--on-fill`, `--on-accent`, `--strip` on an ink or fill) is not measured by this file.
+   * - a glyph that IS a mark, closed by selector below: the `●` status dots and the wordmark's caret are drawn with `color:` but read as a dot and a
+   *   logotype, so they answer to the mark tokens and to 1.4.11 (or, for the logotype, to 1.4.3's exemption), not to 4.5:1. By selector and not by token,
+   *   so `--green-solid` set on a word elsewhere is still measured.
+   * - the project hues `--proj-N`: identity colours, not status ones, outside the status split this file guards. They sit on a card or a drawer head
+   *   (`--strip`), not on all four surfaces, and their daylight set has its own reasoning in shared/theme.css; measured against `--steel` here, `--proj-3`
+   *   would read 4.34:1 — a judgement about that set, not about whether a status word is legible, so it is left to whoever next retunes it.
+   */
+  it('every token client/src/styles.css sets text in clears 4.5:1 on each surface, unless it paints its own ground, is a mark glyph or a project hue', () => {
+    const MARK_GLYPHS: Record<string, string> = {
+      '.rail-caret': '--green-solid',
+      '.set-dot-green': '--green-solid',
+      '.set-dot-amber': '--amber-solid'
+    };
+    const sites: { selector: string; token: string; ground: boolean }[] = [];
+    for (const m of stripComments(STYLES).matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+      // Lookbehind so `border-color:` / `background-color:` are not read as the rule's text colour; the first token is taken, so a `var(--a, var(--b))`
+      // fallback is measured on the value that wins.
+      const fg = /(?<![-\w])color\s*:\s*var\(\s*(--[\w-]+)/.exec(m[2]);
+      if (!fg) continue;
+      sites.push({ selector: m[1].trim().replace(/\s+/g, ' '), token: fg[1], ground: /(?<![-\w])background(?:-color)?\s*:/.test(m[2]) });
+    }
+    // Guards the parser, not the palette: these must be found, or the loop below passes on nothing.
+    for (const sel of ['.runs-status-live', '.runs-status-paused', '.watchdog-kind-live', '.set-error', '.rail-caret']) {
+      expect(sites.map((s) => s.selector)).toContain(sel);
+    }
+    const fails: string[] = [];
+    for (const s of sites) {
+      if (s.ground || s.token.startsWith('--proj-')) continue;
+      if (s.selector in MARK_GLYPHS) {
+        if (s.token !== MARK_GLYPHS[s.selector]) fails.push(`${s.selector} is a mark glyph and must read ${MARK_GLYPHS[s.selector]}, reads ${s.token}`);
+        continue;
+      }
+      for (const bg of SURFACES) {
+        const r = ratio(day(s.token), day(`--${bg}`));
+        if (r < AA) fails.push(`${s.selector}: ${s.token} on --${bg}: ${r.toFixed(2)}:1`);
+      }
+    }
+    expect(fails).toEqual([]);
+  });
+
   it('--amber-solid, a mark, clears 3:1 on the surfaces marks are drawn on', () => {
     const fails: string[] = [];
     for (const bg of ['strip', 'strip-hi', 'board']) {
@@ -204,7 +255,9 @@ describe('the four dark themes do not move', () => {
     '--green-solid': '--green',
     '--amber-solid': '--amber',
     '--amber-text': '--amber',
-    '--amber-ink': '--amber'
+    '--amber-ink': '--amber',
+    // Not a split of --amber: the three live/paused status words read --fill-live before I1, and --fill-live is var(--amber) in every dark block.
+    '--live-ink': '--fill-live'
   };
   const OWN = ['--green', '--mustard', '--cyan', '--ink2', '--ink3'];
   const palettes = THEME_BLOCKS.filter((b) => '--board' in b.decls);

@@ -876,8 +876,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    unrelated rows. */
 .set-row + .set-error-row { padding-top: 0; border-top: 0 }
 .set-error { font-size: 13px; line-height: 1.45; color: var(--red) }
-.set-dot-green { color: var(--green) }
-.set-dot-amber { color: var(--amber-ink) }
+/* The two coloured dots are MARKS drawn as a `●` glyph, so they read the mark tokens: as text tokens daylight drew them in `--green` and `--amber-ink`, a
+   luminance ratio of ~1.1 — two dark blobs told apart by hue alone. Identical to the old values on every dark board. */
+.set-dot-green { color: var(--green-solid) }
+.set-dot-amber { color: var(--amber-solid) }
 .set-dot-gray { color: var(--ink3) }
 .set-control { display: flex; align-items: center; gap: 8px; flex: none }
 
@@ -1755,7 +1757,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   font-size: 12px; font-weight: 500;
   white-space: nowrap;
 }
-.watchdog-kind-live { color: var(--fill-live) }
+.watchdog-kind-live { color: var(--live-ink) }
 .watchdog-kind-done { color: var(--green) }
 .watchdog-kind-bad { color: var(--red) }
 .watchdog-kind-warn { color: var(--amber-ink) }
@@ -1920,14 +1922,17 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    vocabularies that only happen to share one spelling. The colour tokens are
    the four run-stage.ts already uses. */
 .runs-status { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500 }
-.runs-status-live { color: var(--fill-live) }
+.runs-status-live { color: var(--live-ink) }
 .runs-status-done { color: var(--ink3) }
 .runs-status-warn { color: var(--amber-ink) }
 .runs-status-bad { color: var(--red) }
 /* paused is the one status with no verdict attached — the run was stopped on
    purpose and can still finish — so it takes the live fill rather than
-   borrowing amber (a warning) or the done ink (an ending). */
-.runs-status-paused { color: var(--fill-live) }
+   borrowing amber (a warning) or the done ink (an ending).
+   `--live-ink`, the fill's text twin, not `--fill-live` itself: the fill is 2.07:1 as type on daylight's paper (shared/theme.css), and the twin is identical
+   to it on every dark board. In daylight the twin is `--amber-ink`, so `paused` and the warn word share a colour there — as they already do on every dark
+   board, where the live fill IS `--amber`; the word carries the difference. */
+.runs-status-paused { color: var(--live-ink) }
 /* task-21's placeholder row: provisional, and nothing here to click (no run
    file means no runId, and no runId means no detail sheet to show). `default`
    rather than `pointer` says the second thing; the dashed rule says the

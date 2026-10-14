@@ -73,10 +73,14 @@
    - `--amber-solid`: amber as a mark. Amber text never reads bare `--amber` any more (`client/src/styles.css` names it nowhere):
    - `--amber-text`: an amber word on a bare surface, where a neighbouring amber mark already carries the warning — daylight sets it in the ink.
    - `--amber-ink`: an amber word that must keep its hue — on an amber tint (pills, notices), or alone with nothing amber beside it.
+   - `--live-ink`: the live/paused status word — `running`, `paused`, the watchdog's live kind — which until the final review's I1 was set in `--fill-live`
+     itself. Derived from that fill rather than from `--amber`, because the fill is what those rules read: every dark block's `--fill-live` is
+     `var(--amber)` today, and if one ever stops being, the word should follow its own fill and not a sibling token.
    Mustard and cyan need no split: daylight's are dark enough to be text, and so a mark, as they are. */
 :root{
   --green-solid:var(--green);
   --amber-solid:var(--amber);--amber-text:var(--amber);--amber-ink:var(--amber);
+  --live-ink:var(--fill-live);
 }
 /* Graphite — the same board with the blue cast taken out. For anyone who finds
    the navy too warm-shifted on a wide-gamut display. */
@@ -157,6 +161,11 @@
   /* The literal ramp fills (--orange-400 / --green-500, DESIGN.md §2): with the -solid marks above, the places in the palette a colour is allowed to be
      brighter than its text cousin, because nothing sets type in it. */
   --fill-live:#F5A15C;--fill-progress:#7DC242;
+  /* The live word's text twin. #F5A15C is a fill and reads 2.07:1 as type on --strip; the live status words wore it until the final review's I1, on the
+     theme that had just become the default. --amber-ink, not a new hue: it is already the amber word that must keep its hue, AA on all four surfaces, and
+     `running` beside `aborted` in one colour is what every dark theme already draws (both resolve to --amber there) — the word, not the hue, tells them
+     apart. A distinct live brown would buy a difference the dark boards never had, at the cost of a sixth amber to keep in step. */
+  --live-ink:var(--amber-ink);
   /* The one block where --on-fill is NOT --on-accent: this palette's accents
      are dark, so --on-accent is white, and white on #F5A15C is 2.0:1. --ink
      against the same fill is 7.3:1 — the dark end of this palette, which is

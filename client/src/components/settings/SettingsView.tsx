@@ -23,7 +23,7 @@ const SWATCHES: Record<ThemeId, [string, string, string]> = {
   graphite: ['#111214', '#1f2124', '#6fc5cf'],
   amber: ['#0a0805', '#1a150c', '#ffb03a'],
   nightshift: ['#07120d', '#12251b', '#4fe09a'],
-  daylight: ['#e8e3d7', '#fbf8f1', '#136d78']
+  daylight: ['#f4f4f3', '#ffffff', '#306c0f']
 };
 
 const DENSITIES = [
