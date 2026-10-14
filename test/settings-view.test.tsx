@@ -101,10 +101,11 @@ describe('SettingsView', () => {
   it('offers the five themes and persists a pick under the backlog-manager key', async () => {
     renderView();
     expect(screen.getAllByRole('button', { pressed: false }).length).toBeGreaterThan(0);
-    await userEvent.click(screen.getByRole('button', { name: /^Daylight/ }));
+    // Midnight, not Daylight: Daylight is the default, so clicking it would write what the provider already wrote on mount and prove nothing.
+    await userEvent.click(screen.getByRole('button', { name: /^Midnight/ }));
     const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
-    expect(stored.theme).toBe('daylight');
-    expect(document.documentElement.dataset.theme).toBe('daylight');
+    expect(stored.theme).toBe('midnight');
+    expect(document.documentElement.dataset.theme).toBe('midnight');
   });
 
   // Task 5: the staleness window, which is the only Board-scoped setting on

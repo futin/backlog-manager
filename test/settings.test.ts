@@ -316,4 +316,28 @@ describe('the default theme', () => {
     expect(stamp![1]).toBe(DEFAULT_SETTINGS.theme);
     expect(stamp!.index).toBeLessThan(script.indexOf('try {'));
   });
+
+  /**
+   * Review Focus 4's pre-paint half, by EXECUTING the inline script against a stub `document` and `localStorage` (a classic script, so `new Function` with those two
+   * names as parameters runs it as the browser would). A source-order guard cannot catch a deleted `if (s.theme) r.dataset.theme = s.theme` — and deleting it
+   * leaves every other test green while flashing Daylight at everyone who chose Midnight, so the assertion is on the resulting `dataset.theme`.
+   */
+  describe('the pre-paint script, executed', () => {
+    const script = /<script>([\s\S]*?)<\/script>/.exec(readFileSync(join(__dirname, '..', 'client', 'index.html'), 'utf8'))?.[1] ?? '';
+    const run = (getItem: () => string | null): string | undefined => {
+      const documentElement = { dataset: {} as Record<string, string>, style: { setProperty: () => undefined } };
+      new Function('document', 'localStorage', script)({ documentElement }, { getItem });
+      return documentElement.dataset.theme;
+    };
+
+    it('lets a stored theme override the default stamp', () => {
+      expect(run(() => JSON.stringify({ theme: 'midnight' }))).toBe('midnight');
+    });
+
+    it('paints the default when nothing is stored, the blob is corrupt, or storage throws', () => {
+      expect(run(() => null)).toBe('daylight');
+      expect(run(() => '{not json')).toBe('daylight');
+      expect(run(() => { throw new Error('blocked'); })).toBe('daylight');
+    });
+  });
 });
