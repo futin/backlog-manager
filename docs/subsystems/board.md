@@ -63,6 +63,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Select`               | `.ui-select`      | `value`, `options`, `onChange`, `disabled?`, `label?`                                            | Settings rows, `WatchdogGroup`'s three ladders, both sheets' pickers            |
 | `NumberField`          | `.ui-number`      | `value`, `min`, `max`, `unit?`, `onCommit`, `label?`                                             | nothing today — see below                                                       |
 | `Switch`               | `.ui-switch`      | `checked`, `onChange`, `label?`, `disabled?`, `onLabel?`, `offLabel?`                            | `WatchdogGroup`'s Enabled row, `LaunchSheet`'s toggle                           |
+| `Chevron`              | `.chev`           | `dir?: down\|up\|right` (default `down`), `className?` — one 10×10 stroked path, the other two directions rotations of it | `TrackerChip`'s caret (`up` while the popover is open), `DispatchButton`'s mark (`right`) |
 
 `label` and `title` are separate props on both overlay shells because a dialog's accessible name and its visible title are different strings on every surface
 that draws one, and `title` is a node — a name cannot be derived from it.
@@ -236,6 +237,11 @@ does. What stayed on Shared is genuinely the host's — the dispatch status line
 its right slot at all. `Trackers · this machine` is the other Shared report and is read-only by design, not by phase: a project is connected by committing
 `backlog/source.json`, so what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with the repo
 read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is.
+
+Daylight is the default theme and the first one listed (`THEMES` and `DEFAULT_SETTINGS.theme` in `lib/settings.ts`); Midnight, the default until 2026-10-14,
+is second. The default only reaches a browser that has no valid stored theme: `clampSettings` keeps any theme it recognises, so anyone who had already picked
+Midnight keeps it. `theme.css`'s `:root` block still holds Midnight's palette, which is why `index.html`'s pre-paint script stamps `data-theme="daylight"`
+before its `try` — a fresh browser, a corrupt blob or blocked storage paints Daylight with no dark first frame.
 
 Since #17 ([spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md)) the Trackers card sets exactly one thing: each `github` row's sync interval,
 a `Segmented` pill (`15s`, `1m`, `5m`, `off` — `SYNC_INTERVALS`' keys, never a second list) in the row's right slot. Connecting stays read-only; the interval is
