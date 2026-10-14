@@ -2687,7 +2687,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   padding: 0 8px; border-radius: 999px;
   color: var(--ink2); background: var(--strip-hi);
 }
-.ui-pill-live { color: var(--on-accent); background: var(--fill-live) }
+/* `--on-fill`, not `--on-accent`: the ink for type ON `--fill-live`, which is what the card's live strip reads too. `--on-accent` is white in daylight,
+   2.07:1 on #F5A15C; every dark block sets `--on-fill` to `var(--on-accent)`, so they draw exactly what they did. test/daylight-contrast.test.ts
+   measures every word on a rule's own one-token fill. */
+.ui-pill-live { color: var(--on-fill); background: var(--fill-live) }
 .ui-pill-warn { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
 .ui-pill-bad { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
 .ui-pill-done { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }

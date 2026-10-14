@@ -149,6 +149,38 @@ function tintSites(): TintSite[] {
   return out;
 }
 
+/**
+ * What a rule's own `background` puts under its text. Only a value that actually paints something is a ground: `background: none` on a button reset, or
+ * `transparent`, leaves the word on whatever surface is behind the rule, so it is measured there like a rule with no background at all — a
+ * `color: var(--fill-live); background: none` must not pass as reverse type. `fill` is one token, measured by the reverse-type case; `tint` is the
+ * `color-mix` shape `tintSites` reads; `other` (a gradient, an image, a shorthand with more than a colour) is a ground this file cannot compute.
+ */
+type Ground = { kind: 'none' } | { kind: 'fill'; token: string } | { kind: 'tint' } | { kind: 'other' };
+
+function groundOf(body: string): Ground {
+  const bg = /(?<![-\w])background(?:-color)?\s*:\s*([^;]+)/.exec(body);
+  if (!bg) return { kind: 'none' };
+  const v = bg[1].trim().replace(/\s*!important$/, '');
+  if (/^(none|transparent|inherit|initial|unset|revert|revert-layer)$/.test(v)) return { kind: 'none' };
+  const fill = /^var\(\s*(--[\w-]+)\s*\)$/.exec(v);
+  if (fill) return { kind: 'fill', token: fill[1] };
+  if (/^color-mix\(\s*in srgb\s*,\s*var\(--[\w-]+\)\s+\d+%\s*,\s*(var\(--[\w-]+\)|transparent)\s*\)$/.test(v)) return { kind: 'tint' };
+  return { kind: 'other' };
+}
+
+/** Every rule of client/src/styles.css that sets a word in a token, with what its own background puts under that word. */
+function textSites(): { selector: string; token: string; ground: Ground }[] {
+  const out: { selector: string; token: string; ground: Ground }[] = [];
+  for (const m of stripComments(STYLES).matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+    // Lookbehind so `border-color:` / `background-color:` are not read as the rule's text colour; the first token is taken, so a `var(--a, var(--b))`
+    // fallback is measured on the value that wins.
+    const fg = /(?<![-\w])color\s*:\s*var\(\s*(--[\w-]+)/.exec(m[2]);
+    if (!fg) continue;
+    out.push({ selector: m[1].trim().replace(/\s+/g, ' '), token: fg[1], ground: groundOf(m[2]) });
+  }
+  return out;
+}
+
 describe('daylight status tokens hold AA', () => {
   it('every text token clears 4.5:1 on each surface text is set on', () => {
     const fails: string[] = [];
@@ -198,7 +230,9 @@ describe('daylight status tokens hold AA', () => {
    *
    * Three kinds of rule are not measured against the four surfaces:
    * - a rule that paints its own `background` — reverse type on a fill, or a word on a tint. Its text does not sit on a surface; the tints are the case
-   *   above, measured at their own percentage, and reverse type (`--on-fill`, `--on-accent`, `--strip` on an ink or fill) is not measured by this file.
+   *   above, measured at their own percentage, and reverse type on a one-token fill is the case below. "Paints" is `groundOf`'s call: `background: none`
+   *   or `transparent` paints nothing, so such a rule is measured here like one with no background — before that, any `background` declaration at all
+   *   exempted the rule, and `color: var(--fill-live); background: none` would have passed.
    * - a glyph that IS a mark, closed by selector below: the `●` status dots and the wordmark's caret are drawn with `color:` but read as a dot and a
    *   logotype, so they answer to the mark tokens and to 1.4.11 (or, for the logotype, to 1.4.3's exemption), not to 4.5:1. By selector and not by token,
    *   so `--green-solid` set on a word elsewhere is still measured.
@@ -212,21 +246,16 @@ describe('daylight status tokens hold AA', () => {
       '.set-dot-green': '--green-solid',
       '.set-dot-amber': '--amber-solid'
     };
-    const sites: { selector: string; token: string; ground: boolean }[] = [];
-    for (const m of stripComments(STYLES).matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
-      // Lookbehind so `border-color:` / `background-color:` are not read as the rule's text colour; the first token is taken, so a `var(--a, var(--b))`
-      // fallback is measured on the value that wins.
-      const fg = /(?<![-\w])color\s*:\s*var\(\s*(--[\w-]+)/.exec(m[2]);
-      if (!fg) continue;
-      sites.push({ selector: m[1].trim().replace(/\s+/g, ' '), token: fg[1], ground: /(?<![-\w])background(?:-color)?\s*:/.test(m[2]) });
-    }
-    // Guards the parser, not the palette: these must be found, or the loop below passes on nothing.
-    for (const sel of ['.runs-status-live', '.runs-status-paused', '.watchdog-kind-live', '.set-error', '.rail-caret']) {
-      expect(sites.map((s) => s.selector)).toContain(sel);
+    const sites = textSites();
+    // Guards the parser, not the palette: these must be found, or the loop below passes on nothing. `.rail-link` declares `background: none` and must be
+    // measured — the narrowing of the ground exemption, held by a real rule.
+    const measured = sites.filter((s) => s.ground.kind === 'none').map((s) => s.selector);
+    for (const sel of ['.runs-status-live', '.runs-status-paused', '.watchdog-kind-live', '.set-error', '.rail-caret', '.rail-link']) {
+      expect(measured).toContain(sel);
     }
     const fails: string[] = [];
     for (const s of sites) {
-      if (s.ground || s.token.startsWith('--proj-')) continue;
+      if (s.ground.kind !== 'none' || s.token.startsWith('--proj-')) continue;
       if (s.selector in MARK_GLYPHS) {
         if (s.token !== MARK_GLYPHS[s.selector]) fails.push(`${s.selector} is a mark glyph and must read ${MARK_GLYPHS[s.selector]}, reads ${s.token}`);
         continue;
@@ -237,6 +266,39 @@ describe('daylight status tokens hold AA', () => {
       }
     }
     expect(fails).toEqual([]);
+  });
+
+  /**
+   * Reverse type: a word on a rule's own one-token fill, measured against that fill. The exemption in the case above left these unmeasured, and so
+   * `.ui-pill-live` read `--on-accent` on `--fill-live` — white on #F5A15C, 2.0:1 in daylight — for as long as no caller passed `tone="live"`. It reads
+   * `--on-fill` now, as the card's live strip always has: the one token whose job is ink on a fill. A translucent fill is composited over each of the four
+   * surfaces, since the rule cannot know which one it sits on.
+   */
+  it('every word set on a rule\'s own one-token fill clears 4.5:1 against that fill', () => {
+    const sites = textSites().filter((s) => s.ground.kind === 'fill');
+    // Guards the parser, not the palette.
+    for (const sel of ['.ui-pill-live', '.board-card-live', '.ui-chip-ink', '.board-card-queued']) {
+      expect(sites.map((s) => s.selector)).toContain(sel);
+    }
+    const fails: string[] = [];
+    for (const s of sites) {
+      const fill = day((s.ground as { token: string }).token);
+      for (const under of fill[3] < 1 ? SURFACES.map((x) => day(`--${x}`)) : [fill]) {
+        const r = ratio(day(s.token), over(fill, under));
+        if (r < AA) fails.push(`${s.selector}: ${s.token} on ${(s.ground as { token: string }).token}: ${r.toFixed(2)}:1`);
+      }
+    }
+    expect(fails).toEqual([]);
+  });
+
+  it('groundOf counts only a background that paints as a ground', () => {
+    expect(groundOf('color: var(--fill-live); background: none')).toEqual({ kind: 'none' });
+    expect(groundOf('background: transparent')).toEqual({ kind: 'none' });
+    expect(groundOf('background-color: inherit')).toEqual({ kind: 'none' });
+    expect(groundOf('color: var(--x)')).toEqual({ kind: 'none' });
+    expect(groundOf('background: var(--fill-live)')).toEqual({ kind: 'fill', token: '--fill-live' });
+    expect(groundOf('background: color-mix(in srgb, var(--red) 14%, var(--strip))')).toEqual({ kind: 'tint' });
+    expect(groundOf('background: linear-gradient(var(--a), var(--b))')).toEqual({ kind: 'other' });
   });
 
   it('--amber-solid, a mark, clears 3:1 on the surfaces marks are drawn on', () => {
