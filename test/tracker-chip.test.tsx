@@ -332,6 +332,17 @@ describe('TrackerPopover', () => {
     expect(chip()).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('points the caret up while open and down otherwise, and no CSS turns it a second time', async () => {
+    // The direction is the Chevron's `dir`, not an `[aria-expanded]` rotate rule: a rule turning an element that already carries `.chev-up` would flip it back.
+    renderChip(payload());
+    const caret = () => chip().querySelector('.tracker-caret');
+    expect(caret()).toHaveClass('chev', 'chev-down');
+    await user.click(chip());
+    expect(caret()).toHaveClass('chev', 'chev-up');
+    await user.click(chip());
+    expect(caret()).toHaveClass('chev-down');
+  });
+
   it('closes when the section changes', async () => {
     const { update } = renderChip(payload());
     await user.click(chip());

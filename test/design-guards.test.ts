@@ -336,7 +336,8 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-seg',
     '.ui-select',
     '.ui-number',
-    '.ui-switch'
+    '.ui-switch',
+    '.chev'
   ];
 
   const HEADER = '/* ── ui primitives';

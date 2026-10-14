@@ -118,7 +118,7 @@ describe('DispatchButton', () => {
     expect(screen.getByRole('button', { name: 'groom' }).querySelector('.dispatch-word')).toHaveClass('groom');
   });
 
-  // The ▸ is decoration. If it ever reaches the accessible name, every query in
+  // The chevron is decoration. If it ever reaches the accessible name, every query in
   // this file that asks for 'groom' or 'execute' stops matching — and so does a
   // screen reader's rendering of the control.
   it('keeps the mark out of the accessible name', () => {

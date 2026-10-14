@@ -331,8 +331,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    The child combinator, not `.ui-meter`, because guard 7 lets a page lay a primitive out only from the page's own class. */
 .tracker-meters { display: flex; gap: 10px }
 .tracker-meters > * { min-width: max-content }
-.tracker-caret { font-size: 11px; color: var(--ink3); transition: transform .15s }
-.tracker-chip[aria-expanded="true"] .tracker-caret { transform: rotate(180deg) }
+/* The caret is `ui/Chevron` (`.chev`, in the primitives block): colour only here. The open state is the component's `dir="up"`, not a rotate rule — a
+   second transform on the same element would turn an `up` chevron back down. */
+.tracker-caret { color: var(--ink3) }
 /* The panel's shell is `ui/Popover`'s (`.ui-popover`, in the primitives block); what follows is only what is drawn inside it. */
 .tracker-pop-id { display: flex; align-items: center; gap: 10px; margin-bottom: 12px }
 .tracker-pop-who { display: flex; flex-direction: column; gap: 2px; min-width: 0 }
@@ -1534,7 +1535,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    will do. */
 .dispatch-chip { flex: none; margin-left: auto; display: inline-flex }
 .dispatch-word { font-weight: 500; white-space: nowrap }
-.dispatch-mark { font-size: 11px; line-height: 1; opacity: .8 }
+.dispatch-mark { opacity: .8 }
 .dispatch-word.groom { color: var(--mustard) }
 .dispatch-word.execute { color: var(--cyan) }
 .dispatch-word.capture { color: var(--magenta) }
@@ -2995,6 +2996,19 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   position: fixed; top: auto; margin-top: 8px; left: 12px; right: 12px;
   width: auto; max-width: none; max-height: 70vh; overflow-y: auto;
 }
+
+/* Chevron — the one disclosure mark (§6, §8.0). One 10×10 path drawn in an 11 px box (the dashboard's is 9: the board's caret has been 11 since §8.0, and it is
+   guard 3's floor). `currentColor`, so the wrapper's colour is the mark's. `up` and `right` rotate the one path with a 160 ms turn. The reduced-motion
+   override names the three direction classes rather than `.chev`, on purpose: guard 7 counts the bare `.chev` selector across the whole sheet, so the
+   override cannot be a second one. Every `Chevron` carries exactly one direction class, and the block follows the base rule, so source order wins. */
+.chev {
+  flex: none; display: inline-block; width: 11px; height: 11px; vertical-align: middle;
+  fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .16s;
+}
+.chev-up { transform: rotate(180deg) }
+.chev-right { transform: rotate(-90deg) }
+@media (prefers-reduced-motion: reduce) { .chev-down { transition: none } .chev-up { transition: none } .chev-right { transition: none } }
 
 /* ── end ui primitives ────────────────────────────────────────────────────────
    A closing marker, not decoration. Guard 7 has to be able to say whether a

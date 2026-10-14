@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
+import Chevron from './ui/Chevron';
 import { Meter } from './ui/Meter';
 import { Popover } from './ui/Popover';
 import { useTrackersContext } from '../hooks/TrackersContext';
@@ -79,9 +80,8 @@ export function TrackerChip({ section }: { section: Section }) {
             {usage !== null && <Meter label="API" value={usage.label} fraction={usage.fraction} tone={usageTone(usage.fraction)} />}
           </span>
         )}
-        <span className="tracker-caret" aria-hidden="true">
-          ▾
-        </span>
+        {/* `up` while open, chosen here and not by a `[aria-expanded]` rule turning the element: the rotation lives on `.chev-up` alone. */}
+        <Chevron dir={open ? 'up' : 'down'} className="tracker-caret" />
       </button>
       {open && <TrackerPopover platform={noToken ? undefined : plat} rows={githubRows} now={now} anchor={button} onClose={() => setOpen(false)} />}
     </div>

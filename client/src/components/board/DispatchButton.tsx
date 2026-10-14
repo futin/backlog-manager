@@ -5,6 +5,7 @@ import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { useReverify } from '../../hooks/useReverify';
 import { progressBlock } from '../../lib/item-progress';
 import { Chip } from '../ui/Chip';
+import Chevron from '../ui/Chevron';
 
 /**
  * Whether this item gets a dispatch control at all — the two "no control, not
@@ -300,10 +301,8 @@ export function DispatchButton({
               --mustard word at 45% opacity would be a third colour nobody
               chose. */}
           <span className={blocked === null ? `dispatch-word ${action}` : 'dispatch-word blocked'}>{actionLabel(item, action)}</span>
-          {/* aria-hidden: the accessible name is the action word alone. */}
-          <span className="dispatch-mark" aria-hidden="true">
-            ▸
-          </span>
+          {/* `Chevron` is aria-hidden: the accessible name is the action word alone. */}
+          <Chevron dir="right" className="dispatch-mark" />
         </Chip>
       </span>
       {/* Visually hidden, deliberately not `aria-label`: the label is the
