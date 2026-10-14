@@ -216,7 +216,11 @@ describe('guard 4 — one rule uppercases anything', () => {
 });
 
 describe('guard 5 — the daylight palette and the two fill tokens', () => {
-  /** The design spec's §2.2 table, verbatim. */
+  /**
+   * `.claude/DESIGN.md` §8.2's daylight table, verbatim. It was the design spec's §2.2 until the AA pass (dashboard-redesign-ports task 1) darkened
+   * `--ink2`/`--ink3` and the three status text hues and split each hue's mark from its text; §8.2 is now the one place those values are written down, and
+   * `test/daylight-contrast.test.ts` is what holds them to 4.5:1.
+   */
   const DAYLIGHT: Record<string, string> = {
     '--board': '#f4f4f3',
     '--steel': '#ededec',
@@ -226,12 +230,16 @@ describe('guard 5 — the daylight palette and the two fill tokens', () => {
     '--hairline': '#eaeae8',
     '--hairline2': '#dcdcda',
     '--ink': '#131313',
-    '--ink2': '#6e6e6e',
-    '--ink3': '#a0a0a0',
-    '--green': '#5fa92c',
+    '--ink2': '#525252',
+    '--ink3': '#6b6b6b',
+    '--green': '#38631a',
+    '--green-solid': '#7dc242',
     '--amber': '#c4761f',
-    '--mustard': '#9a8712',
-    '--cyan': '#3f8f14',
+    '--amber-solid': '#c4761f',
+    '--amber-text': 'var(--ink)',
+    '--amber-ink': '#8a5214',
+    '--mustard': '#5f530b',
+    '--cyan': '#306c0f',
     '--red': '#b03b28',
     '--magenta': '#6b52a8',
     '--on-accent': '#ffffff',
@@ -242,7 +250,7 @@ describe('guard 5 — the daylight palette and the two fill tokens', () => {
     '--fill-progress': '#7DC242'
   };
 
-  it('the daylight block carries §2.2’s values exactly', () => {
+  it('the daylight block carries §8.2’s values exactly', () => {
     const daylight = themeBlocks.find((b) => b.selector.includes('daylight'));
     expect(daylight).toBeDefined();
     const actual: Record<string, string> = {};

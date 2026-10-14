@@ -37,7 +37,10 @@ describe('run detail crashed-note stylesheet rule', () => {
     // The `crashed` status badge (`runs-status-warn`, via `runStatusChip`) is
     // amber, and so was the Board's own crashed strip until task-37 deleted
     // it. One colour for one verdict: a reader who learns what amber means on
-    // one surface should not have to learn it again here.
-    expect(block).toContain('var(--amber)');
+    // one surface should not have to learn it again here. `--amber-solid`
+    // since the daylight AA pass split amber's mark from its text: the box's
+    // tint and border are marks, and on the four dark themes the token IS
+    // `--amber`, so nothing there moved.
+    expect(block).toContain('var(--amber-solid)');
   });
 });

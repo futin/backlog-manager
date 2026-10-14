@@ -323,7 +323,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    screen would be a signal that never changes, which is decoration pretending to be status. The ring is the strip's paper so the pip reads as cut
    out of the avatar rather than stuck on it. */
 .tracker-pip { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--strip) }
-.tracker-pip[data-tone="amber"] { background: var(--amber) }
+.tracker-pip[data-tone="amber"] { background: var(--amber-solid) }
 .tracker-pip[data-tone="red"] { background: var(--red) }
 .tracker-name { font-size: 12.5px; font-weight: 600; white-space: nowrap }
 /* At guard 3's 11 px label, `POLL overdue` is wider than the meter's 56 px, so the chip's meters grow to their content rather than wrapping — a
@@ -603,8 +603,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    looks like. That is also why this comment names the set rather than counting
    it: the list grows there, and a number here would be the thing that goes
    stale. The tokens did not move with them: groomed is still `--green`, kind
-   and done `--ink3`, stale and `untyped` both `--amber` (the tone this design gives
-   anything a person still has to act on).
+   and done `--ink3`, stale and `untyped` both amber (the tone this design gives
+   anything a person still has to act on) — `--amber-ink` since the daylight AA pass, because a marker is a lone word
+   with no amber mark beside it to carry the hue, and daylight's `--amber-text` is the plain ink.
 
 /* Task 11: the orchestrator's own per-stage chip — the one marker whose source
    is a run payload rather than an item file, and the reason it is shaped as an
@@ -672,8 +673,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    comment warned about (green groomed dot + green chip) is not a concern
    here: an item that has MERGED is no longer an open groomed card at all. */
 .board-card-stage-done {
-  color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--hairline));
-  background: color-mix(in srgb, var(--green) 10%, var(--strip));
+  color: var(--green); border-color: color-mix(in srgb, var(--green-solid) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--green-solid) 10%, var(--strip));
 }
 /* pending/preflight: waiting, and not a problem. Deliberately the quietest
    chip on the board — a whole-queue run puts a dozen of these on screen at
@@ -694,8 +695,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    matching the in-progress bar's own "a human is involved here" legend
    rather than the six-stage chip's cyan above it. */
 .board-card-stage-warn {
-  color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--hairline));
-  background: color-mix(in srgb, var(--amber) 10%, var(--strip));
+  color: var(--amber-ink); border-color: color-mix(in srgb, var(--amber-solid) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--amber-solid) 10%, var(--strip));
 }
 /* failed: the run drawer's own addition (fix round 1) — the card never chipped
    this stage at all even when it still had a chip (it's outside
@@ -761,10 +762,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    says "somebody is on this right now", and the label is a plan, never a claim (docs/subsystems/invariants.md).
    An INK band, `--ink2` under `--strip` text, not a lighter surface: the first cut used `--strip-hi`, and on daylight that is #f2f2f1 against a #ffffff
    card — a band nobody could see, which was the whole complaint the move answered. Inverting the ink stays neutral (no accent spent on a plan) and holds
-   5.1:1 on daylight and 6.8–7.3:1 on the four dark palettes for 11 px type.
-   Stale steps back to `--hairline2` under `--ink2` rather than inverting at `--ink3`: white on daylight's #a0a0a0 is 2.6:1, and the lighter band keeps
-   3.6–4.3:1 across all five while still standing off the card. Dimmed, never recoloured, as the marker was: a leftover label is untidy, not wrong, and the
-   warning inks belong to `stale`/`untyped`, which mark an item the board is wrong about until someone acts. */
+   7.8:1 on daylight (5.1:1 before the AA pass darkened daylight's --ink2 to #525252) and 6.8–7.3:1 on the four dark palettes for 11 px type.
+   Stale steps back to `--hairline2` under `--ink2` rather than inverting at `--ink3`: white on daylight's #a0a0a0 was 2.6:1 when this was chosen (the AA
+   pass has since darkened it to #6b6b6b), and the lighter band keeps 3.6–5.7:1 across all five while still standing off the card. Dimmed, never
+   recoloured, as the marker was: a leftover label is untidy, not wrong, and the warning inks belong to `stale`/`untyped`, which mark an item the board
+   is wrong about until someone acts. */
 .board-card-queued {
   display: flex; align-items: center; gap: 8px;
   height: 24px; padding: 0 var(--card-pad-x);
@@ -865,7 +867,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .set-row + .set-error-row { padding-top: 0; border-top: 0 }
 .set-error { font-size: 13px; line-height: 1.45; color: var(--red) }
 .set-dot-green { color: var(--green) }
-.set-dot-amber { color: var(--amber) }
+.set-dot-amber { color: var(--amber-ink) }
 .set-dot-gray { color: var(--ink3) }
 .set-control { display: flex; align-items: center; gap: 8px; flex: none }
 
@@ -1040,7 +1042,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* Degraded-state line above the board: malformed files skipped by the scan,
    or registered projects whose store is gone. Amber, not red — the board
    below it is still real, just partial. */
-.board-warn { font-size: 12px; color: var(--amber); line-height: 1.5 }
+.board-warn { font-size: 12px; color: var(--amber-ink); line-height: 1.5 }
 
 /* ---------------------------------------------- run controls
    The orchestrator run strip, the crashed strip, the paused strip and the
@@ -1188,9 +1190,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    never did — a stale-run fault note, a pipeline summary, and per-item
    queue/attention rows. */
 .run-drawer-note {
-  font-size: 11px; line-height: 1.5; color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 10%, var(--strip));
-  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--hairline));
+  font-size: 11px; line-height: 1.5; color: var(--amber-ink);
+  background: color-mix(in srgb, var(--amber-solid) 10%, var(--strip));
+  border: 1px solid color-mix(in srgb, var(--amber-solid) 45%, var(--hairline));
   border-radius: 2px; padding: 8px 10px; margin-bottom: 14px;
 }
 .run-drawer-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px }
@@ -1274,7 +1276,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    just in colour: `filled` is a solid fill, `current` is a solid fill plus a
    cyan halo, and this is a ring with a hole in it. */
 .run-stepper-dot-stalled {
-  background: transparent; border: 2px solid var(--amber);
+  background: transparent; border: 2px solid var(--amber-solid);
 }
 .run-drawer-item-verify {
   display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
@@ -1378,9 +1380,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .orchestrate-preview-flag {
   flex: none; font-size: 11px; font-weight: 600;
   padding: 0 4px; border-radius: 2px;
-  color: var(--amber);
-  border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--hairline));
-  background: color-mix(in srgb, var(--amber) 12%, var(--steel));
+  color: var(--amber-ink);
+  border: 1px solid color-mix(in srgb, var(--amber-solid) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--amber-solid) 12%, var(--steel));
 }
 
 /* The three-step chrome (task-20; design §7). A kicker row rather than a
@@ -1428,14 +1430,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    "things a human should look at", and splitting that into three sub-tones
    would draw a distinction the type itself does not make. */
 .run-drawer-attn {
-  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--hairline));
-  background: color-mix(in srgb, var(--amber) 6%, var(--strip));
+  border: 1px solid color-mix(in srgb, var(--amber-solid) 35%, var(--hairline));
+  background: color-mix(in srgb, var(--amber-solid) 6%, var(--strip));
   border-radius: 2px; padding: 8px 10px; margin-bottom: 8px;
 }
 .run-drawer-attn-head { display: flex; align-items: baseline; gap: 8px }
 .run-drawer-attn-kind {
   font-size: 11px; font-weight: 600;
-  color: var(--amber);
+  color: var(--amber-ink);
 }
 .run-drawer-attn-detail { font-size: 12px; color: var(--ink); line-height: 1.5; margin-top: 3px }
 .run-drawer-questions { margin: 6px 0 0; padding-left: 16px }
@@ -1501,7 +1503,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .sheet-row { display: flex; flex-wrap: wrap; gap: 10px }
 .sheet-row .sheet-field { flex: 1 1 auto; min-width: 0 }
 .sheet-check { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--ink2) }
-.sheet-error, .sheet-blocked { font-size: 12px; line-height: 1.5; color: var(--amber) }
+.sheet-error, .sheet-blocked { font-size: 12px; line-height: 1.5; color: var(--amber-ink) }
 .sheet-ok { font-size: 12px; color: var(--green, var(--cyan)) }
 .sheet-link { font-size: 12px; color: var(--cyan) }
 .sheet-note { font-size: 12px; color: var(--ink3); line-height: 1.45 }
@@ -1622,7 +1624,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 
 .watchdog-hint { font-size: 12px; color: var(--ink3) }
-.watchdog-warn { color: var(--amber) }
+.watchdog-warn { color: var(--amber-ink) }
 /* The watching figure's three counts, on the figure's own line: a row that
    wraps rather than truncates, because three short readings are worth keeping
    legible over keeping the cell's height fixed. */
@@ -1685,20 +1687,21 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 
 /* Amber for the same reason the crashed Live row is: the run may still be
    recovered unattended. */
-.watchdog-row-crashed .watchdog-row-verdict, .watchdog-row-crashed .watchdog-verdict-glyph { color: var(--amber) }
+.watchdog-row-crashed .watchdog-row-verdict, .watchdog-row-crashed .watchdog-verdict-glyph { color: var(--amber-ink) }
 .watchdog-row-ok .watchdog-row-verdict, .watchdog-row-ok .watchdog-verdict-glyph { color: var(--ink3) }
 
 /* The watchdog's own line on a crashed row — amber, and wrapping because
    `watchdogClause` can be a long sentence and a session id is 30-odd
-   characters after it. */
-.watchdog-card-wd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--amber) }
+   characters after it. `--amber-text`, not `--amber-ink`: the line holds the attempt pips, `--amber-solid` marks, so the hue is already on it and
+   daylight can set the words in the plain ink (shared/theme.css). */
+.watchdog-card-wd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--amber-text) }
 .watchdog-card-session { color: var(--ink3) }
 /* Pips, not "1/2": at a glance the filled count against the total says how
    much rope is left without being read as a fraction first. `aria-label`
    carries the same fact in words for anything that cannot see them. */
 .watchdog-attempts { display: inline-flex; gap: 3px; align-items: center }
-.watchdog-attempts i { width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--amber) }
-.watchdog-attempts i.on { background: var(--amber) }
+.watchdog-attempts i { width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--amber-solid) }
+.watchdog-attempts i.on { background: var(--amber-solid) }
 
 .watchdog-row-missing, .watchdog-rows-empty {
   padding: 10px 0; font-size: 12px; color: var(--ink3);
@@ -1745,7 +1748,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .watchdog-kind-live { color: var(--fill-live) }
 .watchdog-kind-done { color: var(--green) }
 .watchdog-kind-bad { color: var(--red) }
-.watchdog-kind-warn { color: var(--amber) }
+.watchdog-kind-warn { color: var(--amber-ink) }
 .watchdog-kind-muted { color: var(--ink3) }
 
 /* ---------------------------------------------- Runs › History (task-38)
@@ -1888,7 +1891,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .runs-row-project { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* `⚠ N` — the count and its glyph, which is what `N needs attention`
    compresses to at this width. Amber because a person has to act. */
-.runs-row-attn { flex: none; color: var(--amber); font-variant-numeric: tabular-nums }
+.runs-row-attn { flex: none; color: var(--amber-ink); font-variant-numeric: tabular-nums }
 /* §7's two-tone amount: the completed figure in `--ink`, the queue length in
    `--ink3`, the same size — used for limits and goals alike, and this is a
    goal. */
@@ -1899,8 +1902,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The crashed Live row's second line — all three readings (`no heartbeat for
    <age>`, `last reported <id> at <stage>` or `all items at rest`, and
    `watchdogClause`'s sentence) in one wrapping amber line, because they travel
-   together or the row says less than the strip it replaces did. */
-.runs-row-crashed { font-size: 12px; color: var(--amber); line-height: 1.45 }
+   together or the row says less than the strip it replaces did. `--amber-text`, not `--amber-ink`: the row head right above always draws the `⚠ crashed`
+   warn pill when this line is drawn, so the amber is carried there and daylight can set this sentence in the plain ink (shared/theme.css). */
+.runs-row-crashed { font-size: 12px; color: var(--amber-text); line-height: 1.45 }
 /* The run-level status word. Its own small class rather than a reuse of
    `.board-card-stage`: a RUN's status and an ITEM's stage are different
    vocabularies that only happen to share one spelling. The colour tokens are
@@ -1908,7 +1912,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .runs-status { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500 }
 .runs-status-live { color: var(--fill-live) }
 .runs-status-done { color: var(--ink3) }
-.runs-status-warn { color: var(--amber) }
+.runs-status-warn { color: var(--amber-ink) }
 .runs-status-bad { color: var(--red) }
 /* paused is the one status with no verdict attached — the run was stopped on
    purpose and can still finish — so it takes the live fill rather than
@@ -2099,8 +2103,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    past as another quiet meta line. */
 .run-detail-crashed {
   font-size: 11px; color: var(--ink);
-  background: color-mix(in srgb, var(--amber) 10%, var(--strip));
-  border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--hairline));
+  background: color-mix(in srgb, var(--amber-solid) 10%, var(--strip));
+  border: 1px solid color-mix(in srgb, var(--amber-solid) 40%, var(--hairline));
   border-radius: 2px; padding: 8px 10px; margin-bottom: 10px;
 }
 
@@ -2379,7 +2383,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    omitted so the property is visible to a reader (and to
    run-track-style.test.ts) as a decision, not an oversight. */
 .run-track-node[data-in="stalled"]::before {
-  background: color-mix(in srgb, var(--amber) 55%, transparent);
+  background: color-mix(in srgb, var(--amber-solid) 55%, transparent);
   animation: none;
 }
 
@@ -2436,7 +2440,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    never left this stage. */
 .run-track-dot-stalled {
   background: var(--strip);
-  box-shadow: 0 0 0 2px var(--amber);
+  box-shadow: 0 0 0 2px var(--amber-solid);
   animation: none;
 }
 .run-track-name {
@@ -2581,7 +2585,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .ui-figure-unit { font-size: 13px; font-weight: 500; color: var(--ink3); margin-left: 4px }
 .ui-figure-line { font-size: 12px; font-weight: 400; color: var(--ink2) }
-.ui-figure-live { color: var(--amber) }
+.ui-figure-live { color: var(--amber-ink) }
 .ui-figure-good { color: var(--green) }
 .ui-figure-warn { color: var(--mustard) }
 .ui-figure-bad { color: var(--red) }
@@ -2669,9 +2673,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   color: var(--ink2); background: var(--strip-hi);
 }
 .ui-pill-live { color: var(--on-accent); background: var(--fill-live) }
-.ui-pill-warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, var(--strip)) }
+.ui-pill-warn { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
 .ui-pill-bad { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
-.ui-pill-done { color: var(--green); background: color-mix(in srgb, var(--green) 14%, var(--strip)) }
+.ui-pill-done { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
 
 /* Dot — §7's legend dot. Filled, never outlined: at 8 px a 1 px stroke is most
    of the circle and the hue stops being tellable from its neighbours. */
@@ -2683,10 +2687,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-dot-done { background: var(--fill-progress) }
 /* The category ramp read left to right (§8.2), the same four the column heads
    take: refactors amber, ideas mustard, bugs red, tasks green. */
-.ui-dot-ramp-refactors { background: var(--amber) }
+.ui-dot-ramp-refactors { background: var(--amber-solid) }
 .ui-dot-ramp-ideas { background: var(--mustard) }
 .ui-dot-ramp-bugs { background: var(--red) }
-.ui-dot-ramp-tasks { background: var(--green) }
+.ui-dot-ramp-tasks { background: var(--green-solid) }
 /* Project hues, by class and never a style attribute, so a theme swap
    recolours every dot for free (§8.2) — the same bargain `.pill-proj-N` makes. */
 .ui-dot-proj-1 { background: var(--proj-1) }
@@ -2717,12 +2721,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-marker-groomed { color: var(--green) }
 .ui-marker-kind { color: var(--ink3) }
 .ui-marker-done { color: var(--ink3) }
-.ui-marker-stale { color: var(--amber) }
+.ui-marker-stale { color: var(--amber-ink) }
 /* task-45: an untyped tracker issue. Same ink as `stale` deliberately — both
    mark an item a person still has to act on for the board to be right about
    it — and no rule of its own beyond the colour, because a marker is a weight
    and an ink and nothing else (§8.3). */
-.ui-marker-untyped { color: var(--amber) }
+.ui-marker-untyped { color: var(--amber-ink) }
 
 /* task-45's tracker reading outside the card: the poll-age line under the
    item modal's title, 12/400 --ink3, the sub-line ink this design already uses
@@ -2747,7 +2751,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    colour the crashed Live row and the crashed note both print. A prop on the
    primitive rather than an override the Watchdog page paints over the fill,
    which §12.1 forbids and which would recolour every meter on the board. */
-.ui-progress-fill-warn { background: var(--amber) }
+.ui-progress-fill-warn { background: var(--amber-solid) }
 .ui-progress-caption { font-size: 11px; font-weight: 400; color: var(--ink3) }
 
 /* Meter — the strip chip's line meter (§8.0 shell strip, §7's meter row at chip size; the tracker strip spec, §3). Label over value, both 11 px — guard 3's
@@ -2760,8 +2764,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-meter-label { font-size: 11px; font-weight: 500; color: var(--ink3) }
 .ui-meter-value { font-size: 11px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums }
 .ui-meter-track { height: 3.5px; border-radius: 4px; background: var(--steel); overflow: hidden }
-.ui-meter-fill { display: block; height: 100%; border-radius: 4px; background: var(--green) }
-.ui-meter[data-tone="amber"] .ui-meter-fill { background: var(--amber) }
+.ui-meter-fill { display: block; height: 100%; border-radius: 4px; background: var(--green-solid) }
+.ui-meter[data-tone="amber"] .ui-meter-fill { background: var(--amber-solid) }
 .ui-meter[data-tone="red"] .ui-meter-fill { background: var(--red) }
 
 /* Ledger — "every table scrolls inside its own sheet" (§8.4). This element

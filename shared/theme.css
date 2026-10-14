@@ -59,6 +59,25 @@
   --accent:var(--cyan);--blue:var(--amber);--orange:var(--amber);
   --yellow:var(--mustard);--pink:var(--magenta);
 }
+/* Marks and text, split (the dashboard's names, so the two repos keep one vocabulary). A status hue does two jobs on this board: it is the ink a word is
+   set in, and the fill of a dot, a meter, a bar or a border. On the four dark boards one value does both — every accent is bright on near-black, so it
+   clears 4.5:1 as text and 3:1 as a mark at once — and these defaults say exactly that: each new name IS the token every rule read before the split, so a
+   dark theme computes to what it computed before, pixel for pixel. Only daylight overrides them (see its block for why the jobs part ways on paper).
+
+   Derived here, on bare `:root`, and NOT declared per dark block: a value written into four blocks is four places to drift, and a hex here would leak into
+   every dark theme that does not override it. This block MUST stay above `[data-theme="daylight"]` — both selectors match <html> at the same specificity,
+   so whichever comes later in the file wins, and a defaults block moved below the daylight one would silently undo every daylight override.
+   test/daylight-contrast.test.ts pins both: the values derive, and the order holds.
+
+   - `--green-solid`: green as a mark. The text green stays `--green`.
+   - `--amber-solid`: amber as a mark. Amber text never reads bare `--amber` any more (`client/src/styles.css` names it nowhere):
+   - `--amber-text`: an amber word on a bare surface, where a neighbouring amber mark already carries the warning — daylight sets it in the ink.
+   - `--amber-ink`: an amber word that must keep its hue — on an amber tint (pills, notices), or alone with nothing amber beside it.
+   Mustard and cyan need no split: daylight's are dark enough to be text, and so a mark, as they are. */
+:root{
+  --green-solid:var(--green);
+  --amber-solid:var(--amber);--amber-text:var(--amber);--amber-ink:var(--amber);
+}
 /* Graphite — the same board with the blue cast taken out. For anyone who finds
    the navy too warm-shifted on a wide-gamut display. */
 [data-theme="graphite"]{
@@ -110,21 +129,33 @@
   color-scheme:light;
   --board:#f4f4f3;--steel:#ededec;--strip:#ffffff;--strip-hi:#f2f2f1;
   --edge:rgba(0,0,0,.03);--hairline:#eaeae8;--hairline2:#dcdcda;
-  --ink:#131313;--ink2:#6e6e6e;--ink3:#a0a0a0;
-  /* Two of the six are MAPPED rather than lifted from the reference ramp, and
-     the mapping is the same one the reference palette's own daylight comment
-     records (DESIGN.md §8.2): --green resolves to the darkened --green-600,
-     that palette's positive-delta shade; and because the ramp's brightest
-     steps are fills rather than running text, --amber and --mustard take
-     darkened cousins here so both still hold contrast as TEXT. The two fills
-     those bright steps were for are --fill-live / --fill-progress below. */
-  --green:#5fa92c;--amber:#c4761f;--mustard:#9a8712;--cyan:#3f8f14;
+  --ink:#131313;--ink2:#525252;--ink3:#6b6b6b;
+  /* --ink2 and --ink3 are darker than the reference ramp's #6e6e6e / #a0a0a0 (DESIGN.md §2), which measured 4.35:1 and 2.6:1 on paper; these are the
+     dashboard's AA pair, 4.5:1 or better on all four surfaces, and the secondary/tertiary order between them still holds.
+
+     Every status hue here is split into a MARK and a TEXT value, where the dark blocks need only one (the `:root` defaults block above says why there). On
+     paper the two jobs pull apart: a mark — a dot, a meter, a bar, a border — needs 3:1 and wants to stay bright enough to look like its hue; running text
+     needs 4.5:1, and no green or amber light enough to look like itself gets there on white. The single value this block used to give each hue tried to
+     do both and failed the text half everywhere (--green 2.92:1, --amber 3.52:1, --mustard 3.59:1, --cyan 4.08:1 on --strip). So:
+     - green: the text darkens to #38631a; the mark is the ramp's own --green-500 in --green-solid — the same value as --fill-progress, kept as two tokens
+       because they answer different questions (what a meter is filled with, and what a status mark is). It is the dashboard's value and NOT a 3:1 mark on
+       paper (2.2:1 on --strip): every green mark this board draws has its word beside it — a column name, a meter's value, a pill's text.
+     - amber: the mark --amber-solid keeps the bright #c4761f, 3:1 on every surface a mark sits on (3.0:1 on --steel, the tightest). Amber TEXT has no
+       value that is both AA and amber-looking on white — darkened far enough it reads as brown — so --amber-text is simply the ink, used only where a
+       neighbouring amber mark or pill already says "warning", and --amber-ink #8a5214 is the brown kept for the words that must carry the hue themselves:
+       on an amber tint, or with nothing amber beside them. Its value is set by the worst tint, 12 % amber over --steel (`.orchestrate-preview-flag`),
+       where it measures 4.8:1 and the dashboard's own #945917 only 4.3:1. --amber itself is unchanged, and no rule in client/src/styles.css reads it bare
+       any more.
+     - mustard and cyan stay single tokens, darkened to text values that are dark enough to be marks as they are.
+     test/daylight-contrast.test.ts recomputes every pair, the tint sites read straight off the stylesheet at the percentage and surface each one uses. */
+  --green:#38631a;--green-solid:#7dc242;
+  --amber:#c4761f;--amber-solid:#c4761f;--amber-text:var(--ink);--amber-ink:#8a5214;
+  --mustard:#5f530b;--cyan:#306c0f;
   --red:#b03b28;--magenta:#6b52a8;
   --on-accent:#ffffff;--scrim:rgba(19,19,19,.28);
   --shadow:rgba(0,0,0,.06);--shadow2:rgba(0,0,0,.1);
-  /* The literal ramp fills (--orange-400 / --green-500, DESIGN.md §2): the one
-     place in the palette a colour is allowed to be brighter than its text
-     cousin, because nothing sets type in it. */
+  /* The literal ramp fills (--orange-400 / --green-500, DESIGN.md §2): with the -solid marks above, the places in the palette a colour is allowed to be
+     brighter than its text cousin, because nothing sets type in it. */
   --fill-live:#F5A15C;--fill-progress:#7DC242;
   /* The one block where --on-fill is NOT --on-accent: this palette's accents
      are dark, so --on-accent is white, and white on #F5A15C is 2.0:1. --ink
@@ -199,6 +230,8 @@
      on daylight a tint BETWEEN board and strip, which left the panel at 1.09:1
      against the page and reading as no panel at all. */
   --panel:var(--strip);
-  --good:var(--green);
+  /* --good's one reader is `.run-stepper-dot-filled`'s background in client/src/styles.css — a dot, so it is the green MARK, not the text green. Identical
+     on the four dark boards, where --green-solid is --green. */
+  --good:var(--green-solid);
   --bad:var(--red);
 }

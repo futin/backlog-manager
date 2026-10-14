@@ -195,7 +195,7 @@ describe('runStatusChip', () => {
     const chip = runStatusChip('running', { status: 'running', fresh: false });
     expect(chip.label).toBe('crashed');
     // The same amber every surface prints this verdict in — the Runs detail's
-    // own `.run-detail-crashed-note` (styles.css) is `var(--amber)`, and
+    // own `.run-detail-crashed-note` (styles.css) is an `--amber-solid` tint, and
     // `runs-status-warn` is this list's existing amber slot, so the surfaces
     // agree on colour as well as word without minting a class. (The Board's
     // `.run-strip-crashed-label` was the third until task-37 deleted it.)
