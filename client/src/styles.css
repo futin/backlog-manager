@@ -151,28 +151,32 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   padding: 24px;
   background: var(--strip);
 }
-/* The app's only wordmark, in the rail rather than the page: the dashboard's
-   own row — a 10 px dot, then the 11/500 kicker stacked over the 20/700 name
-   (§8.1's scale). The dot is decoration and not status — it names the app, and
-   an app is never "running". The 24 px under it is padding rather than a
-   margin so the phone block's `padding: 0` takes it away in the same breath. */
+/* The app's only wordmark, in the rail rather than the page: a terminal prompt — the 11/400 kicker stacked 4 px over `› manager▌` at 22/600 (§8.0;
+   the dashboard's own, from its design handoff "1h"). One face, not a mono (§1 allows exactly one). Left-aligned in a column, because the prompt is a
+   line of text and the kicker labels it from above. The 24 px under it is padding rather than a margin so the phone block's `padding: 0` takes it away
+   in the same breath. */
 .rail-brand {
-  display: flex; align-items: center; gap: 9px;
-  font-size: 20px; font-weight: 700; letter-spacing: .01em; line-height: 1;
-  color: var(--ink); padding: 0 12px 24px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  line-height: 1; color: var(--ink); padding: 0 12px 24px;
 }
 /* The one rule in this stylesheet allowed to uppercase anything (§8.1). */
 .rail-kicker {
-  display: block; margin-bottom: 3px;
-  font-size: 11px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: .1em; color: var(--ink3);
+  display: block;
+  font-size: 11px; font-weight: 400;
+  text-transform: uppercase; letter-spacing: .16em; color: var(--ink3);
 }
-/* The kicker-over-name stack beside the dot. The dot itself is a `Dot` rather
-   than a rule of this family's own (§8.2's one-home rule): decoration or not,
-   it is the same filled circle every other surface draws, at `Dot`'s own 10 px
-   size, and a `.rail-dot` beside `.ui-dot` would be the second declaration of
-   one look that rule exists to prevent. */
-.rail-word { display: block }
+.rail-prompt { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 600; letter-spacing: -.03em }
+/* The caret and the cursor share `--green-solid`, the mark colour of a live thing (theme.css): a prompt's two marks, never text, so the AA split between
+   a hue's mark and its text (dashboard-redesign-ports task 1) puts them on the mark side. */
+.rail-caret { color: var(--green-solid) }
+/* Solid by default. It blinks — 530 ms on, 530 ms off, a terminal's own rate — while a run on this machine is working; `SideRail` picks the class from
+   `working`, and nothing else about the wordmark moves. A hint, never the record: RunChip and the Runs page say it in words. */
+.rail-cursor { flex: none; width: 10px; height: 22px; border-radius: 1px; background: var(--green-solid) }
+.rail-cursor.blink { animation: cursor-blink 1.06s steps(1) infinite }
+@keyframes cursor-blink { 0% { opacity: 1 } 50% { opacity: 0 } }
+/* §8.8: cancelled outright rather than left to the blanket rule, which runs an animation once, instantly, and so parks it on whichever frame it ends
+   on — a cursor frozen at `opacity: 0` would read as no wordmark at all. Same selector as the rule above and after it, so no `!important`. */
+@media (prefers-reduced-motion: reduce) { .rail-cursor.blink { animation: none } }
 
 .rail-link {
   position: relative; display: flex; align-items: center; gap: 12px;
@@ -293,9 +297,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
      the popover's `.tracker-pop-who` prints it in full one tap away. Scoped to `.tracker-chip`, the button, because the popover reuses `.tracker-name`;
      and only when meters follow it, because the no-token chip renders none — it is avatar, label and caret with room to spare, and "no token" is the one
      login text that is itself the message. With both rules the worst case (POLL `overdue`, API `100%`) leaves 24.5 px of slack, whatever the login — 28.7 until the
-     wordmark took the dashboard's 10 px dot and 9 px gap (2026-10-01), which made the brand 88 px rather than 83.8. */
+     wordmark took the dashboard's 10 px dot and 9 px gap (2026-10-01), which made the brand 88 px rather than 83.8. The prompt-cursor wordmark that
+     replaced it (2026-10-14) measures 87.8 px in this bar at 375 px, so the slack stands. */
   .rail-bar .tracker-chip .tracker-name:has(+ .tracker-meters) { display: none }
-  .rail-brand { padding: 0; font-size: 17px }
+  /* In a bar the wordmark is a label rather than a page heading: the prompt drops to 17 px and the cursor scales with it (8 × 17, 6 px from the
+     word). The kicker stays at 11 px where the dashboard's bar draws 10 — guard 3's floor (test/design-guards.test.ts), which this board keeps. */
+  .rail-brand { padding: 0; gap: 3px }
+  .rail-prompt { font-size: 17px; gap: 6px }
+  .rail-cursor { width: 8px; height: 17px }
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
   .rail-link { min-height: 44px; border-radius: 12px }

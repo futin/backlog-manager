@@ -17,6 +17,11 @@ Board / Runs / Archive / Settings, a plain section switch. `SECTIONS` in `client
 `Record<Section, string>`, so a section added to the list cannot ship without one. `resolveSection` in `App.tsx` maps a stored value that names no tab — the
 legacy `'projects'` included — onto Board, so an upgrade never opens on a blank main area.
 
+The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks while a run on this machine is working (`.claude/DESIGN.md` §8.0). The answer is
+`runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`), and `App` polls nothing to get it — Board,
+Runs and Archive each already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the section that
+made it and drops it on a section change, so Settings, which reports nothing, always shows a solid cursor.
+
 TWO sections have a sub-nav tree under their row: Runs (History, Watchdog) and Settings (Local, Shared). Both are drawn by one component, `RailTree`, because
 the markup carries three details that must not drift — the `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone
 menu on a pick. What each call site supplies is only what legitimately differs: the item list, which of them is current, and what a pick writes. In both cases
@@ -46,7 +51,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `FigureStrip`, `Figure`| `.ui-figure`      | `FigureStrip{children, cols?: 3\|5, testId?, className?}`; `Figure{label, value?, unit?, line?, tone?, wide?, title?, testId?, children?}` | Runs History (six cells, the sixth `wide`), Watchdog (three)                     |
 | `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
-| `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | rail wordmark, card foot, column header, run chip, Runs rows, modal facts       |
+| `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
 | `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
 | `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block |

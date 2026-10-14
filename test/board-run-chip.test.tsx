@@ -325,6 +325,28 @@ describe('BoardView: the run chip', () => {
     await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('1 run · 1 starting · live'));
   });
 
+  /*
+    The rail's cursor (dashboard-redesign-ports task 4) learns about runs from this view's own poll, reported up through `onWorking` — the shell holds
+    no `useOrchestratorRuns()` of its own. Driven through the real payload rather than a stubbed hook, so the crashed half proves the report is
+    `runsWorking`'s answer and not "the payload has a running run in it": the chip has already said `crashed` by the time it is checked.
+  */
+  it('reports working up to the shell for a live run', async () => {
+    stub([run({ status: 'running', fresh: true })]);
+    const onWorking = jest.fn();
+    render(<BoardView onWorking={onWorking} />);
+    await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('live'));
+    expect(onWorking).toHaveBeenLastCalledWith(true);
+  });
+
+  it('reports not working for a crashed run — the cursor must not blink for it', async () => {
+    stub([run({ status: 'running', fresh: false })]);
+    const onWorking = jest.fn();
+    render(<BoardView onWorking={onWorking} />);
+    await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('crashed'));
+    expect(onWorking).toHaveBeenLastCalledWith(false);
+    expect(onWorking).not.toHaveBeenCalledWith(true);
+  });
+
   /**
    * The wiring, asserted against the SETTER rather than the rendered Runs
    * page: what this proves is that the chip calls the same section change the

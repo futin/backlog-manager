@@ -6,6 +6,7 @@ import { useNow } from '../../hooks/useNow';
 import { hasTracker, itemSyncOff, queuedReading, syncOffReason, trackerLine } from '../../lib/tracker';
 import { remoteAsLive } from '../../lib/remote-run';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
+import { useReportWorking } from '../../hooks/useReportWorking';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useReverify } from '../../hooks/useReverify';
 import { useSettings } from '../../hooks/useSettings';
@@ -237,8 +238,11 @@ function sortItems(items: BacklogItem[], sort: SortKey, dir: SortDir, stageFor: 
  * entry have to mean the same thing by construction, and the section lives in
  * `AppShell`. Optional, because every suite that renders this view bare
  * predates the chip and none of them needs a destination for it.
+ *
+ * `onWorking` is the rail cursor's report (§8.0, `useReportWorking`): this view's own poll is the one the shell reads, so `App` polls nothing itself.
+ * Optional for the same reason `onOpenRuns` is.
  */
-export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
+export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () => void; onWorking?: (working: boolean) => void }) {
   const { items: index, projects, loading, error, refetch } = useBoard();
   /* Task 5: only `staleDays` is read here, but the whole control comes back —
      `useSettings` falls back to the defaults outside a provider (see its own
@@ -268,6 +272,7 @@ export default function BoardView({ onOpenRuns }: { onOpenRuns?: () => void }) {
   // view has no control that can start one. The hook still exports both for
   // that surface; what it no longer has on this page is a second caller.
   const { runs, starting, remote, refresh: refreshRuns } = useOrchestratorRuns();
+  useReportWorking(runs, starting, onWorking);
   /* Separate from `open`: the sheet can be opened from a card (modal closed)
      or from inside the modal (the modal stays open behind it), so one piece of
      state cannot serve both. */

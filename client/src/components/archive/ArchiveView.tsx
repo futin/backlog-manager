@@ -4,6 +4,7 @@ import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
+import { useReportWorking } from '../../hooks/useReportWorking';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useSettings } from '../../hooks/useSettings';
 import { groupByMonth } from '../../lib/item-month';
@@ -86,7 +87,8 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
   { section: 'out-of-scope', label: 'Out of scope', slug: 'out-of-scope' }
 ];
 
-export default function ArchiveView() {
+/** `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this view's run poll is the one the shell reads, so `App` adds none. */
+export default function ArchiveView({ onWorking }: { onWorking?: (working: boolean) => void } = {}) {
   const { items: index, projects, loading, error } = useBoard();
   /* Only `staleDays` is read, but the whole control comes back — `useSettings`
      falls back to the defaults outside a provider (see its own comment), which
@@ -126,6 +128,7 @@ export default function ArchiveView() {
      live-poll predicate, so the block clears on the 5s poll that lands the
      run file rather than on a window focus. */
   const { runs, starting } = useOrchestratorRuns();
+  useReportWorking(runs, starting, onWorking);
 
   const [open, setOpen] = useState<BacklogItem | null>(null);
   const [dispatching, setDispatching] = useState<BacklogItem | null>(null);

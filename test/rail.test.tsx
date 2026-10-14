@@ -286,3 +286,52 @@ describe('SideRail · the Settings tree', () => {
     });
   });
 });
+
+/*
+  The wordmark (dashboard-redesign-ports task 4; .claude/DESIGN.md §8.0): a `BACKLOG` kicker over `› manager▌`, whose cursor blinks while a run on this
+  machine is working. `working` is the rail's whole input for it, so these cases drive the prop directly; what decides the prop — `runsWorking` and the
+  three views reporting it — is test/run-pulse.test.ts and nav.test.tsx's.
+*/
+describe('SideRail · the prompt-cursor wordmark', () => {
+  const cursor = (): Element | null => document.querySelector('.rail-cursor');
+
+  function renderWithWorking(working: boolean | undefined) {
+    return render(
+      <SettingsProvider>
+        <SideRail section="board" onChange={jest.fn()} working={working} />
+      </SettingsProvider>
+    );
+  }
+
+  it('blinks the cursor while a run is working', () => {
+    renderWithWorking(true);
+    expect(cursor()).toHaveClass('rail-cursor', 'blink');
+  });
+
+  /* `undefined` is Settings, which reports nothing, and every view before its first poll lands: neither knows of a run, so neither may claim one. */
+  it.each([
+    ['false', false],
+    ['omitted', undefined]
+  ])('stands the cursor solid when working is %s', (_label, working) => {
+    renderWithWorking(working);
+    expect(cursor()).not.toBeNull();
+    expect(cursor()).not.toHaveClass('blink');
+  });
+
+  /* One <h1>, named for the app rather than for what it draws: read verbatim its parts would be "BACKLOG › manager", a caret glyph and an empty box. */
+  it('is the one h1, named Backlog Manager, with its drawn parts hidden from the accessibility tree', () => {
+    renderWithWorking(true);
+    const headings = screen.getAllByRole('heading', { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveAccessibleName('Backlog Manager');
+    for (const part of Array.from(headings[0].children)) expect(part).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('is still the one h1 in the phone bar', async () => {
+    await withNarrow(async () => {
+      renderWithWorking(false);
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+      expect(screen.getByRole('heading', { level: 1 })).toHaveAccessibleName('Backlog Manager');
+    });
+  });
+});

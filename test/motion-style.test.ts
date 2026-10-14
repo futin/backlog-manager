@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { readStyles, ruleBlocks } from './helpers/css-rule';
 
 /**
- * task-40's test cases 7 and 8 — DESIGN.md §8.8's three moving elements, and
- * the one mechanism that silences all three.
+ * task-40's test cases 7 and 8 — DESIGN.md §8.8's moving elements (three until
+ * the wordmark's cursor made four), and the one mechanism that silences them all.
  *
  * Why this reads the stylesheet as text rather than computing styles: jsdom
  * evaluates no media query in `getComputedStyle`, so a `prefers-reduced-motion`
  * stub proves nothing about what a browser would actually paint. The repo's own
  * `*-style.test.ts` suites take exactly this shape for exactly this reason, and
- * this one is their §8.8 sibling — one table, all three elements, rather than a
+ * this one is their §8.8 sibling — one table, every element, rather than a
  * case marooned in whichever suite happens to own each selector.
  *
  * The hazard being pinned is specific and has already happened once here: the
@@ -19,7 +19,7 @@ import { readStyles, ruleBlocks } from './helpers/css-rule';
  * animation-iteration-count: 1 !important }`) does not CANCEL an animation, it
  * runs it once, instantly — which parks the element on its LAST keyframe. That
  * is right only when the last frame is the element's resting state, and wrong
- * the moment it is not. Each of the three therefore needs an explicit
+ * the moment it is not. Each of them therefore needs an explicit
  * `animation: none`, and `!important` on it only where the rule it is
  * correcting outranks it on specificity.
  */
@@ -54,13 +54,13 @@ function reducedMotionBlocks(): string[] {
 const blocks = reducedMotionBlocks();
 
 /**
- * §8.8's three, as one table.
+ * §8.8's four, as one table.
  *
  * `important` is a per-selector judgement and is recorded as such, because that
  * is the rule the design section states: the flag is needed only where the
  * unconditional rule outranks the override. `.board-card-stage-glyph`'s is two
  * classes deep (`.board-card-stage .board-card-stage-glyph`), so source order
- * cannot win; the other three each share their own single selector with the
+ * cannot win; the four in the table each share their own selector with the
  * rule they correct, and come after it.
  */
 const MOVERS = [
@@ -81,10 +81,18 @@ const MOVERS = [
     selector: '.run-controls-needs-you',
     animation: /animation\s*:\s*run-controls-fade\b/,
     important: false
+  },
+  /* The fourth, since dashboard-redesign-ports task 4. Its keyframes are `0% { opacity: 1 } 50% { opacity: 0 }` under `steps(1)`, so the frame the blanket
+     rule would park it on is not guaranteed to be the solid one — and a cursor frozen invisible would read as "no wordmark" rather than "nothing working". */
+  {
+    what: "the wordmark's cursor blinking",
+    selector: '.rail-cursor.blink',
+    animation: /animation\s*:\s*cursor-blink\b/,
+    important: false
   }
 ] as const;
 
-describe('§8.8 — the three moving elements', () => {
+describe('§8.8 — the four moving elements', () => {
   it.each(MOVERS.map((m) => [m.what, m] as const))('%s declares an animation of its own', (_what, mover) => {
     const unconditional = ruleBlocks(css, mover.selector).filter((rule) => mover.animation.test(rule));
     expect(unconditional.length).toBeGreaterThan(0);

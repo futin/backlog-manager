@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { Dot } from './ui/Dot';
 import { useNarrow } from '../hooks/useNarrow';
 import { useRunsMode } from '../hooks/useRunsMode';
 import { useSettings } from '../hooks/useSettings';
@@ -43,6 +42,12 @@ interface Props {
    * place, never two copies with CSS hiding one. Ignored at desktop width: the rail has no bar there to put it in.
    */
   chipSlot?: ReactNode;
+  /**
+   * Whether a run on this machine is working — the wordmark cursor's one input (§8.0): it blinks while this is `true` and stands solid otherwise.
+   * `App` holds it from whichever view is mounted (`useReportWorking`); `undefined` — Settings, which polls nothing, or any view before its first poll
+   * lands — reads as not working, because nothing that knows of a run has said there is one.
+   */
+  working?: boolean;
 }
 
 /**
@@ -53,7 +58,7 @@ interface Props {
  * dashboard's own rail — 240 px, 24 px padding, 36 px rows 4 px apart at 14/500
  * with a 16 px icon 12 px from the label, an active row marked by a 3 px ink
  * bar and a `--strip-hi` fill and never by a colour change in the label, the
- * wordmark's dot left of the name, a sub-nav hung 24 px in and drawn only for the
+ * prompt-cursor wordmark, a sub-nav hung 24 px in and drawn only for the
  * open section, Settings under a 1 px rule, and — below 700 px — a top bar that
  * hides on a downward scroll.
  *
@@ -65,7 +70,7 @@ interface Props {
  * belongs beside the board, in the board toolbar, not in the switch that
  * decides which section is showing.
  */
-export function SideRail({ section, onChange, chipSlot }: Props) {
+export function SideRail({ section, onChange, chipSlot, working }: Props) {
   const narrow = useNarrow();
   const [menuOpen, setMenuOpen] = useState(false);
   const hidden = useRailHidden(narrow, menuOpen);
@@ -86,15 +91,23 @@ export function SideRail({ section, onChange, chipSlot }: Props) {
   // in its way; nothing outside Settings ever writes this one.
   const { settings, update } = useSettings();
 
+  /*
+    The wordmark (§8.0): a `BACKLOG` kicker over `› manager▌`, a terminal prompt in the one UI face — the dashboard's own, so the two neighbouring tabs
+    still draw one sidebar. The cursor is the only part that moves: it blinks while a run on this machine is working and stands solid otherwise, which
+    makes it a hint and never the record — RunChip and the Runs page say it in words. Reduced motion stops the blink, not the cursor.
+
+    Rendered once, in whichever home the width picks (the rail's head, or the phone bar), so the document has exactly one <h1>. It carries the app's name
+    as its `aria-label` and hides its drawn parts, because read verbatim they would be "BACKLOG › manager" and an empty box.
+  */
   const brand = (
-    <h1 className="rail-brand">
-      {/* Decoration, not status (§8.0) — which is why it is a Dot with no
-          tone that means anything and no text of its own. Left of the name,
-          at 10 px, because that is where the dashboard's sits. */}
-      <Dot tone="done" size={10} />
-      <span className="rail-word">
-        <span className="rail-kicker">Backlog</span>
-        Manager
+    <h1 className="rail-brand" aria-label="Backlog Manager">
+      <span className="rail-kicker" aria-hidden="true">
+        Backlog
+      </span>
+      <span className="rail-prompt" aria-hidden="true">
+        <span className="rail-caret">›</span>
+        manager
+        <span className={working === true ? 'rail-cursor blink' : 'rail-cursor'} />
       </span>
     </h1>
   );

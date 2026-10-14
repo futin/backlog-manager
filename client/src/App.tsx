@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 
 import { SideRail } from './components/SideRail';
 import { TrackerChip } from './components/TrackerChip';
@@ -81,7 +81,31 @@ function AppShell() {
   */
   const [section, setSection] = useState<Section>(() => resolveSection(settings.landing === 'last' ? stored : settings.landing));
 
+  /*
+    Whether a run on this machine is working, for the rail's wordmark cursor (§8.0). Reported up by whichever of Board, Runs and Archive is mounted
+    (`useReportWorking`) rather than polled here: each of the three already runs a `useOrchestratorRuns()`, every call is its own 5 s poller, and a fourth
+    in the shell would double the requests on all three pages to learn what the page on screen already knows. `undefined` is "nobody has said" — Settings,
+    which polls nothing, and any view before its first report — and the rail reads it as not working.
+
+    A view that unmounts reports nothing on its way out, so a report has to be dropped for it. `change` does that on a section CHANGE, so a Board that
+    said `true` neither blinks the cursor over Settings nor comes back with the Board before the new mount has said anything — and only on a change: a
+    click on the section already open (the rail's own row, a Runs tree pick) leaves the view mounted, its report effect has no reason to run again, and
+    resetting there would stand the cursor solid over a run that is still working. Every report also carries the section that made it, read back only
+    while that section is open, because the reset alone can lose a race: a poll that landed just before the click leaves the old view's report effect
+    pending, React flushes it after the click's own update is queued, and the old view's `true` lands on top of the reset. Tagged, it lands and is
+    ignored.
+  */
+  const [pulse, setPulse] = useState<{ section: Section; working: boolean } | null>(null);
+  const working = pulse !== null && pulse.section === section ? pulse.working : undefined;
+  // One stable callback per reporting section: the views' report effect lists `onWorking` as a dependency, and an inline arrow would re-run it on
+  // every render of this shell.
+  const report = useMemo(() => {
+    const reportFor = (from: Section) => (w: boolean) => setPulse({ section: from, working: w });
+    return { board: reportFor('board'), runs: reportFor('runs'), archive: reportFor('archive') };
+  }, []);
+
   const change = (s: Section): void => {
+    if (s !== section) setPulse(null);
     setSection(s);
     setStored(s);
   };
@@ -104,7 +128,7 @@ function AppShell() {
   */
   return (
     <div className="shell">
-      <SideRail section={section} onChange={change} chipSlot={narrow ? chip : undefined} />
+      <SideRail section={section} onChange={change} chipSlot={narrow ? chip : undefined} working={working} />
       {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
           curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
           The strip is always in the tree, empty without a tracker, so its height (`--main-gap`, which `.runs-board` subtracts) never depends on
@@ -129,9 +153,9 @@ function AppShell() {
                 two cannot come to disagree about what opening Runs does (and
                 so the chip's click is recorded in `backlog-manager.section`
                 exactly as the rail's is). */}
-              {section === 'board' && <BoardView onOpenRuns={() => change('runs')} />}
-              {section === 'runs' && <RunsView />}
-              {section === 'archive' && <ArchiveView />}
+              {section === 'board' && <BoardView onOpenRuns={() => change('runs')} onWorking={report.board} />}
+              {section === 'runs' && <RunsView onWorking={report.runs} />}
+              {section === 'archive' && <ArchiveView onWorking={report.archive} />}
               {/* Settings' watchdog card carries a `Live view` link to Runs ›
                 Watchdog (DESIGN.md §8.6), and this is what it opens with — the
                 same PAIR the rail's own Watchdog sub-nav entry calls, in the

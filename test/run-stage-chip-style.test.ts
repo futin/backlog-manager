@@ -1,4 +1,4 @@
-import { readStyles, ruleBlock, ruleBlocks } from './helpers/css-rule';
+import { mediaBlocks, readStyles, ruleBlock, ruleBlocks } from './helpers/css-rule';
 
 /**
  * The stage chip's tones are a stylesheet fact, and the same jsdom limit
@@ -72,11 +72,13 @@ describe('stage chip stylesheet rules', () => {
    * (it does not: it lands the pulse on its dimmest keyframe and leaves it
    * there, which is why the explicit override exists).
    */
+  /* Every reduced-motion block, brace-counted, rather than the first one a lazy regex reaches: the sheet has several, and the first in source order
+     stopped being the blanket one when the rail's wordmark cursor put its own one-line block beside its rule in the shell section (dashboard-redesign-ports
+     task 4) — which made this case read the wrong block and fail with the glyph's override exactly where it always was. */
   it('cancels the glyph pulse under prefers-reduced-motion', () => {
-    const media = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/.exec(css);
-    expect(media).not.toBeNull();
-    const body = (media as RegExpExecArray)[1];
-    expect(body).toMatch(/\.board-card-stage-glyph[^{]*\{[^}]*animation\s*:\s*none/);
+    const blocks = mediaBlocks(css, '@media (prefers-reduced-motion: reduce)');
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.some((body) => /\.board-card-stage-glyph[^{]*\{[^}]*animation\s*:\s*none/.test(body))).toBe(true);
   });
 
   it('defines the pulse keyframes the active glyph names', () => {

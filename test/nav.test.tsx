@@ -32,9 +32,18 @@ import { SETTINGS_STORAGE_KEY, clampSettings } from '../client/src/lib/settings'
   `require` inside the factories rather than the imports above, because
   jest.mock is hoisted above them and may not close over module scope.
 */
+/* The Board stub forwards `onWorking` for the same reason the Settings stub below forwards `onOpenWatchdog`: what the wordmark cases assert is what THIS
+   SHELL does with a view's report — hold it, hand it to the rail, drop it on a section change — and a stub that swallowed the prop would leave that wiring,
+   the one thing App owns there, untested. */
 jest.mock('../client/src/components/board/BoardView', () => ({
   __esModule: true,
-  default: () => require('react').createElement('div', null, 'board stub')
+  default: ({ onWorking }: { onWorking?: (working: boolean) => void }) =>
+    require('react').createElement(
+      'div',
+      null,
+      'board stub',
+      require('react').createElement('button', { type: 'button', onClick: () => onWorking?.(true) }, 'report working')
+    )
 }));
 /* The stub forwards `onOpenWatchdog`, which is the whole subject of the
    `Live view` case below: what that case asserts is what THIS SHELL hands
@@ -294,6 +303,57 @@ describe('the section rail', () => {
       .getAllByRole('button')
       .filter((b) => b.getAttribute('aria-current') === 'true');
     expect(current.map((b) => b.textContent)).toEqual(['Watchdog']);
+  });
+});
+
+/*
+  The wordmark's cursor (dashboard-redesign-ports task 4). `App` holds the boolean a view reports and polls nothing itself — every
+  `useOrchestratorRuns()` is its own 5 s poller, and the three views already run one each. What `App` owns is the lifetime: a value a view reported must
+  not outlive that view, or the cursor would go on blinking over Settings, which polls nothing, on the strength of a Board nobody is looking at.
+*/
+describe('the wordmark cursor', () => {
+  const cursor = (): Element | null => document.querySelector('.rail-cursor');
+
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: [], starting: [], remote: [] }) } as Response)) as jest.Mock;
+  });
+
+  it('blinks on the Board’s report and stops the moment the section switches to Settings', async () => {
+    storeSection('board');
+    render(<App />);
+    expect(cursor()).not.toHaveClass('blink');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'report working' }));
+    expect(cursor()).toHaveClass('blink');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(await screen.findByText('settings stub')).toBeInTheDocument();
+    expect(cursor()).not.toHaveClass('blink');
+
+    // And coming back does not resurrect it: the Board that reported is gone, and the new one has said nothing yet.
+    await userEvent.click(screen.getByRole('button', { name: 'Board' }));
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(cursor()).not.toHaveClass('blink');
+  });
+
+  /* A click on the section already open is not a section change: the view stays mounted, its report effect has no reason to run again, and a reset here
+     would leave the cursor solid over a run that is still working until the next poll happened to change the answer. */
+  it('keeps the report through a click on the section that is already open', async () => {
+    storeSection('board');
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'report working' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Board' }));
+    expect(cursor()).toHaveClass('blink');
+  });
+
+  it('leaves exactly one h1 in the document, named Backlog Manager', async () => {
+    storeSection('board');
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1 })).toHaveAccessibleName('Backlog Manager');
   });
 });
 
