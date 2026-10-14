@@ -11,20 +11,25 @@ under the git-ignored `.superpowers/` and are not kept.
 ## Task 1 — Daylight status tokens
 
 - **`--green-solid` stays `#7dc242`, although it measures 2.17:1 on `--strip`.** The plan mirrors the dashboard's vocabulary, and `#7dc242` is already
-  `--fill-progress`, the value the same marks (meter fills, ramp dots, run bars) drew before the split — so the split moves no mark further from AA than it
-  already was. Task 5's screenshots: the dots and the Runs page's stage bars read clearly; a meter at a low fraction is a thin pale sliver on white, which its
-  label and value carry. Cost if wrong: Daylight's green dots and bars stay under WCAG 1.4.11's 3:1 for non-text marks; the fix is one value in
-  `shared/theme.css`.
+  `--fill-progress`. That value is what the run bars and `.ui-dot-done` drew before the split, but not the other green marks: `.ui-meter-fill`,
+  `.ui-dot-ramp-tasks`, `.board-card-stage-done`'s border, `.ui-pill-done`'s tint and `--good` (the stepper dot) read `var(--green)` at base, `#5fa92c` at
+  2.92:1, and the split moved them to `#7dc242` at 2.17:1 — the meter fill on its `--steel` track from ~2.5:1 to ~1.8:1. Both values fail 1.4.11's 3:1, so
+  the split took those marks from one failing value to a lighter failing one, for dashboard parity (corrected after the final review's M1; this sentence
+  first said the split moved no mark further from AA). Task 5's screenshots: the dots and the Runs page's stage bars read clearly; a meter at a low fraction is a thin pale sliver on white, which its
+  label and value carry — the word beside each mark carries its meaning. Cost if wrong: Daylight's green dots, meters, borders and bars stay under WCAG
+  1.4.11's 3:1 for non-text marks, five of them paler than on `main`; the fix is one value in `shared/theme.css`.
 - **`--amber-text` is `var(--ink)` in Daylight — the dashboard's choice.** Amber text that clears 4.5:1 on white is brown, not amber, so the dashboard sets
   amber-coded text in ink and lets an amber mark beside it carry the hue. Kept only where such a neighbour is guaranteed to render (Review Focus 5):
   - `.watchdog-card-wd` — the line itself holds the attempt pips (`.watchdog-attempts i`, `--amber-solid` ring and fill).
   - `.runs-row-crashed` — this second line renders only when the row head draws `<Pill tone="warn">⚠ crashed</Pill>`.
 
   Cost if wrong: on those two lines a warning reads as plain body text; each is a one-token swap to `--amber-ink`.
-- **Everywhere else, amber text is `--amber-ink` (`#8a5214`, ≥ 5.44:1 on all four surfaces, worst over a tint 4.82:1).** Fifteen sites. Five sit on their own
+- **Everywhere else, amber text is `--amber-ink` (`#8a5214`, ≥ 5.44:1 on all four surfaces, worst over a tint 4.82:1).** Seventeen selectors in fifteen rule blocks (eighteen in sixteen until the final review's M2 moved
+  `.set-dot-amber` to a mark — struck through below). Five sit on their own
   amber tint, where ink would erase the hue the tint promises: `.board-card-stage-warn`, `.run-drawer-note`, `.orchestrate-preview-flag`, `.ui-pill-warn`,
   `.run-drawer-attn-kind` (on its parent's 6 % tint). The rest are the Review Focus 5 exceptions — nothing amber beside them is guaranteed:
-  - `.set-dot-amber` — a `●` tier glyph in a Settings row, beside green and grey tiers; in ink it would read as neither.
+  - ~~`.set-dot-amber`~~ — a `●` tier glyph in a Settings row, beside green and grey tiers; in ink it would read as neither. Now `--amber-solid`, with
+    `.set-dot-green` on `--green-solid` (final review M2): the glyph is a mark, and as two text tokens the pair differed by hue alone (~1.1:1).
   - `.board-warn` — the degraded-scan line above Board and Archive, which stands alone.
   - `.sheet-error`, `.sheet-blocked` — lone message lines in the Launch and Orchestrate sheets.
   - `.watchdog-warn` — `⚠ N crashed` in the Watching figure line, with no amber in that figure.
@@ -35,7 +40,7 @@ under the git-ignored `.superpowers/` and are not kept.
   - `.ui-figure-live` — no caller passes `tone="live"` today; in ink it would equal the default `ink` tone.
   - `.ui-marker-stale`, `.ui-marker-untyped` — lone card marker words; in ink, `stale` would read as a darker `kind`.
 
-  This is the largest departure from the dashboard (15 sites brown, 2 ink, where the dashboard sets them all in ink). Task 5 judged it on a swatch built from
+  This is the largest departure from the dashboard (17 selectors brown, 2 ink, where the dashboard sets them all in ink). Task 5 judged it on a swatch built from
   the app's own classes, beside `main`'s orange: the brown reads as a warm warning colour, distinct from ink and from the dark text green, and every site that
   carries `⚠` keeps its glyph. It is less alarming than the old orange, which is the price of 4.5:1. Cost if wrong: Daylight warnings look subdued; moving a
   site to `--amber-text` is one token, but only where an amber neighbour is guaranteed.
@@ -98,14 +103,25 @@ under the git-ignored `.superpowers/` and are not kept.
 - **Found and left, because it predates this branch:** three status words take their colour from a FILL token, not a text one — `.runs-status-live`,
   `.runs-status-paused` and `.watchdog-kind-live` read `--fill-live`, which is `#F5A15C` in Daylight, about 2.1:1 on `--strip`. Task 1 left `--fill-*`
   alone by plan, and `test/daylight-contrast.test.ts` checks status text tokens only, so neither saw them. Cost if left: Daylight's `paused` and `live` words
-  stay under AA.
+  stay under AA. Fixed after the final review (I1) — see below.
+
+## Final review fixes
+
+- **I1: the live and paused status words read `--live-ink`, a derived text twin of `--fill-live`, and Daylight points it at `--amber-ink`.** Since this
+  branch makes Daylight the default, `running` at 2.07:1 on `--strip` was no longer an opt-in theme's problem. `--live-ink` is `var(--fill-live)` in the
+  `:root` defaults block, so every dark theme computes exactly what `.runs-status-live`, `.runs-status-paused` and `.watchdog-kind-live` drew before;
+  Daylight's `#8a5214` holds AA on all four surfaces. No new hue: `--amber-ink` is already the amber word that keeps its hue, and `running` beside `aborted` in
+  one colour is what every dark theme draws today. `test/daylight-contrast.test.ts` gains a case that reads every token `styles.css` sets text in and holds
+  it to 4.5:1, so the next word set in a fill goes red; it spares only rules that paint their own background, three mark glyphs closed by selector, and the
+  `--proj-N` identity hues. Cost if wrong: in Daylight a live run and an aborted or crashed one share a colour and are told apart by the word and the dot
+  alone; the fix is one value, a distinct live brown, in the daylight block — the test then measures it.
 
 ## Deferred minors (from the task reviews, not acted on)
 
 - `test/daylight-contrast.test.ts`'s tint case cannot see a descendant on its parent's tint (`.run-drawer-attn-kind`); `--amber-solid` is 3.01:1 on
   `--steel`, which case 3 does not list; a `shared/theme.css` comment bullet ends in a dangling colon.
 - The chevron's reduced-motion rule is three `.chev-<dir>` rules rather than one, and its test asserts the exact one-line text — both workarounds for guard
-  7's bare-selector count. DESIGN.md §6 still says chevrons are 12–14 px; §8.0's paragraph says 11 px here.
+  7's bare-selector count. (The §6-says-12–14-px note is gone: the final review's M4 moved the Chevron paragraph out of the copied §6 into §8.0.)
 - The pre-paint stamp guard finds the `try` by `indexOf('try {')`, so it is spelling-sensitive; Task 3's fix round reflowed an existing CSP paragraph in
   `invariants.md` (blame churn).
 - The no-fourth-poller guard catches only an assigned zero-argument `useOrchestratorRuns()` call; `App`'s section tag on the working report is untested.
