@@ -6,7 +6,7 @@ import { join, relative } from 'node:path';
 import { createElement } from 'react';
 import { render } from '@testing-library/react';
 
-import Chevron from '../client/src/components/ui/Chevron';
+import { Chevron } from '../client/src/components/ui/Chevron';
 
 /**
  * Guards the one disclosure mark (dashboard-redesign-ports task 2): every fold, caret and open/closed cue draws `Chevron`, never a text triangle. The glyphs

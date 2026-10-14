@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
-import Chevron from './ui/Chevron';
+import { Chevron } from './ui/Chevron';
 import { Meter } from './ui/Meter';
 import { Popover } from './ui/Popover';
 import { useTrackersContext } from '../hooks/TrackersContext';

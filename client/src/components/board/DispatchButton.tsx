@@ -4,8 +4,8 @@ import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agen
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { useReverify } from '../../hooks/useReverify';
 import { progressBlock } from '../../lib/item-progress';
+import { Chevron } from '../ui/Chevron';
 import { Chip } from '../ui/Chip';
-import Chevron from '../ui/Chevron';
 
 /**
  * Whether this item gets a dispatch control at all — the two "no control, not

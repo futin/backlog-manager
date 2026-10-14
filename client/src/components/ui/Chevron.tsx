@@ -11,10 +11,8 @@
  *
  * A consumer that opens and closes (the tracker chip) passes `dir` rather than rotating the element from CSS: the rotation lives on `.chev-<dir>` alone, so
  * a second rule turning the same element — `[aria-expanded="true"] … { rotate(180deg) }` did, on the old glyph — would turn an `up` chevron back down.
- *
- * Default export, as the interface for this component was specified; the other `ui/` primitives are named exports.
  */
-export default function Chevron({ dir = 'down', className }: { dir?: 'down' | 'up' | 'right'; className?: string }) {
+export function Chevron({ dir = 'down', className }: { dir?: 'down' | 'up' | 'right'; className?: string }) {
   return (
     <svg className={`chev chev-${dir}${className ? ` ${className}` : ''}`} viewBox="0 0 10 10" aria-hidden="true">
       <path d="M2 4l3 3 3-3" />
