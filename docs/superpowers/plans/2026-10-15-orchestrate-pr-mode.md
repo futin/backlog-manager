@@ -37,8 +37,9 @@ plan argues from it and cites it as `spec §N`.
 ## Review Focus
 
 1. **Midnight and time zones.** The mint's date is the machine's local date, not UTC. Pinned in Task 3 (case 3.6).
-2. **An item title with a newline, backtick or leading `#`.** A `## What's new` line must stay one line and must not open a heading. Pinned in Task 4 (4.9).
-3. **`ls-remote` against an unreachable `origin`.** It must fail fast and fall back, never hang `init`. Pinned in Task 3 (3.7).
+2. **An item title with a newline, backtick or leading `#`.** A `## What's new` line must stay one line, must not open a heading, and keeps backticks. Pinned in Task 4 (4.9).
+3. **`ls-remote` with no usable `origin`.** No remote → fall back to local refs with one stderr line; a hung remote → the spawn's timeout, never a hung
+   `init`. Pinned in Task 3 (3.7).
 4. **A resumed PR run.** `claim` and `reconcile` must keep `base`, `prTarget` and `prUrl` as written. Pinned in Task 3 (3.11).
 5. **`merge-check` on a run branch nobody has checked out.** It must take outcome 2 (create `_base-backlog-run-…`), not park. Pinned in Task 3 (3.12).
 
@@ -51,7 +52,8 @@ plan argues from it and cites it as `spec §N`.
   constant and an `isPrUrl` guard beside `isMergeMode`)
 - Modify: `server/src/orchestrator/orchestrator.service.ts` (`sanitizeMergeFields`), `server/src/orchestrator/remote-runs.util.ts` (the run literal)
 - Modify: `client/src/lib/merge-mode.ts` (`mergeModeOptionLabels` gains `pr` — its `Record<MergeMode, string>` fails typecheck the moment `MERGE_MODES`
-  grows, so the label lands here rather than in Task 6)
+  grows, so the label lands here rather than in Task 6), `client/src/components/settings/SettingsView.tsx` (`:383-391` hand-builds two options and a hint
+  naming two modes: build the options from `MERGE_MODES`, and the hint names all three)
 - Modify: every TypeScript literal of `OrchestratorRun` that typecheck then flags (fixtures in `test/` included) — set both new fields to `null`
 - Test: `test/agents-shared.test.ts`, `test/orchestrator-runs.test.ts`, `test/remote-runs.test.ts`, `test/merge-mode-labels.test.ts`,
   `test/settings-view.test.tsx`
@@ -77,23 +79,30 @@ plan argues from it and cites it as `spec §N`.
   `OrchestratorRun` with comments citing spec P4/P5. `sanitizeMergeFields` resolves each once: `prTarget` a non-empty string or `null`, `prUrl` through
   `isPrUrl` or `null`. Then run `pnpm typecheck` and set both fields to `null` at every literal it flags.
 - [ ] **Step 4:** the five suites green; `pnpm typecheck` green; full `pnpm run test:jest` green (any other assertion that lists the modes is updated to
-  the three-mode list — classified, never weakened). The sheet still offers `pr` to every project until Task 6 filters it; that is the one interim gap.
+  the three-mode list — classified, never weakened). Two interim gaps, both closed by later tasks: the sheet offers `pr` to every project until Task 6 filters it, and the server accepts `pr` but spawns
+  it as a plain `merge` run until Task 2 adds its prompt literal.
 - [ ] **Step 5: Commit** `feat(orchestrate): add the pr merge mode to the shared vocabulary`.
 
 ### Task 2: Server — refuse `pr` off a tracker project, and spawn it
 
 **Files:**
 - Modify: `server/src/agents/agents.service.ts` (`resolveMergeMode`, the `prompt:` composition around `:749`)
-- Test: `test/merge-mode.test.ts` (or `test/orchestrator-start.test.ts`, whichever already holds the `--merge-mode branch` prompt case — keep them together)
+- Modify: `server/src/items/items.service.ts` — it holds the `known` kind set privately (`:41`) and already calls `resolveSource(project.path, this.known)`;
+  expose that as one public method (e.g. `sourceOf(projectPath): SourceKind | 'unsupported' | null`). `AgentsService` already injects `ItemsService`
+  (`agents.service.ts:311`). `resolveSource` is imported in `agents.service.ts:12` but never called there; do not hand it a second, hand-built `known` set —
+  one set of honoured kinds per build.
+- Test: tracker cases (2.1, 2.5) in `test/tracker-dispatch.test.ts`, whose `beforeEach` (`:39-145`) builds a tracker project that passes `syncOffBlock`;
+  files and malformed cases (2.2, 2.3, 2.4) beside the existing `--merge-mode branch` prompt cases in `test/merge-mode.test.ts:168-179`. Plus one unit case
+  for the new public source method: tracker project → `'github'`, files → `'files'`, an unknown `kind` → `'unsupported'`.
 
 **Interfaces:**
-- Consumes: `MERGE_MODES`, `isMergeMode` (Task 1); the per-request source resolution `agents.service.ts` already imports (`resolveSource`).
+- Consumes: `MERGE_MODES`, `isMergeMode` (Task 1); the public source method this task adds.
 - Produces: `resolveMergeMode(mergeMode: string | undefined, project: string): MergeMode` (or an equivalent that sees the project).
 
 - [ ] **Step 1: Write the failing tests**
   - 2.1 `mergeMode: 'pr'` on a tracker project spawns a prompt ending `… --merge-mode pr` (ids, if any, before it; `--question-mode`/`--base` after, in the
     existing order).
-  - 2.2 `mergeMode: 'pr'` on a files project → 400 whose error names `pr` and says it needs a tracker project; nothing spawned.
+  - 2.2 `mergeMode: 'pr'` on a files project, and on one whose source is `unsupported` → 400 whose error names `pr` and says it needs a tracker project; nothing spawned.
   - 2.3 `mergeMode: 'nonsense'` → 400 whose text lists `merge, branch, pr` (built from `MERGE_MODES`).
   - 2.4 absent / `''` → no `--merge-mode` token, byte-identical to today's prompt (an existing case; keep it).
   - 2.5 the `RUN_IN_PROGRESS_CODE` 409 still wins over a `pr`-on-files request (lock before content, as the existing ordering comment says).
@@ -105,9 +114,9 @@ plan argues from it and cites it as `spec §N`.
 ### Task 3: Tool — `init` mints the run branch
 
 **Files:**
-- Modify: `skills/backlog-orchestrate/tools/orchestrate.mjs` (`MERGE_MODES` copy at `:1052`, `INIT_USAGE`, `cmdInit`, `cmdMergeMode`, the `merge-mode`
-  exit-1 note in the exit-code contract comment, the run skeleton at `:2991-3013`)
-- Test: `skills/backlog-orchestrate/tools/orchestrate.test.mjs` (tracker cases use the existing `trackerFixture` with its stub API, `:7192-7262`)
+- Modify: `skills/backlog-orchestrate/tools/orchestrate.mjs` (`MERGE_MODES` copy at `:1052` and its comment at `:1039-1051`, `INIT_USAGE`,
+  `cmdInit`, `cmdMergeMode`, the run skeleton at `:2991-3013`)
+- Test: `skills/backlog-orchestrate/tools/orchestrate.test.mjs` (tracker cases use `trackerFixture`, `:7262`, with `fakeApi`, `:7192`)
 
 **Interfaces:**
 - Consumes: `projectSource`, `pullBaseAtInit`, `treeHoldingBranch`, `assertUsableBase` (existing).
@@ -119,15 +128,18 @@ plan argues from it and cites it as `spec §N`.
   - 3.2 `init --merge-mode pr` on a tracker fixture: exit 0; branch `backlog/run-<today>-1` exists at the target's tip; run file has `mergeMode` and
     `mergeModeEffective` `'pr'`, `base: 'backlog/run-<today>-1'`, `prTarget: 'main'`, `prUrl: null`.
   - 3.3 `init --merge-mode pr --base feature/x` → `prTarget: 'feature/x'`, branch cut at `feature/x`'s tip.
-  - 3.4 A local `backlog/run-<today>-1` already present → mints `-2`. Present only on the fixture's bare `origin` → also `-2`. Refs `-1`, `-3` and
+  - 3.4 A local `backlog/run-<today>-1` already present → mints `-2`. Present only on a bare `origin` the case adds → also `-2` (push `main` into that
+    bare origin first, or `pullBaseAtInit`'s `pull --ff-only origin main` fails before the mint). Refs `-1`, `-3` and
     `-wip` present → mints `-4` (the highest + 1, `-wip` ignored). `nextRunBranchName` unit cases: `([], '2026-10-15')` → `…-1`; a ref from another date
     is ignored.
   - 3.5 `init --merge-mode pr` on a files fixture: exit 1, message names the tracker requirement, no branch created, no run file, a pre-existing done run
     NOT archived.
   - 3.6 With `TZ` set in the child env to a zone whose local date differs from UTC at the test's instant (pick the zone at test time so the case is
     deterministic, e.g. `Pacific/Kiritimati` or `Etc/GMT+12` — whichever differs), the minted date equals the date formatted in that zone.
-  - 3.7 `origin` set to a non-existent path: `init --merge-mode pr` still exits 0, mints from local refs, prints exactly one stderr line naming the
-    fallback; the `ls-remote` call carries a timeout (assert the case finishes under 15 s).
+  - 3.7 No `origin` remote (the bare `trackerFixture`, `orchestrate.test.mjs:7262`): `init --merge-mode pr` exits 0, mints from local refs, and prints
+    exactly one stderr line naming the fallback. (An `origin` that exists but cannot be reached never gets this far: `pullBaseAtInit` runs first and
+    refuses the init with exit 1, which is today's behaviour and stays.) The `ls-remote` spawn carries a `timeout` option; pin it with a unit case on the
+    mint helper's argument builder, or by reading the spawn options in source, not by waiting on a network.
   - 3.8 `init` refused after the mint would have run (an exit-4 existing running run) leaves **no** new `backlog/run-*` branch.
   - 3.9 `init --merge-mode merge` and `branch` write `prTarget: null`, `prUrl: null`; the "key set unchanged from the contract fixture" case (`:971`) is
     updated to the new key set, deliberately.
@@ -135,12 +147,11 @@ plan argues from it and cites it as `spec §N`.
     `stage <id> merged` on a `pr` run is accepted.
   - 3.11 `claim` on a `pr` run (the resume path) and `reconcile` leave `base`, `prTarget`, `prUrl` byte-identical.
   - 3.12 `merge-check <id>` on a `pr` run with no tree holding the run branch records `baseTree.created: true` at
-    `.worktrees/_base-<sanitised backlog/run-…>` (outcome 2), not a park.
+    `.worktrees/_base-<sanitised backlog/run-…>` (outcome 2, `orchestrate.mjs:3673-3705`), not a park — build it from an existing `merge-check` fixture.
 - [ ] **Step 2:** `pnpm run test:skills` — the new cases red.
 - [ ] **Step 3: Implement** per spec §2: validate (files refusal in the pre-write block, after `--merge-mode`), pull the target, build the queue at the
   target, run the exit-4 check, then mint (`git ls-remote --heads origin 'backlog/run-<date>-*'` with a timeout, local `for-each-ref`, the `^…-\d+$` filter)
-  and `git branch <run> <target>` as the last git write before the run file. `cmdMergeMode` accepts `merge|pr → branch`. Update `INIT_USAGE` and the
-  exit-code comment.
+  and `git branch <run> <target>` as the last git write before the run file. `cmdMergeMode` accepts `merge|pr → branch`. Update `INIT_USAGE` and the `MERGE_MODES` comment.
 - [ ] **Step 4:** `pnpm run test:skills` green.
 - [ ] **Step 5: Commit** `feat(orchestrate): mint a run branch for pr-mode runs`.
 
@@ -167,7 +178,8 @@ plan argues from it and cites it as `spec §N`.
   - 4.6 A run with branched items adds one line naming those branches and saying they merge only after this PR lands.
   - 4.7 Refusals, exit 1, nothing written under `<dir>/pr/`: `mergeMode` not `'pr'`; no item `merged`; `prUrl` already set.
   - 4.8 `pr --url https://github.com/futin/backlog-manager/pull/275` writes `prUrl`; the six bad URLs of case 1.3 each exit 1 with the run unchanged.
-  - 4.9 A title containing `\n`, a backtick, or a leading `## ` renders as one list line: newlines collapsed to a space, the line still starting `- `.
+  - 4.9 Titles render as one list line each: `a\nb` → `- a b (#7)`; `` use `x` `` → `` - use `x` (#7) `` (backticks kept verbatim — they are Markdown the
+    reader wants); `## heading` → `- ## heading (#7)` (the `- ` prefix already stops it being a heading, so nothing is escaped).
   - 4.10 The tool's PR URL pattern source equals `shared/agent.ts`'s `PR_URL_PATTERN` source (parsed from both files, as 3.1 does).
 - [ ] **Step 2:** `pnpm run test:skills` — red.
 - [ ] **Step 3: Implement** per spec §4 (*Title*, *Body*). Merge commit lookup: first-parent commits in `<prTarget>..<base>`; the item's subject is the
@@ -178,7 +190,7 @@ plan argues from it and cites it as `spec §N`.
 ### Task 5: Tool — `finish` removes an empty run branch
 
 **Files:**
-- Modify: `skills/backlog-orchestrate/tools/orchestrate.mjs` (`cmdFinish`, its "pure status write" comment at `:5786`)
+- Modify: `skills/backlog-orchestrate/tools/orchestrate.mjs` (`cmdFinish`; and `cmdAbort`'s comment at `:5786`, which describes `cmdFinish` as a pure status write)
 - Test: `skills/backlog-orchestrate/tools/orchestrate.test.mjs`
 
 **Interfaces:**
@@ -194,7 +206,7 @@ plan argues from it and cites it as `spec §N`.
   - 5.7 The project root has a different branch checked out than the target → 5.1 still deletes (the delete is HEAD-independent).
 - [ ] **Step 2:** red.
 - [ ] **Step 3: Implement** spec §4 *Nothing merged*: read the run branch sha, check `rev-list --count <prTarget>..<base>` is 0 and no tree holds it,
-  then `git update-ref -d refs/heads/<base> <sha>`. Any failure is one stderr line and never changes the exit code. Rewrite the `:5786` comment.
+  then `git update-ref -d refs/heads/<base> <sha>`. Any failure is one stderr line and never changes the exit code. Rewrite `cmdAbort`'s `:5786` comment about `cmdFinish`.
 - [ ] **Step 4:** green.
 - [ ] **Step 5: Commit** `feat(orchestrate): finish removes a pr run's empty branch`.
 
@@ -203,22 +215,23 @@ plan argues from it and cites it as `spec §N`.
 **Files:**
 - Modify: `client/src/lib/run-stage.ts` (`mergeModeLabel`), `client/src/lib/settings.ts` (clamp —
   automatic through `MERGE_MODES`; check its comment), `client/src/components/board/OrchestrateSheet.tsx` (new `source` prop, option filter, fallback,
-  coverage-hint guard at `:329` and `:1184`), the `BoardView` call site that renders the sheet (passes `source` from the registered project's
-  `ProjectSummary.source`), `client/src/components/runs/RunDetail.tsx` (pill, link), `client/src/components/settings/SettingsView.tsx` (if its option list
-  is not already `MERGE_MODES`-driven), `client/src/styles.css` only if the link needs a class the head does not have
+  coverage-hint guard at `:329` and `:1184`; the prop is typed `ProjectSummary['source']`, i.e. `SourceKind | 'unsupported' | null`, and `pr` is offered
+  iff it is `'github'`), the `BoardView` call site that renders the sheet (passes `source` from the registered project's
+  `ProjectSummary.source`), `client/src/components/runs/RunDetail.tsx` (pill, link), `client/src/styles.css` only if the link needs a class the head does not have
 - Test: `test/orchestrator-start-ui.test.tsx`, `test/run-detail.test.tsx`, `test/runs-view.test.tsx` (if it asserts the pill)
 
 **Interfaces:**
 - Consumes: `MERGE_MODES`, `isPrUrl` (Task 1); `OrchestratorRun.prUrl`.
 
 - [ ] **Step 1: Write the failing tests**
-  - 6.2 `mergeModeLabel('pr', 'pr')` is `PR mode`; `('pr', 'branch')` is `branch mode (downgraded)`; `('merge', 'merge')` stays `null`.
-  - 6.4 Sheet, tracker project: three options, `Open a PR into <base>` among them; launching with it posts `mergeMode: 'pr'`.
-  - 6.5 Sheet, files project: two options, no `pr`; a Settings default of `pr` opens the sheet on `merge` and posts `mergeMode: 'merge'`.
-  - 6.6 Sheet: the no-allow-rule hint shows for `merge` and `pr`, not for `branch` (fetch mocked uncovered).
-  - 6.7 RunDetail: `prUrl` set → a link labelled `PR #275` with that href, `target="_blank"` and `rel="noopener noreferrer"`; `prUrl: null` → no link.
+  - 6.1 `mergeModeLabel('pr', 'pr')` is `PR mode`; `('pr', 'branch')` is `branch mode (downgraded)`; `('merge', 'merge')` stays `null`.
+  - 6.2 Sheet, tracker project: three options, `Open a PR into <base>` among them; launching with it posts `mergeMode: 'pr'`.
+  - 6.3 Sheet, files project: two options, no `pr`; a Settings default of `pr` opens the sheet on `merge` and posts `mergeMode: 'merge'`. The same two
+    outcomes for `source: null` and `source: 'unsupported'`.
+  - 6.4 Sheet: the no-allow-rule hint shows for `merge` and `pr`, not for `branch` (fetch mocked uncovered).
+  - 6.5 RunDetail: `prUrl` set → a link labelled `PR #275` with that href, `target="_blank"` and `rel="noopener noreferrer"`; `prUrl: null` → no link.
     A run that reached the client with a bad `prUrl` is impossible after Task 1's sanitiser, but RunDetail also renders no link unless `isPrUrl` holds.
-  - 6.8 RunDetail: a `pr` run draws the `PR mode` pill.
+  - 6.6 RunDetail: a `pr` run draws the `PR mode` pill.
 - [ ] **Step 2:** red.
 - [ ] **Step 3: Implement** spec §5. Cite `.claude/DESIGN.md`'s subsection in any new component header comment (the repo's rule).
 - [ ] **Step 4:** the suites green; `pnpm typecheck`; `pnpm build`.
@@ -231,17 +244,18 @@ plan argues from it and cites it as `spec §N`.
   failed`" routed through §10; §10's three PR steps, the aborted line, the kept-local-branch line, the merge-list target rule; hard-limit bullet),
   `skills/backlog-orchestrate/references/tracker.md` (§4 pull skip reason, §9 push now naming the run branch, *Hard limits — the three pushes*, the
   `ls-remote` fallback, a denied `gh`, the collision recovery, the nothing-merged delete), `skills/backlog-orchestrate/references/recovery.md` (abort
-  summary line; resume never re-opens a PR when `prUrl` is set)
+  summary line; resume never re-opens a PR when `prUrl` is set; the `--abort` section at `:184-186` notes that `abort` ends through `finish`, which in PR
+  mode may delete an empty run branch with `update-ref -d` — no new step for the session, but the text must not claim abort touches no ref)
 - Modify: `.claude/rules/orchestrator.md` (merge-mode bullet gains `pr`; push bullet names `gh pr create`; **a new bullet** for the new anchor),
   `docs/subsystems/invariants.md` (new section *PR mode drains onto a run branch and opens one PR per run*), `CLAUDE.md` (new headline, byte-equal with the
   new rules bullet's), `docs/subsystems/board.md`, `docs/workflows/ci.md` §The ruleset, `docs/subsystems/skills.md` if it lists merge modes
-- Test: `test/claude-rules.test.ts` (existing guard — must stay green), `pnpm run test:skills` (SKILL.md text guards in `orchestrate.test.mjs`, e.g. the
-  `git -C "$PWD"` allowlist)
+- Test: `test/claude-rules.test.ts` (existing guard — must stay green), `pnpm run test:skills` (SKILL.md text guards in `orchestrate.test.mjs`, the §9
+  fenced-command guards at `orchestrate.test.mjs:3916-3958`)
 
 - [ ] **Step 1:** Write the SKILL.md changes, each new rule entering as **one statement** with its story in `references/` (the repo's invariant). Every
   command added is fenced and literal, with `<target>`/`<head>` placeholders spelled as `pr-draft` prints them.
 - [ ] **Step 2:** Rules, invariants, CLAUDE.md headline. Run `pnpm run test:jest -- claude-rules` — green (anchor exists once, one home, headline byte-equal).
-- [ ] **Step 3:** board.md, ci.md (the ruleset may be applied once the Settings default is `pr`; first bullet says a run opens a PR instead of pushing
+- [ ] **Step 3:** board.md, ci.md (its "Phase B's `--pr` mode" wording becomes the `pr` merge mode — there is no `--pr` flag;the ruleset may be applied once the Settings default is `pr`; first bullet says a run opens a PR instead of pushing
   `main`; release-kit's `apply-repo-settings.sh` stays the user's step), skills.md.
 - [ ] **Step 4:** `pnpm test` (both runners), `pnpm typecheck`, `pnpm build` — all green; paste the summary lines into the task report.
 - [ ] **Step 5: Commit** `docs(orchestrate): document pr mode in the skill, rules and invariants`.

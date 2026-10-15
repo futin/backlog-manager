@@ -232,8 +232,8 @@ The plan names exact cases; the shape is:
 
 ## 8. Docs
 
-- `orchestrate.mjs`'s `cmdFinish` comment, which calls it a pure status write, and `references/recovery.md`'s abort order: `finish` now runs one `git branch
-  -d` in PR mode (§4, *Nothing merged*).
+- `cmdAbort`'s comment in `orchestrate.mjs` that calls `cmdFinish` a pure status write, and `references/recovery.md`'s abort order: `finish` now runs one
+  `git update-ref -d` in PR mode (§4, *Nothing merged*).
 - After a PR opens, the local run branch is kept and nothing deletes it (the repo setting deletes only the remote head on merge); the mint's local-refs read
   is why its numbers keep rising across runs on one machine. SKILL.md §10 says so in one line.
 
