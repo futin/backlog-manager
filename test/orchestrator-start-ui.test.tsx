@@ -1091,7 +1091,7 @@ describe('OrchestrateSheet', () => {
     // OUTCOME, never the flag — pinned here so a future edit that quietly
     // reverts to 'merge'/'branch' as the visible label fails a test instead
     // of only a design-doc diff.
-    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me']);
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me', 'Open a PR into main']);
   });
 
   // --- Test case 1b (bug-36) -------------------------------------------
@@ -1113,7 +1113,7 @@ describe('OrchestrateSheet', () => {
     await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
 
     const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
-    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to feature/x', 'Leave branches for me']);
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to feature/x', 'Leave branches for me', 'Open a PR into feature/x']);
     expect(screen.getByText(/this run gates, branches and merges on/).textContent).toContain('feature/x');
   });
 

@@ -34,18 +34,34 @@ export function isAgentAction(value: unknown): value is AgentAction {
 }
 
 /**
- * Is this unvalidated value one of the two `MergeMode`s? Lives beside
+ * Is this unvalidated value one of the `MergeMode`s? Lives beside
  * `isAgentAction` for the identical reason: `AgentsService.orchestrate`
  * (§2.3 of the design) has to answer "absent → 'merge', valid → itself,
  * anything else → reject", and a hand-written `!== 'merge' && !== 'branch'`
  * chain is a second copy of `MERGE_MODES` — the copy that goes stale the day
- * a third mode is ever added. Deliberately not exported from `shared/types.ts`
+ * a mode is added (`pr` was the third, and it went through here untouched). Deliberately not exported from `shared/types.ts`
  * alongside `MergeMode`/`MERGE_MODES` themselves: this file is where every
  * other request-body guard already lives, and a reader checking a body field
  * against its vocabulary should have exactly one module to look in.
  */
 export function isMergeMode(value: unknown): value is MergeMode {
   return typeof value === 'string' && (MERGE_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * The one shape a recorded pull request URL may have: `https://github.com/<owner>/<repo>/pull/<n>` and nothing after the number. Anchored at both ends and
+ * pinned to `https://` and the literal host, because the value is rendered as an `href` on the Runs detail sheet (spec P5) and the run file it comes from
+ * is hand-editable — a lookalike host (`github.com.evil.io`), a `javascript:` URL, or a sibling path (`/issues/1`, `/pull/1/files`) must not reach a link.
+ */
+export const PR_URL_PATTERN = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+
+/**
+ * Is this unvalidated value a pull request URL `PR_URL_PATTERN` accepts? A guard rather than a bare `PR_URL_PATTERN.test` because its callers hold an
+ * `unknown` (a parsed run file) and the `typeof` check is half the answer; it lives beside `isMergeMode` because `sanitizeMergeFields` asks both questions of the
+ * same parsed file in the same breath.
+ */
+export function isPrUrl(value: unknown): value is string {
+  return typeof value === 'string' && PR_URL_PATTERN.test(value);
 }
 
 /**

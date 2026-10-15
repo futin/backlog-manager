@@ -244,6 +244,56 @@ describe('GET /api/orchestrator/runs', () => {
     expect(res.body.runs[0].mergeMode).toBe('merge');
   });
 
+  // spec P4/P5. The two PR fields are read at the same two sites as the merge fields and degrade the same way — a reading of a run that already happened, so
+  // a bad byte becomes `null` rather than a 500 — but `prUrl` is held to `isPrUrl` and not just `typeof === 'string'`, because the client renders it as an href.
+  describe('prTarget and prUrl', () => {
+    async function readBack(over: Record<string, unknown>, drop: string[] = []): Promise<OrchestratorRun> {
+      const run: Record<string, unknown> = { ...fixture, updatedAt: new Date().toISOString(), ...over };
+      for (const key of drop) delete run[key];
+      const dir = projectDir(fixture.project);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+      const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+      return res.body.runs[0];
+    }
+
+    it('reads a run file with neither key back with both null', async () => {
+      const run = await readBack({}, ['prTarget', 'prUrl']);
+      expect(run.prTarget).toBeNull();
+      expect(run.prUrl).toBeNull();
+    });
+
+    it('reads a recorded target and a valid URL back unchanged', async () => {
+      const run = await readBack({ mergeMode: 'pr', mergeModeEffective: 'pr', prTarget: 'main', prUrl: 'https://github.com/futin/backlog-manager/pull/275' });
+      expect(run.prTarget).toBe('main');
+      expect(run.prUrl).toBe('https://github.com/futin/backlog-manager/pull/275');
+    });
+
+    it('nulls a URL that is not a pull request URL and leaves everything else intact', async () => {
+      const run = await readBack({ prTarget: 'main', prUrl: 'https://example.com/x' });
+      expect(run.prUrl).toBeNull();
+      expect(run.prTarget).toBe('main');
+      expect(run.base).toBe(fixture.base);
+      expect(run.runId).toBe(fixture.runId);
+    });
+
+    it('nulls a prTarget that is not a string', async () => {
+      const run = await readBack({ prTarget: 7 });
+      expect(run.prTarget).toBeNull();
+    });
+
+    it('nulls an empty prTarget, as base treats an empty base', async () => {
+      const run = await readBack({ prTarget: '' });
+      expect(run.prTarget).toBeNull();
+    });
+
+    it('lets mergeMode and mergeModeEffective pr survive the sanitiser instead of degrading to merge', async () => {
+      const run = await readBack({ mergeMode: 'pr', mergeModeEffective: 'pr' });
+      expect(run.mergeMode).toBe('pr');
+      expect(run.mergeModeEffective).toBe('pr');
+    });
+  });
+
   it('marks a run whose heartbeat is 16 minutes old as not fresh', async () => {
     const run: OrchestratorRun = {
       ...fixture,

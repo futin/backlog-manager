@@ -11,6 +11,7 @@ import {
   isAgentAction,
   isItemId,
   isMergeMode,
+  isPrUrl,
   isQuestionMode,
   modesUpTo,
   pickFrom,
@@ -148,8 +149,10 @@ describe('the action vocabulary', () => {
 });
 
 describe('the merge mode vocabulary', () => {
-  it('holds exactly the two modes', () => {
-    expect(MERGE_MODES).toEqual(['merge', 'branch']);
+  it('holds exactly the three modes, in picker order', () => {
+    // Order is load-bearing: the Orchestrate sheet and the Settings default both build their options from this list, so `pr` landing anywhere but third
+    // would reorder a control people already have muscle memory for.
+    expect(MERGE_MODES).toEqual(['merge', 'branch', 'pr']);
   });
 
   it('accepts each of them and nothing else', () => {
@@ -164,6 +167,35 @@ describe('the merge mode vocabulary', () => {
     expect(isMergeMode(undefined)).toBe(false);
     expect(isMergeMode(1)).toBe(false);
     expect(isMergeMode(['merge'])).toBe(false);
+  });
+
+  it('accepts pr, exactly and case-sensitively', () => {
+    expect(isMergeMode('pr')).toBe(true);
+    expect(isMergeMode('PR')).toBe(false);
+    expect(isMergeMode('pull')).toBe(false);
+  });
+});
+
+describe('isPrUrl', () => {
+  it('accepts a github.com pull request URL', () => {
+    expect(isPrUrl('https://github.com/futin/backlog-manager/pull/275')).toBe(true);
+  });
+
+  it('refuses everything that is not exactly one', () => {
+    // Each row is a distinct way a recorded URL could be wrong, and a distinct way a rendered href could be unsafe: a downgraded scheme, a lookalike host
+    // that merely starts with github.com, a sibling path, a deeper path, a script URL, and the three non-string-or-empty shapes a hand-edited file yields.
+    for (const bad of [
+      'http://github.com/a/b/pull/1',
+      'https://github.com.evil.io/a/b/pull/1',
+      'https://github.com/a/b/issues/1',
+      'https://github.com/a/b/pull/1/files',
+      'javascript:alert(1)',
+      '',
+      null,
+      42
+    ]) {
+      expect(isPrUrl(bad)).toBe(false);
+    }
   });
 });
 

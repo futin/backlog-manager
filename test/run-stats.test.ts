@@ -74,6 +74,8 @@ function archiveRun(over: Partial<OrchestratorArchiveRun> = {}): OrchestratorArc
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    prTarget: null,
+    prUrl: null,
     base: 'main',
     questionMode: 'park',
     queue: [],

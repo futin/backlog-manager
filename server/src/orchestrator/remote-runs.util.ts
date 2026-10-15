@@ -366,6 +366,10 @@ export function deriveRemoteRuns(input: DeriveRemoteRunsInput): RemoteRun[] {
       mergeMode: run.mergeMode,
       mergeModeEffective: run.mergeMode,
       mergeModeNote: null,
+      // A claim carries no PR fields (it has no room for them, and a remote run is read-only), so both are `null` here even for a `pr` run — the board
+      // learns the run is a PR run from `mergeMode`, and the link, which only the driving machine's run file holds, does not travel.
+      prTarget: null,
+      prUrl: null,
       questionMode: run.questionMode,
       driver: null,
       queue: newest.map(({ issueNumber, claim }) => queueItemOf(issueNumber, claim, issueTitle(issueNumber))),
