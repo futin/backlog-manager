@@ -1044,12 +1044,19 @@ const RUN_STAGES = [
 // `merge` is today's behaviour, byte for byte — merge each verified item
 // into main and clean up its worktree and branch. `branch` commits, reviews
 // and verifies exactly the same way, then removes the worktree and KEEPS
-// the branch; main is never touched. `init --merge-mode` and the
-// `merge-mode` command below both validate against this exact list, rather
-// than a hand-written `=== 'merge' || === 'branch'` chain, for the same
-// "one copy of the vocabulary" reason RUN_STAGES is a list and not a
-// scattered set of string literals.
-const MERGE_MODES = ['merge', 'branch'];
+// the branch; main is never touched. `pr` (tracker projects only, spec P3) is
+// `merge` aimed at a branch `init` mints for the run — `backlog/run-<local
+// date>-<n>`, recorded as the run's `base` — with `--base` naming the PR's
+// target instead, recorded as `prTarget`; the run ends by opening one PR from
+// the one into the other. Everything downstream reads `base`, so to every
+// merge-side command a `pr` run is a `merge` run on an unusual base (spec P4).
+// `init --merge-mode` and the `merge-mode` command below both validate
+// against this exact list, rather than a hand-written `=== 'merge' || ===
+// 'branch'` chain, for the same "one copy of the vocabulary" reason
+// RUN_STAGES is a list and not a scattered set of string literals — and a
+// node test pins it equal to shared/types.ts's copy by reading both sources,
+// since an import is not available to do it.
+const MERGE_MODES = ['merge', 'branch', 'pr'];
 
 // The QuestionMode vocabulary, verbatim from shared/types.ts's own
 // QuestionMode union and its QUESTION_MODES const — the same standalone
@@ -2695,6 +2702,121 @@ function pullBaseAtInit(projectRoot, base) {
   );
 }
 
+// --- the run branch (pr mode, spec §2) ------------------------------------
+//
+// A `pr` run merges into a branch of its own, `backlog/run-<YYYY-MM-DD>-<n>`, and ends by opening one PR from it into the
+// target `--base` named. The name sits under `backlog/` beside the item branches and cannot collide with one: an item id
+// is a bare number or `<section>-<n>`, and no section is called `run`.
+
+/**
+ * The machine's LOCAL calendar date as `YYYY-MM-DD`. Local rather than UTC because the date is for the person reading a
+ * branch list, and a run started at 01:00 in Belgrade belongs to that day, not the one UTC is still on. Read from the
+ * `Date` getters, which follow `TZ`, and from nothing else — a `toISOString().slice(0, 10)` here would be the UTC date
+ * wearing a local name. Exported for its unit case; `mintRunBranch` is its only caller.
+ */
+export function localDate(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * The next free run branch name for `date`, given every branch name already in use (local and remote alike, as short
+ * names — `backlog/run-…`, no `refs/heads/`). Pure, so the numbering rule has a test that needs no repository.
+ *
+ * Only a name matching `^backlog/run-<date>-\d+$` counts: a hand-made `…-wip` beside a real run branch, another day's
+ * run, or a longer name that merely contains the shape is not a number this mint has to step over. The answer is the
+ * highest number in use plus one, never the first gap — a gap is most likely a run branch somebody deleted after its PR
+ * landed, and handing its number to a second run the same day would give two different PRs one head-branch name in
+ * GitHub's history.
+ */
+export function nextRunBranchName(date, existing) {
+  const shape = new RegExp(`^backlog/run-${date.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)$`);
+  let highest = 0;
+  for (const name of existing) {
+    const m = shape.exec(name);
+    if (m !== null) highest = Math.max(highest, Number(m[1]));
+  }
+  return `backlog/run-${date}-${highest + 1}`;
+}
+
+// Long enough for a slow VPN round trip, short enough that an `init` on a train does not sit there for git's own
+// connect timeout (which over ssh can be minutes) before falling back.
+const LS_REMOTE_TIMEOUT_MS = 15_000;
+
+/**
+ * The mint's one network call, as `spawnSync` arguments — split out so a unit case can pin the `timeout` without
+ * waiting on a network. HEAD-independent and repo-wide, so correct from the project root. The pattern is matched by git
+ * against the tail of each ref, so it may also return a `refs/heads/x/backlog/run-…`; `nextRunBranchName`'s anchored
+ * shape is what discards that.
+ *
+ * `GIT_TERMINAL_PROMPT=0` because an `origin` that wants credentials would otherwise prompt on the terminal of a
+ * hand-run `init`, for a read that has a perfectly good fallback; with it, git fails at once and the fallback runs.
+ */
+export function runBranchLsRemote(projectRoot, date) {
+  return {
+    args: ['-C', projectRoot, 'ls-remote', '--heads', 'origin', `backlog/run-${date}-*`],
+    options: { encoding: 'utf8', timeout: LS_REMOTE_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }
+  };
+}
+
+/**
+ * Mints the run branch and creates it at `target`'s tip; returns its name. `init`'s LAST git write before the run file,
+ * and called only after every refusal `init` can make — so a refused `init` leaves no branch, and a branch exists only
+ * for an `init` that passed every check. (If that write then fails the empty branch stays behind; it is
+ * harmless, and the next mint steps over its number.)
+ *
+ * The numbers in use are read from local refs AND from `origin`, because a tracker project is multi-machine by
+ * definition and two machines starting a run the same day must not mint one name — the second one's first push would be
+ * rejected and its item parked. The remote read is best-effort: ANY non-zero or timed-out `ls-remote` (no `origin`,
+ * offline, an `origin` path that does not exist, auth) falls back to local refs with one stderr line saying so. It keys
+ * on the call failing, never on "no origin configured", because the failure modes worth falling back from are the ones a
+ * config check cannot see.
+ *
+ * Every git call here is HEAD-independent (bug-38): `for-each-ref` over a ref prefix, `ls-remote`, and `branch` with an
+ * explicit start point. The start point is `refs/heads/<target>`, fully qualified, so a tag that happens to share the
+ * branch's name cannot be what the run branch is cut from; and `--no-track`, so a user's `branch.autoSetupMerge=always`
+ * cannot give the run branch `main` as its upstream, which would aim a later bare `pull` in the base tree at the target.
+ */
+function mintRunBranch(projectRoot, target) {
+  const date = localDate();
+  const names = [];
+
+  const local = spawnSync('git', ['-C', projectRoot, 'for-each-ref', '--format=%(refname)', 'refs/heads/backlog/'], { encoding: 'utf8' });
+  if (local.status !== 0) {
+    throw new OrchestrateError(
+      `git for-each-ref failed in ${projectRoot} while minting the run branch. Nothing was written. git said: ${(local.stderr || '').trim()}`,
+      1
+    );
+  }
+  for (const line of local.stdout.split('\n')) {
+    if (line.startsWith('refs/heads/')) names.push(line.slice('refs/heads/'.length));
+  }
+
+  const { args, options } = runBranchLsRemote(projectRoot, date);
+  const remote = spawnSync('git', args, options);
+  if (remote.status === 0) {
+    for (const line of remote.stdout.split('\n')) {
+      const ref = line.split('\t')[1];
+      if (ref !== undefined && ref.startsWith('refs/heads/')) names.push(ref.slice('refs/heads/'.length));
+    }
+  } else {
+    const why = remote.error?.code === 'ETIMEDOUT' ? `timed out after ${LS_REMOTE_TIMEOUT_MS} ms` : `exit ${remote.status ?? remote.signal}`;
+    console.error(
+      `warning: git ls-remote origin failed (${why}) — minting the run branch from local refs only, so a run another machine started today may hold the same name`
+    );
+  }
+
+  const name = nextRunBranchName(date, names);
+  const created = spawnSync('git', ['-C', projectRoot, 'branch', '--no-track', name, `refs/heads/${target}`], { encoding: 'utf8' });
+  if (created.status !== 0) {
+    throw new OrchestrateError(
+      `could not create the run branch ${name} at ${target} in ${projectRoot}. Nothing was written. git said: ${(created.stderr || created.stdout || '').trim()}`,
+      1
+    );
+  }
+  return name;
+}
+
 // --- commands ----------------------------------------------------------
 // Each cmdXxx function is the CLI's own contract for one command: parse
 // this command's flags, validate everything that can be validated before
@@ -2705,7 +2827,7 @@ function pullBaseAtInit(projectRoot, base) {
 // inside cmdStage and not spread across a bigger switch.
 
 const INIT_USAGE =
-  'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch>] [--question-mode <decide|park>]';
+  'usage: orchestrate.mjs init --project <abs path> [--ids a,b,c] [--max N] [--base <ref>] [--merge-mode <merge|branch|pr>] [--question-mode <decide|park>]';
 
 function cmdInit(argv) {
   let project;
@@ -2783,6 +2905,18 @@ function cmdInit(argv) {
   // constant's own comment gives.
   if (!MERGE_MODES.includes(mergeMode)) {
     throw new OrchestrateError(`--merge-mode must be one of ${MERGE_MODES.join(', ')} (got ${mergeMode === undefined ? 'no value' : mergeMode})`, 1);
+  }
+
+  // Spec P3: `pr` is for tracker projects only. A files project has never been pushed by this tool and has no remote ruleset
+  // to route a PR around, so the mode would be an opt-in exception to "never pushes a files project" with nothing to gain.
+  // The server refuses the same request with a 400 before it spawns anything (`resolveMergeMode`); this is the copy a
+  // terminal reaches. Right after the membership test, in the pre-write block, so a refusal archives no done run and
+  // mints no branch.
+  if (mergeMode === 'pr' && projectSource(project) !== 'github') {
+    throw new OrchestrateError(
+      `--merge-mode pr needs a tracker project (backlog/source.json with kind "github"): ${project} keeps its items in files. Nothing was written.`,
+      1
+    );
   }
 
   // Checked in the same pre-write block, immediately after --merge-mode,
@@ -2938,6 +3072,12 @@ function cmdInit(argv) {
     throw new OrchestrateError(`${reason}. Use \`orchestrate.mjs status\` to inspect it, then --resume or --abort (never plain init) to take it over.`, 4);
   }
 
+  // Spec §2 step 4: under `pr` the run's base is a branch minted HERE — after the queue gate above (which read `base`, the
+  // target, at the same commit the run branch is about to be cut from) and after the exit-4 check, so no refusal leaves a
+  // branch behind; and before the archive below, so a failed mint archives nothing. From here on `base` keeps its one
+  // meaning for every later command, "the branch this run merges into", and the target moves to `prTarget`.
+  const runBranch = mergeMode === 'pr' ? mintRunBranch(project, base) : null;
+
   // A non-running existing run (done/aborted/failed) is archived rather
   // than discarded: `runs/<stem>.json` is the only place a finished run's
   // full history survives once run.json itself is about to be replaced, and
@@ -2988,7 +3128,15 @@ function cmdInit(argv) {
     // file may not import but still has to uphold byte for byte, and
     // BASE_REF_DEFAULT's own comment for why this is recorded at all when the
     // gate-only version of the flag deliberately was not.
-    base,
+    //
+    // Under `pr` it is the minted run branch instead, and what `--base` named is `prTarget` (spec P4): every merge-side
+    // reader — the worktree cut, `merge-check`'s base-tree resolution, `cleanup`, the claim's `ClaimRun.base` — already
+    // reads `base`, and each does the right thing once `base` names the run branch. Under `merge` and `branch` there is no
+    // PR, so `prTarget` is `null` rather than a copy of `base` a reader could mistake for one. `prUrl` is written later,
+    // once, by `pr --url`, after the driver has opened the PR.
+    base: runBranch ?? base,
+    prTarget: runBranch === null ? null : base,
+    prUrl: null,
     // What this run was ASKED to do (never rewritten after this line — see
     // the `merge-mode` command below, which only ever moves the EFFECTIVE
     // field) and what it is actually doing right now. The two start equal,
@@ -3396,7 +3544,12 @@ function cmdStage(argv, out = console.log) {
 // The one-way rule (`merge` -> `branch`, never back) is enforced by
 // CONSTRUCTION here, not by trusting the caller to only ever ask for the
 // right thing: the sole transition this function will ever perform is
-// exactly `mergeModeEffective === 'merge'` and `target === 'branch'`.
+// `target === 'branch'` from a `mergeModeEffective` of `merge` or `pr`. A
+// `pr` run merges exactly as a `merge` run does — into its run branch rather
+// than its target — so a classifier denial degrades it the same way (spec
+// §1), and because `mergeMode` keeps `pr` a degraded PR run is still
+// recognisably one: finish still opens the PR for what merged before the
+// denial.
 // Everything else is refused untouched — including trying to move back to
 // `merge` (case 9 of the task-3 brief: the downgrade is one-way) AND
 // re-recording a downgrade that has already happened. That second refusal
@@ -3431,9 +3584,9 @@ function cmdMergeMode(argv) {
   const run = readRun(dir);
   assertDriver(run);
 
-  if (!(run.mergeModeEffective === 'merge' && target === 'branch')) {
+  if (!((run.mergeModeEffective === 'merge' || run.mergeModeEffective === 'pr') && target === 'branch')) {
     throw new OrchestrateError(
-      `merge mode cannot move from '${run.mergeModeEffective}' to '${target}' — the only move this command ever allows is merge -> branch, and only once per run`,
+      `merge mode cannot move from '${run.mergeModeEffective}' to '${target}' — the only move this command ever allows is merge or pr -> branch, and only once per run`,
       1
     );
   }
