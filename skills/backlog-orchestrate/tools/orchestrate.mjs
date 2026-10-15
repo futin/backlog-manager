@@ -6304,8 +6304,9 @@ export function prTitle(items) {
  *
  * A title becomes ONE list line: a line break inside it would end the item and could start a heading or a new block, so
  * every break (and the whitespace around it) collapses to one space. Nothing else is escaped — backticks and the like are
- * Markdown the reader wants, and the `- ` prefix already stops a `## ` from being a heading. `## What's new` is the section
- * Phase C's tag message takes verbatim up to the next `^## `, which is why `## Run` is its own heading rather than a line.
+ * Markdown the reader wants. The `- ` prefix keeps a title line from matching `^## `, the pattern a Phase C tag-message reader stops
+ * at, so a title that begins `## ` cannot cut the section short. `## What's new` is the section Phase C's tag message takes verbatim
+ * up to the next `^## `, which is why `## Run` is its own heading rather than a line.
  */
 export function prBody(run) {
   const oneLine = (text) => String(text).replace(/\s*[\r\n]+\s*/g, ' ').trim();

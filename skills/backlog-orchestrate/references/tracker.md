@@ -71,16 +71,14 @@ only …`, and the mint goes on from local refs. Read the line, mention it in th
 
 **Two machines can still mint one name** — a failed `ls-remote` on one of them, or two `init`s inside the same second. The second machine finds out at its first
 merge: the push of the run branch is rejected and that item parks, exactly as §9 says. The usual recovery for a rejected push — `--resume` pulls and pushes
-again
-— does **not** hold here, because §4's pull is skipped in PR mode and the remote branch is another run's. The recovery is `--abort` and a fresh `init`, which
-mints the next number; the parked item's merge stays on the abandoned local run branch, and the summary names that branch.
+again — does **not** hold here, because §4's pull is skipped in PR mode and the remote branch is another run's. The recovery is `--abort` and a fresh `init`,
+which mints the next number; the parked item's merge stays on the abandoned local run branch, and the summary names that branch.
 
 **Why the run branch is `base`, and the target is a new field.** The run file records `base: <run branch>` and `prTarget: <target>`. Everything downstream
 already reads `base` — §1's gate, §4's worktree cut, `merge-check`'s base-tree resolution, `cleanup`'s commands, `--resume`, the claim's `ClaimRun.base` — and
 each one does the right thing once `base` names the run branch, so nothing there had to learn a second field. Only the pull request reads `prTarget`. No tree
-has
-the run branch checked out, so `merge-check` takes its "none does" outcome: it creates `.worktrees/_base-<sanitised run branch>`, merges there, and §10 removes
-that tree because `baseTree.created` is true.
+has the run branch checked out, so `merge-check` takes its "none does" outcome: it creates `.worktrees/_base-<sanitised run branch>`, merges there, and §10
+removes that tree because `baseTree.created` is true.
 
 ## §3 Pre-flight, per item — the claim
 
