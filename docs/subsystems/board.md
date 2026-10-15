@@ -337,13 +337,16 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Interfaces
 
 - `lib/agents.ts` — same-origin fetches against `/api`.
+- `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns` and
+  `useWatchdog`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
+  rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` entry is present, plus a grace window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
-  (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no interval at all.
+  (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no timer at all.
 - `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared
   Settings Trackers card through `useTrackersContext`. Mount and window focus, plus a timer on the server's poll clock: `nextDelay` arms the next read
   `TRACKER_FETCH_SLACK_MS` after the newest stamp's cycle ends, drops to a 1 s floor while any `ok` repo of the same sweep is still due (the server stamps repos

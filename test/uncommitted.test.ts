@@ -7,6 +7,7 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
+import * as gitRun from '../server/src/git-run.util';
 import { UNCOMMITTED_BASE_REF, uncommittedItemPaths } from '../server/src/items/uncommitted.util';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
@@ -73,22 +74,22 @@ describe('uncommittedItemPaths', () => {
   });
 
   // --- case 1 -----------------------------------------------------------
-  it('case 1: reports nothing for an item committed on main with a clean tree', () => {
+  it('case 1: reports nothing for an item committed on main with a clean tree', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
+    expect(await uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
   });
 
   // --- case 2 -----------------------------------------------------------
-  it('case 2: reports a committed item that has since been edited in the working tree', () => {
+  it('case 2: reports a committed item that has since been edited in the working tree', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     write(root, 'backlog/tasks/open/task-1.md', 'also committed\n');
     commit(root, 'one');
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n\n## Fix\n\nreal words\n');
 
-    expect(uncommittedItemPaths(root)).toEqual({
+    expect(await uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/bugs/open/bug-1.md')],
       absent: [],
       known: true
@@ -104,13 +105,13 @@ describe('uncommittedItemPaths', () => {
   // FAIL — it re-runs the util's own two git reads by hand with the
   // `ls-files --others` half removed and asserts the answer goes empty, so a
   // future "simplification" down to one spawn cannot leave this green.
-  it('case 3: reports an item that exists on disk and was never committed at all', () => {
+  it('case 3: reports an item that exists on disk and was never committed at all', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
     write(root, 'backlog/tasks/open/task-9.md', 'brand new\n');
 
-    expect(uncommittedItemPaths(root)).toEqual({
+    expect(await uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/tasks/open/task-9.md')],
       absent: [abs(root, 'backlog/tasks/open/task-9.md')],
       known: true
@@ -121,7 +122,7 @@ describe('uncommittedItemPaths', () => {
   });
 
   // --- case 4 -----------------------------------------------------------
-  it('case 4: reports an item committed on a branch main does not contain', () => {
+  it('case 4: reports an item committed on a branch main does not contain', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
@@ -135,7 +136,7 @@ describe('uncommittedItemPaths', () => {
     const porcelain = cp.execFileSync('git', ['-C', root, 'status', '--porcelain'], { cwd: root, encoding: 'utf8' });
     expect(porcelain.trim()).toBe('');
 
-    expect(uncommittedItemPaths(root)).toEqual({
+    expect(await uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/tasks/open/task-9.md')],
       absent: [abs(root, 'backlog/tasks/open/task-9.md')],
       known: true
@@ -143,7 +144,7 @@ describe('uncommittedItemPaths', () => {
   });
 
   // --- case 5 -----------------------------------------------------------
-  it('case 5: does not report a staged file whose content is identical to main', () => {
+  it('case 5: does not report a staged file whose content is identical to main', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
@@ -151,7 +152,7 @@ describe('uncommittedItemPaths', () => {
     // and this worktree holds exactly what a run's worktree from main would.
     git(root, 'add', 'backlog/bugs/open/bug-1.md');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
+    expect(await uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
   });
 
   // --- case 6 -----------------------------------------------------------
@@ -165,13 +166,13 @@ describe('uncommittedItemPaths', () => {
   // mirrors blobReaderAt's own precondition: with no blob view the tool gates
   // the working copy, so there is no divergence to warn about and a chip
   // would be a false positive.
-  it('case 6: known: false when the project is a subdirectory rather than the repo toplevel', () => {
+  it('case 6: known: false when the project is a subdirectory rather than the repo toplevel', async () => {
     const root = freshRepo();
     write(root, 'anchor.md', 'so main has a commit\n');
     commit(root, 'one');
     write(root, 'sub/backlog/bugs/open/bug-1.md', 'never committed\n');
 
-    expect(uncommittedItemPaths(join(root, 'sub'))).toEqual({ paths: [], absent: [], known: false });
+    expect(await uncommittedItemPaths(join(root, 'sub'))).toEqual({ paths: [], absent: [], known: false });
   });
 
   // --- case 7 -----------------------------------------------------------
@@ -185,7 +186,7 @@ describe('uncommittedItemPaths', () => {
   // doomed ones — neither of which is observable from out here. What IS
   // observable is that a project whose trunk is not called `main` gets a
   // silent no-answer rather than a wrong one, and that is what this asserts.
-  it('case 7: known: false when the repo has no main ref at all', () => {
+  it('case 7: known: false when the repo has no main ref at all', async () => {
     const root = mkdtempSync(join(tmpdir(), 'bm-uncommitted-master-'));
     roots.push(root);
     git(root, 'init', '-q', '.');
@@ -197,27 +198,26 @@ describe('uncommittedItemPaths', () => {
     commit(root, 'one');
     write(root, 'backlog/tasks/open/task-9.md', 'uncommitted\n');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: false });
+    expect(await uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: false });
   });
 
   // --- case 8 -----------------------------------------------------------
-  it('case 8: known: false and no throw when the path is not inside any git repo', () => {
+  it('case 8: known: false and no throw when the path is not inside any git repo', async () => {
     const plain = mkdtempSync(join(tmpdir(), 'bm-uncommitted-nogit-'));
     roots.push(plain);
     write(plain, 'backlog/bugs/open/bug-1.md', 'no repo here\n');
-    expect(() => uncommittedItemPaths(plain)).not.toThrow();
-    expect(uncommittedItemPaths(plain)).toEqual({ paths: [], absent: [], known: false });
+    await expect(uncommittedItemPaths(plain)).resolves.toEqual({ paths: [], absent: [], known: false });
   });
 
   // --- case 9 -----------------------------------------------------------
-  it('case 9: reports a non-ASCII filename as raw UTF-8, not octal-escaped', () => {
+  it('case 9: reports a non-ASCII filename as raw UTF-8, not octal-escaped', async () => {
     const root = freshRepo();
     const rel = 'backlog/bugs/open/bug-1-café-ø.md';
     write(root, 'backlog/bugs/open/bug-2.md', 'anchor\n');
     commit(root, 'one');
     write(root, rel, 'never committed\n');
 
-    const { paths, absent, known } = uncommittedItemPaths(root);
+    const { paths, absent, known } = await uncommittedItemPaths(root);
     expect(known).toBe(true);
     // The escaped form git prints without `core.quotePath=false` would be
     // quoted and backslashed; asserting the exact absolute path is what
@@ -234,18 +234,18 @@ describe('uncommittedItemPaths', () => {
   // NEITHER — so a memo copied over from that module would answer "clean"
   // here forever after the first call, which is precisely the false negative
   // this feature exists to remove.
-  it('case 10: caches nothing — a working-tree edit after a first call is reported by the second', () => {
+  it('case 10: caches nothing — a working-tree edit after a first call is reported by the second', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
+    expect(await uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
 
     const indexBefore = fs.statSync(join(root, '.git', 'index')).mtimeMs;
     write(root, 'backlog/bugs/open/bug-1.md', 'edited in the working tree\n');
     expect(fs.statSync(join(root, '.git', 'index')).mtimeMs).toBe(indexBefore);
 
-    expect(uncommittedItemPaths(root)).toEqual({
+    expect(await uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/bugs/open/bug-1.md')],
       absent: [],
       known: true
@@ -253,7 +253,7 @@ describe('uncommittedItemPaths', () => {
   });
 
   // --- case 11 ----------------------------------------------------------
-  it('case 11: ignores uncommitted files outside backlog/', () => {
+  it('case 11: ignores uncommitted files outside backlog/', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     write(root, 'README.md', 'committed\n');
@@ -261,7 +261,7 @@ describe('uncommittedItemPaths', () => {
     write(root, 'README.md', 'dirty now\n');
     write(root, 'src/thing.ts', 'brand new, untracked\n');
 
-    expect(uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
+    expect(await uncommittedItemPaths(root)).toEqual({ paths: [], absent: [], known: true });
   });
 
   // --- case 27 ----------------------------------------------------------
@@ -270,7 +270,7 @@ describe('uncommittedItemPaths', () => {
   // "which of the two reads found it": `git rm --cached` makes the file
   // untracked, so only `ls-files --others` reports it — yet `main` still
   // holds it, so a run would gate and execute `main`'s copy, not skip it.
-  it('case 27: an untracked item that main still holds is flagged but not absent', () => {
+  it('case 27: an untracked item that main still holds is flagged but not absent', async () => {
     const root = freshRepo();
     write(root, 'backlog/tasks/open/task-1.md', 'committed\n');
     commit(root, 'one');
@@ -279,7 +279,7 @@ describe('uncommittedItemPaths', () => {
     const untracked = cp.execFileSync('git', ['-C', root, 'ls-files', '--others', '--exclude-standard', '--', 'backlog'], { cwd: root, encoding: 'utf8' });
     expect(untracked.trim()).toBe('backlog/tasks/open/task-1.md');
 
-    expect(uncommittedItemPaths(root)).toEqual({
+    expect(await uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/tasks/open/task-1.md')],
       absent: [],
       known: true
@@ -291,28 +291,28 @@ describe('uncommittedItemPaths', () => {
   // Pins `core.quotePath=false` on the THIRD read: an octal-escaped listing
   // would not contain the raw path, so an edited non-ASCII item would be
   // misreported as absent.
-  it('case 28: a non-ASCII item present at main and edited since is not absent', () => {
+  it('case 28: a non-ASCII item present at main and edited since is not absent', async () => {
     const root = freshRepo();
     const rel = 'backlog/tasks/open/task-1-café-ø.md';
     write(root, rel, 'committed\n');
     commit(root, 'one');
     write(root, rel, 'edited since\n');
 
-    const { paths, absent, known } = uncommittedItemPaths(root);
+    const { paths, absent, known } = await uncommittedItemPaths(root);
     expect(known).toBe(true);
     expect(paths).toEqual([abs(root, rel)]);
     expect(absent).toEqual([]);
   });
 
   // --- case 29 ----------------------------------------------------------
-  it('case 29: a mixed tree splits into absent and stale, and absent is a subset of paths', () => {
+  it('case 29: a mixed tree splits into absent and stale, and absent is a subset of paths', async () => {
     const root = freshRepo();
     write(root, 'backlog/tasks/open/task-1.md', 'committed\n');
     commit(root, 'one');
     write(root, 'backlog/tasks/open/task-1.md', 'edited since\n');
     write(root, 'backlog/bugs/open/bug-2.md', 'never committed\n');
 
-    const { paths, absent, known } = uncommittedItemPaths(root);
+    const { paths, absent, known } = await uncommittedItemPaths(root);
     expect(known).toBe(true);
     expect([...paths].sort()).toEqual([abs(root, 'backlog/bugs/open/bug-2.md'), abs(root, 'backlog/tasks/open/task-1.md')].sort());
     expect(absent).toEqual([abs(root, 'backlog/bugs/open/bug-2.md')]);
@@ -323,18 +323,18 @@ describe('uncommittedItemPaths', () => {
   //
   // Decision 1 again, over the new field: committing the item changes its
   // fate, and a memo would keep reporting it absent.
-  it('case 30: caches nothing across a fate change — absent, then committed and edited, then stale', () => {
+  it('case 30: caches nothing across a fate change — absent, then committed and edited, then stale', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'anchor\n');
     commit(root, 'one');
     write(root, 'backlog/tasks/open/task-9.md', 'never committed\n');
 
-    expect(uncommittedItemPaths(root).absent).toEqual([abs(root, 'backlog/tasks/open/task-9.md')]);
+    expect((await uncommittedItemPaths(root)).absent).toEqual([abs(root, 'backlog/tasks/open/task-9.md')]);
 
     commit(root, 'two');
     write(root, 'backlog/tasks/open/task-9.md', 'edited since\n');
 
-    expect(uncommittedItemPaths(root)).toEqual({
+    expect(await uncommittedItemPaths(root)).toEqual({
       paths: [abs(root, 'backlog/tasks/open/task-9.md')],
       absent: [],
       known: true
@@ -349,7 +349,7 @@ describe('uncommittedItemPaths', () => {
   // one committed only on `main` is the mirror image. Both fates flip with
   // the base, which is what proves every read takes the parameter rather
   // than one of the three still asking about `main`.
-  it('case 31: answers against the base it is given, not main', () => {
+  it('case 31: answers against the base it is given, not main', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed on both\n');
     commit(root, 'one');
@@ -364,7 +364,7 @@ describe('uncommittedItemPaths', () => {
 
     // At `side`: task-9 is present and stale, task-5 is not in this working
     // tree at all, so nothing else differs.
-    expect(uncommittedItemPaths(root, 'side')).toEqual({
+    expect(await uncommittedItemPaths(root, 'side')).toEqual({
       paths: [abs(root, 'backlog/tasks/open/task-9.md')],
       absent: [],
       known: true
@@ -372,17 +372,17 @@ describe('uncommittedItemPaths', () => {
     // The default is still `main`, against which the same tree reads task-9
     // as absent (the run would skip it) — and task-5 as deleted, which
     // `diff` lists but no working-tree item file exists for.
-    const atMain = uncommittedItemPaths(root);
+    const atMain = await uncommittedItemPaths(root);
     expect(atMain.known).toBe(true);
     expect(atMain.absent).toEqual([abs(root, 'backlog/tasks/open/task-9.md')]);
   });
 
   // --- case 31b ---------------------------------------------------------
-  it('case 31b: known: false for a base that does not resolve', () => {
+  it('case 31b: known: false for a base that does not resolve', async () => {
     const root = freshRepo();
     write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
     commit(root, 'one');
-    expect(uncommittedItemPaths(root, 'no-such-branch')).toEqual({ paths: [], absent: [], known: false });
+    expect(await uncommittedItemPaths(root, 'no-such-branch')).toEqual({ paths: [], absent: [], known: false });
   });
 });
 
@@ -447,28 +447,27 @@ describe('GET /api/items/uncommitted', () => {
     // merely the eventual status code, which a gate running afterwards would
     // also produce.
     //
-    // The spy is on `execFileSync` rather than on `realpathSync`, and that
-    // choice is the whole case: `uncommittedItemPaths` SPAWNS FIRST (`git
-    // rev-parse --show-toplevel`) and only calls `realpathSync` on that
-    // spawn's success, so against a path that does not exist a gate running
-    // after the util would still never reach realpath — and a realpath spy
-    // would sit there green while the server shelled out to git about an
-    // arbitrary caller-supplied path. The first thing that leaves this
-    // process is the first thing worth watching.
+    // The spy is on `runGit`, the one helper every git read in `server/src`
+    // goes through since #277 (`server/src/git-run.util.ts`) — the first thing
+    // that leaves this process is the first thing worth watching. It replaced
+    // a spy on `execFileSync`, which nothing under `server/src` calls any
+    // more: that version stayed green with the registry gate deleted, because
+    // it was watching a function the implementation can no longer reach. A
+    // `realpathSync` spy is no better for the reason it never was —
+    // `uncommittedItemPaths` spawns FIRST and only realpaths on that spawn's
+    // success, so against a path that does not exist it would sit green while
+    // the server shelled out to git about an arbitrary caller-supplied path.
     const unregistered = join(tmpdir(), 'bm-uncommitted-unregistered-never-created');
-    const spawnSpy = jest.spyOn(cp, 'execFileSync');
+    const spawnSpy = jest.spyOn(gitRun, 'runGit');
     await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: unregistered }).expect(404, { error: 'not found' });
-    const asked = spawnSpy.mock.calls.some(
-      ([, args, opts]) =>
-        JSON.stringify(args ?? []).includes(unregistered) || String((opts as { cwd?: string } | undefined)?.cwd ?? '').startsWith(unregistered)
-    );
-    expect(asked).toBe(false);
-    // Guards the guard: with the registry gate removed the util is reached,
-    // its very first spawn happens, and the assertion above is what catches
-    // it — so this line proves the spy was installed on the function the
-    // implementation actually calls, rather than passing because nothing at
-    // all was recorded.
     expect(spawnSpy).not.toHaveBeenCalled();
+
+    // Guards the guard: a REGISTERED project's request, through the same app
+    // and the same spy, must reach git. Without this the assertion above would
+    // pass just as happily if the spy sat on something the implementation does
+    // not call — which is exactly how the `execFileSync` version went vacuous.
+    await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath }).expect(200);
+    expect(spawnSpy).toHaveBeenCalled();
   });
 
   // --- case 14 ----------------------------------------------------------

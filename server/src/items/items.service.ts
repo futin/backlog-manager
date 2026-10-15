@@ -186,11 +186,11 @@ export class ItemsService {
    * No cache, per `uncommitted.util.ts`'s own header: the whole point of this
    * read is an event — an edit in the working tree — that no cheap key moves.
    *
-   * Untouched by the item-source seam (task-43) and synchronous still: the
-   * question is about files in a git working tree, which is what this route
-   * means whatever owns the items.
+   * Untouched by the item-source seam (task-43): the question is about files
+   * in a git working tree, which is what this route means whatever owns the
+   * items. Async since #277 — its git reads must not block the event loop.
    */
-  uncommitted(project: string, base?: string): UncommittedItems {
+  async uncommitted(project: string, base?: string): Promise<UncommittedItems> {
     const entry = this.registry.load().projects.find((p) => p.path === project);
     if (entry === undefined) throw new HttpException({ error: 'not found' }, 404);
     // #254: the question is asked at the base the sheet's picker holds, proved
@@ -199,7 +199,7 @@ export class ItemsService {
     // A refusal is a 400 here as there: the sheet only offers branches
     // `GET /api/agents/branches` listed, so one is a stale picker or a bug,
     // and its silent `.catch` turns it into no warning rather than a wrong one.
-    const ref = resolveBaseBranch(base, entry.path);
+    const ref = await resolveBaseBranch(base, entry.path);
     // A tracker project has no item files, so "which of them differ from
     // `main`" is not a question with a wrong answer — it is a question with no
     // meaning, and `known: false` is precisely the shape this endpoint already

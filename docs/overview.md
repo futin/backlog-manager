@@ -61,6 +61,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   whose credential never leaves the server. Two git-backed reads live here: the last
   commit touching an item file (memoised against the files git rewrites) and which items differ from the run's base, `main` by default (memoised nowhere — the edit it reports moves
   neither of those files).
+  Every git spawn the server makes is async with a 10 s timeout (`git-run.util.ts`, #277), so a slow repository slows only the routes that read it.
 - **`orchestrator/`** — a read-only view of the run-state directory, current run and archived runs alike, plus two pieces of in-memory bookkeeping that are lost
   on restart on purpose: what the watchdog has done, and which projects this process has just asked to start a run. Since task-48 it also derives the runs
   other machines drove on a tracker project from the poller's cached claim comments, and serves them in a separate `remote` array, never among the local runs.

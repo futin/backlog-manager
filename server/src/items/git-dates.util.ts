@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+
+import { runGit } from '../git-run.util';
 
 /**
  * When each item file was last committed — the middle rung of "last touched".
@@ -20,11 +21,35 @@ interface Memo {
   dates: Map<string, string>;
 }
 const memo = new Map<string, Memo>();
+/**
+ * The one git spawn currently running for a project, keyed like `memo` and
+ * stamped with the fingerprint it was started under (#277). A burst of N
+ * `/api/items` requests landing while a slow git is still running must spawn
+ * ONE git, not N — otherwise the memo that exists to make this read cheap
+ * would be bypassed in exactly the situation (a slow repository) where it
+ * matters most, and the pile-up would be the server's own doing. A caller
+ * whose fingerprint differs from the pending one is NOT served it: that spawn
+ * started before whatever moved the fingerprint, so its answer may already be
+ * stale. The entry is removed when its spawn settles, success or failure, so a
+ * failed read is retried by the next call instead of being handed out again.
+ *
+ * This sharing is `lastCommitDates`' alone. `uncommittedItemPaths` and
+ * `originRepo` deliberately have none (CLAUDE.md: per request, memoised
+ * nowhere) — the answer they give is about the working tree or a remote, and
+ * a request that arrives after an edit must not be handed a read that began
+ * before it.
+ */
+interface Pending {
+  fingerprint: string;
+  promise: Promise<Map<string, string>>;
+}
+const inflight = new Map<string, Pending>();
 let spawns = 0;
 
 /** Test-only: cases reuse temp paths, so the memo has to be droppable. */
 export function __resetGitDateMemo(): void {
   memo.clear();
+  inflight.clear();
   spawns = 0;
 }
 
@@ -37,21 +62,12 @@ export function __gitSpawnCount(): number {
  * null for every failure alike — not a repo, no git installed, timeout,
  * oversized output. All degrade to the `created` fallback that was the only
  * rung before this module; throwing would 500 every project's board over one
- * project's setup. Bounded because this runs synchronously inside a request.
+ * project's setup. Async and time-bounded (`runGit`) because this runs inside
+ * a request and a slow repository must not freeze the process (#277).
  */
-function run(cwd: string, args: string[]): string | null {
+function run(cwd: string, args: string[]): Promise<string | null> {
   spawns++;
-  try {
-    return execFileSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      timeout: 5000,
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore']
-    });
-  } catch {
-    return null;
-  }
+  return runGit(args, { cwd, maxBuffer: 32 * 1024 * 1024 });
 }
 
 /**
@@ -116,30 +132,53 @@ const NUL = '\u0000';
  * non-ASCII filenames.
  *
  * Memoised because this costs 84–396ms per project (~1.0s for five) and
- * `scanProject` runs on both `/api/items` and `/api/projects`.
+ * `scanProject` runs on both `/api/items` and `/api/projects`. A FAILED read
+ * (timeout, not a repo) is not memoised: it answers the empty map, which every
+ * caller reads as "fall back to `created`", and the next call asks again — so
+ * a repository that was merely slow once is not pinned to the fallback until a
+ * commit moves the fingerprint.
  */
-export function lastCommitDates(projectPath: string): Map<string, string> {
+export async function lastCommitDates(projectPath: string): Promise<Map<string, string>> {
   const key = fingerprint(projectPath);
-  if (key !== null) {
-    const hit = memo.get(projectPath);
-    if (hit !== undefined && hit.fingerprint === key) return hit.dates;
-  }
+  if (key === null) return compute(projectPath, null);
 
+  const hit = memo.get(projectPath);
+  if (hit !== undefined && hit.fingerprint === key) return hit.dates;
+  const pending = inflight.get(projectPath);
+  if (pending !== undefined && pending.fingerprint === key) return pending.promise;
+
+  const entry: Pending = { fingerprint: key, promise: compute(projectPath, key) };
+  inflight.set(projectPath, entry);
+  // Dropped when the spawn settles, success OR failure. `compute` does not
+  // reject today (`run` turns every failure into null), but the entry's
+  // lifetime is the invariant — a rejection that left it in place would pin a
+  // failing promise to this fingerprint for good — so the rejection arm is
+  // handled here rather than leaning on that. Handling it also marks THIS
+  // derived chain handled; the callers awaiting `entry.promise` still see the
+  // rejection themselves. Dropped only if still ours: a later call under a
+  // newer fingerprint may already have replaced it.
+  const drop = (): void => {
+    if (inflight.get(projectPath) === entry) inflight.delete(projectPath);
+  };
+  void entry.promise.then(drop, drop);
+  return entry.promise;
+}
+
+async function compute(projectPath: string, key: string | null): Promise<Map<string, string>> {
   const dates = new Map<string, string>();
-  const out = run(projectPath, ['-c', 'core.quotePath=false', 'log', '--format=%x00%cI', '--name-only', '--relative', '--', 'backlog']);
+  const out = await run(projectPath, ['-c', 'core.quotePath=false', 'log', '--format=%x00%cI', '--name-only', '--relative', '--', 'backlog']);
+  if (out === null) return dates;
 
-  if (out !== null) {
-    let date = '';
-    for (const line of out.split('\n')) {
-      if (line === '') continue;
-      if (line.startsWith(NUL)) {
-        date = line.slice(NUL.length);
-        continue;
-      }
-      // `log` walks newest-first, so first sighting is the last commit that
-      // touched the path; overwriting would report each file's oldest date.
-      if (date !== '' && !dates.has(line)) dates.set(line, date);
+  let date = '';
+  for (const line of out.split('\n')) {
+    if (line === '') continue;
+    if (line.startsWith(NUL)) {
+      date = line.slice(NUL.length);
+      continue;
     }
+    // `log` walks newest-first, so first sighting is the last commit that
+    // touched the path; overwriting would report each file's oldest date.
+    if (date !== '' && !dates.has(line)) dates.set(line, date);
   }
 
   if (key !== null) memo.set(projectPath, { fingerprint: key, dates });
