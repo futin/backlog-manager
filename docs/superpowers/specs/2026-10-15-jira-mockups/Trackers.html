@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shell chips and the Trackers card</title>
+<link rel="stylesheet" href="jira.css">
+</head>
+<body>
+
+
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+
+<div style="width:980px;height:820px;position:relative;background:#fff;font-family:'Hanken Grotesk',Helvetica,Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden">
+  <div class="topstrip">
+    <button class="acct" aria-label="GitHub tracker: futin"><span class="avatar">F</span><span class="login"><small>GitHub</small>futin</span><span class="meter"><span class="lab">POLL <b>9 s</b></span><span class="bar"><i style="width:40%"></i></span></span><span class="meter"><span class="lab">API <b>4%</b></span><span class="bar"><i style="width:4%"></i></span></span><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+    <button class="acct open" aria-label="Jira tracker: ada, open" aria-expanded="true"><span class="avatar">A<span class="pip red"></span></span><span class="login"><small>Jira</small>ada</span><span class="meter"><span class="lab">POLL <b>52 s</b></span><span class="bar"><i style="width:13%"></i></span></span><span class="meter"><span class="lab">CALLS <b>429</b></span><span class="bar"><i class="red" style="width:100%"></i></span></span><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 6.5 5 3.5 8 6.5"/></svg></button>
+  </div>
+  <div class="popover" aria-label="Jira">
+    <div class="prow"><span class="avatar">A</span><div><div style="font-weight:500">Ada Lovelace</div><div style="font-size:12px;color:var(--ink2)">acme.atlassian.net · scoped token · read, write, user</div></div></div>
+    <hr>
+    <div class="prow"><span>Sprint 42 · mine</span><span style="font-size:12px;color:var(--ink3)">every 1m</span><span class="meter"><span class="lab"><span>next poll</span><b>52 s</b></span><span class="bar"><i style="width:13%"></i></span></span></div>
+    <div class="prow"><span>Refund flows</span><span style="font-size:12px;color:var(--ink3)">every 5m</span><span class="meter"><span class="lab"><span>next poll</span><b>3:40</b></span><span class="bar"><i style="width:27%"></i></span></span></div>
+    <div class="prow"><span>Billing bugs</span><span style="font-size:12px;color:var(--ink3)">sync off</span><span class="meter"><span class="lab"><span>last</span><b>2 h ago</b></span><span class="bar"></span></span></div>
+    <hr>
+    <div class="prow"><span style="color:var(--red)">rate limited · Jira asked us to wait 38 s · the sweep resumes by itself</span></div>
+    <div class="prow" style="font-size:12px;color:var(--ink2)">14 calls last sweep · 1 refused today · Jira publishes no hourly budget, so this meter counts calls and turns red on a refusal</div>
+  </div>
+  <div style="background:var(--board);border-top-left-radius:24px;padding:24px;flex:1;display:flex;flex-direction:column;gap:16px">
+    <header class="band"><div class="text"><h2>Shared</h2><p class="sub" style="flex-basis:auto">what this machine's server reports and the one thing it sets</p></div><div class="right"><span class="pillt">this machine</span></div></header>
+    <section class="scard" style="max-width:620px" aria-label="Trackers">
+      <h3>Trackers</h3><p class="scope">this machine</p>
+      <div class="srow first"><div class="lbl"><span class="name">GitHub</span><span class="hint">futin · ok · 4,812 of 5,000 left · resets 14:00</span></div></div>
+      <div class="srow"><div class="lbl"><span class="name">Jira</span><span class="hint">acme.atlassian.net · Ada Lovelace · rate limited, retrying in 38 s · 3 boards, 1 off</span></div><div class="ctl"><span class="hint">boards sync from Jira › Setup</span></div></div>
+      <div class="srow"><div class="lbl"><span class="name">backlog-manager</span><span class="hint">futin/backlog-manager · ok · polled 9 s ago</span></div><div class="ctl"><span class="seg" aria-label="Sync interval"><span class="on">15s</span><span>1m</span><span>5m</span><span>off</span></span></div></div>
+      <div class="srow"><div class="lbl"><span class="name">guide-manager</span><span class="hint">files · connect with <span style="color:var(--ink)">backlog.mjs connect github futin/guide-manager</span></span></div></div>
+    </section>
+  </div>
+</div>
+
+</body>
+</html>
