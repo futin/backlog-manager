@@ -1,0 +1,699 @@
+import { Injectable } from '@nestjs/common';
+import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+
+import {
+  SYNC_INTERVALS,
+  isJiraKey,
+  type JiraBoard,
+  type JiraBoardFailure,
+  type JiraIssue,
+  type JiraIssueDetail,
+  type JiraStatusPayload,
+  type JiraTransition
+} from '../../../shared/types';
+import { adfToMarkdown } from './adf';
+import { readJiraConfig, type JiraConfig } from './config.util';
+import { jiraEnv } from './env.util';
+import { JIRA_RATE_LIMIT_DEFAULT_MS, accessOf } from './errors.util';
+import { JiraBootState } from './identity';
+import { JiraClient, jqlString, type JiraAuth, type JiraResponse } from './jira.client';
+import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapContext } from './map-issue';
+
+/**
+ * poller.service.ts — the Jira ticker, the per-board caches, and the handful of fresh reads the routes make (Jira phase 1; spec §3 `poller.service.ts` and
+ * `identity.ts`, §5's read routes, §8's error mapping). The shape is `tracker/poller.service.ts`'s, deliberately: one `setTimeout` chain whose next link is
+ * made only after the current sweep's awaits finish, an in-flight promise that `tick()` hands back instead of starting a second sweep, `unref` on the timer,
+ * and `stopped` on shutdown. Every route answers from the cache this file fills, or from ONE fresh read this file performs — nothing else in the server
+ * talks to Jira, so the 429 window and the 401 reset below have one place to be true.
+ *
+ * ## The arming rule — three clauses (§3)
+ *
+ * The chain runs while the site is configured (all three env vars) AND any of:
+ * 1. some board's interval is not `off` — it will be due again;
+ * 2. some board is still owed its cold sweep — an `off` board that has never had its list replaced;
+ * 3. the boot is unanswered — `cloudId`, `serverInfo`, `me` or the sprint field is still missing, so the back-off has a retry to make.
+ * Clause 3 has one exception (P5): `unsupported` is a site that is not Jira Cloud, which no retry can change, so it disarms and stays disarmed until restart.
+ * The rule is judged at the END of every sweep, after its awaits, against the config as read at the top of that sweep — the tracker poller's reasoning:
+ * a setting changed mid-tick is honoured on the next tick, and a chain with nothing owed stops on the tick that finds it.
+ *
+ * ## Why `off` still gets one cold sweep
+ *
+ * `off` means "do not poll", not "show nothing": a board whose list was never fetched would render empty, which reads as "nothing on this board" — a lie.
+ * One sweep per process gives it a real list with an honest `polledAt` age beside it. A cold sweep that failed whole-board (Jira unreachable) has not
+ * replaced anything, so the board is still owed and the chain stays armed for it; one that got far enough to replace the list has succeeded, per-entry
+ * `failures` included, because those are part of the answer, not a reason to ask again.
+ *
+ * ## Why the Done window applies at map time
+ *
+ * `mapJiraIssue` drops a `done` issue older than the window as it is mapped (that is `map-issue.ts`'s rule and its constant). The poller hands it `now`
+ * for the sweep and `null` for every fresh read: the board is "what is live", so an expired child must never reach the cache, the payload or the client —
+ * but the modal and the roots picker ask about a SPECIFIC issue and must get it however old it is. Dropping at map time also means the walk still sees the
+ * dropped key: the next `parent in` round names every key Jira returned, mapped or not, so a closed story's open subtask stays on the board.
+ *
+ * ## Why a sweep failure keeps the last good list
+ *
+ * A whole-board failure (transport, a 5xx, a 401, a 429) says nothing about the issues — only that this sweep could not see them. Replacing the cache with
+ * an empty list would make every card vanish for the length of an outage and flash back afterwards; keeping the list, with its `polledAt` unmoved, lets the
+ * board say what it last knew and how old that is, while `access` and `detail` say why it is not newer. Such a failure also ends the sweep for that tick: the
+ * next board would meet the same outage, and each extra call against a failing site is one more against its rate limit. A per-entry failure (a 400, 403 or
+ * 404 on one root or one query) is different — Jira answered, and the answer is about that entry — so it becomes a `failures` row and the rest proceeds.
+ *
+ * ## Why the 429 window refuses reads up front
+ *
+ * After a 429, every call made before `Retry-After` runs out is a call Jira has already said it will refuse, and making it is how a client earns a longer
+ * window. So the window is stored once (`JiraBootState.retryAt`, from whichever caller met the 429 — a sweep or a route) and every caller checks it before
+ * sending: the sweep makes NO call inside it, and a route's read is refused with a synthesised 429 carrying the STORED instant (P1), so two reads a second
+ * apart answer the same `retryAt` rather than one that slides forward with the clock.
+ *
+ * Every instant here — `polledAt`, `last429At`, the window, the back-off — comes from `Date.now()`, never `new Date()`, so a suite that mocks `Date.now`
+ * controls the only clock this file reads.
+ */
+
+/** The base tick, the GitHub poller's. Every `SyncInterval` is a whole number of these, so the tick is the resolution and no board needs its own timer. */
+export const JIRA_POLL_MS = 15_000;
+/** Issues kept per saved query. Silent: spec §3 ties `truncated` to the board cap alone, and the band's copy says `first 500 shown`. */
+export const JIRA_QUERY_CAP = 200;
+/** Issues kept per root walk, the root itself counting as the first. Silent, for the same reason. */
+export const JIRA_ROOT_CAP = 200;
+/** Issues kept per board, after dedupe; the one cap `truncated` reports. */
+export const JIRA_BOARD_CAP = 500;
+/** `parent in` rounds below a root: epic → story → subtask. An initiative-level root reaches its epics and stories, not their subtasks (§3). */
+export const JIRA_DESCENDANT_ROUNDS = 2;
+/** The roots picker's result count. */
+export const JIRA_SEARCH_LIMIT = 20;
+/** The longest `q` the search route accepts; the route enforces it, this is its one home. */
+export const JIRA_SEARCH_MAX_CHARS = 100;
+/** `maxResults` on every sweep search page — Jira Cloud's ceiling for the enhanced search with this many fields. */
+export const JIRA_PAGE_SIZE = 100;
+
+const UNSUPPORTED = 'Jira Server/DC is not supported';
+
+/** One board's last good sweep. Replaced whole, or not at all. */
+export interface JiraBoardCache {
+  issues: JiraIssue[];
+  polledAt: string | null;
+  truncated: boolean;
+  failures: JiraBoardFailure[];
+}
+
+/** A fresh read's outcome. `retryAt` rides only on a 429 (fresh or refused inside the window) and is the stored window end, verbatim (P1). */
+export type JiraResult<T> = { ok: true; value: T } | { ok: false; response: JiraResponse<unknown>; retryAt?: string };
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+const iso = (ms: number): string => new Date(ms).toISOString();
+const ok = (res: JiraResponse<unknown>): boolean => res.status >= 200 && res.status < 300;
+
+/** A response that says the SITE could not be read (as opposed to one entry): transport, a 5xx, a 401, a 429. Those end the sweep. */
+const wholeBoard = (res: JiraResponse<unknown>): boolean => res.status === 0 || res.status === 401 || res.status === 429 || res.status >= 500;
+
+/**
+ * The `detail` a failure records: the transport error's own text for `0`; `Jira answered <status>` for a 5xx or a status `accessOf` has no opinion on (a
+ * 5xx body is a gateway page, not a sentence); Jira's own sentence otherwise.
+ */
+function detailOf(res: JiraResponse<unknown>): string {
+  if (res.status === 0) return res.message ?? 'Jira unreachable';
+  if (res.status >= 500 || accessOf(res) === null) return `Jira answered ${res.status}`;
+  return res.message ?? `Jira answered ${res.status}`;
+}
+
+/** A `failures` row's message: Jira's own sentence about that root or query — the reason a person can act on — never a bare status when Jira sent one. */
+function entryMessage(res: JiraResponse<unknown>): string {
+  return res.message ?? `Jira answered ${res.status}`;
+}
+
+/** A synthesised response, for an answer this file gives without asking Jira (P3, the 429 window). */
+function synthetic(status: number, message: string | null): JiraResponse<unknown> {
+  return { status, data: null, message, retryAfter: null };
+}
+
+interface Pages {
+  /** Every key Jira returned, mapped or dropped by the Done window — what the next `parent in` round names. */
+  raw: string[];
+  issues: JiraIssue[];
+  failure: JiraResponse<unknown> | null;
+}
+
+@Injectable()
+export class JiraPollerService implements OnApplicationBootstrap, OnApplicationShutdown {
+  private timer: NodeJS.Timeout | null = null;
+  private inFlight: Promise<void> | null = null;
+  private stopped = false;
+
+  private readonly boot = new JiraBootState();
+  private readonly caches = new Map<string, JiraBoardCache>();
+  /** The calls the last sweep made, for the chip's CALLS meter (§6). */
+  private sweepCalls = 0;
+  private last429At: string | null = null;
+
+  constructor(private readonly client: JiraClient) {}
+
+  /** A tick is scheduled. Derived from the timer, for the reason the tracker poller gives: two sources of truth for "is a tick coming" drift apart. */
+  get armed(): boolean {
+    return this.timer !== null;
+  }
+
+  onApplicationBootstrap(): void {
+    this.arm();
+  }
+
+  onApplicationShutdown(): void {
+    this.stopped = true;
+    this.disarm();
+  }
+
+  /** Start the chain if anything is owed, or confirm it is running. Idempotent — phase 2's board saves call it after they write. */
+  arm(): void {
+    if (this.stopped) return;
+    if (!jiraEnv().configured || !this.owed(readJiraConfig())) {
+      this.clearTimer();
+      return;
+    }
+    // A pending timer OR a tick mid-flight both mean the chain is alive: a tick clears its own timer on entry, so checking the timer alone would let a
+    // concurrent `arm()` start a second chain in that window.
+    if (this.timer !== null || this.inFlight !== null) return;
+    void this.tick();
+  }
+
+  disarm(): void {
+    this.clearTimer();
+  }
+
+  /** One sweep, or the one already running — a caller awaiting `tick()` is asking "has a sweep including right now finished". */
+  tick(): Promise<void> {
+    if (this.inFlight !== null) return this.inFlight;
+    const running = this.sweep().finally(() => {
+      this.inFlight = null;
+    });
+    this.inFlight = running;
+    return running;
+  }
+
+  /** `GET /api/jira`. No outbound call: everything here is memory, the env and `jira.json`. The credentials never appear (§10). */
+  status(): JiraStatusPayload {
+    const env = jiraEnv();
+    if (!env.configured) {
+      return {
+        configured: false,
+        configUnreadable: null,
+        site: null,
+        me: null,
+        tokenKind: null,
+        access: 'unconfigured',
+        detail: env.detail,
+        boards: [],
+        repos: {},
+        projects: [],
+        skills: [],
+        calls: { sweep: 0, last429At: null },
+        live: {}
+      };
+    }
+    const config = readJiraConfig();
+    const boards = config.boards.map((board) => {
+      const cache = this.caches.get(board.id);
+      return {
+        ...board,
+        polledAt: cache?.polledAt ?? null,
+        count: cache?.issues.length ?? 0,
+        truncated: cache?.truncated ?? false,
+        failures: cache?.failures ?? []
+      };
+    });
+    return {
+      configured: true,
+      configUnreadable: config.unreadable,
+      site: env.site,
+      // Shown only once the boot is whole: an identity beside a board that cannot be swept yet (the sprint field still missing) would read as a working
+      // connection. The boot state keeps the answer, so the retry asks only what is still missing.
+      me: this.boot.answered() ? this.boot.me : null,
+      tokenKind: this.boot.tokenKind,
+      access: this.boot.access,
+      detail: this.boot.detail,
+      boards,
+      repos: config.repos,
+      projects: this.projectsOf(config),
+      skills: config.skills,
+      calls: { sweep: this.sweepCalls, last429At: this.last429At },
+      live: {}
+    };
+  }
+
+  /** A board's cached list: `null` for a board `jira.json` does not hold, an empty list with `polledAt: null` for one not swept yet. */
+  boardIssues(id: string): { issues: JiraIssue[]; polledAt: string | null } | null {
+    if (!readJiraConfig().boards.some((b) => b.id === id)) return null;
+    const cache = this.caches.get(id);
+    return cache === undefined ? { issues: [], polledAt: null } : { issues: cache.issues, polledAt: cache.polledAt };
+  }
+
+  /** The ids of the boards (in `jira.json` order) whose cache holds `key`. Read against the config so a deleted board stops answering at once. */
+  boardsHolding(key: string): string[] {
+    return readJiraConfig()
+      .boards.filter((b) => this.caches.get(b.id)?.issues.some((i) => i.key === key) ?? false)
+      .map((b) => b.id);
+  }
+
+  /** `GET /api/jira/issue/:key`: the issue, its children and its transitions, read fresh, the Done window off. Any of the three failing fails it (P4). */
+  async issueDetail(key: string): Promise<JiraResult<JiraIssueDetail>> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const { auth } = gate;
+    const ctx: MapContext = { site: auth.site, sprintField: this.boot.sprintField, now: null };
+
+    const res = await this.client.issue(auth, key, [...this.sweepFields(), 'description']);
+    if (!ok(res)) return this.routeFailed(res);
+    const issue = mapJiraIssue(res.data, ctx);
+    if (issue === null) return this.routeFailed(synthetic(0, 'Jira sent an issue this server cannot read'));
+
+    const children = await this.pages(auth, `parent in (${jqlString(key)})`, ctx, JIRA_ROOT_CAP);
+    if (children.failure !== null) return this.routeFailed(children.failure);
+
+    const offered = await this.client.transitions(auth, key);
+    if (!ok(offered)) return this.routeFailed(offered);
+    const transitions: JiraTransition[] = (Array.isArray(offered.data?.transitions) ? offered.data.transitions : []).filter(isObj).map((t) => {
+      const to = isObj(t.to) ? t.to : {};
+      return {
+        id: str(t.id),
+        name: str(t.name),
+        to: { name: str(to.name), category: categoryOf(isObj(to.statusCategory) ? to.statusCategory.key : undefined) }
+      };
+    });
+
+    const fields = isObj(res.data?.fields) ? res.data.fields : {};
+    return {
+      ok: true,
+      value: {
+        ...issue,
+        // `null` on a ticket with no description; `adfToMarkdown` folds any non-document to '' (Review Focus 5).
+        description: adfToMarkdown(fields.description).markdown,
+        children: children.issues,
+        transitions,
+        boards: this.boardsHolding(key),
+        session: null
+      }
+    };
+  }
+
+  /**
+   * The roots picker: an exact key when `q` (trimmed, upper-cased) is one, else a summary prefix match, `JIRA_SEARCH_LIMIT` at most, the Done window off.
+   * Blank is `[]` with no call. The length bound is the route's to enforce (`JIRA_SEARCH_MAX_CHARS`).
+   */
+  async search(q: string): Promise<JiraResult<JiraIssue[]>> {
+    const text = q.trim();
+    if (text === '') return { ok: true, value: [] };
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const upper = text.toUpperCase();
+    const jql = isJiraKey(upper) ? `key = ${jqlString(upper)}` : `summary ~ ${jqlString(`${text}*`)}`;
+    const res = await this.client.search(gate.auth, { jql, fields: this.sweepFields(), maxResults: JIRA_SEARCH_LIMIT });
+    if (!ok(res)) return this.routeFailed(res);
+    const ctx: MapContext = { site: gate.auth.site, sprintField: this.boot.sprintField, now: null };
+    const issues = (Array.isArray(res.data?.issues) ? res.data.issues : [])
+      .map((raw) => mapJiraIssue(raw, ctx))
+      .filter((i): i is JiraIssue => i !== null)
+      .slice(0, JIRA_SEARCH_LIMIT);
+    return { ok: true, value: issues };
+  }
+
+  /**
+   * Every project the credentials can see, sorted by key. Paged by `startAt` (P13), never by following the `nextPage` URL Jira hands back: the client builds
+   * every URL itself, so Basic auth is never sent to an address that came out of a response body.
+   */
+  async projects(): Promise<JiraResult<{ key: string; name: string }[]>> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const byKey = new Map<string, string>();
+    let startAt = 0;
+    for (;;) {
+      const res = await this.client.projects(gate.auth, startAt);
+      if (!ok(res)) return this.routeFailed(res);
+      const values = Array.isArray(res.data?.values) ? res.data.values : [];
+      for (const v of values) {
+        if (isObj(v) && typeof v.key === 'string' && !byKey.has(v.key)) byKey.set(v.key, str(v.name) || v.key);
+      }
+      // An empty page ends it too: a Jira that says `isLast: false` and sends nothing would otherwise be asked for the same page forever.
+      if (res.data?.isLast !== false || values.length === 0) break;
+      startAt += values.length;
+    }
+    const value = [...byKey].map(([key, name]) => ({ key, name })).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    return { ok: true, value };
+  }
+
+  /**
+   * The board sheet's check line: Jira's strict parse first (an unknown field is an error there, not an empty result), then the approximate count — which
+   * is where an unbounded query is refused, since it parses fine (P8). Both of those answers are `ok: true` with a verdict inside; only a failure to ASK is
+   * a `JiraResult` failure.
+   */
+  async checkJql(jql: string): Promise<JiraResult<{ ok: true; count: number } | { ok: false; message: string }>> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const parsed = await this.client.parseJql(gate.auth, jql);
+    if (!ok(parsed)) return this.routeFailed(parsed);
+    const first = Array.isArray(parsed.data?.queries) ? parsed.data.queries[0] : undefined;
+    const errors = isObj(first) && Array.isArray(first.errors) ? first.errors.filter((e): e is string => typeof e === 'string' && e !== '') : [];
+    if (errors.length > 0) return { ok: true, value: { ok: false, message: errors.join('; ') } };
+
+    const counted = await this.client.approximateCount(gate.auth, jql);
+    if (counted.status === 400) return { ok: true, value: { ok: false, message: counted.message ?? 'Jira answered 400' } };
+    if (!ok(counted)) return this.routeFailed(counted);
+    return { ok: true, value: { ok: true, count: typeof counted.data?.count === 'number' ? counted.data.count : 0 } };
+  }
+
+  // ── the chain ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  private clearTimer(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private schedule(): void {
+    if (this.stopped) return;
+    if (this.timer !== null) return;
+    // `unref()` so a pending poll never keeps the process alive on its own — the tracker poller's and the watchdog's treatment.
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.tick();
+    }, JIRA_POLL_MS);
+    this.timer.unref?.();
+  }
+
+  /** Make sure a link is coming — for a route that just put the boot back into "owed" (a 401). A sweep in flight schedules its own successor. */
+  private wake(): void {
+    if (this.timer === null && this.inFlight === null) this.schedule();
+  }
+
+  /** The arming rule (header). `unsupported` is final (P5). */
+  private owed(config: JiraConfig): boolean {
+    if (this.boot.access === 'unsupported') return false;
+    if (!this.boot.answered()) return true;
+    return config.boards.some((b) => b.interval !== 'off' || this.coldOwed(b));
+  }
+
+  private coldOwed(board: JiraBoard): boolean {
+    return (this.caches.get(board.id)?.polledAt ?? null) === null;
+  }
+
+  /** Never swept (or never successfully) is due at any interval — the cold sweep; otherwise one interval since the last good sweep (§3). */
+  private due(board: JiraBoard, now: number): boolean {
+    if (this.coldOwed(board)) return true;
+    const ms = SYNC_INTERVALS[board.interval];
+    if (ms === null) return false;
+    return now - Date.parse(this.caches.get(board.id)!.polledAt!) >= ms;
+  }
+
+  private inWindow(now: number): boolean {
+    return this.boot.retryAt !== null && now < this.boot.retryAt;
+  }
+
+  private async sweep(): Promise<void> {
+    // Consumed by this tick, before any await, so `armed` cannot read true for a chain whose next link this tick has not created yet.
+    this.clearTimer();
+    const env = jiraEnv();
+    // Unconfigured is the whole "off" state; `unsupported` is final (P5). Neither schedules a successor.
+    if (!env.configured || this.boot.access === 'unsupported') return;
+
+    const config = readJiraConfig();
+    // Memory hygiene only — every reader filters by the config anyway. An unreadable file prunes nothing: it reads as no boards, and the caches of the
+    // boards it still holds must survive until it parses again.
+    if (config.unreadable === null) {
+      for (const id of [...this.caches.keys()]) if (!config.boards.some((b) => b.id === id)) this.caches.delete(id);
+    }
+
+    // The calls the routes made since the last tick are not this sweep's.
+    this.client.takeCalls();
+    try {
+      await this.run(env, config);
+    } finally {
+      this.sweepCalls = this.client.takeCalls();
+    }
+    if (this.owed(config)) this.schedule();
+  }
+
+  private async run(creds: { site: string; email: string; token: string }, config: JiraConfig): Promise<void> {
+    const now = Date.now();
+    if (this.inWindow(now)) return;
+    if (this.boot.retryAt !== null) {
+      // The window ran out: it is not a verdict any more. What follows in this sweep says what the site is now.
+      this.boot.retryAt = null;
+      if (this.boot.access === 'rate-limited') {
+        this.boot.access = 'ok';
+        this.boot.detail = this.boot.answered() ? null : 'connecting';
+      }
+    }
+
+    // No board is searched until every boot answer is in — see `identity.ts` for why the sprint field is one of them.
+    if (!this.boot.answered()) {
+      if (!this.boot.due(now)) return;
+      if (!(await this.runBoot(creds))) return;
+    }
+
+    const auth: JiraAuth = { ...creds, cloudId: this.boot.cloudId! };
+    let swept = false;
+    for (const board of config.boards) {
+      // A route may have met a 429 while this sweep awaited: honour the window from the next board on.
+      if (this.inWindow(Date.now())) return;
+      if (!this.due(board, Date.now())) continue;
+      if (!(await this.sweepBoard(board, auth))) return;
+      swept = true;
+    }
+    // A sweep that got through every due board is the evidence that an earlier board-level `unreachable` is over.
+    if (swept) {
+      this.boot.access = 'ok';
+      this.boot.detail = null;
+    }
+  }
+
+  /** The boot calls still owed, in order, stopping at the first failure. True when the boot is whole afterwards. */
+  private async runBoot(creds: { site: string; email: string; token: string }): Promise<boolean> {
+    if (this.boot.cloudId === null) {
+      const res = await this.client.tenantInfo(creds.site);
+      if (!this.bootAnswered(res)) return false;
+      const cloudId = res.data?.cloudId;
+      if (typeof cloudId !== 'string' || cloudId === '') {
+        this.boot.fail(null, 'tenant_info carried no cloudId', Date.now());
+        return false;
+      }
+      this.boot.cloudId = cloudId;
+    }
+    const auth: JiraAuth = { ...creds, cloudId: this.boot.cloudId };
+
+    if (!this.boot.serverInfoOk) {
+      const res = await this.client.serverInfo(auth);
+      // A 404 is what the gateway answers for a site that is not Cloud; a `deploymentType` other than `Cloud` is Server/DC saying so itself.
+      if (res.status === 404 || (ok(res) && res.data?.deploymentType !== 'Cloud')) {
+        this.boot.access = 'unsupported';
+        this.boot.detail = UNSUPPORTED;
+        return false;
+      }
+      if (!this.bootAnswered(res)) return false;
+      this.boot.serverInfoOk = true;
+    }
+
+    if (this.boot.me === null) {
+      const res = await this.client.myself(auth);
+      if (!this.bootAnswered(res)) return false;
+      const accountId = res.data?.accountId;
+      if (typeof accountId !== 'string' || accountId === '') {
+        this.boot.fail(null, 'myself carried no accountId', Date.now());
+        return false;
+      }
+      this.boot.me = { accountId, name: str(res.data?.displayName) };
+      // Only now, with the gateway's 200 in hand (P2): a bad token is a 401 at the site too, and would otherwise be recorded as `scoped`.
+      if (!this.boot.tokenProbed) {
+        this.boot.tokenProbed = true;
+        const probe = await this.client.myselfAtSite(auth);
+        this.boot.tokenKind = ok(probe) ? 'classic' : probe.status === 401 ? 'scoped' : null;
+      }
+    }
+
+    if (!this.boot.fieldsOk) {
+      const res = await this.client.fields(auth);
+      if (!this.bootAnswered(res)) return false;
+      const fields = (Array.isArray(res.data) ? res.data : []).filter(
+        (f): f is { id: string; name: string; schema?: { custom?: string } } => isObj(f) && typeof f.id === 'string'
+      );
+      this.boot.sprintField = pickSprintField(fields);
+      this.boot.fieldsOk = true;
+    }
+
+    this.boot.succeed();
+    return true;
+  }
+
+  /** True on a 2xx; otherwise records the failure (a 429 opens the window rather than the back-off — the window already says when to ask again). */
+  private bootAnswered(res: JiraResponse<unknown>): boolean {
+    if (ok(res)) return true;
+    if (res.status === 429) {
+      this.openWindow(res);
+      return false;
+    }
+    this.boot.fail(accessOf(res), detailOf(res), Date.now());
+    return false;
+  }
+
+  private openWindow(res: JiraResponse<unknown>): void {
+    const now = Date.now();
+    const until = now + (res.retryAfter !== null ? res.retryAfter * 1000 : JIRA_RATE_LIMIT_DEFAULT_MS);
+    this.boot.retryAt = until;
+    this.last429At = iso(now);
+    this.boot.access = 'rate-limited';
+    this.boot.detail = `Jira rate limit — retry after ${iso(until)}`;
+  }
+
+  /** What a whole-board failure does to the site-level state. The cache is not touched — see the header. */
+  private boardFailed(res: JiraResponse<unknown>): false {
+    if (res.status === 401) {
+      this.boot.reset();
+      this.boot.fail('unauthorized', detailOf(res), Date.now());
+    } else if (res.status === 429) {
+      this.openWindow(res);
+    } else {
+      this.boot.access = 'unreachable';
+      this.boot.detail = detailOf(res);
+    }
+    return false;
+  }
+
+  /**
+   * One board: its queries in order, then its roots in order with their walks; deduped by key (first occurrence wins), capped at `JIRA_BOARD_CAP`, and
+   * swapped into the cache whole. False when a whole-board failure ended it (and the sweep with it).
+   */
+  private async sweepBoard(board: JiraBoard, auth: JiraAuth): Promise<boolean> {
+    const ctx: MapContext = { site: auth.site, sprintField: this.boot.sprintField, now: Date.now() };
+    const seen = new Set<string>();
+    const list: JiraIssue[] = [];
+    const failures: JiraBoardFailure[] = [];
+    const add = (issues: JiraIssue[]): void => {
+      for (const issue of issues) {
+        if (seen.has(issue.key)) continue;
+        seen.add(issue.key);
+        list.push(issue);
+      }
+    };
+
+    for (const q of board.queries) {
+      const got = await this.pages(auth, q.jql, ctx, JIRA_QUERY_CAP);
+      if (got.failure !== null && wholeBoard(got.failure)) return this.boardFailed(got.failure);
+      // A per-entry failure keeps what that entry returned before it; the `failures` row is what stops a partial list reading as a whole one.
+      if (got.failure !== null) failures.push({ kind: 'query', id: q.id, message: entryMessage(got.failure) });
+      add(got.issues);
+    }
+
+    for (const root of board.roots) {
+      const got = await this.walk(auth, root, ctx);
+      if (got.failure !== null && wholeBoard(got.failure)) return this.boardFailed(got.failure);
+      if (got.failure !== null) failures.push({ kind: 'root', id: root, message: entryMessage(got.failure) });
+      else if (got.unknown) failures.push({ kind: 'root', id: root, message: `Jira knows no issue ${root}` });
+      add(got.issues);
+    }
+
+    this.caches.set(board.id, {
+      issues: list.slice(0, JIRA_BOARD_CAP),
+      // The instant the board's last call answered.
+      polledAt: iso(Date.now()),
+      truncated: list.length > JIRA_BOARD_CAP,
+      failures
+    });
+    return true;
+  }
+
+  /**
+   * A root and its descendants: `key = "K"`, then `JIRA_DESCENDANT_ROUNDS` rounds of `parent in (…)` over every key the previous round RETURNED (mapped or
+   * dropped by the Done window), stopping early at `JIRA_ROOT_CAP` kept issues or an empty round. A root Jira answers with no issue at all is `unknown`
+   * (P3 — Jira says 200 with nothing for a key it does not know); a root the window dropped is not unknown, and its walk still runs.
+   */
+  private async walk(auth: JiraAuth, root: string, ctx: MapContext): Promise<Pages & { unknown: boolean }> {
+    const first = await this.pages(auth, `key = ${jqlString(root)}`, ctx, JIRA_ROOT_CAP);
+    if (first.failure !== null) return { ...first, unknown: false };
+    if (first.raw.length === 0) return { ...first, unknown: true };
+    const issues = [...first.issues];
+    let parents = first.raw;
+    for (let round = 0; round < JIRA_DESCENDANT_ROUNDS && parents.length > 0 && issues.length < JIRA_ROOT_CAP; round++) {
+      const got = await this.pages(auth, `parent in (${parents.map(jqlString).join(', ')})`, ctx, JIRA_ROOT_CAP - issues.length);
+      issues.push(...got.issues);
+      if (got.failure !== null) return { raw: [], issues, failure: got.failure, unknown: false };
+      parents = got.raw;
+    }
+    return { raw: [], issues, failure: null, unknown: false };
+  }
+
+  /**
+   * One JQL, paged by `nextPageToken`, until `room` issues are kept, Jira says `isLast`, or a page names no next token — a page claiming `isLast: false`
+   * with no token ends the walk there rather than asking for the first page again forever (Review Focus 3).
+   */
+  private async pages(auth: JiraAuth, jql: string, ctx: MapContext, room: number): Promise<Pages> {
+    const raw: string[] = [];
+    const issues: JiraIssue[] = [];
+    let nextPageToken: string | undefined;
+    while (issues.length < room) {
+      const res = await this.client.search(auth, { jql, fields: this.sweepFields(), maxResults: JIRA_PAGE_SIZE, nextPageToken });
+      if (!ok(res)) return { raw, issues: issues.slice(0, room), failure: res };
+      const page = Array.isArray(res.data?.issues) ? res.data.issues : [];
+      for (const r of page) {
+        if (isObj(r) && typeof r.key === 'string') raw.push(r.key);
+        const issue = mapJiraIssue(r, ctx);
+        if (issue !== null) issues.push(issue);
+      }
+      const next = res.data?.nextPageToken;
+      if (res.data?.isLast !== false || typeof next !== 'string' || next === '') break;
+      nextPageToken = next;
+    }
+    return { raw, issues: issues.slice(0, room), failure: null };
+  }
+
+  /** The sweep's field list (§4) plus the discovered sprint field, when the site has one. */
+  private sweepFields(): string[] {
+    return this.boot.sprintField === null ? [...JIRA_ISSUE_FIELDS] : [...JIRA_ISSUE_FIELDS, this.boot.sprintField];
+  }
+
+  /** The union of project keys on the cached boards and the mapped keys, sorted; a name from a cached issue when there is one, else the key. */
+  private projectsOf(config: JiraConfig): { key: string; name: string }[] {
+    const names = new Map<string, string>();
+    for (const board of config.boards) {
+      for (const issue of this.caches.get(board.id)?.issues ?? []) if (!names.has(issue.project.key)) names.set(issue.project.key, issue.project.name);
+    }
+    for (const key of Object.keys(config.repos)) if (!names.has(key)) names.set(key, key);
+    return [...names]
+      .map(([key, name]) => ({ key, name }))
+      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  }
+
+  // ── the fresh reads' shared edges ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Whether a fresh read may be sent, and with what. Refused with NO call: inside a 429 window (the stored instant, P1); before boot has a `cloudId` — there
+   * is no gateway path to ask — answering from the boot state (P3: a 401 state is the 401, anything else `unreachable` with the boot's detail); and for an
+   * `unsupported` site, which no read can change. Unconfigured never reaches here past the routes (they answer 503 first), but is refused all the same.
+   */
+  private gate(): { auth: JiraAuth } | { refused: { ok: false; response: JiraResponse<unknown>; retryAt?: string } } {
+    const env = jiraEnv();
+    if (!env.configured) return { refused: { ok: false, response: synthetic(0, env.detail) } };
+    if (this.inWindow(Date.now())) return { refused: { ok: false, response: synthetic(429, null), retryAt: iso(this.boot.retryAt!) } };
+    if (this.boot.access === 'unsupported') return { refused: { ok: false, response: synthetic(0, UNSUPPORTED) } };
+    if (this.boot.cloudId === null) {
+      const detail = this.boot.detail ?? 'connecting';
+      return { refused: { ok: false, response: this.boot.access === 'unauthorized' ? synthetic(401, detail) : synthetic(0, detail) } };
+    }
+    return { auth: { site: env.site, email: env.email, token: env.token, cloudId: this.boot.cloudId } };
+  }
+
+  /**
+   * A fresh read's failure. Only a 401 (the credentials stopped working: `me` reset, the boot retry restarts) and a 429 (the window opens) move the
+   * site-level state; a 0, 5xx, 400, 403 or 404 on a route answers its mapping and leaves `access` to the sweep (§8).
+   */
+  private routeFailed(res: JiraResponse<unknown>): { ok: false; response: JiraResponse<unknown>; retryAt?: string } {
+    if (res.status === 401) {
+      this.boot.reset();
+      this.boot.fail('unauthorized', detailOf(res), Date.now());
+      this.wake();
+    }
+    if (res.status === 429) {
+      this.openWindow(res);
+      return { ok: false, response: res, retryAt: iso(this.boot.retryAt!) };
+    }
+    return { ok: false, response: res };
+  }
+}
