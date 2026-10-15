@@ -88,7 +88,7 @@ The tool's exit codes, which the rest of this file quotes constantly:
 | `8`  | **tracker projects only** — the API is not running. **Nothing is written.** Start the stack and retry the same command (`references/tracker.md`)                                                                                                                      |
 | `9`  | **tracker projects only** — an API refusal this command could not absorb. **Nothing is written.** Not a call to retry: park the item, `--detail "the API refused this step — <what the API refused, your words>"`; the server's sentence is read, never pasted (`references/tracker.md`) |
 | `10` | a **stop** was requested for this run: `stage` refuses **every** transition with it, and `watch` returns it after signalling the child. **Nothing is written** by the `stage` refusal; read `references/stopping.md`                                           |
-| `11` | `verify` only, **tracker projects only**: the snapshot's `## Done when` names a command the gate's allowlist does not approve. **Nothing is run and nothing is written**; read `references/check-failures.md` |
+| `11` | `verify` only, **tracker projects only**: the snapshot's `## Done when` names a command neither the allowlist approves nor the issue carried at pre-flight. **Nothing is run and nothing is written**; read `references/check-failures.md` |
 
 `6`, `7` and `10` are the codes whose reaction is neither a fix nor a retry, which is exactly why none of them is a `1`. A `1` means "this call was wrong". A `6` means
 "this call was right and the run is being asked to stop": never retry it, never work around it, read `references/stopping.md`. A `7` means "this call was right and this session is
@@ -944,8 +944,8 @@ call as the launch.
 - **exit `1` or `5`** — when `verify` exits non-zero, read `references/check-failures.md` in full. Red rows feed a fix loop that shares §7's two-loop ceiling;
   when the ceiling runs out with verification still red the item parks, with a channel or without one; exit `5` (nothing to verify with) parks at once. **Never
   merge red** — nothing green-lights a merge except the commands passing.
-- **exit `11`** — a tracker item's `## Done when` gained a command nobody approved since the gate read it: stage it `needs-answers`, never fix, retry or merge it
-  (`references/check-failures.md`).
+- **exit `11`** — a tracker item's `## Done when` names a command no allowlist approves and `stage <id> preflight` did not record (added since, or no record):
+  stage it `needs-answers`, never fix, retry or merge it (`references/check-failures.md`).
 
 ## 9. Merge — the only door into the base
 

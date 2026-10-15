@@ -8205,7 +8205,10 @@ test('verify refuses with exit 11 a tracker Done when command the gate allowlist
   });
 
   assert.equal(out.status, 11, out.stderr);
-  assert.match(out.stderr, /not approved/);
+  assert.match(out.stderr, /neither approved/);
+  // No `stage 3 preflight` ran, so there is no record of what the gate saw and
+  // the allowlist alone decides — failing closed, and saying why.
+  assert.match(out.stderr, /no pre-flight record exists/);
   assert.ok(out.stderr.includes(injectedCmd), out.stderr);
   assert.ok(!out.stderr.includes(`\`${approvedCmd}\``), out.stderr);
   // Refused before the FIRST spawn, not just before the bad one: a verify that
@@ -8213,6 +8216,60 @@ test('verify refuses with exit 11 a tracker Done when command the gate allowlist
   assert.equal(fs.existsSync(approved), false);
   assert.equal(fs.existsSync(injected), false);
   assert.equal(after, before);
+});
+
+// bug-253, fix loop 1: at the gate an unresolved Done-when command is only a
+// question, which a human answer or `questionMode: decide` clears. Such an item
+// must still verify — the refusal is for commands ADDED after the gate saw the
+// issue, which is what `stage <id> preflight`'s record of the body pins.
+test('verify runs a Done when command the gate saw at pre-flight even when no allowlist approves it', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const marker = path.join(project, 'seen-ran.txt');
+  const cmd = `node -e "require('fs').writeFileSync('${marker}','ran')"`;
+  const body = `## Symptom\n\nx\n\n## Cause\n\nreal\n\n## Fix\n\nreal\n\n## Done when\n\n\`\`\`\n${cmd}\n\`\`\`\n`;
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-verify-wt-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+
+  const { out } = await withApi({ ...claimRoutes(project), '/api/items/body': { body } }, async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    assert.equal((await runApi(project, home, port, 'snapshot', '3')).status, 0);
+    return runApi(project, home, port, 'verify', '3', '--cwd', worktree, '--json');
+  });
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'ran');
+  const record = JSON.parse(fs.readFileSync(path.join(home, encodeURIComponent(project), 'items', '3.gate.json'), 'utf8'));
+  assert.deepEqual(record, { commands: [cmd] });
+});
+
+test('verify refuses with exit 11 a Done when command added to the issue after pre-flight, and runs neither command', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const seenMarker = path.join(project, 'seen-ran.txt');
+  const addedMarker = path.join(project, 'added-ran.txt');
+  const seenCmd = `node -e "require('fs').writeFileSync('${seenMarker}','ran')"`;
+  const addedCmd = `node -e "require('fs').writeFileSync('${addedMarker}','ran')"`;
+  const bodyWith = (lines) => `## Symptom\n\nx\n\n## Cause\n\nreal\n\n## Fix\n\nreal\n\n## Done when\n\n\`\`\`\n${lines.join('\n')}\n\`\`\`\n`;
+  let current = bodyWith([seenCmd]);
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-verify-wt-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+
+  const { out } = await withApi({ ...claimRoutes(project), '/api/items/body': () => ({ body: current }) }, async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+    // The issue is edited while the run holds it; the next snapshot — a fix
+    // loop's — fetches the edited body.
+    current = bodyWith([seenCmd, addedCmd]);
+    assert.equal((await runApi(project, home, port, 'snapshot', '3')).status, 0);
+    return runApi(project, home, port, 'verify', '3', '--cwd', worktree, '--json');
+  });
+
+  assert.equal(out.status, 11, out.stderr);
+  assert.match(out.stderr, /added since/);
+  assert.ok(out.stderr.includes(addedCmd), out.stderr);
+  assert.ok(!out.stderr.includes(`\`${seenCmd}\``), out.stderr);
+  assert.equal(fs.existsSync(seenMarker), false);
+  assert.equal(fs.existsSync(addedMarker), false);
 });
 
 test('a tracker run-s outcomes/ and items/ are archived beside its run file by the next init', async (t) => {

@@ -3319,11 +3319,13 @@ directory and never in the worktree, because §6 stages the worktree with `add -
 run hands the item file, and what `verify` reads `## Done when` out of. Both directories ride the existing archive mover with no change to it: it is a denylist
 of two (`run.json`, `runs/`), which is exactly the property that makes a new sidecar directory free.
 
-**That snapshot is re-fetched from the live issue, so `verify` re-applies the gate's allowlist to it before running anything (bug-253).** The gate checks a
-`## Done when` command against `backlog/verify.json` and the `package.json` scripts once, at gate time; whoever can edit the issue could otherwise add a fenced
-line after that and have this machine run it unattended. The re-check reads the allowlist at the project root, never in the worktree the session can write, and
-an unapproved command refuses the whole verify with exit `11` — nothing run, nothing written — and the driver stages the item `needs-answers`. A files item
-needs no re-check: its `## Done when` is the committed file the gate read.
+**That snapshot is re-fetched from the live issue, so `verify` refuses any `## Done when` command the gate never saw (bug-253).** The gate checks a command
+against `backlog/verify.json` and the `package.json` scripts once, at gate time; whoever can edit the issue could otherwise add a fenced line after that and have
+this machine run it unattended. The gate's check is only a question, though — a human answer or `questionMode: decide` clears an unlisted command, and that item
+must still verify. So `stage <id> preflight`, on the transition that takes the issue, records the body's `## Done when` commands in `<dir>/items/<id>.gate.json`,
+and `verify` runs a command only if the allowlist approves it (read at the project root, never in the worktree the session can write) or that record holds it.
+Anything else refuses the whole verify with exit `11` — nothing run, nothing written — and the driver stages the item `needs-answers`. A missing record fails
+closed, to the allowlist alone. A files item needs no re-check: its `## Done when` is the committed file the gate read.
 
 ### What the rest of the run publishes (task-48)
 

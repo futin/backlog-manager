@@ -2265,6 +2265,49 @@ function snapshotFilePath(dir, itemId) {
   return path.join(dir, 'items', `${itemId}.md`);
 }
 
+// bug-253: the `## Done when` commands the issue carried when this run took it
+// at pre-flight — the body the gate and §3's question hunt both read. `verify`
+// refuses a command that is neither on the allowlist nor in this record, which
+// is exactly "added to the live issue after the gate saw it". A command the gate
+// DID see but could not resolve was already raised as a question there, and a
+// human answer or `questionMode: decide` cleared it, so it must still run.
+function gateRecordPath(dir, itemId) {
+  return path.join(dir, 'items', `${itemId}.gate.json`);
+}
+
+// Best-effort, like the heartbeat: the claim is already won and written, and a
+// failure here must not undo it. A missing record fails CLOSED rather than open
+// — `verify` then approves by the allowlist alone, so the worst a lost record
+// costs is an exit `11` on a command the gate flagged, never a command nobody
+// saw reaching a shell.
+function recordGateDoneWhen(dir, run, itemId) {
+  try {
+    const body = apiCall('GET', `/api/items/body?path=${encodeURIComponent(`gh:${trackerRepoOf(run)}#${itemId}`)}`);
+    if (!body.ok) {
+      console.error(`the gate record for ${itemId} was not written: ${apiErrorText(body, 'GET /api/items/body was refused')}`);
+      return;
+    }
+    const doneWhen = extractSection(typeof body.data === 'string' ? body.data : '', 'Done when');
+    const commands = doneWhen === undefined ? [] : extractDoneWhenCommands(doneWhen);
+    const target = gateRecordPath(dir, itemId);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify({ commands }, null, 2)}\n`);
+  } catch (e) {
+    console.error(`the gate record for ${itemId} was not written: ${e.message}`);
+  }
+}
+
+// The record's commands, or `[]` for a missing or unreadable one — see
+// `recordGateDoneWhen` for why absent means "approve by the allowlist alone".
+function readGateDoneWhen(dir, itemId) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(gateRecordPath(dir, itemId), 'utf8'));
+    return Array.isArray(parsed.commands) ? parsed.commands.filter((c) => typeof c === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 // bug-43: the dispatched child's pid, at the name SKILL.md's launcher writes
 // it under. Unlike the two above, this file is written by the SKILL rather
 // than by this tool — `echo $! > "<dir>/logs/<id>.pid"`, in the same Bash
@@ -3259,6 +3302,7 @@ function cmdStage(argv, out = console.log) {
      and same won/held/throw handling as `preflight`; a move from `parked` to
      another release stage holds nothing, so claims nothing. */
   const leavingParked = item.stage === 'parked' && !CLAIM_RELEASE_STAGES.has(stage);
+  const enteringPreflight = tracker && stage === 'preflight' && item.stage !== stage;
   if (tracker && ((stage === 'preflight' && item.stage !== stage) || leavingParked)) {
     const claimed = trackerClaim(run, item);
     if (!claimed.won) {
@@ -3315,6 +3359,11 @@ function cmdStage(argv, out = console.log) {
   if (tracker) {
     if (CLAIM_RELEASE_STAGES.has(stage)) trackerRelease(run, item, stage, mergedCounters);
     else trackerHeartbeat(run, item);
+    // bug-253: what the gate saw, recorded on the transition that takes the
+    // issue — before any session is spent and before the item can be edited
+    // under a run that holds it. Only on the transition: a re-stamp must not
+    // overwrite the record with a body edited since.
+    if (enteringPreflight) recordGateDoneWhen(dir, run, itemId);
     // An item that leaves the plan WITHOUT ever being claimed — `skipped` or
     // `ungroomed` by the driver before `preflight` — takes its label off now
     // rather than carrying it until `finish`. A claimed item needs nothing:
@@ -5350,7 +5399,13 @@ function cmdVerify(argv) {
   // author, on a public repo anybody — could add a fenced line and have this
   // machine run it unattended. Re-checking closes that without pinning the
   // body: an edit can still reword prose or drop a command, it just can never
-  // ADD one the gate would not have approved.
+  // ADD one the gate did not see.
+  //
+  // "Did not see", not "would not approve": at the gate an unresolved command
+  // is only a QUESTION, which a human answer or `questionMode: decide` clears,
+  // and such an item must still verify. So a command passes if the allowlist
+  // approves it OR it is in the record `stage <id> preflight` wrote of the
+  // commands the issue carried then (`recordGateDoneWhen`).
   //
   // The allowlist is read at the PROJECT ROOT, where the gate read it — not at
   // `--cwd`. The worktree's `backlog/verify.json` and `package.json` are files
@@ -5365,11 +5420,13 @@ function cmdVerify(argv) {
   // a live body.
   if (snapshotPath !== null) {
     const doneWhen = itemDoneWhenSection(cwd, itemId, snapshotPath);
-    const unapproved = doneWhen === undefined ? [] : findUnresolvedCommands(doneWhen, resolveProjectRoot());
+    const seen = new Set(readGateDoneWhen(dir, itemId));
+    const unapproved = doneWhen === undefined ? [] : findUnresolvedCommands(doneWhen, resolveProjectRoot()).filter((cmd) => !seen.has(cmd));
     if (unapproved.length > 0) {
       throw new OrchestrateError(
-        `verify refused: ## Done when for ${itemId} names ${unapproved.length === 1 ? 'a command' : 'commands'} not approved by ` +
-          `backlog/verify.json or package.json scripts at the project root — nothing was run: ` +
+        `verify refused: ## Done when for ${itemId} names ${unapproved.length === 1 ? 'a command' : 'commands'} neither approved by ` +
+          `backlog/verify.json or package.json scripts at the project root nor among the commands the issue carried at pre-flight ` +
+          `(${fs.existsSync(gateRecordPath(dir, itemId)) ? 'added since' : 'no pre-flight record exists for this item'}) — nothing was run: ` +
           unapproved.map((cmd) => `\`${cmd}\``).join(', '),
         EXIT_UNAPPROVED_COMMAND
       );
