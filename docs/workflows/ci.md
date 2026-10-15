@@ -46,8 +46,9 @@ way on 2026-10-15; the 946th is that git-wording case, re-run alone in the conta
 ## The ruleset
 
 The `main-pr-only` ruleset (PR required, the three contexts above, linear history, no force push or deletion, no bypass) and the squash-only merge settings
-are applied by release-kit's `scripts/apply-repo-settings.sh futin/backlog-manager`, dry run first. **State on 2026-10-15: not applied yet** — it goes on only
-after the first PR has reported all three contexts green.
+are applied by release-kit's `scripts/apply-repo-settings.sh futin/backlog-manager`, dry run first. **State on 2026-10-15: not applied, deliberately** — unlike the
+dashboard, it waits for Phase B's `--pr` mode rather than for the first green PR, because of the first bullet below. Until then CI is a signal on
+every PR, not a gate on `main`.
 
 Once it is applied, every direct push to `main` is refused until Phase B lands, and in this repo that is more than habit:
 
