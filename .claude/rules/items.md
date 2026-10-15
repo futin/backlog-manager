@@ -9,7 +9,8 @@ paths: ["server/src/items/**"]
   `ItemsService.writerFor` gates the `project` against the registry by a RAW string compare, resolves the marker per request, and answers `unregistered` (404)
   / `files` (400, `this project's items are files — the skills write them directly`) / `unsupported` (400, carrying `resolveSource`'s own reason) / the call.
   None of those four makes a network request. `FilesSource` has no `writer` at all, and that absence IS the rule. The adapter answers a VALUE for every
-  failure (`WriteRefusal`), and the controller is the only layer mapping one to a status: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited`
+  failure (`WriteRefusal`), and `answer` (`write-answer.util.ts`, #270) is the only mapping from one to a status — the eight routes, `abort` and the
+  `GET /api/items/claim` read all go through it: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited`
   429 · anything else 502. `heartbeat` also takes `finished: { at, status }` (task-48), validated field by field and accepted on a RELEASED claim, where it
   sets `finished` and nothing else — `finish` stamps a claim its terminal stage already released. `claim` takes an optional `host` (bug-46), validated by
   `optional()` as a non-empty string or a 400 naming the field: absent is a value (a caller that sends none writes no `host` key at all), but a blank or a
@@ -42,8 +43,8 @@ paths: ["server/src/items/**"]
   (the spawned session's `start` retires it), while a stale claim held by a run or by a session the board dispatched still blocks; and `AgentsService.dispatch`
   re-checks a tracker item's claim server-side (`itemClaimBlock`, same order, a stale claim going through `staleClaimProbe`) — a files item is not re-checked. **The ORCHESTRATOR lifted one phase later (task-47, phase
   4a)**: `projectIsFiles` is deleted and `AgentsService.orchestrate`'s `arrives in phase 4` 400 is gone, and what replaced them is `resolveIds` learning the
-  vocabulary — `resolveTrackerIds` proves an id against `ItemsService` where the files path proves it against a directory scan, accepts `#31`, the URN and a
-  bare `31`, and **emits bare digits alone**, so no `#` reaches the prompt. Why:
+  vocabulary — `resolveTrackerIds` proves an id against `ItemsService` where the files path proves it against a directory scan, accepts `#31`, this project's own URN and a
+  bare `31` (a URN naming another repo, compared case-insensitively, is a 400 — #270), and **emits bare digits alone**, so no `#` reaches the prompt. Why:
   [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **The middle rung of "last touched" comes from git, not the item file.** `lastCommit` (`server/src/items/git-dates.util.ts`) is the committer date of the last
   commit touching the file, keyed relative to the project path; every failure degrades to `created`, never throws. The container needs `git` installed and

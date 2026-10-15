@@ -5,8 +5,14 @@ import { SameOriginPostGuard } from '../agents/origin.guard';
 import { KIND_NAMES } from '../tracker/labels';
 import { isMergeMode, isQuestionMode } from '../../../shared/agent';
 import { CLAIM_FINISHED_STATUSES, MERGE_MODES, QUESTION_MODES } from '../../../shared/types';
-import type { CreatedItem, WriteOutcome, WriteRefusal } from './sources/source';
+import type { CreatedItem } from './sources/source';
+import { answer } from './write-answer.util';
 import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, Section } from '../../../shared/types';
+
+// Re-exported so `agents/items-abort.service.ts` keeps borrowing `writable` and `answer` from one import line. The mapping itself moved to
+// `write-answer.util.ts` in #270, because `ItemsService.readClaim` needs it too and a service importing a controller that injects that same service is a
+// circular import Nest's constructor metadata does not survive.
+export { answer };
 
 /**
  * items-write.controller.ts — the eight write routes of a tracker project
@@ -280,41 +286,6 @@ export function writable(lookup: WriterLookup): Extract<WriterLookup, { kind: 'w
   // one fact is how a reader ends up believing they are two facts.
   if (lookup.kind === 'unsupported') throw new HttpException({ error: lookup.reason }, 400);
   return lookup;
-}
-
-/**
- * One `WriteOutcome` → the response, or the exception. The ONE mapping from
- * `refused` to a status, so no route can invent its own.
- *
- * Each status is chosen for what the READER can do about it: 503 for a
- * credential this machine is missing (fix the environment), 404 for an issue
- * that is not there (fix the id), 409 for a race or a stale read (re-read and
- * retry), 429 for a budget with a time on it (wait), 502 for anything else
- * GitHub said (nothing local to fix).
- *
- * Exported since #225, for the reason `writable` gives.
- */
-export function answer<T>(outcome: WriteOutcome<T>): T {
-  if (outcome.ok) return outcome.value;
-  const r: WriteRefusal = outcome.refusal;
-  switch (r.refused) {
-    case 'no-token':
-      throw new HttpException({ error: r.error }, 503);
-    case 'not-found':
-      throw new HttpException({ error: r.error }, 404);
-    case 'conflict':
-      // `holder` and `updatedAt` ride along when the adapter set them: each
-      // is what the caller needs in order to do something other than give up
-      // — who holds the claim, or the stamp to re-read against.
-      throw new HttpException({ error: r.error, holder: r.holder, updatedAt: r.updatedAt }, 409);
-    case 'rate-limited':
-      throw new HttpException({ error: r.error, resetAt: r.resetAt ?? null }, 429);
-    case 'sync-off':
-      // No `code`: `RUN_IN_PROGRESS_CODE` is the app's one coded 409 and means a different fact. The sentence names the repo and the fix.
-      throw new HttpException({ error: r.error }, 409);
-    default:
-      throw new HttpException({ error: r.error, status: r.status ?? null }, 502);
-  }
 }
 
 /** The five sections `create` accepts — every one of them, `out-of-scope`

@@ -125,12 +125,16 @@ export function fitBody(text, cap, link) {
   return { text: kept === '' ? trailer.trimStart() : kept + trailer, truncated: true }
 }
 
-// The four id shapes an item file can cite, word-bounded on both sides. `-` and `/` are excluded as left neighbours and `-` as a right one because a filename
-// and a slug both carry an id in the middle of them; see this file's header comment for the three cases that proves.
+// The five id shapes an item file can cite, word-bounded on both sides. `oos` is the fifth (#270): out-of-scope's own id space, minted only for an item
+// captured already rejected, and imported — and mapped by pass 1 — like any other, so a citation of it is a cross-link pass 2 must resolve too. Leaving
+// it out left every `oos-N` reference pointing at a file the import itself deletes.
+//
+// `-` and `/` are excluded as left neighbours and `-` as a right one because a filename and a slug both carry an id in the middle of them; see this file's
+// header comment for the three cases that proves.
 //
 // `=` is excluded as a left neighbour for the footer marker: `from=task-1` is the idempotency key a resume reads, and rewritten to `from=#4` it keys nothing —
 // every issue pass 2 had already patched was invisible to the next resume, which created each of them again.
-const OLD_ID = /(?<![\w/=-])(bug|task|idea|ref)-(\d+)(?![\w-])/g
+const OLD_ID = /(?<![\w/=-])(bug|task|idea|ref|oos)-(\d+)(?![\w-])/g
 
 /** Rewrite every old id the map knows to `#<n>`; leave every other match — an unknown id, a different casing — exactly as it was. */
 export function rewriteOldIds(text, map) {

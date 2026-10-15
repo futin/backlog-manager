@@ -74,7 +74,7 @@ Markdown, in this fixed section order so two reports diff cleanly:
 5. **Defects and gaps found** — each with the evidence rows it rests on.
 6. **Decisions that are not defects** — things that look wrong and are not.
 7. **Method and caveats** — `caveats[]` verbatim.
-8. **Deltas since the previous record**, or `first record — no previous sweep`.
+8. **Deltas since the previous record** taken at the same scope (`--project` or machine-wide), or `first record — no previous sweep`.
 
 Numbers come from the JSON; the prose is yours. **Every estimated figure is marked estimated every time it is printed** — the driver's spend and anything all-in
 are fitted, not billed, and a reader who cannot tell the fitted third of the bill from the billed two thirds is being misled by the report.

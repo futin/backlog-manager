@@ -3,7 +3,7 @@
  */
 import { act, renderHook } from '@testing-library/react';
 
-import { useWatchdog, WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
+import { useWatchdog, WATCHDOG_IDLE_POLL_MS, WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 import type { WatchdogPhase, WatchdogStatus } from '../shared/types';
 
@@ -83,9 +83,12 @@ describe('useWatchdog', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // --- 11: idle never polls ---------------------------------------------------
+  // --- 11: idle polls slowly (#270) -------------------------------------------
+  //
+  // It used to never poll at all while idle, so a monitor left open on an idle sweeper never noticed a run starting — the sweeper arms the moment
+  // some run.json says `running`, and nothing on this page fires a focus event for that. Idle now polls on the slow cadence, never the fast one.
 
-  it('fetches once on mount, and never again while idle', async () => {
+  it('polls on WATCHDOG_IDLE_POLL_MS while idle, and not on the armed cadence', async () => {
     const fetchMock = stubFetch(status('idle'));
     renderHook(() => useWatchdog());
 
@@ -94,6 +97,44 @@ describe('useWatchdog', () => {
 
     await act(async () => {
       await jest.advanceTimersByTimeAsync(WATCHDOG_POLL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_IDLE_POLL_MS - WATCHDOG_POLL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('notices an idle sweeper arming without a focus event, then polls on the armed cadence', async () => {
+    let phase: WatchdogPhase = 'idle';
+    const fetchMock = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(status(phase)) } as Response));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useWatchdog());
+
+    await flush();
+    expect(result.current.status?.phase).toBe('idle');
+
+    phase = 'armed';
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_IDLE_POLL_MS);
+    });
+    expect(result.current.status?.phase).toBe('armed');
+    const calls = fetchMock.mock.calls.length;
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_POLL_MS);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(calls + 1);
+  });
+
+  it('installs no idle poll either when live is false', async () => {
+    const fetchMock = stubFetch(status('idle'));
+    renderHook(() => useWatchdog({ live: false }));
+
+    await flush();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(WATCHDOG_IDLE_POLL_MS * 2);
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

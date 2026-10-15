@@ -61,8 +61,8 @@ that caller.
 
 `ItemsService.writerFor(projectPath)` is the one gate: registry compare (raw string, never realpath), `resolveSource` per request, then the adapter's `writer` —
 answering `unregistered` (404), `files` (400, `this project's items are files — the skills write them directly`), `unsupported` (400, `resolveSource`'s own
-reason) or the call. None of those four makes a network request. `FilesSource` has no writer at all. Refusals travel as values (`WriteRefusal`) and the
-controller alone maps them: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · anything else 502.
+reason) or the call. None of those four makes a network request. `FilesSource` has no writer at all. Refusals travel as values (`WriteRefusal`) and one
+function maps them — `answer` (`write-answer.util.ts`), shared by every write route and by `GET /api/items/claim` (#270): `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · anything else 502.
 
 Writes to one item are serialised in-process (`Map<urn, Promise>`), and every response is absorbed into the poller's cache so the next board read shows it —
 `polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the one READ beside them, unguarded like every other GET,
@@ -114,7 +114,8 @@ sentence, `sync is off for <owner/name> — turn it on in Settings › Shared �
 because its 409 needs the run files and the starting entries and `TrackerModule` hosting it would be a module cycle. Guarded like the agents POSTs; 400 for a
 repo that fails `isRepo` or an interval outside the four; 404 for a repo no registered project is connected to; 409 for `off` while a run file on any project
 of that repo reads `running` or `paused`, or a starting entry exists for one; otherwise write, `arm()`, and 200 with the repo's `summary()`. It calls nothing
-outbound.
+outbound. The write answers one more 409, for any interval (#270): a `tracker-sync.json` that exists but does not parse is left exactly as it is and refused
+(`SyncConfigUnreadableError`), because rewriting it from `{}` would drop every other repo's setting back to `15s`; a missing file is written fresh.
 
 While a repo is `off`, every write path refuses with 409 `{ error: <the sentence> }` before any request to GitHub or the dashboard: the eight
 `GithubSource` writes (through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check), `dispatch`, `orchestrate` and

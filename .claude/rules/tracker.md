@@ -87,5 +87,6 @@ paths: ["server/src/tracker/**"]
   any GitHub request (`create` checks it after `ready()`) — from `AgentsService`'s `dispatch`, `orchestrate` and `resume`, before any spawn, and from `ItemsAbortService.abort` before its dashboard stop; `plan()` puts
   it in `blocked`. `WriteRefusal.refused` is `'sync-off'`. `POST /api/trackers/sync` (`orchestrator/tracker-sync.controller.ts`, guarded) answers 400/404/409
   in that order — 409 only for `off`, while a run file on any registered project of the repo reads `running` or `paused`, or a starting entry exists — then
-  writes, `arm()`s and returns `summary(repo)`. `RemoteRunsService` drops `off` repos before deriving. Why:
+  writes, `arm()`s and returns `summary(repo)`. The write itself answers one more 409, for any interval: a `tracker-sync.json` that exists but does not parse
+  is refused (`SyncConfigUnreadableError`) and left untouched, never replaced by the one key being written (#270); a MISSING file is still written fresh. `RemoteRunsService` drops `off` repos before deriving. Why:
   [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -65,6 +66,40 @@ test('hashTree notices content, renames and deletions', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+// #270 row 11. The dirty check is `git status --porcelain`, which cannot see a git-IGNORED file — so a Finder `.DS_Store` under `skills/` hashed into the
+// repo's digest, never reached the install (the installer clones git), and made every sync reinstall and then exit 1 still "drifted", blaming plugin.json.
+// The repo side hashes what git tracks, which is exactly what an install can carry; the install side, a plain copy with no `.git`, keeps the walk.
+test('publishedDigests over a git work tree hashes tracked files only, so an ignored file is not drift', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'sync-plugin-repo-'));
+  const install = mkdtempSync(join(tmpdir(), 'sync-plugin-install-'));
+  try {
+    const gitIn = (...args) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+    gitIn('init', '--quiet');
+    for (const root of [repo, install]) {
+      mkdirSync(join(root, 'skills', 'a'), { recursive: true });
+      writeFileSync(join(root, 'skills', 'a', 'SKILL.md'), 'hello');
+    }
+    writeFileSync(join(repo, '.git', 'info', 'exclude'), '.DS_Store\n');
+    gitIn('add', 'skills');
+    // Ignored, so the dirty check is blind to it — the shape of the bug. An untracked-but-visible file is the dirty check's to refuse, not this one's.
+    writeFileSync(join(repo, 'skills', 'a', '.DS_Store'), 'finder junk');
+
+    assert.equal(publishedDigests(repo, { tracked: true }).skills, publishedDigests(install).skills);
+    // The walk still sees it, which is what the install side wants: a stray file there IS a difference from what git would deliver.
+    assert.notEqual(hashTree(join(repo, 'skills')), hashTree(join(install, 'skills')));
+
+    // And a tracked file's edit, and a tracked path missing on disk, still move the repo digest.
+    writeFileSync(join(repo, 'skills', 'a', 'SKILL.md'), 'hello!');
+    assert.notEqual(publishedDigests(repo, { tracked: true }).skills, publishedDigests(install).skills);
+    rmSync(join(repo, 'skills', 'a', 'SKILL.md'));
+    assert.notEqual(publishedDigests(repo, { tracked: true }).skills, publishedDigests(install).skills);
+    assert.equal(publishedDigests(repo, { tracked: true }).agents, '', 'a published path git tracks nothing under still digests as absent');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(install, { recursive: true, force: true });
   }
 });
 

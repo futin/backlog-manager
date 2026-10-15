@@ -132,8 +132,10 @@ const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem, sign: 1 | -1
    what this build WRITES, never what it is capable of READING. A key
    hand-edited, or written by a later build and then rolled back, misses
    `COMPARATORS` entirely, and an unguarded miss is *called*: `undefined(a, b)`
-   throws inside render, and with no ErrorBoundary anywhere in client/src React
-   unmounts the tree to a blank page that only clearing site data recovers.
+   throws inside render. With no ErrorBoundary anywhere in client/src React
+   unmounted the tree to a blank page; since #270 `SectionBoundary` catches it
+   and draws a reload prompt instead, but the reload re-reads the same stored
+   key and throws again, so only clearing site data recovers either way.
    Degrading to `created` is precisely what the if/else chain the record
    replaced did in its final `else`, so this restores behaviour rather than
    adding a new rule.
@@ -143,7 +145,7 @@ const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem, sign: 1 | -1
    the sort track reads the key too now — it prints `Sort: <label> (<dir>)` and
    ticks the chosen row — and a raw value handed to it would print `Sort: newest`
    over a board ordered by Created, or, for a stored object, render that object
-   as a React child, which is the same blank page by another road. One
+   as a React child, which is the same failure by another road. One
    resolution feeds the order, the label, the ticked row and the natural
    direction, so the four cannot disagree. An own-property test rather than
    `??`, because `COMPARATORS['constructor']` is not undefined.

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { rmSync } from 'node:fs';
 
 import { GithubClient } from '../server/src/tracker/github.client';
-import { SECONDARY_BACKOFF_MS, TrackerPollerService } from '../server/src/tracker/poller.service';
+import { IDENTITY_RETRY_MS, SECONDARY_BACKOFF_MS, TrackerPollerService } from '../server/src/tracker/poller.service';
 import { TRACKER_LABELS } from '../server/src/tracker/labels';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { makeProject } from './helpers/store';
@@ -521,5 +521,61 @@ describe('the label bootstrap', () => {
     await p.tick();
     expect(calls.filter((c) => c.method === 'POST').length).toBe(first * 2);
     p.disarm();
+  });
+});
+
+describe('the viewer login (#270)', () => {
+  // `GET /user`, matched on the full path so no `/repos/…` URL can hit it.
+  const USER = 'api.github.com/user';
+  const userCalls = (calls: Call[]): number => calls.filter((c) => c.url.endsWith('/user')).length;
+
+  it('a failed GET /user is not cached: the next claim asks again, and a success is then cached', async () => {
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      [USER, (n) => (n === 1 ? { status: 502, body: { message: 'bad gateway' } } : { status: 200, body: { login: 'futin' } })]
+    ]);
+    expect(await p.viewerLogin('tok')).toBeNull();
+    expect(await p.viewerLogin('tok')).toBe('futin');
+    expect(await p.viewerLogin('tok')).toBe('futin');
+    expect(userCalls(calls)).toBe(2);
+  });
+
+  it('a sweep whose GET /user failed does not poison the claim path', async () => {
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      [USER, (n) => (n === 1 ? { status: 500 } : { status: 200, body: { login: 'futin' } })],
+      ['/issues?', { status: 200, body: [] }],
+      ['/labels', LABELS_PRESENT]
+    ]);
+    await p.tick();
+    expect(p.platform().login).toBeNull();
+    expect(await p.viewerLogin('tok')).toBe('futin');
+    expect(p.platform().login).toBe('futin');
+    expect(userCalls(calls)).toBe(2);
+    p.disarm();
+  });
+
+  it('the sweep retries a failed GET /user only once IDENTITY_RETRY_MS has passed, then stops asking', async () => {
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      [USER, (n) => (n === 1 ? { status: 401, body: { message: 'Bad credentials' } } : { status: 200, body: { login: 'futin' } })],
+      ['/issues?', { status: 200, body: [] }],
+      ['/labels', LABELS_PRESENT]
+    ]);
+    const t0 = Date.now();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(t0);
+    try {
+      await p.tick();
+      await p.tick();
+      expect(userCalls(calls)).toBe(1);
+      expect(p.platform().login).toBeNull();
+      now.mockReturnValue(t0 + IDENTITY_RETRY_MS);
+      await p.tick();
+      expect(userCalls(calls)).toBe(2);
+      expect(p.platform().login).toBe('futin');
+      now.mockReturnValue(t0 + 10 * IDENTITY_RETRY_MS);
+      await p.tick();
+      expect(userCalls(calls)).toBe(2);
+    } finally {
+      now.mockRestore();
+      p.disarm();
+    }
   });
 });

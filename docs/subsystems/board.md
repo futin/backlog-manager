@@ -17,6 +17,12 @@ Board / Runs / Archive / Settings, a plain section switch. `SECTIONS` in `client
 `Record<Section, string>`, so a section added to the list cannot ship without one. `resolveSection` in `App.tsx` maps a stored value that names no tab — the
 legacy `'projects'` included — onto Board, so an upgrade never opens on a blank main area.
 
+A section that fails to render does not take the rail with it (#270). The lazy sections sit inside `SectionBoundary`
+(`client/src/components/SectionBoundary.tsx`), keyed by section, which draws `this section failed to load` and a reload button in the well; switching sections clears it. Its common cause — a rebuild
+deleting the chunk an open tab asks for next — rarely gets that far: `installPreloadReload` (`client/src/lib/preload-reload.ts`, installed in `main.tsx`)
+answers Vite's `vite:preloadError` with one page reload, and a second failure within `RELOAD_GUARD_MS` of it (a timestamp in `sessionStorage`) is left to
+the boundary instead, so a chunk a reload cannot bring back never loops.
+
 The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks while a run on this machine is working (`.claude/DESIGN.md` §8.0). The answer is
 `runsWorking` (`client/src/lib/run-pulse.ts`: a `starting` entry, or a local run `running` and not `isCrashed`), and `App` polls nothing to get it — Board,
 Runs and Archive each already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the section that
@@ -341,7 +347,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` entry is present, plus a grace window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
-- `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop.
+- `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop. Mount and window focus, plus a 5s poll
+  while the sweeper reads `armed` and a 15s one otherwise (#270 — armed-only left an idle page blind to a run starting); Settings' `live: false` polls at
+  neither.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
   (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no interval at all.
 - `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared

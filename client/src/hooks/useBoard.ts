@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { hasSyncingTracker } from '../lib/tracker';
 import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
@@ -65,10 +65,25 @@ export function useBoard(): BoardState {
     error: false
   });
 
+  /*
+    Only the newest read may write (#270) — the guard `useTrackers` has carried since #231, for the same reason. Mount, focus, the tracker interval and
+    BoardView's post-write `refetch` can each have a pair in flight at once, and they settle in whatever order the network likes. Without this the last
+    answer to LAND won, so a read started before a claim was released, answering after the read started after it, painted the released claim back onto
+    the card until the next refetch — and a superseded read that failed raised `error` over a good answer. Each read takes a sequence number, and one
+    that is no longer the newest does nothing at all when it settles. A counter rather than an `AbortController` for the reason `useTrackers` gives: an
+    abort rejects the fetch, and `catch` would then have to tell a superseded read from a real failure.
+  */
+  const latest = useRef(0);
+
   const refetch = useCallback(() => {
+    const seq = ++latest.current;
     Promise.all([fetchJson<ItemsIndex>('/api/items'), fetchJson<ProjectSummary[]>('/api/projects')])
-      .then(([items, projects]) => setState({ items, projects, loading: false, error: false }))
-      .catch(() => setState((prev) => ({ items: prev.items, projects: prev.projects, loading: false, error: true })));
+      .then(([items, projects]) => {
+        if (seq === latest.current) setState({ items, projects, loading: false, error: false });
+      })
+      .catch(() => {
+        if (seq === latest.current) setState((prev) => ({ items: prev.items, projects: prev.projects, loading: false, error: true }));
+      });
   }, []);
 
   useEffect(() => {

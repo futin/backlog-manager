@@ -356,6 +356,24 @@ describe('orchestrate', () => {
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
   });
 
+  /* Bug #270: the URN's `owner/repo` used to be read past — only the digits after its `#` were kept — so `gh:other/repo#31` started a run on THIS
+     project's #31, an issue the caller never named. Refused like the file-id case, a 400 with `backlog.mjs`'s own sentence, because it is not an id this
+     project could ever name; and compared case-insensitively, because GitHub treats `Futin/X` and `futin/x` as one repository. */
+  it('400s a URN naming another repository, and accepts this one in any case', async () => {
+    const foreign = await request(app.getHttpServer())
+      .post('/api/agents/orchestrate')
+      .send({ project: trackerPath, ids: ['gh:someone-else/elsewhere#31'] })
+      .expect(400);
+    expect(foreign.body.error).toBe(`gh:someone-else/elsewhere#31 names someone-else/elsewhere, but this project is connected to ${FAKE_REPO}`);
+    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+
+    await request(app.getHttpServer())
+      .post('/api/agents/orchestrate')
+      .send({ project: trackerPath, ids: [`gh:${FAKE_REPO.toUpperCase()}#31`] })
+      .expect(201);
+    expect(promptOf()).toContain('/backlog-orchestrate 31');
+  });
+
   it('still starts a run for a files project', async () => {
     await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: filesPath }).expect(201);
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(true);

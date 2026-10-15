@@ -767,6 +767,45 @@ test('a record in the retro home becomes the deltas of the next sweep', (t) => {
   assert.ok(line && line.includes('not comparable'), String(line));
 });
 
+// #270 row 9, end to end: `sweep --project` must difference against the newest record taken at ITS scope, and a machine-wide sweep against the newest
+// machine-wide one — never against whichever record happens to be newest.
+test('previous is the newest record taken at the same scope as the sweep', (t) => {
+  const fx = totalsFixture(t);
+  const write = (generatedAt, scope, merged) =>
+    fs.writeFileSync(
+      path.join(fx.retro, `${generatedAt.replace(/[:.]/g, '-')}.json`),
+      JSON.stringify({ sweep: { generatedAt, scope, totals: { merged } }, labels: { reviews: {}, candidates: [] }, recordedBy: 't' })
+    );
+  write('2026-09-06T00:00:00.000Z', null, 1);
+  write('2026-09-07T00:00:00.000Z', PROJECT_A, 0);
+  write('2026-09-08T00:00:00.000Z', PROJECT_B, 7);
+
+  const wide = sweepJson(fx);
+  assert.equal(wide.previous.generatedAt, '2026-09-06T00:00:00.000Z');
+  assert.deepEqual(wide.previous.deltas.merged, { then: 1, now: 2, delta: 1 });
+  const scoped = sweepJson(fx, '--project', PROJECT_A);
+  assert.equal(scoped.previous.generatedAt, '2026-09-07T00:00:00.000Z');
+  assert.deepEqual(scoped.previous.deltas.merged, { then: 0, now: 2, delta: 2 });
+});
+
+// #270 row 8, end to end: two archived runs and the live one all worked `bug-1`, and each item row carries the status ITS run recorded.
+test('each run’s item reads the verify status that run recorded', (t) => {
+  const fx = retroFixture(t);
+  seedRun(fx, PROJECT_A, { runId: 'R-1', status: 'done', queue: [queueItem('bug-1')] }, { archived: true });
+  seedRun(fx, PROJECT_A, { runId: 'R-2', status: 'done', queue: [queueItem('bug-1')] }, { archived: true });
+  seedRun(fx, PROJECT_A, { runId: 'R-3', status: 'running', queue: [queueItem('bug-1')] });
+  const dir = path.join(fx.home, encodeURIComponent(PROJECT_A));
+  for (const [root, code] of [
+    [path.join(dir, 'runs', 'R-1'), '1'],
+    [path.join(dir, 'runs', 'R-2'), '0']
+  ]) {
+    fs.mkdirSync(path.join(root, 'verify'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'verify', 'bug-1.status'), code);
+  }
+  const byRun = Object.fromEntries(sweepJson(fx).items.map((i) => [i.runId, i.verifyStatus]));
+  assert.deepEqual(byRun, { 'R-1': 1, 'R-2': 0, 'R-3': null });
+});
+
 test('an empty retro home leaves previous null', (t) => {
   const fx = totalsFixture(t);
   assert.equal(sweepJson(fx).previous, null);

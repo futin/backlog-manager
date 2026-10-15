@@ -11,6 +11,7 @@ import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
 import { resolveBaseBranch } from '../items/base-branch.util';
+import { parseUrn } from '../tracker/map-issue';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
@@ -1592,6 +1593,20 @@ export class AgentsService {
    * a directory scan per files project, on a route that then spawns a headless
    * session.
    */
+  /**
+   * The `owner/repo` a tracker project's marker names, or `null` — read through
+   * `ItemsService.writerFor`, the same per-request marker resolution every item
+   * write gates on, rather than a second `resolveSource` call here (bug #270).
+   * `null` only for a marker without a usable string `repo`, which no URN can
+   * match, so `resolveTrackerIds` refuses every URN for it.
+   */
+  private trackerRepoOf(project: string): string | null {
+    const lookup = this.items.writerFor(project);
+    if (lookup.kind !== 'writer') return null;
+    const repo = lookup.marker.repo;
+    return typeof repo === 'string' && repo !== '' ? repo : null;
+  }
+
   private async resolveTrackerIds(project: string, ids: unknown[]): Promise<string[]> {
     const wanted: string[] = [];
     for (const id of ids) {
@@ -1606,7 +1621,23 @@ export class AgentsService {
         const shown = JSON.stringify(typeof id === 'string' ? id.slice(0, 40) : id);
         throw new HttpException({ error: `ids must all be item ids like #31 — ${shown} is not one` }, 400);
       }
-      // `#31` and `gh:owner/repo#31` both end in the number, and `isItemId`
+      // A URN names its repository as well as its number, and the repository
+      // has to be THIS project's (bug #270). Reading only the digits after the
+      // `#` turned `gh:other/repo#31` into this project's #31 — an issue the
+      // caller never named, worked by a run on this project's credential. Same
+      // refusal and sentence as `backlog.mjs`'s `trackerId`, and a 400 beside
+      // the file-id one below for the same reason: it is not an id this project
+      // could ever name. Case-insensitive, because GitHub resolves `Futin/X`
+      // and `futin/x` to one repository, so refusing a case difference would
+      // refuse the right issue.
+      const urn = parseUrn(id as string);
+      if (urn !== null) {
+        const own = this.trackerRepoOf(project);
+        if (own === null || urn.repo.toLowerCase() !== own.toLowerCase()) {
+          throw new HttpException({ error: `${String(id)} names ${urn.repo}, but this project is connected to ${own ?? 'no repository'}` }, 400);
+        }
+      }
+      // `#31` and a URN proved above both end in the number, and `isItemId`
       // has already proved the whole string against an anchored shape — so
       // taking the digits after the last `#` is reading a value that has been
       // proved, never parsing an unproved one.

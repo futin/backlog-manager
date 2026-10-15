@@ -7,7 +7,7 @@ import type { SourceSummary } from '../items/sources/source';
 import { RegistryService } from '../registry/registry.service';
 import { isRepo } from '../tracker/github.client';
 import { TrackerPollerService } from '../tracker/poller.service';
-import { writeSyncInterval } from '../tracker/sync-config.util';
+import { SyncConfigUnreadableError, writeSyncInterval } from '../tracker/sync-config.util';
 import { isSyncInterval } from '../../../shared/types';
 
 /**
@@ -40,7 +40,7 @@ export class TrackerSyncController {
    * `summary()` — the same fields a Trackers row carries — so the card can show the server's value rather than an optimistic one.
    *
    * The checks run in the table's order, each its own status: a malformed request is a 400 before anything is looked up, an unconnected repo a 404 before
-   * any run is read, and the 409 only for `off`.
+   * any run is read, and the 409 only for `off` — or, for any interval, for a `tracker-sync.json` that exists but does not parse (#270).
    */
   @UseGuards(SameOriginPostGuard)
   @Post('sync')
@@ -58,7 +58,14 @@ export class TrackerSyncController {
       if (blocker !== null) throw new HttpException({ error: blocker }, 409);
     }
 
-    writeSyncInterval(repo, interval);
+    // A file that exists but does not parse is left alone and answered 409 (#270): replacing it would drop every other repo's setting. The message names
+    // the file and says nothing was written; any other throw is a failed write, and Nest's 500 is the honest answer for that.
+    try {
+      writeSyncInterval(repo, interval);
+    } catch (e) {
+      if (e instanceof SyncConfigUnreadableError) throw new HttpException({ error: e.message }, 409);
+      throw e;
+    }
     // Re-arm: a no-op when a chain is alive, a restart when every repo had been `off` and the chain had disarmed, and a disarm when this write turned the
     // last live repo off (`arm()` clears the timer when `shouldPoll` is false).
     this.poller.arm();

@@ -156,10 +156,12 @@ export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDis
  * truthy, `fresh: 0` is falsy, `fresh: undefined` is falsy — every one of
  * those is silently read as a real answer to "is this run live", not an
  * error, and it would keep being read that way for as long as the hook's
- * state holds onto it. There is also no ErrorBoundary anywhere to fall back
- * on if some OTHER malformed field further downstream (Task 11's run strip,
- * say) throws instead: BoardView.tsx's own comment on this is that an
- * unguarded throw during render unmounts the whole tree to a blank page. So
+ * state holds onto it. Nor is there a fine-grained ErrorBoundary to fall
+ * back on if some OTHER malformed field further downstream (Task 11's run
+ * strip, say) throws instead: the only one is section-wide (`SectionBoundary`,
+ * #270), so an unguarded throw during render swaps the whole view for a
+ * "failed to load" line, and BoardView.tsx's own comment on this explains
+ * why a reload does not cure a throw that bad stored data causes. So
  * `runs` itself is checked for the same reason `isAgentsStatus` checks
  * `projectPaths` (an unguarded `.some`/`.every` on a non-array throws before
  * any of this even matters), and every run's `fresh` is checked because that
@@ -174,8 +176,8 @@ export async function dispatchAgent(req: AgentDispatchRequest): Promise<AgentDis
  * for precisely that case. Present-but-wrong is the "lies quietly" shape this
  * guard exists for: `BoardView` calls `.filter` on this array during render
  * and the board's run chip reads `project`/`requestedAt` straight out of each
- * entry, and an unguarded throw during render unmounts the whole tree to a
- * blank page (BoardView.tsx's own comment on that).
+ * entry, and an unguarded throw during render swaps the whole board for
+ * `SectionBoundary`'s "failed to load" line (#270; it was a blank page before).
  */
 function isStartingRuns(value: unknown): boolean {
   if (value === undefined) return true;

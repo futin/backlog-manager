@@ -517,8 +517,9 @@ Per item, in this order:
 
 ### 8.4 Pass 2 — cross-links
 
-For every imported issue whose body cites an old id — `from:` or a word-bounded `(bug|task|idea|ref)-\d+` anywhere in the text, code fences included —
-rewrite it to `#<n>` from the map; an id the map does not know is left as it was. `from: <id>` becomes the `_From #<n>._` line `create` would have prepended.
+For every imported issue whose body cites an old id — `from:` or a word-bounded `(bug|task|idea|ref|oos)-\d+` (`oos` added by #270) anywhere in the text,
+code fences included — rewrite it to `#<n>` from the map; an id the map does not know is left as it was. `from: <id>` becomes the `_From #<n>._` line
+`create` would have prepended.
 Each rewrite is one `POST body` with `ifUpdatedAt` read from `GET /api/items` (the cache is current: `create` and `state` absorb their own responses) and
 no `runnerFix` key, so the label stays exactly as pass 1 set it. This is the one wholesale body patch in the design, made before any human has seen the
 issues.

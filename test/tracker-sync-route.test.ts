@@ -132,6 +132,21 @@ describe('POST /api/trackers/sync', () => {
     expect(res.body.error).toContain('alpha');
   });
 
+  it('answers 409 and leaves a tracker-sync.json that does not parse untouched (#270)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      mkdirSync(join(tmpRoot, 'settings'), { recursive: true });
+      const text = '{"a/one":"5m","other/repo":"off",}';
+      writeFileSync(syncFile, text);
+      const res = await post({ repo: 'a/one', interval: '1m' });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('does not parse');
+      expect(readFileSync(syncFile, 'utf8')).toBe(text);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('ignores a run on a project connected to a different repo', async () => {
     writeRun(filesPath, 'running');
     expect((await post({ repo: 'a/one', interval: 'off' })).status).toBe(200);

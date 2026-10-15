@@ -73,6 +73,14 @@ export const TRACKER_POLL_MS = 15_000;
 export const SECONDARY_BACKOFF_MS = 60_000;
 
 /**
+ * How long the SWEEP waits before asking `GET /user` again after a read that did not answer a login (#270). A failure is never cached — that was the
+ * bug: one blip stored `login: null` for the process lifetime and no won claim ever set an assignee again — but the sweep runs every tick, and against a
+ * token GitHub refuses or a rate limit, re-asking every 15 s would spend the hourly budget on a question whose answer is a courtesy. `viewerLogin` (the
+ * claim's path) ignores this and always retries: claims are rare, and the claim is the thing that needs the answer.
+ */
+export const IDENTITY_RETRY_MS = 60_000;
+
+/**
  * How young a cached comment has to be for the per-issue reconcile to keep it
  * when GitHub's list of that issue's comments does not show it (bug-55).
  *
@@ -247,11 +255,18 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    * detectable without storing a second copy of the answer: the pair is
    * replaced together or not at all.
    *
+   * Only an ANSWER is stored — a 2xx carrying a string `login` (#270). A
+   * failed read leaves the field as it was, so the next need asks again;
+   * caching the failure meant one blip at boot cost every claim for the rest
+   * of the process its assignee. `identityFailedAt` is the sweep's pacing for
+   * those retries, and nothing reads it as an answer.
+   *
    * The token in this field never leaves the process, exactly like the one in
    * the environment: `platform()` below returns the LOGIN and a boolean, never
    * the value (spec §11).
    */
-  private identity: { token: string; login: string | null } | null = null;
+  private identity: { token: string; login: string } | null = null;
+  private identityFailedAt: { token: string; at: number } | null = null;
 
   constructor(
     private readonly registry: RegistryService,
@@ -350,12 +365,26 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
    * `null` when the credential cannot be read back. The protocol treats that as
    * "no assignee to set" and carries on: the claim comment is the claim, and
    * the assignee is a courtesy to a person looking at the issue in the web UI.
+   * That `null` is NOT remembered (#270): the next claim asks again, ignoring
+   * the sweep's `IDENTITY_RETRY_MS` pacing, because a claim is rare and is the
+   * one reader that needs the answer.
    */
   async viewerLogin(token: string): Promise<string | null> {
     if (this.identity !== null && this.identity.token === token) return this.identity.login;
+    return this.readIdentity(token);
+  }
+
+  /** One `GET /user`: stores the login on a 2xx that carries one, and on anything else records only WHEN it failed — see `identity`. */
+  private async readIdentity(token: string): Promise<string | null> {
     const viewer = await this.client.viewer(token);
-    this.identity = { token, login: viewer.data?.login ?? null };
-    return this.identity.login;
+    const login = viewer.data?.login;
+    if (viewer.status >= 200 && viewer.status < 300 && typeof login === 'string' && login.length > 0) {
+      this.identity = { token, login };
+      this.identityFailedAt = null;
+      return login;
+    }
+    this.identityFailedAt = { token, at: Date.now() };
+    return null;
   }
 
   /** Every cached issue of one repo, in ascending issue number so the board's
@@ -586,13 +615,14 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     // is the loop's whole "off" state.
     if (token === null || repos.length === 0) return;
 
-    // Once per token per process — see `identity` above. A failed read stores
-    // `login: null` against the same token rather than retrying every tick:
-    // the login is a nicety on a settings card, and the access states the card
-    // shows beside it already report a credential that cannot be used.
+    // Once per token per process — see `identity` above. A failed read is not
+    // stored (#270), but nor is it retried every tick: the sweep waits
+    // `IDENTITY_RETRY_MS` after one before asking again for the same token,
+    // since the access states the card shows beside the login already report a
+    // credential that cannot be used. A changed token asks at once.
     if (this.identity === null || this.identity.token !== token) {
-      const viewer = await this.client.viewer(token);
-      this.identity = { token, login: viewer.data?.login ?? null };
+      const failed = this.identityFailedAt;
+      if (failed === null || failed.token !== token || Date.now() - failed.at >= IDENTITY_RETRY_MS) await this.readIdentity(token);
     }
 
     // Due-ness is judged once, up front, against the settings as they read at the top of the tick; a setting changed mid-tick is honoured from the NEXT
