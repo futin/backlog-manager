@@ -18,6 +18,10 @@ import '@fontsource/hanken-grotesk/700.css';
 
 import './styles.css';
 import { App } from './App';
+import { installPreloadReload } from './lib/preload-reload';
+
+// Before the first render, so a section chunk deleted by a rebuild while this tab was open reloads the page once instead of blanking it (#270).
+installPreloadReload({ target: window, storage: window.sessionStorage, reload: () => window.location.reload() });
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root is missing from index.html');

@@ -361,9 +361,38 @@ test('readVerifyStatus reads the exit code the run recorded, or null', async (t)
   fs.mkdirSync(path.join(dir, 'verify'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'verify', 'bug-1.status'), '0\n');
   fs.writeFileSync(path.join(dir, 'verify', 'bug-2.status'), '1');
-  assert.equal(readVerifyStatus(dir, 'bug-1'), 0);
-  assert.equal(readVerifyStatus(dir, 'bug-2'), 1);
-  assert.equal(readVerifyStatus(dir, 'bug-3'), null);
+  const live = { file: path.join(dir, 'run.json'), current: true };
+  assert.equal(readVerifyStatus(dir, 'bug-1', live), 0);
+  assert.equal(readVerifyStatus(dir, 'bug-2', live), 1);
+  assert.equal(readVerifyStatus(dir, 'bug-3', live), null);
+});
+
+// #270 row 8. Two runs that both worked `bug-1` each left a `verify/bug-1.status`, one per sidecar directory: the older run's under `runs/run-A/` (it
+// failed), the newer's under `runs/run-B/` (it passed), and the live run has not verified `bug-1` at all. Keyed by item id alone, every one of the three
+// read whichever root `sidecarRoots` listed first that had the file — `run-A`'s `1` — so run B's merge was reported as a failed proof and the live run
+// borrowed a status it never recorded. Each run must read its own directory and nothing else.
+test('readVerifyStatus reads the status of the run it is asked about, never another run’s', async (t) => {
+  const { readVerifyStatus } = await import('./lib/reviews.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-ver-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const [stem, code] of [
+    ['run-A', '1'],
+    ['run-B', '0']
+  ]) {
+    fs.mkdirSync(path.join(dir, 'runs', stem, 'verify'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'runs', stem, 'verify', 'bug-1.status'), code);
+  }
+  const runA = { file: path.join(dir, 'runs', 'run-A.json'), current: false };
+  const runB = { file: path.join(dir, 'runs', 'run-B.json'), current: false };
+  const live = { file: path.join(dir, 'run.json'), current: true };
+  assert.equal(readVerifyStatus(dir, 'bug-1', runA), 1);
+  assert.equal(readVerifyStatus(dir, 'bug-1', runB), 0);
+  assert.equal(readVerifyStatus(dir, 'bug-1', live), null);
+  // And the live run's own file wins for the live run, without leaking into the archived ones.
+  fs.mkdirSync(path.join(dir, 'verify'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'verify', 'bug-1.status'), '2');
+  assert.equal(readVerifyStatus(dir, 'bug-1', live), 2);
+  assert.equal(readVerifyStatus(dir, 'bug-1', runA), 1);
 });
 
 test('median and p90 follow one convention everywhere, and are null on nothing', async () => {
@@ -551,6 +580,37 @@ test('newestRecord picks the latest stem, and null on an empty home', async (t) 
   // no parsing, and no clock skew between the name and the content.
   assert.ok(newestRecord(dir).file.endsWith('2026-09-07T09-00-00-000Z.json'));
   assert.equal(newestRecord(path.join(dir, 'nope')), null);
+});
+
+// #270 row 9. A `--project` sweep and a machine-wide one measure different populations, so differencing one against the other reports the gap between two
+// scopes as if it were movement. Given a scope, `newestRecord` must skip a newer record taken at a different one; a record with no `scope` key at all was
+// written machine-wide (it predates nothing — `scope` is `null` for every unscoped sweep), so it counts as `null`.
+test('newestRecord, given a scope, picks the newest record taken at that same scope', async (t) => {
+  const { newestRecord } = await import('./lib/totals.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-rec-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const write = (generatedAt, scope) => {
+    const file = path.join(dir, `${generatedAt.replace(/[:.]/g, '-')}.json`);
+    const sweep = { generatedAt, totals: RECORD_TOTALS };
+    if (scope !== undefined) sweep.scope = scope;
+    fs.writeFileSync(file, JSON.stringify({ sweep, labels: { reviews: {}, candidates: [] }, recordedBy: 't' }));
+  };
+  write('2026-09-06T00:00:00.000Z', undefined);
+  write('2026-09-07T00:00:00.000Z', '/P');
+  write('2026-09-08T00:00:00.000Z', '/Q');
+  write('2026-09-09T00:00:00.000Z', null);
+  write('2026-09-10T00:00:00.000Z', '/Q');
+
+  assert.ok(newestRecord(dir, { scope: '/P' }).file.endsWith('2026-09-07T00-00-00-000Z.json'));
+  assert.ok(newestRecord(dir, { scope: '/Q' }).file.endsWith('2026-09-10T00-00-00-000Z.json'));
+  assert.ok(newestRecord(dir, { scope: null }).file.endsWith('2026-09-09T00-00-00-000Z.json'));
+  assert.equal(newestRecord(dir, { scope: '/R' }), null);
+  // No scope given is `last`'s question — the newest record of any scope — and it is unchanged.
+  assert.ok(newestRecord(dir).file.endsWith('2026-09-10T00-00-00-000Z.json'));
+
+  // The scope-less legacy record stands in for `null` once the newer machine-wide one is gone.
+  fs.rmSync(path.join(dir, '2026-09-09T00-00-00-000Z.json'));
+  assert.ok(newestRecord(dir, { scope: null }).file.endsWith('2026-09-06T00-00-00-000Z.json'));
 });
 
 test('computePrevious differences every headline measure against the record', async (t) => {

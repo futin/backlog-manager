@@ -14,8 +14,8 @@ import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionU
  * Two conventions carried over from `run-time.ts`, deliberately unchanged here:
  *
  * - Every derivation returns `null` (or skips the offending entry) rather than throwing when a stamp will not parse. A run file is hand-editable JSON on disk,
- *   there is no ErrorBoundary above whatever renders these numbers, and a `null` a caller chooses not to render beats a `NaN` baked into a stat tile or a whole
- *   view crashing on one bad file.
+ *   the only ErrorBoundary above whatever renders these numbers is the section-wide `SectionBoundary` (#270), and a `null` a caller chooses not to render beats
+ *   a `NaN` baked into a stat tile or a whole view swapped for its "failed to load" line on one bad file.
  * - `now` is always a parameter, never read internally via `Date.now()`. `RunDrawer.tsx` states the reason once for the whole app: a caller rendering several of
  *   these numbers against one instant must take that instant itself and thread it down, or two readings taken a millisecond apart can print durations that do
  *   not agree with each other at a rung boundary. `aggregateRuns` and `runWallMs` both take `now` for this reason, not because they default to the wall clock.

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
 
+import { SectionBoundary } from './components/SectionBoundary';
 import { SideRail } from './components/SideRail';
 import { TrackerChip } from './components/TrackerChip';
 import { SECTIONS, type Section } from './lib/sections';
@@ -146,34 +147,37 @@ function AppShell() {
             `contentWidth: 'full'`, which is a stylesheet rule keyed off
             `<html>` and nothing this expression has to know about. */}
           <div className="wrap wide">
-            <Suspense fallback={<SectionLoading />}>
-              {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
-                the setter it navigates with — the same `change` the rail's own
-                Runs entry calls, handed down rather than reimplemented, so the
-                two cannot come to disagree about what opening Runs does (and
-                so the chip's click is recorded in `backlog-manager.section`
-                exactly as the rail's is). */}
-              {section === 'board' && <BoardView onOpenRuns={() => change('runs')} onWorking={report.board} />}
-              {section === 'runs' && <RunsView onWorking={report.runs} />}
-              {section === 'archive' && <ArchiveView onWorking={report.archive} />}
-              {/* Settings' watchdog card carries a `Live view` link to Runs ›
-                Watchdog (DESIGN.md §8.6), and this is what it opens with — the
-                same PAIR the rail's own Watchdog sub-nav entry calls, in the
-                same order: `setRunsMode` (the module-level store every mounted
-                reader subscribes to, `hooks/useRunsMode.ts`) and then this
-                shell's own `change`. Handed down rather than reimplemented in
-                Settings, for the reason the board's chip is handed `change`:
-                two expressions of "open Runs › Watchdog" would be two things
-                free to disagree, and the section key is recorded here. */}
-              {section === 'settings' && (
-                <SettingsView
-                  onOpenWatchdog={() => {
-                    setRunsMode('watchdog');
-                    change('runs');
-                  }}
-                />
-              )}
-            </Suspense>
+            {/* Keyed by section so a switch clears one section's failure rather than carrying it onto the next (#270, `SectionBoundary`). */}
+            <SectionBoundary key={section}>
+              <Suspense fallback={<SectionLoading />}>
+                {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
+                  the setter it navigates with — the same `change` the rail's own
+                  Runs entry calls, handed down rather than reimplemented, so the
+                  two cannot come to disagree about what opening Runs does (and
+                  so the chip's click is recorded in `backlog-manager.section`
+                  exactly as the rail's is). */}
+                {section === 'board' && <BoardView onOpenRuns={() => change('runs')} onWorking={report.board} />}
+                {section === 'runs' && <RunsView onWorking={report.runs} />}
+                {section === 'archive' && <ArchiveView onWorking={report.archive} />}
+                {/* Settings' watchdog card carries a `Live view` link to Runs ›
+                  Watchdog (DESIGN.md §8.6), and this is what it opens with — the
+                  same PAIR the rail's own Watchdog sub-nav entry calls, in the
+                  same order: `setRunsMode` (the module-level store every mounted
+                  reader subscribes to, `hooks/useRunsMode.ts`) and then this
+                  shell's own `change`. Handed down rather than reimplemented in
+                  Settings, for the reason the board's chip is handed `change`:
+                  two expressions of "open Runs › Watchdog" would be two things
+                  free to disagree, and the section key is recorded here. */}
+                {section === 'settings' && (
+                  <SettingsView
+                    onOpenWatchdog={() => {
+                      setRunsMode('watchdog');
+                      change('runs');
+                    }}
+                  />
+                )}
+              </Suspense>
+            </SectionBoundary>
           </div>
         </main>
       </div>

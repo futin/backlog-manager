@@ -210,9 +210,11 @@ function buildSweep({ home, project }) {
   // The verify status rides on the ITEM rather than in an array of its own:
   // there is exactly one per item, and every question anybody asks of it
   // ("did the thing the run merged actually prove itself") is a question
-  // about that item.
+  // about that item. It is read from the sidecar directory of the RUN the item row came from (#270): an id two runs both worked has two statuses, and
+  // each row reports its own run's.
   for (const item of items) {
-    item.verifyStatus = readVerifyStatus(projectDir(home, item.project), item.id);
+    const run = runsByKey.get(runKey(item.project, item.runId));
+    item.verifyStatus = readVerifyStatus(projectDir(home, item.project), item.id, run);
   }
 
   // Rates before drivers, because a driver's dollars are priced with them;
@@ -243,7 +245,7 @@ function buildSweep({ home, project }) {
   sweep.totals = computeTotals(sweep);
   // The ONE place `sweep` opens the retro home, and it opens it READ-ONLY.
   // `record` stays that directory's only writer (CLAUDE.md's invariant).
-  sweep.previous = computePrevious(sweep, newestRecord(retroHome()));
+  sweep.previous = computePrevious(sweep, newestRecord(retroHome(), { scope: project }));
   return sweep;
 }
 

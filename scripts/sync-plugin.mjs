@@ -17,7 +17,7 @@
 // less rather than installing stale code and reporting success.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,8 +55,31 @@ const git = (args, cwd = REPO_ROOT) => execFileSync('git', args, { cwd, encoding
 
 // Hashes path + bytes, not just bytes, so a rename or a deletion changes the
 // digest too. Sorted, because readdir order is not a promise.
-export function hashTree(root) {
+//
+// Two ways to list the files, and which side gets which is the whole of #270. `tracked: true` asks git (`git ls-files`) and is for the REPO side: the
+// installer clones git, so what git tracks is the most an install can ever carry, and the dirty check (`git status --porcelain`) cannot see a git-ignored
+// file. Walking the repo instead hashed a Finder `.DS_Store` under `skills/` into the repo's digest — invisible to the dirty check, never delivered by the
+// clone — so every sync reinstalled, still differed afterwards, and exited 1 telling the user to bump plugin.json. The walk stays for the INSTALL side, a
+// plain copy with no `.git` to ask, where any stray file really is a difference from what git delivered.
+//
+// A tracked path that is missing on disk (deleted, not yet committed) is left out, the same as the walk would leave it out — the deletion moves the digest,
+// and the dirty check is what refuses to publish it. A tree git tracks nothing under answers '' exactly as a missing one does: git has no empty
+// directories, so no install can be cloned with anything there.
+export function hashTree(root, { tracked = false } = {}) {
   if (!existsSync(root)) return '';
+  const files = tracked ? trackedFiles(root) : walkFiles(root);
+  if (tracked && files.length === 0) return '';
+  const digest = createHash('sha256');
+  for (const file of files.sort()) {
+    digest.update(relative(root, file).split('\\').join('/'));
+    digest.update('\0');
+    digest.update(readFileSync(file));
+    digest.update('\0');
+  }
+  return digest.digest('hex');
+}
+
+function walkFiles(root) {
   const files = [];
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -67,14 +90,24 @@ export function hashTree(root) {
     }
   };
   walk(root);
-  const digest = createHash('sha256');
-  for (const file of files.sort()) {
-    digest.update(relative(root, file).split('\\').join('/'));
-    digest.update('\0');
-    digest.update(readFileSync(file));
-    digest.update('\0');
-  }
-  return digest.digest('hex');
+  return files;
+}
+
+// `-z` so a path git would otherwise quote (non-ASCII, a space) comes back verbatim. Run with `cwd: root`, so the list is scoped to the tree and relative to
+// it. Regular files only, by lstat: the walk skips symlinks, and the two listings must agree on what a file is or the sides could never match.
+function trackedFiles(root) {
+  const out = execFileSync('git', ['ls-files', '-z', '--', '.'], { cwd: root, encoding: 'utf8' });
+  return out
+    .split('\0')
+    .filter(Boolean)
+    .map((rel) => join(root, rel))
+    .filter((full) => {
+      try {
+        return lstatSync(full).isFile();
+      } catch {
+        return false;
+      }
+    });
 }
 
 // One digest per published path, keyed by the path. This replaced a lone
@@ -88,8 +121,10 @@ export function hashTree(root) {
 // cannot cover for this: it records which commit the install was cloned from,
 // not which paths the sparse checkout wrote out of it, and the same sha
 // legitimately yields an install with or without `agents/`.
-export function publishedDigests(root) {
-  return Object.fromEntries(PUBLISHED_PATHS.map((path) => [path, hashTree(join(root, path))]));
+//
+// `options` is hashTree's: the repo side passes `{ tracked: true }`, the install side nothing (see hashTree for why the two sides list files differently).
+export function publishedDigests(root, options) {
+  return Object.fromEntries(PUBLISHED_PATHS.map((path) => [path, hashTree(join(root, path), options)]));
 }
 
 // The published paths whose digests disagree, in PUBLISHED_PATHS order rather
@@ -195,7 +230,7 @@ function main() {
   }
 
   const head = git(['rev-parse', 'HEAD']);
-  const repoDigests = publishedDigests(REPO_ROOT);
+  const repoDigests = publishedDigests(REPO_ROOT, { tracked: true });
   const drifted = driftedPaths(repoDigests, publishedDigests(install.installPath));
 
   if (drifted.length === 0 && install.gitCommitSha === head) {

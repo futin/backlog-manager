@@ -7,6 +7,7 @@ import { parseUrn } from '../tracker/map-issue';
 import { ITEM_SOURCES, type ItemSource, type ItemWriter, type SourceSummary } from './sources/source';
 import { uncommittedItemPaths, type UncommittedItems } from './uncommitted.util';
 import { resolveBaseBranch } from './base-branch.util';
+import { answer } from './write-answer.util';
 import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts } from '../../../shared/types';
 
 /**
@@ -341,9 +342,9 @@ export class ItemsService {
   async readClaim(projectPath: string, id: string): Promise<ClaimResult | null> {
     const lookup = this.writerFor(projectPath);
     if (lookup.kind !== 'writer') throw new HttpException({ error: 'not found' }, 404);
-    const outcome = await lookup.writer.readClaim(lookup.project, lookup.marker, id);
-    if (!outcome.ok) throw new HttpException({ error: outcome.refusal.error }, outcome.refusal.refused === 'not-found' ? 404 : 502);
-    return outcome.value;
+    // Mapped by `answer`, the write routes' own mapping, rather than a local not-found-or-502: a missing token is a 503 and a rate limit a 429 with its
+    // `resetAt` on this route exactly as on the nine writes, because the caller (`backlog.mjs stop`) acts on the status the same way (#270).
+    return answer(await lookup.writer.readClaim(lookup.project, lookup.marker, id));
   }
 
   /**

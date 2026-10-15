@@ -312,3 +312,23 @@ describe('a claim made before this process started', () => {
     expect(gh.calls).toEqual([]);
   });
 });
+
+/**
+ * The read route's refusals carry the SAME statuses the nine write routes give (bug #270): `readClaim` used to collapse every refusal but `not-found` into
+ * a 502, so `backlog.mjs stop` was told "GitHub failed" for a token this machine is missing (a 503 — fix the environment) and for a rate limit (a 429 with
+ * the reset time — wait). Both cases take the fresh-read path: no sweep, so the cache holds nothing and the route has to ask GitHub, or find it cannot.
+ */
+describe('GET /api/items/claim refusals', () => {
+  it('answers 503 when this machine has no token', async () => {
+    delete process.env[GITHUB_TOKEN_ENV];
+    const res = await request(app.getHttpServer()).get('/api/items/claim').query({ project: trackerPath, id: '#5' }).expect(503);
+    expect(res.body.error).toMatch(/BM_GITHUB_TOKEN/);
+  });
+
+  it('answers 429 with resetAt when GitHub rate-limits the fresh read', async () => {
+    const reset = Math.floor(Date.now() / 1000) + 600;
+    gh.failNext = { fragment: '/issues/5/comments', status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) } };
+    const res = await request(app.getHttpServer()).get('/api/items/claim').query({ project: trackerPath, id: '#5' }).expect(429);
+    expect(res.body.resetAt).toBe(new Date(reset * 1000).toISOString());
+  });
+});

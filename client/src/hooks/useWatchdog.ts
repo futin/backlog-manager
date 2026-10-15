@@ -21,6 +21,16 @@ import type { WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 export const WATCHDOG_POLL_MS = 5_000;
 
 /**
+ * How often to poll while the sweeper is NOT armed — `idle` or `off` — and the caller asked to be live (#270). It used to be never: the poll existed
+ * only while the last reading was `armed`, so a monitor opened on an idle sweeper sat on "idle" through a run starting, because the sweeper arms off a
+ * run.json the server reads and nothing on this page fires the focus event that was the only other way back in. A slow cadence rather than the armed
+ * one because nothing on screen ticks while idle — the reading only has to notice the phase CHANGE, and the fast poll takes over on the render that
+ * lands `armed`. 15 s, the same number `BOARD_TRACKER_POLL_MS` (useBoard.ts) uses for the app's other "something may move without an event here"
+ * poll — a few GETs a minute for a tab left open all afternoon, and a run that starts is on screen within one cycle of its run file.
+ */
+export const WATCHDOG_IDLE_POLL_MS = 15_000;
+
+/**
  * A refused `POST /api/agents/watchdog/config`, carrying the field it was
  * refused for (bug-24).
  *
@@ -45,10 +55,10 @@ export type WatchdogSaveError = { field: keyof WatchdogConfig | null; message: s
 /**
  * The watchdog's own status (design §4.2, §6.4) — the one hook both
  * `WatchdogMonitor` (Runs › Watchdog) and `WatchdogGroup` (Settings) read,
- * mount + focus like `useAgents`, plus the ARMED-ONLY poll
- * `useOrchestratorRuns` already established the pattern for: an interval
- * that exists only while there is something worth re-reading on a clock,
- * torn down the moment there is not.
+ * mount + focus like `useAgents`, plus a live poll — fast while `armed`, slow
+ * (`WATCHDOG_IDLE_POLL_MS`) otherwise, since #270: armed-only, the shape
+ * `useOrchestratorRuns` established, left an idle monitor blind to a run
+ * starting, because nothing on this page fires an event when one does.
  *
  * `live` (task-18) is the second half of that same "only poll when there is
  * something to poll FOR" argument, moved from the hook's own knowledge to
@@ -188,25 +198,27 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
     return () => window.removeEventListener('focus', onFocus);
   }, [reload]);
 
-  // The armed-only poll: an interval that exists only while the caller asked
-  // to be live AND `status?.phase` reads `'armed'`.
-  // `useOrchestratorRuns`' own polling effect makes the identical trade for
-  // the identical reason — a surface left open and unattended must not spend
-  // that whole stretch polling an API for a state that is not moving. The
-  // moment a reload lands `'armed'`, this effect reruns and installs the
-  // interval; the moment a later reload finds `'idle'`/`'off'` again, it
-  // reruns once more and tears the interval back down on that very render.
+  // The live poll: an interval that exists only while the caller asked to be live, on the fast cadence while `status?.phase` reads `'armed'` and
+  // the slow `WATCHDOG_IDLE_POLL_MS` otherwise (#270 — it used to be armed-ONLY, and an idle monitor never noticed a run starting until a focus
+  // event). `useOrchestratorRuns`' own polling effect makes the related trade — a surface left open and unattended must not spend that whole
+  // stretch polling fast for a state that is not moving — but this one cannot go fully quiet, because the phase change it is waiting for has no
+  // event on this page. The moment a reload lands `'armed'`, this effect reruns and swaps the slow interval for the fast one; the moment a later
+  // reload finds `'idle'`/`'off'` again, it swaps back on that very render. Before the first answer (`status` null, or a failed first read) the
+  // slow cadence applies too, so a monitor whose first GET failed retries rather than sitting on its error until focus.
   //
-  // `live` sits in the same guard and the same dependency array rather than
-  // wrapping the effect, so a caller that ever flips the flag gets the
-  // interval installed or torn down on that render like any other input.
+  // `live` sits in the same guard and the same dependency array rather than wrapping the effect, so a caller that ever flips the flag gets the
+  // interval installed or torn down on that render like any other input. `live: false` still means NO interval at either cadence.
+  const armed = status?.phase === 'armed';
   useEffect(() => {
-    if (!live || status?.phase !== 'armed') return;
-    const id = setInterval(() => {
-      void reload();
-    }, WATCHDOG_POLL_MS);
+    if (!live) return;
+    const id = setInterval(
+      () => {
+        void reload();
+      },
+      armed ? WATCHDOG_POLL_MS : WATCHDOG_IDLE_POLL_MS
+    );
     return () => clearInterval(id);
-  }, [live, status?.phase, reload]);
+  }, [live, armed, reload]);
 
   return { status, error, saveError, reload, save };
 }

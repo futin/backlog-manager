@@ -277,13 +277,19 @@ export function computeTotals(sweep) {
 // never become a fifth category the next sweep dutifully counts.
 export const LABELS = ['drift', 'red-proof', 'defect', 'other'];
 
-// The newest record in the retro home.
+// The newest record in the retro home — or, given `{ scope }`, the newest one whose sweep was taken at that same scope.
 //
 // Stems are filesystem-safe ISO stamps (`record`, Task 7), so LEXICAL order
 // is time order — no parsing, and no way for a record's name and its
 // content to disagree about when it was taken. An absent directory is
 // `null`, not an error: the first sweep on a machine has no previous.
-export function newestRecord(home) {
+//
+// The scope filter is #270's. `sweep` differences its totals against this record, and a `--project` sweep and a machine-wide one count different
+// populations — comparing the two reported the gap between scopes as movement (a machine-wide sweep after a one-project retro "grew" by every other
+// project's runs). So `sweep` passes its own scope, and only a record taken at the same one is a previous. `null` is machine-wide, and a record with no
+// `scope` key reads as `null`. Without the option (`last`) the newest record of any scope is still the answer, exactly as before; with it, an unreadable
+// newer record is skipped rather than ending the search, because the question is now "which record matches" and a corrupt file matches nothing.
+export function newestRecord(home, options) {
   let entries;
   try {
     entries = fs.readdirSync(home, { withFileTypes: true });
@@ -295,12 +301,27 @@ export function newestRecord(home) {
     .map((e) => e.name)
     .sort();
   if (files.length === 0) return null;
-  const file = path.join(home, files.at(-1));
-  try {
-    return { file, record: JSON.parse(fs.readFileSync(file, 'utf8')) };
-  } catch {
-    return null;
+  const scoped = options !== undefined && 'scope' in options;
+  if (!scoped) {
+    const file = path.join(home, files.at(-1));
+    try {
+      return { file, record: JSON.parse(fs.readFileSync(file, 'utf8')) };
+    } catch {
+      return null;
+    }
   }
+  const want = options.scope ?? null;
+  for (const name of files.reverse()) {
+    const file = path.join(home, name);
+    let record;
+    try {
+      record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      continue;
+    }
+    if ((record?.sweep?.scope ?? null) === want) return { file, record };
+  }
+  return null;
 }
 
 function ratio(numerator, denominator) {

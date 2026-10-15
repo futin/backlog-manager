@@ -119,7 +119,9 @@ exactly the reason `$BM_ORCH_HOME` exists — so a test process, or somebody pok
 
 **`sweep` opens the retro home, and it opens it read-only.** That is the one crossing into the directory `record` owns, and it exists because a retro's whole
 value is the comparison: "fix loops are 38% of dispatched items" is a number, and "31%, after task-28 landed" is a finding. The deltas need the newest record,
-so `sweep` reads it — and reading it is all it does. The write stays in `record`, behind one command a session calls once at the end.
+so `sweep` reads it — and reading it is all it does. "Newest" means newest at the sweep's own scope (#270): a `--project` sweep differences against the last
+record of that project, a machine-wide one against the last machine-wide record, because two scopes count different populations and their gap is not
+movement. The write stays in `record`, behind one command a session calls once at the end.
 
 **The whole read surface is four homes, each env-overridable, and `sweep` writes none of them.** `$BM_ORCH_HOME` (the run state, the subject), `$BM_RETRO_HOME`
 (the previous record, for the deltas above), `$BM_REGISTRY_FILE` (read once, so the report can print a project's name beside its path — a broken or missing
@@ -1965,7 +1967,9 @@ half of the sentence, not to the single-writer half.
 The third file is `settings/tracker-sync.json` (#17, `server/src/tracker/sync-config.util.ts`), each connected repo's sync interval on this machine. It joins
 `settings/` for `watchdog.json`'s reason — it is how eagerly THIS server asks GitHub, which no skill has anything to say about and which would differ between
 two machines on one repo, so it cannot live in the committed marker — and it follows that file's posture point for point: read fresh, never cached, every
-failure reading as the default (`15s`), one writer (`writeSyncInterval`, reached only from `POST /api/trackers/sync`), temp file plus rename. It is a map, not
+failure reading as the default (`15s`), one writer (`writeSyncInterval`, reached only from `POST /api/trackers/sync`), temp file plus rename. One departure
+(#270): the WRITER refuses a file that exists but does not parse — a 409, the file untouched — because it rewrites the whole map, and rewriting from `{}`
+would silently reset every other repo to `15s`; reading it as the default is harmless, replacing it is not. It is a map, not
 a fixed object, so validation is per entry: a bad value costs its own repo its setting, never a neighbour's. No skill reads it; `backlog.mjs` learns of it only
 through the 409 the server answers while a repo is `off`.
 
@@ -2899,7 +2903,8 @@ none of a tracker project's ids and 409ed each one as "not an open bug or task i
 **Task-47 (phase 4a) removed both, and what replaced them is `resolveIds` learning the vocabulary rather than a looser gate.** `projectIsFiles` is deleted (it
 had exactly one job and its own doc comment said so), the 400 is gone, and `AgentsService.resolveTrackerIds` now proves a tracker project's ids against
 `ItemsService` where the files path proves them against a directory scan. It accepts all three spellings a caller can hold — `#31`, this project's own URN, and
-the bare `31` — and **emits exactly one: bare digits, before the prompt is composed.** See "the orchestrate spawn prompt is composed server-side" and
+the bare `31` (until #270 the URN's `owner/repo` was read past, so another repo's `#31` became this one's; now it is a 400 with `backlog.mjs`'s
+sentence, compared case-insensitively as GitHub compares) — and **emits exactly one: bare digits, before the prompt is composed.** See "the orchestrate spawn prompt is composed server-side" and
 "`isItemId` accepts three shapes" for why that normalisation is the load-bearing half: the prompt is the one composition that concatenates caller text,
 `orchestrate.mjs` reads its argv as tokens, and SKILL.md substitutes those tokens into fenced shell commands where `#` opens a comment.
 
@@ -2946,7 +2951,8 @@ otherwise the writer. `FilesSource` has NO `writer` field at all, and that absen
 nothing else, and the one check that reads the field is what makes that true for all nine routes at once instead of nine routes each remembering to ask.
 
 **Every refusal is a value.** `ItemWriter` answers `WriteOutcome`, never throws, and `GithubClient` beneath it answers a `GithubResponse` for every status —
-the same posture, one layer down. The controller is the only place a `refused` becomes a status: `no-token` 503, `not-found` 404, `conflict` 409,
+the same posture, one layer down. `answer` (`write-answer.util.ts` since #270, when the claim READ route
+started sharing it instead of answering 502 for everything but a miss) is the only place a `refused` becomes a status: `no-token` 503, `not-found` 404, `conflict` 409,
 `rate-limited` 429 with the reset TIME, anything else 502 carrying GitHub's own status. Each was chosen for what the READER can do about it — fix the
 environment, fix the id, re-read and retry, wait, or nothing local at all.
 

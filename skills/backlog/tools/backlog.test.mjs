@@ -5600,6 +5600,25 @@ test('import rewrites every cross-reference it can resolve, and leaves the ones 
   assert.ok(patch.body.body.endsWith('_Imported from backlog/tasks/open/task-1-one.md_'), patch.body.body.slice(-120))
 })
 
+// #270 row 10, end to end: pass 1 maps the born-rejected `oos-5` like every other item, so pass 2 must resolve a citation of it too.
+test('import rewrites a citation of a born-rejected oos- item to its issue number', async () => {
+  const items = importItems().map((item) =>
+    item.relPath === 'bugs/open/bug-2-two.md'
+      ? { ...item, text: itemText('id: bug-2\ntitle: two\ncreated: 2026-02-01', '## Cause\n\nc, as oos-5 already said\n\n## Fix\n\nf') }
+      : item,
+  )
+  const { dir } = importFixture({ items })
+  const { routes } = githubRoutes({ projectPath: dir })
+
+  const { out, requests } = await withApi(routes, (port) => runNode(dir, apiEnv(port, { BM_IMPORT_PACE_MS: '0' }), 'import', 'github'))
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stdout, /oos-5 → #7/)
+  const patch = posts(requests, 'body').find((r) => r.body.id === '#5')
+  assert.ok(patch !== undefined, 'bug-2 cites oos-5 and must be patched')
+  assert.match(patch.body.body, /c, as #7 already said/)
+})
+
 test('import turns a from: key into a body line, linked when the source was imported too', async () => {
   const { dir } = importFixture({ items: importItems() })
   const { routes } = githubRoutes({ projectPath: dir })

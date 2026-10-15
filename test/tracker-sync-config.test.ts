@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { intervalFor, readSyncConfig, syncConfigFile, writeSyncInterval } from '../server/src/tracker/sync-config.util';
+import { SyncConfigUnreadableError, intervalFor, readSyncConfig, syncConfigFile, writeSyncInterval } from '../server/src/tracker/sync-config.util';
 import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS, isSyncInterval } from '../shared/types';
 
 // Every case points BM_TRACKER_SYNC_FILE at a fresh path under its own temp
@@ -105,8 +105,23 @@ describe('writing', () => {
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ 'gone/repo': 'off', 'Futin/X': '1m', 'a/b': '1m' });
   });
 
-  it('a write over a malformed file replaces it with the written key alone', () => {
-    put('not json');
+  it('a write over a file that does not parse refuses and leaves the file byte-for-byte (#270)', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      // A hand-edit with one stray comma: three repos' settings that a rewrite from `{}` would have reduced to the one being changed.
+      const text = '{"a/one":"off","a/two":"5m",}';
+      put(text);
+      expect(() => writeSyncInterval('a/b', 'off')).toThrow(SyncConfigUnreadableError);
+      expect(readFileSync(file, 'utf8')).toBe(text);
+      expect(readdirSync(join(dir, 'settings'))).toEqual(['tracker-sync.json']);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('refusing to overwrite'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([['[]'], ['null'], ['"15s"']])('a write over JSON that is not an object (%s) replaces it with the written key alone', (text) => {
+    put(text);
     writeSyncInterval('a/b', 'off');
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ 'a/b': 'off' });
   });

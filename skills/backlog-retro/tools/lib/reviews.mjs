@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { sidecarFiles, sidecarRoots } from './paths.mjs';
+import { sidecarFiles } from './paths.mjs';
 
 // `<id>-<pass>.md`. Anything else in the directory is not a review. `<id>`
 // is a files project's `bug-21` or a tracker project's bare issue number,
@@ -81,21 +81,26 @@ export function readReviews(projectDirPath, project) {
   return reviews;
 }
 
-// The exit code the run recorded for an item's proof commands, or `null`
-// when it never got that far. Searched across the archive directories too,
-// but the project directory's own `verify/` is first in `sidecarRoots` and
-// wins on a tie: it belongs to the live run, which is the most recent thing
-// to have proved anything about this item.
-export function readVerifyStatus(projectDirPath, itemId) {
-  for (const root of sidecarRoots(projectDirPath)) {
-    let text;
-    try {
-      text = fs.readFileSync(path.join(root, 'verify', `${itemId}.status`), 'utf8');
-    } catch {
-      continue;
-    }
-    const code = Number(text.trim());
-    if (Number.isFinite(code)) return code;
+// The exit code ONE RUN recorded for an item's proof commands, or `null` when that run never got that far.
+//
+// Keyed by run as well as item id (#270), because item ids repeat across runs: a bug parked by one run and merged by the next leaves a
+// `verify/<id>.status` in each run's sidecar directory. This used to search every `sidecarRoots` entry for the first file named after the item, so every
+// run that worked the same id reported one and the same status — the live run's when it had one, else the OLDEST archive's — and a merge that proved
+// itself could be reported as a failed proof inherited from an earlier attempt.
+//
+// `run` is the run row (`{ file, current }`) the item came from, and its sidecar directory is derived the way orchestrate.mjs's `archiveStem` mints it:
+// the live run writes flat under the project directory, and an archived `runs/<stem>.json` has its sidecars in the sibling `runs/<stem>/`. Nothing else
+// is searched. A run archived before task-31 has no directory of its own — its statuses were swept into whichever archive came next, beside other runs'
+// — so it reads `null`, "not derivable here", which is honest where borrowing a status from a neighbouring run was not.
+export function readVerifyStatus(projectDirPath, itemId, run) {
+  if (!run || typeof run.file !== 'string') return null;
+  const root = run.current ? projectDirPath : run.file.replace(/\.json$/, '');
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, 'verify', `${itemId}.status`), 'utf8');
+  } catch {
+    return null;
   }
-  return null;
+  const code = Number(text.trim());
+  return Number.isFinite(code) ? code : null;
 }

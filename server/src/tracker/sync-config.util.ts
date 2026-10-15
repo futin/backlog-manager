@@ -9,7 +9,8 @@ import { DEFAULT_SYNC_INTERVAL, isSyncInterval, type SyncInterval } from '../../
  *
  * The third file this server writes, after `watchdog.json` and the pause-control files, and it follows `watchdog-config.util.ts` on every point that
  * header argues at length: it lives under `settings/` because that is the one read-write directory carved out of the read-only `~/.backlog-manager` mount,
- * it is read fresh on every call and cached nowhere, every failure reads as the default and never throws, and the one write is temp file plus rename.
+ * it is read fresh on every call and cached nowhere, every failure reads as the default and never throws, and the one write is temp file plus rename. One
+ * departure (#270): the WRITE refuses a file that exists but does not parse, rather than replacing it — see `writeSyncInterval`.
  *
  * What differs is the shape. The watchdog's file is one fixed object whose every field has a range to clamp into; this one is a MAP keyed by `owner/name`,
  * because the repo is the unit the poller syncs (`connectedRepos` already dedups by repo) and two registered projects on one repo must not be able to
@@ -28,8 +29,8 @@ export function syncConfigFile(env: NodeJS.ProcessEnv = process.env): string {
 
 /**
  * The raw parsed object, or `null` for every way the file can fail to be one — missing, not JSON, or JSON that is not a plain object (`null` and arrays
- * included, whatever `typeof` says). Separate from `readSyncConfig` because the WRITER needs the invalid entries too: it rewrites the whole file and must not
- * drop a key it did not understand.
+ * included, whatever `typeof` says). The READERS' view only: the writer reads the file itself, because it must tell "missing" from "unparsable" — the one
+ * it writes fresh, the other it refuses — and this function folds both into `null`.
  */
 function readRaw(file: string): Record<string, unknown> | null {
   let text: string;
@@ -70,12 +71,50 @@ export function intervalFor(repo: string, file: string = syncConfigFile()): Sync
 }
 
 /**
+ * Thrown by `writeSyncInterval` when the file EXISTS but cannot be read as JSON (or cannot be read at all, for any reason other than not existing), and
+ * mapped to a 409 by `POST /api/trackers/sync`. A class rather than a bare `Error` so the route can tell this refusal — a state of the file the user has to
+ * repair by hand — from an I/O failure in the write itself, which stays a 500.
+ */
+export class SyncConfigUnreadableError extends Error {
+  constructor(readonly file: string, reason: string) {
+    super(`settings/tracker-sync.json ${reason} — fix or delete it by hand; nothing was written`);
+    this.name = 'SyncConfigUnreadableError';
+  }
+}
+
+/**
  * Set one repo's interval and rewrite the whole file atomically — called by `POST /api/trackers/sync` and nothing else. Every other key survives,
- * invalid ones included (see the header); a file that was not an object to begin with is replaced by one holding only this key, since there was nothing in
- * it to preserve.
+ * invalid ones included (see the header); a missing file is written fresh, and a file that parsed but was not an object (`[]`, `null`, a bare string) is
+ * replaced by one holding only this key, since there is no `owner/name` key in it to preserve.
+ *
+ * A file that does NOT parse is refused instead (`SyncConfigUnreadableError`) and left exactly as it is. The readers may treat it as empty — reading every
+ * repo as `15s` is a safe default for one tick and costs nothing permanent — but the writer may not: rewriting the whole file from `{}` would turn a
+ * hand-edit with one stray comma, or a file truncated by a full disk, into a file holding only the repo being changed, every other repo's setting silently
+ * gone and back to `15s` with nothing on disk left to recover them from (#270). The same goes for a read that fails for any reason but ENOENT: we cannot
+ * know what is in a file we could not read, so we must not replace it.
  */
 export function writeSyncInterval(repo: string, interval: SyncInterval, file: string = syncConfigFile()): void {
-  const next = { ...(readRaw(file) ?? {}), [repo]: interval };
+  let current: Record<string, unknown> = {};
+  let text: string | null = null;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn(`${file}: cannot be read (${(e as Error).message}) — refusing to overwrite it`);
+      throw new SyncConfigUnreadableError(file, 'cannot be read');
+    }
+  }
+  if (text !== null) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      console.warn(`${file}: exists but does not parse as JSON — refusing to overwrite it, so no other repo's interval is lost`);
+      throw new SyncConfigUnreadableError(file, 'does not parse as JSON');
+    }
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) current = raw as Record<string, unknown>;
+  }
+  const next = { ...current, [repo]: interval };
   const dir = dirname(file);
   mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.tracker-sync.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);

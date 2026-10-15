@@ -43,7 +43,7 @@ Five artefacts hold everything, and the single-writer column is the load-bearing
 | each project's `backlog/**/*.md`                     | the skills                                         | the server's scan; the client renders it                                                                    |
 | `~/.backlog-manager/orchestrator/<project>/run.json` | `skills/backlog-orchestrate/tools/orchestrate.mjs` | `server/src/orchestrator/`, fresh per request                                                               |
 | `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config and the tracker sync intervals it wrote, and — for the control file — `orchestrate.mjs` |
-| `~/.backlog-manager/retro/`                          | `skills/backlog-retro/tools/retro.mjs record`      | `retro.mjs sweep`, read-only, for the deltas against the newest record                                      |
+| `~/.backlog-manager/retro/`                          | `skills/backlog-retro/tools/retro.mjs record`      | `retro.mjs sweep`, read-only, for the deltas against the newest record of the same scope                    |
 
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer

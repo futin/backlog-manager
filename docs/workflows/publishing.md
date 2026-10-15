@@ -23,7 +23,8 @@ pnpm run plugin:sync
 `plugin:sync` is [`scripts/sync-plugin.mjs`](../../scripts/sync-plugin.mjs). What it actually does, in order:
 
 1. **Compares surfaces.** One digest per entry of `PUBLISHED_PATHS` (`skills`, `.claude-plugin`, `agents`) over the repo and over the install, path-and-bytes so
-   a rename or a deletion moves the digest too. Equal digests _and_ an install commit equal to `HEAD` means it prints `in sync` and stops.
+   a rename or a deletion moves the digest too. The repo side hashes only the files git tracks (`git ls-files`) — what a clone can deliver — while the install
+   side, a plain copy with no `.git`, hashes every file in it. Equal digests _and_ an install commit equal to `HEAD` means it prints `in sync` and stops.
 2. **Refuses an unpublishable tree.** Uncommitted files under the published paths (it names them), a `HEAD` ahead of `origin/main` (push first), or a `HEAD`
    behind it (pull first, or the install moves backwards). It fetches `origin/main` before comparing, so a stale ref cannot make a pushed tree look unpushed.
 3. **Warns about the machine-local half** — see Failure modes.
@@ -63,6 +64,11 @@ skill needs at runtime has to live under a published path.
 
 **The install carries every path but not the current bytes.** The version-keyed cache directory did not overwrite in place. A version bump in
 `.claude-plugin/plugin.json` is the lever; the script says so in those words.
+
+**Every sync reinstalls, then fails blaming plugin.json — with nothing to commit.** This was #270: the repo side was a directory walk, so a git-ignored file
+under a published path (a Finder `.DS_Store`) went into the repo's digest while the dirty check, which is `git status`, could not see it and the clone never
+carried it. The repo side now hashes tracked files only, so an ignored file is not drift. A stray file inside the INSTALL still is — that copy should hold
+exactly what git delivered.
 
 **No plugin at all.** The reinstall is an uninstall followed by an install, so a failed install leaves the machine with nothing. The script says exactly that
 and hands over the one command that fixes it — `claude plugin install backlog-manager@backlog-manager-marketplace`.

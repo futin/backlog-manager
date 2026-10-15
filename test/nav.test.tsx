@@ -50,15 +50,20 @@ jest.mock('../client/src/components/board/BoardView', () => ({
    Settings, not what Settings draws with it (test/settings-watchdog.test.tsx
    owns the button). A stub that swallowed the prop would leave the wiring —
    the one thing App owns here — untested. */
+/* `mockSettingsThrows` (the `mock` prefix is what lets a hoisted factory read it) makes the stub throw on render — the #270 case below, standing in for a
+   section whose chunk a rebuild deleted, without depending on how jest resolves a rejected `import()`. */
+let mockSettingsThrows = false;
 jest.mock('../client/src/components/settings/SettingsView', () => ({
   __esModule: true,
-  default: ({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) =>
-    require('react').createElement(
+  default: ({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) => {
+    if (mockSettingsThrows) throw new Error('chunk gone');
+    return require('react').createElement(
       'div',
       null,
       'settings stub',
       require('react').createElement('button', { type: 'button', onClick: () => onOpenWatchdog?.() }, 'open watchdog')
-    )
+    );
+  }
 }));
 
 const SECTION_KEY = 'backlog-manager.section';
@@ -141,6 +146,24 @@ describe('the section rail', () => {
             : { items: [ARCHIVE_ITEM], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     }) as jest.Mock;
+  });
+
+  it('draws a failing section as an in-place failure under a live rail, and clears it on a switch (#270)', async () => {
+    const quiet = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockSettingsThrows = true;
+    try {
+      storeSection('settings');
+      render(<App />);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('this section failed to load');
+      // The rail is outside the boundary, so the reader can still leave.
+      await userEvent.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name: /Board/ }));
+      expect(await screen.findByText('board stub')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      mockSettingsThrows = false;
+      quiet.mockRestore();
+    }
   });
 
   it('resolves the legacy stored "projects" onto Board, not onto a blank main area', async () => {

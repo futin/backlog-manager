@@ -167,6 +167,16 @@ test('rewriteOldIds rewrites every known id in one line', () => {
 // The footer's `from=<id>` is the idempotency key, and it carries a bare old id — word-bounded on both sides, exactly the shape pass 2 rewrites. Before `=`
 // was excluded, pass 2 turned `from=task-1` into `from=#4`, so every issue it had already patched lost its key: the next resume recognised none of them and
 // created all 72 again (this repo's own import, #146–#217).
+// #270 row 10. A born-rejected item's id is `oos-N` — out-of-scope's own id space — and pass 1 maps it like any other (`oos-5 → #7`), but the pattern only
+// knew the four open-able prefixes, so every `see oos-5` in another body survived the import as a dead link to a file the import had just deleted.
+test('rewriteOldIds rewrites a born-rejected oos- id, with the same neighbour rules as the other prefixes', () => {
+  const map = new Map([...MAP, ['oos-5', 9]])
+  assert.equal(rewriteOldIds('declined as oos-5.', map), 'declined as #9.')
+  assert.equal(rewriteOldIds('backlog/out-of-scope/oos-5-five.md', map), 'backlog/out-of-scope/oos-5-five.md')
+  assert.equal(rewriteOldIds('<!-- bm:imported from=oos-5 -->', map), '<!-- bm:imported from=oos-5 -->')
+  assert.equal(rewriteOldIds('oos-6', map), 'oos-6')
+})
+
 test('rewriteOldIds leaves the footer marker alone, so a patched issue is still recognised on resume', () => {
   const footer = renderImportFooter({ id: 'task-1', created: '2026-08-30', tags: [], relPath: 'tasks/open/task-1-foo.md' })
   const patched = rewriteOldIds(`Blocked on idea-12.\n\n${footer}`, MAP)
