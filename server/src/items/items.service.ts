@@ -6,6 +6,7 @@ import type { SourceMarker } from './sources/resolve.util';
 import { parseUrn } from '../tracker/map-issue';
 import { ITEM_SOURCES, type ItemSource, type ItemWriter, type SourceSummary } from './sources/source';
 import { uncommittedItemPaths, type UncommittedItems } from './uncommitted.util';
+import { resolveBaseBranch } from './base-branch.util';
 import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts } from '../../../shared/types';
 
 /**
@@ -166,7 +167,8 @@ export class ItemsService {
 
   /**
    * GET /api/items/uncommitted's whole implementation (task-32) — which of
-   * this project's item files differ from `main`, i.e. which ones a
+   * this project's item files differ from the run's base (`main` unless the
+   * sheet's picker chose another branch, #254), i.e. which ones a
    * board-started run will read a DIFFERENT copy of than the board is
    * showing. Deliberately not "which ones the run cannot see": half of them
    * it can, and `uncommitted.util.ts`'s header carries both fates.
@@ -188,9 +190,16 @@ export class ItemsService {
    * question is about files in a git working tree, which is what this route
    * means whatever owns the items.
    */
-  uncommitted(project: string): UncommittedItems {
+  uncommitted(project: string, base?: string): UncommittedItems {
     const entry = this.registry.load().projects.find((p) => p.path === project);
     if (entry === undefined) throw new HttpException({ error: 'not found' }, 404);
+    // #254: the question is asked at the base the sheet's picker holds, proved
+    // by the same function that proves the orchestrate route's base — AFTER
+    // the registry gate, so an unregistered project still never reaches git.
+    // A refusal is a 400 here as there: the sheet only offers branches
+    // `GET /api/agents/branches` listed, so one is a stale picker or a bug,
+    // and its silent `.catch` turns it into no warning rather than a wrong one.
+    const ref = resolveBaseBranch(base, entry.path);
     // A tracker project has no item files, so "which of them differ from
     // `main`" is not a question with a wrong answer — it is a question with no
     // meaning, and `known: false` is precisely the shape this endpoint already
@@ -202,7 +211,7 @@ export class ItemsService {
     // changes no default selection. The rule this answers is CLAUDE.md's, and
     // answering it earlier for one kind of project does not move it.
     if (resolveSource(entry.path, this.known).kind === 'tracker') return { paths: [], absent: [], known: false };
-    return uncommittedItemPaths(entry.path);
+    return uncommittedItemPaths(entry.path, ref);
   }
 
   /**

@@ -570,7 +570,7 @@ export async function fetchMergeCheck(project: string): Promise<MergeCheckResult
 
 /**
  * Body of `GET /api/items/uncommitted` (task-32) — which of a project's item
- * files differ from `main`, so the Orchestrate sheet can flag the rows whose
+ * files differ from the picked base (`main` unless chosen otherwise, #254), so the Orchestrate sheet can flag the rows whose
  * bytes on disk are not the bytes a run will act on.
  *
  * Not "the rows that run is going to skip", which is what this said for one
@@ -635,8 +635,16 @@ function isUncommittedItems(data: unknown): data is UncommittedItems {
   );
 }
 
-export async function fetchUncommitted(project: string): Promise<UncommittedItems> {
-  const data = await unwrap<UncommittedItems>(await fetch(`/api/items/uncommitted?project=${encodeURIComponent(project)}`));
+/**
+ * `base` is the sheet's picked base, sent on every call — `main` included —
+ * for the reason the launch body sends it on every launch: the server treats
+ * `main` as the default either way, and an always-present parameter is one
+ * URL shape rather than two (#254).
+ */
+export async function fetchUncommitted(project: string, base: string): Promise<UncommittedItems> {
+  const data = await unwrap<UncommittedItems>(
+    await fetch(`/api/items/uncommitted?project=${encodeURIComponent(project)}&base=${encodeURIComponent(base)}`)
+  );
   if (!isUncommittedItems(data)) {
     throw new Error('malformed /api/items/uncommitted response');
   }

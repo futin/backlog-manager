@@ -340,6 +340,50 @@ describe('uncommittedItemPaths', () => {
       known: true
     });
   });
+
+  // --- case 31 ----------------------------------------------------------
+  //
+  // #254: the base picker (task-44) lets a run gate at a branch other than
+  // `main`, so the question is "differs from the CHOSEN base". An item
+  // committed only on `side` is absent from `main` and present at `side`;
+  // one committed only on `main` is the mirror image. Both fates flip with
+  // the base, which is what proves every read takes the parameter rather
+  // than one of the three still asking about `main`.
+  it('case 31: answers against the base it is given, not main', () => {
+    const root = freshRepo();
+    write(root, 'backlog/bugs/open/bug-1.md', 'committed on both\n');
+    commit(root, 'one');
+    git(root, 'checkout', '-q', '-b', 'side');
+    write(root, 'backlog/tasks/open/task-9.md', 'only on side\n');
+    commit(root, 'two');
+    git(root, 'checkout', '-q', 'main');
+    write(root, 'backlog/tasks/open/task-5.md', 'only on main\n');
+    commit(root, 'three');
+    git(root, 'checkout', '-q', 'side');
+    write(root, 'backlog/tasks/open/task-9.md', 'edited since\n');
+
+    // At `side`: task-9 is present and stale, task-5 is not in this working
+    // tree at all, so nothing else differs.
+    expect(uncommittedItemPaths(root, 'side')).toEqual({
+      paths: [abs(root, 'backlog/tasks/open/task-9.md')],
+      absent: [],
+      known: true
+    });
+    // The default is still `main`, against which the same tree reads task-9
+    // as absent (the run would skip it) — and task-5 as deleted, which
+    // `diff` lists but no working-tree item file exists for.
+    const atMain = uncommittedItemPaths(root);
+    expect(atMain.known).toBe(true);
+    expect(atMain.absent).toEqual([abs(root, 'backlog/tasks/open/task-9.md')]);
+  });
+
+  // --- case 31b ---------------------------------------------------------
+  it('case 31b: known: false for a base that does not resolve', () => {
+    const root = freshRepo();
+    write(root, 'backlog/bugs/open/bug-1.md', 'committed\n');
+    commit(root, 'one');
+    expect(uncommittedItemPaths(root, 'no-such-branch')).toEqual({ paths: [], absent: [], known: false });
+  });
 });
 
 // =====================================================================
@@ -431,6 +475,39 @@ describe('GET /api/items/uncommitted', () => {
   it('case 14: 400s when project is absent, and when it is blank', async () => {
     await request(app.getHttpServer()).get('/api/items/uncommitted').expect(400, { error: 'project is required' });
     await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: '   ' }).expect(400, { error: 'project is required' });
+  });
+
+  // --- case 32 ----------------------------------------------------------
+  //
+  // #254: `base` reaches the util. task-9 is never committed on `main`, so
+  // the default answer calls it absent; committed on `feature/x`, the same
+  // tree asked about `feature/x` is clean. `main`, `''` and an absent `base`
+  // are one value, the way `resolveBase` treats them.
+  it('case 32: answers against ?base= when one is given, and treats main and blank as the default', async () => {
+    git(projectPath, 'checkout', '-q', '-b', 'feature/x');
+    commit(projectPath, 'two');
+    git(projectPath, 'checkout', '-q', 'main');
+    write(projectPath, 'backlog/tasks/open/task-9.md', 'never committed\n');
+
+    const flagged = { paths: [join(projectPath, 'backlog', 'tasks', 'open', 'task-9.md')], absent: [join(projectPath, 'backlog', 'tasks', 'open', 'task-9.md')], known: true };
+    await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath, base: 'feature/x' }).expect(200, { paths: [join(projectPath, 'backlog', 'tasks', 'open', 'task-9.md')], absent: [], known: true });
+    await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath }).expect(200, flagged);
+    await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath, base: 'main' }).expect(200, flagged);
+    await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath, base: '' }).expect(200, flagged);
+  });
+
+  // --- case 33 ----------------------------------------------------------
+  //
+  // Validated the way `resolveBase` validates the orchestrate base: a legal
+  // branch name first, then membership in `refs/heads/`. A tag and a SHA are
+  // legal ref names that only the second check refuses, so both are here.
+  it('case 33: 400s a base that is not an existing local branch', async () => {
+    git(projectPath, 'tag', 'v1');
+    const sha = cp.execFileSync('git', ['-C', projectPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    for (const base of ['-x', 'bad..name', 'no-such-branch', 'v1', sha]) {
+      const res = await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: projectPath, base }).expect(400);
+      expect(res.body.error).toMatch(/^base must be an existing local branch/);
+    }
   });
 });
 

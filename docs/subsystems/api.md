@@ -12,7 +12,9 @@ files under `~/.backlog-manager/settings/`.
 `GET /api/items` — the whole index, every registered project scanned fresh on each request; every row carries a `source` naming the adapter that produced it.
 `GET /api/projects` — one row per registered project, with open-item counts, a `missing` flag for a project whose `backlog/` disappeared, and that project's
 `source`. `GET /api/items/body?path=` — one item's Markdown body, resolved through an allowlist built from the registry, so a path outside every registered
-project's `backlog/` 404s. `GET /api/items/uncommitted?project=` — which of one project's item files differ from `main`, so the Orchestrate sheet can flag the
+project's `backlog/` 404s. `GET /api/items/uncommitted?project=&base=` — which of one project's item files differ from `base` (an existing local branch, proved by
+`resolveBaseBranch` as the orchestrate route proves its own; absent, blank or `main` all mean `main`, anything else unproven is a 400 — #254; `main` below
+reads as that base), so the Orchestrate sheet can flag the
 rows whose bytes on disk are not the bytes a run will read: `{ paths, absent, known }`, where `absent` is the subset of `paths` that `main` does not hold at all
 (the run skips those; every other flagged row is stale and runs on `main`'s copy), `known: false` for every git failure alike — and for a tracker project, where
 the question has no meaning — 404 for an unregistered project, and nothing cached.

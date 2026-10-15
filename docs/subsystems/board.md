@@ -103,7 +103,8 @@ queue:
 1. **Items.** Previews the queue and selects a subset of it, flagging with an `uncommitted` chip every row whose file on disk is not the file at `main`, and
    a note that states only the fates actually present, each with its own count — absent from `main` is skipped in the run's own words
    (`not committed on main`), present-but-stale is gated and run on `main`'s bytes — read per row from the endpoint's `absent`, and carried on each flagged
-   row as the pill's `title` and a `data-fate` attribute, plus a `deselect uncommitted (N)` control. Fed once per sheet open by `GET /api/items/uncommitted`, rendering nothing at all on
+   row as the pill's `title` and a `data-fate` attribute, plus a `deselect uncommitted (N)` control. Fed once per sheet open, and again per base picked (#254 — every `main` here reads as the picked base, the note and the pill titles included), by
+   `GET /api/items/uncommitted?base=`, rendering nothing at all on
    `known: false` or a failed/malformed answer, and deliberately changing no default: an untouched sheet still posts no `ids`.
 2. **Order.** Hand-orders that selection with ↑/↓ and a reset (`order: string[] | null`, `null` meaning queue order, reconciled against the live queue every
    render, never stored resolved). The screen says a `runner-fix:` item may still hoist above the chosen order, and that it cannot tell which.

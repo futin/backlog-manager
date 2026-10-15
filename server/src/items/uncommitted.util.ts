@@ -6,11 +6,14 @@ import { join } from 'node:path';
  * uncommitted.util.ts — which item files the working tree holds in a state a
  * board-started orchestrator run will not read.
  *
- * A run gates every item at `<base>` (`BASE_REF_DEFAULT` in
- * `skills/backlog-orchestrate/tools/orchestrate.mjs`, and the board never
- * passes `--base`, so `main` is the ref for every board-started run there
- * will ever be), while the board's own item scan reads the WORKING TREE. The
- * two disagree whenever the file on disk is not the file at `main`, which
+ * A run gates every item at `<base>` — `BASE_REF_DEFAULT` (`main`) in
+ * `skills/backlog-orchestrate/tools/orchestrate.mjs` unless the sheet's base
+ * picker (task-44) chose another branch, in which case the board passes
+ * `--base` and the sheet passes that same branch here (#254) — while the
+ * board's own item scan reads the WORKING TREE. Every `main` below therefore
+ * reads as "the chosen base"; it is spelled `main` because that is the
+ * default and the common case. The two disagree whenever the file on disk is
+ * not the file at the base, which
  * covers two shapes with two different fates — and the difference matters,
  * because the sheet has to state a consequence and only one of these is a
  * skip (review round 1 caught the note claiming both were):
@@ -72,7 +75,7 @@ import { join } from 'node:path';
  */
 
 /**
- * The ref a board-started run gates at. Named rather than inlined because it
+ * The ref a board-started run gates at when no base was picked. Named rather than inlined because it
  * is a second copy of `orchestrate.mjs`'s `BASE_REF_DEFAULT` in a second
  * language — the `.mjs` tool is not importable into the Nest build — and
  * `test/uncommitted.test.ts` reads that file's SOURCE to pin the two
@@ -155,8 +158,14 @@ function lines(out: string): string[] {
  * redundancy is deliberate, because it makes each argument list say which
  * repository it is asking about instead of leaving that to a spawn option two
  * functions away.
+ *
+ * `base` is trusted here, not validated: `ItemsService.uncommitted` proves it
+ * is an existing local branch (#254) before this runs, the way `resolveBase`
+ * proves the orchestrate base before composition, so no caller text reaches
+ * an argument list unchecked. A base that does not resolve still degrades to
+ * `known: false` at the `rev-parse` below, the same seam `blobReaderAt` stops at.
  */
-export function uncommittedItemPaths(projectPath: string): UncommittedItems {
+export function uncommittedItemPaths(projectPath: string, base: string = UNCOMMITTED_BASE_REF): UncommittedItems {
   const top = run(projectPath, ['-C', projectPath, 'rev-parse', '--show-toplevel']);
   if (top === null) return unknown();
   try {
@@ -165,7 +174,7 @@ export function uncommittedItemPaths(projectPath: string): UncommittedItems {
     return unknown();
   }
 
-  const resolved = run(projectPath, ['-C', projectPath, 'rev-parse', '--verify', '--quiet', `${UNCOMMITTED_BASE_REF}^{commit}`]);
+  const resolved = run(projectPath, ['-C', projectPath, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
   if (resolved === null) return unknown();
 
   // Both reads are REQUIRED, and the asymmetry is the whole design: `diff`
@@ -182,7 +191,7 @@ export function uncommittedItemPaths(projectPath: string): UncommittedItems {
     'diff',
     '--name-only',
     '--no-renames',
-    UNCOMMITTED_BASE_REF,
+    base,
     '--',
     'backlog'
   ]);
@@ -192,7 +201,7 @@ export function uncommittedItemPaths(projectPath: string): UncommittedItems {
   // absent. Quoted-path off for the same reason as the other two — an escaped
   // listing would not contain a raw non-ASCII path and would misreport an
   // edited item as absent.
-  const atBase = run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', UNCOMMITTED_BASE_REF, '--', 'backlog']);
+  const atBase = run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', base, '--', 'backlog']);
   // A failure of ANY of the three reads is a failure of the question:
   // reporting the part that worked — paths without their fates included —
   // would be a confident, incomplete statement of fact.

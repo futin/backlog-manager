@@ -240,7 +240,7 @@ export function OrchestrateSheet({
    */
   const [mergeCoverage, setMergeCoverage] = useState<MergeCheckResult | null>(null);
   /**
-   * Which of this project's item files differ from `main` (task-32) — the
+   * Which of this project's item files differ from the picked `base` (task-32; `main` by default, #254) — the
    * rows whose bytes on disk are not the bytes the run will act on, which is
    * broader than "the rows it cannot see" and is the whole reason the note
    * below splits by fate (`absent`, #235) rather than stating one. `null`
@@ -350,15 +350,23 @@ export function OrchestrateSheet({
    * rather than factored out for the reason this file's header already gives
    * about small idioms.
    *
-   * Keyed on `[project]` ONLY, and that is the whole cadence: once per sheet
-   * open, never again when a mode is picked or a step is walked. Unlike
-   * merge-check — which is legitimately re-asked because `mergeMode` decides
-   * whether the question applies at all — nothing on this sheet can change
-   * the answer, since the answer is about someone's working tree and this
-   * screen has no writers. Three git reads per sheet open is the budget
-   * this feature was accepted at (see uncommitted.util.ts on why it is not
-   * memoised server-side); making it per-step would multiply that by however
-   * many times someone walks back and forth.
+   * Keyed on `[project, base]`, and that is the whole cadence: once per
+   * sheet open plus once per base picked, never again when a mode is picked
+   * or a step is walked. The base is the one thing on this sheet that
+   * changes the answer (#254): a run gates at its base, so "differs from the
+   * run's copy" is a question about THAT ref, and asked about `main` it
+   * flagged the wrong rows for every other base — and the `deselect
+   * uncommitted` chip then dropped items the run would have executed.
+   * Nothing else here can change it, since the rest of the answer is about
+   * someone's working tree and this screen has no writers. Three git reads
+   * per ask is the budget this feature was accepted at (see
+   * uncommitted.util.ts on why it is not memoised server-side); making it
+   * per-step would multiply that by however many times someone walks back
+   * and forth.
+   *
+   * The previous answer is dropped the moment the base changes, before the
+   * new one lands: it is an answer about a different ref, and drawn under the
+   * new base's name it would be exactly the mislabelling this keying fixes.
    *
    * The `.catch` is silent for the merge-check hint's reason exactly: this
    * exists to stop a run wasting a slot, not to gate one, and a network
@@ -367,7 +375,8 @@ export function OrchestrateSheet({
    */
   useEffect(() => {
     let alive = true;
-    fetchUncommitted(project)
+    setUncommitted(null);
+    fetchUncommitted(project, base)
       .then((result) => {
         if (alive) setUncommitted(result);
       })
@@ -377,7 +386,7 @@ export function OrchestrateSheet({
     return () => {
       alive = false;
     };
-  }, [project]);
+  }, [project, base]);
 
   /**
    * The base picker's options (task-44) — `GET /api/agents/branches`, the
@@ -811,7 +820,9 @@ export function OrchestrateSheet({
                   reads main's copy, not the file on disk — and then states
                   only the fates actually on screen, each with its own count.
 
-                  `uncommittedItemPaths` flags any item file whose working
+                  Every `main` in this comment reads as the picked base
+                  (#254): the note names `base`, since the lookup is asked at
+                  it. `uncommittedItemPaths` flags any item file whose working
                   tree differs from main, which is deliberately broader than
                   `buildGatedQueue`'s `not committed on ${base}` reason: that
                   fires only when the path is ABSENT from main. A row that is
@@ -847,19 +858,19 @@ export function OrchestrateSheet({
                   bytes the run gates are not the bytes on this screen". */}
               {uncommittedIds.length > 0 && (
                 <div className="sheet-note" data-testid="orchestrate-uncommitted-note">
-                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item differs' : 'items differ'} from main — the run reads main's copy rather than the
-                  file here ("groomed on disk only", in the usual case).
+                  {uncommittedIds.length} {uncommittedIds.length === 1 ? 'item differs' : 'items differ'} from {base} — the run reads {base}'s copy rather
+                  than the file here ("groomed on disk only", in the usual case).
                   {absentCount > 0 && (
                     <>
                       {' '}
-                      {absentCount} {absentCount === 1 ? 'is' : 'are'} missing from main altogether and will be skipped ("not committed on main").
+                      {absentCount} {absentCount === 1 ? 'is' : 'are'} missing from {base} altogether and will be skipped ("not committed on {base}").
                     </>
                   )}
                   {staleCount > 0 && (
                     <>
                       {' '}
-                      {staleCount} {staleCount === 1 ? 'is' : 'are'} on main but stale there, so the run gates and executes main's older copy — a plan written
-                      since the last commit is not the plan that runs.
+                      {staleCount} {staleCount === 1 ? 'is' : 'are'} on {base} but stale there, so the run gates and executes {base}'s older copy — a plan
+                      written since the last commit is not the plan that runs.
                     </>
                   )}
                 </div>
@@ -945,12 +956,12 @@ export function OrchestrateSheet({
                               and the note directly above states each fate as
                               fact with its count. */}
                           {fateOf(item.path) === 'absent' && (
-                            <Pill tone="warn" title="missing from main — the run skips it (not committed on main)">
+                            <Pill tone="warn" title={`missing from ${base} — the run skips it (not committed on ${base})`}>
                               uncommitted
                             </Pill>
                           )}
                           {fateOf(item.path) === 'stale' && (
-                            <Pill tone="warn" title="on main but older there — the run executes main's copy, not this file">
+                            <Pill tone="warn" title={`on ${base} but older there — the run executes ${base}'s copy, not this file`}>
                               uncommitted
                             </Pill>
                           )}

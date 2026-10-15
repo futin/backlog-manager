@@ -10,6 +10,7 @@ import { TrackerPollerService } from '../tracker/poller.service';
 import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
+import { resolveBaseBranch } from '../items/base-branch.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
@@ -1706,14 +1707,15 @@ export class AgentsService {
    * gives.
    */
   private resolveBase(base: string | undefined, project: string): string {
-    // `'main'` short-circuits with absent and `''`, and this is load-bearing
-    // rather than an optimisation. The composition appends NOTHING for
-    // `'main'`, so there is no caller text for the two checks below to
-    // protect — they exist to prove a string that is about to be concatenated
-    // into a prompt, and this one never is. Absent and `'main'` are therefore
-    // exactly as safe as each other, and must behave identically.
+    // The two checks live in `resolveBaseBranch` since #254, shared with
+    // `GET /api/items/uncommitted`, which must accept exactly the bases this
+    // route accepts. The `'main'` short-circuit lives there too, and this is
+    // still why it is load-bearing rather than an optimisation: the
+    // composition appends NOTHING for `'main'`, so there is no caller text
+    // for the two checks to protect — they exist to prove a string that is
+    // about to be concatenated into a prompt, and this one never is.
     //
-    // Treating them differently would also be a live regression: the
+    // Treating it differently would also be a live regression: the
     // Orchestrate sheet sends `base` on EVERY launch, `'main'` included, so a
     // validated `'main'` would run `show-ref refs/heads/main` against the
     // project on every ordinary run — and 400 every one of them in a
@@ -1724,23 +1726,7 @@ export class AgentsService {
     // The tool still checks it at `init` (`assertUsableBase`), which is the
     // right place: that is where the run actually happens, and it has the
     // repository in hand rather than a registry entry.
-    if (base === undefined || base === '' || base === 'main') return 'main';
-    // Echoed back truncated and JSON-quoted, the convention resolveIds,
-    // resolveMergeMode and resolveQuestionMode all share. JSON.stringify also
-    // renders a non-string (a `42` a Partial-typed body cannot rule out) as
-    // `42` rather than `"42"`, which a template interpolation would not.
-    const shown = JSON.stringify(typeof base === 'string' ? base.slice(0, 40) : base);
-    if (typeof base !== 'string' || base.startsWith('-')) {
-      throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);
-    }
-    if (spawnSync('git', ['check-ref-format', '--branch', base]).status !== 0) {
-      throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);
-    }
-    const entry = this.registry.load().projects.find((p) => p.path === project);
-    if (entry === undefined || spawnSync('git', ['-C', entry.path, 'show-ref', '--verify', '--quiet', `refs/heads/${base}`]).status !== 0) {
-      throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a branch in this project` }, 400);
-    }
-    return base;
+    return resolveBaseBranch(base, this.registry.load().projects.find((p) => p.path === project)?.path);
   }
 
   /**
