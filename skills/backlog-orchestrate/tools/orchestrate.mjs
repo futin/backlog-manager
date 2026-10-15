@@ -6202,6 +6202,184 @@ function cmdFixMode(argv) {
   return 0;
 }
 
+// --- the pull request (pr mode, spec §4) ----------------------------------
+//
+// A `pr` run ends by opening one PR from its run branch into `prTarget`. The tool composes it and records where it landed;
+// the driver runs `gh` between the two, and the tool itself makes no GitHub call — `pr-draft` reads the run file and git and
+// writes one file under `<dir>`, `pr --url` writes one field. Splitting it this way keeps the one network write in the
+// driver's own Bash call, where a classifier denial or a refused `gh` is seen and handled (it is not a park), and keeps
+// everything that decides WHAT the PR says in code a test can run.
+
+// Verbatim from shared/agent.ts's `PR_URL_PATTERN`, duplicated for the standalone reason MERGE_MODES' comment gives; a
+// node test pins the two sources equal. The server reads `prUrl` back through its own copy and nulls anything else, so a
+// drift would show up as a link the board silently drops — which is why the copy is guarded, not trusted.
+const PR_URL_PATTERN = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/;
+
+// The types a PR title may carry, highest rank first. `feat`/`fix`/`perf` are the three `ci / pr-title` lets carry a `!`
+// and the three that cut a release; everything else a Conventional Commit can say folds into `chore`.
+const PR_TITLE_TYPES = ['feat', 'fix', 'perf', 'chore'];
+const PR_BREAKING_TYPES = new Set(['feat', 'fix', 'perf']);
+
+// The terminal stages the `## Run` line counts, in the order it prints them (spec §4, *Body*).
+const PR_RUN_COUNT_STAGES = ['merged', 'branched', 'parked', 'failed', 'skipped', 'ungroomed', 'needs-answers'];
+
+const PR_DRAFT_USAGE = 'usage: orchestrate.mjs pr-draft';
+const PR_USAGE = 'usage: orchestrate.mjs pr --url <https://github.com/<owner>/<repo>/pull/<n>>';
+
+/**
+ * The PR title for the merged items, given each one's §6 commit subject (`null` when its merge commit was not found).
+ * `<type>(backlog)<!?>: <N> item(s)`. The type is the highest-ranked one any item's subject carries; an unparseable or
+ * missing subject ranks `chore`, which is the floor, so it can never lower another item's type. The `!` goes on only when
+ * some subject is breaking AND the winning type may carry one — a lone `refactor!` gives a plain `chore`, by design.
+ */
+export function prTitle(items) {
+  let rank = PR_TITLE_TYPES.length - 1;
+  let breaking = false;
+  for (const { subject } of items) {
+    const m = typeof subject === 'string' ? /^([a-z]+)(\([^)]*\))?(!)?: /.exec(subject) : null;
+    if (m === null) continue;
+    const index = PR_TITLE_TYPES.indexOf(m[1]);
+    if (index !== -1) rank = Math.min(rank, index);
+    if (m[3] === '!') breaking = true;
+  }
+  const type = PR_TITLE_TYPES[rank];
+  const bang = breaking && PR_BREAKING_TYPES.has(type) ? '!' : '';
+  return `${type}(backlog)${bang}: ${items.length} ${items.length === 1 ? 'item' : 'items'}`;
+}
+
+/**
+ * The PR body: `## What's new` (merged items, queue order, by their run-file title), then `## Run`. The brief named a
+ * second `subjects` parameter; nothing in the body reads a subject, so it takes the run alone.
+ *
+ * A title becomes ONE list line: a line break inside it would end the item and could start a heading or a new block, so
+ * every break (and the whitespace around it) collapses to one space. Nothing else is escaped — backticks and the like are
+ * Markdown the reader wants, and the `- ` prefix already stops a `## ` from being a heading. `## What's new` is the section
+ * Phase C's tag message takes verbatim up to the next `^## `, which is why `## Run` is its own heading rather than a line.
+ */
+export function prBody(run) {
+  const oneLine = (text) => String(text).replace(/\s*[\r\n]+\s*/g, ' ').trim();
+  const merged = run.queue.filter((item) => item.stage === 'merged');
+  const counts = PR_RUN_COUNT_STAGES.map((stage) => [stage, run.queue.filter((item) => item.stage === stage).length])
+    .filter(([, n]) => n > 0)
+    .map(([stage, n]) => `${n} ${stage}`);
+
+  const lines = ["## What's new", '', ...merged.map((item) => `- ${oneLine(item.title)} (#${item.id})`), '', '## Run', ''];
+  lines.push(`\`${run.runId}\` drained onto \`${run.base}\` from \`${run.prTarget}\`: ${counts.join(', ')}.`);
+
+  // A degraded run (merge-mode branch after a denial) leaves the rest of its items as branches cut from the run branch, so
+  // each one carries this PR's commits too: merging one into the target before this PR lands would ship part of it twice.
+  const branched = run.queue.filter((item) => item.stage === 'branched');
+  if (branched.length > 0) {
+    const names = branched.map((item) => `\`${typeof item.branch === 'string' && item.branch !== '' ? item.branch : `backlog/${item.id}`}\``);
+    lines.push('', `Left as branches, not in this PR: ${names.join(', ')} — merge them into \`${run.prTarget}\` only after this PR lands.`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Each merged item's §6 commit subject, or `null` where it cannot be found. One `log` lists the first-parent commits of
+ * `<prTarget>..<base>` — the run's own merges, newest first — and an item's merge commit is the first whose subject begins
+ * `Merge backlog/<id>: ` (SKILL.md §9's message). Its §6 commit is the first that `rev-list --reverse --topo-order
+ * M^1..M^2` prints: topological, so a fix-loop commit with a skewed clock still comes after the commit it fixes.
+ *
+ * Every call is HEAD-independent (bug-38): explicit, fully-qualified ranges, run from the project root. A missing merge
+ * commit (merged by hand, then staged) is `null`, never a refusal; a range git cannot read at all is exit `1`, because a
+ * title composed without it would be a guess presented as a fact.
+ */
+function mergedSubjects(projectRoot, run, merged) {
+  const range = `refs/heads/${run.prTarget}..refs/heads/${run.base}`;
+  const log = spawnSync('git', ['-C', projectRoot, 'log', '--first-parent', '--format=%H %s', range], { encoding: 'utf8' });
+  if (log.status !== 0) {
+    throw new OrchestrateError(`git log ${range} failed in ${projectRoot}. Nothing was written. git said: ${(log.stderr || '').trim()}`, 1);
+  }
+  const firstParents = log.stdout
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => ({ sha: line.slice(0, line.indexOf(' ')), subject: line.slice(line.indexOf(' ') + 1) }));
+
+  return merged.map((item) => {
+    const merge = firstParents.find((c) => c.subject.startsWith(`Merge backlog/${item.id}: `));
+    if (merge === undefined) return null;
+    const work = spawnSync('git', ['-C', projectRoot, 'rev-list', '--reverse', '--topo-order', `${merge.sha}^1..${merge.sha}^2`], { encoding: 'utf8' });
+    const first = work.status === 0 ? work.stdout.split('\n')[0] : '';
+    if (first === '') return null;
+    const subject = spawnSync('git', ['-C', projectRoot, 'log', '-1', '--format=%s', first], { encoding: 'utf8' });
+    return subject.status === 0 ? subject.stdout.trim() : null;
+  });
+}
+
+// spec §4 step 1. Composes the PR and prints `{ title, bodyFile, head, target }` as one JSON line; the driver copies those
+// into `gh pr create`. `head` is the run branch and `target` is `prTarget` — never `base` as a target, because in every
+// SKILL.md command `<base>` means the run branch.
+//
+// Refuses (exit 1, nothing written) unless the run is a `pr` run with something `merged` and no `prUrl` yet. The mode is
+// `mergeMode`, not `mergeModeEffective`: a run degraded to `branch` part-way still merged its earlier items onto the run
+// branch, and those still need their PR. `prUrl` set means the PR exists, and a resumed session must not draft a second.
+//
+// Writes only `<dir>/pr/body.md`, never run.json, so it takes no driver lease (assertDriver's comment): an aborted run's
+// summary runs it for the `gh pr create` line a person types by hand, from whichever session did the abort. The body is
+// written temp + rename in the same directory, as `writeRunAtomic` does, so `gh` never reads half a body.
+function cmdPrDraft(argv) {
+  if (argv.length > 0) throw new OrchestrateError(PR_DRAFT_USAGE, 1);
+
+  const projectRoot = resolveProjectRoot();
+  const dir = projectDir(orchHome(), projectRoot);
+  const run = readRun(dir);
+
+  if (run.mergeMode !== 'pr' || typeof run.prTarget !== 'string') {
+    throw new OrchestrateError(`pr-draft is for a pr-mode run — this one's merge mode is '${run.mergeMode}'. Nothing was written.`, 1);
+  }
+  if (typeof run.prUrl === 'string') {
+    throw new OrchestrateError(`this run's PR already exists (${run.prUrl}) — there is nothing to draft. Nothing was written.`, 1);
+  }
+  const merged = run.queue.filter((item) => item.stage === 'merged');
+  if (merged.length === 0) {
+    throw new OrchestrateError('no item in this run is merged, so there is no PR to open. Nothing was written.', 1);
+  }
+
+  const subjects = mergedSubjects(projectRoot, run, merged);
+  const title = prTitle(subjects.map((subject) => ({ subject })));
+  const body = prBody(run);
+
+  const prDir = path.join(dir, 'pr');
+  fs.mkdirSync(prDir, { recursive: true });
+  const bodyFile = path.join(prDir, 'body.md');
+  const tmp = path.join(prDir, `.body.md.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  fs.writeFileSync(tmp, body);
+  fs.renameSync(tmp, bodyFile);
+
+  console.log(JSON.stringify({ title, bodyFile, head: run.base, target: run.prTarget }));
+  return 0;
+}
+
+// spec §4 step 3. Records the PR's URL on the run — the one piece of `gh` output that ever reaches a tool argument, and
+// only through PR_URL_PATTERN. Validated before the run is read, like every "a problem with THIS call" check. A run not in
+// `pr` mode is refused too: `prUrl` is `null` under `merge`/`branch` by contract, and this is its only writer.
+function cmdPr(argv) {
+  let url;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--url') url = argv[++i];
+    else throw new OrchestrateError(PR_USAGE, 1);
+  }
+  if (url === undefined) throw new OrchestrateError(PR_USAGE, 1);
+  if (!PR_URL_PATTERN.test(url)) {
+    throw new OrchestrateError(`--url must be a GitHub pull request URL matching ${PR_URL_PATTERN} (got ${JSON.stringify(url)}). Nothing was written.`, 1);
+  }
+
+  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const run = readRun(dir);
+  assertDriver(run);
+  if (run.mergeMode !== 'pr') {
+    throw new OrchestrateError(`pr --url is for a pr-mode run — this one's merge mode is '${run.mergeMode}'. Nothing was written.`, 1);
+  }
+
+  run.prUrl = url;
+  run.updatedAt = nowISO();
+  writeRunAtomic(dir, run);
+  console.log(JSON.stringify({ prUrl: run.prUrl }));
+  return 0;
+}
+
 const USAGE = `usage: orchestrate.mjs <command>
 
 commands:
@@ -6228,6 +6406,8 @@ commands:
   verify       run the project's proof commands and record them
   snapshot     write a tracker item + its Outcome to one file (tracker projects only)
   reconcile    read-only crash-recovery report
+  pr-draft     compose a pr-mode run's pull request title and body (writes only <dir>/pr/body.md)
+  pr           record the pull request's url on a pr-mode run (pr --url <url>)
   abort        tear down worktrees/branches and end the run`;
 
 // --- CLI dispatch --------------------------------------------------------
@@ -6255,6 +6435,10 @@ commands:
 //      three on the call's args alone. Listed here so this contract doc
 //      doesn't quietly go stale on the cases where it isn't quite true. The
 //      "nothing written" half of the guarantee still holds for all three.
+//      pr mode adds two more of the same shape: `pr-draft` refuses a run that
+//      is not `pr`, has nothing `merged` or already has a `prUrl`, and `pr
+//      --url` refuses a run that is not `pr` (see cmdPrDraft and cmdPr) —
+//      nothing written by either, `<dir>/pr/` included.
 //   3  no run exists for this project (readRun's own refusal) — EXCEPT for
 //      `watch`, which also exits 3 when its own `--budget-ms` elapses with
 //      the child still alive. That second meaning is a deliberate reuse of
@@ -6329,6 +6513,8 @@ export function main(argv) {
     if (cmd === 'verify') return cmdVerify(rest);
     if (cmd === 'snapshot') return cmdSnapshot(rest);
     if (cmd === 'reconcile') return cmdReconcile(rest);
+    if (cmd === 'pr-draft') return cmdPrDraft(rest);
+    if (cmd === 'pr') return cmdPr(rest);
     if (cmd === 'abort') return cmdAbort();
     console.error(`unknown command: ${cmd ?? '(none)'}\n\n${USAGE}`);
     return 1;

@@ -10188,10 +10188,12 @@ function tipOf(project, ref) {
 }
 
 /** A files run hand-moved into `pr` mode, for the commands whose behaviour under `pr` does not depend on how the run got
- *  there (and a files fixture keeps `stage merged` from needing a fake close route). Returns the run's own fields. */
-function handPrRun(t, { id = 'task-1' } = {}) {
+ *  there (and a files fixture keeps `stage merged` from needing a fake close route). Returns the run's own fields.
+ *  `items` seeds several tasks instead of one, and the queue is put in exactly that order — the gate's own ordering is not
+ *  what a case about queue order should be depending on. */
+function handPrRun(t, { id = 'task-1', items = [{ id, title: 'Some task' }] } = {}) {
   const fx = basedFixture(t);
-  seedReadyTask(fx.project, id, 'Some task');
+  for (const item of items) seedReadyTask(fx.project, item.id, item.title);
   commitEverything(fx.project, 'seed task');
   assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project).status, 0);
   const runBranch = 'backlog/run-2026-10-15-1';
@@ -10199,6 +10201,7 @@ function handPrRun(t, { id = 'task-1' } = {}) {
   const file = runFile(fx.home, fx.project);
   const written = JSON.parse(fs.readFileSync(file, 'utf8'));
   Object.assign(written, { mergeMode: 'pr', mergeModeEffective: 'pr', base: runBranch, prTarget: 'main', prUrl: null });
+  written.queue = items.map((item) => written.queue.find((q) => q.id === item.id));
   fs.writeFileSync(file, `${JSON.stringify(written, null, 2)}\n`);
   return { ...fx, runBranch, file };
 }
@@ -10500,4 +10503,311 @@ test('pr 3.12: merge-check on a pr run whose run branch no tree holds creates _b
   assert.equal(verdict.created, true);
   assert.deepEqual(readRunJson(fx).baseTree, { path: expected, created: true });
   assert.notEqual(stageOf(fx), 'parked');
+});
+
+// --- pr mode: pr-draft and pr --url (Task 4) --------------------------------
+
+/** A tree holding the run branch, made once per fixture — the merge site SKILL.md §9 merges in. */
+function runBranchTree(fx) {
+  const tree = path.join(fx.project, '.worktrees', '_base-backlog-run-2026-10-15-1');
+  if (!fs.existsSync(tree)) gitOk(fx.project, 'worktree', 'add', '-q', tree, fx.runBranch);
+  return tree;
+}
+
+/** One empty commit with `subject` — the subject is all `pr-draft` reads. */
+function commitSubject(tree, subject) {
+  gitOk(tree, 'commit', '-q', '--allow-empty', '-m', subject);
+}
+
+/**
+ * Lands one item on the run branch the way SKILL.md §6 and §9 do: `backlog/<id>` is cut from the run branch's tip, takes
+ * the §6 commit and then any fix-loop commits (`subjects`, in that order), and is merged `--no-ff` with
+ * `Merge backlog/<id>: <title>`.
+ */
+function landItem(fx, id, title, subjects) {
+  const tree = runBranchTree(fx);
+  gitOk(tree, 'checkout', '-q', '-b', `backlog/${id}`);
+  for (const subject of subjects) commitSubject(tree, subject);
+  gitOk(tree, 'checkout', '-q', fx.runBranch);
+  gitOk(tree, 'merge', '-q', '--no-ff', `backlog/${id}`, '-m', `Merge backlog/${id}: ${title}`);
+}
+
+/** Hand-edits the run file's queue: `stages` maps an id to the stage it ends on, `fields` to extra item fields. */
+function setQueue(fx, stages, fields = {}) {
+  const written = JSON.parse(fs.readFileSync(fx.file, 'utf8'));
+  for (const item of written.queue) {
+    if (stages[item.id] !== undefined) item.stage = stages[item.id];
+    Object.assign(item, fields[item.id] ?? {});
+  }
+  fs.writeFileSync(fx.file, `${JSON.stringify(written, null, 2)}\n`);
+}
+
+function prDir(fx) {
+  return path.join(path.dirname(fx.file), 'pr');
+}
+
+/** `pr-draft`, parsed: its exit, its one JSON line, and the body it wrote. */
+function prDraft(fx) {
+  const out = run(fx.project, fx.home, 'pr-draft');
+  if (out.status !== 0) return { out };
+  const lines = out.stdout.trim().split('\n');
+  assert.equal(lines.length, 1, out.stdout);
+  const draft = JSON.parse(lines[0]);
+  return { out, draft, body: fs.readFileSync(draft.bodyFile, 'utf8') };
+}
+
+// 4.1
+test('pr 4.1: prTitle ranks feat > fix > perf > chore, folds every other type into chore, and counts the items', () => {
+  const title = (...subjects) => orch.prTitle(subjects.map((subject) => ({ subject })));
+  assert.equal(title('fix(a): x', 'feat(b): y'), 'feat(backlog): 2 items');
+  assert.equal(title('fix(a): x', 'chore(b): y'), 'fix(backlog): 2 items');
+  assert.equal(title('perf(a): x', 'chore(b): y'), 'perf(backlog): 2 items');
+  assert.equal(title('refactor(a): x', 'docs(b): y'), 'chore(backlog): 2 items');
+  assert.equal(title('fix(a): x'), 'fix(backlog): 1 item');
+  // An unparseable subject and a missing one (no merge commit found) both rank as chore.
+  assert.equal(title('not a conventional commit', null), 'chore(backlog): 2 items');
+});
+
+test('pr 4.1: pr-draft reads each item’s type from its real merge commit, and prints head and target', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'First thing' },
+      { id: 'task-2', title: 'Second thing' }
+    ]
+  });
+  landItem(fx, 'task-1', 'First thing', ['fix(a): x']);
+  landItem(fx, 'task-2', 'Second thing', ['feat(b): y']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'merged' });
+
+  const { out, draft } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(draft, {
+    title: 'feat(backlog): 2 items',
+    bodyFile: path.join(prDir(fx), 'body.md'),
+    head: fx.runBranch,
+    target: 'main'
+  });
+});
+
+// 4.2
+test('pr 4.2: a breaking subject puts ! on a releasing type only', () => {
+  const title = (...subjects) => orch.prTitle(subjects.map((subject) => ({ subject })));
+  assert.equal(title('feat(b)!: y', 'fix(a): x'), 'feat(backlog)!: 2 items');
+  assert.equal(title('refactor!: y'), 'chore(backlog): 1 item');
+  assert.equal(title('fix!: y'), 'fix(backlog)!: 1 item');
+});
+
+// 4.3
+test('pr 4.3: the §6 commit decides the type, not a later fix-loop commit', (t) => {
+  const fx = handPrRun(t, { items: [{ id: 'task-1', title: 'Only thing' }] });
+  // The fix loop's `fix` outranks the §6 `chore`, so reading the branch tip (M^2) instead of its first commit goes red here.
+  landItem(fx, 'task-1', 'Only thing', ['chore(x): a', 'fix(x): b']);
+  setQueue(fx, { 'task-1': 'merged' });
+
+  const { out, draft } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(draft.title, 'chore(backlog): 1 item');
+});
+
+// 4.4
+test('pr 4.4: an item staged merged with no Merge backlog/<id> commit ranks chore and still gets its line', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'Merged by hand' },
+      { id: 'task-2', title: 'Merged by the run' }
+    ]
+  });
+  landItem(fx, 'task-2', 'Merged by the run', ['chore(b): y']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'merged' });
+
+  const { out, draft, body } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(draft.title, 'chore(backlog): 2 items');
+  assert.match(body, /^- Merged by hand \(#task-1\)$/m);
+
+  // Alone, too: nothing on the run branch at all is still not a refusal.
+  const lone = handPrRun(t, { items: [{ id: 'task-1', title: 'Merged by hand' }] });
+  setQueue(lone, { 'task-1': 'merged' });
+  const alone = prDraft(lone);
+  assert.equal(alone.out.status, 0, alone.out.stderr);
+  assert.equal(alone.draft.title, 'chore(backlog): 1 item');
+});
+
+// 4.5
+test('pr 4.5: the body lists merged items in queue order, then the run line with every non-zero terminal count in order', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'First thing' },
+      { id: 'task-2', title: 'Second thing' },
+      { id: 'task-3', title: 'Parked one' },
+      { id: 'task-4', title: 'Skipped one' },
+      { id: 'task-5', title: 'Failed one' },
+      { id: 'task-6', title: 'Unanswered one' },
+      { id: 'task-7', title: 'Still pending' }
+    ]
+  });
+  // Merged into git in the opposite order from the queue: the list must follow the queue.
+  landItem(fx, 'task-2', 'Second thing', ['fix(b): y']);
+  landItem(fx, 'task-1', 'First thing', ['feat(a): x']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'merged', 'task-3': 'parked', 'task-4': 'skipped', 'task-5': 'failed', 'task-6': 'needs-answers' });
+  const runId = readRunJson(fx).runId;
+
+  const { out, body } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(
+    body,
+    [
+      "## What's new",
+      '',
+      '- First thing (#task-1)',
+      '- Second thing (#task-2)',
+      '',
+      '## Run',
+      '',
+      `\`${runId}\` drained onto \`${fx.runBranch}\` from \`main\`: 2 merged, 1 parked, 1 failed, 1 skipped, 1 needs-answers.`,
+      ''
+    ].join('\n')
+  );
+});
+
+test('pr 4.5: prBody counts all seven terminal stages in the fixed order', () => {
+  const stages = ['needs-answers', 'ungroomed', 'skipped', 'failed', 'parked', 'branched', 'merged'];
+  const queue = stages.map((stage, i) => ({ id: String(i + 1), title: `t${i + 1}`, stage }));
+  const body = orch.prBody({ runId: 'run-x', base: 'backlog/run-2026-10-15-1', prTarget: 'main', queue });
+  assert.match(body, /: 1 merged, 1 branched, 1 parked, 1 failed, 1 skipped, 1 ungroomed, 1 needs-answers\.$/m);
+});
+
+// 4.6
+test('pr 4.6: branched items add one line naming their branches, to merge only after this PR lands', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'Merged one' },
+      { id: 'task-2', title: 'Branched one' },
+      { id: 'task-3', title: 'Branched two' }
+    ]
+  });
+  landItem(fx, 'task-1', 'Merged one', ['fix(a): x']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'branched', 'task-3': 'branched' }, { 'task-2': { branch: 'backlog/task-2' } });
+
+  const { out, body } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(body, /: 1 merged, 2 branched\.$/m);
+  const lines = body.split('\n').filter((line) => line.includes('only after this PR lands'));
+  assert.equal(lines.length, 1, body);
+  // The recorded branch where there is one, and backlog/<id> — the branch §6 made — where there is not.
+  assert.match(lines[0], /`backlog\/task-2`/);
+  assert.match(lines[0], /`backlog\/task-3`/);
+  assert.doesNotMatch(body.split('## Run')[0], /task-2|task-3/, 'a branched item is not something this PR ships');
+});
+
+// 4.7
+test('pr 4.7: pr-draft refuses a non-pr run, a run with nothing merged, and a run whose PR exists — exit 1, nothing written', (t) => {
+  const patchRun = (fx, fields) => {
+    const written = JSON.parse(fs.readFileSync(fx.file, 'utf8'));
+    Object.assign(written, fields);
+    fs.writeFileSync(fx.file, `${JSON.stringify(written, null, 2)}\n`);
+  };
+  const cases = [
+    [
+      'mergeMode merge',
+      (fx) => {
+        patchRun(fx, { mergeMode: 'merge', mergeModeEffective: 'merge', base: 'main', prTarget: null });
+        setQueue(fx, { 'task-1': 'merged' });
+      }
+    ],
+    ['nothing merged', (fx) => setQueue(fx, { 'task-1': 'branched' })],
+    [
+      'prUrl set',
+      (fx) => {
+        setQueue(fx, { 'task-1': 'merged' });
+        patchRun(fx, { prUrl: 'https://github.com/futin/backlog-manager/pull/275' });
+      }
+    ]
+  ];
+  for (const [name, arrange] of cases) {
+    const fx = handPrRun(t);
+    arrange(fx);
+    const before = fs.readFileSync(fx.file);
+
+    const out = run(fx.project, fx.home, 'pr-draft');
+
+    assert.equal(out.status, 1, `${name}: ${out.stdout}`);
+    assert.equal(out.stdout, '', name);
+    assert.equal(fs.existsSync(prDir(fx)), false, `${name}: nothing may be written under <dir>/pr/`);
+    assert.ok(before.equals(fs.readFileSync(fx.file)), `${name}: the run file must be unchanged`);
+  }
+});
+
+// 4.8
+test('pr 4.8: pr --url records a GitHub pull request URL, and refuses anything else with the run unchanged', (t) => {
+  const fx = handPrRun(t);
+  const before = fs.readFileSync(fx.file);
+  const bad = [
+    'http://github.com/a/b/pull/1',
+    'https://github.com.evil.io/a/b/pull/1',
+    'https://github.com/a/b/issues/1',
+    'https://github.com/a/b/pull/1/files',
+    'javascript:alert(1)',
+    ''
+  ];
+  for (const url of bad) {
+    const out = run(fx.project, fx.home, 'pr', '--url', url);
+    assert.equal(out.status, 1, `${JSON.stringify(url)}: ${out.stdout}`);
+    assert.ok(before.equals(fs.readFileSync(fx.file)), `${JSON.stringify(url)}: the run file must be unchanged`);
+  }
+  const missing = run(fx.project, fx.home, 'pr');
+  assert.equal(missing.status, 1);
+  assert.ok(before.equals(fs.readFileSync(fx.file)));
+
+  const out = run(fx.project, fx.home, 'pr', '--url', 'https://github.com/futin/backlog-manager/pull/275');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = readRunJson(fx);
+  assert.equal(after.prUrl, 'https://github.com/futin/backlog-manager/pull/275');
+  assert.equal(after.base, fx.runBranch);
+  assert.equal(after.prTarget, 'main');
+});
+
+test('pr 4.8: pr --url on a run that is not in pr mode exits 1 and writes nothing — prUrl stays null there', (t) => {
+  const { home, project } = basedFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
+
+  const out = run(project, home, 'pr', '--url', 'https://github.com/futin/backlog-manager/pull/275');
+
+  assert.equal(out.status, 1, out.stdout);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
+
+// 4.9
+test('pr 4.9: a title renders as one list line, with its Markdown kept verbatim', () => {
+  const lineFor = (title) => {
+    const body = orch.prBody({ runId: 'run-x', base: 'backlog/run-2026-10-15-1', prTarget: 'main', queue: [{ id: '7', title, stage: 'merged' }] });
+    return body.split('\n').filter((line) => line.startsWith('- '));
+  };
+  assert.deepEqual(lineFor('a\nb'), ['- a b (#7)']);
+  assert.deepEqual(lineFor('a\r\n  b'), ['- a b (#7)']);
+  assert.deepEqual(lineFor('use `x`'), ['- use `x` (#7)']);
+  assert.deepEqual(lineFor('## heading'), ['- ## heading (#7)']);
+});
+
+// 4.10
+test('pr 4.10: the tool’s PR_URL_PATTERN source equals shared/agent.ts’s, read from both sources', () => {
+  const sourceOf = (text, pattern) => {
+    const m = pattern.exec(text);
+    assert.ok(m, `no PR_URL_PATTERN declaration matching ${pattern}`);
+    return m[1];
+  };
+  const tool = sourceOf(fs.readFileSync(SCRIPT, 'utf8'), /^const PR_URL_PATTERN = (\/.+\/[a-z]*);$/m);
+  const shared = sourceOf(
+    fs.readFileSync(path.join(path.dirname(SCRIPT), '..', '..', '..', 'shared', 'agent.ts'), 'utf8'),
+    /^export const PR_URL_PATTERN = (\/.+\/[a-z]*);$/m
+  );
+  assert.equal(tool, shared);
+  assert.equal(tool, String.raw`/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/`);
 });
