@@ -38,8 +38,8 @@ plan argues from it and cites it as `spec §N`.
 
 1. **Midnight and time zones.** The mint's date is the machine's local date, not UTC. Pinned in Task 3 (case 3.6).
 2. **An item title with a newline, backtick or leading `#`.** A `## What's new` line must stay one line, must not open a heading, and keeps backticks. Pinned in Task 4 (4.9).
-3. **`ls-remote` with no usable `origin`.** No remote → fall back to local refs with one stderr line; a hung remote → the spawn's timeout, never a hung
-   `init`. Pinned in Task 3 (3.7).
+3. **`ls-remote` with no usable `origin`.** No remote, a dead path, or a timeout → fall back to local refs with one stderr line; the mint itself never
+   hangs (the earlier `pullBaseAtInit` pull is today's code and out of this plan's scope). Pinned in Task 3 (3.7).
 4. **A resumed PR run.** `claim` and `reconcile` must keep `base`, `prTarget` and `prUrl` as written. Pinned in Task 3 (3.11).
 5. **`merge-check` on a run branch nobody has checked out.** It must take outcome 2 (create `_base-backlog-run-…`), not park. Pinned in Task 3 (3.12).
 
@@ -130,15 +130,17 @@ plan argues from it and cites it as `spec §N`.
   - 3.3 `init --merge-mode pr --base feature/x` → `prTarget: 'feature/x'`, branch cut at `feature/x`'s tip.
   - 3.4 A local `backlog/run-<today>-1` already present → mints `-2`. Present only on a bare `origin` the case adds → also `-2` (push `main` into that
     bare origin first, or `pullBaseAtInit`'s `pull --ff-only origin main` fails before the mint). Refs `-1`, `-3` and
-    `-wip` present → mints `-4` (the highest + 1, `-wip` ignored). `nextRunBranchName` unit cases: `([], '2026-10-15')` → `…-1`; a ref from another date
+    `-wip` present → mints `-4` (the highest + 1, `-wip` ignored). `nextRunBranchName` unit cases: `('2026-10-15', [])` → `…-1`; a ref from another date
     is ignored.
   - 3.5 `init --merge-mode pr` on a files fixture: exit 1, message names the tracker requirement, no branch created, no run file, a pre-existing done run
     NOT archived.
   - 3.6 With `TZ` set in the child env to a zone whose local date differs from UTC at the test's instant (pick the zone at test time so the case is
     deterministic, e.g. `Pacific/Kiritimati` or `Etc/GMT+12` — whichever differs), the minted date equals the date formatted in that zone.
   - 3.7 No `origin` remote (the bare `trackerFixture`, `orchestrate.test.mjs:7262`): `init --merge-mode pr` exits 0, mints from local refs, and prints
-    exactly one stderr line naming the fallback. (An `origin` that exists but cannot be reached never gets this far: `pullBaseAtInit` runs first and
-    refuses the init with exit 1, which is today's behaviour and stays.) The `ls-remote` spawn carries a `timeout` option; pin it with a unit case on the
+    exactly one stderr line naming the fallback. Second shape: `origin` set to a non-existent path **and** `--base feature/x` held by no tree, so `pullBaseAtInit` returns before
+    pulling (`orchestrate.mjs:2686-2687`) and the mint's `ls-remote` is the first call to fail — `init` still exits 0 with the same one stderr line. (When a
+    tree does hold the target, an unreachable `origin` is refused earlier by the pull, exit 1 — today's behaviour, unchanged.) The fallback keys on any
+    non-zero or timed-out `ls-remote`, never on "no origin configured". The `ls-remote` spawn carries a `timeout` option; pin it with a unit case on the
     mint helper's argument builder, or by reading the spawn options in source, not by waiting on a network.
   - 3.8 `init` refused after the mint would have run (an exit-4 existing running run) leaves **no** new `backlog/run-*` branch.
   - 3.9 `init --merge-mode merge` and `branch` write `prTarget: null`, `prUrl: null`; the "key set unchanged from the contract fixture" case (`:971`) is
