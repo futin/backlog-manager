@@ -3160,7 +3160,7 @@ test('abort keeps a parked and a failed item\'s worktree and branch, and still t
   // The parked item's work is a real commit on its branch, never merged — the exact shape the bug destroyed.
   fs.writeFileSync(path.join(trees['task-63'], 'work.txt'), 'unmerged work\n');
   assert.equal(spawnSync('git', ['-C', trees['task-63'], 'add', 'work.txt'], { encoding: 'utf8' }).status, 0);
-  assert.equal(spawnSync('git', ['-C', trees['task-63'], 'commit', '-m', 'work'], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('git', ['-C', trees['task-63'], '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'work'], { encoding: 'utf8' }).status, 0);
   assert.equal(run(project, home, 'stage', 'task-63', 'parked').status, 0);
   assert.equal(run(project, home, 'stage', 'task-64', 'failed').status, 0);
 
@@ -8701,6 +8701,45 @@ test('#240: abort releases each held claim once, not once in abort and again in 
   const { out, requests } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'abort'));
   assert.equal(out.status, 0, out.stderr);
   assert.deepEqual(posts(requests, 'release').map((r) => [r.body.commentId, r.body.reason]), [[505, 'aborted']]);
+});
+
+// #265: a tracker item has no file, and execute under the run marker runs no `start`, so the `phase:` marker abort used to protect live work could never be
+// found — a Stop mid-execute force-removed the worktree and deleted the branch, uncommitted edits included. In a tracker project the stage is the marker:
+// a `dispatched` item keeps its worktree and branch untouched, and a later stage with nothing uncommitted is still torn down as before.
+test('#265: a tracker abort keeps a dispatched item-s dirty worktree and branch, and still tears down a later-stage item', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '5', stage: 'dispatched', claim: 505 },
+    { id: '7', stage: 'reviewing', claim: 507 },
+  ]);
+  commitEverything(project, 'seed');
+  const trees = {};
+  for (const id of ['5', '7']) {
+    trees[id] = path.join(project, '.worktrees', id);
+    assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', trees[id], '-b', `backlog/${id}`, 'HEAD'], { encoding: 'utf8' }).status, 0);
+  }
+  // The live execute session's work: written, never committed — the exact thing `worktree remove --force` destroyed.
+  fs.writeFileSync(path.join(trees['5'], 'work.txt'), 'uncommitted work\n');
+  const file = runFile(home, project);
+  const seeded = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const q of seeded.queue) Object.assign(q, { worktree: trees[q.id], branch: `backlog/${q.id}` });
+  fs.writeFileSync(file, `${JSON.stringify(seeded, null, 2)}\n`);
+
+  const { out } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'abort'));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.readFileSync(path.join(trees['5'], 'work.txt'), 'utf8'), 'uncommitted work\n');
+  assert.match(spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/5'], { encoding: 'utf8' }).stdout, /backlog\/5/);
+  assert.equal(fs.existsSync(trees['7']), false, 'a reviewing item has nothing uncommitted and is torn down as before');
+  assert.equal(spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/7'], { encoding: 'utf8' }).stdout.trim(), '');
+
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.deepEqual(after.attention.map((a) => a.id), ['5']);
+  assert.match(after.attention[0].detail, new RegExp(trees['5'].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // There is no marker to clear in a tracker project, so the files-project recovery command would be an instruction nobody can follow.
+  assert.doesNotMatch(after.attention[0].detail, /backlog\.mjs stop/);
+  assert.match(out.stdout, /removed 1 item\(s\) \(7\)/);
+  assert.match(out.stdout, /left 1 in place with an in-progress marker \(5/);
 });
 
 test('bug-40: a files run-s abort makes no API request on any path', async (t) => {

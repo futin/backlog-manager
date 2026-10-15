@@ -5718,6 +5718,14 @@ function cmdReconcile(argv) {
 // `branch -D` it as "disposable". Keyed on the stage, not the marker, and
 // recorded in `attention` for the same stdout-may-go-unread reason.
 //
+// The marker itself, in a TRACKER project (#265): there is no item file, and
+// the execute session under the run marker runs no `start`, so no `phase:`
+// line can exist to be found. There an item whose worktree exists and whose
+// stage is still `dispatched` is the marked one — the stage an execute
+// session is writing in, with nothing yet committed — and it gets the first
+// exemption's treatment, with an attention entry that names no
+// `backlog.mjs stop` because there is nothing to stop.
+//
 // This does NOT stop abort from finishing overall: every OTHER item's
 // worktree and branch still get torn down, `run.status` still becomes
 // `aborted`, and the run still ends — only the marked item's own git
@@ -5862,11 +5870,36 @@ function cmdAbort() {
     }
   }
 
+  // #265: a tracker item has no file, and the execute session under the run marker runs no `start`, so the `phase:` marker below could never be found in a
+  // tracker project — every Stop mid-execute fell through to the forced teardown and destroyed the session's uncommitted edits. There the STAGE is the
+  // marker: `dispatched` is the one stage an execute session is writing into the worktree, the same window a file's `phase: execute` covers. Read once,
+  // like `cmdReconcile` reads it, and from `run.project` rather than the cwd for the same reason.
+  const tracker = projectSource(run.project) === 'github';
   for (const item of run.queue) {
     let marker = false;
     if (item.worktree && fs.existsSync(item.worktree)) {
-      const found = findItemFilePath(item.worktree, item.id);
-      marker = !!(found && itemHasPhaseMarker(found.path));
+      if (tracker) {
+        marker = item.stage === 'dispatched';
+      } else {
+        const found = findItemFilePath(item.worktree, item.id);
+        marker = !!(found && itemHasPhaseMarker(found.path));
+      }
+    }
+
+    if (marker && tracker) {
+      // No `backlog.mjs stop` in this entry, unlike the file case below: there is no marker to clear, and the claim is released by `cmdFinish` with every
+      // other one this run holds — so the only thing left for a person is the work itself.
+      run.attention.push({
+        id: item.id,
+        kind: 'parked',
+        detail:
+          `worktree ${item.worktree} belongs to an item still staged 'dispatched' — its execute session may have been mid-way, and its edits are not ` +
+          `committed — LEFT IN PLACE (not removed), since removing it would destroy uncommitted work this tool has no way to save first. Keep what you ` +
+          `want from it, then remove the worktree (\`git -C ${projectRoot} worktree remove ${item.worktree}\`) and branch ` +
+          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand — a second abort on this run finds it aborted and does nothing.`
+      });
+      preservedIds.push(item.id);
+      continue;
     }
 
     if (marker) {
