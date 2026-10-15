@@ -333,7 +333,8 @@ spawn for, never a superset — which is the safe direction, and the only direct
 
 - `stage` refuses **every** transition with exit `10`, nothing written — wider than the pause gate in both dimensions (every stage, and not only a
   transition). A stop is allowed to abandon a half-finished worktree; that is the whole difference between it and a pause, and `abort`'s existing
-  marker-preservation rule (a worktree still carrying an in-progress `phase:` marker is LEFT IN PLACE with an `attention` entry) is what keeps that safe. The
+  marker-preservation rule (a worktree still carrying an in-progress `phase:` marker — in a tracker project, an item still staged `dispatched` (#265) — is LEFT
+  IN PLACE with an `attention` entry) is what keeps that safe. The
   re-stamp exemption does not apply either: the pause gate exempts re-stamps so a live child always has its session id recorded, and under a stop the refused
   `--pid` call costs the kill nothing, because `cmdAbort` reads that child's pid from `<dir>/logs/<id>.pid` instead (bug-43 — the child is NOT already dead
   or about to be, which is what this sentence used to claim). Narrowing the gate to exempt a same-stage `--pid` re-stamp was weighed there and declined: a
@@ -3363,9 +3364,9 @@ assignee still on its issue. Five things this entry pins, because each looks arb
   lands — on an already-released claim, which is exactly the case `GithubSource.heartbeat` accepts and where it sets `finished` and nothing else.
 - **Counters are billed the ordinary way**, read through `claimCountersFor` rather than omitted: the session did the work it did up to the abort. This is not
   `backlog.mjs stop --abandon`'s dead-interval case.
-- **The marker-preserved item is released too.** `abort`'s one branch that skips an item's git teardown — a worktree still carrying an in-progress `phase:`
-  marker — cannot fire for a tracker item at all (there is no item file for `findItemFilePath` to find), and an item left in place still needs its claim back,
-  because the run that held it is over either way. A files run makes no request on any path, since `trackerRelease` returns immediately with no `claim`.
+- **The marker-preserved item is released too.** `abort`'s marker branch that skips an item's git teardown — a worktree still carrying an in-progress
+  `phase:` marker, or, for a tracker item, which has no file to carry one, a worktree whose item is still staged `dispatched` (#265) — leaves the work in place,
+  and an item left in place still needs its claim back, because the run that held it is over either way. A files run makes no request on any path, since `trackerRelease` returns immediately with no `claim`.
 - **`takeOverRun` runs BEFORE the release loop, and that order is load-bearing** (bug-42). The abort session is not the holder of any of these claims — the
   driver that posted them is, and on the path this exists for it is dead — so each release is authorised by `runId` alone, the "the RUN that owns the claim"
   clause above. Taking the run's lease first is what makes that assertion true at the moment it is made; moving the releases above the lease take would turn it

@@ -51,7 +51,7 @@ things are worth knowing before you run it:
 - **It recovers the session id the same way.** The same stop never reaches `watch`, the only other reader of the child's init event, so an item whose run file
   still says `sessionId: null` gets it from `<dir>/logs/<id>.jsonl` (bug-52). A recorded id is never replaced, and a missing or init-less log leaves it null.
 - **A worktree carrying an in-progress marker is still left in place**, with an `attention` entry naming it. A stop may abandon an item; it may not destroy
-  uncommitted work.
+  uncommitted work. In a tracker project, where no item file exists to carry a marker, an item still staged `dispatched` is the marked one (#265).
 - **An `abort` that exits `7` saying the run is already being aborted means another session is ending this run** (bug-54). The board's Stop also spawns an
   `--abort` session, so one stop always reaches a live run twice, and the tool lets exactly one of them tear anything down. Do **not** read, `git status` or
   otherwise inspect any worktree — the other abort is emptying it, and what you would see is its teardown, not the child's work. Report that session's id,

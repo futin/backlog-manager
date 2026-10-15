@@ -1997,7 +1997,9 @@ function trackerHeartbeat(run, item) {
  * totals live. A race's two live claims were both seeded from the same prior
  * claim, so either one's counters are the same base.
  *
- * What this run spent is the sum over its own `usage` entries: seconds of
+ * What this run spent is the sum over its own `usage` entries, less what the
+ * claim's base already carries (`claimBilled`, #267 — set when a re-claim on
+ * leaving `parked` is seeded from the park's own release): seconds of
  * wall-clock, and the three token kinds that are actually BILLED. Cache READS
  * are excluded, exactly as `backlog.mjs stop` excludes them for a files item —
  * they routinely run an order of magnitude above everything else and including
@@ -2027,14 +2029,13 @@ function claimCountersFor(run, item) {
       ? held.data.record.counters
       : { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 };
 
-  let ms = 0;
-  let tokens = 0;
-  for (const entry of item.usage ?? []) {
-    if (Number.isFinite(entry.durationMs)) ms += entry.durationMs;
-    for (const key of ['inputTokens', 'outputTokens', 'cacheCreationTokens']) {
-      if (Number.isFinite(entry[key])) tokens += entry[key];
-    }
-  }
+  // Only what the claim's base does not already carry (#267). A re-claim on leaving `parked` is seeded from the counters the park's release just wrote,
+  // and those already include every entry `usage` held at the time — so `claimBilled` records that total when the claim is taken, and is taken off
+  // here. A total rather than an entry index because `usage` replaces an entry by slot: a resumed driver re-recording a pre-park transcript changes no
+  // index, and only a difference of totals bills that correctly, which is nothing. Floored at zero — a re-recorded entry that shrank is not a refund.
+  const spent = usageTotals(item.usage);
+  const ms = Math.max(0, spent.ms - (item.claimBilled?.ms ?? 0));
+  const tokens = Math.max(0, spent.tokens - (item.claimBilled?.tokens ?? 0));
 
   return {
     groomElapsed: base.groomElapsed ?? 0,
@@ -2045,6 +2046,20 @@ function claimCountersFor(run, item) {
     groomTokens: base.groomTokens ?? 0,
     executeTokens: (base.executeTokens ?? 0) + tokens
   };
+}
+
+// The billable sum over an item's `usage` entries: wall-clock milliseconds, and the three token kinds that are BILLED — cache reads excluded, see
+// `claimCountersFor`. A `null` field contributes nothing.
+function usageTotals(usage) {
+  let ms = 0;
+  let tokens = 0;
+  for (const entry of usage ?? []) {
+    if (Number.isFinite(entry.durationMs)) ms += entry.durationMs;
+    for (const key of ['inputTokens', 'outputTokens', 'cacheCreationTokens']) {
+      if (Number.isFinite(entry[key])) tokens += entry[key];
+    }
+  }
+  return { ms, tokens };
 }
 
 /**
@@ -3325,6 +3340,11 @@ function cmdStage(argv, out = console.log) {
       return 0;
     }
     item.claim = { commentId: claimed.commentId };
+    /* #267: what the new claim's seed already carries of this item's spend. The server seeds a claim from the newest claim's counters, which on leaving
+       `parked` are the ones the park's release wrote — this item's `usage` as it stood then — so the release that ends this claim must bill only what
+       comes after. Recorded on every claim this command takes, so a second park and re-claim moves it forward rather than keeping the first. Only
+       here and never in `cmdClaim`: a resumed driver's re-claim takes over a claim that was never released, whose seed has billed none of it. */
+    if (item.usage !== undefined && item.usage.length > 0) item.claimBilled = usageTotals(item.usage);
   }
 
   /* **`merged` closes the issue, and it happens BEFORE the stage is written.**
@@ -5510,6 +5530,9 @@ function cmdVerify(argv) {
 // would read an already-delivered branch as unfinished work and dispatch
 // straight back into it — redoing an item whose result is already sitting
 // on disk as the deliverable.
+// #264: the stages whose worktree and branch `abort` keeps whole — work that was committed and never merged. See `cmdAbort`'s THIRD exemption.
+const KEPT_BY_ABORT_STAGES = new Set(['parked', 'failed']);
+
 const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked']);
 
 // The fixed suggestion vocabulary the brief names, in priority order:
@@ -5704,6 +5727,25 @@ function cmdReconcile(argv) {
 // merge time (§9), so attempting `branch -D` again here is a harmless
 // no-op, not a second case needing a guard.
 //
+// A THIRD exemption, #264: an item staged `parked` or `failed` keeps its
+// worktree AND its branch, exactly as the marker case does. Every park path
+// in SKILL.md keeps both on purpose (a merge conflict, an exhausted fix
+// loop), and a failed item's branch is the same shape: committed work that
+// never reached the base, and in merge mode never pushed either, so the
+// branch is the only copy. Such an item has already run `stop
+// --keep-started`, so it carries no `phase:` marker and the first exemption
+// never sees it — which is how abort used to `worktree remove --force` and
+// `branch -D` it as "disposable". Keyed on the stage, not the marker, and
+// recorded in `attention` for the same stdout-may-go-unread reason.
+//
+// The marker itself, in a TRACKER project (#265): there is no item file, and
+// the execute session under the run marker runs no `start`, so no `phase:`
+// line can exist to be found. There an item whose worktree exists and whose
+// stage is still `dispatched` is the marked one — the stage an execute
+// session is writing in, with nothing yet committed — and it gets the first
+// exemption's treatment, with an attention entry that names no
+// `backlog.mjs stop` because there is nothing to stop.
+//
 // This does NOT stop abort from finishing overall: every OTHER item's
 // worktree and branch still get torn down, `run.status` still becomes
 // `aborted`, and the run still ends — only the marked item's own git
@@ -5776,6 +5818,7 @@ function cmdAbort() {
   const removedIds = [];
   const preservedIds = [];
   const keptBranchIds = [];
+  const keptItemIds = [];
   const signalledIds = [];
 
   // bug-52: recover every item's session id before anything else in this command reads the item — the claim releases below among them. Over the whole
@@ -5847,11 +5890,36 @@ function cmdAbort() {
     }
   }
 
+  // #265: a tracker item has no file, and the execute session under the run marker runs no `start`, so the `phase:` marker below could never be found in a
+  // tracker project — every Stop mid-execute fell through to the forced teardown and destroyed the session's uncommitted edits. There the STAGE is the
+  // marker: `dispatched` is the one stage an execute session is writing into the worktree, the same window a file's `phase: execute` covers. Read once,
+  // like `cmdReconcile` reads it, and from `run.project` rather than the cwd for the same reason.
+  const tracker = projectSource(run.project) === 'github';
   for (const item of run.queue) {
     let marker = false;
     if (item.worktree && fs.existsSync(item.worktree)) {
-      const found = findItemFilePath(item.worktree, item.id);
-      marker = !!(found && itemHasPhaseMarker(found.path));
+      if (tracker) {
+        marker = item.stage === 'dispatched';
+      } else {
+        const found = findItemFilePath(item.worktree, item.id);
+        marker = !!(found && itemHasPhaseMarker(found.path));
+      }
+    }
+
+    if (marker && tracker) {
+      // No `backlog.mjs stop` in this entry, unlike the file case below: there is no marker to clear, and the claim is released by `cmdFinish` with every
+      // other one this run holds — so the only thing left for a person is the work itself.
+      run.attention.push({
+        id: item.id,
+        kind: 'parked',
+        detail:
+          `worktree ${item.worktree} belongs to an item still staged 'dispatched' — its execute session may have been mid-way, and its edits are not ` +
+          `committed — LEFT IN PLACE (not removed), since removing it would destroy uncommitted work this tool has no way to save first. Keep what you ` +
+          `want from it, then remove the worktree (\`git -C ${projectRoot} worktree remove ${item.worktree}\`) and branch ` +
+          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand — a second abort on this run finds it aborted and does nothing.`
+      });
+      preservedIds.push(item.id);
+      continue;
     }
 
     if (marker) {
@@ -5873,6 +5941,22 @@ function cmdAbort() {
           `(\`git -C ${projectRoot} branch -D ${item.branch}\`) by hand — a second abort on this run finds it aborted and does nothing.`
       });
       preservedIds.push(item.id);
+      continue;
+    }
+
+    if (KEPT_BY_ABORT_STAGES.has(item.stage)) {
+      // #264 — the THIRD exemption in this function's header comment. A parked or failed item already ran `stop --keep-started`, so it has no marker
+      // and would otherwise fall through to the forced teardown below, deleting the only copy of committed work that never reached the base.
+      run.attention.push({
+        id: item.id,
+        kind: 'parked',
+        detail:
+          `worktree ${item.worktree ?? '(none recorded)'} and branch ${item.branch ?? '(none recorded)'} were KEPT by abort (not removed) — this item ` +
+          `finished as '${item.stage}', so its branch holds committed work that was never merged into ${run.base ?? BASE_REF_DEFAULT}. Merge or inspect it by ` +
+          `hand; once it is no longer wanted, remove the worktree (\`git -C ${projectRoot} worktree remove ${item.worktree}\`) and branch ` +
+          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) yourself.`
+      });
+      keptItemIds.push(item.id);
       continue;
     }
 
@@ -5910,8 +5994,9 @@ function cmdAbort() {
         });
         keptBranchIds.push(item.id);
       } else {
-        // Every other terminal (or non-terminal) stage's branch is
-        // genuinely disposable here — most notably `merged`, whose branch
+        // Every other stage that reaches this line — `parked` and
+        // `failed` never do (#264, the THIRD exemption) — has a branch that
+        // is genuinely disposable here: most notably `merged`, whose branch
         // was already deleted by the run itself at merge time (§9), which
         // makes this call a harmless no-op for that stage rather than a
         // second case needing its own guard.
@@ -5982,6 +6067,7 @@ function cmdAbort() {
     `abort: signalled ${signalledIds.length} live session(s)${signalledIds.length ? ` (${signalledIds.join(', ')})` : ''}; ` +
       `removed ${removedIds.length} item(s)${removedIds.length ? ` (${removedIds.join(', ')})` : ''}; ` +
       `kept ${keptBranchIds.length} branch(es) already staged 'branched'${keptBranchIds.length ? ` (${keptBranchIds.join(', ')} — see attention)` : ''}; ` +
+      `kept ${keptItemIds.length} parked/failed item(s)${keptItemIds.length ? ` (${keptItemIds.join(', ')} — see attention)` : ''}; ` +
       `left ${preservedIds.length} in place with an in-progress marker${preservedIds.length ? ` (${preservedIds.join(', ')} — see attention)` : ''}`
   );
 

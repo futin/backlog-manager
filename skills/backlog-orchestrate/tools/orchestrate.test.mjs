@@ -3139,6 +3139,51 @@ test("abort still deletes a merged item's branch normally — only a branched it
   assert.equal(after.attention[0].id, 'task-62');
 });
 
+// #264: a `parked` or `failed` item's branch holds committed work that never reached the base — a merge conflict, an exhausted fix loop — and in merge mode
+// that branch is never pushed, so it is the only copy. Such an item has already run `stop --keep-started`, so it carries no `phase:` marker, and before this
+// fix the teardown read "no marker" as "disposable" and force-removed both. One run, three items: the parked and the failed one keep worktree AND branch, and
+// a plain in-flight item without a marker is still torn down, so the new gate is pinned from both sides.
+test('abort keeps a parked and a failed item\'s worktree and branch, and still tears down an in-flight item without a marker (#264)', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-63', 'A parked task');
+  seedReadyTask(project, 'task-64', 'A failed task');
+  seedReadyTask(project, 'task-65', 'An in-flight task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  const trees = {};
+  for (const id of ['task-63', 'task-64', 'task-65']) {
+    trees[id] = path.join(project, '.worktrees', id);
+    assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', trees[id], '-b', `backlog/${id}`, 'HEAD'], { encoding: 'utf8' }).status, 0);
+    assert.equal(run(project, home, 'stage', id, 'dispatched', '--worktree', trees[id], '--branch', `backlog/${id}`).status, 0);
+  }
+  // The parked item's work is a real commit on its branch, never merged — the exact shape the bug destroyed.
+  fs.writeFileSync(path.join(trees['task-63'], 'work.txt'), 'unmerged work\n');
+  assert.equal(spawnSync('git', ['-C', trees['task-63'], 'add', 'work.txt'], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('git', ['-C', trees['task-63'], '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-m', 'work'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-63', 'parked').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-64', 'failed').status, 0);
+
+  const out = run(project, home, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  for (const id of ['task-63', 'task-64']) {
+    assert.equal(fs.existsSync(trees[id]), true, `${id}'s worktree must survive abort`);
+    const kept = spawnSync('git', ['-C', project, 'branch', '--list', `backlog/${id}`], { encoding: 'utf8' });
+    assert.match(kept.stdout, new RegExp(`backlog/${id}`), `${id}'s branch must survive abort`);
+  }
+  assert.equal(fs.readFileSync(path.join(trees['task-63'], 'work.txt'), 'utf8'), 'unmerged work\n');
+  assert.equal(fs.existsSync(trees['task-65']), false);
+  assert.equal(spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-65'], { encoding: 'utf8' }).stdout.trim(), '');
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted');
+  const kept = after.attention.filter((a) => /KEPT by abort/.test(a.detail)).map((a) => a.id).sort();
+  assert.deepEqual(kept, ['task-63', 'task-64']);
+  assert.match(out.stdout, /removed 1 item\(s\) \(task-65\)/);
+  assert.match(out.stdout, /kept 2 parked\/failed item\(s\) \(task-63, task-64/);
+});
+
 test('abort with no run exits 3', (t) => {
   const { home, project } = orchFixture(t);
 
@@ -8067,6 +8112,69 @@ test('usage entries with no numbers at all bill nothing, and the read counters g
   assert.deepEqual(released[0].body.counters, { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 });
 });
 
+/* #267. Parking RELEASES the claim with this run's bill so far, and leaving `parked` re-claims (#250) — and the server seeds that new claim from the newest
+   claim's counters, which are the ones the park just wrote. The release at the end then read that seed as its base and added EVERY usage entry the item
+   carries, so the pre-park spend was billed twice: `base0 + 2·U1 + U2`. These routes behave like the server on the one point that matters — a claim is seeded
+   from what the last release wrote, and the GET answers it — so the final counters are the sum the issue's permanent record actually ends up with. */
+function billingRoutes(project) {
+  let counters = { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 };
+  let nextComment = 500;
+  return claimRoutes(project, {
+    '/api/items/claim': (body, _url, method) =>
+      method === 'GET'
+        ? { body: { commentId: nextComment, record: { v: 1, counters } } }
+        : { status: 201, body: { commentId: (nextComment += 1), record: { v: 1, session: body?.session, run: body?.run, counters } } },
+    '/api/items/release': (body) => {
+      if (body?.counters !== undefined) counters = body.counters;
+      return { status: 201, body: { commentId: nextComment, record: { v: 1, counters } } };
+    },
+  });
+}
+
+async function parkResumeMerge(t, project, home, port, afterReclaim) {
+  assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+  assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3.jsonl'))).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'parked')).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'inspecting')).status, 0);
+  await afterReclaim();
+  const file = path.join(project, 'outcome.md');
+  fs.writeFileSync(file, '## Outcome\n\nmerged after a park.\n');
+  const out = await runApi(project, home, port, 'stage', '3', 'merged', '--outcome', file);
+  assert.equal(out.status, 0, out.stderr);
+}
+
+test('#267: park, re-claim, merge bills the pre-park session once — base + U1 + U2, not base + 2·U1 + U2', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(billingRoutes(project), async (port) => {
+    await parkResumeMerge(t, project, home, port, async () => {
+      assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3-retry-1.jsonl'))).status, 0);
+    });
+  });
+
+  const released = posts(requests, 'release');
+  assert.deepEqual(released.map((r) => r.body.reason), ['parked', 'merged']);
+  // The park bills U1 (812 s, 257,463 tokens) onto the base; the merge bills only U2, the retry, on top of that.
+  assert.deepEqual(released[0].body.counters, { groomElapsed: 1, executeElapsed: 2 + 812, groomTokens: 3, executeTokens: 4 + 257_463 });
+  assert.deepEqual(released[1].body.counters, { groomElapsed: 1, executeElapsed: 2 + 812 * 2, groomTokens: 3, executeTokens: 4 + 257_463 * 2 });
+});
+
+test('#267: re-recording a pre-park transcript after the re-claim bills nothing a second time', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(billingRoutes(project), async (port) => {
+    await parkResumeMerge(t, project, home, port, async () => {
+      // Same slot, same numbers: `usage` replaces the entry in place (a resumed driver re-running inspect), so the item's total is unchanged — and so
+      // is what is left to bill.
+      assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3.jsonl'))).status, 0);
+    });
+  });
+
+  const released = posts(requests, 'release');
+  assert.deepEqual(released.at(-1).body.counters, { groomElapsed: 1, executeElapsed: 2 + 812, groomTokens: 3, executeTokens: 4 + 257_463 });
+});
+
 test('a resumed driver re-claims its own run-s in-flight items under the same runId', async (t) => {
   const { home, project } = trackerFixture(t);
 
@@ -8656,6 +8764,45 @@ test('#240: abort releases each held claim once, not once in abort and again in 
   const { out, requests } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'abort'));
   assert.equal(out.status, 0, out.stderr);
   assert.deepEqual(posts(requests, 'release').map((r) => [r.body.commentId, r.body.reason]), [[505, 'aborted']]);
+});
+
+// #265: a tracker item has no file, and execute under the run marker runs no `start`, so the `phase:` marker abort used to protect live work could never be
+// found — a Stop mid-execute force-removed the worktree and deleted the branch, uncommitted edits included. In a tracker project the stage is the marker:
+// a `dispatched` item keeps its worktree and branch untouched, and a later stage with nothing uncommitted is still torn down as before.
+test('#265: a tracker abort keeps a dispatched item-s dirty worktree and branch, and still tears down a later-stage item', async (t) => {
+  const { home, project } = await seededTrackerRun(t, [
+    { id: '5', stage: 'dispatched', claim: 505 },
+    { id: '7', stage: 'reviewing', claim: 507 },
+  ]);
+  commitEverything(project, 'seed');
+  const trees = {};
+  for (const id of ['5', '7']) {
+    trees[id] = path.join(project, '.worktrees', id);
+    assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', trees[id], '-b', `backlog/${id}`, 'HEAD'], { encoding: 'utf8' }).status, 0);
+  }
+  // The live execute session's work: written, never committed — the exact thing `worktree remove --force` destroyed.
+  fs.writeFileSync(path.join(trees['5'], 'work.txt'), 'uncommitted work\n');
+  const file = runFile(home, project);
+  const seeded = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const q of seeded.queue) Object.assign(q, { worktree: trees[q.id], branch: `backlog/${q.id}` });
+  fs.writeFileSync(file, `${JSON.stringify(seeded, null, 2)}\n`);
+
+  const { out } = await withApi(FINISH_ROUTES, (port) => runApi(project, home, port, 'abort'));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(fs.readFileSync(path.join(trees['5'], 'work.txt'), 'utf8'), 'uncommitted work\n');
+  assert.match(spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/5'], { encoding: 'utf8' }).stdout, /backlog\/5/);
+  assert.equal(fs.existsSync(trees['7']), false, 'a reviewing item has nothing uncommitted and is torn down as before');
+  assert.equal(spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/7'], { encoding: 'utf8' }).stdout.trim(), '');
+
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.status, 'aborted');
+  assert.deepEqual(after.attention.map((a) => a.id), ['5']);
+  assert.match(after.attention[0].detail, new RegExp(trees['5'].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  // There is no marker to clear in a tracker project, so the files-project recovery command would be an instruction nobody can follow.
+  assert.doesNotMatch(after.attention[0].detail, /backlog\.mjs stop/);
+  assert.match(out.stdout, /removed 1 item\(s\) \(7\)/);
+  assert.match(out.stdout, /left 1 in place with an in-progress marker \(5/);
 });
 
 test('bug-40: a files run-s abort makes no API request on any path', async (t) => {
