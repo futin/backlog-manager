@@ -102,7 +102,7 @@ describe('the two parsers of one rule', () => {
    * `www.github.com` and any URL scheme while this file accepted neither, so
    * the card stayed silent for an origin `connect` would have connected.
    */
-  it('answers identically to the skill’s own parser on every shape', () => {
+  it('answers identically to the skill’s own parser on every shape', async () => {
     const skill = pathToFileURL(join(__dirname, '..', 'skills', 'backlog', 'tools', 'backlog.mjs')).href;
     const script = `
       const remotes = ${JSON.stringify(SHARED_REMOTES)};
@@ -124,14 +124,14 @@ describe('the two parsers of one rule', () => {
 });
 
 describe('originRepo', () => {
-  it('reads a repo’s origin', () => {
-    expect(originRepo(repo('git@github.com:futin/backlog-manager.git'))).toBe('futin/backlog-manager');
+  it('reads a repo’s origin', async () => {
+    expect(await originRepo(repo('git@github.com:futin/backlog-manager.git'))).toBe('futin/backlog-manager');
   });
 
-  it('answers null for a repo with no origin and for a directory that is not a repo', () => {
-    expect(originRepo(repo())).toBeNull();
+  it('answers null for a repo with no origin and for a directory that is not a repo', async () => {
+    expect(await originRepo(repo())).toBeNull();
     const plain = mkdtempSync(join(tmpdir(), 'bm-plain-'));
     dirs.push(plain);
-    expect(originRepo(plain)).toBeNull();
+    expect(await originRepo(plain)).toBeNull();
   });
 });

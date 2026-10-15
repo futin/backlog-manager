@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { runGit } from '../git-run.util';
 
 /**
  * The GitHub repo a files project's `origin` points at, read from git PER
@@ -16,6 +16,10 @@ import { execFileSync } from 'node:child_process';
  * that is not GitHub. This feeds a suggestion, not a fact about the project,
  * and a card that showed a wrong connect command would be worse than one that
  * shows none.
+ *
+ * Async and time-bounded since #277 (`runGit`): a slow repository makes the
+ * Trackers card slow, never the whole server. A timeout is one more failure,
+ * and degrades to `null` like the rest.
  */
 
 /** `owner/name`, GitHub's own allowed character set on each side — the same
@@ -71,20 +75,9 @@ export function parseGithubRemote(url: string): string | null {
   return REPO.test(repo) ? repo : null;
 }
 
-/** The project's `origin` as `owner/name`, or `null`. Synchronous and bounded,
+/** The project's `origin` as `owner/name`, or `null`. Async and bounded,
  *  like every other git read in a request path here. */
-export function originRepo(projectPath: string): string | null {
-  let out: string;
-  try {
-    out = execFileSync('git', ['-C', projectPath, 'remote', 'get-url', 'origin'], {
-      cwd: projectPath,
-      encoding: 'utf8',
-      timeout: 5000,
-      maxBuffer: 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore']
-    });
-  } catch {
-    return null;
-  }
-  return parseGithubRemote(out);
+export async function originRepo(projectPath: string): Promise<string | null> {
+  const out = await runGit(['-C', projectPath, 'remote', 'get-url', 'origin'], { cwd: projectPath, maxBuffer: 1024 * 1024 });
+  return out === null ? null : parseGithubRemote(out);
 }

@@ -3510,6 +3510,81 @@ because the tracker's label set is the closed nine of `labels.ts` and inventing 
 repository — the issue's date is its `created` frontmatter, not the commit that filed it. None of the three is recoverable from the tracker, which is why the
 files' history is worth keeping in git rather than deleting the whole `backlog/` directory.
 
+## The server never spawns git synchronously in a request path
+
+Every git read the server makes goes through `runGit` (`server/src/git-run.util.ts`): `execFile`, promisified, so the event loop keeps turning while git runs,
+with a 10 s timeout, and a `null` answer for every failure alike. The rule is that no `execFileSync`, `spawnSync` or `execSync` exists anywhere under
+`server/src`, and `test/git-run.test.ts` fails on one.
+
+### The incident
+
+2026-10-15: a stray `find /` in the server container slowed Docker's bind-mount I/O. `git status` took 5–38 s inside the container against 75 ms on the host,
+and because every git call in a request path was `execFileSync` or `spawnSync`, each one froze the whole Node process for as long as it ran. `/api/health` —
+which does no I/O at all — took 23 s, `/api/projects` 16 s, `/api/agents/status` 20 s. The slow part was one repository's git; the outage was the entire API's,
+and it looked like a hung server rather than a slow disk, which is the worst thing a loopback-only tool can look like. An async spawn trades that for the honest
+shape: the routes that need git are slow, every other route answers normally. After the fix the route case in `test/git-run.test.ts` has `/api/health` answering
+in 58 ms while `/api/items` waits 1.1 s on a fake `git` that sleeps for a second.
+
+### Failure is a value, and a timeout is just another failure
+
+Each call site already had exactly one failure branch, and each degrades rather than throws, so `runGit` answers `null` for a timeout, a non-zero exit, a spawn
+error (`ENOENT`, a `cwd` that is not a directory) and an oversized output alike, and a timeout lands in whatever that site did with `null` before:
+`lastCommitDates` → the empty map (every caller reads it as "fall back to `created`"), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
+`resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list. A command that succeeds and prints nothing answers `''`, not
+`null`, so `show-ref --quiet` callers test `!== null`. Nobody added a "timed out" branch, because none of the five has a reason to treat a slow repository
+differently from an absent one; a site that grows one is making a new decision and should say so here.
+
+**Ten seconds, not five.** The synchronous callers carried 5 s, and that number was a cap on how long the entire process could be frozen, so it had to be short.
+Async removes the freeze; the bound now says only how long one request is willing to wait before it gives up with the degraded answer, and the incident's 5–38 s
+spread says 5 s would have degraded healthy-but-slow repositories too eagerly.
+
+### Sharing a pending spawn is `lastCommitDates`' alone
+
+`lastCommitDates` costs a spawn per registered project on both `/api/items` and `/api/projects`, and it has a cheap, trustworthy key (the mtimes of `index` and
+`logs/HEAD`, see the middle-rung rule). Async made a new failure possible: a burst of N requests landing while one slow git is still running would each miss the
+memo and spawn their own, so the memo would be bypassed in exactly the situation, a slow repository, where it matters most, and the pile-up would be the
+server's own doing. So concurrent misses for the same project **and the same fingerprint** share one pending promise. A caller under a different fingerprint is
+not handed it, because that spawn began before whatever moved the key. The entry is dropped when its spawn settles, and a failed read is neither memoised nor
+left pending, so the next call retries instead of the project being pinned to the `created` fallback until a commit moves the fingerprint.
+
+`uncommittedItemPaths` and `originRepo` have no such sharing and must not get it. The uncommitted read's whole contract is "per request, memoised nowhere" — its
+subject is the working tree, which the fingerprint does not watch — and a request that arrives after an edit must not be handed a read that began before it. Two
+concurrent calls spawn git twice; `test/git-run.test.ts` pins that.
+
+### What was left synchronous, deliberately
+
+The synchronous `fs` reads (`readFileSync`, `readdirSync`, `statSync` in `orchestrator.service.ts`, `scan.util.ts`, `resolve.util.ts`) were not converted.
+During the incident `ls -R` of a backlog took 76 ms while git took 38 s; they were not what stalled anything, and converting them is churn with no failure
+behind it. The grep guard is for spawns only, and scoped to `server/src` — the skills' own CLIs (`skills/**/tools/*.mjs`) legitimately `spawnSync`, because
+nothing there serves requests.
+
+## A client poller built on `useCoalescedFetch` never has two of its own requests in flight
+
+The other half of the same incident. While the server was stalled, the client's `setInterval` pollers kept ticking on the wall clock whether or not the last
+request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
+them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
+shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog` and `useAgents`; none of them
+holds a `setInterval`.
+
+**The timer is armed by an answer.** The next tick is a `setTimeout` set when the current request settles, `intervalMs` later, so a slow answer slows the poll
+instead of piling onto it and at most one timer is ever pending. Each hook keeps its own `armed` condition for "something is moving worth polling" exactly as
+its interval effect used to guard on it; flipping it false clears the pending timer on that render, and an in-flight request finishes without re-arming
+anything.
+
+**A trigger mid-flight folds into one follow-up, not a drop and not a second request.** A mount, a window focus or an explicit refresh that lands while a
+request is in the air must not start another one, but it must not be swallowed either: the request already in flight was issued before whatever the trigger is
+about (the Resume click's spawn, the tab just returned to) and may answer the old state. So the trigger marks the poller dirty, and when the flight settles
+exactly one follow-up runs at once, however many triggers arrived. Every caller that asked during the flight is handed that same follow-up promise, so the
+answer it receives was requested after it asked. The timer re-arms from the last request of a chain, never from the one it queued behind, so a focus storm
+cannot make the poll tick sooner than `intervalMs` after the answer on screen.
+
+**`useTrackers` is the deliberate exception, which is why the rule is scoped to hooks built on `useCoalescedFetch` rather than stated for every client
+poller.** It is not built on this: it aims its own timer at the server's poll clock, and its focus refetch, the timer's read and `saveInterval`'s refetch can
+all be in flight at once. It keeps correctness a different way — each read takes a sequence number and a superseded one does nothing when it settles (#231) —
+rather than by preventing the overlap. `/api/trackers` reads `originRepo` per files project, so it is a git-backed route and a candidate to move onto the same
+footing later; until then a window focus during a `/api/trackers` timer read can legitimately show two pending requests. `useNow`'s `setInterval` is a display
+clock, not a request.
+
 <!-- docs-sync:
   sources:
     - server/src

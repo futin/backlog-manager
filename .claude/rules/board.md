@@ -75,3 +75,16 @@ paths: ["client/src/**"]
 - **"Queue wait is not work."** `itemDurationMs` (`client/src/lib/run-time.ts`) is the one implementation of "how long did this item take"; machine time
   (`runStageTotals`) excludes `pending` too; `MACHINE_STAGES` is the closed list of what counts. Why:
   [invariants.md](docs/subsystems/invariants.md#queue-wait-is-not-work)
+- **A client poller built on `useCoalescedFetch` never has two of its own requests in flight: its timer is armed by an answer, and a trigger that lands
+  mid-flight folds into one follow-up (`useTrackers` is the deliberate exception, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React) is the
+  one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a
+  request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared by every trigger
+  that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout` re-armed `intervalMs`
+  after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes; nothing re-arms after
+  it) and on unmount, which also drops a queued follow-up. `armed`
+  stays each hook's OWN condition for "something is moving" — `useOrchestratorRuns`'s live/remote/starting/grace test, `useBoard`'s `hasSyncingTracker`, the
+  watchdog's armed sweeper — and `useAgents` passes none (mount, focus and the explicit `reload`, coalesced). A hook still guards the state its settled request
+  sets with `useMountedRef`. `useTrackers` is the deliberate exception, and the rule is scoped to the hooks built on this for it: its timer chases the server's
+  own poll clock, and a focus refetch, the timer's read and `saveInterval`'s refetch CAN overlap — it guards writes by sequence number (only the newest read may
+  write) instead of preventing the overlap (#231). Why:
+  [invariants.md](docs/subsystems/invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)

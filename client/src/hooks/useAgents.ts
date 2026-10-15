@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { fetchAgentsStatus } from '../lib/agents';
+import { useCoalescedFetch } from './useCoalescedFetch';
+import { useMountedRef } from './useMountedRef';
 import type { AgentsStatus } from '../../../shared/types';
 
 /**
@@ -9,6 +11,14 @@ import type { AgentsStatus } from '../../../shared/types';
  * started, a session opened in another repo) happens outside this tab, and you
  * come back to the tab afterwards. A timer would ask the same question worse,
  * and the server's project-map cache means a focus refetch is nearly free.
+ *
+ * #277: never two requests in flight FROM ONE HOOK INSTANCE. Focus storms and
+ * explicit `reload`s each used to start their own `/api/agents/status` (the
+ * duplicate pending requests seen when the server stalled); now a trigger that
+ * lands mid-flight queues exactly ONE follow-up behind it
+ * (`useCoalescedFetch`), so the answer a late caller gets was requested after
+ * it asked. The coalescing is per instance, not per page: two components that
+ * each call `useAgents` still each hold their own poller.
  *
  * `null` means "not answered yet". Callers render no button in that state
  * rather than a disabled one, so a board load does not flash a dead control.
@@ -20,16 +30,20 @@ import type { AgentsStatus } from '../../../shared/types';
  * (`DispatchButton`, deciding whether a click on a project-visibility block
  * may open the sheet after all). That state lands on a later render, which is
  * one render too late for the click that provoked it, so the answer is handed
- * back directly as well.
+ * back directly as well. A caller that asks while a request is in flight is
+ * handed the follow-up's answer — the same promise as every other caller that
+ * asked during that flight.
  */
 export function useAgents(): { status: AgentsStatus | null; reload: () => Promise<AgentsStatus> } {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
 
-  const reload = useCallback(
+  const mounted = useMountedRef();
+
+  const load = useCallback(
     () =>
       fetchAgentsStatus()
         .then((fresh) => {
-          setStatus(fresh);
+          if (mounted.current) setStatus(fresh);
           return fresh;
         })
         // A failing status endpoint is our own API being down, which the board's
@@ -50,11 +64,13 @@ export function useAgents(): { status: AgentsStatus | null; reload: () => Promis
             spawnMaxPermission: null,
             projectPaths: []
           };
-          setStatus(off);
+          if (mounted.current) setStatus(off);
           return off;
         }),
-    []
+    [mounted]
   );
+
+  const reload = useCoalescedFetch(load);
 
   useEffect(() => {
     // `void`: the promise is the return of an explicit re-ask (bug-13), and

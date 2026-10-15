@@ -158,7 +158,7 @@ describe('useWatchdog', () => {
   // that move on their own — `WatchdogMonitor`'s state card and rows. The
   // Settings group that used to carry that countdown no longer renders
   // anything that changes on a clock, so it passes `live: false` and the
-  // interval is never installed. Everything else about the hook is
+  // poll timer is never armed. Everything else about the hook is
   // deliberately unchanged under the flag: these cases exist as much to pin
   // what `live: false` must NOT switch off as what it must.
 
@@ -170,7 +170,7 @@ describe('useWatchdog', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Two full poll periods, not one: an off-by-one in the guard (say, an
-    // interval installed and cleared on the next render) would still be
+    // timer armed and cleared on the next render) would still be
     // caught by the first, but a poll that merely starts LATE would slip
     // through a single-period assertion.
     await act(async () => {
