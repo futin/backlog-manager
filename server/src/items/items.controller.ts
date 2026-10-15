@@ -30,7 +30,8 @@ export class ItemsController {
   }
 
   /**
-   * Which of one project's item files differ from `main` (task-32) — the
+   * Which of one project's item files differ from the run's base (task-32;
+   * `?base=`, #254, defaults to `main`) — the
    * Orchestrate sheet's own on-open read, so it can flag the rows whose bytes
    * on disk are not the bytes a run will act on, before anyone walks away
    * from a multi-hour operation.
@@ -62,10 +63,13 @@ export class ItemsController {
    * 404 is the registry's answer.
    */
   @Get('items/uncommitted')
-  uncommitted(@Query('project') project: string | undefined): UncommittedItems {
+  uncommitted(@Query('project') project: string | undefined, @Query('base') base: string | undefined): UncommittedItems {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
-    return this.items.uncommitted(trimmed);
+    // `base` is passed through untrimmed and unjudged: it is proved in the
+    // service, after the registry gate, by the same function that proves the
+    // orchestrate route's base (#254).
+    return this.items.uncommitted(trimmed, base);
   }
 
   /**

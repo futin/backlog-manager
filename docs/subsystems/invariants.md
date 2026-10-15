@@ -2257,8 +2257,11 @@ reverse.
 ### The gap it closes
 
 The sheet's queue preview is a pure derivation over the board's own item scan, which reads the **working tree**. The run that follows gates every item at
-`<base>` — `BASE_REF_DEFAULT` in `orchestrate.mjs`, i.e. `main`, and the board never passes `--base`, so `main` is the ref for every board-started run there
-will ever be. Those two readings disagree whenever the file on disk is not the file at `main` — which is broader than one situation, and the breadth is
+`<base>` — `BASE_REF_DEFAULT` in `orchestrate.mjs`, i.e. `main`, unless the sheet's base picker (task-44) chose another branch and the board passed `--base`.
+Since #254 the sheet asks this question at that same base (`?base=`, validated by `resolveBaseBranch` exactly as `POST /api/agents/orchestrate` validates the
+run's own base, and defaulting to `main`); before it, the lookup still asked about `main` whatever was picked, so for any other base the note flagged the wrong
+rows and `deselect uncommitted` dropped items the run would have executed. Every `main` in the rest of this section reads as "the chosen base". Those two
+readings disagree whenever the file on disk is not the file at `main` — which is broader than one situation, and the breadth is
 deliberate (see "one question, two fates" below). In the shape that prompted the task, the sheet previews a ready bug, `buildGatedQueue` reports
 `not committed on main — the worktree this run creates from main would not contain <path>`, and the item is skipped — after the person has walked away from a
 multi-hour unattended operation. The 2026-09-06 cross-run sweep counted five such skips across three projects (bug-12 twice in backlog-manager, bug-13 and bug-7
@@ -2306,8 +2309,8 @@ The cost is affordable without one. Measured 2026-09-07 across the five projects
 50–270ms per project; #235's third read (`ls-tree`, §3) was re-measured 2026-10-02 on three of those projects at 4–9ms, with the whole call at 20–39ms warm —
 and unlike `lastCommitDates`, which runs for **every** registered project on both `/api/items` and `/api/projects` (the two the board fetches on mount and on
 every window focus), this runs for **one** project **once per sheet open**. That asymmetry is the whole reason one of these two functions needs a cache and the
-other must not have one. The client half enforces the cadence too: the effect is keyed on `[project]` alone, so walking the three steps or flipping a picker
-re-asks nothing.
+other must not have one. The client half enforces the cadence too: the effect is keyed on `[project, base]`, so walking the three steps or flipping the mode
+pickers re-asks nothing, and only picking a different base — which changes the answer (#254) — asks again.
 
 **A sibling endpoint, not a `BacklogItem` field**, for `merge-check`'s reason: a field would put an un-memoisable git read inside `scanProject`, which runs for
 every registered project on both `/api/items` and `/api/projects`.

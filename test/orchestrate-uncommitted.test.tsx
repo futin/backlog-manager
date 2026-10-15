@@ -539,7 +539,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
   );
 
   // --- case 24 ----------------------------------------------------------
-  it('case 24: fetches exactly once per sheet open, whatever is picked or walked', async () => {
+  it('case 24: fetches exactly once per sheet open, whatever mode is picked or step walked', async () => {
     stub({ paths: [TASK_2.path], absent: [], known: true });
     renderSheet();
     await waitFor(() => expect(within(row('task-2')).getByText('uncommitted')).toBeInTheDocument());
@@ -557,7 +557,55 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
     expect(asked).toHaveLength(1);
     // The URL carries the project, encoded — the same contract
     // `fetchMergeCheck` has.
-    expect(asked[0]).toBe(`/api/items/uncommitted?project=${encodeURIComponent('/abs/alpha')}`);
+    expect(asked[0]).toBe(`/api/items/uncommitted?project=${encodeURIComponent('/abs/alpha')}&base=main`);
+  });
+
+  // --- case 24b (#254) ---------------------------------------------------
+  //
+  // The run gates at the picked base, so the flag has to be asked there too.
+  // Picking `feature/x` on step 3 re-asks with `base=feature/x`, and walking
+  // back to step 1 shows that answer, worded with that base: the note names
+  // `feature/x` and the run's own verdict string for it, and the row `main`
+  // called absent is now unflagged. The two answers are chosen to disagree on
+  // every row, so a sheet still rendering the `main` answer fails each line.
+  it('case 24b: picking a base re-asks at that base and the note names it', async () => {
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
+      if (url.includes('/api/items/uncommitted')) {
+        return url.includes('base=feature%2Fx')
+          ? json({ paths: [TASK_3.path], absent: [TASK_3.path], known: true })
+          : json({ paths: [TASK_2.path], absent: [TASK_2.path], known: true });
+      }
+      if (url.includes('/api/agents/branches')) return json({ branches: ['main', 'feature/x'] });
+      if (url.includes('/api/agents/merge-check')) return json({ covered: true, source: null });
+      return json({});
+    }) as jest.Mock;
+    renderSheet();
+    await waitFor(() => expect(within(row('task-2')).getByText('uncommitted')).toBeInTheDocument());
+    expect(screen.getByTestId('orchestrate-uncommitted-note')).toHaveTextContent('not committed on main');
+
+    await toModes();
+    await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
+    await userEvent.click(screen.getByRole('button', { name: 'back' }));
+    await userEvent.click(screen.getByRole('button', { name: 'back' }));
+
+    await waitFor(() => expect(within(row('task-3')).getByText('uncommitted')).toBeInTheDocument());
+    expect(within(row('task-2')).queryByText('uncommitted')).not.toBeInTheDocument();
+    const note = screen.getByTestId('orchestrate-uncommitted-note');
+    expect(note).toHaveTextContent('1 item differs from feature/x');
+    expect(note).toHaveTextContent('not committed on feature/x');
+    expect(note).not.toHaveTextContent(/\bmain\b/);
+    expect(within(row('task-3')).getByText('uncommitted')).toHaveAttribute('title', expect.stringContaining('not committed on feature/x'));
+    await userEvent.click(screen.getByRole('button', { name: /deselect uncommitted/ }));
+    expect(screen.getByLabelText('select task-3')).not.toBeChecked();
+    expect(screen.getByLabelText('select task-2')).toBeChecked();
+
+    const asked = (global.fetch as unknown as jest.Mock).mock.calls.map(([input]) => String(input)).filter((url) => url.includes('/api/items/uncommitted'));
+    expect(asked).toEqual([
+      `/api/items/uncommitted?project=${encodeURIComponent('/abs/alpha')}&base=main`,
+      `/api/items/uncommitted?project=${encodeURIComponent('/abs/alpha')}&base=${encodeURIComponent('feature/x')}`
+    ]);
   });
 
   // Step 2 deliberately carries no chip — the flag is a step 1 fact about
