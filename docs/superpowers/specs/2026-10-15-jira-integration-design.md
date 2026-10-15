@@ -36,16 +36,24 @@ tracked set is small (tens to a few hundred issues per board), so the server can
 | ticket → repository                | a per-machine map **Jira project key → local checkouts**, set up front in Setup, independent of any ticket          | per-ticket pick with no map; a registry entry per repo |
 | credentials                        | `.env` per machine (`BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN`), restart to change                            | a settings-page form (would put the token through the browser); OAuth app (needs an Atlassian app registration per site) |
 
+Where the spec and the picked mocks differ, the spec wins: the session name is `jira <KEY>` (the dashboard's name rule rejects the mocks' `jira:PAY-131`);
+the launch sheet's Move to defaults to `leave as is`, not the mocks' `In Progress`; a Done card reads its age, not `resolved Oct 11`; a root carries a `root`
+crumb and its children the parent crumb; the marker reads `N subtasks`, not `1 of 3 subtasks done`; there is no Sort control — the list is by `updated`; the
+Boards card is sorted by name with off boards last; Connection names the scopes the token needs and does not claim to have checked them; the two built-ins
+are `Work it end to end` and `Open with the ticket loaded`; the mocks' issue counts are illustrative and were not recomputed.
+
 ## 2. Scopes — what lives where
 
-- **Per browser** (`client/src/lib/settings.ts`, clamped like every other key): the picked board id (`backlog-manager.jira-board`, `usePersistedState`), the
-  Jira page (`backlog-manager.jira-page`, a module store like `useRunsMode`), and `jiraDefaultAction` on Settings › Local › Dispatch — `execute`, `context`
+- **Per browser**: the picked board id (`backlog-manager.jira-board`, `usePersistedState`), the Jira page (`backlog-manager.jira-page`, a module store
+  like `useRunsMode`), and — the one settings key, in `client/src/lib/settings.ts` and clamped like every other — `jiraDefaultAction` on Settings › Local ›
+  Dispatch — `execute`, `context`
   or a skill id, seeding the launch sheet's Action and never the last launch. `clampSettings` keeps it a non-empty string; which ids exist is only known where
   the skills list is, so `resolveJiraAction(setting, skills)` in `lib/jira.ts` is what falls back to `execute`.
 - **Per machine**: `.env` holds the three credentials. `~/.backlog-manager/settings/jira.json` (`BM_JIRA_FILE` overrides) holds `{ boards, repos, skills }`
-  — the **fourth file this server writes**, after `watchdog.json`, the control files and `tracker-sync.json`, and it follows `tracker-sync.json`'s contract to
-  the letter: read fresh per use, each malformed part falls back on its own, the write is temp-file-plus-rename of the WHOLE file, and a file that exists but
-  cannot be read or parsed is refused (409) and left alone. The server is its only writer, through the guarded POSTs in §5.
+  — the **fourth file this server writes**, after `watchdog.json`, the control files and `tracker-sync.json`, on `tracker-sync.json`'s contract: read
+  fresh per use and cached nowhere; each malformed ENTRY (a board, a skill, one project's path list) falls back on its own and costs only itself; a write
+  merges ONE entry into the raw parsed file — a board or skill by id, one project's list by key — and preserves everything else in it, malformed entries and
+  unknown keys included, then lands by temp-file-plus-rename; a file that exists but cannot be read or parsed is refused (409) and left exactly as it is. The server is its only writer, through the guarded POSTs in §5.
 - **Per project: nothing.** No marker, no registry entry. A mapped repository is a path in `jira.json` and never enters `registry.json`; a Jira board has no
   `backlog/` and no `source.json`. This is the one thing that keeps A a parallel subsystem rather than a third source.
 
@@ -56,29 +64,47 @@ tracked set is small (tens to a few hundred issues per board), so the server can
 - `jira.client.ts` — one `fetch` wrapper: Basic auth from the env, `https://<site>/rest/api/3/…`, JSON in and out, `AbortSignal.timeout`. Maps 401 →
   `unauthorized`, 403 → `forbidden`, 429 → `rate-limited` carrying the `Retry-After` instant, network/timeout → `unreachable`. Counts calls per sweep and
   stamps the last 429, for the chip.
-- `config.util.ts` — `readJiraConfig()` / `writeJiraConfig(next)` over `jira.json`, plus `JiraConfigUnreadableError`. Ids are server-minted (`b_<8 hex>`,
+- `config.util.ts` — `readJiraConfig()` and one writer per entry kind (`writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill`, `deleteSkill`) over `jira.json`, plus
+  `JiraConfigUnreadableError`. Ids are server-minted (`b_<8 hex>`,
   `s_<8 hex>`); a board's or skill's identity is its id, never its name.
 - `poller.service.ts` — one 15 s ticker, armed only while the site is configured AND some board's interval is not `off` (the GitHub poller's
   armed/idle/off rule). A board is due when `now − polledAt ≥ SYNC_INTERVALS[interval]`; the default interval is **`1m`**, not GitHub's `15s`, because a
-  sweep is several calls deep. Per due board: each query runs through `POST search/jql` with a fixed field list, following `nextPageToken`, capped at
-  **200** issues per query; roots are fetched with `key in (…)`, then their descendants with `parent in (…)` repeated to **depth 3** (epic → story → subtask),
-  capped at 200 per root; results are deduplicated by key and the board is capped at **500** after dedupe, with `truncated: true` in its status. The cache is
+  sweep is several calls deep. `off` means what it means for a GitHub repo: the board is swept once at boot and once after each save of it, never on the
+  ticker, so its list exists and is honest about its age. A save of any board ("re-aimed" below) sweeps that board at once and resets its due time. Per due board: each query runs through `POST search/jql` with a fixed field list, following `nextPageToken`, capped at
+  **200** issues per query; each root is fetched on its own (`key = "K"`), so a root Jira no longer knows (a 400 naming it, or an empty answer) is marked `gone` in the
+  board's status while the others proceed; then its descendants with `parent in (…)` over the keys just returned, repeated to **depth 3** (epic → story →
+  subtask), each root's walk capped at 200; results are deduplicated by key — queries first in board order, then roots in board order — and the board is
+  capped at **500** in that order, with `truncated: true` in its status. The cache is
   `Map<boardId, { issues, polledAt, access, detail, truncated }>`. Descriptions, children detail and transitions are never swept — they are read on modal open.
 - `map-issue.ts` — Jira JSON → `JiraIssue`: `status.statusCategory.key` → the column, `issuetype.hierarchyLevel` → `type.level`, `issuetype.subtask`,
-  `parent.key`, the sprint from the one custom field whose schema is `gh-sprint`, discovered once per boot from `GET field`. The **Done window** lives here:
-  an issue whose `resolutiondate` is older than `JIRA_DONE_WINDOW_DAYS` (14) is dropped at map time, because a root's done children would otherwise pile up
-  forever and a query author has JQL for the rest.
+  `parent.key`, the sprint from the one custom field whose schema is `gh-sprint` — discovered from `GET field` at boot and retried on the ticker until it answers; the
+  field is an array (a carried-over issue sits in several), and the active sprint wins, else the last by id. The **Done window** lives here, and only here
+  (`JIRA_DONE_WINDOW_DAYS` = 14 is this file's constant): an issue in the `done` category whose `resolutiondate` — or, when Jira recorded none, whose
+  `updated` — is older than 14 days is dropped at map time, because a root's done children would otherwise pile up forever and a query author has JQL for
+  the rest. An issue in any other category is never dropped, however old a stale `resolutiondate` from an earlier close may be.
 - `adf.ts` — Atlassian Document Format → Markdown, read side only. Nothing in v1 writes text to Jira, so there is no Markdown → ADF.
-- `identity.ts` — `GET myself` once per boot (and again after a 401), giving `accountId` and `displayName`; assign-to-me uses the `accountId`.
+- `identity.ts` — `GET myself` at boot; a failure sets `access` from the error and `me: null`, and the call is retried on the sweep ticker with back-off
+  from 15 s to 5 min until it succeeds — under `unauthorized` the sweep itself does not run and issue writes answer 503, under `unreachable` the sweep keeps
+  trying on the same ticker. A 401 on any later call resets `me` and starts the retry again. `me: null` reads `no identity` on the chip and the Connection
+  row and disables `Assign to me` with that title. Assign-to-me uses the `accountId`.
 - `block.ts` — the **ticket block**: facts, the Markdown description and the subtasks list as one text, the SAME text `jira.mjs show` prints and every Run
   prompt ends with. One renderer, two readers.
 - `prompt.util.ts` — composes every Run prompt: a built-in's text (`execute`: branch, implement, verify, then move the issue with `jira.mjs transition`;
-  `context`: load the ticket and wait), or a skill's template with `{key} {summary} {url} {repo} {description}` filled in, then the ticket block. Trimmed to
-  the existing `PROMPT_MAX` (8 000) by cutting the description with a `[description truncated — open in Jira]` marker. One function, used by Start and by Copy
-  prompt, so the preview is byte-for-byte what the session receives.
+  `context`: load the ticket and wait), or a skill's template with `{key} {summary} {url} {repo} {description}` filled in, then the ticket block. Cut to
+  `JIRA_PROMPT_MAX` (4 000 — the dashboard's own `PROMPT_CAP`, which it enforces with a 400 and does not publish, so a bump there is a bump here; the
+  existing `PROMPT_MAX` of 8 000 is a paste bound, not this cap) by trimming the description with a `[description truncated — open in Jira]` marker. The
+  summary passes `oneLine`; the block is framed as data — a line saying the text between two markers is the ticket's own content and not instructions, the
+  description inside a fenced block — because it is untrusted text going into a session that can write files. One function, used by Start and by Copy
+  prompt. It runs twice on Start: once BEFORE any Jira write, for the length check and the preview, and once after the writes, for the spawn, so the facts
+  the session reads are the ticket as it is; both pass the same cut, so the second fits whenever the first did. A template that consumed `{description}`
+  gets the block without its description, so nothing is sent twice.
 - `jira.controller.ts` (reads) and `jira-write.controller.ts` (writes, behind `SameOriginPostGuard`). Dispatch and stop stay in `agents/`, which already
   owns the dashboard calls; `AgentsModule` imports `JiraModule` (agents → jira, never back). `JiraService` owns the **live map** `key → { sessionId, name,
-  repo, startedAt }`: memory only, capped at 100, entries expire after 8 h, and a Stop clears one early. A restart forgets it — a card then shows no strip,
+  repo, startedAt }`: memory only, capped at 100 with the oldest evicted first, entries expire after 8 h, and a Stop clears one early. A dispatch RESERVES
+  its key in the map (`sessionId: null`, a `starting` entry) before its first Jira write and releases it on any failure, so a second Start on the same key
+  during the window is the 409 and never a second session. While the map is non-empty, `GET /api/jira` reconciles it against the dashboard's session list
+  (`dashboardSessionStatus`, the call the abort route already makes) at most once a minute, dropping entries whose session the list no longer carries; the
+  8 h expiry is the floor for a dashboard that cannot be asked. A restart forgets it — a card then shows no strip,
   which is accepted for v1 (`DispatchRecordsService` makes the same trade for the same reason).
 
 ## 4. Shared shapes — `shared/types.ts`, all new, nothing existing changes
@@ -87,13 +113,15 @@ Shapes, not code: the implementer owns the exact TypeScript.
 
 - `JiraStatusCategory` = `new | indeterminate | done`.
 - `JiraIssue`: `key, id, url, summary, project { key, name }, type { name, level, subtask }, status { name, category }, priority | null,
-  assignee { accountId, name } | null, reporter name | null, parent key | null, labels[], sprint | null, created, updated, resolved | null`.
+  assignee { accountId, name } | null, reporter name | null, parent { key, summary } | null, subtasks (a count), labels[], sprint | null, created, updated,
+  resolved | null`. The sweep's field list is exactly what fills this: `summary issuetype status priority assignee reporter parent subtasks labels created
+  updated resolutiondate project` plus the discovered sprint field.
 - `JiraQuery`: `id, label, jql`. `JiraBoard`: `id, name, roots: key[], queries: JiraQuery[], interval: SyncInterval` (the existing type; `DEFAULT_JIRA_INTERVAL
   = '1m'`).
 - `JiraSkill`: `id, name, prompt` (the template). `JiraAction` = `'execute' | 'context' | { skill: id }`.
 - `JiraStatusPayload`: `configured, site, me { accountId, name } | null, access, detail, boards: (JiraBoard & { polledAt, count, access, detail, truncated })[],
   repos: Record<projectKey, path[]>, projects { key, name }[], skills: JiraSkill[], calls { sweep, last429At }, live: Record<key, { name, startedAt, repo }>`.
-  `access` is one of `ok | unconfigured | unauthorized | forbidden | rate-limited | unreachable`.
+  `access` is one of `ok | unconfigured | unsupported | unauthorized | forbidden | rate-limited | unreachable`.
 - `JiraIssueDetail extends JiraIssue`: `description` (Markdown), `children: JiraIssue[]`, `transitions { id, name, to { name, category } }[]`,
   `boards: id[]` (which boards hold it), `session | null`.
 - `JiraDispatchRequest`: `key, repo, action: JiraAction, assign: boolean, transitionId | null, model, effort, permissionMode, remoteControl`; the result is
@@ -108,10 +136,10 @@ Reads:
 | `GET /api/jira`                         | `JiraStatusPayload`; `configured: false` when any of the three env vars is absent — the client draws nothing Jira then   |
 | `GET /api/jira/boards/:id/issues`       | the board's cached list, with `polledAt`; 404 for an unknown board                                                      |
 | `GET /api/jira/issue/:key`              | `JiraIssueDetail`, read fresh (issue, children, transitions); `?format=text` returns the ticket block as `text/plain`    |
-| `GET /api/jira/search?q=`               | ≤ 20 issues for the roots picker: `key = Q` when `q` is a key, else `summary ~ "q*"`                                     |
+| `GET /api/jira/search?q=`               | ≤ 20 issues for the roots picker: `key = Q` when `q` passes `isJiraKey`, else `summary ~ "<q>*"` with `\` and `"` in `q` backslash-escaped                                     |
 | `GET /api/jira/projects`                | the projects the token can see, for the Repositories select                                                             |
 | `GET /api/jira/jql/check?jql=`          | Jira's own parse errors, or the approximate count — the sheet's check line                                              |
-| `GET /api/jira/prompt?key&action&repo`  | `text/plain`: exactly what Copy prompt copies and Start sends                                                            |
+| `GET /api/jira/prompt?key&action&repo`  | `text/plain`: exactly what Copy prompt copies and Start sends; `action` is `execute`, `context` or `skill:<id>`                                        |
 
 Writes (`application/json` + same origin via `SameOriginPostGuard`; 503 while unconfigured; 400 malformed; 409 when `jira.json` is unreadable):
 
@@ -119,18 +147,24 @@ Writes (`application/json` + same origin via `SameOriginPostGuard`; 503 while un
 | -------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `POST /api/jira/boards`          | a `JiraBoard` (no id → create)        | upsert; roots validated by `isJiraKey`; the poller is re-aimed                               |
 | `POST /api/jira/boards/delete`   | `{ id }`                              | delete; the browser whose pick it was falls to the first board                               |
-| `POST /api/jira/repos`           | `{ project, paths[] }`                | replaces one project's list; each path absolute and an existing directory at save time       |
+| `POST /api/jira/repos`           | `{ project, paths[] }`                | replaces one project's list; each path absolute (existence is not checked — under `docker:up` only `BM_PROJECT_ROOT` is mounted, so the server cannot see every path the dashboard can)       |
 | `POST /api/jira/skills`          | a `JiraSkill` (no id → create)        | upsert; `name` and `prompt` non-empty                                                        |
 | `POST /api/jira/skills/delete`   | `{ id }`                              | delete                                                                                       |
 | `POST /api/jira/issue/assign`    | `{ key }`                             | `PUT issue/{key}/assignee { accountId: me }`; then the splice of §8                          |
 | `POST /api/jira/issue/transition`| `{ key, transitionId }`               | re-reads the offered transitions, 400 for an id not offered, else `POST issue/{key}/transitions`; then the splice |
+
+Validation, per route, on the server: a board has a trimmed `name` of 1–80 characters, an `interval` in `SYNC_INTERVALS`, at most 20 roots each passing
+`isJiraKey`, at most 10 queries each with a trimmed `label` of 1–80 and a `jql` of 1–2 000 characters, and at least one root or query; ids are server-minted
+(`b_…`, `q_…`, `s_…`), a client-supplied id on create is ignored, and an upsert naming an id the file does not hold is a 404. A repos write names a project
+key matching `^[A-Z][A-Z0-9_]+$` and at most 10 absolute, deduplicated paths; an empty list removes the key. A skill has a trimmed `name` of 1–60 and a
+`prompt` of 1–2 000 characters. Anything else is a 400 naming the field.
 
 In `agents/` (behind the agents guard, like every agents POST):
 
 | route                          | body                 | effect                                                                                                                                        |
 | ------------------------------ | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /api/agents/dispatch-jira` | `JiraDispatchRequest` | 400 for a repo not in the key's project map or an unknown skill id; `projectDispatchGate(status, repo)` decides 409/502 exactly as `dispatch` does; 409 for a live session on the key; then assign → transition → spawn (§7) |
-| `POST /api/agents/jira-stop`   | `{ key }`            | `POST <dashboard>/api/sessions/<id>/stop` through the same call `ItemsAbortService.stopSession` makes today (hoisted to `agents/session-stop.util.ts` so both use one); 200 or the dashboard's "no live session" 404 both clear the live entry; Jira untouched |
+| `POST /api/agents/jira-stop`   | `{ key }`            | `POST <dashboard>/api/sessions/<id>/stop` through the same call `ItemsAbortService.stopSession` makes today (hoisted to `agents/session-stop.util.ts` so both use one, its claim-specific error tail becoming a parameter); 200 or the dashboard's "no live session" 404 both clear the live entry; Jira untouched |
 
 The `/api/trackers` payload and the nine item write routes are untouched.
 
@@ -139,25 +173,32 @@ The `/api/trackers` payload and the nine item write routes are untouched.
 ### 6.1 Rail and pages
 
 - `jira` joins `SECTIONS` between `archive` and `settings`; `RAIL_LABEL.jira = 'Jira'`. The rail draws the entry only while `GET /api/jira` says
-  `configured`; `resolveSection` treats `jira` as unrecognised (→ `board`) while it is not, so an `Opens on: Jira` preference cannot land on nothing.
+  `configured`. `resolveSection` accepts `jira` like any section (it runs in a `useState` initializer, before `/api/jira` has answered), the shell holds it
+  while the status is unknown, and the first status that says `configured: false` moves the shell to `board`. Settings › Local offers `Opens on: Jira` only
+  while the status says configured; a stored `jira` landing on a machine that later lost its credentials takes the same fall to `board`.
 - Two pages, **Board** and **Setup**, switched by the rail's sub-nav tree ALONE — the Runs/Settings rule. `lib/jira-page.ts` holds `JIRA_PAGES`, the storage
-  key and `isJiraPage`; `hooks/useJiraPage.ts` is the module store (`useRunsMode`'s shape, for the same two-readers reason). No in-page control switches
-  them, at any width.
+  key and `isJiraPage`; `hooks/useJiraPage.ts` is the module store (`useRunsMode`'s shape, for the same two-readers reason). No in-page control restates
+  that choice, at any width; `Open board` on Setup and the empty board's chip to Setup are the rail's own navigation threaded down through `App`
+  (`onOpenJiraPage`), exactly as Settings' `Live view` link is `onOpenWatchdog` — a link that means the same thing as the tree entry by construction, not a
+  second control.
 - `JiraProvider` (over `useJira`, `useTrackers`'s shape: one fetch of `GET /api/jira` on mount and focus, a timer aimed at the soonest board's next poll with a
   15 s floor, only the newest read may write) sits beside `TrackersProvider` in `App`, so the chip, the rail and both pages read one answer on one clock.
   `useJiraBoard(id)` polls `boards/:id/issues` through `useCoalescedFetch` at `BOARD_TRACKER_POLL_MS` while the Board page is mounted and the board's
   interval is not `off`. The browser never talks to Jira.
-- `lib/jira.ts` is the ONE home of every derivation: category → column, card age, crumb text, `runChipState` (`no-repo | live | ready`, composing
-  `projectDispatchGate(status, repoPath)` for whether Start can draw), the Band's summary line, `resolveJiraAction`, the Done-window predicate for tests,
-  the CALLS reading (`calls / 100` of the track, red when a 429 landed in the last 15 min).
+- `lib/jira.ts` is the ONE home of every derivation: category → column, card age, crumb text, `runChipState` (`no-repo | live | ready`; `ready` needs one mapped path — the sheet evaluates `projectDispatchGate(status, path)` per path for
+  whether Start can draw, disabling Start with the gate's reason for a `disabled` gate as `DispatchButton` does and hiding it for a `hidden` one), the Band's
+  summary line, `resolveJiraAction`, and the CALLS reading (the track is `calls / JIRA_SWEEP_CALL_CEILING`, a 100-call constant past which the meter reads
+  full — a reading, not a limit — red when a 429 landed in the last 15 min). The Done window is not derived here: the server drops those issues before they
+  are served.
 
 ### 6.2 Jira › Board — `BoardB.html`
 
 - `Band`: title = board name; sub = `<site> · N issues from R roots and Q queries · polled Xs ago`, red with Jira's message when a query or root failed in the
-  last sweep, and `showing 500 of more` when truncated. Right slot: the picker `Chip` (a `Popover` listing boards — pick only) and the summary search.
+  last sweep, and `first 500 shown` when truncated; counts read `1 query` / `2 queries` and a zero is omitted. Right slot: the picker `Chip` (a `Popover` listing boards — pick only) and the summary search.
 - `FilterBar` with three `FilterSection`s: type, assignee (anyone / me / unassigned), sprint — derived from the loaded list, per browser, not persisted.
 - Three `BoardColumn`s (`BoardColumnSlug` widened with `todo | doing | done`, plain dot), flat `JiraCard`s sorted by `updated` descending. A card: type icon,
-  key, crumb (`↳ PAY-120 Refund flows` for a parent, `Assigned to me`, or nothing); title; avatar + assignee, the RAW status name as a pill, age; a marker row
+  key, crumb (`↳ PAY-120 Refund flows` for a parent, `root` for one of the board's roots, `Assigned to me`, or nothing); title; the assignee's initials and name (initials, never Jira's `avatarUrls` — an image would be a browser request to Atlassian), the RAW status name as a
+  pill, age; a marker row
   with priority, `N subtasks`, and `Run ▾`. A card with a live session carries the `board-card-live hatch` strip: `session · <repo basename>` and the elapsed
   reading. Empty states: no boards → `No boards yet` with a chip to Setup; a board with no issues → its three empty columns.
 - Below 700 px the columns stack as the Board's do; the chip moves into the rail bar as the tracker chip does.
@@ -166,9 +207,10 @@ The `/api/trackers` payload and the nine item write routes are untouched.
 
 `JiraIssueModal` on `ui/Modal` (the §8.7 sidecar: facts column, body). Facts: key with `open in Jira ↗`, type · parent, status with its category, priority ·
 sprint, assignee · reporter, labels, created · updated, on boards, repository (from the project map, or the no-repo hint), session. Controls under the facts:
-`Assign to me` (disabled with a title when already me), `Move to…` (a `Select` over the transitions Jira offers this issue now, applied on pick), `Run ▾`,
-and `Stop session` through `ui/Confirm`. Body: the description as Markdown through `lib/markdown.ts` (the sanitising `marked` config hoisted out of
-`ItemModal`, which switches to the same function — the one targeted improvement to existing code), a Subtasks list, and the line "Comments stay in Jira — v1
+`Assign to me` (disabled with a title when already me, or while `me` is null), `Move to…` (a `Select` over the transitions Jira offers this issue now, applied on pick), `Run ▾`,
+and `Stop session` through `ui/Confirm`, drawn only while agents are enabled (there is no session to reach otherwise). Body: the description as Markdown through `lib/markdown.ts` (the sanitising `marked` config hoisted out of
+`ItemModal`, which switches to the same function — one of this design's few touches to existing code, beside the `Fact` hoist, the `SettingsRow` promotion, the `stopSession` hoist and the two
+widenings of `SECTIONS` and `BoardColumnSlug`), a Subtasks list, and the line "Comments stay in Jira — v1
 neither reads nor writes them" with the link. `Fact` is hoisted to `ui/Fact.tsx` for the same one-home reason. The detail is fetched on open; a write's
 Jira error is shown inline under the controls and the modal stays open.
 
@@ -176,18 +218,17 @@ Jira error is shown inline under the controls and the modal stays open.
 
 Four cards composed from `SettingsGroup` / `SettingsRow`, promoted to `components/ui/` because a second surface now draws them:
 
-- **Boards** — rows always: name, `R roots · Q queries · N issues · every <interval> · polled <age>` (red with the failure when the last sweep failed; `sync
+- **Boards** — rows always, sorted by name with `off` boards last: name, `R roots · Q queries · N issues · every <interval> · polled <age>` (red with the failure when the last sweep failed; `sync
   off` pill), `Open board` (switches the Jira page to Board with this board picked) and `Edit`; a `New board` chip in the head; a filter field from the sixth
   board. One `JiraBoardSheet` (`FormSheet`) serves new and edit: **Name & sync** (name, interval as a `Segmented` over `SYNC_INTERVALS`, default `1m`);
   **Roots** (rows with ×, a search field whose `Popover` lists `/api/jira/search` results); **Queries** (preset chips `+ Assigned to me`, `+ Open in current
   sprint`, `+ Unresolved in a project…`, `+ Custom JQL` add rows; a row is label + JQL textarea + the check line from `/api/jira/jql/check`, debounced 500 ms:
   `4 issues match · checked 3 s ago`, or Jira's parse error in red); footer `Delete board` (edit only, through `Confirm`) / `Cancel` / `Save` (`Create board`
   disabled until a name and at least one root or query).
-- **Repositories** — one row per mapped path (`PAY · Payments`, the path, ×), a warning row for a project with none (`no repository yet — PAY cards draw no
-  dispatch control`), and an add row: project `Select` from `/api/jira/projects`, path field, `Add`. The hint states the dashboard rule: a path the dashboard
+- **Repositories** — one row per mapped path (`PAY · Payments`, the path, ×), a warning row for a project with none (`no repository yet — PAY cards cannot Start until a path is mapped`), and an add row: project `Select` from `/api/jira/projects`, path field, `Add`. The hint states the dashboard rule: a path the dashboard
   cannot see is refused at dispatch, not here.
-- **Connection** — read-only rows off `GET /api/jira`: site, signed in as (name from `myself`, never the email), token scopes required, last sweep (`every
-  15 s · N calls · no 429 today`). `restart the server to change it`.
+- **Connection** — read-only rows off `GET /api/jira`: site, signed in as (name from `myself`, never the email), the scopes the token needs (stated, not verified — Jira does not report them), last sweep (`every
+  15 s · N calls · last 429 <age>`, or `no 429 since start`). `restart the server to change it`.
 - **Skills** (phase 5) — the two built-ins as locked rows, one row per skill (name, the template in mono, ×), an add row (name + template + `Add`), and the
   placeholder hint. A skill has to exist in the repo or the Claude install; this list only names it.
 
@@ -195,7 +236,7 @@ Four cards composed from `SettingsGroup` / `SettingsRow`, promoted to `component
 
 `JiraChip` beside `TrackerChip`, on the same `.tracker-chip*` classes: initial, `Jira · <name>`, `POLL` (soonest board, `pollProgress`) and `CALLS` meters,
 a red pip when `access` is not `ok`. Its popover is a reading — site, per-board lines, calls, last 429 — with no links or buttons (the rail rule). Settings ›
-Shared › Trackers gains one read-only Jira row; Settings › Local › Dispatch gains `Jira default action`.
+Shared › Trackers gains one read-only Jira row (`<site> · N boards · intervals live on Jira › Setup`); Settings › Local › Dispatch gains `Jira default action`.
 
 ## 7. Run ▾ and dispatch — `RunMenu.html`, `Dispatch.html`
 
@@ -204,15 +245,20 @@ Shared › Trackers gains one read-only Jira row; Settings › Local › Dispatc
   sake**: with agents off or the dashboard unreachable the sheet draws Copy prompt alone and hides Start. This is the one deliberate departure from "an
   environment-level block hides the dispatch control", and the reason is that Copy prompt is a second exit the Board's control never had.
 - `JiraLaunchSheet` (`FormSheet`): **Action** (`Select`, seeded from `jiraDefaultAction` or the menu pick); the **prompt preview** (`GET /api/jira/prompt`,
-  re-fetched when the action or repository changes, in a read-only `.sheet-prompt`); **Repository** (the project's mapped paths, preselected when there is
+  re-fetched when the action or repository changes, in a read-only `.sheet-prompt`; its status and assignee lines are the ticket as it is now, and Start's
+  own prompt is composed after its writes, so those two lines are the one thing that can differ); **Repository** (the project's mapped paths, preselected when there is
   one); **Assign to me** (`Switch`, off and disabled when already me); **Move to** (`Select` over the offered transitions, default `leave as is`); **Model ·
   effort** (seeded from Settings, never the last launch); **Permissions** (`modesUpTo` the dashboard's ceiling); **Remote control**. Footer: **Copy prompt**
   (`navigator.clipboard.writeText`; the chip reads `Copied` for 2 s; the preview is selectable text as the fallback where the clipboard API is unavailable)
   and **Start**.
 - **Start, server side, in this order**: assign (if asked) → transition (if asked) → spawn through the dashboard in the chosen repository, session name `jira
-  <KEY>` (`sessionName`'s 60-char rule). A Jira write that fails is a 502 naming the step, and nothing spawns. A spawn that fails after the writes is a 502
-  whose text says the writes stand; the sheet keeps Copy prompt so the work can still start in a terminal. On success the live map gets the key and the card's
-  strip appears on the next poll; the sheet shows `sessionUrl(linkBase, sessionId)`.
+  <KEY>` (`sessionName`'s 60-char rule). Before the first write the request is checked whole: 400 for a bad body, an unmapped repo, an unknown skill or a transition not offered (a fresh
+  read); the dashboard gate's 409/502; 409 for a key already live or starting; a prompt over the cap. Then each Jira write maps as §8's errors line does
+  (401 → 503, 429 → 503 with the retry instant, 403 → 502 `Jira refused: <message>`, network → 502), the answer names the step, and an earlier write stands
+  — an assign that landed before a failed transition is not undone. A spawn that fails after the writes is a 502 whose text says the writes stand; the sheet
+  keeps Copy prompt so the work can still start in a terminal. On success the live map gets the key, the result carries the
+  entry, the sheet shows `sessionUrl(linkBase, sessionId)`, and the client reloads `GET /api/jira` at once — the status poll alone runs on the boards' own
+  clock and not at all while no board syncs — so the strip appears without waiting; a Stop reloads the same way.
 - **Stop session**: `Confirm` → `POST /api/agents/jira-stop`. The dashboard session is stopped; Jira is not touched — the ticket keeps its assignee and
   status, which is right because the person is still on it.
 
@@ -220,22 +266,29 @@ Shared › Trackers gains one read-only Jira row; Settings › Local › Dispatc
 
 - **Assign**: `PUT issue/{key}/assignee` with the identity's `accountId`. **Transition**: a fresh `GET issue/{key}/transitions`; an id not in the answer is a
   400 (`transition not offered`); else `POST issue/{key}/transitions`. After either, the server does `GET issue/{key}` and **splices** the mapped issue into
-  every board cache holding the key, so the board reflects the change on the next client poll rather than the next sweep.
+  every board cache holding the key, so the board reflects the change on the next client poll rather than the next sweep. Newest `updated` wins: a sweep
+  that lands afterwards (one already in flight, or a search index that still lags the write — P2) never replaces a cached issue whose `updated` is newer
+  than the one it brought.
 - **ADF → Markdown** on the server, read side only: paragraph, heading, bulletList/orderedList/listItem, codeBlock (with language), inlineCode, strong, em,
-  strike, link, hardBreak, rule, blockquote, mention → `@name`, date and status → their text, emoji → its shortname. Everything else becomes a one-line
+  strike, link, inlineCard → a link to its url, hardBreak, rule, blockquote, mention → `@name`, date and status → their text, emoji → its shortname; text
+  nodes have Markdown's specials escaped, so a literal `snake_case_name` or `*` renders as written. Everything else becomes a one-line
   placeholder — `[attachment: name]`, `[table omitted]`, `[panel omitted]`, `[expand omitted]` — and a description that had any is followed by `open in Jira ↗`.
   An unknown node renders its text content.
-- **Errors**: 401 → `access: unauthorized` (chip red, Connection row red, every write 503 until the next successful `myself`); 403 → the modal's inline
-  `Jira refused: <message>`; 429 → the sweep pauses until `Retry-After`, a write answers 503 with the retry instant.
+- **Errors**, one mapping for every Jira call the server makes: 401 → `access: unauthorized`, the chip and the Connection row red, every ISSUE write (assign,
+  transition, the two inside Start) a 503 until the next successful `myself` — config writes (boards, repos, skills) touch only `jira.json` and stay open;
+  403 → 502 with `Jira refused: <message>`, shown inline in the modal; 429 → the sweep pauses until `Retry-After` and an issue write inside that window is
+  refused up front with a 503 carrying the retry instant, not sent to be refused again; network or timeout → 502.
 
 ## 9. The `jira` skill — `skills/jira/`
 
 - `SKILL.md` + `tools/jira.mjs` with `show <key>` (the ticket block, verbatim from `GET /api/jira/issue/:key?format=text`), `transitions <key>`,
   `transition <key> <name|id>`, `assign <key>`, `status`. Every subcommand goes through `/api/jira` on `http://127.0.0.1:${BM_API_PORT:-4322}` (the one port setting the skills already dial)
   — never Jira directly — so the token stays in the server process and the server stays the one caller. Stack down → exit `5` with the two start commands
-  named, the contract `backlog.mjs` has in a tracker project; a Jira refusal (the server's 4xx) → exit `2` with the message; usage → exit `1`.
-- The built-in `execute` prompt ends with "move the issue with `jira.mjs transition`"; `context` ends with "wait". A custom skill names its own slash
-  command; the server appends the ticket block to every prompt, built-in or not.
+  named, the contract `backlog.mjs` has in a tracker project; a refusal the server answers with a 4xx (not offered, unknown key) → exit `2` with the message;
+  a 5xx (unconfigured, unauthorized, rate-limited, Jira unreachable, a write Jira refused) → exit `3` with the message; usage → exit `1`.
+- The built-in `execute` text (`Work it end to end` in the menu) says: branch, implement, verify, move the issue with `jira.mjs transition`, then the same
+  commit rule item dispatch carries (stage only what the session changed, never `git add -A`, do not push); `context` (`Open with the ticket loaded`) says:
+  read the ticket and wait. Those are the built-ins' own texts; the WHOLE prompt, built-in or custom, ends with the ticket block the server appends.
 - `process.exitCode = main(...)`; `tools/jira.test.mjs` beside the tool (the node runner's globs do not descend); publish is commit → push → `pnpm run
   plugin:sync`; `agents/` is untouched; `.claude-plugin/plugin.json`'s description names the seventh skill.
 
@@ -243,12 +296,17 @@ Shared › Trackers gains one read-only Jira row; Settings › Local › Dispatc
 
 - The token and the email live in `.env` and nowhere else; `JiraStatusPayload` carries `site`, `me.name` and `me.accountId`, never either. No route returns
   the token; the browser never talks to Jira; `jira.mjs` goes through the server.
-- `BM_JIRA_SITE` is validated at boot: `https`, a hostname with no path or query. Jira Cloud only; a Server/DC site is reported in `detail` as unsupported.
-- Every `:key`, every root and every search-by-key passes `isJiraKey` (`^[A-Z][A-Z0-9_]+-\d+$`), and the server quotes keys into JQL (`key in ("PAY-1",
-  "PAY-2")`). A person's JQL is passed verbatim for Jira to parse — the server never edits it.
+- `BM_JIRA_SITE` is a hostname (`acme.atlassian.net`) — no scheme, path or query; anything else fails validation at boot and the status says so. The
+  server always speaks `https://` to it. Jira Cloud only: `GET /rest/api/3/serverInfo` is asked once at boot beside `myself`, and a `deploymentType` other
+  than `Cloud` (or a 404 there) sets `access: unsupported` with `detail: Jira Server/DC is not supported`.
+- Every `:key`, every root and every search-by-key passes `isJiraKey` (`^[A-Z][A-Z0-9_]+-\d+$`); every value the server itself puts into JQL — a key
+  (`key = "PAY-1"`) or the search term — is double-quoted with `\` and `"` escaped. A person's JQL is passed verbatim for Jira to parse — the server never
+  edits it.
 - Reads sit behind the global Host allowlist (`applySecurityMiddleware`); writes add `SameOriginPostGuard`; `dispatch-jira` and `jira-stop` sit under the
-  agents guard like every agents POST. The prompt is composed server-side (the existing invariant, widened to "every spawn prompt"). Repository paths must be
-  absolute and exist at save; the dashboard must list them at dispatch (409 otherwise — the Board's own rule). `/browse/` links are built server-side from the
+  agents guard like every agents POST. The prompt is composed server-side, as orchestrate's is (the existing invariant widened to "the orchestrate and Jira spawn prompts" — item dispatch
+  takes the sheet's edited prompt and stays as it is). Repository paths must be
+  absolute; the dashboard must list them at dispatch (409 otherwise — the Board's own rule, and the only existence check, because the server container sees
+  only `BM_PROJECT_ROOT`). `/browse/` links are built server-side from the
   validated site. The CSP is untouched: no new inline script.
 - The client polls the server only; the sweep caps (200 per query and per root, 500 per board, depth 3) and the 429 back-off bound what the server asks of
   Jira.
@@ -256,10 +314,12 @@ Shared › Trackers gains one read-only Jira row; Settings › Local › Dispatc
 ## 11. Testing
 
 - **jest** (flat in `test/`): `jira-config` (per-part fallbacks, atomic write, unreadable → 409 through supertest), `jira-map-issue` (category, level, sprint
-  discovery, the Done window relative to the clock), `jira-adf` (one fixture per node, placeholders, unknown nodes), `jira-poller` (a fake client: dedupe,
+  discovery and the active-sprint pick, the Done window relative to the clock: done with a resolution, done without one, not-done with a stale resolution), `jira-adf` (one fixture per node, placeholders, unknown nodes), `jira-poller` (a fake client: dedupe,
   depth and size caps, due intervals, armed/idle/off, 429 back-off, the splice after a write), `jira-routes` (supertest through `listenLoopback`: 503
-  unconfigured, Host gate, the guard, key validation, transition not offered → 400, `?format=text`), `jira-prompt` (placeholders, the block, the 8 000 cut),
-  `agents-dispatch-jira` (unmapped repo 400, dashboard-blind 409, live 409, write-then-spawn order, spawn failure keeps the writes, the live map), `jira-lib`
+  unconfigured, Host gate, the guard, key validation, transition not offered → 400, `?format=text`), `jira-prompt` (placeholders, the block, the 4 000 cut, the data framing, the description-once rule),
+  `agents-dispatch-jira` (unmapped repo 400, dashboard-blind 409, live and starting 409, the length check before any write, write-then-spawn order, a
+  failed transition after a landed assign, spawn failure keeps the writes, the reservation released on failure), `agents-jira-stop` (200 and the 404 both
+  clear the entry, agents off), `use-jira` (the timer aimed at the soonest board, none while every board is off, the reload after Start and Stop), `jira-lib`
   (jsdom: column, `runChipState`, `resolveJiraAction`, the CALLS reading), `jira-sections` (no rail entry while unconfigured, the tree switches the page),
   `jira-board` / `jira-modal` / `jira-setup` (render suites in the style of `tracker-board` and `settings-trackers`), and `claude-rules` picks up the new rule
   file by itself. `test/helpers/jira.ts` is an in-memory Jira over the dozen endpoints this touches, the shape `test/helpers/github.ts` has.
@@ -269,13 +329,17 @@ Shared › Trackers gains one read-only Jira row; Settings › Local › Dispatc
 ## 12. Phases — one plan and one PR each
 
 0. **Probe** — verify the API facts in §14 against a real site; amend this spec.
-1. **Server read** — client, config, poller, map, ADF, identity, block, the read routes, `GET /api/jira`; `.env.example`; `docs/subsystems/jira.md`;
-   `.claude/rules/jira.md`; CLAUDE.md and invariants entries for §13's server rules.
+1. **Server read** — client, config reader, poller, map, ADF, identity, block, the read routes, `GET /api/jira`; `.env.example` and the compose
+   passthrough of the three keys (as `BM_GITHUB_TOKEN` has); `docs/subsystems/jira.md`; `.claude/rules/jira.md` with the rules this phase builds: the
+   `jira.json` reader half, the token, the JQL quoting, the Done window.
 2. **Jira section** — rail entry and tree, `JiraProvider`, Board page, read-only modal (the `Fact` and `marked` hoists land here), Setup with the board
-   sheet, Repositories and Connection, the chip, the Trackers row; board/docs entries for §13's client rules.
-3. **Writes** — assign and transition routes, the modal controls, the splice.
-4. **Skill** — `skills/jira`, `?format=text`, docs, publish.
-5. **Run** — Skills card, `jiraDefaultAction`, the menu, the launch sheet, the prompt route, `dispatch-jira`, `jira-stop`, the live map and the strip.
+   sheet, Repositories and Connection — so the boards and repos write routes and the `jira.json` writers land here — the chip, the Trackers row; the two
+   client rules of §13; DESIGN.md gains §8.9 for the Jira surfaces (every component cites its subsection), and §8.7's composer count, `board.md`'s Escape
+   bullet, `invariants.md`'s Escape section and `test/dialog-count-docs.test.ts` move from three composers to five (the issue modal and the board sheet).
+3. **Writes** — assign and transition routes, the modal controls, the splice; the write rule of §13.
+4. **Skill** — `skills/jira`, `?format=text`, docs, publish; the widened exit-5 bullet.
+5. **Run** — Skills card and its two routes, `jiraDefaultAction`, the menu, the launch sheet, the prompt route, `dispatch-jira`, `jira-stop`, the live map
+   and the strip; the live-map rule and the dispatch widening of §13; the composer count moves to six (the launch sheet).
 
 Every phase lands its own docs (CLAUDE.md line, rule bullets, invariants anchors, `docs/subsystems/*`) with the mechanism it introduces, so
 `test/claude-rules.test.ts` and `/docs-sync` stay green at every merge.
@@ -287,17 +351,19 @@ claude-rules suite enforces that all three exist and agree.
 
 | headline                                                                                                                                    | rules file     |
 | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.                 | `jira.md` (new, `paths: ["server/src/jira/**"]`) |
+| `~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.                 | `jira.md` (new, `paths: ["server/src/jira/**", "skills/jira/**"]` — the tenth rule file; CLAUDE.md's count follows) |
 | The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs. | `jira.md`  |
 | The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key. | `jira.md`  |
 | Jira's Done column is a window, not a store: an issue resolved more than 14 days ago is dropped at map time.                                 | `jira.md`      |
-| Every key the server puts into JQL passes `isJiraKey` and is quoted; a person's JQL is passed verbatim for Jira to parse.                     | `jira.md`      |
+| Every value the server puts into JQL — a key or the search term — is quoted and escaped, and a person's JQL is passed verbatim for Jira to parse.                     | `jira.md`      |
 | A Jira session is remembered in server memory only; a restart forgets it, and Stop is the one hand that clears it early.                     | `jira.md`      |
 | The Jira section's two pages are switched by the rail's tree alone, and the section is drawn only when `GET /api/jira` says configured.      | `board.md`     |
 | Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.                          | `board.md`     |
 
 Widened, not added: "`backlog.mjs` in a tracker project needs the stack up, and says so with exit `5`" gains `jira.mjs` (always) in the same bullet;
-"The orchestrate spawn prompt is composed server-side" becomes "every spawn prompt"; the CLAUDE.md layout line names `jira/` as the third outbound module.
+"The orchestrate spawn prompt is composed server-side" becomes "the orchestrate and Jira spawn prompts" (item dispatch still takes the sheet's prompt);
+"Dispatch derives the action; it never accepts one" gains its Jira clause — a Jira issue has no file state to derive from, so `dispatch-jira`'s `action` is a
+PICK from a closed set (the two built-ins and the skills in `jira.json`), validated on the server and refused with a 400 otherwise; the CLAUDE.md layout line names `jira/` as the third outbound module.
 
 ## 14. Phase-0 probe — the facts this spec assumes and has not verified
 
@@ -306,7 +372,7 @@ Each is to be run by hand with `curl` against the user's site (token from `.env`
 | #   | assumption                                                                                                                  | finding |
 | --- | --------------------------------------------------------------------------------------------------------------------------- | ------- |
 | P1  | `GET /rest/api/3/myself` with Basic `email:token` returns `accountId` and `displayName`; scoped tokens need `read:jira-work write:jira-work read:jira-user` | |
-| P2  | `POST /rest/api/3/search/jql` takes `{ jql, fields, maxResults, nextPageToken }` and answers `issues[]`, `nextPageToken`, `isLast`                    | |
+| P2  | `POST /rest/api/3/search/jql` takes `{ jql, fields, maxResults, nextPageToken }` and answers `issues[]`, `nextPageToken`, `isLast`; whether a search run right after an assign or transition can still return the old issue (the index lags the write) | |
 | P3  | `parent in (K1, K2)` follows epic → story → subtask on both company-managed and team-managed projects; `issuetype.hierarchyLevel` is present         | |
 | P4  | the sprint field is discoverable from `GET /rest/api/3/field` by `schema.custom = com.pyxis.greenhopper.jira:gh-sprint`; its value shape in a search  | |
 | P5  | `status.statusCategory.key` is exactly `new`, `indeterminate` or `done`                                                                              | |
@@ -316,7 +382,8 @@ Each is to be run by hand with `curl` against the user's site (token from `.env`
 | P9  | a 429 carries `Retry-After` in seconds; whether `X-RateLimit-*` headers exist                                                                        | |
 | P10 | the ADF node inventory on a real description: media, mention, table, panel, expand, emoji, inlineCard, date, status                                  | |
 | P11 | `GET /rest/api/3/project/search` lists the projects the token sees, with paging                                                                     | |
-| P12 | the dashboard's `POST /api/sessions/<id>/stop` answers 404 `no live session` for a gone session (known from code); whether a session STATUS endpoint exists — if so, phase 5 reconciles the live map against it instead of relying on the 8 h expiry alone | |
+| P12 | answered from code, no probe needed: `POST /api/sessions/<id>/stop` answers 404 `no live session` for a gone session (`items-abort.service.ts`), and `GET /api/sessions` carries each session's status (`dashboardSessionStatus`, `agents.service.ts`) — §3 reconciles the live map against it | known |
+| P13 | `GET /rest/api/3/serverInfo` answers `deploymentType: "Cloud"` on a Cloud site, and is absent or says otherwise on Server/DC                       | |
 
 ## 15. Out of scope, and what comes after
 
