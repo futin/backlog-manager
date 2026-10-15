@@ -25,6 +25,13 @@ The discriminator is `linkedWorktreeInfo`, a **second copy** of `orchestrate.mjs
 another's, and keyed on a `commondir` entry in the `gitdir:` target, never "`.git` is a file": a submodule working tree is a file too and must keep registering
 as itself. Both suites build a real submodule so a future git that changes that layout fails loudly in both places.
 
+**One writer is not one process** (#255). Two `backlog.mjs` runs in two repos can upsert at the same moment, and the old read-modify-write — a catch that read
+any failure as "empty registry", then a truncating `writeFileSync` — let one of them catch the other mid-truncate, fail to parse, and write back a registry
+holding only its own project: every other project gone from the board, and its tracker writes refused, until each captured again. Two changes close it. Every
+write is a temp file renamed over the registry in its own directory, so a reader only ever sees a whole file. And only `ENOENT` starts fresh: a file that does
+not parse, or has no `projects` array, is left byte-identical, copied aside to `registry.json.corrupt-<ts>`, and the registration is skipped with a stderr line
+— the capture still succeeds. What remains is a lost update, last rename wins, which drops one upsert the next capture restores rather than every entry.
+
 ## The orchestrator's run file has exactly one writer, one reader — the same relationship the registry has
 
 The run file (`run.json`) is `orchestrate.mjs`'s entire state model for one project's queue — the queue itself, each item's stage, the attention list,

@@ -7,7 +7,9 @@ paths: ["skills/**", "agents/**"]
 - **`~/.backlog-manager/registry.json` has exactly one writer**: `skills/backlog/tools/backlog.mjs` (`init`/`new` upsert, plus `unregister`, the one removal
   path). The server re-reads it per request, never writes, never caches. What gets written is `registryRoot(root)`, not the root `resolveRoot` returned
   (bug-17): a linked worktree registers its **main tree**, a bare main repo registers nothing (non-fatal stderr note), and `resolveRoot` itself is deliberately
-  unchanged. The discriminator is a `commondir` entry in the `gitdir:` target, never "`.git` is a file". Why:
+  unchanged. The discriminator is a `commondir` entry in the `gitdir:` target, never "`.git` is a file". Every write is temp file + `rename` in the registry's
+  own directory, and only `ENOENT` starts fresh — an unparseable registry is left untouched, copied to `registry.json.corrupt-<ts>`, and the registration
+  skipped with a stderr line (#255). Why:
   [invariants.md](docs/subsystems/invariants.md#registryjson-has-exactly-one-writer-and-a-linked-worktree-registers-its-main-tree)
 - **`~/.backlog-manager/retro/` has exactly one writer, `retro.mjs record`, and `backlog-retro` never writes under the run-state directory** — the same
   relationship `registry.json` and `run.json` each have with their writer, stated for the third directory under `~/.backlog-manager` a tool owns. A record is

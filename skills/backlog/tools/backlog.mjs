@@ -66,13 +66,36 @@ export function registryFile() {
   return process.env.BM_REGISTRY_FILE || path.join(os.homedir(), '.backlog-manager', 'registry.json')
 }
 
+// Only a MISSING file starts fresh (#255). A file that exists but does not parse, or parses into something with no `projects` array, is every other
+// project's only record: writing a one-entry registry over it used to drop all of them from the board — and the server then refused tracker writes for
+// each — until every one captured again. So the bad file is left byte-identical, a copy goes beside it as `registry.json.corrupt-<ts>` for whoever repairs
+// it, and this throws; registerBestEffort turns that into a stderr line and the capture still succeeds. The copy rather than a rename is deliberate: a
+// rename would leave no file, and the next capture would start fresh over the very projects this exists to keep.
+//
+// The torn-read half of the bug is closed by writeRegistryAtomic below, not here: a reader can no longer catch a concurrent writer mid-truncate. What two
+// concurrent read-modify-writes can still do is lose one of their two upserts (last rename wins) — a missing entry the next capture restores, never a
+// wiped registry.
 export function registerProject(root, file = registryFile()) {
-  let registry = { projects: [] }
+  let registry
+  let raw
   try {
-    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
-    if (Array.isArray(parsed.projects)) registry = parsed
-  } catch {
-    // first write, or a corrupt file — start fresh rather than fail the capture
+    raw = fs.readFileSync(file, 'utf8')
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e
+  }
+  if (raw === undefined) {
+    registry = { projects: [] }
+  } else {
+    try {
+      registry = JSON.parse(raw)
+    } catch {
+      registry = null
+    }
+    if (!registry || !Array.isArray(registry.projects)) {
+      const aside = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      fs.copyFileSync(file, aside)
+      throw new Error(`${file} is not a readable registry; left it untouched and copied it to ${aside}`)
+    }
   }
   const existing = registry.projects.find((p) => p.path === root)
   if (existing) {
@@ -80,8 +103,18 @@ export function registerProject(root, file = registryFile()) {
   } else {
     registry.projects.push({ name: path.basename(root), path: root, createdAt: new Date().toISOString() })
   }
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
+  writeRegistryAtomic(file, registry)
+}
+
+// Temp file in the registry's own directory, then renameSync over it — the writeRunAtomic pattern from orchestrate.mjs, for the same reason: a reader (the
+// server, or a second backlog.mjs mid-capture) only ever sees the old complete file or the new one, never the truncated window a plain writeFileSync opens.
+// Same directory because a rename across filesystems degrades to a copy, which is not atomic; pid plus a random suffix so two writers never share a temp name.
+function writeRegistryAtomic(file, registry) {
+  const dir = path.dirname(file)
+  fs.mkdirSync(dir, { recursive: true })
+  const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`)
+  fs.writeFileSync(tmp, JSON.stringify(registry, null, 2) + '\n')
+  fs.renameSync(tmp, file)
 }
 
 // The registry's only removal path, and the exact counterpart to
@@ -123,7 +156,7 @@ export function unregisterProject(root, file = registryFile()) {
   // `{ projects }` keeps any other top-level key a future version of the file
   // might carry, exactly as registerProject's own read-modify-write does.
   registry.projects = remaining
-  fs.writeFileSync(file, JSON.stringify(registry, null, 2) + '\n')
+  writeRegistryAtomic(file, registry)
   return true
 }
 
