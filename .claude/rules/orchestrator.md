@@ -80,19 +80,20 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `mergeModeNote`. **Absent means `merge`; present-but-invalid is a 400, never a clamp.** `pr` runs on a run branch recorded as `base`, with its target in
   `prTarget` and the PR opened at finish (next bullet). Why:
   [invariants.md](docs/subsystems/invariants.md#merge-mode-is-run-scoped-and-a-malformed-one-is-a-400)
-- **PR mode drains onto a run branch and opens one PR per run.** Tracker projects only: `resolveMergeMode` answers `pr` with a 400 for a project whose
-  resolved source is not `github`, and `init --merge-mode pr` exits `1` there, nothing written. `init` mints `backlog/run-<local date>-<n>` (`n` from local
-  refs plus `git ls-remote`, run with a timeout and `GIT_TERMINAL_PROMPT=0`; a failed `ls-remote` is one stderr line and a local-refs mint), creates it with
-  `git branch --no-track <run> refs/heads/<target>` as its last git write, after every refusal, and records `base: <run branch>` and `prTarget: <target>`.
-  `prTarget` and `prUrl` are REQUIRED on `OrchestratorRun`, `null` under `merge`/`branch`, resolved once by `sanitizeMergeFields`, which also nulls a `prUrl`
-  that fails `^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$` — the one pattern the tool, the server and the client hold. The loop is `merge` mode's (the issue
-  closes at `stage <n> merged --outcome`, at the merge into the run branch) except that SKILL.md §4's per-item pull is skipped, keyed on the REQUESTED
-  `mergeMode`. At a `done`/`failed` finish with something `merged`, the driver runs `pr-draft` (writes `<dir>/pr/body.md`, prints `{ title, bodyFile, head,
-  target }`; exit `1` for a run that is not `pr`, has nothing `merged` or already has a `prUrl`), `gh pr view` then `gh pr create`, and `pr --url` (the pattern
-  above, `pr` runs only); a failed or denied `gh` is not a park and moves no status, and no PR opens on `paused` or `aborted`. The tool makes no GitHub call.
-  `finish`, on every status but `paused` — so `abort` too — deletes a `pr` run's run branch when nothing is `merged`, `rev-list --count <prTarget>..<base>` is
-  `0` and `treeHoldingBranch` finds nobody, by `update-ref -d refs/heads/<base> <sha it read>`, never `branch -d`; anything else keeps it with one stderr line,
-  and the exit code never changes. Why:
+- **PR mode drains onto a run branch and opens one PR per run.** Tracker projects only: `resolveMergeMode` answers `pr` with a 400 for a project whose resolved
+  source is not `github`, and `init --merge-mode pr` exits `1` there, nothing written. `init` mints `backlog/run-<local date>-<n>` (`n` from local refs plus
+  `git ls-remote`, run with a timeout and `GIT_TERMINAL_PROMPT=0`; a failed `ls-remote` is one stderr line and a local-refs mint), creates it with `git branch
+  --no-track <run> refs/heads/<target>` as its last git write, after every refusal, and records `base: <run branch>` and `prTarget: <target>`. `prTarget` and
+  `prUrl` are REQUIRED on `OrchestratorRun`, `null` under `merge`/`branch`, resolved once by `sanitizeMergeFields`, which also nulls a `prUrl` that fails
+  `^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$` — the one pattern the tool, the server and the client hold. The loop is `merge` mode's (the issue closes at
+  `stage <n> merged --outcome`, at the merge into the run branch) except that SKILL.md §4's per-item pull is skipped, keyed on the REQUESTED `mergeMode`. At a
+  `done`/`failed` finish with something `merged` — keyed on the REQUESTED `mergeMode` too, so a degraded `pr` run still opens its PR — the driver runs
+  `pr-draft` (writes `<dir>/pr/body.md`, prints `{ title, bodyFile, head, target }`; exit `1` for a run that is not `pr`, has nothing `merged` or already has a
+  `prUrl`), `gh pr list --head <head> --state open` (OPEN PRs only — a reused run branch name must not find an earlier run's merged PR) then `gh pr create`, and
+  `pr --url` (the pattern above, `pr` runs only); a failed or denied `gh` is not a park and moves no status, and no PR opens on `paused` or `aborted`. The tool
+  makes no GitHub call. `finish`, on every status but `paused` — so `abort` too — deletes a `pr` run's run branch when nothing is `merged`, `rev-list --count
+  <prTarget>..<base>` is `0` and `treeHoldingBranch` finds nobody, by `update-ref -d refs/heads/<base> <sha it read>`, never `branch -d`; anything else keeps it
+  with one stderr line, and the exit code never changes. Why:
   [invariants.md](docs/subsystems/invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run)
 - **`merged` is no longer the only success exit.** `branched` is its branch-mode sibling and a true exit: out of `RUN_CLAIMED_STAGES`, `ATTENTION_RUN_STAGES`
   and `MACHINE_STAGES`, in `RECONCILE_TERMINAL_STAGES`, counted as completed by `aggregateRuns`; `test/agents-shared.test.ts`'s `Record<RunStage, true>` literal

@@ -684,7 +684,8 @@ person's decision, and reopening the issues by hand is its fix — cheaper than 
 
 **The driver opens the PR; the tool composes it and records it.** `pr-draft` reads the run file and git, writes `<dir>/pr/body.md` and prints
 `{ title, bodyFile, head, target }`; it refuses a run that is not `pr`, one with nothing `merged`, and one whose `prUrl` is already set. The driver asks
-`gh pr view` first — a session that died between `gh pr create` and recording the URL left a PR the run file does not know — then runs `gh pr create`, and
+`gh pr list --head <head> --state open` first — a session that died between `gh pr create` and recording the URL left a PR the run file does not know, and
+`gh pr view <head>` would also match a merged PR from an earlier run on a reused branch name — then runs `gh pr create`, and
 `pr --url` records `prUrl` through `^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$`, refusing anything else and any run that is not `pr`. The tool makes no
 GitHub call: the one network write stays in the driver's own Bash call, where a classifier denial or a refused `gh` is seen, and everything that decides what
 the PR says stays in code a test runs. **A failed or denied `gh pr create` is not a park and does not change the finish status** — every item is merged, pushed

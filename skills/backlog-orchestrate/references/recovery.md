@@ -12,7 +12,8 @@ every remaining item.
 
 A `pr` run's `status --json` also carries `prTarget` and `prUrl`. **A set `prUrl` means the run's pull request already exists, so a resumed session never opens
 another**: it skips SKILL.md §10's PR steps and names that URL in the summary — `pr-draft` refuses such a run anyway, exit `1`. A `null` `prUrl` on a run that
-reached §10 is not proof there is no PR: the session may have died between `gh pr create` and `pr --url`, which is why §10 asks `gh pr view` first.
+reached §10 is not proof there is no PR: the session may have died between `gh pr create` and `pr --url`, which is why §10 asks `gh pr list --head <head>
+--state open` first.
 
 Then, before reconcile, before Inspect, before anything else this file describes, close the gap the board's watchdog is timing:
 
@@ -232,11 +233,11 @@ Before any of that, it fills in every queue item's empty `sessionId` from `<dir>
 
 Then it prints a one-line summary of three counts: what it removed, how many branches it kept because their items were `branched`, and what it left in place
 with a marker. And it ends the run through `finish --status aborted`, the same command SKILL.md §10 runs, so everything `finish` does on an abort happens here
-too. **In a `pr` run that merged nothing, that includes deleting the empty run branch**: one `git update-ref -d` on `refs/heads/<run branch>`, run by the tool,
-only when the branch has no commit beyond `prTarget` and no worktree has it checked out, and otherwise kept with one stderr line (`references/tracker.md` §10,
-_The pull request_). There is no step for this session in it, and abort touches no other ref but the item branches above. A `pr` run that merged something
-keeps its run branch: abort opens no PR, so the summary names that pushed branch and gives the `gh pr create` line for it, built from `pr-draft`
-(SKILL.md §10).
+too. **In a run whose `mergeMode` is `pr` and that merged nothing, that includes deleting the empty run branch**: one `git update-ref -d` on `refs/heads/<run
+branch>`, run by the tool, only when the branch has no commit beyond `prTarget` and no worktree has it checked out, and otherwise kept with one stderr line
+(`references/tracker.md` §10, _The pull request_). There is no step for this session in it, and abort touches no other ref but the item branches above. A `pr`
+run that merged something keeps its run branch: abort opens no PR, so the summary names that pushed branch and gives the `gh pr create` line for it, built from
+`pr-draft` (SKILL.md §10).
 
 **That marker is the signal, and clearing markers _before_ `abort` destroys it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
 marker, classifies the item as safe, and `worktree remove --force`s a directory whose session was still working: `--force` deletes the working directory

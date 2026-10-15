@@ -249,8 +249,13 @@ The commands stay in the body, under _Finishing_. What they rest on:
   `<dir>/pr/body.md`, and refuses with exit `1`, writing nothing, when the run is not `pr`, when no item is `merged`, or when `prUrl` is already set — the PR
   exists, and a resumed session must not draft a second one. The title can ride argv because the tool built it from a fixed vocabulary and a count:
   `<type>(backlog): <N> item(s)`, the type ranked `feat` > `fix` > `perf` > `chore` across the merged items' own commit subjects.
-- **Why `gh pr view` comes first.** A session that died between `gh pr create` and `pr --url` left a PR that the run file does not know about. A resumed
-  session asks GitHub before creating, so it records that PR instead of failing on a duplicate.
+- **Why the open-PR lookup comes first, and why it matches OPEN PRs only.** A session that died between `gh pr create` and `pr --url` left a PR that the
+  run file does not know about. A resumed session asks GitHub before creating, so it records that PR instead of failing on a duplicate. The lookup is
+  `gh pr list --head <head> --state open`, never `gh pr view <head>`: `view` also matches a merged or closed PR, and a run branch name can be reused — GitHub
+  deletes a merged PR's head branch, and a machine that never held the first run's branch locally mints the same name — so a second run would record the
+  first run's merged PR as its own and never open one. An open PR from this head is this run's, because a name is minted only while no branch holds it.
+- **The PR gate keys on the requested `mergeMode`, never `mergeModeEffective`** — the same key §4's pull skip, `pr-draft` and `finish` use. A PR run degraded
+  to branch mode still merged its first items onto the run branch and closed their issues, and only the PR carries them to `prTarget`.
 - **A failed or classifier-denied `gh pr create` is not a park and does not change the finish status.** Every merged item is merged, pushed and closed; only the
   PR is outstanding. `prUrl` stays `null`, and the summary names the pushed run branch and gives the exact `gh pr create --base <target> --head <head> --title
   "<title>" --body-file "<bodyFile>"` line, filled in, for a person to run. `gh`'s failure output and the classifier's `Reason:` are read and never put into
@@ -259,16 +264,16 @@ The commands stay in the body, under _Finishing_. What they rest on:
 - **No PR on `paused` or `aborted`.** A paused run is resumed onto the same run branch later, so a PR then would be premature. An aborted run was torn down by
   a person's Stop or a `--abort`, neither of which should grow a publish step; its summary names the pushed run branch and gives the `gh pr create` line, built
   from `pr-draft`, which writes only under `<dir>` and so is not a publish.
-- **Nothing merged: `finish` deletes the empty run branch.** On every finish but `paused`, a `pr` run with no item `merged` has its local run branch deleted by
-  `finish` itself — but only when `git rev-list --count <prTarget>..<base>` is `0` and no worktree has the branch checked out. The delete is
-  `git update-ref -d refs/heads/<base> <sha it just read>`, a compare-and-delete that depends on no tree's HEAD. Otherwise the branch is kept with one stderr
+- **Nothing merged: `finish` deletes the empty run branch.** On every finish but `paused`, a run whose `mergeMode` is `pr` with no item `merged` has its local
+  run branch deleted by `finish` itself — but only when `git rev-list --count <prTarget>..<base>` is `0` and no worktree has the branch checked out. The delete
+  is `git update-ref -d refs/heads/<base> <sha it just read>`, a compare-and-delete that depends on no tree's HEAD. Otherwise the branch is kept with one stderr
   line, and `finish`'s exit code never changes: a merge that landed locally with its push refused leaves commits there, and an aborted run can leave its
   `_base-` tree holding it. Name a kept branch in the summary. Nothing was pushed, so there is no remote branch to delete. A degraded run that branched every
-  item and merged none goes the same way — its branched items were cut from the run branch while it still equalled `<prTarget>`, which is why §10's merge
-  list names `prTarget` as the branch to merge them on.
+  item and merged none goes the same way — its branched items were cut from the run branch while it still equalled `<prTarget>`, which is why §10's merge list
+  names `prTarget` as the branch to merge them on.
 - **After a PR opens, nothing deletes the local run branch.** The repo setting deletes only the remote head when the PR merges. That kept branch is why the
-  mint reads local refs as well as `origin`: a second run the same day mints the next number even after the first one's remote head is gone. Delete old
-  `backlog/run-*` branches by hand once their PRs have landed, if they get in the way.
+  mint reads local refs as well as `origin`: a second run the same day mints the next number even after the first one's remote head is gone. Leave them:
+  a `backlog/run-*` branch deleted by hand on the day it was minted frees its name for the next run.
 
 ## Hard limits — the three pushes
 

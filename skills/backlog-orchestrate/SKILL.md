@@ -1124,21 +1124,23 @@ the run** — the items merged, the base holds their work, and a leftover direct
 loud in the summary so whoever tidies it knows which one it is. A base worktree the run did **not** create is never touched here, however convenient it looks:
 it is someone's working tree, and this run's authority stops at worktrees it created itself.
 
-**In `pr` mode, when some item is `merged` and the finish is `done` or `failed`, open the run's one pull request next, before `finish`.** Draft it:
+**When `status --json` shows `mergeMode` `pr`, some item is `merged` and the finish is `done` or `failed`, open the run's one pull request next, before
+`finish`.** `mergeMode` is the requested mode, so a PR run degraded to branch mode opens its PR too — the items it merged before the denial are on the run
+branch with their issues closed, and the PR is the only thing that carries them to the target. Draft it:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" pr-draft
 ```
 
 It writes the body under `<dir>` and prints one JSON line, `{ title, bodyFile, head, target }`: `head` is the run branch and `target` is `prTarget`, and those
-two — never `<base>` — fill the `gh` lines below, each its own Bash call from the project root. First ask whether the PR already exists, which it does for a
-resumed session whose predecessor died after creating it:
+two — never `<base>` — fill the `gh` lines below, each its own Bash call from the project root. First ask whether an OPEN PR from that head already exists,
+which it does for a resumed session whose predecessor died after creating it:
 
 ```bash
-gh pr view <head> --json url --jq .url
+gh pr list --head <head> --state open --json url --jq '.[0].url // empty'
 ```
 
-A URL printed there is the PR: take it straight to `pr --url`. No URL, create it:
+A URL printed there is the PR: take it straight to `pr --url`. Nothing printed means none is open — create it:
 
 ```bash
 gh pr create --base <target> --head <head> --title "<title>" --body-file "<bodyFile>"
@@ -1162,8 +1164,8 @@ retries, green first try — should have produced no ping at all along the way; 
 
 **Any item that finished `branched` owes the user a merge list.** Name those branches in queue order — each was verified against the base its predecessor
 started from, and one carried over from an earlier run (§3's own recognition step) against that run's — with the literal command per branch, and say which
-branch to run it on when the base is not `main`. **In a `pr` run that branch is `prTarget`, never the run branch**, and when the run also opened a PR, name the
-PR first and say each branch merges only after it has landed, rebased onto `prTarget`:
+branch to run it on when the base is not `main`. **In a `pr` run that branch is `prTarget`, never the run branch** (a `pr` run is one whose `mergeMode` is `pr`,
+degraded or not), and when the run also opened a PR, name the PR first and say each branch merges only after it has landed, rebased onto `prTarget`:
 
 ```bash
 git merge --no-ff backlog/<id>
