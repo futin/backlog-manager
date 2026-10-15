@@ -23,6 +23,9 @@ one kanban-by-type board. No database: the registry file and each project's `bac
 | Production build                          | `pnpm run build`                                                   |
 | CI gate (every PR into `main`)            | `.github/workflows/ci.yml` → [docs/workflows/ci.md](docs/workflows/ci.md) |
 
+**CI is the full-suite gate — never re-run the whole `pnpm test` locally just before a push.** Push and let CI run it; locally run only the suites the change
+(or a merge of `main`) touched. Why: `~/.claude/session-analytics-log.md`, 2026-10-15.
+
 Ports: API `4322`, Vite `5177` (guide-manager holds 4321/5175/5176 on this machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in `.env` —
 inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` from that same `.env` and serves the tailnet on the same number.
 
