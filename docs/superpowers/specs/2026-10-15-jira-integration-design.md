@@ -63,7 +63,9 @@ source) read as this spec states them; BoardsTen's and NewBoard's tile wording i
 
 `tracker/` and `agents/` are today the ONLY two modules that call out; `jira/` becomes the third, and the CLAUDE.md layout line says so.
 
-- `jira.client.ts` — one `fetch` wrapper: Basic auth from the env, `https://<site>/rest/api/3/…`, JSON in and out, `AbortSignal.timeout`. Maps 401 →
+- `jira.client.ts` — one `fetch` wrapper: Basic auth from the env, every call on Atlassian's gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/…` — the one
+  base both token kinds answer on (P14: a scoped token gets 401 at `https://<site>`); the `cloudId` comes from `GET https://<site>/_edge/tenant_info` (unauthenticated) at
+  boot, held in memory, re-read on the ticker until it answers; only `browse` links use `https://<site>`. JSON in and out, `AbortSignal.timeout`. Maps 401 →
   `unauthorized`, 403 → `forbidden`, 429 → `rate-limited` carrying the `Retry-After` instant, network/timeout → `unreachable`. Counts calls per sweep and
   stamps the last 429, for the chip.
 - `config.util.ts` — `readJiraConfig()` and one writer per entry kind (`writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill`, `deleteSkill`) over `jira.json`, plus
@@ -76,7 +78,7 @@ source) read as this spec states them; BoardsTen's and NewBoard's tile wording i
   same back-off as `myself`. A board is due when `now − polledAt ≥ SYNC_INTERVALS[interval]`; the default interval is **`1m`**, not GitHub's `15s`, because a
   sweep is several calls deep. `off` keeps a GitHub repo's one cold sweep at boot and adds one after each save of the board (new here — a GitHub interval save only re-arms),
   never on the ticker, so its list exists and is honest about its age; a boot sweep that failed is owed again on the next tick until one succeeds. A save of any board ("re-aimed" below) sweeps that board at once and resets its due time. Per due board: each query runs through `POST search/jql` with a fixed field list, following `nextPageToken`, capped at
-  **200** issues per query; each root is fetched on its own (`key = "K"`), so a root Jira no longer knows (a 400 naming it, or an empty answer) is a `failures` entry on the
+  **200** issues per query; each root is fetched on its own (`key = "K"`), so a root Jira no longer knows (an empty answer — Jira says 200 with no issues for a key it does not know, P3 — or a 400 naming it) is a `failures` entry on the
   board while the others proceed; then its descendants with `parent in (…)` over the keys just returned, repeated for two rounds below the root (epic → story →
   subtask; an initiative-level root reaches its epics and stories, not their subtasks), each root's walk capped at 200; results are deduplicated by key — queries first in board order, then roots in board order — and the board is
   capped at **500** in that order, with `truncated: true` in its status. The cache is
@@ -91,7 +93,8 @@ source) read as this spec states them; BoardsTen's and NewBoard's tile wording i
   the rest. An issue in any other category is never dropped, however old a stale `resolutiondate` from an earlier close may be. The window applies as each
   issue is mapped, before the 500 cap, and a root it drops still has its descendants walked.
 - `adf.ts` — Atlassian Document Format → Markdown, read side only. Nothing in v1 writes text to Jira, so there is no Markdown → ADF.
-- `identity.ts` — `GET myself` at boot; a failure sets `access` from the error and `me: null`, and the call is retried on the sweep ticker with back-off
+- `identity.ts` — `GET myself` at boot, on the gateway; one extra `GET myself` at `https://<site>` decides the token kind the Connection card shows (`classic` when it
+  answers 200, `scoped` on 401 — P14), once, never retried. A failure of the gateway call sets `access` from the error and `me: null`, and the call is retried on the sweep ticker with back-off
   from 15 s to 5 min until it succeeds — under `unauthorized` the sweep itself does not run and issue writes answer 503, under `unreachable` the sweep keeps
   trying on the same ticker. A 401 on any later call resets `me` and starts the retry again. `me: null` reads `no identity` on the chip and the Connection
   row and disables `Assign to me` with that title. Assign-to-me uses the `accountId`.
@@ -152,7 +155,7 @@ Reads:
 | `GET /api/jira/issue/:key`              | `JiraIssueDetail`, read fresh (issue, children, transitions); `?format=text` returns the ticket block as `text/plain`    |
 | `GET /api/jira/search?q=`               | ≤ 20 issues for the roots picker: `key = Q` when `q` passes `isJiraKey`, else `summary ~ "<q>*"` with `\` and `"` in `q` backslash-escaped; `q` is trimmed (empty → `[]`, over 100 characters → 400) and upper-cased before the key test; Jira's 400 on a reserved character is §8's 409, shown under the field                                     |
 | `GET /api/jira/projects`                | Jira's full project list (`project/search`, paged), fetched when the Setup page opens — never on the poll — for the Repositories select            |
-| `GET /api/jira/jql/check?jql=`          | Jira's own parse errors, or the approximate count — the sheet's check line                                              |
+| `GET /api/jira/jql/check?jql=`          | `jql/parse?validation=strict`, then `search/approximate-count`: the parse errors, else the count call's error (an unbounded query passes parse and is refused only there — P8), else the count — the sheet's check line |
 | `GET /api/jira/prompt?key&action&repo`  | `text/plain`: exactly what Copy prompt copies, and what Start sends but for the status and assignee lines (§7); `action` is `execute`, `context` or `skill:<id>`                                        |
 
 Writes (`application/json` + same origin via `SameOriginPostGuard`; 503 while unconfigured; 400 malformed; 409 when `jira.json` is unreadable):
@@ -242,8 +245,8 @@ Four cards composed from `SettingsGroup` / `SettingsRow`, promoted to `component
   disabled until a name and at least one root or query).
 - **Repositories** — one row per mapped path (`PAY · Payments`, the path, ×), a warning row for a project that has issues on some board and no path (`no repository yet — PAY cards cannot Start until a path is mapped`), and an add row: project `Select` from `/api/jira/projects`, path field, `Add`. The hint states the dashboard rule: a path the dashboard
   cannot see is refused at dispatch, not here.
-- **Connection** — read-only rows off `GET /api/jira`: site, signed in as (name from `myself`, never the email), the token kind (v1 takes a classic, unscoped API token against `https://<site>` — a scoped token only answers through Atlassian's
-  `api.atlassian.com/ex/jira/<cloudId>` gateway, which v1 does not call), last sweep (`every 15 s` while the ticker is armed, `idle` otherwise, then `· N calls · last 429 <age>` or `· no 429 since start`). `restart the server to change it`.
+- **Connection** — read-only rows off `GET /api/jira`: site, signed in as (name from `myself`, never the email), the token kind (`classic` or `scoped`, as `identity.ts` found it; a scoped token needs `read:jira-work`, `write:jira-work` and `read:jira-user`, and the row's
+  hint says so — both kinds are called through the gateway, §3), last sweep (`every 15 s` while the ticker is armed, `idle` otherwise, then `· N calls · last 429 <age>` or `· no 429 since start`). `restart the server to change it`.
 - **Skills** (phase 5) — the two built-ins as locked rows, one row per skill (name, the template in mono, ×), an add row (name + template + `Add`), and the
   placeholder hint. A skill has to exist in the repo or the Claude install; this list only names it.
 
@@ -287,7 +290,8 @@ Shared › Trackers gains one read-only Jira row (`<site> · N boards · interva
   that lands afterwards (one already in flight, or a search index that still lags the write — P2) never replaces a cached issue whose `updated` is newer
   than the one it brought.
 - **ADF → Markdown** on the server, read side only: paragraph, heading, bulletList/orderedList/listItem, codeBlock (with language), inlineCode, strong, em,
-  strike, link, inlineCard → a link to its url, hardBreak, rule, blockquote, mention → `@name`, date and status → their text, emoji → its shortname; text
+  strike, link, inlineCard → a link to its url, hardBreak, rule, blockquote, mention → `@name`, date and status → their text, emoji → its shortname, taskList/taskItem →
+  `- [ ]` / `- [x]` lines (P10 found them on real descriptions); text
   nodes have Markdown's specials escaped, so a literal `snake_case_name` or `*` renders as written. Everything else becomes a one-line
   placeholder — `[attachment: name]`, `[table omitted]`, `[panel omitted]`, `[expand omitted]` — and a description that had any is followed by `open in Jira ↗`.
   An unknown node renders its text content.
@@ -397,23 +401,25 @@ phase 1.
 
 ## 14. Phase-0 probe — the facts this spec assumes and has not verified
 
-Each is to be run by hand with `curl` against the user's site (token from `.env`), and the answer recorded in the right-hand column before phase 1's plan.
+Run on 2026-10-16 with a read-only scratch probe (`node`, Basic auth from `.env`) against `timify.atlassian.net` with a **scoped** token; the writes (P6's POST, P7) run only
+against a ticket the user names. A finding that changed the spec is applied in §3, §5, §6 or §8 and cites the row's number there.
 
 | #   | assumption                                                                                                                  | finding |
 | --- | --------------------------------------------------------------------------------------------------------------------------- | ------- |
-| P1  | `GET /rest/api/3/myself` with Basic `email:token` returns `accountId` and `displayName` for a classic (unscoped) API token against `https://<site>`; whether a scoped token answers there at all, or only through `api.atlassian.com/ex/jira/<cloudId>` | |
-| P2  | `POST /rest/api/3/search/jql` takes `{ jql, fields, maxResults, nextPageToken }` and answers `issues[]`, `nextPageToken`, `isLast`; whether a search run right after an assign or transition can still return the old issue (the index lags the write) | |
-| P3  | `parent in (K1, K2)` follows epic → story → subtask on both company-managed and team-managed projects; `issuetype.hierarchyLevel` is present         | |
-| P4  | the sprint field is discoverable from `GET /rest/api/3/field` by `schema.custom = com.pyxis.greenhopper.jira:gh-sprint`; its value shape in a search  | |
-| P5  | `status.statusCategory.key` is `new`, `indeterminate` or `done`, and whether `undefined` ever appears on a real status                                | |
-| P6  | `GET issue/{key}/transitions` shape; `POST issue/{key}/transitions { transition: { id } }` → 204; the error shape when a transition needs a screen     | |
-| P7  | `PUT issue/{key}/assignee { accountId }` → 204                                                                                                       | |
-| P8  | `POST /rest/api/3/jql/parse?validation=strict { queries }` returns per-query errors; `POST /rest/api/3/search/approximate-count { jql }` returns `count` | |
-| P9  | a 429 carries `Retry-After` in seconds; whether `X-RateLimit-*` headers exist                                                                        | |
-| P10 | the ADF node inventory on a real description: media, mention, table, panel, expand, emoji, inlineCard, date, status                                  | |
-| P11 | `GET /rest/api/3/project/search` lists the projects the token sees, with paging                                                                     | |
+| P1  | `GET /rest/api/3/myself` with Basic `email:token` returns `accountId` and `displayName` for a classic (unscoped) API token against `https://<site>`; whether a scoped token answers there at all, or only through `api.atlassian.com/ex/jira/<cloudId>` | **scoped token: 401 at `https://<site>`** (`Client must be authenticated to access this resource.`), 200 on `api.atlassian.com/ex/jira/<cloudId>`; `myself` carries `accountId`, `displayName`, `emailAddress`, `avatarUrls`, `accountType`, `timeZone`. Classic token not probed (none available) — Atlassian documents it as answering on both bases. → §3 client and identity, §6 Connection, P14 |
+| P2  | `POST /rest/api/3/search/jql` takes `{ jql, fields, maxResults, nextPageToken }` and answers `issues[]`, `nextPageToken`, `isLast`; whether a search run right after an assign or transition can still return the old issue (the index lags the write) | shape confirmed: `issues[]`, `nextPageToken` (a string, present only while `isLast: false`), no `total`; `maxResults: 200` accepted. **Unbounded JQL is a 400** (`Unbounded JQL queries are not allowed here. Please add a search restriction to your query.`) — `order by` alone counts as unbounded; every v1 query is bounded (`key =`, `parent in`, a project or sprint clause). Index lag after a write: not probed (write) |
+| P3  | `parent in (K1, K2)` follows epic → story → subtask on both company-managed and team-managed projects; `issuetype.hierarchyLevel` is present         | `parent in (…)` from an epic (`hierarchyLevel: 1`) returned 10 level-0 children and 0 grandchildren on a company-managed project; team-managed not probed (none on this site). `hierarchyLevel` is on every type: epic 1, standard 0, subtask −1 — and oddly named subtask types (`Project`, `Testing`, `Story Bug`) are level −1, so the level, never the name, decides. An unknown key (`key = "ZZZZ-999999"`) is **200 with no issues**, not a 400. → §3 roots |
+| P4  | the sprint field is discoverable from `GET /rest/api/3/field` by `schema.custom = com.pyxis.greenhopper.jira:gh-sprint`; its value shape in a search  | `GET field` (223 fields) has exactly one `gh-sprint` field (`customfield_10020`, `Sprint`); in a search it is an array of `{ id, name, state, boardId, goal, startDate, endDate }` with `state: active | closed | future`. `parent.fields` carries `summary`, `status`, `priority`, `issuetype` |
+| P5  | `status.statusCategory.key` is `new`, `indeterminate` or `done`, and whether `undefined` ever appears on a real status                                | `GET statuscategory` lists four keys — `undefined`, `new`, `indeterminate`, `done` — so `undefined` exists (id 1) as assumed; §4's mapping to `new` stands |
+| P6  | `GET issue/{key}/transitions` shape; `POST issue/{key}/transitions { transition: { id } }` → 204; the error shape when a transition needs a screen     | GET shape: `transitions[]` of `{ id, name, to { id, name, statusCategory }, hasScreen, isGlobal, isInitial, isAvailable, isConditional, isLooped }` — 5 offered on the sampled issue, all `isAvailable: true`, `hasScreen: false`. The POST and the screen error: not probed (write) |
+| P7  | `PUT issue/{key}/assignee { accountId }` → 204                                                                                                       | not probed (write) — `write:jira-work` ("create and edit issues") is the scope that covers it, and the token has it |
+| P8  | `POST /rest/api/3/jql/parse?validation=strict { queries }` returns per-query errors; `POST /rest/api/3/search/approximate-count { jql }` returns `count` | both 200 as assumed: parse answers `queries[].errors[]` strings (`Field 'sprnt' does not exist or you do not have permission to view it.`) but **passes an unbounded query**; `approximate-count` answers `{ count }` and is the call that refuses unbounded JQL (400, P2's message). → §5 check route |
+| P9  | a 429 carries `Retry-After` in seconds; whether `X-RateLimit-*` headers exist                                                                        | no 429 met. Every normal answer carries `x-ratelimit-limit`, `x-ratelimit-remaining`, `ratelimit`, `ratelimit-policy`; the client keeps counting its own calls for the CALLS meter (the headers are per gateway bucket, not per sweep) and reads only `Retry-After` on a 429 — unverified, the 60 s default stands |
+| P10 | the ADF node inventory on a real description: media, mention, table, panel, expand, emoji, inlineCard, date, status                                  | over 10 descriptions: `doc, paragraph, text, heading, bulletList, orderedList, listItem, codeBlock, panel, table, tableRow, tableHeader, tableCell, taskList, taskItem, media, mediaSingle, mention, emoji, inlineCard, rule`; marks `strong, em, code, link, underline`. No `expand`, `date` or `status` seen. A description is an ADF object, never a string. → §8 taskList |
+| P11 | `GET /rest/api/3/project/search` lists the projects the token sees, with paging                                                                     | 200, paged: `values[]`, `isLast`, `nextPage` (a URL), `startAt`, `maxResults`, `total` (8 here) — the route follows `nextPage` until `isLast` |
 | P12 | answered from code, no probe needed: `POST /api/sessions/<id>/stop` answers 404 `no live session` for a gone session (`items-abort.service.ts`), and `GET /api/sessions` carries each session's status (`dashboardSessionStatus`, `agents.service.ts`) — §3 reconciles the live map against it | known |
-| P13 | `GET /rest/api/3/serverInfo` answers `deploymentType: "Cloud"` on a Cloud site, and is absent or says otherwise on Server/DC                       | |
+| P13 | `GET /rest/api/3/serverInfo` answers `deploymentType: "Cloud"` on a Cloud site, and is absent or says otherwise on Server/DC                       | `deploymentType: "Cloud"`, `version: 1001.0.0-SNAPSHOT`; Server/DC not probed |
+| P14 | (found, not assumed) the token kind decides the base URL                                                                   | scoped token → gateway only; cloudId from `GET https://<site>/_edge/tenant_info` (200, unauthenticated, `{ cloudId }`). → §3 client, §6 Connection |
 
 ## 15. Out of scope, and what comes after
 
