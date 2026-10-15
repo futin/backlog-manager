@@ -10811,3 +10811,125 @@ test('pr 4.10: the tool’s PR_URL_PATTERN source equals shared/agent.ts’s, re
   assert.equal(tool, shared);
   assert.equal(tool, String.raw`/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/`);
 });
+
+// --- pr mode: finish removes an empty run branch (Task 5) --------------------
+
+/** Every local branch and its sha, for the cases that assert `finish` moved no ref it should not have. */
+function allRefs(project) {
+  return gitOk(project, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/');
+}
+
+/** `finish`'s stderr, split into its non-blank lines. */
+function stderrLines(out) {
+  return out.stderr.split('\n').filter((l) => l.trim() !== '');
+}
+
+/** Lands `task-1` on the run branch, then removes the tree that did it — a merge that landed with nothing staged `merged`. */
+function landAndDropTree(fx) {
+  landItem(fx, 'task-1', 'Some task', ['feat: some task']);
+  gitOk(fx.project, 'worktree', 'remove', '--force', runBranchTree(fx));
+}
+
+// 5.1
+test('pr 5.1: finish --status done on a pr run with nothing merged and an unchanged run branch deletes the branch', (t) => {
+  const fx = handPrRun(t);
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(fx.project), []);
+  assert.deepEqual(stderrLines(out), []);
+  assert.equal(readRunJson(fx).status, 'done');
+});
+
+// 5.2
+test('pr 5.2: a run branch with a commit beyond the target is kept, with one stderr line naming it', (t) => {
+  const fx = handPrRun(t);
+  landAndDropTree(fx);
+  const before = allRefs(fx.project);
+
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(allRefs(fx.project), before);
+  assert.deepEqual(runBranches(fx.project), [fx.runBranch]);
+  const lines = stderrLines(out);
+  assert.equal(lines.length, 1, out.stderr);
+  assert.ok(lines[0].includes(fx.runBranch), lines[0]);
+});
+
+// 5.3
+test('pr 5.3: a _base- worktree still holding the run branch keeps it, with one stderr line, and exits 0', (t) => {
+  const fx = handPrRun(t);
+  const tree = runBranchTree(fx);
+
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(fx.project), [fx.runBranch]);
+  assert.ok(fs.existsSync(tree), 'finish never removes a tree');
+  const lines = stderrLines(out);
+  assert.equal(lines.length, 1, out.stderr);
+  assert.ok(lines[0].includes(fx.runBranch), lines[0]);
+});
+
+// 5.4
+test('pr 5.4: paused never deletes; done, failed and aborted (directly and through abort) do', (t) => {
+  const paused = handPrRun(t);
+  const out = run(paused.project, paused.home, 'finish', '--status', 'paused');
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(paused.project), [paused.runBranch], 'paused keeps the branch');
+  assert.deepEqual(stderrLines(out), []);
+
+  for (const status of ['done', 'failed', 'aborted']) {
+    const fx = handPrRun(t);
+    const finished = run(fx.project, fx.home, 'finish', '--status', status);
+    assert.equal(finished.status, 0, `${status}: ${finished.stderr}`);
+    assert.deepEqual(runBranches(fx.project), [], `finish --status ${status} deletes the empty branch`);
+  }
+
+  const viaAbort = handPrRun(t);
+  const aborted = run(viaAbort.project, viaAbort.home, 'abort');
+  assert.equal(aborted.status, 0, aborted.stderr);
+  assert.equal(readRunJson(viaAbort).status, 'aborted');
+  assert.deepEqual(runBranches(viaAbort.project), [], 'abort ends through finish, which deletes it');
+});
+
+// 5.5
+test('pr 5.5: a pr run with an item merged keeps the run branch whatever the status', (t) => {
+  for (const status of ['done', 'failed', 'aborted', 'paused']) {
+    const fx = handPrRun(t);
+    setQueue(fx, { 'task-1': 'merged' });
+
+    const out = run(fx.project, fx.home, 'finish', '--status', status);
+
+    assert.equal(out.status, 0, `${status}: ${out.stderr}`);
+    assert.deepEqual(runBranches(fx.project), [fx.runBranch], status);
+  }
+});
+
+// 5.6
+test('pr 5.6: finish on a merge run and a branch run touches no branch', (t) => {
+  for (const mode of ['merge', 'branch']) {
+    const fx = basedFixture(t);
+    assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project, '--merge-mode', mode).status, 0);
+    const before = allRefs(fx.project);
+
+    const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+    assert.equal(out.status, 0, `${mode}: ${out.stderr}`);
+    assert.equal(allRefs(fx.project), before, mode);
+    assert.deepEqual(stderrLines(out), [], mode);
+  }
+});
+
+// 5.7
+test('pr 5.7: the delete is HEAD-independent — a root on another branch than the target still deletes', (t) => {
+  const fx = handPrRun(t);
+  gitOk(fx.project, 'checkout', '-q', '-b', 'elsewhere');
+
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(fx.project), []);
+  assert.equal(gitOk(fx.project, 'symbolic-ref', '--short', 'HEAD').trim(), 'elsewhere');
+});

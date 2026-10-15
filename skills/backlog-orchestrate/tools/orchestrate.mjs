@@ -4463,6 +4463,47 @@ function cmdAssume(argv) {
 const FINISH_USAGE = 'usage: orchestrate.mjs finish --status <done|aborted|failed|paused>';
 const FINISH_STATUSES = ['done', 'aborted', 'failed', 'paused'];
 
+/**
+ * `finish`'s one git write, for a `pr` run only (spec §4, *Nothing merged*): the run branch of a run that merged nothing is deleted, so a
+ * run that did nothing leaves no `backlog/run-*` branch behind to push the mint's numbers up for nothing.
+ *
+ * Both conditions are read first and either one keeps the branch: `rev-list --count <prTarget>..<base>` must be `0` (a merge that landed
+ * locally with its push refused leaves commits here and no item `merged`, and that work is not this command's to destroy), and
+ * `treeHoldingBranch` must find nobody (an aborted run can leave its `_base-` tree in place, and git refuses to delete a checked-out
+ * branch anyway). The delete is `update-ref -d refs/heads/<base> <sha it read>` — a compare-and-delete that depends on no tree's HEAD,
+ * where `branch -d` from the project root would judge "merged" against whatever the root has checked out, the HEAD-relative shape bug-38
+ * removed from `cleanup`. The ranges and refs are fully qualified for the same reason.
+ *
+ * **Never fails the command.** The run file is already written, so a git refusal is one stderr line and the branch stays. That is the
+ * same posture as the tracker publishes around it: the journal of record is `run.json`, not the branch.
+ */
+function removeEmptyRunBranch(projectRoot, run) {
+  const branch = run.base;
+  const ref = `refs/heads/${branch}`;
+  const tip = spawnSync('git', ['-C', projectRoot, 'rev-parse', '--verify', '-q', `${ref}^{commit}`], { encoding: 'utf8' });
+  if (tip.status !== 0) {
+    console.error(`run branch ${branch} was not removed: it could not be read (${(tip.stderr || 'no such branch').trim()})`);
+    return;
+  }
+  const sha = tip.stdout.trim();
+  const ahead = spawnSync('git', ['-C', projectRoot, 'rev-list', '--count', `refs/heads/${run.prTarget}..${ref}`], { encoding: 'utf8' });
+  if (ahead.status !== 0) {
+    console.error(`run branch ${branch} was kept: its commits beyond ${run.prTarget} could not be counted (${(ahead.stderr || '').trim()})`);
+    return;
+  }
+  if (ahead.stdout.trim() !== '0') {
+    console.error(`run branch ${branch} was kept: it has ${ahead.stdout.trim()} commit(s) beyond ${run.prTarget}, and no item is merged`);
+    return;
+  }
+  const tree = treeHoldingBranch(projectRoot, branch);
+  if (tree !== null) {
+    console.error(`run branch ${branch} was kept: ${tree} has it checked out`);
+    return;
+  }
+  const del = spawnSync('git', ['-C', projectRoot, 'update-ref', '-d', ref, sha], { encoding: 'utf8' });
+  if (del.status !== 0) console.error(`run branch ${branch} was kept: git refused to delete it (${(del.stderr || '').trim()})`);
+}
+
 function cmdFinish(argv) {
   let status;
   for (let i = 0; i < argv.length; i++) {
@@ -4472,13 +4513,21 @@ function cmdFinish(argv) {
     throw new OrchestrateError(FINISH_USAGE, 1);
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const projectRoot = resolveProjectRoot();
+  const dir = projectDir(orchHome(), projectRoot);
   const run = readRun(dir);
   assertDriver(run);
 
   run.status = status;
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  // PR mode, spec §4: a run that ends with nothing merged has no PR to open, so its empty run branch goes. After the status write because
+  // the run file is the record and this is housekeeping; never on `paused`, which means to come back to that branch. A degraded run (its
+  // effective mode moved to `branch`) is still a `pr` run here — its branched items were cut from the run branch while it equalled the
+  // target, so the branch is empty and goes the same way.
+  if (status !== 'paused' && run.mergeMode === 'pr' && typeof run.prTarget === 'string' && !run.queue.some((item) => item.stage === 'merged')) {
+    removeEmptyRunBranch(projectRoot, run);
+  }
   // task-48, tracker only: another machine can only tell a finished run from
   // a crashed one if the outcome is on a claim, so it is stamped on the run's
   // last-touched claimed item. Best-effort like every publish here.
@@ -5936,7 +5985,8 @@ function cmdAbort() {
   // item with an empty field has as much to recover as the stopped one, and `resolveItemSessionId` never replaces an id already recorded. Picked up by the
   // single `writeRunAtomic` at the end of this command.
   //
-  // `finish --status paused` deliberately does NOT do this, and `cmdFinish` stays a pure status write. A park is decided from `watch`'s own exits, so the
+  // `finish --status paused` deliberately does NOT do this, and `cmdFinish` stays free of the harvest (it is no longer a pure
+  // status write: since PR mode it also deletes a `pr` run's empty branch, and that is the only git it runs). A park is decided from `watch`'s own exits, so the
   // parked item's tick has normally already read the id; abort is the exit that ends a run on the path where `watch` never ran at all — the stop inside the
   // dispatch block. One harvest at the one exit that needs it, rather than a second copy on an exit that usually would not.
   for (const item of run.queue) item.sessionId = resolveItemSessionId(dir, item);
