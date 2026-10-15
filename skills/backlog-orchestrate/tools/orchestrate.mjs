@@ -766,6 +766,16 @@ const EXIT_FOREIGN_DRIVER = 7;
 // precisely the request a stop is not.
 const EXIT_STOP_REQUESTED = 10;
 
+// bug-253. Exit code for "`verify` refused a tracker item's `## Done when`
+// command the gate never approved". A tracker item's snapshot is re-fetched
+// from the live issue after every fix loop, so its commands are whatever the
+// issue says NOW, and whoever can edit the issue can edit them. Its own number
+// rather than a `1` or a `5`: a `1` reads as "this call was wrong" and a `5` as
+// "nothing to verify with", and both send the driver somewhere else — this one
+// means the item has an open question (is this command meant to run?) and is
+// staged `needs-answers`, never fixed and never retried.
+const EXIT_UNAPPROVED_COMMAND = 11;
+
 // This session's identity, or `null` when there is none.
 //
 // `CLAUDE_CODE_SESSION_ID` is the same variable `backlog.mjs` reads for token
@@ -1314,8 +1324,11 @@ function extractDoneWhenCommands(doneWhenText) {
 // `package.json` script. Neither file existing, or either failing to parse,
 // is read as "nothing known" rather than an error — a project with no
 // verify.json and no package.json at all is a normal thing for this gate to
-// see (this tool's own fixtures/store/ is exactly that), and the whole point
-// of this check is a soft warning, never a reason to fail the command.
+// see (this tool's own fixtures/store/ is exactly that), and at the gate the
+// whole point of this check is a soft warning, never a reason to fail the
+// command. bug-253 gave it a second caller that is NOT soft: `cmdVerify`
+// re-runs it against a tracker item's live-fetched snapshot and refuses with
+// exit 11 on anything it returns — see the comment there.
 function findUnresolvedCommands(doneWhenText, projectRoot) {
   const commands = extractDoneWhenCommands(doneWhenText);
   if (commands.length === 0) return [];
@@ -5164,21 +5177,29 @@ function packageJsonVerifyCommands(cwd) {
 // has no proof commands anywhere, and it says so far better than a throw here
 // would.
 function itemDoneWhenCommands(cwd, itemId, snapshotPath = null) {
+  const doneWhen = itemDoneWhenSection(cwd, itemId, snapshotPath);
+  return doneWhen === undefined ? [] : extractDoneWhenCommands(doneWhen);
+}
+
+// The `## Done when` section's text itself, or `undefined` for every case the
+// function above reads as "nothing extra". Split out for bug-253's re-check in
+// `cmdVerify`, which needs the text — `findUnresolvedCommands` takes a
+// section, not a command list — and must read the SAME bytes the commands come
+// from, never a second fetch that could differ from the first.
+function itemDoneWhenSection(cwd, itemId, snapshotPath) {
   let body;
   if (snapshotPath !== null) {
-    if (!fs.existsSync(snapshotPath)) return [];
+    if (!fs.existsSync(snapshotPath)) return undefined;
     // The WHOLE file is the body. A snapshot has no frontmatter fence — an
     // issue has no frontmatter to snapshot — so running it through
     // `parseItemForGate` would answer `body: ''` for every well-formed one.
     body = fs.readFileSync(snapshotPath, 'utf8');
   } else {
     const found = findItemFilePath(cwd, itemId);
-    if (!found) return [];
+    if (!found) return undefined;
     ({ body } = readItemForGate(found.path));
   }
-  const doneWhen = extractSection(body, 'Done when');
-  if (doneWhen === undefined) return [];
-  return extractDoneWhenCommands(doneWhen);
+  return extractSection(body, 'Done when');
 }
 
 // Base commands (verify.json's own `commands` array when it resolves to
@@ -5321,6 +5342,40 @@ function cmdVerify(argv) {
   // `backlog/` — there is none. Everything else about verify is unchanged:
   // the commands still run in `--cwd`, the rows still land on the queue item.
   const snapshotPath = projectSource(checked.project) === 'github' ? snapshotFilePath(dir, itemId) : null;
+
+  // bug-253: the gate's allowlist, applied again to the snapshot right before
+  // anything is spawned. The gate ran `findUnresolvedCommands` once, against
+  // the body as it was then; the snapshot is re-fetched from the LIVE issue
+  // after every fix loop, so without this whoever can edit the issue — its
+  // author, on a public repo anybody — could add a fenced line and have this
+  // machine run it unattended. Re-checking closes that without pinning the
+  // body: an edit can still reword prose or drop a command, it just can never
+  // ADD one the gate would not have approved.
+  //
+  // The allowlist is read at the PROJECT ROOT, where the gate read it — not at
+  // `--cwd`. The worktree's `backlog/verify.json` and `package.json` are files
+  // the execute session can write, so approving against them would let the
+  // branch widen its own allowlist.
+  //
+  // Refused before the first spawn, not just the bad one: a verify that ran
+  // half its rows would leave a partial answer for the merge gate. Nothing is
+  // written either — the driver records the question and stages the item
+  // `needs-answers` itself (SKILL.md §8). Files projects are untouched: their
+  // `## Done when` comes from the committed item file the gate read, not from
+  // a live body.
+  if (snapshotPath !== null) {
+    const doneWhen = itemDoneWhenSection(cwd, itemId, snapshotPath);
+    const unapproved = doneWhen === undefined ? [] : findUnresolvedCommands(doneWhen, resolveProjectRoot());
+    if (unapproved.length > 0) {
+      throw new OrchestrateError(
+        `verify refused: ## Done when for ${itemId} names ${unapproved.length === 1 ? 'a command' : 'commands'} not approved by ` +
+          `backlog/verify.json or package.json scripts at the project root — nothing was run: ` +
+          unapproved.map((cmd) => `\`${cmd}\``).join(', '),
+        EXIT_UNAPPROVED_COMMAND
+      );
+    }
+  }
+
   const commands = resolveVerifyCommands(cwd, itemId, snapshotPath);
   if (commands.length === 0) {
     // Exit 5: nothing this tool could find to prove the item works — no

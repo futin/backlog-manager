@@ -8154,12 +8154,20 @@ test('snapshot is refused for a files project', (t) => {
 test('verify reads a tracker item-s Done when out of the snapshot, not out of any backlog file', async (t) => {
   const { home, project } = trackerFixture(t);
   const marker = path.join(project, 'verify-ran.txt');
-  const body = `## Symptom\n\nx\n\n## Cause\n\nreal\n\n## Fix\n\nreal\n\n## Done when\n\n\`\`\`\nnode -e "require('fs').writeFileSync('${marker}','ran')"\n\`\`\`\n`;
+  const cmd = `node -e "require('fs').writeFileSync('${marker}','ran')"`;
+  const body = `## Symptom\n\nx\n\n## Cause\n\nreal\n\n## Fix\n\nreal\n\n## Done when\n\n\`\`\`\n${cmd}\n\`\`\`\n`;
+  // bug-253: the command has to be one the gate's allowlist approves, and that
+  // allowlist is the PROJECT ROOT's verify.json. The commands run in a separate
+  // directory with no verify.json of its own, so the only way this command can
+  // reach a spawn is through the snapshot's `## Done when`.
+  fs.writeFileSync(path.join(project, 'backlog', 'verify.json'), JSON.stringify({ commands: [cmd] }));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-verify-wt-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
 
   const { out } = await withApi({ ...claimRoutes(project), '/api/items/body': { body } }, async (port) => {
     assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
     assert.equal((await runApi(project, home, port, 'snapshot', '3')).status, 0);
-    return runApi(project, home, port, 'verify', '3', '--cwd', project, '--json');
+    return runApi(project, home, port, 'verify', '3', '--cwd', worktree, '--json');
   });
 
   assert.equal(out.status, 0, out.stderr);
@@ -8168,6 +8176,43 @@ test('verify reads a tracker item-s Done when out of the snapshot, not out of an
     JSON.parse(out.stdout).map((row) => row.ok),
     [true],
   );
+});
+
+// bug-253: the snapshot is re-fetched from the live issue after every fix loop,
+// so whoever can edit the issue can change what `verify` spawns. The gate's
+// allowlist is re-applied to the snapshot right before anything runs.
+test('verify refuses with exit 11 a tracker Done when command the gate allowlist does not approve, and spawns and writes nothing', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const approved = path.join(project, 'approved-ran.txt');
+  const injected = path.join(project, 'injected-ran.txt');
+  const approvedCmd = `node -e "require('fs').writeFileSync('${approved}','ran')"`;
+  const injectedCmd = `node -e "require('fs').writeFileSync('${injected}','ran')"`;
+  const body = `## Symptom\n\nx\n\n## Cause\n\nreal\n\n## Fix\n\nreal\n\n## Done when\n\n\`\`\`\n${approvedCmd}\n${injectedCmd}\n\`\`\`\n`;
+  fs.writeFileSync(path.join(project, 'backlog', 'verify.json'), JSON.stringify({ commands: [approvedCmd] }));
+  // The worktree's own verify.json approving the injected line must not count:
+  // the executor session can write that file, and the gate never read it.
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-verify-wt-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'));
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: [injectedCmd] }));
+
+  const { out: { out, before, after } } = await withApi({ ...claimRoutes(project), '/api/items/body': { body } }, async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    assert.equal((await runApi(project, home, port, 'snapshot', '3')).status, 0);
+    const before = fs.readFileSync(runFile(home, project), 'utf8');
+    const out = await runApi(project, home, port, 'verify', '3', '--cwd', worktree, '--json');
+    return { out, before, after: fs.readFileSync(runFile(home, project), 'utf8') };
+  });
+
+  assert.equal(out.status, 11, out.stderr);
+  assert.match(out.stderr, /not approved/);
+  assert.ok(out.stderr.includes(injectedCmd), out.stderr);
+  assert.ok(!out.stderr.includes(`\`${approvedCmd}\``), out.stderr);
+  // Refused before the FIRST spawn, not just before the bad one: a verify that
+  // ran half its rows would hand the merge gate a partial answer.
+  assert.equal(fs.existsSync(approved), false);
+  assert.equal(fs.existsSync(injected), false);
+  assert.equal(after, before);
 });
 
 test('a tracker run-s outcomes/ and items/ are archived beside its run file by the next init', async (t) => {
