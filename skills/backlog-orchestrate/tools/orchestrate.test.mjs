@@ -3139,6 +3139,51 @@ test("abort still deletes a merged item's branch normally — only a branched it
   assert.equal(after.attention[0].id, 'task-62');
 });
 
+// #264: a `parked` or `failed` item's branch holds committed work that never reached the base — a merge conflict, an exhausted fix loop — and in merge mode
+// that branch is never pushed, so it is the only copy. Such an item has already run `stop --keep-started`, so it carries no `phase:` marker, and before this
+// fix the teardown read "no marker" as "disposable" and force-removed both. One run, three items: the parked and the failed one keep worktree AND branch, and
+// a plain in-flight item without a marker is still torn down, so the new gate is pinned from both sides.
+test('abort keeps a parked and a failed item\'s worktree and branch, and still tears down an in-flight item without a marker (#264)', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-63', 'A parked task');
+  seedReadyTask(project, 'task-64', 'A failed task');
+  seedReadyTask(project, 'task-65', 'An in-flight task');
+  commitEverything(project, 'seed');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  const trees = {};
+  for (const id of ['task-63', 'task-64', 'task-65']) {
+    trees[id] = path.join(project, '.worktrees', id);
+    assert.equal(spawnSync('git', ['-C', project, 'worktree', 'add', trees[id], '-b', `backlog/${id}`, 'HEAD'], { encoding: 'utf8' }).status, 0);
+    assert.equal(run(project, home, 'stage', id, 'dispatched', '--worktree', trees[id], '--branch', `backlog/${id}`).status, 0);
+  }
+  // The parked item's work is a real commit on its branch, never merged — the exact shape the bug destroyed.
+  fs.writeFileSync(path.join(trees['task-63'], 'work.txt'), 'unmerged work\n');
+  assert.equal(spawnSync('git', ['-C', trees['task-63'], 'add', 'work.txt'], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync('git', ['-C', trees['task-63'], 'commit', '-m', 'work'], { encoding: 'utf8' }).status, 0);
+  assert.equal(run(project, home, 'stage', 'task-63', 'parked').status, 0);
+  assert.equal(run(project, home, 'stage', 'task-64', 'failed').status, 0);
+
+  const out = run(project, home, 'abort');
+
+  assert.equal(out.status, 0, out.stderr);
+  for (const id of ['task-63', 'task-64']) {
+    assert.equal(fs.existsSync(trees[id]), true, `${id}'s worktree must survive abort`);
+    const kept = spawnSync('git', ['-C', project, 'branch', '--list', `backlog/${id}`], { encoding: 'utf8' });
+    assert.match(kept.stdout, new RegExp(`backlog/${id}`), `${id}'s branch must survive abort`);
+  }
+  assert.equal(fs.readFileSync(path.join(trees['task-63'], 'work.txt'), 'utf8'), 'unmerged work\n');
+  assert.equal(fs.existsSync(trees['task-65']), false);
+  assert.equal(spawnSync('git', ['-C', project, 'branch', '--list', 'backlog/task-65'], { encoding: 'utf8' }).stdout.trim(), '');
+
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.equal(after.status, 'aborted');
+  const kept = after.attention.filter((a) => /KEPT by abort/.test(a.detail)).map((a) => a.id).sort();
+  assert.deepEqual(kept, ['task-63', 'task-64']);
+  assert.match(out.stdout, /removed 1 item\(s\) \(task-65\)/);
+  assert.match(out.stdout, /kept 2 parked\/failed item\(s\) \(task-63, task-64/);
+});
+
 test('abort with no run exits 3', (t) => {
   const { home, project } = orchFixture(t);
 
