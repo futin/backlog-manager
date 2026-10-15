@@ -32,7 +32,8 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   has no `prompt` field, so a caller-supplied one is never read. What a caller can influence is enumerated by the composition in `orchestrate()` and nowhere
   else, in this order: `ids` first (each proven by `isItemId` and a per-project scan; 400 for a malformed list, 409 for a disagreeing one; absent means the whole
   queue, explicitly empty is a 400) — ids must stay first, because bare tokens parse as ids and a flag ahead of them swallows the first one — then the
-  compile-time literals ` --merge-mode branch` and ` --question-mode decide`, then ` --base <ref>`. Each is appended only off its guard and each default appends
+  compile-time literals ` --merge-mode branch` or ` --merge-mode pr` (`pr` a 400 for a project whose source is not `github`) and ` --question-mode decide`,
+  then ` --base <ref>`. Each is appended only off its guard and each default appends
   nothing. **They are not all the same kind of safe**: the two mode flags append compile-time literals, so no caller character reaches the prompt, while `base`
   is the one member whose caller text is appended verbatim and is therefore *proved* (`resolveBase`) rather than clamped. Do not restore any claim that every
   appended flag is a literal. Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-spawn-prompt-is-composed-server-side)

@@ -47,13 +47,16 @@ way on 2026-10-15; the 946th is that git-wording case, re-run alone in the conta
 
 The `main-pr-only` ruleset (PR required, the three contexts above, linear history, no force push or deletion, no bypass) and the squash-only merge settings
 are applied by release-kit's `scripts/apply-repo-settings.sh futin/backlog-manager`, dry run first. **State on 2026-10-15: not applied, deliberately** — unlike the
-dashboard, it waits for Phase B's `--pr` mode rather than for the first green PR, because of the first bullet below. Until then CI is a signal on
-every PR, not a gate on `main`.
+dashboard, it waits for Phase B, the `pr` merge mode, rather than for the first green PR, because of the first bullet below. Until then CI is a signal on
+every PR, not a gate on `main`. The `pr` merge mode has now landed (`docs/superpowers/specs/2026-10-15-orchestrate-pr-mode-design.md`); once this machine's
+Settings default merge mode is `pr` and one PR-mode run has opened its PR here, the ruleset can be applied. Applying it stays the user's step.
 
-Once it is applied, every direct push to `main` is refused until Phase B lands, and in this repo that is more than habit:
+Once it is applied, every direct push to `main` is refused, and in this repo that is more than habit:
 
-- **`backlog-orchestrate` pushes `main` for a tracker project**, and this repo's own backlog is tracker-backed — a run here would merge locally and then park
-  at the push. Phase B's `--pr` mode (one PR per run, its own plan in this repo) is what replaces that push.
+- **`backlog-orchestrate` opens a PR instead of pushing `main`, but only in `pr` merge mode.** This repo's own backlog is tracker-backed, and a `merge`-mode run
+  here pushes `main` after every merge, so under the ruleset it would merge locally and then park at the push. A `pr`-mode run drains onto its own
+  `backlog/run-<date>-<n>` branch, pushes that, and ends by opening one PR into `main` for CI to gate and a person to squash-merge. There is no `--pr` flag: it
+  is the third value of the merge mode, picked in the Orchestrate sheet or defaulted from Settings.
 - **[publishing.md](publishing.md)'s "commit, on main" then `git push`** becomes a PR; `pnpm run plugin:sync` still installs from the pushed `main`, so it runs
   after the merge, not after the push.
 - `git-sync`'s trunk push is gated per repo by the dashboard's Phase B; until then it fails here like any other direct push.

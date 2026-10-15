@@ -435,6 +435,11 @@ because nothing landed; a denied or rejected PUSH follows a merge that HAS lande
 into the summary a person reads afterwards. See
 [a classifier denial degrades the run](#a-classifier-denial-degrades-the-run-every-other-merge-failure-parks) for the rule this is the exception to.
 
+**PR mode adds no fourth push.** A `pr` run's base is its run branch, so the same `push origin <base>` after each merge pushes that branch, and its per-item
+pull is skipped. What it adds is one remote write that is not a git command: the finish's `gh pr create`, run by the driver in a Bash call of its own, which
+opens the run's one pull request. The run still merges only into its own base, and never into the PR's target — a person merges the PR
+([PR mode drains onto a run branch](#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run)).
+
 ## The merge happens in whichever tree holds the base, and the run removes only the tree it made
 
 A run's **base** is the branch it gates its queue at, cuts each item worktree from, and merges each finished item into — `main` unless the run was started with
@@ -551,7 +556,8 @@ exactly one writer. It rides the one channel that exists — the spawn prompt �
 `orchestrateDefaultMergeMode` (client Settings, per-device, default `'merge'`, clamped by the same `pickOne` as `dispatchDefaultModel`) seeds the
 `OrchestrateSheet` picker; the sheet sends `mergeMode` on **every** launch, including when it equals the default, because the field is the sheet's answer to
 "what should this run do" and inferring it server-side from an absent field would put one decision in two places; `AgentsService` validates it and appends the
-compile-time literal ` --merge-mode branch`; `orchestrate.mjs init` writes `mergeMode`, `mergeModeEffective` and `mergeModeNote`.
+compile-time literal ` --merge-mode branch` (or ` --merge-mode pr`, below); `orchestrate.mjs init` writes `mergeMode`, `mergeModeEffective` and
+`mergeModeNote`.
 
 The service's rule differs deliberately from every neighbouring field. Absent (`undefined` or `''`) resolves to `'merge'`; a member of `MERGE_MODES` passes
 through; **anything else is a 400, uncoded — not clamped, not dropped.** `model` and `effort` drop an unknown value because dropping one costs a default model.
@@ -559,10 +565,12 @@ Dropping an unrecognised `mergeMode` would resolve to `'merge'`, and _merging to
 it. Absent still means `'merge'` because absent is not a bug — it is every request written before this field existed. Uncoded because `RUN_IN_PROGRESS_CODE`
 stays the one machine-readable answer this endpoint gives, and nothing about a malformed enum needs telling apart from another 4xx.
 
-`MergeMode` (`shared/types.ts`) is `merge | branch`, with `isMergeMode` as its one guard for the reason `isAgentAction` has one.
+`MergeMode` (`shared/types.ts`) is `merge | branch | pr`, with `isMergeMode` as its one guard for the reason `isAgentAction` has one. `pr` came later and
+has a section of its own, [PR mode drains onto a run branch](#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run).
 
 Two run fields rather than one, because the archive has to answer "did this run merge, and was that the plan?" months later. `mergeMode` is what was asked for
-and is never rewritten; `mergeModeEffective` is what the run is actually doing and only ever moves `merge` → `branch`, never back; `mergeModeNote` says why they
+and is never rewritten; `mergeModeEffective` is what the run is actually doing and only ever moves `merge` (or `pr`) → `branch`, never back;
+`mergeModeNote` says why they
 differ. Collapsing them loses the distinction between a run that chose branches and a run that was denied them — exactly the distinction the post-mortem above
 needed.
 
@@ -635,6 +643,64 @@ the probe's one job: a probe of a different shape, or none at all, asks the clas
 half: **the merge is one Bash call of its own.** The classifier returns one verdict per call over the whole call, so a driver that chained `git merge …; git
 push origin main` had a reviewed, green merge denied as `[Merge Without Review]` and degraded the run — a push question answered on the merge's degrade path,
 when a denied push is meant to park.
+
+## PR mode drains onto a run branch and opens one PR per run
+
+release-kit's `main-pr-only` ruleset refuses every direct push to `main` — PR required, three CI contexts, linear history, no bypass actor — and a tracker run
+pushes its base after every merge. Under the ruleset that push is refused, and a refused push parks, because the merge has already landed. So once a repo's
+ruleset is on, every run there would spend one whole item and park at its push, the merge stranded on one laptop. `pr` moves the run's writes off the target:
+the run drains onto a branch of its own, pushes that branch, and ends by opening one pull request into the base it was started against. It never merges that
+PR. CI gates it and a person squash-merges it, which is the point of the ruleset. Design:
+`docs/superpowers/specs/2026-10-15-orchestrate-pr-mode-design.md`.
+
+**A third `MergeMode`, not a flag.** `pr` rides the route merge mode already travels — Settings default, the sheet's picker, `POST /api/agents/orchestrate`, the
+spawn prompt's compile-time ` --merge-mode pr`, `init`, the run file, the claim — so every hop that validates against `MERGE_MODES` accepted it with no edit.
+A separate `--pr` flag would have needed its own plumbing at each of those hops, and a refusal for the meaningless `--pr --merge-mode branch`. It also makes
+the degrade free: a classifier-denied merge moves `mergeModeEffective` `pr` → `branch` exactly as it moves `merge` → `branch`, and `mergeMode` keeps `pr`, so a
+degraded PR run stays recognisably one — it still skips the pull, and the items it merged before the denial still get their PR.
+
+**Tracker projects only.** The server answers `pr` with a 400 for a project whose resolved source is not `github`, and `init --merge-mode pr` exits `1` there
+with nothing written. A files project never pushes, a PR is a publish, and the one files project on this machine has no remote ruleset to route around. The
+sheet offers the option only for a `github`-source project and falls back to `merge` from a `pr` Settings default on a files one.
+
+**The run branch is the run's `base`, and the target is a new field, `prTarget`.** This is what made most of the feature free. Everything downstream already
+reads `base` — §1's gate, §4's worktree cut, `merge-check`'s base-tree resolution, `cleanup`'s commands, `--resume`, the claim's `ClaimRun.base`, remote runs —
+and each does the right thing once `base` names the run branch. The rejected shape kept `base` as the target and added a `runBranch` that every merge-side
+reader would have had to prefer over it, which is a field each new reader can forget. `prTarget` and `prUrl` are **required** on `OrchestratorRun`, `null`
+under `merge` and `branch`, so every literal that builds a run fails typecheck until it says so; an older run file's absent fields resolve to `null` once, in
+`sanitizeMergeFields`, which also drops a `prUrl` that fails the GitHub PR URL pattern — the board's link-out does not rest on the tool alone, for the reason
+`linkBase` is clamped.
+
+**The run branch is minted, not chosen.** `backlog/run-<local date>-<n>`, `n` one more than the highest already used that day, read from local refs and from
+`git ls-remote` — a tracker project is multi-machine by definition, and two machines starting a run the same day must not mint one name. The remote read runs
+with a timeout and `GIT_TERMINAL_PROMPT=0`, and any failure falls back to local refs with one stderr line: it keys on the call failing, because the failure
+modes worth falling back from are ones a config check cannot see. The branch is created with `git branch --no-track <run> refs/heads/<target>` as `init`'s
+last git write, after every refusal, so a refused `init` leaves no branch. If a collision happens anyway, the second machine's first push is rejected and its
+item parks, and the recovery is `--abort` and a fresh `init`, never `--resume` — the pull that would let a resume push again is the one PR mode skips.
+
+**The issue closes at the item's merge into the run branch, not at the PR's merge.** `stage <n> merged --outcome` closes it after the push, exactly as in
+`merge` mode, so the run branch is pushed after every merge rather than once at the end. Closing at PR merge would leave the item open after its claim was
+released, and the next run would queue it again. The price: a PR closed without merging leaves closed issues whose work never reached the target. That is a
+person's decision, and reopening the issues by hand is its fix — cheaper than a "merged but not landed" state every board reader would have to learn.
+
+**The driver opens the PR; the tool composes it and records it.** `pr-draft` reads the run file and git, writes `<dir>/pr/body.md` and prints
+`{ title, bodyFile, head, target }`; it refuses a run that is not `pr`, one with nothing `merged`, and one whose `prUrl` is already set. The driver asks
+`gh pr list --head <head> --state open` first — a session that died between `gh pr create` and recording the URL left a PR the run file does not know, and
+`gh pr view <head>` would also match a merged PR from an earlier run on a reused branch name — then runs `gh pr create`, and
+`pr --url` records `prUrl` through `^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$`, refusing anything else and any run that is not `pr`. The tool makes no
+GitHub call: the one network write stays in the driver's own Bash call, where a classifier denial or a refused `gh` is seen, and everything that decides what
+the PR says stays in code a test runs. **A failed or denied `gh pr create` is not a park and does not change the finish status** — every item is merged, pushed
+and closed, and only the PR is outstanding, so the summary names the branch and the exact command. No PR opens on `paused` (the run resumes onto the same
+branch) or on `aborted` (a person tore it down, and an abort should not grow a publish step).
+
+**Nothing merged: `finish` deletes the empty run branch, by compare-and-delete.** On every finish but `paused`, and so on every `abort`, which ends through
+`finish`, a `pr` run with no item `merged` loses its local run branch — but only when `rev-list --count <prTarget>..<base>` is `0` and no worktree has the
+branch checked out. The delete is `git update-ref -d refs/heads/<base> <sha it just read>`, which depends on no tree's HEAD; `git branch -d` from the project
+root would judge "merged" against whatever the root has checked out, the HEAD-relative shape `cleanup` was rid of (see [the merge happens in whichever tree
+holds the base](#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made)). Either condition failing, or git refusing,
+keeps the branch with one stderr line and never changes `finish`'s exit code: a merge that landed locally with its push refused has commits there that are not
+`finish`'s to destroy. After a PR opens nothing deletes the local run branch — the repo setting deletes only the remote head — which is one reason the mint
+reads local refs as well as `origin`.
 
 ## Question mode is run-scoped, and it only ever takes effect in a headless run
 
@@ -1249,16 +1315,16 @@ anything at all.
 not an exception to the rule above so much as the clearest statement of it.
 
 **The four influences are not all the same kind of safe, and the difference has to be stated rather than averaged over.** `mergeMode` and `questionMode` are the
-tightest: each appends one of exactly two compile-time literals selected by a guard, so no caller-supplied character reaches the prompt through either channel
+tightest: each appends nothing or a compile-time literal selected by a guard, so no caller-supplied character reaches the prompt through either channel
 at all. An `ids` entry is looser — caller text that passed a shape check and was then proved against a closed vocabulary. **`base` is the first and only member
 whose caller-supplied text is appended verbatim**, which is why it is proved the way an id is (a ref-name check, then membership in this project's own local
 branches — see
 [the merge happens in whichever tree holds the base](#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made)) rather than
-clamped the way a two-member enum is. Any statement here that every appended flag is a compile-time literal is therefore false and must not be restored: it was
+clamped the way an enum is. Any statement here that every appended flag is a compile-time literal is therefore false and must not be restored: it was
 true of two flags out of three and is true of two out of four. Each is appended only off its own guard, and each default appends nothing, so a request written
 before any of these fields existed composes the byte-identical prompt it always did. The board's Orchestrate sheet can narrow a run to a subset of the queue, which means the
 spawned session has to be told `/backlog-orchestrate task-3 bug-7` rather than the bare trigger — `--ids` is a flag `orchestrate.mjs`'s own `init` and `plan`
-have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch] [--question-mode decide]`. What makes that safe is that the server never _accepts_
+have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide]`. What makes that safe is that the server never _accepts_
 prompt text, it _composes_ the prompt out of the constant plus values that have passed two independent checks (`resolveIds`, `agents.service.ts`):
 
 1. **Shape** — `isItemId` (`shared/agent.ts`), the same `^[a-z]+-\d+$` `backlog.mjs`'s own `ID_SHAPE` enforces. What survives is a bare identifier: no
@@ -1284,8 +1350,10 @@ the shape of line that already went stale once here. The first influence is `ids
 both _is_ an id (`isItemId`, `shared/agent.ts` — the same `^[a-z]+-\d+$` `backlog.mjs` enforces, so no whitespace, path separator, shell metacharacter or
 newline survives) and _names_ an open bug or task in **this** project (a per-request scan scoped to `req.project`, deliberately not `findItem`'s registry-wide
 walk). Next are `mergeMode` and `questionMode`, tighter surfaces still and identical in shape: each appends a compile-time literal selected by a guard
-(` --merge-mode branch` by `isMergeMode`, ` --question-mode decide` by `isQuestionMode`), with no caller string in it at all, and each one's DEFAULT appends
-nothing — `merge` there, `park` here — so a default run's prompt stays byte-identical to what shipped before either field existed.
+(` --merge-mode branch` or ` --merge-mode pr` by `isMergeMode`, ` --question-mode decide` by `isQuestionMode`), with no caller string in it at all,
+and each one's DEFAULT appends
+nothing — `merge` there, `park` here — so a default run's prompt stays byte-identical to what shipped before either field existed. `pr` carries one more
+check than its sibling: `resolveMergeMode` takes the project and answers a 400 when the project's resolved source is not `github`, before anything spawns.
 
 The fourth is `base` (task-44), and it is the loosest of the four in form: it appends the caller's OWN text, ` --base <ref>`, where the other two append
 literals. What makes it acceptable is that `resolveBase` proves it the way `resolveIds` proves an id — a ref-name check, then membership in this project's own

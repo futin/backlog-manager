@@ -49,6 +49,37 @@ The probe's literal call stays in the body, under "Merge mode, and the probe bef
 `Already up to date.`, exit `0`, no commit — and it pushes nothing, deliberately: a denied push parks rather than degrades (§9), so there is nothing for a push
 probe to decide.
 
+## §2 Start the run — PR mode's run branch
+
+`--merge-mode pr` is a tracker-only mode: `init` refuses it with exit `1` and nothing written on any project whose committed `backlog/source.json` is not
+`github`, and the server refuses it with a 400 before spawning. A files project has no remote ruleset to route around, and opening a PR is a publish, which a
+files project never gets.
+
+**What `init` does, in order.** It validates `--base` as it always does — here it names the PR's target, default `main` — pulls it (the same pull every
+tracker `init` makes), runs every refusal it has (the queue gate, the exit-`4` existing-run check), and only then mints the run branch and creates it at the
+target's tip with `git branch --no-track <run branch> refs/heads/<target>`, the last git write before the run file. So a refused `init` leaves no branch behind,
+and an `init` whose run-file write then fails leaves an empty one, which is harmless: the next mint steps over its number.
+
+The name is `backlog/run-<YYYY-MM-DD>-<n>`, the machine's local date, `<n>` one more than the highest already used that day (starting at `1`), read from this
+repo's local refs **and** from `git ls-remote --heads origin 'backlog/run-<date>-*'`. The remote read is there because a tracker project is multi-machine by
+definition: two machines starting a run the same day must not mint one name. Only refs shaped exactly `backlog/run-<date>-<digits>` count, so a stray
+`backlog/run-<date>-wip` never moves the number. The name cannot collide with an item branch, since no item id is `run-…`.
+
+**A failed `ls-remote` is not a refusal.** No `origin`, offline, an `origin` that wants credentials (git is run with `GIT_TERMINAL_PROMPT=0` and a timeout, so
+it fails instead of prompting or hanging) — any of them prints one stderr line, `warning: git ls-remote origin failed … minting the run branch from local refs
+only …`, and the mint goes on from local refs. Read the line, mention it in the summary, and carry on.
+
+**Two machines can still mint one name** — a failed `ls-remote` on one of them, or two `init`s inside the same second. The second machine finds out at its first
+merge: the push of the run branch is rejected and that item parks, exactly as §9 says. The usual recovery for a rejected push — `--resume` pulls and pushes
+again — does **not** hold here, because §4's pull is skipped in PR mode and the remote branch is another run's. The recovery is `--abort` and a fresh `init`,
+which mints the next number; the parked item's merge stays on the abandoned local run branch, and the summary names that branch.
+
+**Why the run branch is `base`, and the target is a new field.** The run file records `base: <run branch>` and `prTarget: <target>`. Everything downstream
+already reads `base` — §1's gate, §4's worktree cut, `merge-check`'s base-tree resolution, `cleanup`'s commands, `--resume`, the claim's `ClaimRun.base` — and
+each one does the right thing once `base` names the run branch, so nothing there had to learn a second field. Only the pull request reads `prTarget`. No tree
+has the run branch checked out, so `merge-check` takes its "none does" outcome: it creates `.worktrees/_base-<sanitised run branch>`, merges there, and §10
+removes that tree because `baseTree.created` is true.
+
 ## §3 Pre-flight, per item — the claim
 
 **In a tracker project the `stage <n> preflight` call is where the run takes the issue** — it posts the claim comment that stops a second machine working this
@@ -89,6 +120,10 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" fi
 
 `init` ran the same pull once, before it built the queue, so on the ordinary path this never fires for the first item. It is here because a run lasts hours and
 the other machine does not stop pushing while it does.
+
+**In PR mode both commands are skipped**, keyed on `mergeMode` — the requested mode — so a PR run degraded to branch mode skips them too. The run branch is this
+run's alone: no other machine merges into it, so there is nothing to pull. And before the first merge's push the remote branch does not exist at all, so the
+pull would fail and park the run on its first item. (`init`'s own pull is unaffected: it freshens the PR target before the run branch is cut from it.)
 
 ## §4 The loop — Create the worktree: the `show` probe
 
@@ -171,7 +206,8 @@ The literal call stays in the body, with a one-line version of each outcome. The
   outstanding.
 - **It is rejected** (non-fast-forward) → another machine merged into the base meanwhile. `attention <n> --kind parked --detail "merge landed locally but the
   push was rejected — another machine pushed to <base>"`, then `stage <n> parked`. The merge stays local and `--resume` pulls and pushes again. **Do not**
-  `push --force` and do not reset.
+  `push --force` and do not reset. In PR mode a rejection means another run minted the same run branch name, and `--resume` cannot fix that (§2, _PR mode's
+  run branch_, has the recovery).
 - **It is denied by the auto-mode classifier** → **park it too.** This is the one place the classifier-denial rule does _not_ apply: a denied MERGE
   degrades the run to branch mode, because nothing landed and "branched" is then a true description. A denied PUSH is the opposite — the merge has already
   landed in the base tree, so staging the item `branched` would write a falsehood into the run file and into the summary a person reads afterwards. Park with
@@ -183,6 +219,12 @@ The close is tied to the STAGE rather than to the merge because the tool cannot 
 this machine, so the driver calls `stage merged` only once the push has succeeded, and the tool closes the issue as part of that call.
 
 `cleanup <id>` runs after the push in a tracker project, as it runs after the stage in both modes.
+
+**In PR mode the push is the same command, byte for byte** — `git -C "<base tree>" push origin <base>` — and `<base>` is the run branch, so the first merge's
+push creates the remote branch and every later one moves it. Its three outcomes are unchanged, and so is the close: the issue closes at `stage <n> merged
+--outcome`, at the item's merge into the run branch, not when the PR merges. Closing at PR merge would leave the item open after its claim was released, and
+the next run would queue it again. The price is that a PR closed without merging leaves closed issues whose work never reached the target; that is a person's
+decision, and reopening those issues by hand is its fix.
 
 ## §10 Finishing, resuming, aborting — what the tool publishes
 
@@ -196,9 +238,47 @@ this machine, so the driver calls `stage merged` only once the push has succeede
   best-effort, and a refusal is one stderr line rather than a failed abort. It matters because a run torn down this way reaches no terminal stage, and an
   unreleased claim keeps the item's dispatch control disabled on every machine's board — going stale does not clear it.
 
+## §10 Finishing — The pull request (PR mode)
+
+The commands stay in the body, under _Finishing_. What they rest on:
+
+- **Who opens it.** The driver, with `gh pr create`; the tool composes the title and body (`pr-draft`) and records the URL (`pr --url`), and makes no GitHub
+  call itself. That keeps the one network write in the driver's own Bash call, where a refusal is seen and handled. `pr-draft` writes only
+  `<dir>/pr/body.md`, and refuses with exit `1`, writing nothing, when the run is not `pr`, when no item is `merged`, or when `prUrl` is already set — the PR
+  exists, and a resumed session must not draft a second one. The title can ride argv because the tool built it from a fixed vocabulary and a count:
+  `<type>(backlog): <N> item(s)`, the type ranked `feat` > `fix` > `perf` > `chore` across the merged items' own commit subjects.
+- **Why the open-PR lookup comes first, and why it matches OPEN PRs only.** A session that died between `gh pr create` and `pr --url` left a PR that the
+  run file does not know about. A resumed session asks GitHub before creating, so it records that PR instead of failing on a duplicate. The lookup is
+  `gh pr list --head <head> --state open`, never `gh pr view <head>`: `view` also matches a merged or closed PR, and a run branch name can be reused — GitHub
+  deletes a merged PR's head branch, and a machine that never held the first run's branch locally mints the same name — so a second run would record the
+  first run's merged PR as its own and never open one. An open PR from this head is this run's, because a name is minted only while no branch holds it.
+- **The PR gate keys on the requested `mergeMode`, never `mergeModeEffective`** — the same key §4's pull skip, `pr-draft` and `finish` use. A PR run degraded
+  to branch mode still merged its first items onto the run branch and closed their issues, and only the PR carries them to `prTarget`.
+- **A failed or classifier-denied `gh pr create` is not a park and does not change the finish status.** Every merged item is merged, pushed and closed; only the
+  PR is outstanding. `prUrl` stays `null`, and the summary names the pushed run branch and gives the exact `gh pr create --base <target> --head <head> --title
+  "<title>" --body-file "<bodyFile>"` line, filled in, for a person to run. `gh`'s failure output and the classifier's `Reason:` are read and never put into
+  any tool argument, the rule §2's `--note` follows; the one piece of `gh` output that travels is a PR URL, and only through `pr --url`, which refuses anything
+  but `https://github.com/<owner>/<repo>/pull/<n>` and refuses a run that is not `pr` mode.
+- **No PR on `paused` or `aborted`.** A paused run is resumed onto the same run branch later, so a PR then would be premature. An aborted run was torn down by
+  a person's Stop or a `--abort`, neither of which should grow a publish step; its summary names the pushed run branch and gives the `gh pr create` line, built
+  from `pr-draft`, which writes only under `<dir>` and so is not a publish.
+- **Nothing merged: `finish` deletes the empty run branch.** On every finish but `paused`, a run whose `mergeMode` is `pr` with no item `merged` has its local
+  run branch deleted by `finish` itself — but only when `git rev-list --count <prTarget>..<base>` is `0` and no worktree has the branch checked out. The delete
+  is `git update-ref -d refs/heads/<base> <sha it just read>`, a compare-and-delete that depends on no tree's HEAD. Otherwise the branch is kept with one stderr
+  line, and `finish`'s exit code never changes: a merge that landed locally with its push refused leaves commits there, and an aborted run can leave its
+  `_base-` tree holding it. Name a kept branch in the summary. Nothing was pushed, so there is no remote branch to delete. A degraded run that branched every
+  item and merged none goes the same way — its branched items were cut from the run branch while it still equalled `<prTarget>`, which is why §10's merge list
+  names `prTarget` as the branch to merge them on.
+- **After a PR opens, nothing deletes the local run branch.** The repo setting deletes only the remote head when the PR merges. That kept branch is why the
+  mint reads local refs as well as `origin`: a second run the same day mints the next number even after the first one's remote head is gone. Leave them:
+  a `backlog/run-*` branch deleted by hand on the day it was minted frees its name for the next run.
+
 ## Hard limits — the three pushes
 
 **Never pushes a files project. A tracker project is the one exception, and it is exactly three commands** — `pull --ff-only origin <base>` before each item's
 worktree, `push origin <base>` after each merge, `push -u origin backlog/<n>` under branch mode — because its items are issues every machine reads, so a merge
 that stayed on one laptop would be a run reporting `merged` for work nobody else can see. A rejected or classifier-denied push **parks**, never degrades: the
 merge has already landed, so `branched` would be a falsehood.
+
+**PR mode adds no fourth git command.** Its `push origin <base>` is the same §9 push, with the run branch as `<base>`, and its `pull --ff-only` is skipped. It
+adds exactly one remote write beside the three: the finish's `gh pr create`, which opens the run's pull request.

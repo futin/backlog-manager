@@ -241,7 +241,7 @@ describe('the three dialogs on the stack', () => {
     // renders are the test's whole setup.
     render(<ItemModal item={item} hues={HUES} onClose={closeModal} />);
     render(<LaunchSheet item={item} onClose={closeLaunch} />);
-    render(<OrchestrateSheet project="/abs/alpha" projectName="alpha" items={[item]} spawnMaxPermission="acceptEdits" onClose={closeOrchestrate} refresh={() => {}} />);
+    render(<OrchestrateSheet project="/abs/alpha" projectName="alpha" source="files" items={[item]} spawnMaxPermission="acceptEdits" onClose={closeOrchestrate} refresh={() => {}} />);
     await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(3));
 
     await userEvent.keyboard('{Escape}');

@@ -109,9 +109,9 @@ export interface Settings {
    * `'merge'` is the default — it is what every existing run does — so a
    * board that has never touched this setting keeps behaving exactly as it
    * does today. Unlike `dispatchDefaultModel`/`dispatchDefaultEffort`, there
-   * is no `''`/"CLI default" third state: `MergeMode` is already a closed
-   * two-member enum with no absent-flag reading, so the picker always shows
-   * one of its two real members.
+   * is no `''`/"CLI default" extra state: `MergeMode` is already a closed
+   * three-member enum (`merge`, `branch`, `pr`) with no absent-flag reading,
+   * so the picker always shows one of its real members.
    */
   orchestrateDefaultMergeMode: MergeMode;
   /**

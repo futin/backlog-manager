@@ -28,6 +28,8 @@ function fakeRun(
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    prTarget: null,
+    prUrl: null,
     base: 'main',
     questionMode: 'park',
     queue: [],

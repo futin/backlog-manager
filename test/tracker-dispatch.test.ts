@@ -356,6 +356,27 @@ describe('orchestrate', () => {
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
   });
 
+  /* Task 2 of the PR-mode plan: `pr` is accepted exactly where a tracker marker
+     resolves to `github`, and the flag lands after any ids and before nothing
+     else this request sets. */
+  it("spawns a pr-mode run for a tracker project: the prompt ends `--merge-mode pr`", async () => {
+    await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: trackerPath, mergeMode: 'pr' }).expect(201);
+    expect(promptOf()).toBe('/backlog-orchestrate --merge-mode pr');
+  });
+
+  it('puts the ids ahead of `--merge-mode pr`, because a flag ahead of them would swallow the first id', async () => {
+    await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: trackerPath, ids: ['#31'], mergeMode: 'pr' }).expect(201);
+    expect(promptOf()).toBe('/backlog-orchestrate 31 --merge-mode pr');
+  });
+
+  it('keeps `--merge-mode pr` ahead of `--question-mode` in the composed prompt', async () => {
+    await request(app.getHttpServer())
+      .post('/api/agents/orchestrate')
+      .send({ project: trackerPath, mergeMode: 'pr', questionMode: 'decide' })
+      .expect(201);
+    expect(promptOf()).toBe('/backlog-orchestrate --merge-mode pr --question-mode decide');
+  });
+
   it('still starts a run for a files project', async () => {
     await request(app.getHttpServer()).post('/api/agents/orchestrate').send({ project: filesPath }).expect(201);
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(true);

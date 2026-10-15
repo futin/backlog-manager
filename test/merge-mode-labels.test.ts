@@ -36,6 +36,14 @@ describe('mergeModeOptionLabels', () => {
     expect(mergeModeOptionLabels(null).merge).not.toBe('Merge to main');
   });
 
+  it('names the PR target when there is one, and the base branch as a role when there is none', () => {
+    // `pr` is the third option and, like `merge`, a function of the destination: the PR is opened INTO the base. Same null rule as `merge` for the same reason —
+    // Settings cannot know a base, so it must not be told `main`.
+    expect(mergeModeOptionLabels('main').pr).toBe('Open a PR into main');
+    expect(mergeModeOptionLabels('feature/tracker-backed').pr).toBe('Open a PR into feature/tracker-backed');
+    expect(mergeModeOptionLabels(null).pr).toBe('Open a PR into the base branch');
+  });
+
   it('leaves the branch-mode label alone for every base', () => {
     // Branch mode's outcome does not mention a destination — it stops before
     // one — so the base must not reach it. Asserted for all three inputs

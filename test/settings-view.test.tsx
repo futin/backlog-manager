@@ -456,12 +456,16 @@ describe('SettingsView', () => {
       renderView();
       const select = (await screen.findByLabelText('Default merge mode')) as HTMLSelectElement;
       expect(select.value).toBe('merge');
-      expect([...select.options].map((o) => o.value)).toEqual(['merge', 'branch']);
+      expect([...select.options].map((o) => o.value)).toEqual(['merge', 'branch', 'pr']);
       // bug-36. Text as well as value, because the text is what was wrong:
       // this row picks a default BEFORE any run exists, so it cannot know a
       // base and must not name one. 'Merge to main' here was a claim about
       // where every future run would land, which task-44 made false.
-      expect([...select.options].map((o) => o.textContent)).toEqual(['Merge into the base branch', 'Leave branches for me']);
+      expect([...select.options].map((o) => o.textContent)).toEqual([
+        'Merge into the base branch',
+        'Leave branches for me',
+        'Open a PR into the base branch'
+      ]);
       // The hint's own claim, separately false since task-44 whatever the
       // picker is called: a run merges into the branch it was STARTED on, not
       // into main. Asserted as an absence because the replacement sentence's
@@ -532,6 +536,17 @@ describe('SettingsView', () => {
       await userEvent.selectOptions(select, 'decide');
       const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
       expect(stored.orchestrateDefaultQuestionMode).toBe('decide');
+    });
+
+    it('keeps a stored pr default and falls back to merge for a value outside the vocabulary', async () => {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ orchestrateDefaultMergeMode: 'pr' }));
+      renderView();
+      expect(((await screen.findByLabelText('Default merge mode')) as HTMLSelectElement).value).toBe('pr');
+      cleanup();
+
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ orchestrateDefaultMergeMode: 'pull' }));
+      renderView();
+      expect(((await screen.findByLabelText('Default merge mode')) as HTMLSelectElement).value).toBe('merge');
     });
 
     it('still persists a merge-mode pick from its new home', async () => {
