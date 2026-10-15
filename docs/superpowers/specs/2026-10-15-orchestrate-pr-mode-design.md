@@ -40,14 +40,16 @@ the run branch.
 ## 1. Vocabulary
 
 `MergeMode` (`shared/types.ts`) gains `'pr'`, `MERGE_MODES` lists it, and `isMergeMode` stays the one guard. Every surface that validates a merge mode
-against that list accepts `pr` without further change: the Settings clamp, the sheet picker's options, `resolveMergeMode`, `init`'s `--merge-mode`, the
-claim route's `run.mergeMode` check, and `sanitizeMergeFields`. The existing rules hold unchanged: absent means `merge`; present-but-invalid is a 400 and
+against that list accepts `pr` without further change: the Settings clamp, the sheet picker's options, `resolveMergeMode`, the claim route's
+`run.mergeMode` check, and `sanitizeMergeFields`. The existing rules hold unchanged: absent means `merge`; present-but-invalid is a 400 and
 never a clamp.
 
 Two server sites do need an edit, because each restates the vocabulary by hand. The spawn prompt (`agents.service.ts`, the `prompt:` array) appends
 `--merge-mode` only for `'branch'`, so without a second guarded literal a `pr` request would spawn a plain `merge` run; it gains `mergeMode === 'pr' ?
 ['--merge-mode', 'pr'] : []`, a compile-time literal like its sibling. `resolveMergeMode`'s 400 text hard-codes "merge or branch"; it is built from
-`MERGE_MODES` instead, as the claim route's already is.
+`MERGE_MODES` instead, as the claim route's already is. The tool keeps its own deliberate copy, `const MERGE_MODES = ['merge', 'branch']` in
+`orchestrate.mjs` (it imports nothing from `shared/`), which `init`'s `--merge-mode` and `merge-mode` validate against, and `INIT_USAGE` restates the list;
+both gain `pr`, and a node test pins the tool's copy equal to `shared/types.ts`'s.
 
 `mergeModeEffective` still moves one way, once. `orchestrate.mjs merge-mode branch --note …` is accepted from `merge` **or** `pr`, and from nothing else.
 `mergeMode` keeps the requested value, so a degraded PR run stays recognisably a PR run (§4, §5).
@@ -91,7 +93,9 @@ One SKILL.md line changes, plus the probe sentence.
   Its three outcomes (success → `stage <n> merged --outcome`, which closes the issue (P2); rejected → park; classifier-denied → park) are unchanged.
 - **§2's merge probe runs in `pr` mode as in `merge` mode**, with the tracker shape. In `branch` mode it is still skipped.
 
-The tracker hard limit, "exactly three push commands", still holds. PR mode adds no `git push`; it adds one `gh pr create` at the end (§4).
+The tracker hard limit, "exactly three commands" (`pull --ff-only`, `push origin <base>`, `push -u origin backlog/<n>`), still holds for git. PR mode adds
+no git command to that list; it adds one remote-writing `gh pr create` at the end (§4), which every place that restates the limit names beside the three
+(`SKILL.md`'s hard-limit bullet, `references/tracker.md`'s *Hard limits — the three pushes*, `.claude/rules/orchestrator.md`'s push bullet).
 
 The run branch carries `--no-ff` merge commits, and the squash merge flattens them. The ruleset's linear-history rule applies to `main`, not to the PR's head
 branch.
@@ -101,7 +105,7 @@ branch.
 The PR is opened when **`mergeMode` is `pr`, at least one queue item is `merged`, and the finish is `done` or `failed`**. A `paused` run is resumed onto the
 same branch later, so a PR then would be premature. An `aborted` run is torn down: by a Stop, which a person chose, or by a `--abort` whose session follows
 `references/recovery.md`'s order-of-operations, which should not grow a publish step. For an aborted run the summary names the pushed branch and gives the
-exact `gh pr create` line to run by hand.
+exact `gh pr create` line to run by hand; the driver runs `pr-draft` (step 1 below) for that line, which writes only under `<dir>` and so is not a publish.
 
 In SKILL.md §10, after the existing base-worktree removal and before `finish`. A `failed` finish today is reached from §5's "Stopping the run is
 `finish --status failed`" without passing §10; that sentence changes to send the run through §10's finishing steps (base-worktree removal, then these three)
@@ -111,14 +115,14 @@ before `finish --status failed`, so `failed` and `done` share one path:
    the run branch and `target` is `prTarget` — not `base`, which in every SKILL.md command means the run branch. It refuses (exit `1`) unless `mergeMode` is `pr` and some item is `merged`, and also when `prUrl` is already set:
    the PR exists, and a resumed session must not draft a second one.
 2. Before creating, the driver asks whether a PR already exists for the head, which covers a session that died between `gh pr create` and step 3 and was
-   resumed: `gh pr view <head> --json url --jq .url`. A URL printed there goes straight to step 3. Otherwise the driver runs `gh pr create --base <target> --head <head> --title "<title>" --body-file "<bodyFile>"` from the project root, as its own Bash call. The
+   resumed: `gh pr view <head> --json url --jq .url`, from the project root. A URL printed there goes straight to step 3. Otherwise the driver runs `gh pr create --base <target> --head <head> --title "<title>" --body-file "<bodyFile>"` from the project root, as its own Bash call. The
    title can go in argv because the tool composed it from a fixed vocabulary, a count and nothing else.
 3. `orchestrate.mjs pr --url <url>` records `prUrl` on the run. It accepts only `^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$` and exits `1` on anything
    else, writing nothing.
 
 **A failed or classifier-denied `gh pr create` is not a park and does not change the finish status.** The items are merged, pushed and closed, and only the
-PR is outstanding. The summary names the branch and gives the exact command. `gh`'s output and the classifier's `Reason:` are read and never passed to a
-tool argument, the same rule §2's `--note` follows.
+PR is outstanding. The summary names the branch and gives the exact command. `gh`'s failure output and the classifier's `Reason:` are read and never passed to
+a tool argument, the same rule §2's `--note` follows. The one piece of `gh` output that does travel is a PR URL, and only through `pr --url`'s pattern.
 
 ### Title
 
@@ -151,7 +155,7 @@ rule allows `!` only on those three types, and a breaking change hidden under a 
 
 ## Run
 
-`<runId>` drained onto `<head>` from `<base>`: <N> merged, <b> branched, <k> parked, <f> failed, <s> skipped, <u> ungroomed, <q> needs-answers.
+`<runId>` drained onto `<head>` from `<target>`: <N> merged, <b> branched, <k> parked, <f> failed, <s> skipped, <u> ungroomed, <q> needs-answers.
 ```
 
 `## What's new` lists the merged items in queue order, by their run-file `title`. Phase C's tag message takes that section verbatim, so it is what becomes
@@ -162,22 +166,28 @@ one line naming those branches and saying they merge only after this PR lands. I
 
 ### Nothing merged
 
-If no item reached `merged`, no PR is opened. On every finish but `paused`, `finish` then deletes the local run branch with `git branch -d`, but **only when
-`git rev-list --count <prTarget>..<base>` is `0`**. A run whose merge landed locally and whose push was refused has commits on the branch with no item
+If no item reached `merged`, no PR is opened. On every finish but `paused`, `finish` then deletes the local run branch, but **only when
+`git rev-list --count <prTarget>..<base>` is `0` and no worktree has the branch checked out** (`treeHoldingBranch`). The delete is
+`git update-ref -d refs/heads/<base> <sha it just read>`: a compare-and-delete that depends on no tree's HEAD, where `git branch -d` from the project root
+would judge "merged" against whatever the root has checked out — the HEAD-relative shape bug-38 removed from `cleanup`. A run whose merge landed locally and whose push was refused has commits on the branch with no item
 `merged`, and that branch is kept and named in the summary. Nothing was pushed, so there is no remote branch to delete. `finish` runs the delete in the tool,
-the same way `cleanup` already runs `branch -d`. On the ordinary path the base worktree has been removed by then, so no tree holds the branch. If git
-refuses the delete anyway (an aborted run can leave the `_base-` tree in place), `finish` writes one stderr line, keeps the branch and never fails.
+the same way `cleanup` already runs its git. On the ordinary path the base worktree has been removed by then. When either condition fails (an aborted run can
+leave the `_base-` tree in place) or git refuses, `finish` writes one stderr line, keeps the branch and never fails.
+
+A degraded run that branched every item and merged none deletes the run branch this way too. Its branched items were cut from the run branch while it still
+equalled `<prTarget>`, so §10's merge list names `<prTarget>` as the branch to merge them on — never the run branch, which no longer exists.
 
 ## 5. The board
 
 - **Sheet.** `mergeModeOptionLabels(base)` gains `pr`, labelled `Open a PR into <base>` (`Open a PR into the base branch` when `base` is `null`). The option
-  is offered only when the selected project's `ProjectSummary.source` is `github`. If the Settings default is `pr` and the project is a files one, the sheet
+  is offered only when the selected project's source is `github`. The sheet holds only `project: string` today, so it gains a `source: SourceKind` prop,
+  passed by `BoardView` from the registered project's `ProjectSummary.source` — never read off `items[0]`, which is absent on an empty queue. If the Settings default is `pr` and the project is a files one, the sheet
   falls back to `merge`, the same posture as an out-of-range stored value. The merge-coverage hint (no `git merge` allow rule in
   `.claude/settings.local.json`) is shown for `merge` **and** `pr`: a PR run asks the classifier for the same merge at every item, so the hint applies to it
   just as much. Its condition widens from `mergeMode === 'merge'` to `mergeMode !== 'branch'`, both in the render and in the effect that fetches it.
 - **Settings.** The default-merge-mode picker lists `pr` with the base-less label. Settings is pre-project, so it cannot hide the option per source; the sheet's
   fallback above covers a files project.
-- **RunDetail.** `mergeModeLabel` returns `PR mode` for an effective `pr`. A degraded PR run reads `branch mode (downgraded)` as today. When `prUrl` is set,
+- **RunDetail.** `mergeModeLabel` (`client/src/lib/run-stage.ts`, not `merge-mode.ts`) returns `PR mode` for an effective `pr`. A degraded PR run reads `branch mode (downgraded)` as today. When `prUrl` is set,
   the detail sheet's head shows a link-out labelled `PR #<n>`, opened with `rel="noopener noreferrer"`. The server's `sanitizeMergeFields` re-applies the
   §4 URL pattern and drops anything else to `null`, so the href's safety does not rest on the tool alone. The same reasoning is why `linkBase` is clamped.
 - **Remote runs** need no logic: a claim publishes `mergeMode: 'pr'` and `base: <run branch>`, and the remote derivation copies both. They need two fields,
@@ -229,8 +239,9 @@ The plan names exact cases; the shape is:
 
 - `.claude/rules/orchestrator.md`: the merge-mode bullet gains `pr`, with the run branch, `prTarget` and the PR at finish. The push bullet notes that PR mode
   pushes the run branch through the same §9 command and adds no fourth push.
-- `docs/subsystems/invariants.md`: a new anchor, *PR mode drains onto a run branch and opens one PR per run*, with P2's and P4's reasoning. The matching
-  CLAUDE.md headline is byte-equal with the rules file (`test/claude-rules.test.ts`).
+- `docs/subsystems/invariants.md`: a new anchor, *PR mode drains onto a run branch and opens one PR per run*, with P2's and P4's reasoning. It gets a
+  **new bullet of its own** in `.claude/rules/orchestrator.md` (one anchor per bullet) and a CLAUDE.md headline byte-equal with that bullet's
+  (`test/claude-rules.test.ts`); the existing merge-mode bullet only gains `pr` in its vocabulary.
 - `skills/backlog-orchestrate/SKILL.md`: the trigger line, §2's mode list, the §4 pull skip, and §10's three PR steps, each entering as one statement.
   `references/tracker.md` carries the rare branches: the `ls-remote` fallback, a denied `gh`, and the nothing-merged branch delete. This follows the
   "a new orchestrate rule enters SKILL.md as one statement" invariant.
