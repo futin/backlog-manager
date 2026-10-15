@@ -26,7 +26,9 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   is verified to have it actually checked out. No other skill touches git history at all. The push half is task-47's and is exactly three commands, none of
   them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree, `push origin <base>` after each merge and
   before `stage <n> merged`, and `push -u origin backlog/<n>` from the item worktree under branch mode. **A rejected or classifier-denied push PARKS, never
-  degrades** — the merge has already landed, so `branched` would be false — which is the one exception to the classifier-denial rule. Why:
+  degrades** — the merge has already landed, so `branched` would be false — which is the one exception to the classifier-denial rule. PR mode pushes its run
+  branch through that same `push origin <base>` and adds no fourth git command; its one extra remote write is the finish's `gh pr create`, run by the driver
+  in a Bash call of its own, never by the tool. Why:
   [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-commits-or-merges)
 - **On a tracker project the DRIVER owns each item's claim, and the execute session never touches the issue** (task-47). The run claims at
   `stage <n> preflight` — before the worktree exists — and again on a `stage` out of `parked` to a non-release stage (#250), with `phase: 'execute'` and a
@@ -73,9 +75,25 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `check-ref-format --branch` accepts `origin/main`, a SHA and any unknown name. A missing branch is a refusal, never a create. Why:
   [invariants.md](docs/subsystems/invariants.md#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made)
 - **Merge mode is run-scoped: chosen per launch, defaulted from Settings, and carried spawn → prompt → `init` → run file.** `MergeMode` (`shared/types.ts`) is
-  `merge | branch`, `isMergeMode` its one guard. The sheet sends `mergeMode` on **every** launch; `init` writes `mergeMode`, `mergeModeEffective` (moves `merge`
-  → `branch` once, never back) and `mergeModeNote`. **Absent means `merge`; present-but-invalid is a 400, never a clamp.** Why:
+  `merge | branch | pr`, `isMergeMode` its one guard, and `orchestrate.mjs` keeps its own `MERGE_MODES` copy in the same order, pinned equal by a node test.
+  The sheet sends `mergeMode` on **every** launch; `init` writes `mergeMode`, `mergeModeEffective` (moves `merge` or `pr` → `branch` once, never back) and
+  `mergeModeNote`. **Absent means `merge`; present-but-invalid is a 400, never a clamp.** `pr` runs on a run branch recorded as `base`, with its target in
+  `prTarget` and the PR opened at finish (next bullet). Why:
   [invariants.md](docs/subsystems/invariants.md#merge-mode-is-run-scoped-and-a-malformed-one-is-a-400)
+- **PR mode drains onto a run branch and opens one PR per run.** Tracker projects only: `resolveMergeMode` answers `pr` with a 400 for a project whose
+  resolved source is not `github`, and `init --merge-mode pr` exits `1` there, nothing written. `init` mints `backlog/run-<local date>-<n>` (`n` from local
+  refs plus `git ls-remote`, run with a timeout and `GIT_TERMINAL_PROMPT=0`; a failed `ls-remote` is one stderr line and a local-refs mint), creates it with
+  `git branch --no-track <run> refs/heads/<target>` as its last git write, after every refusal, and records `base: <run branch>` and `prTarget: <target>`.
+  `prTarget` and `prUrl` are REQUIRED on `OrchestratorRun`, `null` under `merge`/`branch`, resolved once by `sanitizeMergeFields`, which also nulls a `prUrl`
+  that fails `^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$` — the one pattern the tool, the server and the client hold. The loop is `merge` mode's (the issue
+  closes at `stage <n> merged --outcome`, at the merge into the run branch) except that SKILL.md §4's per-item pull is skipped, keyed on the REQUESTED
+  `mergeMode`. At a `done`/`failed` finish with something `merged`, the driver runs `pr-draft` (writes `<dir>/pr/body.md`, prints `{ title, bodyFile, head,
+  target }`; exit `1` for a run that is not `pr`, has nothing `merged` or already has a `prUrl`), `gh pr view` then `gh pr create`, and `pr --url` (the pattern
+  above, `pr` runs only); a failed or denied `gh` is not a park and moves no status, and no PR opens on `paused` or `aborted`. The tool makes no GitHub call.
+  `finish`, on every status but `paused` — so `abort` too — deletes a `pr` run's run branch when nothing is `merged`, `rev-list --count <prTarget>..<base>` is
+  `0` and `treeHoldingBranch` finds nobody, by `update-ref -d refs/heads/<base> <sha it read>`, never `branch -d`; anything else keeps it with one stderr line,
+  and the exit code never changes. Why:
+  [invariants.md](docs/subsystems/invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run)
 - **`merged` is no longer the only success exit.** `branched` is its branch-mode sibling and a true exit: out of `RUN_CLAIMED_STAGES`, `ATTENTION_RUN_STAGES`
   and `MACHINE_STAGES`, in `RECONCILE_TERMINAL_STAGES`, counted as completed by `aggregateRuns`; `test/agents-shared.test.ts`'s `Record<RunStage, true>` literal
   forces the classification. A `branched` stamp does not prove the run that wrote it executed the item. Why:

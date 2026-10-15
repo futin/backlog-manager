@@ -4469,9 +4469,10 @@ const FINISH_STATUSES = ['done', 'aborted', 'failed', 'paused'];
  *
  * Both conditions are read first and either one keeps the branch: `rev-list --count <prTarget>..<base>` must be `0` (a merge that landed
  * locally with its push refused leaves commits here and no item `merged`, and that work is not this command's to destroy), and
- * `treeHoldingBranch` must find nobody (an aborted run can leave its `_base-` tree in place, and git refuses to delete a checked-out
- * branch anyway). The delete is `update-ref -d refs/heads/<base> <sha it read>` — a compare-and-delete that depends on no tree's HEAD,
- * where `branch -d` from the project root would judge "merged" against whatever the root has checked out, the HEAD-relative shape bug-38
+ * `treeHoldingBranch` must find nobody (an aborted run can leave its `_base-` tree in place, and `update-ref -d`, unlike `branch -d`,
+ * deletes a checked-out branch without a word, so this check is the only thing that keeps that tree off a dangling ref). The delete is
+ * `update-ref -d refs/heads/<base> <sha it read>` — a compare-and-delete that depends on no tree's HEAD, where `branch -d` from the project
+ * root would judge "merged" against whatever the root has checked out, the HEAD-relative shape bug-38
  * removed from `cleanup`. The ranges and refs are fully qualified for the same reason.
  *
  * **Never fails the command.** The run file is already written, so a git refusal is one stderr line and the branch stays. That is the
@@ -6437,7 +6438,7 @@ commands:
   claim        take a crashed run over as its driver, and heartbeat it
   plan         preview the gated queue init would build, without writing
   stage        move a queue item to a new stage
-  merge-mode   record a merge mode downgrade (merge -> branch only)
+  merge-mode   record a merge mode downgrade (merge|pr -> branch only)
   merge-check  find the base tree and test both merge preconditions (never merges)
   leftover     say what an earlier run left for an item (read-only)
   worktree     create an item's worktree, refusing any leftover but a bare branch
@@ -6478,7 +6479,7 @@ commands:
 //      run state. Nothing is ever written when a command exits 1. Three
 //      exit 1s are the deliberate exceptions to "independent of run state":
 //      `stage <id> merged` under a branch-mode run (see cmdStage's own
-//      comment) and `merge-mode` refusing anything but a merge -> branch
+//      comment) and `merge-mode` refusing anything but a merge|pr -> branch
 //      move (see cmdMergeMode's own comment) both depend on the run file's
 //      own mergeModeEffective, and `assume` under a park-mode run (see
 //      cmdAssume's own comment) depends on its questionMode — none of the

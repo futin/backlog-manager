@@ -17,7 +17,9 @@ Orchestrate is the loop around `backlog-execute`, and only the loop. For every g
 headless `backlog-execute` session inside it, commits what that session produced, has it reviewed, proves it with real commands, and merges it into the run's
 **base branch** — then starts the next item from the updated base. The base is `main` unless the run was started with `--base <ref>`, and it is the one ref this
 whole file turns on: items are gated at it, worktrees are cut from it, and merges land in it (section 2). Under `--merge-mode branch` a verified item stops at
-its reviewed branch instead and nothing is merged anywhere (section 2). Execute keeps doing the work, groom keeps writing the plans, capture keeps filing new items.
+its reviewed branch instead and nothing is merged anywhere (section 2). Under `--merge-mode pr`, in a tracker project only, the run merges onto a run branch of
+its own and ends by opening one pull request into the branch `--base` named (sections 2 and 10). Execute keeps doing the work, groom keeps writing the plans,
+capture keeps filing new items.
 
 Two things make this skill different from its three siblings, and both are worth having in mind before the first command runs:
 
@@ -27,9 +29,10 @@ Two things make this skill different from its three siblings, and both are worth
   rather than block, never `reset --hard` — is there because the failure it prevents would otherwise happen silently, hours after anyone could have caught it.
 
 The trigger carries the whole invocation surface:
-`/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch] [--question-mode decide] [--resume] [--abort]`.
+`/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide] [--resume] [--abort]`.
 Ids and `--max` shape the queue (section 1); `--base` names the branch this run gates at, cuts worktrees from and merges into, defaulting to `main`
-(section 2); `--merge-mode` decides whether a verified item is merged into that base or stops at its reviewed branch (section 2);
+(section 2); `--merge-mode` decides whether a verified item is merged into that base or stops at its reviewed branch (section 2), and `pr` merges it into a
+run branch cut from that base and opens one pull request at the end (sections 2 and 10);
 `--question-mode` decides what happens to an item whose open questions nobody is there to answer — `park` (the default: record them, skip the item, keep
 draining) or `decide` (answer them yourself, write the answers into the item, record what you assumed, and execute it), section 3; `--resume` takes over a run
 that was interrupted and `--abort` ends one (section 10). With none of them, the run is every ready item in the project's backlog, in the board's own order,
@@ -254,19 +257,22 @@ is proven is a human act, not this run's; and `branch` mode is unaffected, since
 
 ### Merge mode, and the probe before item 1
 
-When the trigger carries `--merge-mode branch`, add that flag to the `init` above and change nothing else. Absent, the run is `merge` mode — today's behaviour
-byte for byte.
+When the trigger carries `--merge-mode branch` or `--merge-mode pr`, add that flag to the `init` above and change nothing else. Absent, the run is `merge` mode
+— today's behaviour byte for byte.
 
 When the trigger carries `--question-mode decide`, add that flag to the `init` above too, and change nothing else. Absent, the run is `park` mode — also today's
 behaviour byte for byte. Kept as its own sentence rather than merged into the one above deliberately: a run reading this on turn 300 skims, and a compound
 sentence about two flags is where one of them gets dropped. The mode is run-level — set at `init`, applied to the whole queue, and only ever moved one way
-afterwards (`merge` → `branch`, below). `status --json` carries it as `mergeModeEffective`, which is where a resumed session reads it.
+afterwards (`merge` or `pr` → `branch`, below). `status --json` carries it as `mergeModeEffective`, which is where a resumed session reads it.
 
 - **`merge`** — each verified item is merged into the run's base, then its worktree and branch are cleaned up (§9).
 - **`branch`** — each verified item stops at its reviewed `backlog/<id>` branch and the base is never written. Review and verification are unchanged: the mode
   decides where a _successful_ item stops, nothing else.
+- **`pr`** — tracker projects only (`init` exits `1` on any other, nothing written). `init` creates a run branch, `backlog/run-<date>-<n>`, at the tip of
+  the branch `--base` named, and records it as the run's `base` and that branch as `prTarget`: **from here on every `<base>` in this file is the run branch**,
+  items merge into it exactly as in `merge` mode, and §10 opens one pull request from it into `prTarget` (Tracker: `references/tracker.md` §2, _PR mode_).
 
-**In `merge` mode only, probe once, here, before item 1:**
+**In `merge` and `pr` mode, probe once, here, before item 1:**
 
 ```bash
 git merge --no-ff --no-edit HEAD
@@ -287,7 +293,7 @@ Same effect — `Already up to date.`, exit `0`, no commit — and it pushes not
 **A resumed or unpaused run that has not probed in this session probes before its first merge.** The verdict belongs to the session asking, and a run that was
 paused before item 1 and unpaused by a later session reaches §9 having never asked at all.
 
-- **Allowed** → carry on in merge mode.
+- **Allowed** → carry on in the mode the run started in.
 - **Denied** (`Permission for this action was denied by the Claude Code auto mode classifier`) → record the downgrade and run the **whole queue** in branch
   mode. The run does not stop and nothing is parked:
 
@@ -295,8 +301,8 @@ paused before item 1 and unpaused by a later session reaches §9 having never as
   node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" merge-mode branch --note "auto mode classifier denied the merge probe"
   ```
 
-  `--note` is mandatory (omitting it exits `1`), and the command only ever moves `merge` → `branch`, only once per run — a second call exits `1` rather than
-  overwriting the first note.
+  `--note` is mandatory (omitting it exits `1`), and the command only ever moves `merge` or `pr` → `branch`, only once per run — a second call exits `1` rather
+  than overwriting the first note.
 
   **That note is fixed text, not the classifier's message.** The denial's `Reason:` is model-written, so §4's prose-in-argv rule keeps it off the command line;
   the full text stays in this session's transcript (`references/rationale.md`, §2).
@@ -454,6 +460,9 @@ git -C "<base tree>" pull --ff-only origin <base>
 
 **Before every item's worktree, not once per run**, with `<base tree>` re-resolved every time and never read back from the run file; never rewrite the scan as
 `awk` over `$0`. A non-zero exit **parks the run** — Tracker: `references/tracker.md` §4, _Pull the base first_, has why and the three park commands.
+
+**Skip both commands when `status --json` shows `mergeMode` `pr`** — the requested mode, so a degraded PR run skips them too: nothing but this run writes the
+run branch (Tracker: `references/tracker.md` §4, _Pull the base first_).
 
 ### Create the worktree
 
@@ -743,7 +752,7 @@ The session id comes from `status --json` (recorded by `watch`); a null there me
 resume — a fresh dispatch is the only retry available. With no channel to ask through, do not guess:
 `attention <id> --kind parked --detail "<what happened, your words>"` plus `stage <id> parked`, keep the worktree and branch, and continue with the next item.
 Skipping is `stage <id> skipped --note "<why, your words>"` — your own short reason, under the same rule as the detail beside it. Stopping the run is
-`finish --status failed` after parking this item.
+parking this item, then §10's _Finishing_ with `finish --status failed` in place of `done`.
 
 ## 6. Commit — the orchestrator's job, still never execute's
 
@@ -1115,6 +1124,37 @@ the run** — the items merged, the base holds their work, and a leftover direct
 loud in the summary so whoever tidies it knows which one it is. A base worktree the run did **not** create is never touched here, however convenient it looks:
 it is someone's working tree, and this run's authority stops at worktrees it created itself.
 
+**In `pr` mode, when some item is `merged` and the finish is `done` or `failed`, open the run's one pull request next, before `finish`.** Draft it:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" pr-draft
+```
+
+It writes the body under `<dir>` and prints one JSON line, `{ title, bodyFile, head, target }`: `head` is the run branch and `target` is `prTarget`, and those
+two — never `<base>` — fill the `gh` lines below, each its own Bash call from the project root. First ask whether the PR already exists, which it does for a
+resumed session whose predecessor died after creating it:
+
+```bash
+gh pr view <head> --json url --jq .url
+```
+
+A URL printed there is the PR: take it straight to `pr --url`. No URL, create it:
+
+```bash
+gh pr create --base <target> --head <head> --title "<title>" --body-file "<bodyFile>"
+```
+
+Then record the URL `gh` printed:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-orchestrate/tools/orchestrate.mjs" pr --url "<url>"
+```
+
+**A `gh pr create` that fails or is denied by the classifier is not a park and changes no finish status**: say in the summary that the run branch is pushed,
+and give the exact `gh pr create` line to run by hand (Tracker: `references/tracker.md` §10, _The pull request_). An `aborted` or `paused` run opens no PR; an
+aborted one's summary still gives that line, from `pr-draft`. After a PR opens, the local run branch is kept and nothing deletes it. With nothing `merged` there
+is no PR, and `finish` itself deletes the empty run branch or keeps it with one stderr line — name a kept one in the summary (`references/tracker.md` §10).
+
 `--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits `1`. Tracker: `finish` also stamps that status on the last-touched claim and the tool
 keeps `orchestrator:queued` by itself — best-effort, nothing to run (`references/tracker.md` §10). Then summarise for the user from `status --json`: what merged or branched,
 what parked and why, what was skipped as `ungroomed` or `needs-answers` and therefore wants a groom pass before the next run. A clean item — no fix loops, no
@@ -1122,7 +1162,8 @@ retries, green first try — should have produced no ping at all along the way; 
 
 **Any item that finished `branched` owes the user a merge list.** Name those branches in queue order — each was verified against the base its predecessor
 started from, and one carried over from an earlier run (§3's own recognition step) against that run's — with the literal command per branch, and say which
-branch to run it on when the base is not `main`:
+branch to run it on when the base is not `main`. **In a `pr` run that branch is `prTarget`, never the run branch**, and when the run also opened a PR, name the
+PR first and say each branch merges only after it has landed, rebased onto `prTarget`:
 
 ```bash
 git merge --no-ff backlog/<id>
@@ -1131,16 +1172,17 @@ git merge --no-ff backlog/<id>
 Then flag the pairs that will fight: two branches that touch a common path mean a conflict for whichever is merged second, regardless of which base commit
 each one actually started from — a carried-over branch (§3) can predate this run by days, and a run that downgraded mid-queue means the base itself moved (the
 items that merged before the denial) before it froze. Write each branch's paths into the run's own `<dir>` and intersect them — the three-dot diff each file is built from
-is merge-base relative, so it isolates each branch's own changes correctly regardless of any of that:
+is merge-base relative, so it isolates each branch's own changes correctly regardless of any of that (in a `pr` run whose run branch `finish` deleted, spell
+`<base>` there as `prTarget`):
 
 ```bash
 git -C "$PWD" diff --name-only <base>...backlog/<id> | sort > "<dir>/verify/<id>.branch-paths"
 comm -12 "<dir>/verify/<a>.branch-paths" "<dir>/verify/<b>.branch-paths"
 ```
 
-And when `mergeModeEffective` is `branch` while `mergeMode` is `merge`, say so **once**, run-level, quoting `mergeModeNote` verbatim: the run wanted to merge
-and was refused, the work is green, and those branches are what it produced instead. Not per item — one classifier verdict is one fact. A downgraded run still
-finishes `--status done`; nothing about it failed.
+And when `mergeModeEffective` is `branch` while `mergeMode` is `merge` or `pr`, say so **once**, run-level, quoting `mergeModeNote` verbatim: the run wanted to
+merge and was refused, the work is green, and those branches are what it produced instead. Not per item — one classifier verdict is one fact. A downgraded run
+still finishes `--status done`; nothing about it failed.
 
 Long steps in between deserve a heartbeat. `watch` stamps one every interval — through the dispatched session in step 4 and through the detached verification in
 step 8, which is precisely why neither of those two can make a healthy run read as stale any more — but review and merge still can outlast the fifteen-minute
@@ -1196,8 +1238,8 @@ Two rules stay here, because a reader who stops at this line still has to know t
 - **Never merges red.** Verification failure parks the item exactly like a conflict does. Nothing green-lights a merge except the commands passing — not a clean
   review, not a confident `## Outcome`, not "the failure looks unrelated."
 - **Branch mode never writes the base, and a denied merge never parks.** The mode is set at `init`, applies to the whole queue, and only ever moves one way
-  afterwards (`merge` → `branch`, never back — §2, §9). `branched` is a success exit, not a failure — the tool refuses `stage <id> merged` under branch mode so
-  the run file cannot say otherwise.
+  afterwards (`merge` or `pr` → `branch`, never back — §2, §9). `branched` is a success exit, not a failure — the tool refuses `stage <id> merged` under branch
+  mode so the run file cannot say otherwise.
 - **The merge site is derived, never assumed: merge in whichever tree has `<base>` checked out, and remove only a base worktree this run created.** git
   refuses one branch in two trees and `--force` is not the way round it (§9). A tree the person made is theirs — the same sentence as "this run's authority
   stops at worktrees it created itself", not a second rule beside it.
@@ -1205,6 +1247,7 @@ Two rules stay here, because a reader who stops at this line still has to know t
 - **Never pushes a files project.** Publishing that is the user's call. **A tracker project is the one exception, and it is exactly three commands** —
   `pull --ff-only origin <base>` before each item's worktree, `push origin <base>` after each merge, `push -u origin backlog/<n>` under branch mode (why:
   `references/tracker.md`). A rejected or classifier-denied push **parks**, never degrades: the merge has already landed, so `branched` would be a falsehood.
+  PR mode adds no fourth git command — its `<base>` is the run branch — and exactly one remote write beside the three, §10's `gh pr create`.
 - **Never writes the registry.** `~/.backlog-manager/registry.json` keeps its single writer (`backlog.mjs` `init`/`new`), untouched by anything here.
 - **Item bodies: pre-flight answers only.** Nothing else in the item lifecycle belongs to this skill — `start`, `## Outcome`, and the archive move all belong to
   `backlog-execute`, inside the session, and the plan belongs to `backlog-groom`. The single exception is the dead-marker `backlog.mjs stop` in the resume and

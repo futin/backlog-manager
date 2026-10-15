@@ -3679,7 +3679,18 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['`fix-mode` decides fresh or resume', 'the fix loop mode is the tool\'s decision, not the driver\'s'],
     // Final-review fixes: the retry's own transcript is inspected, and a null denial count is unknown rather than clean.
     ['inspect <id> --jsonl "<dir>/logs/<id>-retry-1.jsonl"', "after a retry the run inspects the RETRY's transcript, never the first session's again"],
-    ['`null` means unknown, never clean', 'an item with no transcript in this run reports denials unknown, never a clean zero']
+    ['`null` means unknown, never clean', 'an item with no transcript in this run reports denials unknown, never a clean zero'],
+    // PR mode: each statement the body gained, its story and rare branches in references/tracker.md (§2 PR mode's run branch, §4, §9, §10 The pull request).
+    ['**from here on every `<base>` in this file is the run branch**', 'a pr run records its run branch as base, so every <base> command targets it'],
+    ['**Skip both commands when `status --json` shows `mergeMode` `pr`**', "a pr run skips §4's pull, keyed on the requested mode"],
+    ['parking this item, then §10\'s _Finishing_', 'stopping the run goes through §10, so a failed finish opens the PR as a done one does'],
+    ['gh pr view <head> --json url --jq .url', 'the finish asks whether the PR already exists before creating one'],
+    ['gh pr create --base <target> --head <head> --title "<title>" --body-file "<bodyFile>"', "the PR is opened by the driver, from pr-draft's head and target"],
+    ['pr --url "<url>"', "the PR's url is recorded on the run"],
+    ['is not a park and changes no finish status', 'a failed or denied gh pr create is not a park'],
+    ['the local run branch is kept and nothing deletes it', 'an opened PR leaves the local run branch in place'],
+    ['**In a `pr` run that branch is `prTarget`, never the run branch**', "a pr run's merge list names prTarget, never the run branch"],
+    ['PR mode adds no fourth git command', "the push hard limit names gh pr create as PR mode's one extra remote write"]
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);

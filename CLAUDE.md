@@ -136,6 +136,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-merge-happens-in-whichever-tree-holds-the-base-and-the-run-removes-only-the-tree-it-made)
 - **Merge mode is run-scoped: chosen per launch, defaulted from Settings, and carried spawn → prompt → `init` → run file.**
   Why: [invariants.md](docs/subsystems/invariants.md#merge-mode-is-run-scoped-and-a-malformed-one-is-a-400)
+- **PR mode drains onto a run branch and opens one PR per run.**
+  Why: [invariants.md](docs/subsystems/invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run)
 - **`merged` is no longer the only success exit.**
   Why: [invariants.md](docs/subsystems/invariants.md#merged-is-not-the-only-success-exit--branched-is-its-branch-mode-sibling)
 - **The tool refuses `stage <id> merged` under branch mode**
