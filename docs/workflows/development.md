@@ -70,8 +70,9 @@ Reaching the board from another device is a separate, deliberate step: `pnpm run
 ### What the container mounts
 
 `~/.backlog-manager` and the project tree come in **read-only**, at their host paths, because the registry stores absolute host paths and they have to mean the
-same thing inside. One nested mount is read-write: `~/.backlog-manager/settings`, the only place the server itself writes — the watchdog config, and the pause
-request a live run reads back. The image also carries `git` and a system-config `safe.directory` — see Failure modes.
+same thing inside. One nested mount is read-write: `~/.backlog-manager/settings`, the only place the server itself writes — the watchdog config, the pause
+or stop request a live run reads back, and each tracker repo's sync interval (`tracker-sync.json`). The image also carries `git` and a system-config
+`safe.directory` — see Failure modes.
 
 ## Verification
 
@@ -179,5 +180,5 @@ stack topology (`host.docker.internal`), not a policy default, so it is overrida
     - scripts/test-all.mjs
     - server/src/main.ts
   kind: workflow
-  verified: 5034d2de2916b416fcb5d654aa12b07a73507cdd
+  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
 -->

@@ -7,20 +7,20 @@ one kanban-by-type board. No database: the registry file and each project's `bac
 
 ## Commands
 
-| Task                                      | Command                                                |
-| ----------------------------------------- | ------------------------------------------------------ |
-| Whole stack (api + client, no db)         | `pnpm run docker:up`                                   |
-| Rebuild the stack from scratch            | `pnpm run docker:sync`                                 |
-| Board only, built, no watchers (less RAM) | `pnpm run docker:run`                                  |
-| API only, on the host                     | `pnpm run dev`                                         |
-| Client only, on the host                  | `pnpm run dev:web`                                     |
-| Tests (both runners)                      | `pnpm test` (`scripts/test-all.mjs` — jest, then node) |
-| Tests, jest only                          | `pnpm run test:jest` (`jest --runInBand`)              |
-| Skill tests                               | `pnpm run test:skills` (`node --test`)                 |
-| Reinstall the plugin from the pushed HEAD | `pnpm run plugin:sync`                                 |
-| Publish the web port to the tailnet       | `pnpm run tailnet` (`up` \| `status` \| `down`)        |
-| Types                                     | `pnpm run typecheck`                                   |
-| Production build                          | `pnpm run build`                                       |
+| Task                                      | Command                                                            |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| Whole stack (api + client, no db)         | `pnpm run docker:up`                                               |
+| Rebuild the stack from scratch            | `pnpm run docker:sync`                                             |
+| Board only, built, no watchers (less RAM) | `pnpm run docker:run`                                              |
+| API only, on the host                     | `pnpm run dev`                                                     |
+| Client only, on the host                  | `pnpm run dev:web`                                                 |
+| Tests (both runners)                      | `pnpm test` (`scripts/test-all.mjs` — jest, then node)             |
+| Tests, jest only                          | `pnpm run test:jest` (`jest --runInBand`)                          |
+| Skill tests                               | `pnpm run test:skills` (`scripts/test-tmpdir.mjs` — `node --test`) |
+| Reinstall the plugin from the pushed HEAD | `pnpm run plugin:sync`                                             |
+| Publish the web port to the tailnet       | `pnpm run tailnet` (`up` \| `status` \| `down`)                    |
+| Types                                     | `pnpm run typecheck`                                               |
+| Production build                          | `pnpm run build`                                                   |
 
 Ports: API `4322`, Vite `5177` (guide-manager holds 4321/5175/5176 on this machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in `.env` —
 inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` from that same `.env` and serves the tailnet on the same number.
@@ -63,7 +63,8 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   `test/claude-rules.test.ts`: bullets only, each anchored exactly once, one home per anchor, headlines byte-equal with the ones below.
 - `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](docs/workflows/publishing.md)), `test-all.mjs`
-  (`pnpm test`, → [docs/workflows/development.md](docs/workflows/development.md)) and `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper).
+  (`pnpm test`, → [docs/workflows/development.md](docs/workflows/development.md)), `test-tmpdir.mjs` (the per-run temp root `test:skills` runs `node --test`
+  inside, same doc) and `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper).
 - `docs/` — the reference docs; `docs/superpowers/` holds the design spec and implementation plans this repo was built from.
 
 ## Invariants
@@ -238,5 +239,5 @@ of them, and to be opened by hand before editing through any other route (`Write
     - vite.config.ts
     - pnpm-workspace.yaml
   kind: index
-  verified: 5034d2de2916b416fcb5d654aa12b07a73507cdd
+  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
 -->

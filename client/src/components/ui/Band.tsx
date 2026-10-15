@@ -16,7 +16,7 @@ import type { ReactNode } from 'react';
  * for the opposite reason — see its own comment.
  */
 /* `className` is the page's own LAYOUT class, never a second look — the same contract `Sheet` has carried since task-38 (`.runs-history-sheet`,
-   `.runs-detail`), and the reason DESIGN.md §12.1 gives for it: where a band sits in a page's grid is a fact about that page, and the primitive cannot
+   `.runs-detail`), and the reason the design spec's §12.1 gives for it: where a band sits in a page's grid is a fact about that page, and the primitive cannot
    know it. `test/design-guards.test.ts` guard 7 enforces the other half — no page may name `.ui-band` in a selector at all. */
 export function Band({ title, sub, children, className }: { title: ReactNode; sub?: ReactNode; children?: ReactNode; className?: string }) {
   return (

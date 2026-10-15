@@ -1,9 +1,10 @@
 # The API
 
-Nest, one process, every route under `/api`. It owns five things: reading the registry, listing each registered project's items through whichever source owns
-them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, and — behind a switch
-that is off by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are two
-files under `~/.backlog-manager/settings/`.
+Nest, one process, every route under `/api`. It owns six things: reading the registry, listing each registered project's items through whichever source owns
+them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, serving the Hub's three
+read-only Lookout widgets (`hub/`), and — behind a switch that is off by default — asking another local process to start a Claude Code session. It writes no
+item file and no run file; the only bytes it owns are three files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file, and
+`tracker-sync.json`.
 
 ## Modules
 
@@ -231,5 +232,5 @@ origin guard, the derive-never-accept rule for dispatch, and the watchdog's armi
   sources:
     - server/src
   kind: subsystem
-  verified: 5034d2de2916b416fcb5d654aa12b07a73507cdd
+  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
 -->

@@ -176,5 +176,5 @@ skill's own `SKILL.md` is the authority on how that skill behaves; this doc is t
     - skills
     - agents
   kind: subsystem
-  verified: 5034d2de2916b416fcb5d654aa12b07a73507cdd
+  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
 -->
