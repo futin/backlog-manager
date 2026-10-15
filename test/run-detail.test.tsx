@@ -130,6 +130,8 @@ function primarySummary(): OrchestratorArchiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    prTarget: null,
+    prUrl: null,
     base: 'main',
     questionMode: 'park',
     current: false,
@@ -169,6 +171,8 @@ function primaryFull(overTails: { a1?: string; a2?: string } = {}): LiveRun {
     mergeMode: 'merge',
     mergeModeEffective: 'merge',
     mergeModeNote: null,
+    prTarget: null,
+    prUrl: null,
     base: 'main',
     questionMode: 'park',
     attention: [{ id: 'a-2', kind: 'fix-exhausted', detail: 'gave up after 3 fix loops' }],
@@ -339,6 +343,8 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
       base: 'main',
       questionMode: 'park',
       current: true,
@@ -363,6 +369,8 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
       base: 'main',
       questionMode: 'park',
       attention: [],
@@ -389,6 +397,8 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
       base: 'main',
       questionMode: 'park',
       attention: [],
@@ -612,6 +622,8 @@ describe('RunDetail', () => {
       mergeMode: 'merge',
       mergeModeEffective: 'merge',
       mergeModeNote: null,
+      prTarget: null,
+      prUrl: null,
       base: 'main',
       questionMode: 'park',
       attention: [],
@@ -785,6 +797,57 @@ describe('RunDetail', () => {
   // Which branch a run wrote to is not recoverable from anything else after
   // the fact — the merge commits are on the base, not in any file this app
   // keeps — so a runs history that omitted it would lie by omission.
+
+  // --- pr mode (spec §5): the pill and the link-out ----------------------
+  it('draws the PR mode pill for a pr run', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = {
+      ...primarySummary(),
+      mergeMode: 'pr',
+      mergeModeEffective: 'pr',
+      prTarget: 'main',
+      base: 'backlog/run-2026-10-15-1'
+    };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.getByTestId('run-detail-mode')).toHaveTextContent('PR mode');
+    expect(screen.queryByTestId('run-detail-mode-note')).not.toBeInTheDocument();
+  });
+
+  it('links a set prUrl as PR #<n>, opened in a new tab without an opener', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const prUrl = 'https://github.com/acme/widgets/pull/275';
+    const summary: OrchestratorArchiveRun = { ...primarySummary(), mergeMode: 'pr', mergeModeEffective: 'pr', prTarget: 'main', prUrl };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    const link = screen.getByRole('link', { name: 'PR #275' });
+    expect(link).toHaveAttribute('href', prUrl);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('draws no PR link when prUrl is null', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = { ...primarySummary(), mergeMode: 'pr', mergeModeEffective: 'pr', prTarget: 'main', prUrl: null };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.queryByRole('link', { name: /^PR #/ })).not.toBeInTheDocument();
+  });
+
+  // The server's sanitiser already nulls a bad URL, so this payload cannot arrive; the component refuses it anyway because an href is the one place a
+  // client-side lapse becomes script execution (the `linkBase` reasoning).
+  it('draws no PR link for a prUrl that is not a GitHub pull-request URL', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    const summary: OrchestratorArchiveRun = { ...primarySummary(), mergeMode: 'pr', mergeModeEffective: 'pr', prUrl: 'javascript:alert(1)' };
+    render(<RunDetail summary={summary} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.queryByRole('link', { name: /^PR #/ })).not.toBeInTheDocument();
+    expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
+  });
 
   it('renders the run base', () => {
     mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));

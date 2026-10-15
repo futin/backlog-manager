@@ -706,27 +706,38 @@ export interface StopResult {
 export const RUN_IN_PROGRESS_CODE = 'run-in-progress';
 
 /**
- * What a successful run does with a verified item's branch: merge it into
- * `main` and clean up, or leave it for a person to merge by hand. Declared
+ * What a successful run does with a verified item's work: merge it into the
+ * run's base, leave its branch for a person to merge by hand, or drain every
+ * item onto a run branch and open one pull request for the lot. Declared
  * beside `RunStage` because the two are the same feature — `branch` mode
  * exists to make `RunStage` need a second success exit (`branched`, below).
  *
  * - `merge` — today's behaviour, byte for byte. The run merges each verified
- *   item into `main` (`git merge --no-ff`) and deletes its worktree and
- *   branch.
+ *   item into its base (`main` unless the launch picked another;
+ *   `git merge --no-ff`) and deletes its worktree and branch.
  * - `branch` — the run commits, reviews and verifies exactly as `merge`
- *   mode does, then removes the worktree and **keeps the branch**. `main` is
- *   never touched. The branch is the deliverable a person merges by hand.
+ *   mode does, then removes the worktree and **keeps the branch**. The base
+ *   is never touched. The branch is the deliverable a person merges by hand.
+ * - `pr` — the run commits, reviews, verifies and merges exactly as `merge`
+ *   mode does, but onto a RUN branch it cuts from the launch's base instead of
+ *   onto the base itself, and ends by opening ONE pull request from that run
+ *   branch into the base. The run file's `base` names the run branch and
+ *   `prTarget` names where the PR goes (spec P4); `prUrl` records the PR once
+ *   it exists (spec P5). A tracker project only — the server refuses `pr` for
+ *   a files project. Like `merge` it is open to a classifier denial, which
+ *   degrades `mergeModeEffective` to `branch`.
  */
-export type MergeMode = 'merge' | 'branch';
+export type MergeMode = 'merge' | 'branch' | 'pr';
 
 /**
  * Every member of `MergeMode`, as a value — what a request body's
  * `mergeMode` and the CLI's `--merge-mode` flag are both checked against.
  * Exported so neither caller has to restate the union by hand, the same
  * reason `AGENT_ACTIONS` exists in `shared/agent.ts` beside `isAgentAction`.
+ * The order is the picker's order: Settings and the Orchestrate sheet both
+ * build their options from this list, so `pr` is third there too.
  */
-export const MERGE_MODES: readonly MergeMode[] = ['merge', 'branch'];
+export const MERGE_MODES: readonly MergeMode[] = ['merge', 'branch', 'pr'];
 
 /**
  * What a run does with an item's open questions when nobody can answer them.
@@ -1302,7 +1313,7 @@ export interface OrchestratorRun {
   mergeMode: MergeMode;
   /**
    * What this run is actually doing right now. Starts equal to `mergeMode`
-   * and only ever moves `merge` → `branch`, never back — a run can be
+   * and only ever moves `merge` → `branch` or `pr` → `branch`, never back — a run can be
    * denied a merge mid-queue (§5.2 of the design) and fall back to leaving
    * branches for the rest of the queue, but nothing pushes it the other way:
    * once a run has proven the classifier will refuse it, retrying merge mode
@@ -1317,6 +1328,25 @@ export interface OrchestratorRun {
    * and this note is never cleared back to `null` afterwards.
    */
   mergeModeNote: string | null;
+  /**
+   * The branch the run's pull request is opened INTO under `pr` mode, or `null`
+   * under `merge` and `branch` (and in any run file written before `pr`
+   * existed). Spec P4: under `pr` the run's `base` is the RUN branch, so every
+   * reader that already trusts `base` — the merge gate, the worktree cut,
+   * `merge-check`, `cleanup`, `--resume`, the claim, remote runs — does the right
+   * thing unchanged, and the one place that needs the original destination reads
+   * this field instead. Written once by `init`; resolved by the server's
+   * `sanitizeMergeFields`, which is why it is required here.
+   */
+  prTarget: string | null;
+  /**
+   * The URL of the pull request the run opened, or `null` until it has opened
+   * one (and always under `merge` and `branch`). Spec P5: recorded in the run
+   * file, and not only in the final summary text, so the Runs detail sheet can
+   * link to it. It becomes an `href`, so `sanitizeMergeFields` only lets a
+   * value through that `isPrUrl` (shared/agent.ts) accepts.
+   */
+  prUrl: string | null;
   /**
    * What this run does with an item's open questions when nobody can answer
    * them — `init --question-mode`'s value, or `'park'` when the flag was

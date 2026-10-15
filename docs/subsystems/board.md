@@ -120,10 +120,15 @@ queue:
    reports. **Base branch seeds from the literal `'main'`, never from Settings** (task-44): its two neighbours have permanently sensible values, while a base
    names one experiment's branch, so a stored one would outlive that experiment and silently send a later run onto a stale feature branch. Its options come
    from `GET /api/agents/branches`, fetched once per sheet open, falling back to `['main']` alone on any failure and never blocking a launch. Plus, in merge
-   mode, a setup hint fed by `GET /api/agents/merge-check`, and, for a non-`main` base, a note saying `main` will not be written. The merge-mode picker's own
+   and PR mode (a PR run asks the classifier for the same merge at every item), a setup hint fed by `GET /api/agents/merge-check`,
+   and, for a non-`main` base, a note saying `main` will not be written. The merge-mode picker's own
    option words come from `mergeModeOptionLabels` (`lib/merge-mode.ts`) and are **derived from the picked base** — `Merge to <base>` — so the control and that
    note are one statement rather than two that can disagree (bug-36). Settings, picking a default before any run and so before any base exists, calls the same
-   function with `null` and gets `Merge into the base branch`; `null` there means "no base is knowable", never `main`.
+   function with `null` and gets `Merge into the base branch`; `null` there means "no base is knowable", never `main`. The third option, `pr`, reads
+   `Open a PR into <base>` (`Open a PR into the base branch` in Settings) and is **offered only for a `github`-source project**: the sheet takes a `source`
+   prop that `BoardView` passes from the registered project's `ProjectSummary.source` — never off `items[0]`, which an empty queue does not have — and a `pr`
+   Settings default (or a `pr` pick left over from another project) reads as `merge` on a files project. Settings is pre-project, so it lists `pr` for every
+   project and leaves the refusal to the sheet and to the server's 400.
 
 Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
 call `useDialogEscape` for whatever they wrap. Two further entries join the same stack while they are drawn and are not dialogs: `ui/Confirm` (bug-53),
@@ -195,8 +200,10 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   Stop beside both — and on a crashed run too, which is the run a person most needs to end — Resume for a paused run, and Resume for a crashed one exactly
   when `watchdogStoodDown` says the sweeper will not. Stop asks first (bug-53): the chip is replaced in place by `ui/Confirm` naming the item it abandons and
   saying the run cannot be resumed, and only its `Stop run` sends the request — `Keep running` and Escape send nothing. A run with a stop on file drops to the
-  `Stopping` reading and offers no control at all — no withdrawal, because the `--abort` session has already been spawned, and no Resume in any branch); then the facts strip, the mode and question
-  notes, the chip row, `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with its stage chip, its `RowTime` reading, its
+  `Stopping` reading and offers no control at all — no withdrawal, because the `--abort` session has already been spawned, and no Resume in any branch) — and,
+  when the run file carries a `prUrl` that passes `isPrUrl`, a `PR #<n>` link-out in the head's sub line, opened with `rel="noopener noreferrer"`; then the
+  facts strip, the mode and question notes (`mergeModeLabel`'s pill reads `PR mode` for an effective `pr` run and `branch mode (downgraded)` for a degraded
+  one), the chip row, `git merge --no-ff <branch>` per branched item, the items in pipeline order — each with its stage chip, its `RowTime` reading, its
   seven-node `StageTrack`, its usage line, its assumptions under `decide`, and its last verification as a disclosure, open when failed. Machine time by stage
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
   its count, so the section earns the screen only when it has something in it. Selection is one run across both sheets: the first live run is selected on
@@ -343,6 +350,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Interfaces
 
 - `lib/agents.ts` — same-origin fetches against `/api`.
+- `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns` and
+  `useWatchdog`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
+  rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` entry is present, plus a grace window after a Resume click.
@@ -351,7 +361,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   while the sweeper reads `armed` and a 15s one otherwise (#270 — armed-only left an idle page blind to a run starting); Settings' `live: false` polls at
   neither.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
-  (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no interval at all.
+  (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no timer at all.
 - `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared
   Settings Trackers card through `useTrackersContext`. Mount and window focus, plus a timer on the server's poll clock: `nextDelay` arms the next read
   `TRACKER_FETCH_SLACK_MS` after the newest stamp's cycle ends, drops to a 1 s floor while any `ok` repo of the same sweep is still due (the server stamps repos

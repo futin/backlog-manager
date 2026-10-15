@@ -3724,7 +3724,19 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['`fix-mode` decides fresh or resume', 'the fix loop mode is the tool\'s decision, not the driver\'s'],
     // Final-review fixes: the retry's own transcript is inspected, and a null denial count is unknown rather than clean.
     ['inspect <id> --jsonl "<dir>/logs/<id>-retry-1.jsonl"', "after a retry the run inspects the RETRY's transcript, never the first session's again"],
-    ['`null` means unknown, never clean', 'an item with no transcript in this run reports denials unknown, never a clean zero']
+    ['`null` means unknown, never clean', 'an item with no transcript in this run reports denials unknown, never a clean zero'],
+    // PR mode: each statement the body gained, its story and rare branches in references/tracker.md (§2 PR mode's run branch, §4, §9, §10 The pull request).
+    ['**from here on every `<base>` in this file is the run branch**', 'a pr run records its run branch as base, so every <base> command targets it'],
+    ['**Skip both commands when `status --json` shows `mergeMode` `pr`**', "a pr run skips §4's pull, keyed on the requested mode"],
+    ['parking this item, then §10\'s _Finishing_', 'stopping the run goes through §10, so a failed finish opens the PR as a done one does'],
+    ["gh pr list --head <head> --state open --json url --jq '.[0].url // empty'", 'the finish asks whether an OPEN PR already exists before creating one'],
+    ['**When `status --json` shows `mergeMode` `pr`, some item is `merged`', 'the PR gate keys on the requested mergeMode: a degraded pr run opens its PR'],
+    ['gh pr create --base <target> --head <head> --title "<title>" --body-file "<bodyFile>"', "the PR is opened by the driver, from pr-draft's head and target"],
+    ['pr --url "<url>"', "the PR's url is recorded on the run"],
+    ['is not a park and changes no finish status', 'a failed or denied gh pr create is not a park'],
+    ['the local run branch is kept and nothing deletes it', 'an opened PR leaves the local run branch in place'],
+    ['**In a `pr` run that branch is `prTarget`, never the run branch**', "a pr run's merge list names prTarget, never the run branch"],
+    ['PR mode adds no fourth git command', "the push hard limit names gh pr create as PR mode's one extra remote write"]
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
@@ -10262,4 +10274,821 @@ test('inspect composes the existing internals and runs no git of its own', () =>
     assert.ok(body.includes(needle), `cmdInspect no longer calls ${needle}`);
   }
   assert.doesNotMatch(body, /spawnSync|'merge'|'push'/);
+});
+
+// --- PR mode, task 3: `init` mints the run branch ------------------------------------------------------------------------
+//
+// Spec §2 (docs/superpowers/specs/2026-10-15-orchestrate-pr-mode-design.md): under `--merge-mode pr`, `--base` names the PR's
+// TARGET and the run's own `base` is a branch `init` mints, `backlog/run-<local date>-<n>`, cut at the target's tip as the last
+// git write before the run file. Numbered after the task-3 brief's cases so a red one maps straight back to the row that
+// specifies it.
+
+/** The local calendar date, computed here rather than through the tool's own formatter so a wrong formatter cannot agree
+ *  with itself. A case that straddles local midnight can still flake; nothing here runs long enough to make that likely. */
+function todayLocal(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** A tracker fixture with one commit, so `main` is a real ref a run branch can be cut from. No `origin`. */
+function prFixture(t) {
+  const fx = trackerFixture(t);
+  fs.writeFileSync(path.join(fx.project, 'README.md'), 'pr fixture\n');
+  commitEverything(fx.project, 'pr fixture');
+  return fx;
+}
+
+/** `runApi`, with extra environment for the one case that needs it (`TZ`). */
+function runApiEnv(extraEnv, cwd, home, port, ...args) {
+  return new Promise((resolve) => {
+    const proc = spawn('node', [SCRIPT, ...args], {
+      cwd,
+      env: {
+        ...process.env,
+        BM_ORCH_HOME: home,
+        BM_ORCH_CONTROL_HOME: `${home}-control`,
+        BM_API_PORT: String(port),
+        CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID,
+        ...extraEnv
+      }
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => (stdout += d));
+    proc.stderr.on('data', (d) => (stderr += d));
+    proc.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
+/** `init --merge-mode pr` against an empty tracker queue, so the case is about the mint and nothing else. */
+async function initPr(fx, extra = [], env = {}) {
+  const { out } = await withApi(gateRoutes([], {}), (port) =>
+    runApiEnv(env, fx.project, fx.home, port, 'init', '--project', fx.project, '--merge-mode', 'pr', ...extra)
+  );
+  return out;
+}
+
+/** `init`'s stderr minus the tracker gate's own cache-age line, which every whole-queue tracker `init` prints (bug-41) and
+ *  which is not this feature's to count. What is left is what the mint said. */
+function mintStderr(out) {
+  return out.stderr.split('\n').filter((l) => l.trim() !== '' && !l.startsWith('queue built from the tracker cache'));
+}
+
+/** Every local `backlog/run-*` branch, sorted. */
+function runBranches(project) {
+  return gitOk(project, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/backlog/')
+    .split('\n')
+    .filter((name) => name.startsWith('backlog/run-'))
+    .sort();
+}
+
+function tipOf(project, ref) {
+  return gitOk(project, 'rev-parse', '--verify', `${ref}^{commit}`).trim();
+}
+
+/** A files run hand-moved into `pr` mode, for the commands whose behaviour under `pr` does not depend on how the run got
+ *  there (and a files fixture keeps `stage merged` from needing a fake close route). Returns the run's own fields.
+ *  `items` seeds several tasks instead of one, and the queue is put in exactly that order — the gate's own ordering is not
+ *  what a case about queue order should be depending on. */
+function handPrRun(t, { id = 'task-1', items = [{ id, title: 'Some task' }] } = {}) {
+  const fx = basedFixture(t);
+  for (const item of items) seedReadyTask(fx.project, item.id, item.title);
+  commitEverything(fx.project, 'seed task');
+  assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project).status, 0);
+  const runBranch = 'backlog/run-2026-10-15-1';
+  gitOk(fx.project, 'branch', runBranch, 'main');
+  const file = runFile(fx.home, fx.project);
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  Object.assign(written, { mergeMode: 'pr', mergeModeEffective: 'pr', base: runBranch, prTarget: 'main', prUrl: null });
+  written.queue = items.map((item) => written.queue.find((q) => q.id === item.id));
+  fs.writeFileSync(file, `${JSON.stringify(written, null, 2)}\n`);
+  return { ...fx, runBranch, file };
+}
+
+// 3.1
+test('pr 3.1: the tool’s MERGE_MODES copy equals shared/types.ts’s, read from both sources', () => {
+  const listOf = (source, pattern) => {
+    const m = pattern.exec(source);
+    assert.ok(m, `no MERGE_MODES declaration matching ${pattern}`);
+    return JSON.parse(m[1].replace(/'/g, '"'));
+  };
+  const tool = listOf(fs.readFileSync(SCRIPT, 'utf8'), /^const MERGE_MODES = (\[[^\]]*\]);$/m);
+  const types = listOf(
+    fs.readFileSync(path.join(path.dirname(SCRIPT), '..', '..', '..', 'shared', 'types.ts'), 'utf8'),
+    /^export const MERGE_MODES: readonly MergeMode\[\] = (\[[^\]]*\]);$/m
+  );
+  assert.deepEqual(tool, types);
+  assert.deepEqual(tool, ['merge', 'branch', 'pr']);
+});
+
+// 3.2
+test('pr 3.2: init --merge-mode pr mints backlog/run-<today>-1 at main and records base, prTarget and a null prUrl', async (t) => {
+  const fx = prFixture(t);
+  const today = todayLocal();
+
+  const out = await initPr(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  const runBranch = `backlog/run-${today}-1`;
+  assert.deepEqual(runBranches(fx.project), [runBranch]);
+  assert.equal(tipOf(fx.project, runBranch), tipOf(fx.project, 'main'));
+  const written = readRunJson(fx);
+  assert.equal(written.mergeMode, 'pr');
+  assert.equal(written.mergeModeEffective, 'pr');
+  assert.equal(written.base, runBranch);
+  assert.equal(written.prTarget, 'main');
+  assert.equal(written.prUrl, null);
+});
+
+// 3.3
+test('pr 3.3: init --merge-mode pr --base feature/x targets feature/x and cuts the run branch at its tip', async (t) => {
+  const fx = prFixture(t);
+  gitOk(fx.project, 'branch', 'feature/x');
+  // Move main on, so the two tips differ and "cut at feature/x" is distinguishable from "cut at main".
+  fs.writeFileSync(path.join(fx.project, 'later.txt'), 'later\n');
+  commitEverything(fx.project, 'later on main');
+  assert.notEqual(tipOf(fx.project, 'main'), tipOf(fx.project, 'feature/x'));
+
+  const out = await initPr(fx, ['--base', 'feature/x']);
+
+  assert.equal(out.status, 0, out.stderr);
+  const written = readRunJson(fx);
+  assert.equal(written.prTarget, 'feature/x');
+  assert.equal(tipOf(fx.project, written.base), tipOf(fx.project, 'feature/x'));
+});
+
+// 3.4
+test('pr 3.4: a local backlog/run-<today>-1 already present mints -2', async (t) => {
+  const fx = prFixture(t);
+  const today = todayLocal();
+  gitOk(fx.project, 'branch', `backlog/run-${today}-1`, 'main');
+
+  const out = await initPr(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(readRunJson(fx).base, `backlog/run-${today}-2`);
+});
+
+test('pr 3.4: a backlog/run-<today>-1 present only on origin mints -2', async (t) => {
+  const fx = prFixture(t);
+  const today = todayLocal();
+  const remote = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-remote-')));
+  t.after(() => fs.rmSync(remote, { recursive: true, force: true }));
+  gitOk(remote, 'init', '-q', '--bare', '-b', 'main');
+  gitOk(fx.project, 'remote', 'add', 'origin', remote);
+  // main first, or init's own `pull --ff-only origin main` refuses before the mint is reached.
+  gitOk(fx.project, 'push', '-q', 'origin', 'main');
+  gitOk(fx.project, 'push', '-q', 'origin', `main:refs/heads/backlog/run-${today}-1`);
+  assert.deepEqual(runBranches(fx.project), [], 'the -1 must exist on origin only');
+
+  const out = await initPr(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(readRunJson(fx).base, `backlog/run-${today}-2`);
+  assert.doesNotMatch(out.stderr, /ls-remote/, 'a reachable origin must not print the fallback line');
+});
+
+test('pr 3.4: refs -1, -3 and -wip mint -4 — the highest number plus one, the non-numeric one ignored', async (t) => {
+  const fx = prFixture(t);
+  const today = todayLocal();
+  for (const suffix of ['1', '3', 'wip']) gitOk(fx.project, 'branch', `backlog/run-${today}-${suffix}`, 'main');
+
+  const out = await initPr(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(readRunJson(fx).base, `backlog/run-${today}-4`);
+});
+
+test('pr 3.4: nextRunBranchName starts at 1, ignores other dates and non-numeric suffixes, and takes the highest plus one', () => {
+  assert.equal(orch.nextRunBranchName('2026-10-15', []), 'backlog/run-2026-10-15-1');
+  assert.equal(orch.nextRunBranchName('2026-10-15', ['backlog/run-2026-10-14-7']), 'backlog/run-2026-10-15-1');
+  assert.equal(
+    orch.nextRunBranchName('2026-10-15', ['backlog/run-2026-10-15-1', 'backlog/run-2026-10-15-3', 'backlog/run-2026-10-15-wip']),
+    'backlog/run-2026-10-15-4'
+  );
+  // Anchored at both ends: a longer name that merely contains a run branch's shape is not one.
+  assert.equal(orch.nextRunBranchName('2026-10-15', ['backlog/run-2026-10-15-9/x', 'x/backlog/run-2026-10-15-8']), 'backlog/run-2026-10-15-1');
+});
+
+test('pr 3.4: localDate formats the local calendar date as YYYY-MM-DD, zero-padded', () => {
+  assert.equal(orch.localDate(new Date(2026, 0, 5, 23, 59)), '2026-01-05');
+  assert.equal(orch.localDate(new Date(2026, 11, 31, 0, 0)), '2026-12-31');
+});
+
+// 3.5
+test('pr 3.5: init --merge-mode pr on a files project exits 1 naming the tracker requirement, and writes nothing', (t) => {
+  const { home, project } = basedFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'done').status, 0);
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
+
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'pr');
+
+  assert.equal(out.status, 1, out.stdout);
+  assert.match(out.stderr, /tracker/);
+  assert.deepEqual(runBranches(project), []);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before, 'the done run must be neither archived nor replaced');
+  assert.equal(fs.existsSync(runsDir(home, project)), false);
+});
+
+test('pr 3.5: on a project with no run yet, the files refusal leaves no run file at all', (t) => {
+  const { home, project } = basedFixture(t);
+
+  const out = run(project, home, 'init', '--project', project, '--merge-mode', 'pr');
+
+  assert.equal(out.status, 1);
+  assert.deepEqual(fs.readdirSync(home), []);
+});
+
+// 3.6
+test('pr 3.6: the minted date is the local date in the child’s TZ, not UTC', async (t) => {
+  const fx = prFixture(t);
+  const now = new Date();
+  const utc = now.toISOString().slice(0, 10);
+  const inZone = (timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  // At any instant one of these two is on a different calendar day from UTC: Kiritimati is UTC+14, Etc/GMT+12 is UTC-12.
+  const zone = ['Pacific/Kiritimati', 'Etc/GMT+12'].find((z) => inZone(z) !== utc);
+  assert.ok(zone, 'one of the two zones must differ from UTC at any instant');
+
+  const out = await initPr(fx, [], { TZ: zone });
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(readRunJson(fx).base, `backlog/run-${inZone(zone)}-1`);
+});
+
+// 3.7
+test('pr 3.7: with no origin, init mints from local refs and prints exactly one stderr line naming the fallback', async (t) => {
+  const fx = prFixture(t);
+
+  const out = await initPr(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(readRunJson(fx).base, `backlog/run-${todayLocal()}-1`);
+  const lines = mintStderr(out);
+  assert.equal(lines.length, 1, out.stderr);
+  assert.match(lines[0], /ls-remote/);
+  assert.match(lines[0], /local refs/);
+});
+
+test('pr 3.7: an unreachable origin with a target no tree holds still mints, with the same one stderr line', async (t) => {
+  const fx = prFixture(t);
+  gitOk(fx.project, 'branch', 'feature/x');
+  // A path that does not exist: `remote get-url` succeeds, so `pullBaseAtInit` reaches its tree scan — and returns there,
+  // because no tree holds feature/x. The mint's `ls-remote` is the first call that talks to the remote, and it fails.
+  gitOk(fx.project, 'remote', 'add', 'origin', path.join(fx.project, 'no-such-remote'));
+
+  const out = await initPr(fx, ['--base', 'feature/x']);
+
+  assert.equal(out.status, 0, out.stderr);
+  const written = readRunJson(fx);
+  assert.equal(written.base, `backlog/run-${todayLocal()}-1`);
+  assert.equal(written.prTarget, 'feature/x');
+  const lines = mintStderr(out);
+  assert.equal(lines.length, 1, out.stderr);
+  assert.match(lines[0], /ls-remote/);
+});
+
+test('pr 3.7: the mint’s ls-remote spawn carries a timeout, and asks for the date’s run branches on origin', () => {
+  const { args, options } = orch.runBranchLsRemote('/some/root', '2026-10-15');
+  assert.deepEqual(args, ['-C', '/some/root', 'ls-remote', '--heads', 'origin', 'backlog/run-2026-10-15-*']);
+  assert.ok(Number.isFinite(options.timeout) && options.timeout > 0, `timeout must be a positive number, got ${options.timeout}`);
+});
+
+// 3.8
+test('pr 3.8: init refused by an existing running run (exit 4) leaves no run branch behind', async (t) => {
+  const fx = prFixture(t);
+  const first = await withApi(gateRoutes([], {}), (port) => runApi(fx.project, fx.home, port, 'init', '--project', fx.project));
+  assert.equal(first.out.status, 0, first.out.stderr);
+  const before = fs.readFileSync(runFile(fx.home, fx.project), 'utf8');
+
+  const out = await initPr(fx);
+
+  assert.equal(out.status, 4, out.stderr);
+  assert.deepEqual(runBranches(fx.project), []);
+  assert.equal(fs.readFileSync(runFile(fx.home, fx.project), 'utf8'), before);
+});
+
+// 3.9
+test('pr 3.9: init --merge-mode merge and branch write prTarget and prUrl as null, and mint nothing', (t) => {
+  for (const mode of ['merge', 'branch']) {
+    const { home, project } = basedFixture(t);
+
+    const out = run(project, home, 'init', '--project', project, '--merge-mode', mode);
+
+    assert.equal(out.status, 0, out.stderr);
+    const written = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+    assert.equal(written.base, 'main');
+    assert.equal(written.prTarget, null);
+    assert.equal(written.prUrl, null);
+    assert.deepEqual(runBranches(project), []);
+  }
+});
+
+// 3.10
+test('pr 3.10: merge-mode branch on a pr run degrades the effective mode only, and only once', async (t) => {
+  const fx = prFixture(t);
+  assert.equal((await initPr(fx)).status, 0);
+
+  const out = run(fx.project, fx.home, 'merge-mode', 'branch', '--note', 'x');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = readRunJson(fx);
+  assert.equal(after.mergeMode, 'pr');
+  assert.equal(after.mergeModeEffective, 'branch');
+  assert.equal(after.mergeModeNote, 'x');
+  const before = fs.readFileSync(runFile(fx.home, fx.project));
+
+  const again = run(fx.project, fx.home, 'merge-mode', 'branch', '--note', 'y');
+
+  assert.equal(again.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(fx.home, fx.project))));
+});
+
+test('pr 3.10: merge-mode pr is never a target — the only move is to branch', async (t) => {
+  const fx = prFixture(t);
+  assert.equal((await initPr(fx)).status, 0);
+  const before = fs.readFileSync(runFile(fx.home, fx.project));
+
+  const out = run(fx.project, fx.home, 'merge-mode', 'pr', '--note', 'x');
+
+  assert.equal(out.status, 1);
+  assert.ok(before.equals(fs.readFileSync(runFile(fx.home, fx.project))));
+});
+
+test('pr 3.10: stage <id> merged is accepted on a pr run', (t) => {
+  const fx = handPrRun(t);
+
+  const out = run(fx.project, fx.home, 'stage', 'task-1', 'merged');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(readRunJson(fx).queue.find((q) => q.id === 'task-1').stage, 'merged');
+});
+
+// 3.11
+test('pr 3.11: claim and reconcile on a pr run leave base, prTarget and prUrl byte-identical', (t) => {
+  const fx = handPrRun(t);
+  const fields = () => {
+    const r = readRunJson(fx);
+    return JSON.stringify({ base: r.base, prTarget: r.prTarget, prUrl: r.prUrl });
+  };
+  const before = fields();
+
+  const claimed = run(fx.project, fx.home, 'claim');
+  assert.equal(claimed.status, 0, claimed.stderr);
+  assert.equal(fields(), before);
+
+  const reconciled = run(fx.project, fx.home, 'reconcile', '--json');
+  assert.equal(reconciled.status, 0, reconciled.stderr);
+  assert.equal(fields(), before);
+});
+
+// 3.12
+test('pr 3.12: merge-check on a pr run whose run branch no tree holds creates _base-<sanitised run branch>', (t) => {
+  const fx = mergeCheckFixture(t);
+  const runBranch = 'backlog/run-2026-10-15-1';
+  gitOk(fx.project, 'branch', runBranch, 'main');
+  const file = runFile(fx.home, fx.project);
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  Object.assign(written, { mergeMode: 'pr', mergeModeEffective: 'pr', base: runBranch, prTarget: 'main', prUrl: null });
+  fs.writeFileSync(file, `${JSON.stringify(written, null, 2)}\n`);
+
+  const out = mergeCheck(fx, MC_ID);
+
+  assert.equal(out.status, 0, out.stderr);
+  const expected = path.join(fx.project, '.worktrees', '_base-backlog-run-2026-10-15-1');
+  const verdict = JSON.parse(out.stdout.trim());
+  assert.equal(verdict.verdict, 'merge');
+  assert.equal(verdict.baseTree, expected);
+  assert.equal(verdict.created, true);
+  assert.deepEqual(readRunJson(fx).baseTree, { path: expected, created: true });
+  assert.notEqual(stageOf(fx), 'parked');
+});
+
+// --- pr mode: pr-draft and pr --url (Task 4) --------------------------------
+
+/** A tree holding the run branch, made once per fixture — the merge site SKILL.md §9 merges in. */
+function runBranchTree(fx) {
+  const tree = path.join(fx.project, '.worktrees', '_base-backlog-run-2026-10-15-1');
+  if (!fs.existsSync(tree)) gitOk(fx.project, 'worktree', 'add', '-q', tree, fx.runBranch);
+  return tree;
+}
+
+/** One empty commit with `subject` — the subject is all `pr-draft` reads. */
+function commitSubject(tree, subject) {
+  gitOk(tree, 'commit', '-q', '--allow-empty', '-m', subject);
+}
+
+/**
+ * Lands one item on the run branch the way SKILL.md §6 and §9 do: `backlog/<id>` is cut from the run branch's tip, takes
+ * the §6 commit and then any fix-loop commits (`subjects`, in that order), and is merged `--no-ff` with
+ * `Merge backlog/<id>: <title>`.
+ */
+function landItem(fx, id, title, subjects) {
+  const tree = runBranchTree(fx);
+  gitOk(tree, 'checkout', '-q', '-b', `backlog/${id}`);
+  for (const subject of subjects) commitSubject(tree, subject);
+  gitOk(tree, 'checkout', '-q', fx.runBranch);
+  gitOk(tree, 'merge', '-q', '--no-ff', `backlog/${id}`, '-m', `Merge backlog/${id}: ${title}`);
+}
+
+/** Hand-edits the run file's queue: `stages` maps an id to the stage it ends on, `fields` to extra item fields. */
+function setQueue(fx, stages, fields = {}) {
+  const written = JSON.parse(fs.readFileSync(fx.file, 'utf8'));
+  for (const item of written.queue) {
+    if (stages[item.id] !== undefined) item.stage = stages[item.id];
+    Object.assign(item, fields[item.id] ?? {});
+  }
+  fs.writeFileSync(fx.file, `${JSON.stringify(written, null, 2)}\n`);
+}
+
+function prDir(fx) {
+  return path.join(path.dirname(fx.file), 'pr');
+}
+
+/** `pr-draft`, parsed: its exit, its one JSON line, and the body it wrote. */
+function prDraft(fx) {
+  const out = run(fx.project, fx.home, 'pr-draft');
+  if (out.status !== 0) return { out };
+  const lines = out.stdout.trim().split('\n');
+  assert.equal(lines.length, 1, out.stdout);
+  const draft = JSON.parse(lines[0]);
+  return { out, draft, body: fs.readFileSync(draft.bodyFile, 'utf8') };
+}
+
+// 4.1
+test('pr 4.1: prTitle ranks feat > fix > perf > chore, folds every other type into chore, and counts the items', () => {
+  const title = (...subjects) => orch.prTitle(subjects.map((subject) => ({ subject })));
+  assert.equal(title('fix(a): x', 'feat(b): y'), 'feat(backlog): 2 items');
+  assert.equal(title('fix(a): x', 'chore(b): y'), 'fix(backlog): 2 items');
+  assert.equal(title('perf(a): x', 'chore(b): y'), 'perf(backlog): 2 items');
+  assert.equal(title('refactor(a): x', 'docs(b): y'), 'chore(backlog): 2 items');
+  assert.equal(title('fix(a): x'), 'fix(backlog): 1 item');
+  // An unparseable subject and a missing one (no merge commit found) both rank as chore.
+  assert.equal(title('not a conventional commit', null), 'chore(backlog): 2 items');
+});
+
+test('pr 4.1: pr-draft reads each item’s type from its real merge commit, and prints head and target', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'First thing' },
+      { id: 'task-2', title: 'Second thing' }
+    ]
+  });
+  landItem(fx, 'task-1', 'First thing', ['fix(a): x']);
+  landItem(fx, 'task-2', 'Second thing', ['feat(b): y']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'merged' });
+
+  const { out, draft } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(draft, {
+    title: 'feat(backlog): 2 items',
+    bodyFile: path.join(prDir(fx), 'body.md'),
+    head: fx.runBranch,
+    target: 'main'
+  });
+});
+
+// 4.2
+test('pr 4.2: a breaking subject puts ! on a releasing type only', () => {
+  const title = (...subjects) => orch.prTitle(subjects.map((subject) => ({ subject })));
+  assert.equal(title('feat(b)!: y', 'fix(a): x'), 'feat(backlog)!: 2 items');
+  assert.equal(title('refactor!: y'), 'chore(backlog): 1 item');
+  assert.equal(title('fix!: y'), 'fix(backlog)!: 1 item');
+});
+
+// 4.3
+test('pr 4.3: the §6 commit decides the type, not a later fix-loop commit', (t) => {
+  const fx = handPrRun(t, { items: [{ id: 'task-1', title: 'Only thing' }] });
+  // The fix loop's `fix` outranks the §6 `chore`, so reading the branch tip (M^2) instead of its first commit goes red here.
+  landItem(fx, 'task-1', 'Only thing', ['chore(x): a', 'fix(x): b']);
+  setQueue(fx, { 'task-1': 'merged' });
+
+  const { out, draft } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(draft.title, 'chore(backlog): 1 item');
+});
+
+// 4.4
+test('pr 4.4: an item staged merged with no Merge backlog/<id> commit ranks chore and still gets its line', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'Merged by hand' },
+      { id: 'task-2', title: 'Merged by the run' }
+    ]
+  });
+  landItem(fx, 'task-2', 'Merged by the run', ['chore(b): y']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'merged' });
+
+  const { out, draft, body } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(draft.title, 'chore(backlog): 2 items');
+  assert.match(body, /^- Merged by hand \(#task-1\)$/m);
+
+  // Alone, too: nothing on the run branch at all is still not a refusal.
+  const lone = handPrRun(t, { items: [{ id: 'task-1', title: 'Merged by hand' }] });
+  setQueue(lone, { 'task-1': 'merged' });
+  const alone = prDraft(lone);
+  assert.equal(alone.out.status, 0, alone.out.stderr);
+  assert.equal(alone.draft.title, 'chore(backlog): 1 item');
+});
+
+// 4.5
+test('pr 4.5: the body lists merged items in queue order, then the run line with every non-zero terminal count in order', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'First thing' },
+      { id: 'task-2', title: 'Second thing' },
+      { id: 'task-3', title: 'Parked one' },
+      { id: 'task-4', title: 'Skipped one' },
+      { id: 'task-5', title: 'Failed one' },
+      { id: 'task-6', title: 'Unanswered one' },
+      { id: 'task-7', title: 'Still pending' }
+    ]
+  });
+  // Merged into git in the opposite order from the queue: the list must follow the queue.
+  landItem(fx, 'task-2', 'Second thing', ['fix(b): y']);
+  landItem(fx, 'task-1', 'First thing', ['feat(a): x']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'merged', 'task-3': 'parked', 'task-4': 'skipped', 'task-5': 'failed', 'task-6': 'needs-answers' });
+  const runId = readRunJson(fx).runId;
+
+  const { out, body } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(
+    body,
+    [
+      "## What's new",
+      '',
+      '- First thing (#task-1)',
+      '- Second thing (#task-2)',
+      '',
+      '## Run',
+      '',
+      `\`${runId}\` drained onto \`${fx.runBranch}\` from \`main\`: 2 merged, 1 parked, 1 failed, 1 skipped, 1 needs-answers.`,
+      ''
+    ].join('\n')
+  );
+});
+
+test('pr 4.5: prBody counts all seven terminal stages in the fixed order', () => {
+  const stages = ['needs-answers', 'ungroomed', 'skipped', 'failed', 'parked', 'branched', 'merged'];
+  const queue = stages.map((stage, i) => ({ id: String(i + 1), title: `t${i + 1}`, stage }));
+  const body = orch.prBody({ runId: 'run-x', base: 'backlog/run-2026-10-15-1', prTarget: 'main', queue });
+  assert.match(body, /: 1 merged, 1 branched, 1 parked, 1 failed, 1 skipped, 1 ungroomed, 1 needs-answers\.$/m);
+});
+
+// 4.6
+test('pr 4.6: branched items add one line naming their branches, to merge only after this PR lands', (t) => {
+  const fx = handPrRun(t, {
+    items: [
+      { id: 'task-1', title: 'Merged one' },
+      { id: 'task-2', title: 'Branched one' },
+      { id: 'task-3', title: 'Branched two' }
+    ]
+  });
+  landItem(fx, 'task-1', 'Merged one', ['fix(a): x']);
+  setQueue(fx, { 'task-1': 'merged', 'task-2': 'branched', 'task-3': 'branched' }, { 'task-2': { branch: 'backlog/task-2' } });
+
+  const { out, body } = prDraft(fx);
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(body, /: 1 merged, 2 branched\.$/m);
+  const lines = body.split('\n').filter((line) => line.includes('only after this PR lands'));
+  assert.equal(lines.length, 1, body);
+  // The recorded branch where there is one, and backlog/<id> — the branch §6 made — where there is not.
+  assert.match(lines[0], /`backlog\/task-2`/);
+  assert.match(lines[0], /`backlog\/task-3`/);
+  assert.doesNotMatch(body.split('## Run')[0], /task-2|task-3/, 'a branched item is not something this PR ships');
+});
+
+// 4.7
+test('pr 4.7: pr-draft refuses a non-pr run, a run with nothing merged, and a run whose PR exists — exit 1, nothing written', (t) => {
+  const patchRun = (fx, fields) => {
+    const written = JSON.parse(fs.readFileSync(fx.file, 'utf8'));
+    Object.assign(written, fields);
+    fs.writeFileSync(fx.file, `${JSON.stringify(written, null, 2)}\n`);
+  };
+  const cases = [
+    [
+      'mergeMode merge',
+      (fx) => {
+        patchRun(fx, { mergeMode: 'merge', mergeModeEffective: 'merge', base: 'main', prTarget: null });
+        setQueue(fx, { 'task-1': 'merged' });
+      }
+    ],
+    ['nothing merged', (fx) => setQueue(fx, { 'task-1': 'branched' })],
+    [
+      'prUrl set',
+      (fx) => {
+        setQueue(fx, { 'task-1': 'merged' });
+        patchRun(fx, { prUrl: 'https://github.com/futin/backlog-manager/pull/275' });
+      }
+    ]
+  ];
+  for (const [name, arrange] of cases) {
+    const fx = handPrRun(t);
+    arrange(fx);
+    const before = fs.readFileSync(fx.file);
+
+    const out = run(fx.project, fx.home, 'pr-draft');
+
+    assert.equal(out.status, 1, `${name}: ${out.stdout}`);
+    assert.equal(out.stdout, '', name);
+    assert.equal(fs.existsSync(prDir(fx)), false, `${name}: nothing may be written under <dir>/pr/`);
+    assert.ok(before.equals(fs.readFileSync(fx.file)), `${name}: the run file must be unchanged`);
+  }
+});
+
+// 4.8
+test('pr 4.8: pr --url records a GitHub pull request URL, and refuses anything else with the run unchanged', (t) => {
+  const fx = handPrRun(t);
+  const before = fs.readFileSync(fx.file);
+  const bad = [
+    'http://github.com/a/b/pull/1',
+    'https://github.com.evil.io/a/b/pull/1',
+    'https://github.com/a/b/issues/1',
+    'https://github.com/a/b/pull/1/files',
+    'javascript:alert(1)',
+    ''
+  ];
+  for (const url of bad) {
+    const out = run(fx.project, fx.home, 'pr', '--url', url);
+    assert.equal(out.status, 1, `${JSON.stringify(url)}: ${out.stdout}`);
+    assert.ok(before.equals(fs.readFileSync(fx.file)), `${JSON.stringify(url)}: the run file must be unchanged`);
+  }
+  const missing = run(fx.project, fx.home, 'pr');
+  assert.equal(missing.status, 1);
+  assert.ok(before.equals(fs.readFileSync(fx.file)));
+
+  const out = run(fx.project, fx.home, 'pr', '--url', 'https://github.com/futin/backlog-manager/pull/275');
+
+  assert.equal(out.status, 0, out.stderr);
+  const after = readRunJson(fx);
+  assert.equal(after.prUrl, 'https://github.com/futin/backlog-manager/pull/275');
+  assert.equal(after.base, fx.runBranch);
+  assert.equal(after.prTarget, 'main');
+});
+
+test('pr 4.8: pr --url on a run that is not in pr mode exits 1 and writes nothing — prUrl stays null there', (t) => {
+  const { home, project } = basedFixture(t);
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project));
+
+  const out = run(project, home, 'pr', '--url', 'https://github.com/futin/backlog-manager/pull/275');
+
+  assert.equal(out.status, 1, out.stdout);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))));
+});
+
+// 4.9
+test('pr 4.9: a title renders as one list line, with its Markdown kept verbatim', () => {
+  const lineFor = (title) => {
+    const body = orch.prBody({ runId: 'run-x', base: 'backlog/run-2026-10-15-1', prTarget: 'main', queue: [{ id: '7', title, stage: 'merged' }] });
+    return body.split('\n').filter((line) => line.startsWith('- '));
+  };
+  assert.deepEqual(lineFor('a\nb'), ['- a b (#7)']);
+  assert.deepEqual(lineFor('a\r\n  b'), ['- a b (#7)']);
+  assert.deepEqual(lineFor('use `x`'), ['- use `x` (#7)']);
+  assert.deepEqual(lineFor('## heading'), ['- ## heading (#7)']);
+});
+
+// 4.10
+test('pr 4.10: the tool’s PR_URL_PATTERN source equals shared/agent.ts’s, read from both sources', () => {
+  const sourceOf = (text, pattern) => {
+    const m = pattern.exec(text);
+    assert.ok(m, `no PR_URL_PATTERN declaration matching ${pattern}`);
+    return m[1];
+  };
+  const tool = sourceOf(fs.readFileSync(SCRIPT, 'utf8'), /^const PR_URL_PATTERN = (\/.+\/[a-z]*);$/m);
+  const shared = sourceOf(
+    fs.readFileSync(path.join(path.dirname(SCRIPT), '..', '..', '..', 'shared', 'agent.ts'), 'utf8'),
+    /^export const PR_URL_PATTERN = (\/.+\/[a-z]*);$/m
+  );
+  assert.equal(tool, shared);
+  assert.equal(tool, String.raw`/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/`);
+});
+
+// --- pr mode: finish removes an empty run branch (Task 5) --------------------
+
+/** Every local branch and its sha, for the cases that assert `finish` moved no ref it should not have. */
+function allRefs(project) {
+  return gitOk(project, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/');
+}
+
+/** `finish`'s stderr, split into its non-blank lines. */
+function stderrLines(out) {
+  return out.stderr.split('\n').filter((l) => l.trim() !== '');
+}
+
+/** Lands `task-1` on the run branch, then removes the tree that did it — a merge that landed with nothing staged `merged`. */
+function landAndDropTree(fx) {
+  landItem(fx, 'task-1', 'Some task', ['feat: some task']);
+  gitOk(fx.project, 'worktree', 'remove', '--force', runBranchTree(fx));
+}
+
+// 5.1
+test('pr 5.1: finish --status done on a pr run with nothing merged and an unchanged run branch deletes the branch', (t) => {
+  const fx = handPrRun(t);
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(fx.project), []);
+  assert.deepEqual(stderrLines(out), []);
+  assert.equal(readRunJson(fx).status, 'done');
+});
+
+// 5.2
+test('pr 5.2: a run branch with a commit beyond the target is kept, with one stderr line naming it', (t) => {
+  const fx = handPrRun(t);
+  landAndDropTree(fx);
+  const before = allRefs(fx.project);
+
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(allRefs(fx.project), before);
+  assert.deepEqual(runBranches(fx.project), [fx.runBranch]);
+  const lines = stderrLines(out);
+  assert.equal(lines.length, 1, out.stderr);
+  assert.ok(lines[0].includes(fx.runBranch), lines[0]);
+});
+
+// 5.3
+test('pr 5.3: a _base- worktree still holding the run branch keeps it, with one stderr line, and exits 0', (t) => {
+  const fx = handPrRun(t);
+  const tree = runBranchTree(fx);
+
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(fx.project), [fx.runBranch]);
+  assert.ok(fs.existsSync(tree), 'finish never removes a tree');
+  const lines = stderrLines(out);
+  assert.equal(lines.length, 1, out.stderr);
+  assert.ok(lines[0].includes(fx.runBranch), lines[0]);
+});
+
+// 5.4
+test('pr 5.4: paused never deletes; done, failed and aborted (directly and through abort) do', (t) => {
+  const paused = handPrRun(t);
+  const out = run(paused.project, paused.home, 'finish', '--status', 'paused');
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(paused.project), [paused.runBranch], 'paused keeps the branch');
+  assert.deepEqual(stderrLines(out), []);
+
+  for (const status of ['done', 'failed', 'aborted']) {
+    const fx = handPrRun(t);
+    const finished = run(fx.project, fx.home, 'finish', '--status', status);
+    assert.equal(finished.status, 0, `${status}: ${finished.stderr}`);
+    assert.deepEqual(runBranches(fx.project), [], `finish --status ${status} deletes the empty branch`);
+  }
+
+  const viaAbort = handPrRun(t);
+  const aborted = run(viaAbort.project, viaAbort.home, 'abort');
+  assert.equal(aborted.status, 0, aborted.stderr);
+  assert.equal(readRunJson(viaAbort).status, 'aborted');
+  assert.deepEqual(runBranches(viaAbort.project), [], 'abort ends through finish, which deletes it');
+});
+
+// 5.5
+test('pr 5.5: a pr run with an item merged keeps the run branch whatever the status', (t) => {
+  for (const status of ['done', 'failed', 'aborted', 'paused']) {
+    const fx = handPrRun(t);
+    setQueue(fx, { 'task-1': 'merged' });
+
+    const out = run(fx.project, fx.home, 'finish', '--status', status);
+
+    assert.equal(out.status, 0, `${status}: ${out.stderr}`);
+    assert.deepEqual(runBranches(fx.project), [fx.runBranch], status);
+  }
+});
+
+// 5.6
+test('pr 5.6: finish on a merge run and a branch run touches no branch', (t) => {
+  for (const mode of ['merge', 'branch']) {
+    const fx = basedFixture(t);
+    assert.equal(run(fx.project, fx.home, 'init', '--project', fx.project, '--merge-mode', mode).status, 0);
+    const before = allRefs(fx.project);
+
+    const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+    assert.equal(out.status, 0, `${mode}: ${out.stderr}`);
+    assert.equal(allRefs(fx.project), before, mode);
+    assert.deepEqual(stderrLines(out), [], mode);
+  }
+});
+
+// 5.7
+test('pr 5.7: the delete is HEAD-independent — a root on another branch than the target still deletes', (t) => {
+  const fx = handPrRun(t);
+  gitOk(fx.project, 'checkout', '-q', '-b', 'elsewhere');
+
+  const out = run(fx.project, fx.home, 'finish', '--status', 'done');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(runBranches(fx.project), []);
+  assert.equal(gitOk(fx.project, 'symbolic-ref', '--short', 'HEAD').trim(), 'elsewhere');
 });

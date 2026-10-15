@@ -10,6 +10,11 @@ Section and step numbers below name sections of `SKILL.md` — "step 4" is its d
 Read `mergeModeEffective` out of `status --json` first: a run downgraded to branch mode before the crash stays downgraded, and §9 then takes its branch path for
 every remaining item.
 
+A `pr` run's `status --json` also carries `prTarget` and `prUrl`. **A set `prUrl` means the run's pull request already exists, so a resumed session never opens
+another**: it skips SKILL.md §10's PR steps and names that URL in the summary — `pr-draft` refuses such a run anyway, exit `1`. A `null` `prUrl` on a run that
+reached §10 is not proof there is no PR: the session may have died between `gh pr create` and `pr --url`, which is why §10 asks `gh pr list --head <head>
+--state open` first.
+
 Then, before reconcile, before Inspect, before anything else this file describes, close the gap the board's watchdog is timing:
 
 ```bash
@@ -49,8 +54,8 @@ continue, `reconcile` next.
 A resumed run never executes SKILL.md §1, which is where a fresh tracker run reads it, and the pull-failure park, the claim-refused park and the push's
 `--detail` templates live only there.
 
-**Either path, before this session's first merge: run SKILL.md §2's merge probe** if `mergeModeEffective` still reads `merge` — the tracker-shaped one in a
-tracker project. The probe is per session, not per run: a run paused before item 1 and unpaused here has never asked the classifier anything, and #222's
+**Either path, before this session's first merge: run SKILL.md §2's merge probe** if `mergeModeEffective` still reads `merge` or `pr` — the tracker-shaped one
+in a tracker project. The probe is per session, not per run: a run paused before item 1 and unpaused here has never asked the classifier anything, and #222's
 first denial came at a real merge for exactly that reason. A denied probe degrades the run the way §2 says.
 
 **Anything else** — `done`, `aborted`, `failed` — is not this path's to touch. Refuse and say which.
@@ -233,8 +238,13 @@ A files run makes no request at all. (For an item stranded by an abort from an o
 Before any of that, it fills in every queue item's empty `sessionId` from `<dir>/logs/<id>.jsonl` (bug-52) — a stop inside the dispatch block never reaches
 `watch`, which was the only other reader of the child's init event. A recorded id is never replaced, and a missing or unreadable log leaves the field null.
 
-Then it sets the run to `aborted` and prints a one-line summary of its counts: the sessions it signalled, what it removed, how many branches it kept because their
-items were `branched`, how many `parked`/`failed` items it kept whole, and what it left in place with a marker.
+Then it prints a one-line summary of its counts: the sessions it signalled, what it removed, how many branches it kept because their items were `branched`,
+how many `parked`/`failed` items it kept whole, and what it left in place with a marker. And it ends the run through `finish --status aborted`, the same command
+SKILL.md §10 runs, so everything `finish` does on an abort happens here too. **In a run whose `mergeMode` is `pr` and that merged nothing, that includes deleting
+the empty run branch**: one `git update-ref -d` on `refs/heads/<run branch>`, run by the tool, only when the branch has no commit beyond `prTarget` and no
+worktree has it checked out, and otherwise kept with one stderr line (`references/tracker.md` §10, _The pull request_). There is no step for this session in it,
+and abort touches no other ref but the item branches above. A `pr` run that merged something keeps its run branch: abort opens no PR, so the summary names that
+pushed branch and gives the `gh pr create` line for it, built from `pr-draft` (SKILL.md §10).
 
 **That marker is the signal, and clearing markers _before_ `abort` destroys it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
 marker, classifies the item as safe, and `worktree remove --force`s a directory whose session was still working: `--force` deletes the working directory

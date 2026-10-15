@@ -150,7 +150,15 @@ function renderSheet(items: BacklogItem[] = THREE) {
   const refresh = jest.fn();
   render(
     <SettingsProvider>
-      <OrchestrateSheet project="/abs/alpha" projectName="alpha" items={items} spawnMaxPermission="acceptEdits" onClose={onClose} refresh={refresh} />
+      <OrchestrateSheet
+        project="/abs/alpha"
+        projectName="alpha"
+        source="files"
+        items={items}
+        spawnMaxPermission="acceptEdits"
+        onClose={onClose}
+        refresh={refresh}
+      />
     </SettingsProvider>
   );
   return { onClose, refresh };

@@ -1,7 +1,7 @@
 import type { MergeMode } from '../../../shared/types';
 
 /**
- * merge-mode.ts — the words the merge-mode PICKER puts on its two options
+ * merge-mode.ts — the words the merge-mode PICKER puts on its three options
  * (design §2.2), on both surfaces that draw one: the Orchestrate sheet's
  * per-launch control and Settings' default.
  *
@@ -38,6 +38,9 @@ import type { MergeMode } from '../../../shared/types';
 export function mergeModeOptionLabels(base: string | null): Record<MergeMode, string> {
   return {
     merge: base === null ? 'Merge into the base branch' : `Merge to ${base}`,
-    branch: 'Leave branches for me'
+    branch: 'Leave branches for me',
+    // Like `merge`, named by its destination, and under the same null rule: the PR is opened INTO the base, so a surface that cannot know the base says
+    // "the base branch" and never guesses `main`.
+    pr: base === null ? 'Open a PR into the base branch' : `Open a PR into ${base}`
   };
 }

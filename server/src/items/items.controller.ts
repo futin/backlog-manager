@@ -63,7 +63,7 @@ export class ItemsController {
    * 404 is the registry's answer.
    */
   @Get('items/uncommitted')
-  uncommitted(@Query('project') project: string | undefined, @Query('base') base: string | undefined): UncommittedItems {
+  uncommitted(@Query('project') project: string | undefined, @Query('base') base: string | undefined): Promise<UncommittedItems> {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
     // `base` is passed through untrimmed and unjudged: it is proved in the

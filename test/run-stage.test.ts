@@ -1,4 +1,13 @@
-import { RUN_STATUS_CLASS, RUN_STATUS_GLYPH, STAGE_TONE, runDotTone, runStatusChip, stageChipClass, stageGlyph } from '../client/src/lib/run-stage';
+import {
+  RUN_STATUS_CLASS,
+  RUN_STATUS_GLYPH,
+  STAGE_TONE,
+  mergeModeLabel,
+  runDotTone,
+  runStatusChip,
+  stageChipClass,
+  stageGlyph
+} from '../client/src/lib/run-stage';
 import type { OrchestratorRun, RunStage } from '../shared/types';
 
 /** Sorted, so `Object.keys(...).sort()` can be compared against it directly
@@ -261,5 +270,20 @@ describe('runDotTone', () => {
   it.each(['done', 'aborted', 'failed'] as const)('gives %s no tone at all, so the word carries which ending it was', (status) => {
     expect(runDotTone(status, null)).toBeUndefined();
     expect(runDotTone(status, live(status, false))).toBeUndefined();
+  });
+});
+
+describe('mergeModeLabel', () => {
+  // The detail sheet's mode pill: `null` for the one shape that draws nothing (a plain merge run), a word for each of the other two, and the downgrade
+  // suffix only when the run was ASKED for something other than what it ended up doing.
+  it('words a pr run as PR mode and a pr run degraded to branch as downgraded', () => {
+    expect(mergeModeLabel('pr', 'pr')).toBe('PR mode');
+    expect(mergeModeLabel('pr', 'branch')).toBe('branch mode (downgraded)');
+  });
+
+  it('leaves a plain merge run unlabelled and still words the two branch shapes', () => {
+    expect(mergeModeLabel('merge', 'merge')).toBeNull();
+    expect(mergeModeLabel('branch', 'branch')).toBe('branch mode');
+    expect(mergeModeLabel('merge', 'branch')).toBe('branch mode (downgraded)');
   });
 });

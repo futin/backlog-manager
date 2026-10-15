@@ -26,7 +26,7 @@ export class FilesSource implements ItemSource {
   /** The marker is ignored: a files project's items are wherever the store is,
    *  and nothing in a marker could move them. */
   async list(project: RegistryProject, _marker: SourceMarker | null): Promise<{ items: BacklogItem[]; errors: string[] }> {
-    return scanProject(project);
+    return await scanProject(project);
   }
 
   /**
@@ -89,7 +89,7 @@ export class FilesSource implements ItemSource {
     const real = resolveAllowed(ref, buildAllowlist(registry));
     if (real === null || !real.endsWith('.md')) return null;
     for (const project of registry.projects) {
-      for (const candidate of scanProject(project).items) {
+      for (const candidate of (await scanProject(project)).items) {
         // Both sides through realpath: resolveAllowed already resolved
         // symlinks, scanProject did not, and on macOS the temp roots the test
         // fixtures live under are themselves symlinks (/var → /private/var).

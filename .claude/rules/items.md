@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/items/**"]
+paths: ["server/src/items/**", "server/src/git-run.util.ts"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -48,12 +48,30 @@ paths: ["server/src/items/**"]
   [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **The middle rung of "last touched" comes from git, not the item file.** `lastCommit` (`server/src/items/git-dates.util.ts`) is the committer date of the last
   commit touching the file, keyed relative to the project path; every failure degrades to `created`, never throws. The container needs `git` installed and
-  `safe.directory` in system config (Dockerfile). Memoised per project against the mtimes of `index` and `logs/HEAD` — the one cache in `items/`. Why:
+  `safe.directory` in system config (Dockerfile). Memoised per project against the mtimes of `index` and `logs/HEAD` — the one cache in `items/`. Since #277
+  `lastCommitDates` is async and ALSO shares one in-flight spawn: concurrent misses for the same project and the same fingerprint get the one pending promise
+  instead of each spawning git; a caller whose fingerprint differs is not handed it (that spawn began before whatever moved the key); the entry is dropped
+  when the spawn settles, and a failed read (timeout, not a repo) is neither memoised nor kept pending, so the next call asks again. That sharing belongs to
+  this function ALONE — see the `uncommitted` bullet below. Why:
   [invariants.md](docs/subsystems/invariants.md#the-middle-rung-comes-from-git-not-the-item-file)
 - **The Orchestrate sheet's `uncommitted` flag is read from git per request, memoised nowhere, and must never join the memo one file over.**
   `uncommittedItemPaths` (`server/src/items/uncommitted.util.ts`), behind `GET /api/items/uncommitted`, is the one implementation. The question is "differs from
   the run's base" — `?base=`, the sheet's picked branch, proved by `resolveBaseBranch` like the orchestrate route's and defaulting to `main` (#254) — never
   "differs from `HEAD`"; three git reads (`diff` plus `ls-files --others` for membership, `ls-tree` at `main` for each row's fate), never fewer; a sibling endpoint, never a `BacklogItem` field; `known`
   gates the render; nothing derived reads it; it changes no default selection. Any surface stating a consequence must split it, by the endpoint's per-row `absent`:
-  absent from `main` is skipped, present-but-edited is executed on `main`'s bytes. Why:
+  absent from `main` is skipped, present-but-edited is executed on `main`'s bytes. Async since #277, and it still never joins the memo one file over: no
+  memo, and no in-flight sharing either — two concurrent calls spawn git twice, because a call that arrives after an edit must not be handed a read that began
+  before it (`test/git-run.test.ts` pins it). Why:
   [invariants.md](docs/subsystems/invariants.md#the-orchestrate-sheets-uncommitted-flag-is-read-from-git-per-request-and-memoised-nowhere)
+- **The server never spawns git synchronously: every git read is `runGit`, async, bounded at 10 s, and a timeout lands in the failure branch the call site
+  already had.** `server/src/git-run.util.ts` is the one way this server runs git — `runGit(args, { cwd?, maxBuffer? })` answers stdout, or `null` for every
+  failure alike (timeout, non-zero exit, spawn error, oversized output), and `''` for a command that succeeded and printed nothing, so a caller that only wants
+  "did it exit 0" tests `!== null`. `GIT_TIMEOUT_MS` is 10 000, `execFile`'s `timeout`; the synchronous callers carried 5 s because that was a cap on how long
+  the whole process could freeze, and async removes the freeze, so the bound now only says how long a request waits before the degraded answer. The call sites
+  and what a `null` means to each: `lastCommitDates` → the empty map (falls back to `created`), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
+  `resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list. No call site grew a new branch for a timeout and none may:
+  a caller with a reason a timeout should differ from a missing repo is a new decision, not a refactor. `stdout` only, stdin closed, stderr dropped.
+  `test/git-run.test.ts` is the guard: a fake slow `git` on `PATH`, the timeout landing in each branch above, the sharing cases, a route case in which
+  `/api/health` answers in tens of milliseconds while `/api/items` waits out a 1 s git, and a grep that fails on `execFileSync`, `spawnSync` or `execSync`
+  anywhere under `server/src`. The synchronous `fs` reads (`readFileSync`, `readdirSync`, `statSync`) stay synchronous on purpose — they were not the
+  bottleneck. Why: [invariants.md](docs/subsystems/invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path)

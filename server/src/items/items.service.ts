@@ -8,7 +8,7 @@ import { ITEM_SOURCES, type ItemSource, type ItemWriter, type SourceSummary } fr
 import { uncommittedItemPaths, type UncommittedItems } from './uncommitted.util';
 import { resolveBaseBranch } from './base-branch.util';
 import { answer } from './write-answer.util';
-import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts } from '../../../shared/types';
+import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts, SourceKind } from '../../../shared/types';
 
 /**
  * All reads walk the registry and the stores per request, like guide-manager's
@@ -187,11 +187,11 @@ export class ItemsService {
    * No cache, per `uncommitted.util.ts`'s own header: the whole point of this
    * read is an event — an edit in the working tree — that no cheap key moves.
    *
-   * Untouched by the item-source seam (task-43) and synchronous still: the
-   * question is about files in a git working tree, which is what this route
-   * means whatever owns the items.
+   * Untouched by the item-source seam (task-43): the question is about files
+   * in a git working tree, which is what this route means whatever owns the
+   * items. Async since #277 — its git reads must not block the event loop.
    */
-  uncommitted(project: string, base?: string): UncommittedItems {
+  async uncommitted(project: string, base?: string): Promise<UncommittedItems> {
     const entry = this.registry.load().projects.find((p) => p.path === project);
     if (entry === undefined) throw new HttpException({ error: 'not found' }, 404);
     // #254: the question is asked at the base the sheet's picker holds, proved
@@ -200,7 +200,7 @@ export class ItemsService {
     // A refusal is a 400 here as there: the sheet only offers branches
     // `GET /api/agents/branches` listed, so one is a stale picker or a bug,
     // and its silent `.catch` turns it into no warning rather than a wrong one.
-    const ref = resolveBaseBranch(base, entry.path);
+    const ref = await resolveBaseBranch(base, entry.path);
     // A tracker project has no item files, so "which of them differ from
     // `main`" is not a question with a wrong answer — it is a question with no
     // meaning, and `known: false` is precisely the shape this endpoint already
@@ -278,6 +278,26 @@ export class ItemsService {
     const entry = this.registry.load().projects.find((p) => p.path === projectPath);
     if (entry === undefined) return false;
     return resolveSource(entry.path, this.known).kind === 'tracker';
+  }
+
+  /**
+   * What one registered project's source resolves to, as `ProjectSummary.source` spells it: the kind of the adapter that serves it, `'unsupported'` for a
+   * marker this build cannot honour, `null` for a project that is not registered or has no `backlog/` at all.
+   *
+   * It exists so a caller outside this class (PR-mode's `resolveMergeMode`, which must refuse `pr` off a GitHub-backed project) asks the question through
+   * the one `known` set this build resolves with, instead of handing `resolveSource` a second, hand-built set that would drift the day a source is added.
+   * `unsupported` never reads as `'files'`, for the reason `ProjectSummary.source` gives. Registry compare and `resolveSource` per request, cached nowhere,
+   * like every sibling above.
+   */
+  sourceOf(projectPath: string): SourceKind | 'unsupported' | null {
+    const entry = this.registry.load().projects.find((p) => p.path === projectPath);
+    if (entry === undefined) return null;
+    const resolved = resolveSource(entry.path, this.known);
+    if (resolved.kind === 'missing') return null;
+    if (resolved.kind === 'unsupported') return 'unsupported';
+    // `known` IS the adapter map's key set, so a tracker marker always has an adapter and its `kind` is a `SourceKind`; the `?? 'unsupported'` is the
+    // unreachable branch `index()` also guards, answered conservatively rather than with a cast.
+    return this.adapterFor(resolved)?.kind ?? 'unsupported';
   }
 
   /**

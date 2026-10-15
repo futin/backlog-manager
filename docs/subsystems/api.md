@@ -32,6 +32,13 @@ Two git-backed reads live here and they cache differently on purpose. The last c
 against the mtimes of `index` and `logs/HEAD` — the files git rewrites whenever the answer can change. The uncommitted read (`uncommitted.util.ts`) is memoised
 **nowhere**: a working-tree edit, the exact event it reports, moves neither of those files, so the same key would answer "clean" forever after its first hit.
 
+Both are async and time-bounded since #277: every git spawn in this server goes through `runGit` (`git-run.util.ts`) with a 10 s timeout, so a slow repository
+makes the routes that need git slow and leaves every other route (`/api/health` included) answering normally. A timeout lands in each site's existing failure
+branch — the date read falls back to `created`, the uncommitted read answers `known: false`, `originRepo` answers `null`, an unprovable base is the 400 a
+missing branch gets, an unreadable branch list is empty. The date read also shares one in-flight spawn between concurrent misses for the same project and
+fingerprint; the uncommitted read shares nothing. No `*Sync` spawn exists under `server/src`; the reasoning is in
+[invariants.md](invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path).
+
 Two adapters are registered (`sources/files.source.ts`, `sources/github.source.ts`). `GET /api/items/body` dispatches on the ref's SHAPE, in `ItemsService` and
 nowhere else: a `gh:<owner>/<repo>#<n>` URN goes to the GitHub adapter, anything else is a filesystem path and goes to files. `ItemsService.find` makes the
 identical dispatch for the agents routes (task-46), which is why `AgentsService.findItem` is now a one-line delegate rather than a private second copy of the

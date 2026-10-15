@@ -9,6 +9,8 @@
   "mergeModeEffective": "merge",
   "mergeModeNote": null,
   "base": "main",
+  "prTarget": null,
+  "prUrl": null,
   "questionMode": "park",
   "driver": null,
   "queue": [

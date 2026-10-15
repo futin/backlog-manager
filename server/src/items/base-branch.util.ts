@@ -1,5 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import { HttpException } from '@nestjs/common';
+
+import { runGit } from '../git-run.util';
 
 /**
  * base-branch.util.ts — the one proof that a caller-supplied base names an
@@ -23,10 +24,16 @@ import { HttpException } from '@nestjs/common';
  * (the sheet sends `base` on every request, `'main'` included, and a repo
  * whose trunk is named something else must keep working).
  *
+ * Async since #277: both git checks go through `runGit`, so a slow repository
+ * delays this route instead of freezing the process. A TIMEOUT on either check
+ * is a failed check — the same refusal a missing branch gets — because the
+ * caller cannot prove the base exists, and an unproven base must never reach a
+ * prompt. The `'main'` carve-out above still answers without asking git.
+ *
  * Uncoded 400s, messages pinned by test/base-branch.test.ts and
  * test/uncommitted.test.ts.
  */
-export function resolveBaseBranch(base: unknown, projectPath: string | undefined): string {
+export async function resolveBaseBranch(base: unknown, projectPath: string | undefined): Promise<string> {
   if (base === undefined || base === '' || base === 'main') return 'main';
   // Echoed back truncated and JSON-quoted, the convention resolveIds,
   // resolveMergeMode and resolveQuestionMode all share. JSON.stringify also
@@ -36,10 +43,10 @@ export function resolveBaseBranch(base: unknown, projectPath: string | undefined
   if (typeof base !== 'string' || base.startsWith('-')) {
     throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);
   }
-  if (spawnSync('git', ['check-ref-format', '--branch', base]).status !== 0) {
+  if ((await runGit(['check-ref-format', '--branch', base])) === null) {
     throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);
   }
-  if (projectPath === undefined || spawnSync('git', ['-C', projectPath, 'show-ref', '--verify', '--quiet', `refs/heads/${base}`]).status !== 0) {
+  if (projectPath === undefined || (await runGit(['-C', projectPath, 'show-ref', '--verify', '--quiet', `refs/heads/${base}`])) === null) {
     throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a branch in this project` }, 400);
   }
   return base;

@@ -38,12 +38,13 @@ const LEAVES: { section: Section; status: ItemStatus; rel: string }[] = [
  * an error. readdirSync is sorted so the index is deterministic across
  * filesystems.
  */
-export function scanProject(project: RegistryProject): { items: BacklogItem[]; errors: string[] } {
+export async function scanProject(project: RegistryProject): Promise<{ items: BacklogItem[]; errors: string[] }> {
   const items: BacklogItem[] = [];
   const errors: string[] = [];
   const backlog = join(project.path, 'backlog');
-  // Once per scan, not per item: it shells out to git.
-  const commits = lastCommitDates(project.path);
+  // Once per scan, not per item: it shells out to git (async since #277, so a
+  // slow repository delays this scan without freezing the process).
+  const commits = await lastCommitDates(project.path);
 
   for (const leaf of LEAVES) {
     const dir = join(backlog, leaf.rel);

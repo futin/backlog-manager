@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 
-import { isMergeMode } from '../../../shared/agent';
+import { isMergeMode, isPrUrl } from '../../../shared/agent';
 import { RUN_STALE_MS } from '../../../shared/types';
 import type { OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
 import { pauseRequestEffective, readPauseRequest, stopRequestEffective } from './pause-control.util';
@@ -97,6 +97,11 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
  * `?? 'main'`; see that field's own comment for why a fifth reader
  * re-implementing the default is the failure this prevents.
  *
+ * `prTarget` and `prUrl` (spec P4/P5) are the fifth and sixth, for the same three reasons: absent from every run file written before `pr` mode, read at
+ * exactly these sites, and a reading of a run that already happened. Absent resolves to `null`, which is a statement of fact, not a guess — no earlier run
+ * opened a pull request. `prTarget` is any non-empty string, taken verbatim for `base`'s historical-reading reason. `prUrl` is held to the narrower
+ * `isPrUrl`, because it is the one of the two that becomes an `href` on the client: a hand-edited or corrupt value is dropped to `null` rather than rendered.
+ *
  * Note the narrower check `base` gets: any non-string degrades, but a string
  * is taken **verbatim**, with no attempt to confirm the branch still exists.
  * That is deliberate and is the same historical-reading argument one paragraph
@@ -112,7 +117,9 @@ function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
     mergeMode: isMergeMode(run.mergeMode) ? run.mergeMode : 'merge',
     mergeModeEffective: isMergeMode(run.mergeModeEffective) ? run.mergeModeEffective : 'merge',
     mergeModeNote: typeof run.mergeModeNote === 'string' ? run.mergeModeNote : null,
-    base: typeof run.base === 'string' && run.base !== '' ? run.base : 'main'
+    base: typeof run.base === 'string' && run.base !== '' ? run.base : 'main',
+    prTarget: typeof run.prTarget === 'string' && run.prTarget !== '' ? run.prTarget : null,
+    prUrl: isPrUrl(run.prUrl) ? run.prUrl : null
   };
 }
 

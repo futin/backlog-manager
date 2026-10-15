@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { HttpException, Injectable } from '@nestjs/common';
@@ -12,6 +11,7 @@ import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
 import { resolveBaseBranch } from '../items/base-branch.util';
 import { parseUrn } from '../tracker/map-issue';
+import { runGit } from '../git-run.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
@@ -33,7 +33,7 @@ import {
 import { composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
-import { CLAIM_STALE_MS, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
+import { CLAIM_STALE_MS, MERGE_MODES, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -108,8 +108,10 @@ const PROMPT_MAX = 8_000;
  *   1. **`ids`** — a list `resolveIds` has already proved name open bugs or
  *      tasks in the project being orchestrated (see that method for both
  *      checks and for why shape alone would not be enough).
- *   2. **` --merge-mode branch`** — appended when `resolveMergeMode` (Task 4)
- *      resolved the request's `mergeMode` to `'branch'`.
+ *   2. **` --merge-mode branch`** or **` --merge-mode pr`** — appended when
+ *      `resolveMergeMode` (Task 4) resolved the request's `mergeMode` to
+ *      `'branch'` or `'pr'`; `pr` only ever survives that method for a
+ *      tracker project.
  *   3. **` --question-mode decide`** — appended when `resolveQuestionMode`
  *      (task-19) resolved `questionMode` to `'decide'`.
  *   4. **` --base <ref>`** — appended when `resolveBase` (task-44) resolved
@@ -124,7 +126,8 @@ const PROMPT_MAX = 8_000;
  *
  * **They are not all the same kind of safe, and the difference is worth
  * stating rather than averaging over.** Members 2 and 3 are the tightest: the
- * text each can append is one of exactly two compile-time constants selected
+ * text each can append is one of a few compile-time constants (`branch` or
+ * `pr` for the merge mode, `decide` for the question mode) selected
  * by a guard, so no caller-supplied character reaches the prompt through
  * either channel at all. An id (1) is looser — caller text that passed a
  * shape check and was then proved against a closed vocabulary, this project's
@@ -717,7 +720,7 @@ export class AgentsService {
     // (task-4-brief.md) pins the lock winning over it, same as it wins over
     // an ids problem.
     const ids = await this.resolveIds(req.project, req.ids);
-    const mergeMode = this.resolveMergeMode(req.mergeMode);
+    const mergeMode = this.resolveMergeMode(req.mergeMode, req.project);
     // Beside resolveMergeMode, after the lock, for the identical reason the
     // comment directly above gives: a malformed `questionMode` is a problem
     // with what the run should contain, not with whether it may start, so
@@ -727,14 +730,14 @@ export class AgentsService {
     // reason both comments above give: a base naming no branch is a problem
     // with what the run should contain, not with whether it may start, so the
     // coded RUN_IN_PROGRESS_CODE 409 must still win over it.
-    const base = this.resolveBase(req.base, req.project);
+    const base = await this.resolveBase(req.base, req.project);
 
     return this.spawn(cfg, {
       project: dirName,
       // The composition, and the whole of what a caller can influence: a
       // bare constant for a full-queue, merge-mode, main-based run, that same
       // constant followed by ids that have each been proved to name an open
-      // bug or task in THIS project, and then up to three flags, each
+      // bug or task in THIS project, and then up to three flags (the first of them one of two merge-mode literals), each
       // appended only off its own guard and each default appending nothing.
       // Nothing a caller sends is ever concatenated in unchecked — see
       // resolveIds, resolveMergeMode, resolveBase, and ORCHESTRATE_PROMPT's
@@ -747,7 +750,12 @@ export class AgentsService {
       prompt: [
         ORCHESTRATE_PROMPT,
         ...(ids === undefined ? [] : ids),
+        // Two guarded literals, never one interpolation: `mergeMode` is the
+        // `MergeMode` union here, but a template over it would be the one
+        // place a future member (or a widened type) could reach the prompt
+        // unreviewed. `merge` appends nothing — the default.
         ...(mergeMode === 'branch' ? ['--merge-mode', 'branch'] : []),
+        ...(mergeMode === 'pr' ? ['--merge-mode', 'pr'] : []),
         // Last of the three, and `park` appends nothing at all — which is
         // what keeps every prompt this endpoint composed before task-19 a
         // byte-exact PREFIX of what it composes now. The silent value is
@@ -1519,7 +1527,7 @@ export class AgentsService {
     // the same honest refusal below.
     const entry = this.registry.load().projects.find((p) => p.path === project);
     const runnable = new Set(
-      (entry === undefined ? [] : scanProject(entry).items)
+      (entry === undefined ? [] : (await scanProject(entry)).items)
         // Exactly orchestrate.mjs's own candidate set: open, and one of the
         // two sections GATE_SECTIONS names. Ideas, refactors and
         // out-of-scope have nothing to execute by definition — the same
@@ -1737,7 +1745,7 @@ export class AgentsService {
    * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
    * gives.
    */
-  private resolveBase(base: string | undefined, project: string): string {
+  private async resolveBase(base: string | undefined, project: string): Promise<string> {
     // The two checks live in `resolveBaseBranch` since #254, shared with
     // `GET /api/items/uncommitted`, which must accept exactly the bases this
     // route accepts. The `'main'` short-circuit lives there too, and this is
@@ -1757,6 +1765,10 @@ export class AgentsService {
     // The tool still checks it at `init` (`assertUsableBase`), which is the
     // right place: that is where the run actually happens, and it has the
     // repository in hand rather than a registry entry.
+    //
+    // Async since #277: the two checks spawn git without blocking the event
+    // loop, and a timeout on either is a failed check — the same 400 a missing
+    // branch gets.
     return resolveBaseBranch(base, this.registry.load().projects.find((p) => p.path === project)?.path);
   }
 
@@ -1774,13 +1786,17 @@ export class AgentsService {
    * needs names; "where is this branch checked out" is a question about
    * merge time, and §9 of SKILL.md answers it then, from the run, rather than
    * from a snapshot taken when a picker was drawn.
+   *
+   * Async and time-bounded since #277 (`runGit`): a timeout answers
+   * `{ branches: [] }`, exactly as a non-zero exit does — an empty picker, not
+   * a 500 and not a frozen server.
    */
-  branches(project: string): { branches: string[] } {
+  async branches(project: string): Promise<{ branches: string[] }> {
     const entry = this.registry.load().projects.find((p) => p.path === project);
     if (entry === undefined) throw new HttpException({ error: 'project is not registered' }, 404);
-    const out = spawnSync('git', ['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/'], { encoding: 'utf8' });
-    if (out.status !== 0) return { branches: [] };
-    return { branches: out.stdout.split('\n').map((b) => b.trim()).filter((b) => b !== '') };
+    const out = await runGit(['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/']);
+    if (out === null) return { branches: [] };
+    return { branches: out.split('\n').map((b) => b.trim()).filter((b) => b !== '') };
   }
 
   /**
@@ -1790,7 +1806,9 @@ export class AgentsService {
    *
    * - absent (`undefined` or `''`) → `'merge'` — today's behaviour, for
    *   every caller written before this field existed.
-   * - a member of `MERGE_MODES` → that value.
+   * - a member of `MERGE_MODES` → that value, except that `pr` also needs
+   *   the project to be a tracker project (spec P3: a files project has no
+   *   remote ruleset to route around, and the tool refuses it too).
    * - anything else → reject.
    *
    * This is deliberately NOT `pickFrom`'s drop-on-unknown rule, even though
@@ -1823,9 +1841,21 @@ export class AgentsService {
    * `orchestrate()`, and the code's own doc comment) — nothing about a
    * malformed enum needs telling apart from any other 4xx.
    */
-  private resolveMergeMode(mergeMode: string | undefined): MergeMode {
+  private resolveMergeMode(mergeMode: string | undefined, project: string): MergeMode {
     if (mergeMode === undefined || mergeMode === '') return 'merge';
-    if (isMergeMode(mergeMode)) return mergeMode;
+    if (isMergeMode(mergeMode)) {
+      // The source check is by what the project RESOLVES to, through the one
+      // `known` set `ItemsService` owns — `github` is the only tracker kind
+      // today, and anything else (`files`, a marker this build cannot honour,
+      // an unreadable one, no store at all) is refused rather than guessed
+      // at. `unsupported` in particular must not read as files-and-therefore-
+      // fine: both refusals are the same sentence. Uncoded, like the enum 400
+      // below, and after the run locks for the same reason that one is.
+      if (mergeMode === 'pr' && this.items.sourceOf(project) !== 'github') {
+        throw new HttpException({ error: 'mergeMode pr needs a tracker project — this project\'s backlog is not backed by a GitHub repo' }, 400);
+      }
+      return mergeMode;
+    }
     // Echoed back truncated and JSON-quoted, matching resolveIds's own
     // convention just above: a client bug is far easier to find when the
     // error names the value that broke, and this body goes back to the
@@ -1833,7 +1863,7 @@ export class AgentsService {
     // value (case 7's `42`) sensibly, which a template-literal interpolation
     // would not.
     const shown = JSON.stringify(typeof mergeMode === 'string' ? mergeMode.slice(0, 40) : mergeMode);
-    throw new HttpException({ error: `mergeMode must be merge or branch — ${shown} is not one` }, 400);
+    throw new HttpException({ error: `mergeMode must be ${MERGE_MODES.join(', ')} — ${shown} is not one` }, 400);
   }
 
   /**

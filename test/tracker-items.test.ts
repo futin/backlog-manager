@@ -239,7 +239,7 @@ describe('both adapters in one payload', () => {
   it('answers known: false for a tracker project’s uncommitted read', async () => {
     // The fixture is a real repo on `main` with a clean tree, so the FILES
     // answer here would be `{ paths: [], absent: [], known: true }` — see `gitInit`.
-    const filesAnswer = uncommittedItemPaths(tracker);
+    const filesAnswer = await uncommittedItemPaths(tracker);
     expect(filesAnswer.known).toBe(true);
 
     const res = await request(app.getHttpServer()).get('/api/items/uncommitted').query({ project: tracker }).expect(200);

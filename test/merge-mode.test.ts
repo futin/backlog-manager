@@ -10,7 +10,7 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import { RUN_IN_PROGRESS_CODE } from '../shared/types';
+import { MERGE_MODES, RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { OrchestratorRun } from '../shared/types';
 
 // Same translation orchestrator-runs.test.ts and orchestrator-start.test.ts
@@ -169,6 +169,49 @@ describe('POST /api/agents/orchestrate — mergeMode', () => {
     const sent = stubDashboard();
     await post({ project: projectPath, mergeMode: 'branch' }).expect(201);
     expect(spawnedPrompt(sent)).toBe('/backlog-orchestrate --merge-mode branch');
+  });
+
+  // --- 'pr' (Task 2 of the PR-mode plan): tracker projects only ------------
+  //
+  // `pr` is a third compile-time literal beside `branch`, and unlike its
+  // neighbour it needs the PROJECT: a files project has no remote ruleset to
+  // route around (spec P3), so `resolveMergeMode` refuses it with a 400. The
+  // tracker half of the contract (it spawns) is in tracker-dispatch.test.ts,
+  // whose beforeEach builds the github-marked project.
+
+  it("case pr-1: mergeMode: 'pr' on a files project 400s naming pr and the tracker requirement, and spawns nothing", async () => {
+    const sent = stubDashboard();
+    const res = await post({ project: projectPath, mergeMode: 'pr' }).expect(400);
+    expect(res.body.error).toMatch(/\bpr\b/);
+    expect(res.body.error).toMatch(/tracker project/);
+    expect(res.body.code).toBeUndefined();
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it("case pr-2: mergeMode: 'pr' on a project whose source is unsupported 400s the same way", async () => {
+    const sent = stubDashboard();
+    // A marker naming a kind no adapter in this build serves: `unsupported`, never `files`.
+    writeFileSync(join(projectPath, 'backlog', 'source.json'), JSON.stringify({ kind: 'gitlab' }));
+    const res = await post({ project: projectPath, mergeMode: 'pr' }).expect(400);
+    expect(res.body.error).toMatch(/\bpr\b/);
+    expect(res.body.error).toMatch(/tracker project/);
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it("case pr-3: the 400 for an unrecognised mergeMode lists every mode, built from MERGE_MODES", async () => {
+    stubDashboard();
+    const res = await post({ project: projectPath, mergeMode: 'nonsense' }).expect(400);
+    expect(res.body.error).toContain(MERGE_MODES.join(', '));
+    expect(res.body.error).toContain('merge, branch, pr');
+  });
+
+  it("case pr-4: a fresh run in progress wins over a pr-on-files request, with RUN_IN_PROGRESS_CODE", async () => {
+    const sent = stubDashboard();
+    writeRun({ ...fixture, project: projectPath, updatedAt: new Date().toISOString() });
+
+    const res = await post({ project: projectPath, mergeMode: 'pr' }).expect(409);
+    expect(res.body.code).toBe(RUN_IN_PROGRESS_CODE);
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
   });
 
   // --- Case 5: ids first, the merge-mode flag last ---------------------------

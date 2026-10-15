@@ -165,6 +165,18 @@ describe('deriveRemoteRuns', () => {
   });
 });
 
+describe('deriveRemoteRuns and the pr merge mode', () => {
+  it('R-13: a derived run carries no PR fields — a claim has nowhere to record them — and a pr claim derives mergeMode pr', () => {
+    const [plain] = derive([claimComment(3)]);
+    expect(plain.prTarget).toBeNull();
+    expect(plain.prUrl).toBeNull();
+
+    const [pr] = derive([claimComment(3, { run: { ...RUN, mergeMode: 'pr' } })]);
+    expect(pr.mergeMode).toBe('pr');
+    expect(pr.mergeModeEffective).toBe('pr');
+  });
+});
+
 describe('readClaimState', () => {
   it('R-8: drops mis-shaped fields and never throws', () => {
     expect(readClaimState({ stage: 'reviewing', fixLoops: 'two', usage: 5, extra: {} })).toEqual({ stage: 'reviewing' });

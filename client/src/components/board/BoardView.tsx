@@ -979,6 +979,11 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
           // whatever else changed" reasoning `orchestrating` itself is
           // declared with above.
           projectName={projectName(registered, orchestrating)}
+          // The registered project's own source, never an item's: an empty
+          // queue has no `items[0]` to read one off, and `pr` is offered by
+          // the PROJECT's source. `null` for a path no longer registered —
+          // the same "not github" the sheet treats an unreadable marker as.
+          source={registered.find((p) => p.path === orchestrating)?.source ?? null}
           items={all.filter((i) => i.projectPath === orchestrating)}
           spawnMaxPermission={agents?.spawnMaxPermission ?? null}
           onClose={() => setOrchestrating(null)}

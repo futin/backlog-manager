@@ -34,12 +34,18 @@ export class TrackerController {
   ) {}
 
   @Get('trackers')
-  trackers(): TrackersPayload {
+  async trackers(): Promise<TrackersPayload> {
     const platform = this.poller.platform();
     const projects: TrackerProjectRow[] = [];
 
-    for (const project of this.registry.load().projects) {
-      const resolved = resolveSource(project.path, KNOWN);
+    // Each project's source is resolved up front so the `origin` lookups — one
+    // git spawn per FILES project, async since #277 — can run concurrently
+    // rather than one after another: N projects on a slow bind mount would
+    // otherwise cost N times the slow read. Still per request, memoised nowhere.
+    const entries = this.registry.load().projects.map((project) => ({ project, resolved: resolveSource(project.path, KNOWN) }));
+    const origins = await Promise.all(entries.map(({ project, resolved }) => (resolved.kind === 'files' ? originRepo(project.path) : null)));
+
+    for (const [index, { project, resolved }] of entries.entries()) {
       const row: TrackerProjectRow = {
         name: project.name,
         path: project.path,
@@ -63,7 +69,7 @@ export class TrackerController {
         row.source = 'unsupported';
       } else if (resolved.kind === 'files') {
         row.source = 'files';
-        const origin = originRepo(project.path);
+        const origin = origins[index];
         // The suggestion, and only for a project that could actually take it:
         // a files project whose origin is on GitHub. Read per request (see
         // `origin.util.ts` for why it joins no memo).

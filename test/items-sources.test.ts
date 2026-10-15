@@ -1,7 +1,9 @@
+import { rmSync } from 'node:fs';
 import { ItemsService } from '../server/src/items/items.service';
 import { FilesSource } from '../server/src/items/sources/files.source';
 import type { ItemSource, SourceSummary } from '../server/src/items/sources/source';
 import type { RegistryService } from '../server/src/registry/registry.service';
+import { makeProject } from './helpers/store';
 
 /**
  * The adapter map `ItemsService` builds in its constructor (task-43). Two
@@ -46,5 +48,54 @@ describe('ItemsService construction', () => {
 
   it('accepts one adapter per kind', () => {
     expect(() => new ItemsService(registry, [new FilesSource()])).not.toThrow();
+  });
+});
+
+/**
+ * `sourceOf` (PR-mode Task 2): the one public answer to "what is this project's source", so a caller outside `ItemsService` never builds a second
+ * `known` set. Real marker files on disk, because the resolution table is about what a marker says.
+ */
+describe('ItemsService.sourceOf', () => {
+  /** An adapter that only has to carry a kind; `sourceOf` never calls it. */
+  class StubSource implements ItemSource {
+    constructor(readonly kind: 'files' | 'github') {}
+    async list(): Promise<{ items: []; errors: [] }> {
+      return { items: [], errors: [] };
+    }
+    async body(): Promise<null> {
+      return null;
+    }
+    async summary(): Promise<SourceSummary> {
+      return { repo: null, polledAt: null, access: null, detail: null, interval: null };
+    }
+    async find(): Promise<null> {
+      return null;
+    }
+  }
+
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  function serviceWith(marker: string | undefined): { service: ItemsService; path: string } {
+    const path = makeProject('src', [], marker);
+    dirs.push(path);
+    const reg = { load: () => ({ projects: [{ name: 'p', path, createdAt: '2026-01-01' }] }) } as unknown as RegistryService;
+    return { service: new ItemsService(reg, [new StubSource('files'), new StubSource('github')]), path };
+  }
+
+  it("answers 'github' for a tracker marker, 'files' for no marker, and 'unsupported' for a kind no adapter serves", () => {
+    const tracker = serviceWith(JSON.stringify({ kind: 'github', repo: 'o/r' }));
+    expect(tracker.service.sourceOf(tracker.path)).toBe('github');
+    const files = serviceWith(undefined);
+    expect(files.service.sourceOf(files.path)).toBe('files');
+    const odd = serviceWith(JSON.stringify({ kind: 'gitlab' }));
+    expect(odd.service.sourceOf(odd.path)).toBe('unsupported');
+  });
+
+  it('answers null for a project the registry does not hold', () => {
+    const { service } = serviceWith(undefined);
+    expect(service.sourceOf('/not/registered')).toBeNull();
   });
 });
