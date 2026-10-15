@@ -95,8 +95,8 @@ source) read as this spec states them; BoardsTen's and NewBoard's tile wording i
 - `adf.ts` — Atlassian Document Format → Markdown, read side only. Nothing in v1 writes text to Jira, so there is no Markdown → ADF.
 - `identity.ts` — `GET myself` at boot, on the gateway; one extra `GET myself` at `https://<site>` decides the token kind the Connection card shows (`classic` when it
   answers 200, `scoped` on 401 — P14), once, never retried. A failure of the gateway call sets `access` from the error and `me: null`, and the call is retried on the sweep ticker with back-off
-  from 15 s to 5 min until it succeeds — under `unauthorized` the sweep itself does not run and issue writes answer 503, under `unreachable` the sweep keeps
-  trying on the same ticker. A 401 on any later call resets `me` and starts the retry again. `me: null` reads `no identity` on the chip and the Connection
+  from 15 s to 5 min until it succeeds — under `unauthorized` the sweep itself does not run and issue writes answer 503, under `unreachable` the boot calls keep
+  retrying on the same ticker, and no board is swept until all of them have answered (the plan's decision, review round 2). A 401 on any later call resets `me` and starts the retry again. `me: null` reads `no identity` on the chip and the Connection
   row and disables `Assign to me` with that title. Assign-to-me uses the `accountId`.
 - `block.ts` — the **ticket block**: facts, the Markdown description and the subtasks list as one text, the SAME text `jira.mjs show` prints and every Run
   prompt ends with. One renderer, two readers.

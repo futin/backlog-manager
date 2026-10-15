@@ -276,8 +276,9 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
   - Over the fake's call log after every method once: neither `t0k3n-SECRET` nor the base64 of `ada@example.com:t0k3n-SECRET` appears anywhere but an
     `authorization` header value, and `ada@example.com` appears nowhere in clear.
   - `accessOf` for 200, 204, 401, 403, 429, 500, 0 → `ok, ok, unauthorized, forbidden, rate-limited, unreachable, unreachable`; for 400 and 404 → `null`.
-  - `jiraHttpError` for each row of the §8 table: status and body `{ message, access }` exactly as the Global Constraints state them (`retryAt` included for a
-    429 given `retryAfter: 7` under a mocked clock: now + 7 s; now + 60 s when `retryAfter` is null).
+  - `jiraHttpError` for each row of the §8 table: status and body `{ error, access?, retryAt? }` exactly as the Global Constraints state them — `access` present
+    exactly when `accessOf(res)` is non-null (a 401, 403, 429, 0 or 5xx carries it; a 400 or 404 does not); `retryAt` included for a 429 given `retryAfter: 7`
+    under a mocked clock: now + 7 s; now + 60 s when `retryAfter` is null.
 
 - [ ] **Step 2: Run; expect failure** (`pnpm run test:jest -- test/jira-client.test.ts`).
 
@@ -391,7 +392,9 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
   doubling, capped at 300 000); `class JiraBootState` holding `cloudId: string | null`, `serverInfoOk: boolean`, `me: { accountId; name } | null`, `tokenKind:
   JiraTokenKind | null`, `sprintField: string | null`, `fieldsOk: boolean`, `access: JiraAccess`, `detail: string | null`, `failedAt: number | null`,
   `backoffMs: number | null`, `retryAt: number | null` (the 429 window's end), with `answered(): boolean` (cloudId, serverInfo, me and fields all in),
-  `due(now): boolean` (never asked, or `failedAt + backoffMs ≤ now`), `fail(access, detail, now)`, `reset()` (what a 401 mid-sweep does to `me`).
+  `due(now): boolean` (never asked, or `failedAt + backoffMs ≤ now`), `fail(access: JiraAccess | null, detail, now)` — a `null` access (a 400 or 404 on a boot
+  call) is recorded as `unreachable` with `Jira answered <status>`, except `serverInfo`'s 404, which the poller maps to `unsupported` before calling `fail` —
+  and `reset()` (what a 401 mid-sweep does to `me`).
 - Produces (`poller.service.ts`): `JIRA_POLL_MS`, `JIRA_QUERY_CAP`, `JIRA_ROOT_CAP`, `JIRA_BOARD_CAP`, `JIRA_DESCENDANT_ROUNDS`, `JIRA_SEARCH_LIMIT`,
   `JIRA_SEARCH_MAX_CHARS`, `JIRA_PAGE_SIZE = 100`; `interface JiraBoardCache { issues: JiraIssue[]; polledAt: string | null; truncated: boolean; failures:
   JiraBoardFailure[] }`; `type JiraResult<T> = { ok: true; value: T } | { ok: false; response: JiraResponse<unknown>; retryAt?: string }`; `@Injectable() class
@@ -414,16 +417,18 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
     and `null` for the life of the process on any other answer from the site probe (0, 403, 5xx — asked once, never retried); `armed` false afterwards (nothing
     owed). A second tick makes NO boot call (asked once).
   - **Boot failures**, each leaving `me: null`, no search sent, and `armed` true (owed): `tenant_info` transport failure → `access: 'unreachable'`, `detail` =
-    the error's message, and the other three boot calls NOT made that tick (Review Focus 2); `serverInfo` → `deploymentType: 'Server'` or a 404 → `access:
+    the error's message, and the other three boot calls NOT made that tick (Review Focus 2); `tenant_info` 404 (what a mistyped `*.atlassian.net` host answers)
+    → `access: 'unreachable'`, `detail: 'Jira answered 404'`, retried on the back-off; `serverInfo` → `deploymentType: 'Server'` or a 404 → `access:
     'unsupported'`, `detail: 'Jira Server/DC is not supported'`, and `armed` FALSE (final until restart); `myself` 401 → `access: 'unauthorized'`, `detail` =
     Jira's message; `myself` 403 → `'forbidden'`; `field` 500 → `access: 'unreachable'`, `detail: 'Jira answered 500'`.
   - **Back-off**: after a failed boot, a tick at +10 s makes no call; at +15 s one retry; failing again, the next retry waits 30 s, then 60, 120, 240, 300, 300
     (`nextBackoff` pinned directly: `null → 15000`, `15000 → 30000`, `160000 → 300000`, `300000 → 300000`). A success resets the back-off (the next failure
     waits 15 s again).
   - **Boards wait for boot**: a `'1m'` board and a `tenant_info` that fails on the first tick → no search that tick; on the tick where every boot call has
-    answered the board is swept in that same tick. Spec §3's "under `unreachable` the sweep keeps trying on the same ticker" is this: the boot calls retry on
-    the back-off, and no board is searched until `cloudId`, `serverInfo`, `me` and the sprint field are all in (a search made without the sprint field would
-    fill a cache the next sweep could not compare with).
+    answered the board is swept in that same tick. This narrows spec §3's "under `unreachable` the sweep keeps trying on the same ticker" (which, read beside
+    `unauthorized`'s "the sweep itself does not run", could mean boards sweep without identity; §3 is amended in this branch to say what follows): the boot
+    calls retry on the back-off, and no board is searched until `cloudId`, `serverInfo`, `me` and the sprint field are all in (a search made without the sprint
+    field would fill a cache the next sweep could not compare with).
   - **Whole-board versus per-entry**: a board search answering 0 (transport) or a 5xx leaves that board's last good list and `polledAt` in place, sets `access:
     'unreachable'` with `detail` (the error's message, or `Jira answered 500`), and ends the sweep for that tick; a 400, 403 or 404 on one root or query is that
     entry's `failures` row, the rest of the board proceeds, and `access` is unchanged.
@@ -467,7 +472,9 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
     then `transitions`; answers `ok` with the mapped issue (window OFF — a detail read never drops), `description` = `adfToMarkdown` of the raw description
     (`''` for `null` — Review Focus 5), `children` mapped (window off), `transitions: [{ id, name, to: { name, category } }]` from the fake, `boards` =
     `boardsHolding(key)` (`[]` for a key on no board — Review Focus 5), `session: null`. A 404 → `{ ok: false, response.status: 404 }`; a transport failure →
-    status 0. Inside a 429 window → `{ ok: false, response.status: 429, retryAt }` with NO call made.
+    status 0. Inside a 429 window → `{ ok: false, response.status: 429, retryAt }` with NO call made. Site-level state from a route: a 401 on the detail read →
+    `me: null`, `status().access: 'unauthorized'`, and the boot retry chain restarts; a 404, a 403 or a transport failure on the detail read → `status().access`
+    still `'ok'`.
   - **`search`**: `'pay-131'` → one search with `jql: 'key = "PAY-131"'`, `maxResults: 20`; `'refund "x"'` → `jql: 'summary ~ "refund \"x\"*"'`; `'   '` → `ok`
     with `[]` and no call; the fake answering 400 → `{ ok: false, response.status: 400 }`; results mapped with the window off.
   - **`projects()`**: the fake holding 70 projects → two `project/search` calls (`startAt` 0 and 50), the union sorted by key. (Paged by `startAt`, not by
@@ -546,13 +553,15 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
   /api/jira/jql/check?jql=`. Not produced: `/api/jira/prompt` (phase 5) and every POST (phase 2).
 
 - [ ] **Step 1: Write the failing tests** — an app from `AppModule` with `.overrideProvider(JiraClient).useValue(new JiraClient(fake.fetch))`, `listenLoopback`,
-      the three keys set in `beforeAll` BEFORE `app.init()` (one describe per configuration, configured and unconfigured — the poller's boot tick runs at init,
-      so the keys must be there first; `BM_JIRA_TOKEN=t0k3n-SECRET`), `BM_JIRA_FILE` a temp file, `REGISTRY_FILE` overridden as `tracker-sync-route` does so no
-      real registry is read; one `beforeAll` app per describe:
+      the three keys set in `beforeAll` BEFORE `app.init()` (one describe per configuration — unconfigured; configured against a healthy fake; configured with
+      `failNext` failing `tenant_info` set BEFORE `app.init()`, since boot asks it once; and configured for the 429 cases, whose window would otherwise turn
+      every later case in the same app into the rate-limit 503 — the poller's boot tick runs at init, so the keys and the fake's switches must be there first;
+      `BM_JIRA_TOKEN=t0k3n-SECRET`), `BM_JIRA_FILE` a temp file, `REGISTRY_FILE` overridden as `tracker-sync-route` does so no real registry is read; one
+      `beforeAll` app per describe:
   - `GET /api/jira` unconfigured → 200 with `configured: false`, `access: 'unconfigured'`, `detail: 'BM_JIRA_SITE is not set'`, `boards: []`.
   - `GET /api/jira` configured, after `await poller.tick()` → 200, `configured: true`, `site`, `me`, `tokenKind`, the board statuses; the serialised body
-    contains neither the token nor the email. With `failNext` failing `tenant_info` by transport → still 200, `access: 'unreachable'`, the error's message in
-    `detail` (Review Focus 2).
+    contains neither the token nor the email. In the describe whose fake fails `tenant_info` by transport before init → `GET /api/jira` still 200, `access:
+    'unreachable'`, the error's message in `detail` (Review Focus 2).
   - A request with `Host: evil.example` on `GET /api/jira` → the allowlist's refusal (the status `test/allowed-hosts.test.ts` asserts today).
   - Every other route while unconfigured → 503 `{ error: 'Jira is not configured' }`.
   - `GET /api/jira/boards/b_0123abcd/issues` → 200 `{ issues, polledAt }`; `b_ffffffff` (well-formed, unknown) → 404 `{ error: 'unknown board' }`; `b_zz` → 404
@@ -561,9 +570,9 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
     `/issue/PAY-131` → 200 with the `JiraIssueDetail` JSON, `content-type` JSON; `/issue/PAY-131?format=text` → 200 `text/plain; charset=utf-8`, the body equal
     to `renderTicketBlock` of the JSON answer; `?format=html` → 400 `{ error: 'format must be text' }`.
   - §8 through the detail route: the fake `unauthorized` → 503 `{ error: 'Jira rejected the credentials', access: 'unauthorized' }`; 403 → 502 `Jira refused:
-    <message>`; `rateLimit: { retryAfter: 30 }` → 503 with `retryAt` and `error` starting `Jira rate limit — retry after`; a second request inside the window →
-    the same 503, the same `retryAt`, and no new call in the fake's log; `failWith: 'transport'` → 502 `Jira unreachable: <message>`; `failWith: 500` → 502
-    `Jira answered 500`.
+    <message>`; in the 429 describe, `rateLimit: { retryAfter: 30 }` → 503 with `retryAt` and `error` starting `Jira rate limit — retry after`; a second request
+    inside the window → the same 503, the same `retryAt`, and no new call in the fake's log; `failWith: 'transport'` → 502 `Jira unreachable: <message>`;
+    `failWith: 500` → 502 `Jira answered 500`.
   - `GET /api/jira/search` → 400 `{ error: 'q is required' }`; `?q=` and `?q=%20%20` → 200 `[]`; `?q=pay-131` → 200 one issue (the fake saw `key = "PAY-131"`);
     `?q=` of 101 characters → 400 `{ error: 'q is too long (max 100)' }`; the fake answering 400 → 409 `Jira refused: <message>`.
   - `GET /api/jira/projects` → 200 the sorted list; while the fake is unauthorized → 503.
@@ -638,19 +647,23 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
       (`It owns six things` → seven, the Jira boards named) and `api.md:138` (`The one module that calls anything outbound` → `one of the three modules that
       call outbound`).
 
-- [ ] **Step 6: Subsystem docs.** `docs/subsystems/jira.md`, new, with no docs-sync stamp of its own (the stamp is a footer `/docs-sync` writes, and
-      `docs/.docs-sync.yml` — "edit only via bootstrap" — is where a doc is registered; both are left to the next `/docs-sync`, which adopts an unstamped doc),
-      covering: the scopes (§2), the module file by file (§3, phase 1 only, with a line per later phase saying what is not there yet), the shapes (§4), the six
-      routes with their status codes (§5 and §8), the sweep's caps and the arming rule, `jira.json`'s reader, the probe facts the code encodes (P1–P14, one line
-      each), and one sentence saying the widened cache-age rule's mechanism stays in `.claude/rules/tracker.md` (a session under `server/src/jira/**` reads it
-      in this doc). `docs/overview.md`: a table row for `subsystems/jira.md` and one sentence under "The API". `docs/subsystems/api.md`: a `### \`jira/\``
-      heading after `tracker/` (six lines: what it owns, that it is the third outbound module, where the full doc is), line 96's `and the only other one` → `and
-      the second of three (`jira/` is the third)`, and an Interfaces row for `api.atlassian.com` beside `api.github.com`'s.
+- [ ] **Step 6: Subsystem docs.** `docs/subsystems/jira.md`, new, registered with docs-sync in its own commit (Step 7), covering: the scopes (§2), the module
+      file by file (§3, phase 1 only, with a line per later phase saying what is not there yet), the shapes (§4), the six routes with their status codes (§5 and
+      §8), the sweep's caps and the arming rule, `jira.json`'s reader, the probe facts the code encodes (P1–P14, one line each), and one sentence saying the
+      widened cache-age rule's mechanism stays in `.claude/rules/tracker.md` (a session under `server/src/jira/**` reads it in this doc). `docs/overview.md`: a
+      table row for `subsystems/jira.md` and one sentence under "The API". `docs/subsystems/api.md`: a `### \`jira/\`` heading after `tracker/` (six lines: what
+      it owns, that it is the third outbound module, where the full doc is), line 96's `and the only other one` → `and the second of three (`jira/` is the
+      third)`, and an Interfaces row for `api.atlassian.com` beside `api.github.com`'s.
 
-- [ ] **Step 7: Run** `pnpm run test:jest -- test/claude-rules.test.ts test/compose-env.test.ts test/dialog-count-docs.test.ts` and `pnpm run typecheck`; expect
+- [ ] **Step 7: Register the doc.** Run `/docs-sync` so its bootstrap adds `docs/subsystems/jira.md` to `docs/.docs-sync.yml` (`kind: subsystem`, `note: Jira`)
+      and writes the doc's verification footer — an unstamped doc the layout plan does not list is `unaccounted`, an error in plan mode and never auto-adopted
+      (`~/.claude/skills/docs-sync/references/bootstrap.md`), which would break spec §12's "`/docs-sync` stays green at every merge". Commit it alone as
+      `docs(jira): register docs/subsystems/jira.md with docs-sync`. A headless run without that skill leaves this step undone and says so in its report.
+
+- [ ] **Step 8: Run** `pnpm run test:jest -- test/claude-rules.test.ts test/compose-env.test.ts test/dialog-count-docs.test.ts` and `pnpm run typecheck`; expect
       green. If `claude-rules` names an anchor, a count or a headline mismatch, fix the text — never the test.
 
-- [ ] **Step 8: Commit** — `docs(jira): phase 1 rules, invariants, subsystem doc, env and compose passthrough`.
+- [ ] **Step 9: Commit** — `docs(jira): phase 1 rules, invariants, subsystem doc, env and compose passthrough`.
 
 ---
 
@@ -670,4 +683,5 @@ stop, the live map and `agents/jira-live.service.ts` (5), all client code (2 and
 - Review Focus: 1 → T1, 2 → T6 and T8, 3 → T6, 4 → T2, 5 → T6/T7/T8 — each has its case in the owning task.
 - Decisions taken in review round 1, where the spec left room: error bodies use `{ error }` (the API's one key); `truncated` means the 500 board cap only; no
   board is searched until every boot call has answered; a transport failure or 5xx on a board search is whole-board, a 400/403/404 is per-entry; a parsed
-  non-object `jira.json` reads as empty, not unreadable; `project/search` pages by `startAt`.
+  non-object `jira.json` reads as empty, not unreadable; `project/search` pages by `startAt`; `unreachable` at boot retries the boot calls only and boards wait
+  (spec §3 amended in this branch to say so).
