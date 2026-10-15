@@ -8112,6 +8112,69 @@ test('usage entries with no numbers at all bill nothing, and the read counters g
   assert.deepEqual(released[0].body.counters, { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 });
 });
 
+/* #267. Parking RELEASES the claim with this run's bill so far, and leaving `parked` re-claims (#250) — and the server seeds that new claim from the newest
+   claim's counters, which are the ones the park just wrote. The release at the end then read that seed as its base and added EVERY usage entry the item
+   carries, so the pre-park spend was billed twice: `base0 + 2·U1 + U2`. These routes behave like the server on the one point that matters — a claim is seeded
+   from what the last release wrote, and the GET answers it — so the final counters are the sum the issue's permanent record actually ends up with. */
+function billingRoutes(project) {
+  let counters = { groomElapsed: 1, executeElapsed: 2, groomTokens: 3, executeTokens: 4 };
+  let nextComment = 500;
+  return claimRoutes(project, {
+    '/api/items/claim': (body, _url, method) =>
+      method === 'GET'
+        ? { body: { commentId: nextComment, record: { v: 1, counters } } }
+        : { status: 201, body: { commentId: (nextComment += 1), record: { v: 1, session: body?.session, run: body?.run, counters } } },
+    '/api/items/release': (body) => {
+      if (body?.counters !== undefined) counters = body.counters;
+      return { status: 201, body: { commentId: nextComment, record: { v: 1, counters } } };
+    },
+  });
+}
+
+async function parkResumeMerge(t, project, home, port, afterReclaim) {
+  assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'preflight')).status, 0);
+  assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3.jsonl'))).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'parked')).status, 0);
+  assert.equal((await runApi(project, home, port, 'stage', '3', 'inspecting')).status, 0);
+  await afterReclaim();
+  const file = path.join(project, 'outcome.md');
+  fs.writeFileSync(file, '## Outcome\n\nmerged after a park.\n');
+  const out = await runApi(project, home, port, 'stage', '3', 'merged', '--outcome', file);
+  assert.equal(out.status, 0, out.stderr);
+}
+
+test('#267: park, re-claim, merge bills the pre-park session once — base + U1 + U2, not base + 2·U1 + U2', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(billingRoutes(project), async (port) => {
+    await parkResumeMerge(t, project, home, port, async () => {
+      assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3-retry-1.jsonl'))).status, 0);
+    });
+  });
+
+  const released = posts(requests, 'release');
+  assert.deepEqual(released.map((r) => r.body.reason), ['parked', 'merged']);
+  // The park bills U1 (812 s, 257,463 tokens) onto the base; the merge bills only U2, the retry, on top of that.
+  assert.deepEqual(released[0].body.counters, { groomElapsed: 1, executeElapsed: 2 + 812, groomTokens: 3, executeTokens: 4 + 257_463 });
+  assert.deepEqual(released[1].body.counters, { groomElapsed: 1, executeElapsed: 2 + 812 * 2, groomTokens: 3, executeTokens: 4 + 257_463 * 2 });
+});
+
+test('#267: re-recording a pre-park transcript after the re-claim bills nothing a second time', async (t) => {
+  const { home, project } = trackerFixture(t);
+
+  const { requests } = await withApi(billingRoutes(project), async (port) => {
+    await parkResumeMerge(t, project, home, port, async () => {
+      // Same slot, same numbers: `usage` replaces the entry in place (a resumed driver re-running inspect), so the item's total is unchanged — and so
+      // is what is left to bill.
+      assert.equal((await runApi(project, home, port, 'usage', '3', '--jsonl', transcriptAs(t, STREAM_USAGE, '3.jsonl'))).status, 0);
+    });
+  });
+
+  const released = posts(requests, 'release');
+  assert.deepEqual(released.at(-1).body.counters, { groomElapsed: 1, executeElapsed: 2 + 812, groomTokens: 3, executeTokens: 4 + 257_463 });
+});
+
 test('a resumed driver re-claims its own run-s in-flight items under the same runId', async (t) => {
   const { home, project } = trackerFixture(t);
 

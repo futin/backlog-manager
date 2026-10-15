@@ -1161,6 +1161,13 @@ export interface RunQueueItem {
    * predates it, and both archive endpoints serve those verbatim.
    */
   claim?: { commentId: number };
+  /**
+   * How much of `usage` the current claim's counters already carry (#267), as the same billable totals `orchestrate.mjs` sums at release: wall-clock
+   * milliseconds and non-cache-read tokens. Written by `stage` when it takes a claim on an item that already has usage — in practice the re-claim on leaving
+   * `parked`, whose seed is the counters the park's release wrote — and subtracted at the next release, so the pre-park spend is billed once. Absent means
+   * the claim's base carries none of it. Tool-internal bookkeeping: nothing on the server or the client reads it.
+   */
+  claimBilled?: { ms: number; tokens: number };
 }
 
 /**

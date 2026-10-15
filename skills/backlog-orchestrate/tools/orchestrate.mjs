@@ -1997,7 +1997,9 @@ function trackerHeartbeat(run, item) {
  * totals live. A race's two live claims were both seeded from the same prior
  * claim, so either one's counters are the same base.
  *
- * What this run spent is the sum over its own `usage` entries: seconds of
+ * What this run spent is the sum over its own `usage` entries, less what the
+ * claim's base already carries (`claimBilled`, #267 — set when a re-claim on
+ * leaving `parked` is seeded from the park's own release): seconds of
  * wall-clock, and the three token kinds that are actually BILLED. Cache READS
  * are excluded, exactly as `backlog.mjs stop` excludes them for a files item —
  * they routinely run an order of magnitude above everything else and including
@@ -2027,14 +2029,13 @@ function claimCountersFor(run, item) {
       ? held.data.record.counters
       : { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 };
 
-  let ms = 0;
-  let tokens = 0;
-  for (const entry of item.usage ?? []) {
-    if (Number.isFinite(entry.durationMs)) ms += entry.durationMs;
-    for (const key of ['inputTokens', 'outputTokens', 'cacheCreationTokens']) {
-      if (Number.isFinite(entry[key])) tokens += entry[key];
-    }
-  }
+  // Only what the claim's base does not already carry (#267). A re-claim on leaving `parked` is seeded from the counters the park's release just wrote,
+  // and those already include every entry `usage` held at the time — so `claimBilled` records that total when the claim is taken, and is taken off
+  // here. A total rather than an entry index because `usage` replaces an entry by slot: a resumed driver re-recording a pre-park transcript changes no
+  // index, and only a difference of totals bills that correctly, which is nothing. Floored at zero — a re-recorded entry that shrank is not a refund.
+  const spent = usageTotals(item.usage);
+  const ms = Math.max(0, spent.ms - (item.claimBilled?.ms ?? 0));
+  const tokens = Math.max(0, spent.tokens - (item.claimBilled?.tokens ?? 0));
 
   return {
     groomElapsed: base.groomElapsed ?? 0,
@@ -2045,6 +2046,20 @@ function claimCountersFor(run, item) {
     groomTokens: base.groomTokens ?? 0,
     executeTokens: (base.executeTokens ?? 0) + tokens
   };
+}
+
+// The billable sum over an item's `usage` entries: wall-clock milliseconds, and the three token kinds that are BILLED — cache reads excluded, see
+// `claimCountersFor`. A `null` field contributes nothing.
+function usageTotals(usage) {
+  let ms = 0;
+  let tokens = 0;
+  for (const entry of usage ?? []) {
+    if (Number.isFinite(entry.durationMs)) ms += entry.durationMs;
+    for (const key of ['inputTokens', 'outputTokens', 'cacheCreationTokens']) {
+      if (Number.isFinite(entry[key])) tokens += entry[key];
+    }
+  }
+  return { ms, tokens };
 }
 
 /**
@@ -3325,6 +3340,11 @@ function cmdStage(argv, out = console.log) {
       return 0;
     }
     item.claim = { commentId: claimed.commentId };
+    /* #267: what the new claim's seed already carries of this item's spend. The server seeds a claim from the newest claim's counters, which on leaving
+       `parked` are the ones the park's release wrote — this item's `usage` as it stood then — so the release that ends this claim must bill only what
+       comes after. Recorded on every claim this command takes, so a second park and re-claim moves it forward rather than keeping the first. Only
+       here and never in `cmdClaim`: a resumed driver's re-claim takes over a claim that was never released, whose seed has billed none of it. */
+    if (item.usage !== undefined && item.usage.length > 0) item.claimBilled = usageTotals(item.usage);
   }
 
   /* **`merged` closes the issue, and it happens BEFORE the stage is written.**
