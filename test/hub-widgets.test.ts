@@ -117,7 +117,7 @@ describe('hub widgets', () => {
   });
 
   describe('run', () => {
-    it('is idle / no run with no runs, and carries no detail', () => {
+    it('is idle / no run with no runs, and carries no detail and no lines', () => {
       expect(runStatus(payload())).toEqual({ state: 'idle', label: 'no run' });
     });
 
@@ -125,29 +125,107 @@ describe('hub widgets', () => {
       expect(runStatus(payload(run('/p/a', 'done', true), run('/p/b', 'failed', false)))).toEqual({ state: 'idle', label: 'no run' });
     });
 
-    it('is ok / running for a fresh run whose items are all dispatched or merged', () => {
-      expect(runStatus(payload(run('/p/a', 'running', true, ['dispatched', 'merged'])))).toEqual({ state: 'ok', label: 'running', detail: 'a' });
+    it('is ok / running for a fresh run whose items are all dispatched or merged, one line with its progress', () => {
+      expect(runStatus(payload(run('/p/a', 'running', true, ['dispatched', 'merged'])))).toEqual({
+        state: 'ok',
+        label: 'running',
+        lines: [{ label: 'a', value: '1/2', state: 'ok' }]
+      });
     });
 
-    it('is warn / needs a person for a fresh run holding a parked item', () => {
-      expect(runStatus(payload(run('/p/a', 'running', true, ['merged', 'parked'])))).toEqual({ state: 'warn', label: 'needs a person', detail: 'a' });
+    it('is warn / needs a person for a fresh run holding a parked item, and a parked item counts as finished', () => {
+      expect(runStatus(payload(run('/p/a', 'running', true, ['merged', 'parked'])))).toEqual({
+        state: 'warn',
+        label: 'needs a person',
+        lines: [{ label: 'a', value: '2/2', state: 'warn' }]
+      });
     });
 
     it('is warn / paused for a paused run', () => {
-      expect(runStatus(payload(run('/p/a', 'paused', true)))).toEqual({ state: 'warn', label: 'paused', detail: 'a' });
+      expect(runStatus(payload(run('/p/a', 'paused', true)))).toEqual({ state: 'warn', label: 'paused', lines: [{ label: 'a', value: '1/1', state: 'warn' }] });
     });
 
     it('is error / crashed for a stale running run', () => {
-      expect(runStatus(payload(run('/p/a', 'running', false)))).toEqual({ state: 'error', label: 'crashed', detail: 'a' });
+      expect(runStatus(payload(run('/p/a', 'running', false)))).toEqual({ state: 'error', label: 'crashed', lines: [{ label: 'a', value: '1/1', state: 'error' }] });
     });
 
-    it('lets a crash outrank a pause, and names only the crashed project', () => {
-      expect(runStatus(payload(run('/p/a', 'running', false), run('/p/b', 'paused', true)))).toEqual({ state: 'error', label: 'crashed', detail: 'a' });
+    it('reads 0/0 for a run with an empty queue', () => {
+      expect(runStatus(payload(run('/p/a', 'running', true, [])))).toMatchObject({ lines: [{ label: 'a', value: '0/0' }] });
     });
 
-    it('names both projects when a pause and a parked item tie at warn', () => {
-      const r = runStatus(payload(run('/p/a', 'paused', true), run('/p/b', 'running', true, ['needs-answers'])));
-      expect(r).toMatchObject({ state: 'warn', detail: 'a, b' });
+    it('lets a crash outrank a pause, and lists the crashed project first', () => {
+      expect(runStatus(payload(run('/p/a', 'running', false), run('/p/b', 'paused', true)))).toEqual({
+        state: 'error',
+        label: 'crashed',
+        lines: [
+          { label: 'a', value: '1/1', state: 'error' },
+          { label: 'b', value: '1/1', state: 'warn' }
+        ]
+      });
+    });
+
+    it('keeps run order when a pause and a parked item tie at warn, and the label is the first met', () => {
+      expect(runStatus(payload(run('/p/a', 'paused', true), run('/p/b', 'running', true, ['needs-answers'])))).toEqual({
+        state: 'warn',
+        label: 'paused',
+        lines: [
+          { label: 'a', value: '1/1', state: 'warn' },
+          { label: 'b', value: '1/1', state: 'warn' }
+        ]
+      });
+    });
+
+    it('counts merged and failed as finished, pending and reviewing as not', () => {
+      expect(runStatus(payload(run('/p/a', 'running', true, ['merged', 'failed', 'pending', 'reviewing'])))).toMatchObject({ lines: [{ value: '2/4' }] });
+    });
+
+    it('counts all seven exits as finished and none of the eight claimed stages', () => {
+      const all: RunStage[] = [
+        'pending',
+        'preflight',
+        'dispatched',
+        'inspecting',
+        'reviewing',
+        'fixing',
+        'verifying',
+        'merging',
+        'merged',
+        'branched',
+        'failed',
+        'skipped',
+        'needs-answers',
+        'ungroomed',
+        'parked'
+      ];
+      expect(runStatus(payload(run('/p/a', 'running', true, all)))).toMatchObject({ lines: [{ value: '7/15' }] });
+    });
+
+    it('orders lines worst first, ties in run order, and gives a finished run no line', () => {
+      const r = runStatus(payload(run('/p/a', 'running', true), run('/p/b', 'paused', true), run('/p/c', 'done', true), run('/p/d', 'running', false)));
+      expect(r.label).toBe('crashed');
+      expect(r.lines?.map((l) => l.label)).toEqual(['d', 'b', 'a']);
+    });
+
+    it('counts a stage it does not know as finished', () => {
+      const r = runStatus(payload(run('/p/a', 'running', true, ['legacy-stage' as RunStage, 'pending'])));
+      expect(r).toMatchObject({ lines: [{ value: '1/2' }] });
+    });
+
+    it('gives two projects with the same name a line each, in run order', () => {
+      const r = runStatus(payload(run('/x/p', 'running', true, ['merged']), run('/y/p', 'running', true, ['pending'])));
+      expect(r.lines).toEqual([
+        { label: 'p', value: '1/1', state: 'ok' },
+        { label: 'p', value: '0/1', state: 'ok' }
+      ]);
+    });
+
+    it('never sends detail while there are lines', () => {
+      const cases = [
+        payload(run('/p/a', 'running', true)),
+        payload(run('/p/a', 'paused', true)),
+        payload(run('/p/a', 'running', false), run('/p/b', 'paused', true))
+      ];
+      for (const c of cases) expect('detail' in runStatus(c)).toBe(false);
     });
 
     it('ignores remote runs: only this machine\'s run files count', () => {
