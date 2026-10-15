@@ -1,6 +1,6 @@
-import { createHubHandler, type HubHandler, type LoadResult, type RowStatus, type State, type WidgetDecl } from 'lookout-widgets';
+import { createHubHandler, type HubHandler, type LoadResult, type RowStatus, type State, type StatusLine, type WidgetDecl } from 'lookout-widgets';
 
-import { ATTENTION_RUN_STAGES } from '../../../shared/types';
+import { ATTENTION_RUN_STAGES, RUN_CLAIMED_STAGES } from '../../../shared/types';
 import type { OrchestratorRunsPayload, ProjectSummary, SectionCounts } from '../../../shared/types';
 
 /**
@@ -96,25 +96,32 @@ function projectName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+/** Queue items that have left the pipeline: the complement of the claimed stages, so a stage this server does not know counts as finished. */
+function progress(run: LocalRun): string {
+  const finished = run.queue.filter((q) => !RUN_CLAIMED_STAGES.includes(q.stage)).length;
+  return `${finished}/${run.queue.length}`;
+}
+
 /**
- * The `run` status: every local run reduced to its own state, and the worst of them wins. `detail` names the projects whose runs produced the winning
- * state — and only those, so a crash in one project is not blamed on another's pause. Two `warn` causes (paused, needs a person) tie at one severity; their
- * projects are all named, and the label is the first one met in run order.
+ * The `run` status: every local run reduced to its own state, and the worst of them wins the headline. Two `warn` causes (paused, needs a person) tie at
+ * one severity; the label is the first one met in run order. `lines` gives every non-idle run one line — its project, `<finished>/<total>` and its own
+ * state — worst first, ties in run order, so the dots say which project produced the headline. No `detail`: naming the projects there would repeat them.
  */
 export function runStatus(payload: OrchestratorRunsPayload): LoadResult['status'] {
   let best: { state: State; label: string } = { state: 'idle', label: 'no run' };
-  let names: string[] = [];
+  const live: { run: LocalRun; state: State }[] = [];
   for (const run of payload.runs) {
     const s = runState(run);
     if (s.state === 'idle') continue;
-    if (SEVERITY[s.state] > SEVERITY[best.state]) {
-      best = s;
-      names = [projectName(run.project)];
-    } else if (s.state === best.state) {
-      names.push(projectName(run.project));
-    }
+    if (SEVERITY[s.state] > SEVERITY[best.state]) best = s;
+    live.push({ run, state: s.state });
   }
-  return names.length === 0 ? best : { ...best, detail: names.join(', ') };
+  if (live.length === 0) return best;
+  // Array#sort is stable, so runs of one severity keep their run order.
+  const lines: StatusLine[] = live
+    .sort((x, y) => SEVERITY[y.state] - SEVERITY[x.state])
+    .map(({ run, state }) => ({ label: projectName(run.project), value: progress(run), state }));
+  return { ...best, lines };
 }
 
 export function createBacklogHub(sources: HubSources): HubHandler {
