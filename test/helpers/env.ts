@@ -95,3 +95,29 @@ process.env.BM_ORCH_CONTROL_HOME ||= mkdtempSync(join(tmpdir(), 'bm-control-'));
  * every suite that is not about this feature assumes. `||=`, like the two above.
  */
 process.env.BM_TRACKER_SYNC_FILE ||= join(mkdtempSync(join(tmpdir(), 'bm-tracker-sync-')), 'tracker-sync.json');
+
+/**
+ * `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` — the Jira credentials (`server/src/jira/env.util.ts`), blanked here for the same class of reason
+ * `BM_WATCHDOG=off` is set, but for the outbound half: the Jira poller is armed the moment all three are present, and any suite that builds `AppModule` and
+ * calls `app.init()` then makes a REAL request to a REAL site at boot (the `tenant_info` lookup and the identity probe, then a sweep every poll). A suite
+ * that stubs `global.fetch` for its own reasons would see calls it never expects, and one that does not would send the developer's real API token to the
+ * network from `pnpm test`.
+ *
+ * `=`, not `||=` — the opposite choice to every block above, and deliberately. Those default a value so a suite can still choose its own; these must
+ * OVERWRITE whatever is there, because the value a developer has is exactly the one that must not reach a test. A shell that exports `BM_JIRA_TOKEN` would
+ * survive `||=`, and `ConfigModule.forRoot` makes it worse: it reads `.env` at import time but never overrides a key that already EXISTS, so a key set to
+ * `''` here, before any import, is what keeps `.env`'s real values out of the process. An empty string is "absent" to `jiraEnv` (whitespace-only counts as
+ * unset), so `configured: false` follows without a suite doing anything. A suite that wants Jira on passes `jiraEnv` an object, or sets the three itself in
+ * `beforeEach` — and every suite that builds `AppModule` with them set overrides `JiraClient` with one built on a fake `fetch`.
+ */
+process.env.BM_JIRA_SITE = '';
+process.env.BM_JIRA_EMAIL = '';
+process.env.BM_JIRA_TOKEN = '';
+
+/**
+ * `BM_JIRA_FILE` — the board list and repo mappings (`~/.backlog-manager/settings/jira.json`), defaulted so no suite reads the developer's real boards. Phase 1
+ * only reads it, but a real board list on a machine would change what `GET /api/jira` answers (and what the poller sweeps, once a suite arms it). A file under
+ * a fresh temp directory that does not exist yet reads as no boards and no mappings, which is what every suite that is not about Jira assumes. `||=`, like
+ * the blocks above the credentials: a suite that points it at a fixture keeps its own value.
+ */
+process.env.BM_JIRA_FILE ||= join(mkdtempSync(join(tmpdir(), 'bm-jira-')), 'jira.json');
