@@ -1,0 +1,28 @@
+# The CI gate for every PR into main (docs/workflows/ci.md). The job id must stay `ci` and no job may set `name:` — the ruleset requires the contexts
+# `ci / checks`, `ci / pr-title` and `ci / skills` by exactly those names.
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: futin/release-kit/.github/workflows/ci-node.yml@v1
+    with:
+      # The same three an orchestrated item's verification resolves to off package.json. `pnpm test` is already the union of jest and the node
+      # skills suite (scripts/test-all.mjs), so no `skills-command` is passed and `ci / skills` reports green without running anything.
+      check-commands: |
+        pnpm typecheck
+        pnpm build
+        pnpm test
