@@ -9144,10 +9144,15 @@ test('merge-check 12: a base held only by a worktree mid-rebase is invisible to 
   assert.equal(out.status, 0, out.stderr);
   const verdict = JSON.parse(out.stdout.trim());
   assert.equal(verdict.verdict, 'park');
+  // git's own wording is quoted verbatim, and it changed in 2.42: "is already checked out at" became "is already used by worktree at". Both are
+  // accepted so the suite holds on an older git too — node:22's Debian image ships 2.39 (docs/workflows/ci.md's Linux repro), this Mac 2.50.
+  const quoted = verdict.detail.match(/\(git: fatal: 'feature\/x' is already (?:used by worktree|checked out) at '(.*)'\)/);
+  assert.ok(quoted, verdict.detail);
   assert.equal(
     verdict.detail,
-    `feature/x is checked out at ${holder} but not cleanly (git: fatal: 'feature/x' is already used by worktree at '${holder}') — branch backlog/${MC_ID} kept for a manual merge`
+    `feature/x is checked out at ${holder} but not cleanly (${quoted[0].slice(1, -1)}) — branch backlog/${MC_ID} kept for a manual merge`
   );
+  assert.equal(quoted[1], holder);
   assert.equal(stageOf(fx), 'parked');
   assert.equal(verdict.created, false);
   assert.equal(readRunJson(fx).baseTree, undefined, 'a refused add must not record a base tree');
