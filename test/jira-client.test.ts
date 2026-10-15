@@ -80,12 +80,12 @@ describe('what each method puts on the wire', () => {
   it('search POSTs the body exactly, with nextPageToken present only when given', async () => {
     const { fake, client } = build();
     await client.search(auth, { jql: 'project = PAY', fields: ['summary'], maxResults: 100 });
-    await client.search(auth, { jql: 'project = PAY', fields: ['summary'], maxResults: 100, nextPageToken: 'p100' });
+    await client.search(auth, { jql: 'project = PAY', fields: ['summary'], maxResults: 100, nextPageToken: 'p1' });
     expect(fake.calls[0]).toMatchObject({ method: 'POST', url: `${GATEWAY}/search/jql` });
     expect(fake.calls[0].headers['content-type']).toBe('application/json');
     expect(fake.calls[0].body).toEqual({ jql: 'project = PAY', fields: ['summary'], maxResults: 100 });
     expect(Object.keys(fake.calls[0].body as object)).toEqual(['jql', 'fields', 'maxResults']);
-    expect(fake.calls[1].body).toEqual({ jql: 'project = PAY', fields: ['summary'], maxResults: 100, nextPageToken: 'p100' });
+    expect(fake.calls[1].body).toEqual({ jql: 'project = PAY', fields: ['summary'], maxResults: 100, nextPageToken: 'p1' });
   });
 
   it('issue, transitions, projects, parseJql and approximateCount build their URLs and bodies', async () => {
@@ -163,6 +163,20 @@ describe('response normalisation', () => {
     const fetchImpl = (async () =>
       new Response(JSON.stringify({ errorMessages: [], errors: { assignee: 'User cannot be assigned' } }), { status: 400 })) as unknown as typeof fetch;
     expect((await new JiraClient(fetchImpl).myself(auth)).message).toBe('assignee: User cannot be assigned');
+  });
+
+  it('a gateway { code, message } body (its own 401/403) gives its message, after errorMessages and errors yield nothing', async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ code: 403, message: 'scope does not match' }), { status: 403 })) as unknown as typeof fetch;
+    expect((await new JiraClient(fetchImpl).myself(auth)).message).toBe('scope does not match');
+    const { fake, client } = build();
+    fake.unauthorized = true;
+    expect((await client.myself(auth)).message).toBe('Unauthorized');
+  });
+
+  it('errorMessages still wins over a top-level message', async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ errorMessages: ['first'], errors: {}, message: 'second' }), { status: 400 })) as unknown as typeof fetch;
+    expect((await new JiraClient(fetchImpl).myself(auth)).message).toBe('first');
   });
 
   it('a 400 with both arrays empty says "Jira answered 400"', async () => {
@@ -423,11 +437,11 @@ describe('FakeJira', () => {
     fake.answers.set('all', ['PAY-1', 'PAY-2', 'PAY-3', 'PAY-4', 'PAY-5']);
     const p1 = await search(client, 'all', { maxResults: 2 });
     expect(keys(p1 as never)).toEqual(['PAY-1', 'PAY-2']);
-    expect(p1.data).toMatchObject({ isLast: false, nextPageToken: 'p2' });
-    const p2 = await search(client, 'all', { maxResults: 2, nextPageToken: 'p2' });
+    expect(p1.data).toMatchObject({ isLast: false, nextPageToken: 'p1' });
+    const p2 = await search(client, 'all', { maxResults: 2, nextPageToken: 'p1' });
     expect(keys(p2 as never)).toEqual(['PAY-3', 'PAY-4']);
-    expect(p2.data).toMatchObject({ isLast: false, nextPageToken: 'p4' });
-    const p3 = await search(client, 'all', { maxResults: 2, nextPageToken: 'p4' });
+    expect(p2.data).toMatchObject({ isLast: false, nextPageToken: 'p2' });
+    const p3 = await search(client, 'all', { maxResults: 2, nextPageToken: 'p2' });
     expect(keys(p3 as never)).toEqual(['PAY-5']);
     expect(p3.data).toEqual({ issues: expect.any(Array), isLast: true });
   });

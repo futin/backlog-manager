@@ -10,8 +10,8 @@
  *    scoped API token (the kind Atlassian now issues by default) can reach; a classic token works there too, so the server never has to know which it holds
  *    to make a read. The two exceptions are `tenantInfo` and `myselfAtSite`, below, and both are asked on purpose.
  * 2. **`tenant_info` is unauthenticated.** `GET https://<site>/_edge/tenant_info` answers `{ cloudId }` to anyone who can name the site, which is exactly
- *    what lets the server turn a hostname into the gateway path WITHOUT first sending a credential to an address it has not yet validated as Jira Cloud. It
- *    carries no `authorization` header at all.
+ *    what lets the server turn a hostname into the gateway path without a credential in that first request. It is not a validation of the site — the
+ *    operator's own configuration names it, and `myselfAtSite` later sends credentials to it by design. It carries no `authorization` header at all.
  * 3. **The token sits in one header and nowhere else.** `authorization: Basic base64(email:token)` is built in one place (`headers`), never logged, never in
  *    a URL, never in an error message — a `message` here is Jira's own sentence or the transport error's, neither of which can contain it. The call log a test
  *    reads (`FakeJira.calls`) is how the suite proves it (§10).
@@ -214,21 +214,24 @@ export class JiraClient {
 }
 
 /**
- * Jira's own sentence for a failure: `errorMessages` first, then `errors` as `field: text`, joined by `; `. A body with neither (an HTML gateway page, an
+ * Jira's own sentence for a failure: `errorMessages` first, then `errors` as `field: text`, joined by `; `, then a top-level `message` (the gateway's own shape). A body with none of them (an HTML gateway page, an
  * empty 502, both arrays empty) is `Jira answered <status>` — so a message is never empty and never raw HTML.
  */
 function errorMessage(status: number, parsed: unknown): string {
-  const body = (parsed ?? {}) as { errorMessages?: unknown; errors?: unknown };
+  const body = (parsed ?? {}) as { errorMessages?: unknown; errors?: unknown; message?: unknown };
   const parts: string[] = [];
   if (Array.isArray(body.errorMessages)) for (const m of body.errorMessages) if (typeof m === 'string' && m !== '') parts.push(m);
   if (typeof body.errors === 'object' && body.errors !== null) {
     for (const [field, text] of Object.entries(body.errors)) if (typeof text === 'string' && text !== '') parts.push(`${field}: ${text}`);
   }
+  // The gateway answers its own 401 and 403 as `{ code, message }` rather than Jira's shape; it is the only sentence those carry.
+  if (parts.length === 0 && typeof body.message === 'string' && body.message !== '') parts.push(body.message);
   return parts.length > 0 ? parts.join('; ') : `Jira answered ${status}`;
 }
 
 function numberHeader(value: string | null): number | null {
   if (value === null || value.trim() === '') return null;
   const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  // Never negative: a `retry-after: -5` would otherwise put the 429 window in the past.
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }

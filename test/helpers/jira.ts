@@ -102,7 +102,8 @@ export class FakeJira {
   issues = new Map<string, RawIssue>();
   transitions = new Map<string, FakeTransition[]>();
   projects: { key: string; name: string }[] = [];
-  /** Canned search results by EXACT JQL, for a person's query; the server's own JQL is resolved against `issues` instead. */
+  /** Canned search results by EXACT JQL, for a person's query; the server's own JQL is resolved against `issues` instead. Keys not seeded in `issues` are
+   *  dropped, so a case seeds every key it names. */
   answers = new Map<string, string[]>();
   counts = new Map<string, number>();
   parseErrors = new Map<string, string[]>();
@@ -206,12 +207,14 @@ export class FakeJira {
       const req = body as { jql: string; fields: string[]; maxResults: number; nextPageToken?: string };
       const found = this.resolve(req.jql);
       if ('error' in found) return this.refuse(400, found.error);
-      const start = req.nextPageToken ? Number(req.nextPageToken.replace(/^p/, '')) : 0;
+      // The token is a page INDEX (`p1` points at the second page, `p2` the third), not an offset: that is what Task 6's paging cases assert.
+      const page = req.nextPageToken ? Number(req.nextPageToken.replace(/^p/, '')) : 0;
+      const start = page * req.maxResults;
       const end = Math.min(start + req.maxResults, found.keys.length);
       const issues = found.keys.slice(start, end).map((k) => this.subset(this.issues.get(k)!, req.fields));
       // A Jira that claims more pages and names none (`omitNextPageToken`) is answered on EVERY page, last included: the caller must stop on the absent token.
       if (this.omitNextPageToken) return this.json(200, { issues, isLast: false });
-      return this.json(200, end >= found.keys.length ? { issues, isLast: true } : { issues, isLast: false, nextPageToken: `p${end}` });
+      return this.json(200, end >= found.keys.length ? { issues, isLast: true } : { issues, isLast: false, nextPageToken: `p${page + 1}` });
     }
 
     const issuePath = /^\/issue\/([^/]+)(\/transitions)?$/.exec(path);
