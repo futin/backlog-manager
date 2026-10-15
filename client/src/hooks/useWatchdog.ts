@@ -1,17 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { fetchWatchdog, updateWatchdogConfig } from '../lib/agents';
+import { useCoalescedFetch } from './useCoalescedFetch';
+import { useMountedRef } from './useMountedRef';
 import type { WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
- * How often to poll `GET /api/agents/watchdog` while the sweeper reports
+ * How long after one `GET /api/agents/watchdog` settles the next is asked
+ * (#277: from the answer, not the wall clock), while the sweeper reports
  * `armed` AND the caller asked to be live — `WatchdogMonitor`'s state line
  * ("next check in 42s") and its per-row heartbeat ages both have to move on
  * their own for either to be worth showing at all. 5s, the identical cadence
  * `useOrchestratorRuns`' own `POLL_MS` uses for the live run strip, and for
  * the same balancing act: fast enough that the card reads as live rather
  * than stale, slow enough that leaving Runs › Watchdog open all afternoon
- * costs a trickle of same-origin GETs rather than a flood.
+ * costs a trickle of same-origin GETs rather than a flood. A slow answer slows
+ * the poll rather than stacking requests behind it.
  *
  * task-18: this number used to be justified by a Settings row. It no longer
  * is — Settings passes `live: false` and prints nothing that moves — and the
@@ -46,9 +50,12 @@ export type WatchdogSaveError = { field: keyof WatchdogConfig | null; message: s
  * The watchdog's own status (design §4.2, §6.4) — the one hook both
  * `WatchdogMonitor` (Runs › Watchdog) and `WatchdogGroup` (Settings) read,
  * mount + focus like `useAgents`, plus the ARMED-ONLY poll
- * `useOrchestratorRuns` already established the pattern for: an interval
+ * `useOrchestratorRuns` already established the pattern for: a poll
  * that exists only while there is something worth re-reading on a clock,
- * torn down the moment there is not.
+ * torn down the moment there is not. #277: never two reads of its own in
+ * flight — a mount, focus, `reload` or tick that lands mid-flight queues one
+ * follow-up behind it (`useCoalescedFetch`); `save` is a write and stays
+ * outside that.
  *
  * `live` (task-18) is the second half of that same "only poll when there is
  * something to poll FOR" argument, moved from the hook's own knowledge to
@@ -57,7 +64,7 @@ export type WatchdogSaveError = { field: keyof WatchdogConfig | null; message: s
  * Settings, after the monitor took its State row and Activity feed away,
  * renders four knobs and nothing else — a poll there redraws identical
  * output forever — so it passes `live: false`. The monitor takes the
- * default. `live: false` skips the interval and NOTHING else: the mount
+ * default. `live: false` skips the poll and NOTHING else: the mount
  * fetch, the focus refetch, `save()` and the error posture below are
  * deliberately identical under both settings, because those are how a
  * Settings group learns the sweeper's config changed on another device, and
@@ -100,24 +107,14 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<WatchdogSaveError | null>(null);
 
-  // Flipped false on unmount, checked before every setState below — the
-  // identical guard and identical StrictMode rationale `useOrchestratorRuns`'
-  // own `mountedRef` carries (see that hook's comment for the full
-  // mechanics): re-asserted in the effect BODY, not only in `useRef`'s
-  // initializer, because `useRef`'s initial value is computed exactly once
-  // for the life of the fiber and never again on a later effect run, so a
-  // StrictMode dev-only mount → cleanup → remount cycle would otherwise
-  // leave this flag stuck `false` for the whole of the component's real,
-  // on-screen life.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  // Flipped false on unmount, checked before every setState below — a
+  // request can land after the component is gone (see `useMountedRef` for the
+  // mechanics, StrictMode included).
+  const mountedRef = useMountedRef();
 
-  const reload = useCallback(async () => {
+  // The read itself; what `reload` and the poll tick both run, through
+  // `useCoalescedFetch` below so it is never in flight twice.
+  const load = useCallback(async () => {
     try {
       const fresh = await fetchWatchdog();
       if (mountedRef.current) {
@@ -140,7 +137,22 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
         setError(e instanceof Error ? e.message : 'failed to load watchdog status');
       }
     }
-  }, []);
+  }, [mountedRef]);
+
+  // The armed-only poll: a timer chain that exists only while the caller
+  // asked to be live AND `status?.phase` reads `'armed'`.
+  // `useOrchestratorRuns`' own polling makes the identical trade for the
+  // identical reason — a surface left open and unattended must not spend that
+  // whole stretch polling an API for a state that is not moving. The moment a
+  // read lands `'armed'`, the timer is armed (`WATCHDOG_POLL_MS` after that
+  // answer settled); the moment a later read finds `'idle'`/`'off'` again,
+  // the render that shows it clears the timer. A read already in flight at
+  // that moment still lands and updates state, and nothing re-arms after it.
+  //
+  // `live` sits in the same condition rather than wrapping the hook, so a
+  // caller that ever flips the flag gets the timer armed or cleared on that
+  // render like any other input.
+  const reload = useCoalescedFetch(load, { armed: live && status?.phase === 'armed', intervalMs: WATCHDOG_POLL_MS });
 
   const save = useCallback(async (patch: Partial<WatchdogConfig>) => {
     // Cleared synchronously, BEFORE the await: a retry must not sit there
@@ -187,26 +199,6 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [reload]);
-
-  // The armed-only poll: an interval that exists only while the caller asked
-  // to be live AND `status?.phase` reads `'armed'`.
-  // `useOrchestratorRuns`' own polling effect makes the identical trade for
-  // the identical reason — a surface left open and unattended must not spend
-  // that whole stretch polling an API for a state that is not moving. The
-  // moment a reload lands `'armed'`, this effect reruns and installs the
-  // interval; the moment a later reload finds `'idle'`/`'off'` again, it
-  // reruns once more and tears the interval back down on that very render.
-  //
-  // `live` sits in the same guard and the same dependency array rather than
-  // wrapping the effect, so a caller that ever flips the flag gets the
-  // interval installed or torn down on that render like any other input.
-  useEffect(() => {
-    if (!live || status?.phase !== 'armed') return;
-    const id = setInterval(() => {
-      void reload();
-    }, WATCHDOG_POLL_MS);
-    return () => clearInterval(id);
-  }, [live, status?.phase, reload]);
 
   return { status, error, saveError, reload, save };
 }

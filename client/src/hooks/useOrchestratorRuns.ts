@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { fetchOrchestratorRuns } from '../lib/agents';
+import { useCoalescedFetch } from './useCoalescedFetch';
+import { useMountedRef } from './useMountedRef';
 import type { OrchestratorRunsPayload } from '../../../shared/types';
 
 /**
- * How often to poll while at least one run is fresh. Five seconds is fast
- * enough that a live run (Task 11) reads as live without feeling laggy,
- * and slow enough that leaving the board open all afternoon costs a trickle
- * of same-origin GETs rather than a flood of them.
+ * How long after one poll's answer settles the next poll starts, while at
+ * least one run is fresh (#277: after the answer, not on the wall clock — see
+ * `useCoalescedFetch`, which this hook's fetch is wrapped in). Five seconds is
+ * fast enough that a live run (Task 11) reads as live without feeling laggy, and
+ * slow enough that leaving the board open all afternoon costs a trickle of
+ * same-origin GETs rather than a flood of them.
  *
  * Exported (fix round 1) for the surface that reads it as its own "how young
  * does a heartbeat have to be to read as 'live'" threshold — this poller is
@@ -80,8 +84,15 @@ function hasResumed(runs: OrchestratorRunsPayload['runs'], project: string): boo
  * of those two needs: a run already in progress keeps changing on its own,
  * with nobody touching this tab at all, so mount+focus alone would leave the
  * queue frozen at whatever it looked like when you last clicked in. See the
- * polling effect below for how that interval is scoped to exactly the
- * stretch where it is useful, and torn down the moment it stops being so.
+ * polling section below for how that poll is scoped to exactly the stretch
+ * where it is useful, and torn down the moment it stops being so.
+ *
+ * #277: this hook never has two of its own requests in flight. A mount, a
+ * focus, a resume click or a poll tick that arrives while one is outstanding
+ * starts nothing; it queues exactly ONE follow-up that runs the moment the
+ * outstanding one settles (`useCoalescedFetch`). The poll used to be a
+ * wall-clock interval timer, which kept firing into a server that had stopped answering
+ * and stacked a pending request per tick.
  *
  * `runs` starts `[]` — the same shape `GET /api/orchestrator/runs` (Task 8)
  * itself answers with for a project that has never run the orchestrator —
@@ -125,85 +136,55 @@ export function useOrchestratorRuns(): {
    */
   const [resumeMarks, setResumeMarks] = useState<Map<string, number>>(() => new Map());
 
-  // Flipped false on unmount, checked before every setRuns below. Unlike
-  // useAgents/useBoard — each has at most one in-flight fetch at a time,
-  // always triggered by a human action (mount, a click back into the tab) —
-  // this hook can have a poll in flight the moment the component goes away,
-  // so that response would otherwise land on a hook nobody is reading any
-  // more. A plain ref is cheaper here than threading an AbortController
-  // through fetchOrchestratorRuns for a cancellation that would buy nothing
-  // beyond what this already gets: the in-flight request still completes
-  // either way, only what happens with its answer changes.
-  //
-  // The `true` has to be set HERE, in the effect body, not only in
-  // `useRef(true)`'s initializer — `useRef`'s initial value is computed
-  // exactly once for the lifetime of the fiber, never again on a later
-  // effect run, whereas this effect body runs every time the effect
-  // (re-)fires. That distinction is invisible on a plain mount, where both
-  // ever happen exactly once each, but StrictMode's dev-only mount → cleanup
-  // → remount sequence (client/src/main.tsx wraps <App> in <StrictMode>)
-  // runs the cleanup below once *before* the lasting mount: with only the
-  // initializer setting `true`, that first cleanup flips the ref to `false`
-  // and nothing ever flips it back, so the guard reads "unmounted" for the
-  // rest of the component's real, on-screen lifetime — every `refresh()`
-  // silently skips its `setRuns`, and the hook reports zero data and never
-  // polls from the very first real mount onward. Re-asserting `true` in the
-  // effect body means the remount's own run re-arms it correctly.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  // Flipped false on unmount, checked before every setRuns below. A poll can
+  // be in flight the moment the component goes away (see `useMountedRef` for
+  // why a ref rather than an abort, and for the StrictMode trap in how it is
+  // set).
+  const mountedRef = useMountedRef();
 
-  const refresh = useCallback(() => {
-    fetchOrchestratorRuns()
-      .then((payload) => {
-        if (!mountedRef.current) return;
-        setRuns(payload.runs);
-        // `payload.starting ?? []`, not `payload.starting`: this hook is the
-        // one place a response from an OLDER server (one built before
-        // task-14, which a dev box can absolutely be serving while a newer
-        // client bundle is open) reaches React state, and `starting` is
-        // typed non-optional. Without the fallback, `.some()` below and the
-        // board's own `.find()` would throw on undefined and take the whole
-        // board down over a field that only ever adds a card.
-        setStarting(payload.starting ?? []);
-        // Same fallback, same reason, for task-48's array.
-        setRemote(payload.remote ?? []);
-        // task-17: drop marks this payload has answered or that have simply
-        // run out. Purely housekeeping — `resuming` below re-applies both
-        // rules on every render, so an unpruned map never lies, it only
-        // grows. Same pure/mutating split `StartingRunsService` keeps for
-        // the same reason: correctness never depends on the sweep.
-        setResumeMarks((prev) => {
-          const now = Date.now();
-          const next = new Map([...prev].filter(([project, expiresAt]) => now < expiresAt && !hasResumed(payload.runs, project)));
-          // Same Map when nothing was dropped, so a landed payload that
-          // changed nothing here does not force an extra render.
-          return next.size === prev.size ? prev : next;
-        });
-      })
-      // A failed poll (the API hiccups, the box is mid-restart) keeps
-      // whatever is already in state, the same fallback `useBoard`'s own
-      // refetch makes. There is no error field on this hook's return value
-      // for a caller to render one from, so the only sane behaviour is to
-      // leave the last good queue on screen and let the next mount, focus,
-      // or interval tick try again — not blank out a run that is still
-      // actually running because one request dropped.
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const onFocus = (): void => refresh();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [refresh]);
+  // The ONE way a request leaves this hook: the mount fetch, the focus
+  // refetch, the poll tick and `refresh`/`noteResume` below all go through it,
+  // so no two of them can be in flight together. The `armed` condition and
+  // the cadence are the polling section's, declared after `anyLive` exists.
+  const load = useCallback(
+    () =>
+      fetchOrchestratorRuns()
+        .then((payload) => {
+          if (!mountedRef.current) return;
+          setRuns(payload.runs);
+          // `payload.starting ?? []`, not `payload.starting`: this hook is the
+          // one place a response from an OLDER server (one built before
+          // task-14, which a dev box can absolutely be serving while a newer
+          // client bundle is open) reaches React state, and `starting` is
+          // typed non-optional. Without the fallback, `.some()` below and the
+          // board's own `.find()` would throw on undefined and take the whole
+          // board down over a field that only ever adds a card.
+          setStarting(payload.starting ?? []);
+          // Same fallback, same reason, for task-48's array.
+          setRemote(payload.remote ?? []);
+          // task-17: drop marks this payload has answered or that have simply
+          // run out. Purely housekeeping — `resuming` below re-applies both
+          // rules on every render, so an unpruned map never lies, it only
+          // grows. Same pure/mutating split `StartingRunsService` keeps for
+          // the same reason: correctness never depends on the sweep.
+          setResumeMarks((prev) => {
+            const now = Date.now();
+            const next = new Map([...prev].filter(([project, expiresAt]) => now < expiresAt && !hasResumed(payload.runs, project)));
+            // Same Map when nothing was dropped, so a landed payload that
+            // changed nothing here does not force an extra render.
+            return next.size === prev.size ? prev : next;
+          });
+        })
+        // A failed poll (the API hiccups, the box is mid-restart) keeps
+        // whatever is already in state, the same fallback `useBoard`'s own
+        // refetch makes. There is no error field on this hook's return value
+        // for a caller to render one from, so the only sane behaviour is to
+        // leave the last good queue on screen and let the next mount, focus,
+        // or poll tick try again — not blank out a run that is still
+        // actually running because one request dropped.
+        .catch(() => {}),
+    [mountedRef]
+  );
 
   // Server-computed per run (`fresh` = status running AND heartbeated within
   // RUN_STALE_MS, shared/types.ts) — true exactly when at least one
@@ -254,36 +235,50 @@ export function useOrchestratorRuns(): {
     runs.some((run) => run.fresh || run.status === 'running') || remote.some((run) => run.status === 'running') || starting.length > 0 || resuming.size > 0;
 
   /**
-   * The point of this hook: an interval that exists only while it has
-   * something to report on. `useNow` (client/src/hooks/useNow.ts) already
-   * makes this exact trade for its own per-minute tick — installing no timer
-   * at all while its `enabled` flag is false — and the reasoning here is the
-   * same, with a sharper cost. That hook's timer merely re-renders a label
-   * whose props have not changed; this one fires a real network request
-   * every tick. A board left open and unattended for hours — a spare
-   * monitor, a forgotten tab — must not spend that whole stretch polling an
-   * API for a run that finished (or never started) long ago: with nothing
-   * live, `anyLive` is false, this effect's guard clause returns before
-   * ever calling `setInterval`, and the cleanup from the last time it WAS
-   * true (if ever) has already cleared that interval on the render where
-   * `anyLive` flipped. A quiet board therefore costs exactly the two
-   * requests mount and focus already cost it, forever, and not one more.
-   * The moment a run goes live — fresh, or newly crashed — the next mount,
-   * focus, or a launch elsewhere in the app that this same focus effect
-   * will pick up — this effect reruns, installs the interval, and polling
-   * resumes; the moment the last live run finishes (truly `done`,
-   * `aborted`, or `failed` — not merely gone stale) this effect reruns
-   * again and tears the interval back down on that very render. Mount and
-   * window focus (both effects above) are untouched by any of this and
-   * keep refreshing in both worlds — which is what lets a quiet board still
-   * notice a brand new run the instant you switch back to the tab, instead
-   * of waiting up to 5s for a poll that, by definition, was not running yet.
+   * The point of this hook: a poll that exists only while it has something to
+   * report on. `useNow` (client/src/hooks/useNow.ts) already makes this exact
+   * trade for its own per-minute tick — installing no timer at all while its
+   * `enabled` flag is false — and the reasoning here is the same, with a
+   * sharper cost. That hook's timer merely re-renders a label whose props have
+   * not changed; this one fires a real network request every tick. A board
+   * left open and unattended for hours — a spare monitor, a forgotten tab —
+   * must not spend that whole stretch polling an API for a run that finished
+   * (or never started) long ago: with nothing live, `anyLive` is false, no
+   * timer is armed, and the pending one from the last time it WAS true was
+   * cleared on the render where `anyLive` flipped. A quiet board therefore
+   * costs exactly the two requests mount and focus already cost it, forever,
+   * and not one more. The moment a run goes live — fresh, or newly crashed —
+   * the next mount, focus, or a launch elsewhere in the app that this same
+   * focus handler will pick up — the landed payload arms the timer, and
+   * polling resumes; the moment the last live run finishes (truly `done`,
+   * `aborted`, or `failed` — not merely gone stale) the render that shows it
+   * clears the timer again. A poll that was already in flight at that moment
+   * still lands and updates state, and nothing re-arms after it. Mount and
+   * window focus (both effects below) are untouched by any of this and keep
+   * refreshing in both worlds — which is what lets a quiet board still notice
+   * a brand new run the instant you switch back to the tab, instead of
+   * waiting up to 5s for a poll that, by definition, was not running yet.
+   *
+   * #277: the cadence is "`POLL_MS` after the last answer settled", not "every
+   * `POLL_MS`" — see `useCoalescedFetch`. `refresh` is the same single door
+   * the tick uses, so a focus or a resume click that lands mid-flight queues
+   * one follow-up behind the request already out instead of racing it. It
+   * returns nothing: callers fire a refresh, they never wait on one.
    */
+  const request = useCoalescedFetch(load, { armed: anyLive, intervalMs: POLL_MS });
+  const refresh = useCallback(() => {
+    void request();
+  }, [request]);
+
   useEffect(() => {
-    if (!anyLive) return;
-    const id = setInterval(refresh, POLL_MS);
-    return () => clearInterval(id);
-  }, [anyLive, refresh]);
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const onFocus = (): void => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refresh]);
 
   /**
    * "A resume was just asked for on this project" (task-17) — records a

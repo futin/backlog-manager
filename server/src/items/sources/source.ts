@@ -25,8 +25,8 @@ import type {
  * service's control flow does not change again.
  *
  * Asynchronous throughout, which phase 1 chose before it had an adapter that
- * needed it: `FilesSource` is synchronous underneath, and `GithubSource`
- * (task-45) reads a cache a poller fills. Making the signature async in the
+ * needed it: `FilesSource`'s scan is mostly synchronous `fs` reads
+ * with an awaited git read (#277), and `GithubSource` (task-45) reads a cache a poller fills. Making the signature async in the
  * phase where nothing else was moving is why the controller, the service and
  * every test had already learned to await by the time network I/O, a cache and
  * a poller arrived.

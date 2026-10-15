@@ -421,7 +421,7 @@ describe('the board’s own poll', () => {
   it('matches the server’s poll interval', () => {
     // Two constants, one number, and a test rather than an import: the client
     // module is bundled into the browser and the server's imports Nest. A
-    // client interval slower than the server's would make the rendered age
+    // client poll period longer than the server's would make the rendered age
     // claim the items are older than they are.
     expect(BOARD_TRACKER_POLL_MS).toBe(TRACKER_POLL_MS);
   });
@@ -434,7 +434,7 @@ describe('the board’s own poll', () => {
       await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
       const filesOnly = (global.fetch as jest.Mock).mock.calls.length;
       jest.advanceTimersByTime(BOARD_TRACKER_POLL_MS * 2);
-      // No interval at all on a board with no tracker: every card is a pure
+      // No poll timer at all on a board with no tracker: every card is a pure
       // function of props that cannot change without an event this tab sees.
       expect((global.fetch as jest.Mock).mock.calls.length).toBe(filesOnly);
     } finally {
@@ -482,7 +482,7 @@ describe('a tracker project whose sync is off (#17)', () => {
   it.each([
     ['every tracker project is off', 'off' as const, false],
     ['the tracker project is at 5m', '5m' as const, true]
-  ])('re-reads the payload on the board’s interval only while some tracker syncs — %s', async (_label, interval, polls) => {
+  ])('re-reads the payload on the board’s poll timer only while some tracker syncs — %s', async (_label, interval, polls) => {
     jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
     try {
       stubFetch([item({})], projects({ interval }));

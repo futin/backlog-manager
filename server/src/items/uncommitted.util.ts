@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { runGit } from '../git-run.util';
 
 /**
  * uncommitted.util.ts — which item files the working tree holds in a state a
@@ -70,8 +71,16 @@ import { join } from 'node:path';
  *    `ls-tree -r --name-only main -- backlog` lists every path `main` holds,
  *    once per request, and a flagged path missing from that listing is
  *    absent. `cat-file -e main:<path>` per flagged path answers the same
- *    question but costs one spawn per row on a synchronous request path,
+ *    question but costs one spawn per row — N process launches per request —
  *    which is the cost this module's whole shape avoids.
+ *
+ * Since #277 every read here is ASYNC and time-bounded, so a slow repository
+ * makes THIS route slow instead of freezing the process — and Decision 1
+ * extends to the new seam: there is no in-flight sharing either. Two
+ * concurrent callers spawn git twice, because a call that arrives after an
+ * edit must not be handed a read that began before it (`git-dates.util.ts`
+ * shares a pending spawn precisely because its question has a cheap key that
+ * says when sharing is safe; this one has none). `test/git-run.test.ts` pins it.
  */
 
 /**
@@ -113,23 +122,14 @@ function unknown(): UncommittedItems {
 }
 
 /**
- * null for every failure alike, exactly as `git-dates.util.ts`'s own `run`
- * does and for the same reason: this is a launch SURFACE, and an unreadable
- * repo must degrade to "no answer" rather than 500 the sheet. Bounded because
- * it runs synchronously inside a request.
+ * null for every failure alike — a timeout included — exactly as
+ * `git-dates.util.ts`'s own `run` does and for the same reason: this is a
+ * launch SURFACE, and an unreadable repo must degrade to "no answer" (`known:
+ * false`) rather than 500 the sheet. Async and time-bounded (`runGit`) because
+ * it runs inside a request (#277).
  */
-function run(cwd: string, args: string[]): string | null {
-  try {
-    return execFileSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      timeout: 5000,
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore']
-    });
-  } catch {
-    return null;
-  }
+function run(cwd: string, args: string[]): Promise<string | null> {
+  return runGit(args, { cwd, maxBuffer: 32 * 1024 * 1024 });
 }
 
 /** Non-empty lines, which is all any of the three git reads produces. */
@@ -165,8 +165,8 @@ function lines(out: string): string[] {
  * an argument list unchecked. A base that does not resolve still degrades to
  * `known: false` at the `rev-parse` below, the same seam `blobReaderAt` stops at.
  */
-export function uncommittedItemPaths(projectPath: string, base: string = UNCOMMITTED_BASE_REF): UncommittedItems {
-  const top = run(projectPath, ['-C', projectPath, 'rev-parse', '--show-toplevel']);
+export async function uncommittedItemPaths(projectPath: string, base: string = UNCOMMITTED_BASE_REF): Promise<UncommittedItems> {
+  const top = await run(projectPath, ['-C', projectPath, 'rev-parse', '--show-toplevel']);
   if (top === null) return unknown();
   try {
     if (realpathSync(top.trim()) !== realpathSync(projectPath)) return unknown();
@@ -174,7 +174,7 @@ export function uncommittedItemPaths(projectPath: string, base: string = UNCOMMI
     return unknown();
   }
 
-  const resolved = run(projectPath, ['-C', projectPath, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
+  const resolved = await run(projectPath, ['-C', projectPath, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
   if (resolved === null) return unknown();
 
   // Both reads are REQUIRED, and the asymmetry is the whole design: `diff`
@@ -183,7 +183,7 @@ export function uncommittedItemPaths(projectPath: string, base: string = UNCOMMI
   // module reports (verified 2026-09-07 against this machine's `ixray`, where
   // the diff printed nothing and `ls-files --others` printed the very bug the
   // 2026-09-06 sweep had recorded as skipped).
-  const diffed = run(projectPath, [
+  const diffed = await run(projectPath, [
     '-C',
     projectPath,
     '-c',
@@ -195,13 +195,13 @@ export function uncommittedItemPaths(projectPath: string, base: string = UNCOMMI
     '--',
     'backlog'
   ]);
-  const untracked = run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', 'backlog']);
+  const untracked = await run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', 'backlog']);
   // The third read answers each row's fate (Decision 3 in the header): every
   // path `main` holds under `backlog/`, so a flagged path missing from it is
   // absent. Quoted-path off for the same reason as the other two — an escaped
   // listing would not contain a raw non-ASCII path and would misreport an
   // edited item as absent.
-  const atBase = run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', base, '--', 'backlog']);
+  const atBase = await run(projectPath, ['-C', projectPath, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', base, '--', 'backlog']);
   // A failure of ANY of the three reads is a failure of the question:
   // reporting the part that worked — paths without their fates included —
   // would be a confident, incomplete statement of fact.

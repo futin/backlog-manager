@@ -163,7 +163,7 @@ describe('useOrchestratorRuns', () => {
     renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // The interval this whole hook exists to install — proof it actually
+    // The scheduled tick this whole hook exists to arm — proof it actually
     // armed, not just that a second fetch happens to follow.
     expect(jest.getTimerCount()).toBe(1);
 
@@ -172,8 +172,9 @@ describe('useOrchestratorRuns', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    // Not a one-shot timeout: the interval must still be armed after firing
-    // once, since a run in progress keeps needing a live queue for more than
+    // A one-shot timeout, re-armed by each answer rather than a repeating
+    // interval: the next tick must be scheduled again once this one's answer
+    // lands, since a run in progress keeps needing a live queue for more than
     // one tick.
     expect(jest.getTimerCount()).toBe(1);
     await act(async () => {
@@ -187,7 +188,7 @@ describe('useOrchestratorRuns', () => {
    * suite (every case there answered the SAME body on every call, so the
    * polling effect's dependency on `anyFresh` actually changing value was
    * never exercised — only the two static worlds either side of it). A run
-   * finishing for real must stop the interval on the very render that
+   * finishing for real must clear the scheduled tick on the very render that
    * discovers it, not merely stop scheduling new ones from that point while
    * an old one silently keeps ticking.
    *
@@ -213,7 +214,7 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(jest.getTimerCount()).toBe(0);
 
-    // And with the interval actually gone, nothing fires again on its own.
+    // And with the timer actually gone, nothing fires again on its own.
     await act(async () => {
       await jest.advanceTimersByTimeAsync(30_000);
     });
@@ -261,7 +262,7 @@ describe('useOrchestratorRuns', () => {
 
   /**
    * The done→fresh transition via focus, the other half of the gap fix
-   * round 1 flagged: a board sitting quiet (nothing live, no interval) must
+   * round 1 flagged: a board sitting quiet (nothing live, no tick scheduled) must
    * resume polling the instant a focus refetch discovers a run has gone
    * live — not wait for some later mount/focus to notice.
    *
@@ -270,7 +271,7 @@ describe('useOrchestratorRuns', () => {
    * 'running'` makes `payload(false)` alone a CRASHED (still-polling) shape
    * post-watchdog, not the truly-quiet starting point this case needs.
    */
-  it('a focus refetch that discovers a newly-fresh run re-arms the interval', async () => {
+  it('a focus refetch that discovers a newly-fresh run re-arms the poll timer', async () => {
     const fetchMock = stubFetchSequence([payloadWith('done', false), payload(true)]);
     renderHook(() => useOrchestratorRuns());
     await flush();
@@ -283,9 +284,9 @@ describe('useOrchestratorRuns', () => {
     await flush();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(jest.getTimerCount()).toBe(1); // now fresh: interval installed
+    expect(jest.getTimerCount()).toBe(1); // now fresh: next tick scheduled
 
-    // And it is a genuinely live interval, not a count that happens to read
+    // And it is a genuinely live timer, not a count that happens to read
     // 1 for an unrelated reason — prove it actually polls from here.
     await act(async () => {
       await jest.advanceTimersByTimeAsync(5_000);
@@ -295,13 +296,13 @@ describe('useOrchestratorRuns', () => {
 
   // --- Test case 5: unmount leaves nothing running --------------------------
 
-  it('leaves no interval and no focus listener behind on unmount', async () => {
+  it('leaves no pending timer and no focus listener behind on unmount', async () => {
     const fetchMock = stubFetch(payload(true));
     const { unmount } = renderHook(() => useOrchestratorRuns());
     await flush();
-    // One live interval — proof the fresh-world poll actually armed, so the
+    // One pending timer — proof the fresh-world poll actually armed, so the
     // count going to zero below is unmount clearing something real rather
-    // than an interval that was never installed to begin with.
+    // than a timer that was never scheduled to begin with.
     expect(jest.getTimerCount()).toBe(1);
 
     act(() => {
@@ -311,7 +312,7 @@ describe('useOrchestratorRuns', () => {
 
     // The listener side of the same claim: fire the exact event the case
     // above proved triggers a refetch, and show it no longer does — and
-    // advance well past a poll interval too, proving neither survived.
+    // advance well past a poll period too, proving neither survived.
     const callsAtUnmount = fetchMock.mock.calls.length;
     act(() => {
       window.dispatchEvent(new Event('focus'));
@@ -519,7 +520,7 @@ describe('useOrchestratorRuns', () => {
 
   it('stops polling once the starting entry is replaced by a finished run', async () => {
     // The whole point of the widening: the placeholder's own poll is what
-    // notices the real run landing, and the interval has to stand back down
+    // notices the real run landing, and the timer chain has to stand back down
     // once that run is over rather than outliving both shapes.
     const fetchMock = stubFetchSequence([
       { runs: [], starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }], remote: [] },
@@ -560,7 +561,7 @@ describe('useOrchestratorRuns', () => {
     const { result } = renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    // The ordinary rule: nothing here is live, so no interval is armed.
+    // The ordinary rule: nothing here is live, so no tick is scheduled.
     expect(jest.getTimerCount()).toBe(0);
 
     await act(async () => {

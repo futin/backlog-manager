@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { HttpException, Injectable } from '@nestjs/common';
@@ -11,6 +10,7 @@ import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
 import { resolveBaseBranch } from '../items/base-branch.util';
+import { runGit } from '../git-run.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
@@ -729,7 +729,7 @@ export class AgentsService {
     // reason both comments above give: a base naming no branch is a problem
     // with what the run should contain, not with whether it may start, so the
     // coded RUN_IN_PROGRESS_CODE 409 must still win over it.
-    const base = this.resolveBase(req.base, req.project);
+    const base = await this.resolveBase(req.base, req.project);
 
     return this.spawn(cfg, {
       project: dirName,
@@ -1526,7 +1526,7 @@ export class AgentsService {
     // the same honest refusal below.
     const entry = this.registry.load().projects.find((p) => p.path === project);
     const runnable = new Set(
-      (entry === undefined ? [] : scanProject(entry).items)
+      (entry === undefined ? [] : (await scanProject(entry)).items)
         // Exactly orchestrate.mjs's own candidate set: open, and one of the
         // two sections GATE_SECTIONS names. Ideas, refactors and
         // out-of-scope have nothing to execute by definition — the same
@@ -1714,7 +1714,7 @@ export class AgentsService {
    * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
    * gives.
    */
-  private resolveBase(base: string | undefined, project: string): string {
+  private async resolveBase(base: string | undefined, project: string): Promise<string> {
     // The two checks live in `resolveBaseBranch` since #254, shared with
     // `GET /api/items/uncommitted`, which must accept exactly the bases this
     // route accepts. The `'main'` short-circuit lives there too, and this is
@@ -1734,6 +1734,10 @@ export class AgentsService {
     // The tool still checks it at `init` (`assertUsableBase`), which is the
     // right place: that is where the run actually happens, and it has the
     // repository in hand rather than a registry entry.
+    //
+    // Async since #277: the two checks spawn git without blocking the event
+    // loop, and a timeout on either is a failed check — the same 400 a missing
+    // branch gets.
     return resolveBaseBranch(base, this.registry.load().projects.find((p) => p.path === project)?.path);
   }
 
@@ -1751,13 +1755,17 @@ export class AgentsService {
    * needs names; "where is this branch checked out" is a question about
    * merge time, and §9 of SKILL.md answers it then, from the run, rather than
    * from a snapshot taken when a picker was drawn.
+   *
+   * Async and time-bounded since #277 (`runGit`): a timeout answers
+   * `{ branches: [] }`, exactly as a non-zero exit does — an empty picker, not
+   * a 500 and not a frozen server.
    */
-  branches(project: string): { branches: string[] } {
+  async branches(project: string): Promise<{ branches: string[] }> {
     const entry = this.registry.load().projects.find((p) => p.path === project);
     if (entry === undefined) throw new HttpException({ error: 'project is not registered' }, 404);
-    const out = spawnSync('git', ['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/'], { encoding: 'utf8' });
-    if (out.status !== 0) return { branches: [] };
-    return { branches: out.stdout.split('\n').map((b) => b.trim()).filter((b) => b !== '') };
+    const out = await runGit(['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/']);
+    if (out === null) return { branches: [] };
+    return { branches: out.split('\n').map((b) => b.trim()).filter((b) => b !== '') };
   }
 
   /**

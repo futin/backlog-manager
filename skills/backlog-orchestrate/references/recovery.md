@@ -211,7 +211,10 @@ the refusal names, and end the turn.** Once the first abort has finished, a late
 fact, with the same reaction. Three callers are never refused by the mark: the session that took it (an abort that lost its process can finish its own work),
 a hand-run terminal with no `CLAUDE_CODE_SESSION_ID`, and anyone at all once the mark is older than fifteen minutes (that abort died mid-way).
 
-`abort` walks the queue, and for each item it asks one question of the disk: does this item's worktree copy still carry an in-progress `phase:` marker?
+`abort` walks the queue, and for each item it asks one question of the disk: does this item's worktree copy still carry an in-progress `phase:` marker? In a
+**tracker project** there is no item file to carry one, and the execute session runs no `start` under the run marker, so the question is asked of the run file
+instead: an item whose worktree exists and whose stage is still `dispatched` counts as marked (#265). That is the one stage an execute session writes into the
+worktree, and its edits are not committed until the run's next step.
 
 - **No marker** → it tears the item down: `git worktree remove --force` on the worktree, `git branch -D` on the branch, best-effort (a worktree or branch git
   has never heard of just fails harmlessly — that is the state abort is trying to reach anyway).
@@ -219,8 +222,12 @@ a hand-run terminal with no `CLAUDE_CODE_SESSION_ID`, and anyone at all once the
   anything, so it is the only copy of that item's work; `-D` would force past git's "not fully merged" check and leave nothing to recover from. Abort records
   the kept branch in `attention` — it needs no action, it is simply waiting to be merged by hand. A `merged` item is the opposite case and keeps today's
   behaviour: the run already deleted that branch at the merge, so the `-D` is a harmless no-op.
+- **No marker, but the item finished `parked` or `failed`** → it keeps **both** the worktree and the branch, the same as §9's park paths do (#264). The item
+  already ran `stop --keep-started`, so having no marker says nothing about its work: the branch holds commits that never reached the base, and in merge mode
+  it was never pushed, so it is the only copy. Abort records each one in `attention`, with the `worktree remove` / `branch -D` to run once nobody wants it.
 - **Marker present** → it leaves that item **completely alone**, worktree _and_ branch, and pushes an `attention` entry naming the absolute worktree path, the
-  exact `backlog.mjs stop <id>` to run, and the exact `worktree remove` / `branch -D` commands to finish with afterwards.
+  exact `backlog.mjs stop <id>` to run, and the exact `worktree remove` / `branch -D` commands to finish with afterwards. A tracker item's entry names no
+  `backlog.mjs stop` — there is no marker to clear, and its claim is released below with the rest — only the worktree path and the two cleanup commands.
 
 **In a tracker project it then gives every claim the run still holds back**, with the reason `aborted` and this run's bill, before it ends the run — every
 queue item that carries a claim and has not reached a stage that already released it, the marker-preserved ones included. Without that release the issue keeps
@@ -231,13 +238,13 @@ A files run makes no request at all. (For an item stranded by an abort from an o
 Before any of that, it fills in every queue item's empty `sessionId` from `<dir>/logs/<id>.jsonl` (bug-52) — a stop inside the dispatch block never reaches
 `watch`, which was the only other reader of the child's init event. A recorded id is never replaced, and a missing or unreadable log leaves the field null.
 
-Then it prints a one-line summary of three counts: what it removed, how many branches it kept because their items were `branched`, and what it left in place
-with a marker. And it ends the run through `finish --status aborted`, the same command SKILL.md §10 runs, so everything `finish` does on an abort happens here
-too. **In a run whose `mergeMode` is `pr` and that merged nothing, that includes deleting the empty run branch**: one `git update-ref -d` on `refs/heads/<run
-branch>`, run by the tool, only when the branch has no commit beyond `prTarget` and no worktree has it checked out, and otherwise kept with one stderr line
-(`references/tracker.md` §10, _The pull request_). There is no step for this session in it, and abort touches no other ref but the item branches above. A `pr`
-run that merged something keeps its run branch: abort opens no PR, so the summary names that pushed branch and gives the `gh pr create` line for it, built from
-`pr-draft` (SKILL.md §10).
+Then it prints a one-line summary of its counts: the sessions it signalled, what it removed, how many branches it kept because their items were `branched`,
+how many `parked`/`failed` items it kept whole, and what it left in place with a marker. And it ends the run through `finish --status aborted`, the same command
+SKILL.md §10 runs, so everything `finish` does on an abort happens here too. **In a run whose `mergeMode` is `pr` and that merged nothing, that includes deleting
+the empty run branch**: one `git update-ref -d` on `refs/heads/<run branch>`, run by the tool, only when the branch has no commit beyond `prTarget` and no
+worktree has it checked out, and otherwise kept with one stderr line (`references/tracker.md` §10, _The pull request_). There is no step for this session in it,
+and abort touches no other ref but the item branches above. A `pr` run that merged something keeps its run branch: abort opens no PR, so the summary names that
+pushed branch and gives the `gh pr create` line for it, built from `pr-draft` (SKILL.md §10).
 
 **That marker is the signal, and clearing markers _before_ `abort` destroys it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
 marker, classifies the item as safe, and `worktree remove --force`s a directory whose session was still working: `--force` deletes the working directory

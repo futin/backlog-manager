@@ -520,7 +520,7 @@ export class AgentsController {
    * reader than `/api/projects` already does.
    */
   @Get('branches')
-  branches(@Query('project') project: string | undefined): { branches: string[] } {
+  branches(@Query('project') project: string | undefined): Promise<{ branches: string[] }> {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
     return this.agents.branches(trimmed);
