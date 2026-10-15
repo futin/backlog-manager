@@ -54,3 +54,21 @@ export function installPreloadReload({ target, storage, reload, now = Date.now }
   target.addEventListener('vite:preloadError', onPreloadError);
   return () => target.removeEventListener('vite:preloadError', onPreloadError);
 }
+
+/**
+ * The page's own wiring, called by main.tsx before the first render. `window.sessionStorage` is a getter that THROWS (a `SecurityError`) in a browser
+ * that blocks site storage for this origin — and main.tsx runs at module top level, outside every boundary, so reading it there would blank the whole
+ * app before React draws anything: the very failure this file exists to prevent, caused by the cure (#270 fix loop 1). So the getter is read lazily,
+ * per call, inside the `try` blocks `installPreloadReload` already wraps around every storage access — a blocked storage then reads as "cannot carry
+ * the guard", which leaves the failure to `SectionBoundary` exactly as a throwing `getItem` does.
+ */
+export function installPreloadReloadOnWindow(win: Window): () => void {
+  return installPreloadReload({
+    target: win,
+    storage: {
+      getItem: (key) => win.sessionStorage.getItem(key),
+      setItem: (key, value) => win.sessionStorage.setItem(key, value),
+    },
+    reload: () => win.location.reload(),
+  });
+}

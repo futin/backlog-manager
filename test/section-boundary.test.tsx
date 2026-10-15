@@ -1,13 +1,15 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { lazy, Suspense } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { SectionBoundary } from '../client/src/components/SectionBoundary';
-import { RELOAD_GUARD_KEY, RELOAD_GUARD_MS, installPreloadReload } from '../client/src/lib/preload-reload';
+import { RELOAD_GUARD_KEY, RELOAD_GUARD_MS, installPreloadReload, installPreloadReloadOnWindow } from '../client/src/lib/preload-reload';
 
 /**
  * #270 — a rebuild while a tab is open deletes the lazy sections' chunks, and with no boundary and no `vite:preloadError` handler the next section
@@ -113,5 +115,69 @@ describe('installPreloadReload', () => {
     uninstall = installPreloadReload({ target: window, storage: window.sessionStorage, reload, now: () => now });
     fire();
     expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe('installPreloadReloadOnWindow', () => {
+  // A window whose `sessionStorage` getter throws, as a browser blocking site storage for this origin does. main.tsx calls this at module top level, before
+  // React renders anything, so a throw here is a blank app with no boundary to catch it (#270 fix loop 1).
+  function blockedStorageWindow(reload: () => void): { win: Window; fire: () => Event } {
+    const target = new EventTarget();
+    const win = {
+      addEventListener: target.addEventListener.bind(target),
+      removeEventListener: target.removeEventListener.bind(target),
+      location: { reload },
+    } as unknown as Window;
+    Object.defineProperty(win, 'sessionStorage', {
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+    });
+    const fire = (): Event => {
+      const event = new Event('vite:preloadError', { cancelable: true });
+      target.dispatchEvent(event);
+      return event;
+    };
+    return { win, fire };
+  }
+
+  it('installs without touching a sessionStorage that throws, so main.tsx cannot blank the app', () => {
+    const reload = jest.fn();
+    const { win, fire } = blockedStorageWindow(reload);
+    let uninstall: () => void = () => undefined;
+    expect(() => {
+      uninstall = installPreloadReloadOnWindow(win);
+    }).not.toThrow();
+
+    // A preload failure under blocked storage cannot carry the loop guard, so it does not reload — it propagates to SectionBoundary.
+    let event: Event | undefined;
+    expect(() => {
+      event = fire();
+    }).not.toThrow();
+    expect(reload).not.toHaveBeenCalled();
+    expect(event?.defaultPrevented).toBe(false);
+    uninstall();
+  });
+
+  it('is what main.tsx calls, and main.tsx reads no storage of its own at module top level', () => {
+    // A source guard because behaviour cannot reach main.tsx without rendering the whole app: the case above proves the function is safe, this proves
+    // the entry point goes through it rather than handing it `window.sessionStorage` evaluated eagerly — the shape fix loop 1 removed.
+    const main = readFileSync(join(__dirname, '../client/src/main.tsx'), 'utf8');
+    expect(main).toContain('installPreloadReloadOnWindow(window)');
+    expect(main).not.toMatch(/sessionStorage/);
+  });
+
+  it('reloads through the window it was given when storage works', () => {
+    const reload = jest.fn();
+    const uninstall = installPreloadReloadOnWindow({
+      addEventListener: window.addEventListener.bind(window),
+      removeEventListener: window.removeEventListener.bind(window),
+      sessionStorage: window.sessionStorage,
+      location: { reload },
+    } as unknown as Window);
+    window.dispatchEvent(new Event('vite:preloadError', { cancelable: true }));
+    expect(reload).toHaveBeenCalledTimes(1);
+    uninstall();
+    window.sessionStorage.clear();
   });
 });
