@@ -36,13 +36,13 @@ Deliberately not tracked, and each for a stated reason in [`.docs-sync.yml`](.do
 
 Five artefacts hold everything, and the single-writer column is the load-bearing part:
 
-| artefact                                             | one writer                                         | read by                                                                       |
-| ---------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `~/.backlog-manager/registry.json`                   | `skills/backlog/tools/backlog.mjs`                 | the server, per request, never cached                                         |
-| each project's `backlog/**/*.md`                     | the skills                                         | the server's scan; the client renders it                                      |
-| `~/.backlog-manager/orchestrator/<project>/run.json` | `skills/backlog-orchestrate/tools/orchestrate.mjs` | `server/src/orchestrator/`, fresh per request                                 |
-| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config it wrote, and — for the control file — `orchestrate.mjs`  |
-| `~/.backlog-manager/retro/`                          | `skills/backlog-retro/tools/retro.mjs record`      | `retro.mjs sweep`, read-only, for the deltas against the newest record        |
+| artefact                                             | one writer                                         | read by                                                                                                     |
+| ---------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `~/.backlog-manager/registry.json`                   | `skills/backlog/tools/backlog.mjs`                 | the server, per request, never cached                                                                       |
+| each project's `backlog/**/*.md`                     | the skills                                         | the server's scan; the client renders it                                                                    |
+| `~/.backlog-manager/orchestrator/<project>/run.json` | `skills/backlog-orchestrate/tools/orchestrate.mjs` | `server/src/orchestrator/`, fresh per request                                                               |
+| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config and the tracker sync intervals it wrote, and — for the control file — `orchestrate.mjs` |
+| `~/.backlog-manager/retro/`                          | `skills/backlog-retro/tools/retro.mjs record`      | `retro.mjs sweep`, read-only, for the deltas against the newest record                                      |
 
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
@@ -113,5 +113,5 @@ its tests decide — but the disagreement itself is a bug worth fixing in the sa
     - agents
     - docs/.docs-sync.yml
   kind: overview
-  verified: 5034d2de2916b416fcb5d654aa12b07a73507cdd
+  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
 -->

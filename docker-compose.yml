@@ -152,8 +152,11 @@ services:
       # throughout EXCEPT settings/ below: the server never writes anything
       # else here — backlog.mjs and orchestrate.mjs do, on the host.
       - ${HOME}/.backlog-manager:${HOME}/.backlog-manager:ro
-      # The one directory the server itself writes to — watchdog.json alone
-      # (watchdog-config.util.ts). A nested mount of a whole directory,
+      # The one directory the server itself writes to — watchdog.json
+      # (watchdog-config.util.ts), each project's pause or stop request under
+      # orchestrator-control/ (pause-control.util.ts) and tracker-sync.json
+      # (tracker/sync-config.util.ts). The whole directory has to stay
+      # read-write, not any one file in it. A nested mount of a whole directory,
       # deliberately not of the file: a bind mount of a path that does not
       # exist yet on the host is created as a directory, never as a file, so
       # mounting the file itself would either fail on a fresh machine or
