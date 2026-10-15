@@ -33,7 +33,7 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `ClaimRun` naming the run; it publishes the queue item as `ClaimState`
   through `heartbeat` from every command that changes one (`stage`, `usage`, `verify`, `assume`, `watch`'s tick); and it releases at a terminal stage
   (`merged`, `branched`, `failed`, `skipped`, `parked`, `ungroomed` — never `needs-answers`), billing `executeElapsed`/`executeTokens` on top of the counters
-  it reads first. **`abort` releases too, with the reason `aborted`** (bug-40): a torn-down run passes through no terminal stage, and an unreleased claim is
+  it reads first — less `claimBilled`, the usage a re-claim's seed already carries (#267), so a park and re-claim bill the pre-park spend once. **`abort` releases too, with the reason `aborted`** (bug-40): a torn-down run passes through no terminal stage, and an unreleased claim is
   not repaired by going stale — the mapper reads `started`/`phase` off any unreleased claim, fresh or stale, so the item's dispatch control stays disabled on
   every machine until a person intervenes. Since #240 that loop lives in `finish`, which `abort` ends with: every status but `paused` releases what the
   run still holds — a `needs-answers` item's claim on an ordinary `done`/`failed` finish — with the reason `finished`, or `aborted` on an abort. The released set is the one `heartbeat` already uses ("still holds": `claim` set and the stage not one that

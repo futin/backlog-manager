@@ -206,7 +206,10 @@ the refusal names, and end the turn.** Once the first abort has finished, a late
 fact, with the same reaction. Three callers are never refused by the mark: the session that took it (an abort that lost its process can finish its own work),
 a hand-run terminal with no `CLAUDE_CODE_SESSION_ID`, and anyone at all once the mark is older than fifteen minutes (that abort died mid-way).
 
-`abort` walks the queue, and for each item it asks one question of the disk: does this item's worktree copy still carry an in-progress `phase:` marker?
+`abort` walks the queue, and for each item it asks one question of the disk: does this item's worktree copy still carry an in-progress `phase:` marker? In a
+**tracker project** there is no item file to carry one, and the execute session runs no `start` under the run marker, so the question is asked of the run file
+instead: an item whose worktree exists and whose stage is still `dispatched` counts as marked (#265). That is the one stage an execute session writes into the
+worktree, and its edits are not committed until the run's next step.
 
 - **No marker** → it tears the item down: `git worktree remove --force` on the worktree, `git branch -D` on the branch, best-effort (a worktree or branch git
   has never heard of just fails harmlessly — that is the state abort is trying to reach anyway).
@@ -218,7 +221,8 @@ a hand-run terminal with no `CLAUDE_CODE_SESSION_ID`, and anyone at all once the
   already ran `stop --keep-started`, so having no marker says nothing about its work: the branch holds commits that never reached the base, and in merge mode
   it was never pushed, so it is the only copy. Abort records each one in `attention`, with the `worktree remove` / `branch -D` to run once nobody wants it.
 - **Marker present** → it leaves that item **completely alone**, worktree _and_ branch, and pushes an `attention` entry naming the absolute worktree path, the
-  exact `backlog.mjs stop <id>` to run, and the exact `worktree remove` / `branch -D` commands to finish with afterwards.
+  exact `backlog.mjs stop <id>` to run, and the exact `worktree remove` / `branch -D` commands to finish with afterwards. A tracker item's entry names no
+  `backlog.mjs stop` — there is no marker to clear, and its claim is released below with the rest — only the worktree path and the two cleanup commands.
 
 **In a tracker project it then gives every claim the run still holds back**, with the reason `aborted` and this run's bill, before it ends the run — every
 queue item that carries a claim and has not reached a stage that already released it, the marker-preserved ones included. Without that release the issue keeps
