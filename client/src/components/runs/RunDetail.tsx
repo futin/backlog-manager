@@ -4,6 +4,7 @@ import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { pickAuthority } from '../../lib/run-authority';
 import { projectLabel } from '../../lib/project-label';
+import { isPrUrl } from '../../../../shared/agent';
 import { mergeModeLabel, runDotTone, runStatusChip, stageChipClass, stageGlyph } from '../../lib/run-stage';
 import { formatTurns, formatUsd, itemStageSpans, itemUsageTotals, runStageTotals, runUsageTotals, runWallMs } from '../../lib/run-stats';
 import { isCrashed } from '../../lib/run-watchdog';
@@ -418,6 +419,10 @@ export function RunDetail({
   // byte-identically to before this feature existed for every run that
   // shape describes, which is every run ever archived before Task 9 landed.
   const modeLabel = mergeModeLabel(source.mergeMode, source.mergeModeEffective);
+  // The PR's number is read off the URL itself — the run file records only `prUrl`, and `isPrUrl` is the same pattern the tool and the server hold, so a
+  // value that fails it draws no link at all rather than an anchor with an unvetted href. `null` is the whole answer for every non-pr run and for a pr
+  // run whose `gh pr create` failed or was denied (`prUrl` stays `null`, spec §6).
+  const prNumber = isPrUrl(source.prUrl) ? (source.prUrl.split('/').pop() ?? null) : null;
   // The two-field distinction design §7 asks for ("plus ... the note, when
   // it differs") is deliberately NOT collapsed into `modeLabel` above: a
   // reader needs to tell "this run was TOLD to leave branches" apart from
@@ -538,7 +543,21 @@ export function RunDetail({
             {projectLabel(summary.project)}
           </span>
         }
-        sub={[summary.runId, itemCount].filter((part) => part !== null).join(' · ')}
+        sub={
+          <>
+            {[summary.runId, itemCount].filter((part) => part !== null).join(' · ')}
+            {prNumber !== null && (
+              <>
+                {' · '}
+                {/* spec §5: the run's one outbound link. `rel` carries both tokens because the href is a URL a run file supplied; the pattern guard above is
+                    the second half of its safety (the server's `sanitizeMergeFields` is the first), the same reasoning `linkBase` is clamped by. */}
+                <a className="sheet-link" data-testid="run-detail-pr-link" href={source.prUrl ?? undefined} target="_blank" rel="noopener noreferrer">
+                  {`PR #${prNumber}`}
+                </a>
+              </>
+            )}
+          </>
+        }
         right={
           /* task-17. `live` when there is one — it already carries `fresh`,
              `pauseRequested` and `watchdog`, the three fields the controls

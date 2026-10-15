@@ -17,7 +17,7 @@ import { FormSheet } from '../ui/FormSheet';
 import { Pill } from '../ui/Pill';
 import { Select } from '../ui/Select';
 import { MERGE_MODES, QUESTION_MODES, RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
-import type { BacklogItem, MergeMode, PermissionMode, QuestionMode } from '../../../../shared/types';
+import type { BacklogItem, MergeMode, PermissionMode, ProjectSummary, QuestionMode } from '../../../../shared/types';
 
 /**
  * The question-mode picker's own words (design §7), built the same way
@@ -117,6 +117,7 @@ const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git me
 export function OrchestrateSheet({
   project,
   projectName,
+  source,
   items,
   spawnMaxPermission,
   onClose,
@@ -127,6 +128,10 @@ export function OrchestrateSheet({
   project: string;
   /** Display name for the header; the registry's own name, not a path. */
   projectName: string;
+  /** The registered project's `ProjectSummary.source`, passed by `BoardView` — never read off `items[0]`, which is absent on an empty queue. It decides one
+   *  thing: `pr` is offered iff it is `'github'`, the same rule the server enforces with a 400 (`resolveMergeMode`). `null` (no store) and `'unsupported'`
+   *  (a marker this build cannot read) are NOT `files`, and neither is offered `pr`. */
+  source: ProjectSummary['source'];
   /** This project's items, unfiltered by the board's own search/status/sort
    *  — the preview below applies its own, narrower filter (see `queue`). */
   items: BacklogItem[];
@@ -178,7 +183,16 @@ export function OrchestrateSheet({
    * See `start` below for why the request always carries this value, even
    * when it is the untouched default.
    */
-  const [mergeMode, setMergeMode] = useState<MergeMode>(settings.orchestrateDefaultMergeMode);
+  const [pickedMergeMode, setMergeMode] = useState<MergeMode>(settings.orchestrateDefaultMergeMode);
+  /**
+   * `pr` opens a pull request through the tracker, so only a project whose source is `github` can run it; the server refuses it for any other with a 400,
+   * and this is the same rule one step earlier, as a picker that does not list it (spec §5). Settings cannot do the same, being pre-project — which is why a
+   * stored `pr` default has to be survivable here: it is read through `mergeMode` below, not `pickedMergeMode`, and falls back to `merge`, the posture an
+   * out-of-range stored value already gets (`clampSettings`). Derived in render rather than written back into state, so a project list that refreshes under
+   * an open sheet cannot leave a `pr` pick standing on a source that no longer offers it.
+   */
+  const prOffered = source === 'github';
+  const mergeMode: MergeMode = pickedMergeMode === 'pr' && !prOffered ? 'merge' : pickedMergeMode;
   /**
    * The question-mode picker (task-20; design §7) — seeded from Settings and
    * overridable for this launch only, the identical rule `mergeMode` above
@@ -301,10 +315,12 @@ export function OrchestrateSheet({
   // hooks/useDialogEscape.ts for the stack it registers with.
 
   /**
-   * The setup hint's data source (§6) — fetched only while `mergeMode` is
-   * actually `'merge'` (brief case 6: branch mode fetches nothing at all).
-   * Branch mode never touches the base, so this project's `git merge`
-   * coverage is none of its business — asking anyway would spend a request
+   * The setup hint's data source (§6) — fetched while `mergeMode` is anything
+   * but `'branch'` (brief case 6: branch mode fetches nothing at all). `pr`
+   * counts with `merge`: a pr run asks the classifier for the same `git merge`
+   * at every item, only into its run branch, so the allow rule matters to it
+   * just as much. Branch mode never touches the base, so this project's `git
+   * merge` coverage is none of its business — asking anyway would spend a request
    * nobody reads the answer to, and risk a hint flashing into view for the
    * one instant between picking 'merge' and picking 'branch' right back.
    *
@@ -326,7 +342,7 @@ export function OrchestrateSheet({
    * otherwise works.
    */
   useEffect(() => {
-    if (mergeMode !== 'merge') {
+    if (mergeMode === 'branch') {
       setMergeCoverage(null);
       return;
     }
@@ -1102,7 +1118,7 @@ export function OrchestrateSheet({
                     label="Merge mode"
                     value={mergeMode}
                     onChange={setMergeMode}
-                    options={MERGE_MODES.map((m) => ({ value: m, label: mergeModeLabels[m] }))}
+                    options={MERGE_MODES.filter((m) => m !== 'pr' || prOffered).map((m) => ({ value: m, label: mergeModeLabels[m] }))}
                   />
                 </label>
 
@@ -1181,7 +1197,7 @@ export function OrchestrateSheet({
                   permission grant in a file the whole team commits, and
                   `settings.json` is named as the deliberate opposite choice
                   for a reader who wants that instead. */}
-              {mergeMode === 'merge' && mergeCoverage !== null && !mergeCoverage.covered && (
+              {mergeMode !== 'branch' && mergeCoverage !== null && !mergeCoverage.covered && (
                 <div className="sheet-note orchestrate-merge-hint">
                   <p>
                     <code>{project}/.claude/settings.local.json</code> has no <code>git merge</code> allow rule. This is the per-user file, so the rule stays

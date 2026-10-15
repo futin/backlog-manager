@@ -188,6 +188,10 @@ export const RUN_STATUS_CLASS: Record<OrchestratorRun['status'], string> = {
  * chooses between belongs there, not here (bug-36).
  */
 export function mergeModeLabel(mergeMode: MergeMode, mergeModeEffective: MergeMode): string | null {
+  // An effective `pr` is a deviation from plain merge like `branch` is — the run drained onto its own branch and ends in a pull request — so it earns a pill
+  // of its own. Only EFFECTIVE `pr` gets `PR mode`: a pr run the classifier degraded reads `branch mode (downgraded)` below, because what it is doing now is
+  // leaving branches, and `mergeModeNote` says why (spec §5).
+  if (mergeModeEffective === 'pr') return 'PR mode';
   if (mergeModeEffective !== 'branch') return null;
   return mergeMode === mergeModeEffective ? 'branch mode' : 'branch mode (downgraded)';
 }

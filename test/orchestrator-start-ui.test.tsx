@@ -268,6 +268,22 @@ describe('toolbar Orchestrate button', () => {
     expect(await screen.findByRole('button', { name: 'Orchestrate' })).toBeEnabled();
   });
 
+  // The call site's half of spec §5: BoardView hands the sheet the REGISTERED project's source, so the picker's `pr` follows `/api/projects` and not
+  // anything about the items (this fixture has none — an empty queue is exactly the case reading `items[0]` could not answer).
+  it.each<[ProjectSummary['source'], string[]]>([
+    ['github', ['Merge to main', 'Leave branches for me', 'Open a PR into main']],
+    ['files', ['Merge to main', 'Leave branches for me']]
+  ])('opens the sheet for a %s project with the merge modes that source offers', async (source, labels) => {
+    stub({ projects: [{ ...PROJECTS[0], source }] });
+    await renderNarrowed();
+    await userEvent.click(await screen.findByRole('button', { name: 'Orchestrate' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'next' }));
+    await userEvent.click(screen.getByRole('button', { name: 'next' }));
+
+    const picker = (await screen.findByLabelText('Merge mode')) as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(labels);
+  });
+
   // --- bug-16: the click may re-ask a stale project-visibility block -----
   // The same one-question click bug-13 gave the card, one control over. Every
   // case here renders the real BoardView for the reason bug-13's own board
@@ -502,6 +518,9 @@ describe('OrchestrateSheet', () => {
         <OrchestrateSheet
           project="/abs/alpha"
           projectName="alpha"
+          // A tracker project by default: the three-option picker is the shape most of this block's cases were written against, and the files / null /
+          // unsupported shapes override it in the cases that pin the refusal.
+          source="github"
           items={[]}
           spawnMaxPermission="acceptEdits"
           onClose={onClose}
@@ -1117,6 +1136,53 @@ describe('OrchestrateSheet', () => {
     expect(screen.getByText(/this run gates, branches and merges on/).textContent).toContain('feature/x');
   });
 
+  // --- pr mode (spec §5): the option is offered by the project's source ------
+  it('offers the pr option for a tracker project and posts mergeMode pr when it is picked', async () => {
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ source: 'github' });
+    await toModes();
+
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me', 'Open a PR into main']);
+
+    await userEvent.selectOptions(picker, 'pr');
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'pr', questionMode: 'park', base: 'main' });
+  });
+
+  // A files project, one with no `backlog/`, and one whose marker the build cannot read all have a source that is not `github`, and the server refuses `pr`
+  // for every one of them — so the picker never offers it, and a stored default of `pr` (Settings cannot know the project) falls back to `merge`.
+  it.each<[string, ProjectSummary['source']]>([
+    ['a files project', 'files'],
+    ['a project with no source', null],
+    ['a project whose source is unsupported', 'unsupported']
+  ])('offers no pr option for %s and falls a stored pr default back to merge', async (_name, source) => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'pr' }));
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ source });
+    await toModes();
+
+    const picker = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['Merge to main', 'Leave branches for me']);
+    expect(picker.value).toBe('merge');
+
+    await userEvent.click(screen.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+  });
+
+  // A stored `branch` default is valid for every source and must survive the fallback untouched.
+  it('keeps a stored branch default on a files project', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    renderSheet({ source: 'files' });
+    await toModes();
+
+    expect((screen.getByLabelText('Merge mode') as HTMLSelectElement).value).toBe('branch');
+  });
+
   // --- Test case 2 -----------------------------------------------------
   // Seeded on 'branch' specifically (not the Settings default of 'merge')
   // so a passing assertion can only mean the OVERRIDE was sent, never a
@@ -1165,6 +1231,31 @@ describe('OrchestrateSheet', () => {
     expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
     expect(screen.getByText('git merge')).toBeInTheDocument();
     expect(screen.getByText('Bash(git merge:*)', { exact: false })).toBeInTheDocument();
+  });
+
+  // A pr run asks the classifier for the same `git merge` at every item, so the no-allow-rule hint applies to it exactly as it does to merge (spec §5).
+  it('shows the setup hint for pr mode as it does for merge mode', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'pr' }));
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: false, source: null });
+    renderSheet({ source: 'github' });
+    await toModes();
+
+    expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
+  });
+
+  it('shows no setup hint for branch mode even when merge-check reports no coverage', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ orchestrateDefaultMergeMode: 'branch' }));
+    const calls = stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: false, source: null });
+    renderSheet({ source: 'github' });
+    await toModes();
+
+    // Switch through pr and back so the effect has been asked to fetch once and must hide what it fetched on leaving: a hint that lingered after the
+    // switch would be a stale answer for a mode that never touches the base.
+    await userEvent.selectOptions(screen.getByLabelText('Merge mode'), 'pr');
+    expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Merge mode'), 'branch');
+    expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+    expect(calls).toHaveLength(0);
   });
 
   // --- Review fix round 1 (Important) -------------------------------------
