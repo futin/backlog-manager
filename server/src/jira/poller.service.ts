@@ -33,8 +33,10 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * 2. some board is still owed its cold sweep — an `off` board that has never had its list replaced;
  * 3. the boot is unanswered — `cloudId`, `serverInfo`, `me` or the sprint field is still missing, so the back-off has a retry to make.
  * Clause 3 has one exception (P5): `unsupported` is a site that is not Jira Cloud, which no retry can change, so it disarms and stays disarmed until restart.
- * The rule is judged at the END of every sweep, after its awaits, against the config as read at the top of that sweep — the tracker poller's reasoning:
- * a setting changed mid-tick is honoured on the next tick, and a chain with nothing owed stops on the tick that finds it.
+ * The rule is judged at the END of every sweep, after its awaits, against `jira.json` READ AGAIN there — the tracker poller's reasoning: `arm()` returns
+ * early while a sweep is in flight, trusting that sweep to schedule its successor, so a board saved (and `arm()`ed) mid-sweep is seen only if the sweep's
+ * last look at the file comes after it. Due-ness, by contrast, is judged on the file as read at the top of the sweep: a board added mid-tick is swept from
+ * the next tick, never half-way through this one. A chain with nothing owed stops on the tick that finds it.
  *
  * ## Why `off` still gets one cold sweep
  *
@@ -176,6 +178,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     void this.tick();
   }
 
+  /** Drops the pending link. Not a hard stop: a sweep in flight still schedules its successor when it ends — `onApplicationShutdown` is the hard stop. */
   disarm(): void {
     this.clearTimer();
   }
@@ -210,6 +213,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
         live: {}
       };
     }
+    this.expireWindow(Date.now());
     const config = readJiraConfig();
     const boards = config.boards.map((board) => {
       const cache = this.caches.get(board.id);
@@ -408,6 +412,20 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return this.boot.retryAt !== null && now < this.boot.retryAt;
   }
 
+  /**
+   * A 429 window that has run out is not a verdict any more. Expired where the state is READ — `status()`, the read gate, the sweep — not by a timer:
+   * a route can open the window while the chain is disarmed (no boards, or only `off` boards already swept — the ordinary phase-1 state), and a
+   * verdict that only a sweep could clear would then read `rate-limited` with a past instant for the life of the process.
+   */
+  private expireWindow(now: number): void {
+    if (this.boot.retryAt === null || now < this.boot.retryAt) return;
+    this.boot.retryAt = null;
+    if (this.boot.access === 'rate-limited') {
+      this.boot.access = 'ok';
+      this.boot.detail = this.boot.answered() ? null : 'connecting';
+    }
+  }
+
   private async sweep(): Promise<void> {
     // Consumed by this tick, before any await, so `armed` cannot read true for a chain whose next link this tick has not created yet.
     this.clearTimer();
@@ -429,20 +447,14 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     } finally {
       this.sweepCalls = this.client.takeCalls();
     }
-    if (this.owed(config)) this.schedule();
+    // Re-read after the awaits — see the header: an `arm()` that landed mid-sweep returned early and is honoured only here.
+    if (this.owed(readJiraConfig())) this.schedule();
   }
 
   private async run(creds: { site: string; email: string; token: string }, config: JiraConfig): Promise<void> {
     const now = Date.now();
+    this.expireWindow(now);
     if (this.inWindow(now)) return;
-    if (this.boot.retryAt !== null) {
-      // The window ran out: it is not a verdict any more. What follows in this sweep says what the site is now.
-      this.boot.retryAt = null;
-      if (this.boot.access === 'rate-limited') {
-        this.boot.access = 'ok';
-        this.boot.detail = this.boot.answered() ? null : 'connecting';
-      }
-    }
 
     // No board is searched until every boot answer is in — see `identity.ts` for why the sprint field is one of them.
     if (!this.boot.answered()) {
@@ -451,16 +463,17 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     }
 
     const auth: JiraAuth = { ...creds, cloudId: this.boot.cloudId! };
-    let swept = false;
     for (const board of config.boards) {
       // A route may have met a 429 while this sweep awaited: honour the window from the next board on.
       if (this.inWindow(Date.now())) return;
+      // ...or a 401: `me` is gone, and no board is searched without it.
+      if (!this.boot.answered()) return;
       if (!this.due(board, Date.now())) continue;
       if (!(await this.sweepBoard(board, auth))) return;
-      swept = true;
     }
-    // A sweep that got through every due board is the evidence that an earlier board-level `unreachable` is over.
-    if (swept) {
+    // Every due board answered, so an earlier board-level `unreachable` is over — and only that verdict: a 429 or a 401 a ROUTE recorded while this sweep
+    // awaited is evidence this sweep does not have, and clearing it would read `ok` while the routes are refused (§8: only those two move the state).
+    if (this.boot.access === 'unreachable') {
       this.boot.access = 'ok';
       this.boot.detail = null;
     }
@@ -482,13 +495,19 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
     if (!this.boot.serverInfoOk) {
       const res = await this.client.serverInfo(auth);
-      // A 404 is what the gateway answers for a site that is not Cloud; a `deploymentType` other than `Cloud` is Server/DC saying so itself.
-      if (res.status === 404 || (ok(res) && res.data?.deploymentType !== 'Cloud')) {
+      // A 404 is what the gateway answers for a site that is not Cloud; a `deploymentType` other than `Cloud` is Server/DC saying so itself. Both are
+      // FINAL, so only an explicit answer counts: a 2xx with no `deploymentType` (a proxy's page, a body that did not parse) is a retryable failure.
+      const deployment = res.data?.deploymentType;
+      if (res.status === 404 || (ok(res) && typeof deployment === 'string' && deployment !== 'Cloud')) {
         this.boot.access = 'unsupported';
         this.boot.detail = UNSUPPORTED;
         return false;
       }
       if (!this.bootAnswered(res)) return false;
+      if (deployment !== 'Cloud') {
+        this.boot.fail(null, 'serverInfo carried no deploymentType', Date.now());
+        return false;
+      }
       this.boot.serverInfoOk = true;
     }
 
@@ -519,7 +538,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       this.boot.fieldsOk = true;
     }
 
-    this.boot.succeed();
+    // A route 401 during one of the awaits above reset `me`: the boot is not whole, whatever the last call here answered.
+    if (!this.boot.answered()) return false;
+    this.boot.succeed(Date.now());
     return true;
   }
 
@@ -549,7 +570,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       this.boot.reset();
       this.boot.fail('unauthorized', detailOf(res), Date.now());
     } else if (res.status === 429) {
-      this.openWindow(res);
+      // A window already open (a route's, or the synthetic refusal from `pages`) keeps its end: reopening would move the instant the routes report (P1).
+      if (!this.inWindow(Date.now())) this.openWindow(res);
     } else {
       this.boot.access = 'unreachable';
       this.boot.detail = detailOf(res);
@@ -629,6 +651,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     const issues: JiraIssue[] = [];
     let nextPageToken: string | undefined;
     while (issues.length < room) {
+      // A route may have opened a 429 window while this walk awaited; the sweep makes no call inside it (the header).
+      if (this.inWindow(Date.now())) return { raw, issues: issues.slice(0, room), failure: synthetic(429, null) };
       const res = await this.client.search(auth, { jql, fields: this.sweepFields(), maxResults: JIRA_PAGE_SIZE, nextPageToken });
       if (!ok(res)) return { raw, issues: issues.slice(0, room), failure: res };
       const page = Array.isArray(res.data?.issues) ? res.data.issues : [];
@@ -671,6 +695,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private gate(): { auth: JiraAuth } | { refused: { ok: false; response: JiraResponse<unknown>; retryAt?: string } } {
     const env = jiraEnv();
     if (!env.configured) return { refused: { ok: false, response: synthetic(0, env.detail) } };
+    this.expireWindow(Date.now());
     if (this.inWindow(Date.now())) return { refused: { ok: false, response: synthetic(429, null), retryAt: iso(this.boot.retryAt!) } };
     if (this.boot.access === 'unsupported') return { refused: { ok: false, response: synthetic(0, UNSUPPORTED) } };
     if (this.boot.cloudId === null) {
@@ -687,7 +712,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private routeFailed(res: JiraResponse<unknown>): { ok: false; response: JiraResponse<unknown>; retryAt?: string } {
     if (res.status === 401) {
       this.boot.reset();
-      this.boot.fail('unauthorized', detailOf(res), Date.now());
+      // Once per streak: a read refused again while already `unauthorized` must not double the back-off and slide the boot's retry out to the cap.
+      if (this.boot.access !== 'unauthorized') this.boot.fail('unauthorized', detailOf(res), Date.now());
       this.wake();
     }
     if (res.status === 429) {

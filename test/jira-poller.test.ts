@@ -999,6 +999,127 @@ describe('checkJql', () => {
   });
 });
 
+describe('route verdicts against the sweep (review round 1)', () => {
+  const jqlOf = (c: { body: unknown }) => (c.body as { jql: string }).jql;
+
+  it('a route 429 met while a sweep awaits is not cleared by that sweep (I1)', async () => {
+    seedTree();
+    writeConfig([board({ roots: ['PAY-120'] })]);
+    await poller.tick();
+    now = T0 + 60_000;
+    let route: Promise<unknown> | null = null;
+    fake.failNext = (c) => {
+      if (!isSearch(c.url)) return null;
+      if (jqlOf(c).startsWith('summary ~')) return { status: 429 };
+      if (route === null) route = poller.search('refund');
+      return null;
+    };
+    await poller.tick();
+    await route;
+    expect(poller.status()).toMatchObject({
+      access: 'rate-limited',
+      detail: `Jira rate limit — retry after ${iso(T0 + 60_000 + JIRA_RATE_LIMIT_DEFAULT_MS)}`
+    });
+  });
+
+  it('a route 401 met while a sweep awaits is not cleared by that sweep (I1)', async () => {
+    seedTree();
+    writeConfig([board({ roots: ['PAY-120'] })]);
+    await poller.tick();
+    now = T0 + 60_000;
+    let route: Promise<unknown> | null = null;
+    fake.failNext = (c) => {
+      if (c.url.includes('/issue/PAY-131')) return { status: 401 };
+      if (isSearch(c.url) && route === null) route = poller.issueDetail('PAY-131');
+      return null;
+    };
+    await poller.tick();
+    await route;
+    expect(poller.status()).toMatchObject({ access: 'unauthorized', me: null });
+    expect(poller.armed).toBe(true);
+  });
+
+  it('a route 401 met while the boot awaits leaves the boot unanswered (I1)', async () => {
+    let route: Promise<unknown> | null = null;
+    fake.failNext = (c) => {
+      if (c.url.includes('/issue/')) return { status: 401 };
+      if (c.url.endsWith('/field') && route === null) route = poller.issueDetail('PAY-131');
+      return null;
+    };
+    await poller.tick();
+    await route;
+    expect(poller.status()).toMatchObject({ access: 'unauthorized', me: null });
+    expect(poller.armed).toBe(true);
+    fake.failNext = null;
+    fake.calls.length = 0;
+    now += JIRA_BACKOFF_MIN_MS;
+    await poller.tick();
+    expect(labels()).toEqual(['myself']);
+    expect(poller.status()).toMatchObject({ access: 'ok', me: { accountId: 'acc-1', name: 'Ada Lovelace' } });
+  });
+
+  it('a route 429 on a disarmed poller lapses on its own at the window end (I2)', async () => {
+    await booted();
+    fake.rateLimit = { retryAfter: 30 };
+    expect(await poller.checkJql('assignee = currentUser()')).toMatchObject({ ok: false, response: { status: 429 } });
+    expect(poller.armed).toBe(false);
+    expect(poller.status().access).toBe('rate-limited');
+    fake.rateLimit = null;
+    now = T0 + 29_999;
+    expect(poller.status().access).toBe('rate-limited');
+    now = T0 + 30_000;
+    expect(poller.status()).toMatchObject({ access: 'ok', detail: null });
+    fake.counts.set('assignee = currentUser()', 875);
+    expect(await poller.checkJql('assignee = currentUser()')).toEqual({ ok: true, value: { ok: true, count: 875 } });
+  });
+
+  it('a board saved and arm()ed while a sweep is in flight is owed when it ends (I3)', async () => {
+    seedTree();
+    const cold = board({ roots: ['PAY-120'], interval: 'off' });
+    const added = board({ id: B2, name: 'Ops', roots: ['PAY-131'], interval: '1m' });
+    writeConfig([cold]);
+    let wrote = false;
+    fake.failNext = (c) => {
+      if (isSearch(c.url) && !wrote) {
+        wrote = true;
+        writeConfig([cold, added]);
+        poller.arm();
+      }
+      return null;
+    };
+    await poller.tick();
+    expect(poller.armed).toBe(true);
+    // Due-ness was judged on the file as read at the top of that sweep: the new board waits for the next tick.
+    expect(poller.boardIssues(B2)).toEqual({ issues: [], polledAt: null });
+    now += JIRA_POLL_MS;
+    await poller.tick();
+    expect(poller.boardIssues(B2)?.polledAt).toBe(iso(now));
+  });
+
+  it('a serverInfo 2xx with no deploymentType is retried, not final (M1)', async () => {
+    fake.deploymentType = undefined as unknown as string;
+    await poller.tick();
+    expect(poller.status()).toMatchObject({ access: 'unreachable', detail: 'serverInfo carried no deploymentType' });
+    expect(poller.armed).toBe(true);
+    fake.deploymentType = 'Cloud';
+    now += JIRA_BACKOFF_MIN_MS;
+    await poller.tick();
+    expect(poller.status()).toMatchObject({ access: 'ok', detail: null });
+  });
+
+  it('repeated route 401s restart the boot retry once, not compound its back-off (M3)', async () => {
+    await booted();
+    fake.unauthorized = true;
+    await poller.issueDetail('PAY-131');
+    await poller.issueDetail('PAY-131');
+    fake.unauthorized = false;
+    fake.calls.length = 0;
+    now += JIRA_BACKOFF_MIN_MS;
+    await poller.tick();
+    expect(labels()).toEqual(['myself']);
+  });
+});
+
 describe('the token', () => {
   it('appears in no status payload', async () => {
     seedTree();

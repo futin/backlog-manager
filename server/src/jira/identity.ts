@@ -70,12 +70,17 @@ export class JiraBootState {
     this.backoffMs = nextBackoff(this.backoffMs);
   }
 
-  /** The boot is whole: clear the failure and the back-off, so the NEXT failure waits 15 s again rather than where the last streak left off. */
-  succeed(): void {
-    this.access = 'ok';
-    this.detail = null;
+  /**
+   * The boot is whole: clear the failure and the back-off, so the NEXT failure waits 15 s again rather than where the last streak left off. A 429 window
+   * still in force at `now` keeps its `rate-limited` verdict — a route may have opened it while the boot awaited, and the boot answering says nothing about
+   * whether Jira will take the next call.
+   */
+  succeed(now: number): void {
     this.failedAt = null;
     this.backoffMs = null;
+    if (this.retryAt !== null && now < this.retryAt) return;
+    this.access = 'ok';
+    this.detail = null;
   }
 
   /** What a 401 on a later call does: the credentials no longer resolve to anybody, so `me` is asked again. The token kind is not re-probed. */
