@@ -189,7 +189,8 @@ each opening `/` because the client has no URL routing:
 - **`projects`** (list, 60 s) — one row per registered project, keyed by path, its non-zero open sections as the subtitle; a missing store is `error`, an
   unsupported source `warn`.
 - **`run`** (status, 15 s) — this machine's run files reduced to one state, worst wins: crashed, then paused or needing a person, then running. A finished run
-  is `idle`. `remote` is ignored, the posture the watchdog takes.
+  is `idle`. `remote` is ignored, the posture the watchdog takes. `lines` gives each non-idle run one line, worst first (ties in run order): its project,
+  `<finished>/<total>` (queue items past every claimed stage, over the queue) and that run's own state. No `detail`.
 
 Read-only by construction: no widget declares an action, so every POST is the package's 404. The package does no authentication and Lookout's POST carries no
 `Origin`, so an action could not pass the guard every other POST here carries — that is why there are none, not an omission. `hub.module.ts` reads
