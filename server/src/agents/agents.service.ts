@@ -32,7 +32,7 @@ import {
 import { composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
-import { CLAIM_STALE_MS, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
+import { CLAIM_STALE_MS, MERGE_MODES, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -107,8 +107,10 @@ const PROMPT_MAX = 8_000;
  *   1. **`ids`** — a list `resolveIds` has already proved name open bugs or
  *      tasks in the project being orchestrated (see that method for both
  *      checks and for why shape alone would not be enough).
- *   2. **` --merge-mode branch`** — appended when `resolveMergeMode` (Task 4)
- *      resolved the request's `mergeMode` to `'branch'`.
+ *   2. **` --merge-mode branch`** or **` --merge-mode pr`** — appended when
+ *      `resolveMergeMode` (Task 4) resolved the request's `mergeMode` to
+ *      `'branch'` or `'pr'`; `pr` only ever survives that method for a
+ *      tracker project.
  *   3. **` --question-mode decide`** — appended when `resolveQuestionMode`
  *      (task-19) resolved `questionMode` to `'decide'`.
  *   4. **` --base <ref>`** — appended when `resolveBase` (task-44) resolved
@@ -123,7 +125,8 @@ const PROMPT_MAX = 8_000;
  *
  * **They are not all the same kind of safe, and the difference is worth
  * stating rather than averaging over.** Members 2 and 3 are the tightest: the
- * text each can append is one of exactly two compile-time constants selected
+ * text each can append is one of a few compile-time constants (`branch` or
+ * `pr` for the merge mode, `decide` for the question mode) selected
  * by a guard, so no caller-supplied character reaches the prompt through
  * either channel at all. An id (1) is looser — caller text that passed a
  * shape check and was then proved against a closed vocabulary, this project's
@@ -716,7 +719,7 @@ export class AgentsService {
     // (task-4-brief.md) pins the lock winning over it, same as it wins over
     // an ids problem.
     const ids = await this.resolveIds(req.project, req.ids);
-    const mergeMode = this.resolveMergeMode(req.mergeMode);
+    const mergeMode = this.resolveMergeMode(req.mergeMode, req.project);
     // Beside resolveMergeMode, after the lock, for the identical reason the
     // comment directly above gives: a malformed `questionMode` is a problem
     // with what the run should contain, not with whether it may start, so
@@ -733,7 +736,7 @@ export class AgentsService {
       // The composition, and the whole of what a caller can influence: a
       // bare constant for a full-queue, merge-mode, main-based run, that same
       // constant followed by ids that have each been proved to name an open
-      // bug or task in THIS project, and then up to three flags, each
+      // bug or task in THIS project, and then up to three flags (the first of them one of two merge-mode literals), each
       // appended only off its own guard and each default appending nothing.
       // Nothing a caller sends is ever concatenated in unchecked — see
       // resolveIds, resolveMergeMode, resolveBase, and ORCHESTRATE_PROMPT's
@@ -746,7 +749,12 @@ export class AgentsService {
       prompt: [
         ORCHESTRATE_PROMPT,
         ...(ids === undefined ? [] : ids),
+        // Two guarded literals, never one interpolation: `mergeMode` is the
+        // `MergeMode` union here, but a template over it would be the one
+        // place a future member (or a widened type) could reach the prompt
+        // unreviewed. `merge` appends nothing — the default.
         ...(mergeMode === 'branch' ? ['--merge-mode', 'branch'] : []),
+        ...(mergeMode === 'pr' ? ['--merge-mode', 'pr'] : []),
         // Last of the three, and `park` appends nothing at all — which is
         // what keeps every prompt this endpoint composed before task-19 a
         // byte-exact PREFIX of what it composes now. The silent value is
@@ -1759,7 +1767,9 @@ export class AgentsService {
    *
    * - absent (`undefined` or `''`) → `'merge'` — today's behaviour, for
    *   every caller written before this field existed.
-   * - a member of `MERGE_MODES` → that value.
+   * - a member of `MERGE_MODES` → that value, except that `pr` also needs
+   *   the project to be a tracker project (spec P3: a files project has no
+   *   remote ruleset to route around, and the tool refuses it too).
    * - anything else → reject.
    *
    * This is deliberately NOT `pickFrom`'s drop-on-unknown rule, even though
@@ -1792,9 +1802,21 @@ export class AgentsService {
    * `orchestrate()`, and the code's own doc comment) — nothing about a
    * malformed enum needs telling apart from any other 4xx.
    */
-  private resolveMergeMode(mergeMode: string | undefined): MergeMode {
+  private resolveMergeMode(mergeMode: string | undefined, project: string): MergeMode {
     if (mergeMode === undefined || mergeMode === '') return 'merge';
-    if (isMergeMode(mergeMode)) return mergeMode;
+    if (isMergeMode(mergeMode)) {
+      // The source check is by what the project RESOLVES to, through the one
+      // `known` set `ItemsService` owns — `github` is the only tracker kind
+      // today, and anything else (`files`, a marker this build cannot honour,
+      // an unreadable one, no store at all) is refused rather than guessed
+      // at. `unsupported` in particular must not read as files-and-therefore-
+      // fine: both refusals are the same sentence. Uncoded, like the enum 400
+      // below, and after the run locks for the same reason that one is.
+      if (mergeMode === 'pr' && this.items.sourceOf(project) !== 'github') {
+        throw new HttpException({ error: 'mergeMode pr needs a tracker project — this project\'s backlog is not backed by a GitHub repo' }, 400);
+      }
+      return mergeMode;
+    }
     // Echoed back truncated and JSON-quoted, matching resolveIds's own
     // convention just above: a client bug is far easier to find when the
     // error names the value that broke, and this body goes back to the
@@ -1802,7 +1824,7 @@ export class AgentsService {
     // value (case 7's `42`) sensibly, which a template-literal interpolation
     // would not.
     const shown = JSON.stringify(typeof mergeMode === 'string' ? mergeMode.slice(0, 40) : mergeMode);
-    throw new HttpException({ error: `mergeMode must be merge or branch — ${shown} is not one` }, 400);
+    throw new HttpException({ error: `mergeMode must be ${MERGE_MODES.join(', ')} — ${shown} is not one` }, 400);
   }
 
   /**
