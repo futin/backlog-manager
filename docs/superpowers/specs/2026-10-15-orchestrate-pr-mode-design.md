@@ -6,8 +6,9 @@ there), under its decision **D8 — one PR per orchestrator run, not per item**.
 
 ## Why this exists
 
-release-kit's `main-pr-only` ruleset refuses every direct push to `main`: PR required, three CI contexts, linear history, no bypass actor (D9). Every backlog
-registered on this machine — this repo, `claude-agents-dashboard`, `lookout`, `guide-manager` — is tracker-backed, and a tracker run pushes `<base>` after
+release-kit's `main-pr-only` ruleset refuses every direct push to `main`: PR required, three CI contexts, linear history, no bypass actor (D9). Six of the seven
+backlogs registered on this machine are tracker-backed — this repo, `claude-agents-dashboard`, `lookout`, `guide-manager`, `ixray`, `brickwright`; only
+`finance-manager` is a files project (2026-10-15) — and a tracker run pushes `<base>` after
 every merge (task-47, `.claude/rules/orchestrator.md`). Under the ruleset that push is refused, and a refused push **parks** (it never degrades, because the
 merge has already landed). So once a repo's ruleset is on, every orchestrator run there spends one whole item — execute, review, verify, merge — and parks at
 the push, with the merge stranded on one laptop. The dashboard's ruleset is already applied (2026-10-15); this repo's waits for this feature, by the decision
@@ -21,11 +22,11 @@ was started against. The run never merges that PR. CI gates it, and a person squ
 | #   | Decision                                                                                                                                                                         | Rejected                                                                                                                      |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | P1  | **`pr` is a third `MergeMode`**, `merge \| branch \| pr`. It rides the route merge mode already travels: Settings default → sheet picker → `POST /api/agents/orchestrate` → spawn prompt → `init` → run file → claim. | A separate `--pr` flag — its own plumbing at every one of those hops, plus a refusal for the meaningless `--pr --merge-mode branch`. |
-| P2  | **A tracker item's issue still closes at its merge into the run branch** (`stage <n> merged --outcome`, after the push succeeded), exactly as today.                             | Closing at PR merge — the item would stay open after its claim is released, and the next run would queue it again.            |
-| P3  | **Tracker projects only.** `pr` on a files project is refused at the server (400) and in `init` (exit `1`).                                                                    | Files projects too — an opt-in exception to "never pushes a files project", with no current user: every registered backlog is tracker-backed. |
+| P2  | **A tracker item's issue still closes at its merge into the run branch** (`stage <n> merged --outcome`, after the push succeeded), exactly as today. So the run branch is pushed after every merge, not once at the end as D8's text reads — a deliberate deviation.                             | Closing at PR merge — the item would stay open after its claim is released, and the next run would queue it again.            |
+| P3  | **Tracker projects only.** `pr` on a files project is refused at the server (400) and in `init` (exit `1`).                                                                    | Files projects too — an opt-in exception to "never pushes a files project", and the one files project here (`finance-manager`) has no remote ruleset to route around. |
 | P4  | **The run branch is the run's `base`; the PR's target is a new field, `prTarget`.**                                                                                              | Keeping `base` as the target and adding a `runBranch` that every merge-side reader would have to prefer over `base`.         |
 | P5  | **The run file records the PR's URL, and the Runs detail sheet links to it.**                                                                                                    | The URL in the final summary text only.                                                                                       |
-| P6  | **The PR is opened by the driver with `gh pr create`; the tool composes its title and body and records its URL.** The tool makes no outbound call of its own.                    | The server's GitHub client opening it through a tenth item-write route; `orchestrate.mjs` spawning `gh` itself.               |
+| P6  | **The PR is opened by the driver with `gh pr create`; the tool composes its title and body and records its URL.** The tool makes no call to GitHub; its only network call stays the local API (`apiCall`).                    | The server's GitHub client opening it through a tenth item-write route; `orchestrate.mjs` spawning `gh` itself.               |
 
 P1 makes the degrade path free: a classifier-denied merge moves `mergeModeEffective` one way, today `merge → branch`, and under P1 also `pr → branch`.
 
@@ -41,7 +42,12 @@ the run branch.
 `MergeMode` (`shared/types.ts`) gains `'pr'`, `MERGE_MODES` lists it, and `isMergeMode` stays the one guard. Every surface that validates a merge mode
 against that list accepts `pr` without further change: the Settings clamp, the sheet picker's options, `resolveMergeMode`, `init`'s `--merge-mode`, the
 claim route's `run.mergeMode` check, and `sanitizeMergeFields`. The existing rules hold unchanged: absent means `merge`; present-but-invalid is a 400 and
-never a clamp; the server appends `--merge-mode pr` to the spawn prompt from a compile-time literal, behind its guard.
+never a clamp.
+
+Two server sites do need an edit, because each restates the vocabulary by hand. The spawn prompt (`agents.service.ts`, the `prompt:` array) appends
+`--merge-mode` only for `'branch'`, so without a second guarded literal a `pr` request would spawn a plain `merge` run; it gains `mergeMode === 'pr' ?
+['--merge-mode', 'pr'] : []`, a compile-time literal like its sibling. `resolveMergeMode`'s 400 text hard-codes "merge or branch"; it is built from
+`MERGE_MODES` instead, as the claim route's already is.
 
 `mergeModeEffective` still moves one way, once. `orchestrate.mjs merge-mode branch --note …` is accepted from `merge` **or** `pr`, and from nothing else.
 `mergeMode` keeps the requested value, so a degraded PR run stays recognisably a PR run (§4, §5).
@@ -58,10 +64,11 @@ In `pr` mode `init` does the following, in this order and all inside its existin
 1. Validates `--base` as today (`assertUsableBase`). Here it names the **PR target**, default `main`.
 2. Pulls the target (`pullBaseAtInit`, unchanged — the run branch is cut from a fresh target).
 3. Mints the run branch name `backlog/run-<YYYY-MM-DD>-<n>`. The date is the machine's local date. `<n>` is one more than the highest `n` already used for
-   that date, read from this repo's local refs **and** from `git ls-remote --heads origin 'backlog/run-<date>-*'`. The remote read matters because a tracker
+   that date, parsed only from refs matching `backlog/run-<date>-\d+$` (a stray `backlog/run-<date>-wip` is ignored), read from this repo's local refs **and** from `git ls-remote --heads origin 'backlog/run-<date>-*'`. The remote read matters because a tracker
    project is multi-machine by definition, and two machines starting a run on the same day must not mint the same name. A failed `ls-remote` (offline, no
    `origin`) falls back to local refs and prints one stderr line saying so. `<n>` starts at `1`.
-4. Creates the branch at the target's tip (`git branch <run branch> <target>`). This is the last git write before the run file is written. If the run file
+4. Creates the branch at the target's tip (`git branch <run branch> <target>`), after the queue gate (which reads `<target>`, the same commit) and after the
+   exit-`4` existing-run check, so a refused `init` leaves no branch. This is the last git write before the run file is written. If the run file
    write then fails, the empty branch is left behind; it is harmless, and the next mint skips its number.
 
 The run file records `base: <run branch>` and `prTarget: <target>` (P4). Under `merge` and `branch` modes `prTarget` is `null`. In an older run file it is
@@ -70,8 +77,8 @@ absent, and the server's `sanitizeMergeFields` resolves it to `null` **once**, t
 No tree has the run branch checked out, so §9's `merge-check` takes its existing outcome 2: it creates `.worktrees/_base-<sanitised ref>`, merges there, and
 §10 removes that tree at the end because `baseTree.created` is true. That outcome is already built and tested, so this feature adds no code for it.
 
-The run branch name is under `backlog/`, beside the item branches `backlog/<id>`. The two cannot collide: an item id is a bare number, `bug-<n>` or `task-<n>`,
-and none of those begins `run-`.
+The run branch name is under `backlog/`, beside the item branches `backlog/<id>`. The two cannot collide: an item id is a bare number or `<section>-<n>` (`ITEM_ID_SHAPE`,
+`shared/agent.ts`), and no backlog section is named `run`.
 
 ## 3. The loop
 
@@ -96,11 +103,15 @@ same branch later, so a PR then would be premature. An `aborted` run is torn dow
 `references/recovery.md`'s order-of-operations, which should not grow a publish step. For an aborted run the summary names the pushed branch and gives the
 exact `gh pr create` line to run by hand.
 
-In SKILL.md §10, after the existing base-worktree removal and before `finish`:
+In SKILL.md §10, after the existing base-worktree removal and before `finish`. A `failed` finish today is reached from §5's "Stopping the run is
+`finish --status failed`" without passing §10; that sentence changes to send the run through §10's finishing steps (base-worktree removal, then these three)
+before `finish --status failed`, so `failed` and `done` share one path:
 
-1. `orchestrate.mjs pr-draft` reads the run file and git, writes `<dir>/pr/body.md`, and prints one JSON line `{ title, bodyFile, head, base }`. `head` is
-   the run branch and `base` is `prTarget`. It refuses (exit `1`) unless `mergeMode` is `pr` and some item is `merged`.
-2. The driver runs `gh pr create --base <base> --head <head> --title "<title>" --body-file "<bodyFile>"` from the project root, as its own Bash call. The
+1. `orchestrate.mjs pr-draft` reads the run file and git, writes `<dir>/pr/body.md`, and prints one JSON line `{ title, bodyFile, head, target }`. `head` is
+   the run branch and `target` is `prTarget` — not `base`, which in every SKILL.md command means the run branch. It refuses (exit `1`) unless `mergeMode` is `pr` and some item is `merged`, and also when `prUrl` is already set:
+   the PR exists, and a resumed session must not draft a second one.
+2. Before creating, the driver asks whether a PR already exists for the head, which covers a session that died between `gh pr create` and step 3 and was
+   resumed: `gh pr view <head> --json url --jq .url`. A URL printed there goes straight to step 3. Otherwise the driver runs `gh pr create --base <target> --head <head> --title "<title>" --body-file "<bodyFile>"` from the project root, as its own Bash call. The
    title can go in argv because the tool composed it from a fixed vocabulary, a count and nothing else.
 3. `orchestrate.mjs pr --url <url>` records `prUrl` on the run. It accepts only `^https://github\.com/[\w.-]+/[\w.-]+/pull/\d+$` and exits `1` on anything
    else, writing nothing.
@@ -115,9 +126,14 @@ tool argument, the same rule §2's `--note` follows.
 
 `<type>` comes from each merged item's own work commit, not from its item type. The §6 commit subject is already a Conventional Commit chosen per item, e.g.
 `fix(orchestrate): re-claim a tracker item's issue when it leaves parked`. The tool finds the item's merge commit as the first-parent commit in
-`<prTarget>..<base>` whose subject begins `Merge backlog/<id>: `. It then reads the subject of the **oldest** commit in `M^1..M^2`: that is the §6 commit, and
+`<prTarget>..<base>` whose subject begins `Merge backlog/<id>: `. It then reads the subject of the first commit `git rev-list --reverse --topo-order M^1..M^2` prints (parent before child, so
+a skewed author clock cannot reorder it): that is the §6 commit, and
 fix-loop commits come after it. Each item's type is ranked `feat > fix > perf > chore`. Any other type (`refactor`, `docs`, `test`, …) and an unparseable
-subject rank as `chore`. The highest rank across the merged items wins.
+subject rank as `chore`. The highest rank across the merged items wins. An item staged `merged` whose `Merge backlog/<id>: ` commit is not found (merged by
+hand, then staged — `references/tracker.md`'s carry-forward) also ranks `chore` and still gets its `## What's new` line; `pr-draft` never refuses over it.
+
+A run whose only breaking item is `refactor!` or `chore!` gets a plain `chore(backlog)` title: `pr-title` allows `!` only on a releasing type, so that is
+the intended consequence, not an omission.
 
 `perf` extends D8's "any feat → feat, else any fix → fix, else chore". Without it, a run of performance work would ship as `chore` and cut no release under
 Phase C.
@@ -135,12 +151,13 @@ rule allows `!` only on those three types, and a breaking change hidden under a 
 
 ## Run
 
-`<runId>` drained onto `<head>` from `<base>`: <N> merged, <k> parked, <s> skipped, <u> ungroomed, <q> needs-answers.
+`<runId>` drained onto `<head>` from `<base>`: <N> merged, <b> branched, <k> parked, <f> failed, <s> skipped, <u> ungroomed, <q> needs-answers.
 ```
 
 `## What's new` lists the merged items in queue order, by their run-file `title`. Phase C's tag message takes that section verbatim, so it is what becomes
 the release notes. Issue titles are written as problem statements, not release notes; the person merging the PR edits the lines before merging if they want
-to, and the template leaves that to them. The `## Run` line omits each zero count. Its own heading ends the `## What's new` section for Phase C's extraction
+to, and the template leaves that to them. The `## Run` line covers every terminal `RunStage` in that fixed order and omits each zero count; when `branched` is nonzero (a degraded run, §6) it adds
+one line naming those branches and saying they merge only after this PR lands. Its own heading ends the `## What's new` section for Phase C's extraction
 (`^## `).
 
 ### Nothing merged
@@ -155,14 +172,18 @@ refuses the delete anyway (an aborted run can leave the `_base-` tree in place),
 
 - **Sheet.** `mergeModeOptionLabels(base)` gains `pr`, labelled `Open a PR into <base>` (`Open a PR into the base branch` when `base` is `null`). The option
   is offered only when the selected project's `ProjectSummary.source` is `github`. If the Settings default is `pr` and the project is a files one, the sheet
-  falls back to `merge`, the same posture as an out-of-range stored value. The merge-coverage hint stays `merge`-only: a PR run always merges in a fresh
-  `_base-` worktree, so the dirty-tree hint has nothing to say.
+  falls back to `merge`, the same posture as an out-of-range stored value. The merge-coverage hint (no `git merge` allow rule in
+  `.claude/settings.local.json`) is shown for `merge` **and** `pr`: a PR run asks the classifier for the same merge at every item, so the hint applies to it
+  just as much. Its condition widens from `mergeMode === 'merge'` to `mergeMode !== 'branch'`, both in the render and in the effect that fetches it.
 - **Settings.** The default-merge-mode picker lists `pr` with the base-less label. Settings is pre-project, so it cannot hide the option per source; the sheet's
   fallback above covers a files project.
 - **RunDetail.** `mergeModeLabel` returns `PR mode` for an effective `pr`. A degraded PR run reads `branch mode (downgraded)` as today. When `prUrl` is set,
   the detail sheet's head shows a link-out labelled `PR #<n>`, opened with `rel="noopener noreferrer"`. The server's `sanitizeMergeFields` re-applies the
   §4 URL pattern and drops anything else to `null`, so the href's safety does not rest on the tool alone. The same reasoning is why `linkBase` is clamped.
-- **Remote runs** need nothing. A claim publishes `mergeMode: 'pr'` and `base: <run branch>`, and the remote derivation copies both.
+- **Remote runs** need no logic: a claim publishes `mergeMode: 'pr'` and `base: <run branch>`, and the remote derivation copies both. They need two fields,
+  though: `OrchestratorRun` gains `prTarget: string | null` and `prUrl: string | null` as **required** fields (resolved once by `sanitizeMergeFields`, as
+  `base` is), so every literal that builds a run — `remote-runs.util.ts`'s field-by-field run, `cmdInit`'s skeleton and the test fixtures — fails typecheck
+  until it says `null`. That is the forcing function; optional fields would let a reader forget the fallback.
 
 ## 6. Error handling, in one place
 
@@ -170,8 +191,8 @@ refuses the delete anyway (an aborted run can leave the `_base-` tree in place),
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `pr` requested for a files project                | Server 400 before spawning; `init` exit `1`, nothing written                                         |
 | `ls-remote` fails at mint                         | One stderr line; mint from local refs only                                                           |
-| Two machines mint the same name anyway            | The second machine's first push is rejected → that item parks, as any rejected push does             |
-| Merge denied by the classifier                    | `merge-mode branch --note …`, `pr → branch`; earlier merged items still get the PR at finish        |
+| Two machines mint the same name anyway            | The second machine's first push is rejected → that item parks. `references/tracker.md`'s "`--resume` pulls and pushes again" does **not** hold in PR mode (§3 skips the pull): the recovery is `--abort` and a fresh `init`, which mints the next number. The parked item's merge stays on the abandoned local branch, named in the summary |
+| Merge denied by the classifier                    | `merge-mode branch --note …`, `pr → branch`; earlier merged items still get the PR at finish. Later items are cut from the run branch and pushed as `backlog/<n>`; they carry the run branch's pre-squash merges, so the summary names the PR first and says each branched item is merged only after the PR lands, rebased onto `<prTarget>` |
 | Push of the run branch rejected or denied         | The item parks (unchanged §9 rule)                                                                   |
 | `gh pr create` fails or is denied                 | Not a park; summary names the branch and the command; `prUrl` stays `null`                           |
 | `pr --url` given anything but a GitHub PR URL     | Exit `1`, nothing written                                                                            |
@@ -189,15 +210,22 @@ The plan names exact cases; the shape is:
   - `stage merged` is legal under `pr`.
   - `pr-draft` ranks the types: feat beats fix beats perf beats chore, and `refactor` counts as chore. Breaking `!` is carried. The count is singular for
     one item. The body lists items in queue order and omits zero counts. `pr-draft` refuses with nothing merged.
+  - `pr-draft` refuses once `prUrl` is set; an item staged `merged` with no `Merge backlog/<id>: ` commit ranks `chore` and is still listed.
   - `pr --url` accepts a GitHub PR URL and refuses `javascript:`, a non-GitHub host and a non-`/pull/` path.
   - `finish` deletes an empty run branch and keeps a non-empty one.
 - **jest:** `resolveMergeMode` gives a 400 for `pr` on a files project and appends `--merge-mode pr` for a tracker one. `sanitizeMergeFields` resolves an
   absent `prTarget`/`prUrl` to `null` and drops a non-GitHub `prUrl`. The sheet offers `pr` only for a tracker project and falls back from a `pr` default on
   a files one. `mergeModeLabel('pr','pr')` is `PR mode`. RunDetail renders the link only for a valid `prUrl`.
-- **`test/agents-shared.test.ts`** and any other `Record<MergeMode, …>` literal go red until `pr` is classified. That is the forcing function, and no test is
+- **`test/agents-shared.test.ts`**'s `expect(MERGE_MODES).toEqual(['merge', 'branch'])`, `test/settings-view.test.tsx`'s option list and
+  `mergeModeOptionLabels`' `Record<MergeMode, string>` (`client/src/lib/merge-mode.ts`) go red until `pr` is classified. That is the forcing function, and no test is
   weakened to get past it.
 
 ## 8. Docs
+
+- `orchestrate.mjs`'s `cmdFinish` comment, which calls it a pure status write, and `references/recovery.md`'s abort order: `finish` now runs one `git branch
+  -d` in PR mode (§4, *Nothing merged*).
+- After a PR opens, the local run branch is kept and nothing deletes it (the repo setting deletes only the remote head on merge); the mint's local-refs read
+  is why its numbers keep rising across runs on one machine. SKILL.md §10 says so in one line.
 
 - `.claude/rules/orchestrator.md`: the merge-mode bullet gains `pr`, with the run branch, `prTarget` and the PR at finish. The push bullet notes that PR mode
   pushes the run branch through the same §9 command and adds no fourth push.
