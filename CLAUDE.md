@@ -21,6 +21,7 @@ one kanban-by-type board. No database: the registry file and each project's `bac
 | Publish the web port to the tailnet       | `pnpm run tailnet` (`up` \| `status` \| `down`)                    |
 | Types                                     | `pnpm run typecheck`                                               |
 | Production build                          | `pnpm run build`                                                   |
+| CI gate (every PR into `main`)            | `.github/workflows/ci.yml` → [docs/workflows/ci.md](docs/workflows/ci.md) |
 
 Ports: API `4322`, Vite `5177` (guide-manager holds 4321/5175/5176 on this machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in `.env` —
 inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` from that same `.env` and serves the tailnet on the same number.
@@ -218,6 +219,8 @@ of them, and to be opened by hand before editing through any other route (`Write
 ## Conventions
 
 - Comments explain _why_, at length, and the existing density is deliberate — match it rather than stripping it.
+- **A PR title must pass `ci / pr-title`** (it becomes the squash commit once squash-only merges are applied): `feat|fix|perf` (`!` allowed) or
+  `docs|chore|test|refactor|ci|build`, optional lowercase `(scope)`, `: `, a description. `feat`/`fix`/`perf` cut a release once Phase C lands.
 - **A suite that hands an app to supertest listens once, on `127.0.0.1`, via `listenLoopback` (`test/helpers/app.ts`)**
   Why: [invariants.md](docs/subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)
 - **A jsdom suite's fixture dates are relative to the clock the assertion runs under**
