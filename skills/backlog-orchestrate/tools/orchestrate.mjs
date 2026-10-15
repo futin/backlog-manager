@@ -5510,6 +5510,9 @@ function cmdVerify(argv) {
 // would read an already-delivered branch as unfinished work and dispatch
 // straight back into it — redoing an item whose result is already sitting
 // on disk as the deliverable.
+// #264: the stages whose worktree and branch `abort` keeps whole — work that was committed and never merged. See `cmdAbort`'s THIRD exemption.
+const KEPT_BY_ABORT_STAGES = new Set(['parked', 'failed']);
+
 const RECONCILE_TERMINAL_STAGES = new Set(['merged', 'branched', 'failed', 'skipped', 'needs-answers', 'ungroomed', 'parked']);
 
 // The fixed suggestion vocabulary the brief names, in priority order:
@@ -5704,6 +5707,17 @@ function cmdReconcile(argv) {
 // merge time (§9), so attempting `branch -D` again here is a harmless
 // no-op, not a second case needing a guard.
 //
+// A THIRD exemption, #264: an item staged `parked` or `failed` keeps its
+// worktree AND its branch, exactly as the marker case does. Every park path
+// in SKILL.md keeps both on purpose (a merge conflict, an exhausted fix
+// loop), and a failed item's branch is the same shape: committed work that
+// never reached the base, and in merge mode never pushed either, so the
+// branch is the only copy. Such an item has already run `stop
+// --keep-started`, so it carries no `phase:` marker and the first exemption
+// never sees it — which is how abort used to `worktree remove --force` and
+// `branch -D` it as "disposable". Keyed on the stage, not the marker, and
+// recorded in `attention` for the same stdout-may-go-unread reason.
+//
 // This does NOT stop abort from finishing overall: every OTHER item's
 // worktree and branch still get torn down, `run.status` still becomes
 // `aborted`, and the run still ends — only the marked item's own git
@@ -5776,6 +5790,7 @@ function cmdAbort() {
   const removedIds = [];
   const preservedIds = [];
   const keptBranchIds = [];
+  const keptItemIds = [];
   const signalledIds = [];
 
   // bug-52: recover every item's session id before anything else in this command reads the item — the claim releases below among them. Over the whole
@@ -5876,6 +5891,22 @@ function cmdAbort() {
       continue;
     }
 
+    if (KEPT_BY_ABORT_STAGES.has(item.stage)) {
+      // #264 — the THIRD exemption in this function's header comment. A parked or failed item already ran `stop --keep-started`, so it has no marker
+      // and would otherwise fall through to the forced teardown below, deleting the only copy of committed work that never reached the base.
+      run.attention.push({
+        id: item.id,
+        kind: 'parked',
+        detail:
+          `worktree ${item.worktree ?? '(none recorded)'} and branch ${item.branch ?? '(none recorded)'} were KEPT by abort (not removed) — this item ` +
+          `finished as '${item.stage}', so its branch holds committed work that was never merged into ${run.base ?? BASE_REF_DEFAULT}. Merge or inspect it by ` +
+          `hand; once it is no longer wanted, remove the worktree (\`git -C ${projectRoot} worktree remove ${item.worktree}\`) and branch ` +
+          `(\`git -C ${projectRoot} branch -D ${item.branch}\`) yourself.`
+      });
+      keptItemIds.push(item.id);
+      continue;
+    }
+
     if (item.worktree) {
       // Always attempted, not gated on fs.existsSync above — this also
       // cleans up a worktree whose directory was already deleted
@@ -5910,8 +5941,9 @@ function cmdAbort() {
         });
         keptBranchIds.push(item.id);
       } else {
-        // Every other terminal (or non-terminal) stage's branch is
-        // genuinely disposable here — most notably `merged`, whose branch
+        // Every other stage that reaches this line — `parked` and
+        // `failed` never do (#264, the THIRD exemption) — has a branch that
+        // is genuinely disposable here: most notably `merged`, whose branch
         // was already deleted by the run itself at merge time (§9), which
         // makes this call a harmless no-op for that stage rather than a
         // second case needing its own guard.
@@ -5982,6 +6014,7 @@ function cmdAbort() {
     `abort: signalled ${signalledIds.length} live session(s)${signalledIds.length ? ` (${signalledIds.join(', ')})` : ''}; ` +
       `removed ${removedIds.length} item(s)${removedIds.length ? ` (${removedIds.join(', ')})` : ''}; ` +
       `kept ${keptBranchIds.length} branch(es) already staged 'branched'${keptBranchIds.length ? ` (${keptBranchIds.join(', ')} — see attention)` : ''}; ` +
+      `kept ${keptItemIds.length} parked/failed item(s)${keptItemIds.length ? ` (${keptItemIds.join(', ')} — see attention)` : ''}; ` +
       `left ${preservedIds.length} in place with an in-progress marker${preservedIds.length ? ` (${preservedIds.join(', ')} — see attention)` : ''}`
   );
 

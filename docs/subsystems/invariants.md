@@ -3363,8 +3363,8 @@ assignee still on its issue. Five things this entry pins, because each looks arb
   lands — on an already-released claim, which is exactly the case `GithubSource.heartbeat` accepts and where it sets `finished` and nothing else.
 - **Counters are billed the ordinary way**, read through `claimCountersFor` rather than omitted: the session did the work it did up to the abort. This is not
   `backlog.mjs stop --abandon`'s dead-interval case.
-- **The marker-preserved item is released too.** `abort`'s one branch that skips an item's git teardown — a worktree still carrying an in-progress `phase:`
-  marker — cannot fire for a tracker item at all (there is no item file for `findItemFilePath` to find), and an item left in place still needs its claim back,
+- **The marker-preserved item is released too.** `abort`'s marker branch that skips an item's git teardown — a worktree still carrying an in-progress
+  `phase:` marker — cannot fire for a tracker item at all (there is no item file for `findItemFilePath` to find), and an item left in place still needs its claim back,
   because the run that held it is over either way. A files run makes no request on any path, since `trackerRelease` returns immediately with no `claim`.
 - **`takeOverRun` runs BEFORE the release loop, and that order is load-bearing** (bug-42). The abort session is not the holder of any of these claims — the
   driver that posted them is, and on the path this exists for it is dead — so each release is authorised by `runId` alone, the "the RUN that owns the claim"

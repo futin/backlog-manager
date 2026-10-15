@@ -214,6 +214,9 @@ a hand-run terminal with no `CLAUDE_CODE_SESSION_ID`, and anyone at all once the
   anything, so it is the only copy of that item's work; `-D` would force past git's "not fully merged" check and leave nothing to recover from. Abort records
   the kept branch in `attention` — it needs no action, it is simply waiting to be merged by hand. A `merged` item is the opposite case and keeps today's
   behaviour: the run already deleted that branch at the merge, so the `-D` is a harmless no-op.
+- **No marker, but the item finished `parked` or `failed`** → it keeps **both** the worktree and the branch, the same as §9's park paths do (#264). The item
+  already ran `stop --keep-started`, so having no marker says nothing about its work: the branch holds commits that never reached the base, and in merge mode
+  it was never pushed, so it is the only copy. Abort records each one in `attention`, with the `worktree remove` / `branch -D` to run once nobody wants it.
 - **Marker present** → it leaves that item **completely alone**, worktree _and_ branch, and pushes an `attention` entry naming the absolute worktree path, the
   exact `backlog.mjs stop <id>` to run, and the exact `worktree remove` / `branch -D` commands to finish with afterwards.
 
@@ -226,8 +229,8 @@ A files run makes no request at all. (For an item stranded by an abort from an o
 Before any of that, it fills in every queue item's empty `sessionId` from `<dir>/logs/<id>.jsonl` (bug-52) — a stop inside the dispatch block never reaches
 `watch`, which was the only other reader of the child's init event. A recorded id is never replaced, and a missing or unreadable log leaves the field null.
 
-Then it sets the run to `aborted` and prints a one-line summary of three counts: what it removed, how many branches it kept because their items were `branched`,
-and what it left in place with a marker.
+Then it sets the run to `aborted` and prints a one-line summary of its counts: the sessions it signalled, what it removed, how many branches it kept because their
+items were `branched`, how many `parked`/`failed` items it kept whole, and what it left in place with a marker.
 
 **That marker is the signal, and clearing markers _before_ `abort` destroys it.** Run `backlog.mjs stop` on a mid-flight item first and abort now sees no
 marker, classifies the item as safe, and `worktree remove --force`s a directory whose session was still working: `--force` deletes the working directory
