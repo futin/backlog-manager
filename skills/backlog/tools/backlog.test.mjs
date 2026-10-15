@@ -1906,13 +1906,56 @@ test('registerProject keeps other projects and appends new ones', () => {
   assert.deepEqual(written.projects.map((p) => p.path), ['/abs/one', '/abs/two'])
 })
 
-test('registerProject starts fresh over a corrupt registry rather than failing', () => {
+// #255: a registry that exists but cannot be parsed is the OTHER projects' only record, so starting fresh over it deletes every one of them from the board.
+// The file stays byte-identical, a copy lands beside it for whoever repairs it, and the registration is refused with a throw registerBestEffort turns into a
+// stderr line — the capture that triggered it still succeeds.
+test('registerProject refuses an unparseable registry, leaves it byte-identical and copies it aside', () => {
   const file = tmpRegistry()
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, 'not json')
+  fs.writeFileSync(file, '{"projects": [{"name": "other", "path": "/abs/oth')
+  const before = fs.readFileSync(file)
+
+  assert.throws(() => registerProject('/abs/one', file), /registry\.json\.corrupt-/)
+
+  assert.ok(before.equals(fs.readFileSync(file)), 'the corrupt registry must never be overwritten')
+  const copies = fs.readdirSync(path.dirname(file)).filter((n) => n.startsWith('registry.json.corrupt-'))
+  assert.equal(copies.length, 1)
+  assert.ok(before.equals(fs.readFileSync(path.join(path.dirname(file), copies[0]))))
+})
+
+test('registerProject refuses a registry that parses but has no projects array', () => {
+  const file = tmpRegistry()
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, 'null\n')
+
+  assert.throws(() => registerProject('/abs/one', file), /registry\.json\.corrupt-/)
+  assert.equal(fs.readFileSync(file, 'utf8'), 'null\n')
+})
+
+test('registerProject still creates the registry, and its directory, when the file is missing', () => {
+  const file = tmpRegistry()
+  assert.equal(fs.existsSync(path.dirname(file)), false, 'fixture sanity: nothing exists yet')
+
   registerProject('/abs/one', file)
-  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
-  assert.equal(written.projects.length, 1)
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).projects.map((p) => p.path), ['/abs/one'])
+})
+
+// Atomicity is observed through the inode: a temp file renamed over the target is a NEW inode, while writeFileSync truncates and rewrites the old one in
+// place — which is exactly the window a concurrent reader sees an empty or half-written file through. No temp file may survive the write either.
+test('registerProject and unregisterProject replace the registry by rename and leave no temp file behind', () => {
+  const file = tmpRegistry()
+  registerProject('/abs/one', file)
+  const first = fs.statSync(file).ino
+
+  registerProject('/abs/two', file)
+  const second = fs.statSync(file).ino
+  assert.notEqual(second, first, 'registerProject must rename a new file into place, not rewrite the old one')
+
+  assert.equal(unregisterProject('/abs/one', file), true)
+  assert.notEqual(fs.statSync(file).ino, second, 'unregisterProject must rename a new file into place, not rewrite the old one')
+
+  assert.deepEqual(fs.readdirSync(path.dirname(file)), ['registry.json'])
 })
 
 // --- bug-17: a linked worktree must never be registered as its own project ---
@@ -2115,6 +2158,20 @@ test('CLI unregister exits 1 on a path that is not registered and rewrites nothi
   assert.equal(out.status, 1)
   assert.match(out.stderr, /not registered/)
   assert.ok(before.equals(fs.readFileSync(file)), 'a miss must never rewrite the file')
+})
+
+test('CLI new over an unparseable registry still files the item, warns on stderr and leaves the registry untouched', () => {
+  const { dir } = backlogFixture()
+  const file = tmpRegistry()
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, '{"projects": [')
+  assert.equal(runWithRegistry(dir, path.join(path.dirname(file), 'scratch.json'), 'init').status, 0)
+
+  const out = runWithRegistry(dir, file, 'new', 'bugs', 'Something broke')
+
+  assert.equal(out.status, 0, out.stderr)
+  assert.match(out.stderr, /registry update failed.*registry\.json\.corrupt-/)
+  assert.equal(fs.readFileSync(file, 'utf8'), '{"projects": [')
 })
 
 test('CLI unregister with no path prints usage and exits 1 — there is deliberately no cwd default', () => {
