@@ -1,8 +1,8 @@
 # The API
 
-Nest, one process, every route under `/api`. It owns seven things: reading the registry, listing each registered project's items through whichever source owns
+Nest, one process, every route under `/api`. It owns eight things: reading the registry, listing each registered project's items through whichever source owns
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
-boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), and — behind a switch that is off
+boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), and — behind a switch that is off
 by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are three files under
 `~/.backlog-manager/settings/` — the watchdog config, the per-project control file, and `tracker-sync.json`.
 
@@ -216,6 +216,19 @@ Read-only by construction: no widget declares an action, so every POST is the pa
 The package declares its types only through `package.json#exports`, which this repo's `moduleResolution: "node"` ignores. `hub/lookout-widgets.d.ts` is an
 ambient shim that re-exports the dist types; `compilerOptions.paths` was the other option, and is wrong here because `nest build` rewrites any import matching a
 `paths` entry into a relative path to the mapped file — a `.d.ts`, at runtime. The shim's header has the detail.
+
+### `releases/` — this app's own versions
+
+`GET /api/releases` answers `{ current, releases }` (`shared/types.ts`'s `ReleasesResponse`) from the annotated `vX.Y.Z` tags in this server's own checkout —
+the ones the release workflow cuts (docs/workflows/ci.md §Releases) — for the side rail's version chip and its What's new drawer. Read-only, git only — not an
+outbound-calling module: four `runGit` reads and nothing else. The root is `BM_RELEASES_ROOT` when set (the test seam), else the first ancestor of the server's
+own files holding a `.git` entry, never `process.cwd()`.
+
+It runs git itself and imports only release-kit's pure `parseTagMessage`, because release-kit's `readReleases` spawns git with no timeout (spec R4 of
+docs/superpowers/specs/2026-10-16-release-versioning-design.md); `test/api-releases.test.ts` holds the route to deep-equality with `readReleases` for the same
+repo, so the reproduced filters cannot drift. Every failure is a shape, never a status: `for-each-ref` failing is the empty shape, `describe` failing is
+`current: null` with the releases kept, an origin that is not GitHub (or none) drops `url`. The memo is keyed by HEAD and the mtimes of `packed-refs` and
+`refs/tags` under the common git dir — a linked worktree's own git dir holds no tags — and a read in which a deciding call failed is never memoised.
 
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 

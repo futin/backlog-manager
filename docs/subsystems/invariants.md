@@ -3757,8 +3757,10 @@ in 58 ms while `/api/items` waits 1.1 s on a fake `git` that sleeps for a second
 Each call site already had exactly one failure branch, and each degrades rather than throws, so `runGit` answers `null` for a timeout, a non-zero exit, a spawn
 error (`ENOENT`, a `cwd` that is not a directory) and an oversized output alike, and a timeout lands in whatever that site did with `null` before:
 `lastCommitDates` → the empty map (every caller reads it as "fall back to `created`"), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
-`resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list. A command that succeeds and prints nothing answers `''`, not
-`null`, so `show-ref --quiet` callers test `!== null`. Nobody added a "timed out" branch, because none of the five has a reason to treat a slow repository
+`resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list, and `ReleasesService`'s four reads (2026-10-16, the release
+chip) — `for-each-ref` → the empty shape, `describe` → `current: null` with the releases kept, `remote get-url` → no `url`, `rev-parse` → the answer is not
+memoised. A command that succeeds and prints nothing answers `''`, not `null`, so `show-ref --quiet` callers test `!== null`. Nobody added a "timed out" branch,
+because none of the nine has a reason to treat a slow repository
 differently from an absent one; a site that grows one is making a new decision and should say so here.
 
 **Ten seconds, not five.** The synchronous callers carried 5 s, and that number was a cap on how long the entire process could be frozen, so it had to be short.
