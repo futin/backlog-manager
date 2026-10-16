@@ -73,7 +73,6 @@ export function jqlString(value: string): string {
 
 export class JiraClient {
   private callCount = 0;
-  private last429: string | null = null;
 
   /** `fetch` by default; a fake in tests, injected through the constructor so two suites can never share one. */
   constructor(private readonly fetchImpl: FetchLike = fetch) {}
@@ -88,11 +87,6 @@ export class JiraClient {
     const n = this.callCount;
     this.callCount = 0;
     return n;
-  }
-
-  /** The ISO instant of the last 429 this client SAW, or `null`. The poller owns the window that follows from it; this is only the observation. */
-  get last429At(): string | null {
-    return this.last429;
   }
 
   /** `{ cloudId }` for a site, with no credential sent (rule 2). */
@@ -190,12 +184,10 @@ export class JiraClient {
       got = await Promise.race([call, deadline]);
     } catch (e) {
       // A transport failure or a timeout is a state, not an exception: the poller records `unreachable` with this message and tries again next tick.
-      return { status: 0, data: null, message: e instanceof Error ? e.message : String(e), retryAfter: null };
+      return { status: 0, data: null, message: transportMessage(e), retryAfter: null };
     } finally {
       clearTimeout(timer);
     }
-
-    if (got.status === 429) this.last429 = new Date().toISOString();
 
     let parsed: unknown = null;
     let parseable = true;
@@ -227,6 +219,20 @@ function errorMessage(status: number, parsed: unknown): string {
   // The gateway answers its own 401 and 403 as `{ code, message }` rather than Jira's shape; it is the only sentence those carry.
   if (parts.length === 0 && typeof body.message === 'string' && body.message !== '') parts.push(body.message);
   return parts.length > 0 ? parts.join('; ') : `Jira answered ${status}`;
+}
+
+/**
+ * A rejected call's message, with its `cause` appended when it has one. undici rejects every network failure as a bare `TypeError('fetch failed')` and puts
+ * the reason — `getaddrinfo ENOTFOUND <host>`, `connect ECONNREFUSED <addr>` — in `cause`, which is the one thing that tells a mistyped site from an outage.
+ * Safe to show: the cause is the socket's or the resolver's error, built before any header is written, so it can hold a host but never the credentials.
+ */
+function transportMessage(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  const cause: unknown = e.cause;
+  if (!(cause instanceof Error)) return e.message;
+  const code = (cause as { code?: unknown }).code;
+  const reason = cause.message !== '' ? cause.message : typeof code === 'string' ? code : '';
+  return reason === '' ? e.message : `${e.message}: ${reason}`;
 }
 
 function numberHeader(value: string | null): number | null {

@@ -189,15 +189,14 @@ describe('response normalisation', () => {
     expect(await new JiraClient(fetchImpl).myself(auth)).toEqual({ status: 502, data: null, message: 'Jira answered 502', retryAfter: null });
   });
 
-  it('a 429 reads retry-after as seconds and stamps last429At from the clock', async () => {
-    jest.useFakeTimers({ now: Date.parse('2026-10-16T12:00:00Z') });
+  // No `last429At` here: the poller stamps the one the status payload shows, from `Date.now()`, where it opens the window (final review minor 6).
+  it('a 429 reads retry-after as seconds', async () => {
     const { fake, client } = build();
-    expect(client.last429At).toBeNull();
     fake.rateLimit = { retryAfter: 7 };
     const out = await client.myself(auth);
     expect(out.status).toBe(429);
     expect(out.retryAfter).toBe(7);
-    expect(client.last429At).toBe('2026-10-16T12:00:00.000Z');
+    expect('last429At' in client).toBe(false);
   });
 
   it('a 429 without the header has retryAfter null', async () => {
@@ -206,7 +205,6 @@ describe('response normalisation', () => {
     const out = await client.myself(auth);
     expect(out.status).toBe(429);
     expect(out.retryAfter).toBeNull();
-    expect(client.last429At).not.toBeNull();
   });
 
   it('a rejected fetch is status 0 carrying the error message', async () => {
@@ -219,6 +217,19 @@ describe('response normalisation', () => {
       message: 'getaddrinfo ENOTFOUND acme.atlassian.net',
       retryAfter: null
     });
+  });
+
+  // undici's `fetch` rejects with a bare `TypeError('fetch failed')` and puts the reason in `cause`; without it a mistyped `BM_JIRA_SITE` reads as nothing
+  // more than "fetch failed" (final review minor 3).
+  it.each([
+    ['its message', Object.assign(new Error('getaddrinfo ENOTFOUND acme.atlassian.nett'), { code: 'ENOTFOUND' }), 'fetch failed: getaddrinfo ENOTFOUND acme.atlassian.nett'],
+    ['its code, when the message is empty', Object.assign(new Error(''), { code: 'ECONNREFUSED' }), 'fetch failed: ECONNREFUSED'],
+    ['nothing, for a cause that is not an error', { detail: 'x' }, 'fetch failed']
+  ])('a rejection with a cause appends %s', async (_, cause, message) => {
+    const fetchImpl = (async () => {
+      throw new TypeError('fetch failed', { cause });
+    }) as unknown as typeof fetch;
+    expect(await new JiraClient(fetchImpl).myself(auth)).toEqual({ status: 0, data: null, message, retryAfter: null });
   });
 });
 
