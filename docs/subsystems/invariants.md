@@ -1689,29 +1689,39 @@ the one settings key a hand-edited localStorage value could turn into script exe
 ## Escape has one owner, and the topmost dialog is the only one that closes
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-listener, installed on the first entry and removed with the last; all three dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet` and
-`OrchestrateSheet` — call it and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
+listener, installed on the first entry and removed with the last; all five dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
+`OrchestrateSheet`, and since Jira phase 2 the Jira issue modal (`jira/JiraIssueModal.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`) — are on it
+and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
 is the Runs page's own sheet — inline, beside the list, never a dialog — so it is off the stack rather than migrated onto it, and `useDialogEscape` itself is
 untouched. They used to bind four, unguarded, and two of them are mounted together by design — Board and Archive both keep the item modal open behind the launch
 sheet — so one press ran both callbacks and took the modal with the sheet (bug-23).
 
-Since task-40 the three do not call the hook themselves either: the two overlay SHELLS do. `ui/Modal.tsx` is the item modal's, `ui/FormSheet.tsx` is both
+Since task-40 the dialogs do not call the hook themselves either: the two overlay SHELLS do. `ui/Modal.tsx` is the item modal's, `ui/FormSheet.tsx` is both
 sheets', and each calls `useDialogEscape` once, so a fourth surface opened through either shell joins the stack by construction rather than by remembering to.
-The count is still three because the shells have three composers, and `test/dialog-escape.test.tsx` mounts all three together to prove the ranking holds across
+The count was three while the shells had three composers, and `test/dialog-escape.test.tsx` mounts those three together to prove the ranking holds across
 them.
 
+Jira phase 2 is that construction paying out, twice. `JiraIssueModal` composes `Modal` — `Modal`'s composers are `ItemModal` and `JiraIssueModal` — and
+`JiraBoardSheet` composes `FormSheet` beside the two Board sheets, so both joined the stack without a line of the hook changing, and the count is five. The
+suite still proves the ranking on the Board's three; the two Jira surfaces need no case of their own, because what ranks them is the same shell code those
+three run through, and a sixth composer of either shell would join the same way. A second modal is right where §8.7 of `.claude/DESIGN.md` used to say there
+was one: the issue modal is the same sidecar reading — a facts column and a body — of a ticket instead of an item, and it holds no run state, so the reason
+the run's detail is an always-visible sheet rather than a modal (a modal has no standing place for Pause and Resume) does not reach it.
+
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
-the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to one composer and nothing else floating but `Popover`'s panels,
-which hang under their control without a scrim. It calls
+the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its two composers and nothing else floating but `Popover`'s
+panels, which hang under their control without a scrim. The Jira board sheet's `Delete board` asks through it too, drawn inside the sheet. It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
-The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control: the tracker strip's (`TrackerPopover` in
-`components/TrackerChip.tsx`) and the band's Filters and Sort. It joins for the same reason and in the same shape: it MOUNTS only while open, calling
-`useDialogEscape` once, so a popover opened over the item modal takes the key from the modal and hands it back when it closes. What it does not take from the
-stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown` on `document` while it is open, ignoring a press on
-its panel and on the control that opened it (that control's click is what toggles it). The dashboard's `useDismiss` bundles the two into one hook with its own
-`keydown` listener, which is exactly the second Escape owner this section forbids, and is why it was not copied. Still three dialogs counted.
+The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, six composers since Jira phase 2: the tracker
+strip's (`TrackerPopover` in `components/TrackerChip.tsx`), the band's Filters and Sort, the Jira chip's (`JiraPopover` in `components/JiraChip.tsx`), the
+Jira board's picker and the board sheet's roots search, which hangs over that sheet and so is the topmost entry while it is open. It joins for the same reason
+and in the same shape: it MOUNTS only while open, calling `useDialogEscape` once, so a popover opened over the item modal takes the key from the modal and hands
+it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown`
+on `document` while it is open, ignoring a press on its panel and on the control that opened it (that control's click is what toggles it). The dashboard's
+`useDismiss` bundles the two into one hook with its own `keydown` listener, which is exactly the second Escape owner this section forbids, and is why it was not
+copied. Still five dialogs counted.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the
@@ -2761,6 +2771,52 @@ the item list, which of them is current, and what a pick writes — so that is w
 `current` is kept apart from the tree's own `section` for the phone: below 700 px every tree is drawn at once, and a tree whose section is not current must mark
 nothing, or the rail announces a current item on a page nobody is looking at.
 
+Jira phase 2 made it three call sites — Runs, Jira, Settings — and the third arrived exactly as the argument above says it should: a new item list
+(`JIRA_PAGES`), a new current value (`useJiraPage`) and a new write (`setJiraPage`), with nothing about the markup restated.
+
+## The Jira section's two pages are switched by the rail's tree, and the section is drawn only when configured
+
+The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+`GET /api/jira` says configured. The two halves are separate rules that happen to meet in one rail row, and each has a precedent or a failure behind it.
+
+### The tree rule is Runs' and Settings', applied a third time
+
+Board and Setup are two pages under one rail entry, which is the shape Runs (History, Watchdog) and Settings (Local, Shared) already have, and the rule those
+two settled is that the tree is the switch at every width: the rail's trees stand open below 700 px, so a segmented control on the page would be a second
+wording of the same choice, free to drift from the tree's and reached in the same number of taps. Task-38 deleted Runs' in-page pair for that reason and task-42
+never gave Settings one; a Jira page switch would have been the first thing a later reader removed, so it was never drawn.
+
+The two links that DO land on a page — `Open board` on a Setup row, and `Open Setup` on a board page with no boards — are not switches in that sense, because
+they are not a second implementation of one. `App` builds `onOpenJiraPage` once, the same pair the tree calls in the same order (`setJiraPage`, then the
+shell's `change`), and hands it down, exactly as Settings' `Live view` link is `onOpenWatchdog`. A link built that way means what the tree entry means by
+construction; a link built inside the page out of its own `localStorage` write and its own section call would mean it only until one of the two changed. The
+page value lives in a module store (`hooks/useJiraPage.ts`, `useRunsMode`'s shape) rather than a `usePersistedState` per caller for the same reason Runs' does:
+the tree and the page are two mounted writers, and a per-caller copy would leave one of them looking at the page the other has just left.
+
+The chip's popover and the Trackers row stay readings with no link at all, for the rule's other face: a `Setup ›` link there would be an in-page switch on a
+surface that is not even in the section. The Trackers row writes `Jira › Setup` as text, and the rail is one click away.
+
+### An unconfigured machine must not show an entry it cannot fill
+
+A machine without `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` has no Jira section to show: every route but the status answers 503, so a rail row
+would open on a page that can only say so, and on a machine that never configures Jira an entry that is always there and always empty is furniture that
+teaches readers to ignore the rail. So the row is drawn while the status says `configured: true` and not otherwise, and the chip and the
+Trackers row follow the same answer.
+
+What makes this harder than hiding a row is that the section can be STORED. `jira` is a member of `SECTIONS` unconditionally, because `resolveSection` runs in
+a `useState` initializer, before `GET /api/jira` has answered, and a list that refused `jira` there would throw away the section a reader left on a configured
+machine on every reload. The conditional half therefore cannot live in the list; it lives in the shell, and it is decided by ONE answer. `App`'s effect moves
+a `jira` section to Board on `configured: false` — the only status that says there is nothing to show — and on nothing else. An unknown status, whether not
+answered yet or every read so far failed, HOLDS the section, drawn in `JiraView`'s `loading…` or `Jira unavailable` shape: a network blip at load says nothing
+about the credentials, and a shell that fell on it would move a reader off a working section and record `board` as where they were. A failure after a
+`configured: true` keeps that answer, because `useJira` keeps its last payload.
+
+The rail follows the shell rather than the status alone: while the section is held, the row is drawn — a held section with no row of its own would leave the
+reader on a page the rail does not name — and while another section is open and the status is unknown, it is not, because a row drawn on a guess and removed
+on the answer would make the rail flicker on every load of every machine that never configures Jira. `Opens on` offers `Jira` under the
+same answer, and a stored `jira` pin keeps its option so a native select never shows a value with no option; the pin itself is left alone and takes the same
+fall at load, because the machine may get its credentials back.
+
 ## `contentWidth` is stamped before first paint, and the CSP hash travels with it
 
 `contentWidth` (`client/src/lib/settings.ts`) is `fixed | full`, per device, defaulting to `fixed`. It is stamped on `<html>` as `data-width` **twice** — by
@@ -3757,6 +3813,14 @@ all be in flight at once. It keeps correctness a different way — each read tak
 rather than by preventing the overlap. `/api/trackers` reads `originRepo` per files project, so it is a git-backed route and a candidate to move onto the same
 footing later; until then a window focus during a `/api/trackers` timer read can legitimately show two pending requests. `useNow`'s `setInterval` is a display
 clock, not a request.
+
+**`useJira` is the second exception (Jira phase 2), and for the same reason rather than a new one.** `GET /api/jira` is the Jira poller's status, and the
+reading worth having from it is a board's `polledAt` moving just after the server's sweep stamped it — so, like `useTrackers`, its timer is aimed at the
+server's clock (the soonest syncing board's `polledAt` plus its interval plus `useTrackers`' own `TRACKER_FETCH_SLACK_MS`, floored at
+`JIRA_STATUS_FLOOR_MS`, and no timer at all while unconfigured or with no syncing board), not re-armed a fixed interval after an answer; a focus read, that
+timer's read and a Setup save's `reload` can overlap, and it keeps the newest-read-wins sequence counter instead. Unlike `/api/trackers` the route reads no
+git — it answers from memory, the env and `jira.json` — so the overlap costs a cheap read, not a spawn. `useJiraBoard`, the Board page's issue list, has no
+server clock to chase and IS built on `useCoalescedFetch`.
 
 <!-- docs-sync:
   sources:

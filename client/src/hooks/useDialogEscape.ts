@@ -21,17 +21,22 @@ import { useEffect, useRef } from 'react';
  * this module changed for that — which is the point of a stack whose entries
  * are removed by identity.
  *
- * One entry is not a dialog at all, and it is not one of the three: bug-53's
+ * Five since Jira phase 2: the Jira issue modal (`components/jira/JiraIssueModal.tsx`) composes `ui/Modal` and the Jira board sheet
+ * (`components/jira/JiraBoardSheet.tsx`) composes `ui/FormSheet`, so both joined the stack through the two shells, by construction — the item modal,
+ * `LaunchSheet`, `OrchestrateSheet` and those two. Nothing here changed for that either, which is what moving the call into the shells (task-40) bought.
+ *
+ * One entry is not a dialog at all, and it is not one of the five: bug-53's
  * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens. It paints no
  * scrim and floats over nothing, but it calls this hook while it is drawn,
  * because the rule is about who owns the key — a listener of its own would run
  * beside this one, and one press would close it and the dialog under it.
  *
  * The second non-dialog entry is `ui/Popover.tsx`, the panel that hangs under a control, in the same shape: mounted only while open, one call to this hook,
- * closing only itself. It has five composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, the Jira board's
- * picker (`components/jira/JiraBoardView.tsx`, Jira phase 2) and the board sheet's roots search (`components/jira/JiraBoardSheet.tsx`, drawn OVER that
- * sheet, so it is the topmost entry while open; R6 counts six once the Jira chip lands) — and each is its own
- * entry while it is open. Its click-outside is its own `pointerdown` listener — this module owns the key, not the pointer.
+ * closing only itself. It has six composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, and since Jira phase 2
+ * (R6) the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`) and the board sheet's roots search
+ * (`components/jira/JiraBoardSheet.tsx`, drawn OVER that sheet, so it is the topmost entry while open) — and each is its own entry while it is open. The Jira
+ * board's Filters are `FilterBar`'s own panel, already counted. Its click-outside is its own `pointerdown` listener — this module owns the key, not the
+ * pointer.
  *
  * They stay `window` listeners rather than becoming element handlers because
  * none of these overlays traps focus (each one's own comment says so): Escape

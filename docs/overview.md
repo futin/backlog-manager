@@ -88,10 +88,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 
 ### The client — [full doc](subsystems/board.md)
 
-A React SPA, four sections behind a side rail ([`App.tsx`](../client/src/App.tsx)) and each one its own lazy chunk: Board, Runs, Archive, Settings. The server
-returns whole corpora, so most of what you see is decided in the browser — whether an item is groomed, whether it belongs on the Board or in Archive, how long
-an item's work took, what a run's cost was. Those derivations live in `client/src/lib/` as one implementation each, precisely so two surfaces cannot disagree
-about the same item; the ones the server needs too live in [`shared/`](../shared/agent.ts) beside the wire types.
+A React SPA, five sections behind a side rail ([`App.tsx`](../client/src/App.tsx)) and each one its own lazy chunk: Board, Runs, Archive, Jira (drawn only when
+configured), Settings. The server returns whole corpora, so most of what you see is decided in the browser — whether an item is groomed, whether it belongs on
+the Board or in Archive, how long an item's work took, what a run's cost was. Those derivations live in `client/src/lib/` as one implementation each, precisely
+so two surfaces cannot disagree about the same item; the ones the server needs too live in [`shared/`](../shared/agent.ts) beside the wire types.
 
 ### The skills — [full doc](subsystems/skills.md)
 
