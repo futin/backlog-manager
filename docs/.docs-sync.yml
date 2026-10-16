@@ -28,6 +28,10 @@ docs:
   - path: docs/subsystems/skills.md
     kind: subsystem
     note: The skills
+  - path: docs/subsystems/jira.md
+    kind: subsystem
+  - path: docs/workflows/ci.md
+    kind: workflow
 out-of-scope:
   - path: backlog/
     reason: the backlog store itself — item files are skill-written records, and the store README documents the store beside the items it describes
