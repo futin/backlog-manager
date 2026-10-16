@@ -27,14 +27,14 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
 
 ## 3. The fold — `lib/jira.ts`, one derivation
 
-- **Top card.** An issue is a *top* when its `parent` is `null`, or its `parent.key` is not in the board's loaded list. Every other issue folds into the
-  top reached by walking `parent.key` up through the loaded list. The walk keeps a visited set, and **an issue whose walk comes back to itself — a
-  self-parent, or any member of a cycle — is a top**, so each issue lands exactly once and a cycle draws as its members side by side. Jira has no cycles,
+- **Top card.** Defined recursively: `top(X)` is X when X's `parent` is `null`, when its `parent.key` is not in the board's loaded list, or when the
+  walk up from X comes back to X — a self-parent, or any member of a cycle; otherwise `top(X)` is `top(parent(X))`. Every non-top issue folds under its
+  `top`, so each issue lands exactly once, a cycle draws as its members side by side, and a child of a cycle member folds under that member. Jira has no cycles,
   but the list is our own cache, and a malformed one must not hang the page. `foldBoard(issues) → { tops: JiraIssue[], under: Map<topKey, JiraIssue[]>,
   childrenOf: Map<key, JiraIssue[]> }` is the one home of this walk. `childrenOf` is the on-board parent → direct-children index the walk builds anyway,
   and the modal's tree reads it for whichever issue the modal shows, a mid-level one included. It holds only **fold edges**, child → the parent it folded
-  under, so a top is nobody's child and the index is acyclic by construction: the tree recurses it with no guard of its own. Each list is in
-  `sortForBoard` order (the issue's own `updated`, descending). The board, the band count, the filters and the modal tree
+  under, so a top is nobody's child and the index is acyclic by construction: the tree recurses it with no guard of its own. Every `under`
+  and `childrenOf` list is in `sortForBoard` order (the issue's own `updated`, descending); only the tops sort differently (Sort, below). The board, the band count, the filters and the modal tree
   all read `foldBoard`. None of them walks parents on its own.
 - **What "on the board" means** is the loaded list, exactly. So it covers four cases that need no extra code:
   - A parent that left through the 14-day Done window is not on the board, so its open children become tops and keep their parent crumb.
@@ -44,7 +44,9 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
 - **Column.** A top card sits in its **own** status category's column. Folded issues never move it.
 - **Sort.** Tops sort by the newest `updated` across the top and everything under it, descending, with the existing key tie-break. Activity on a child
   therefore moves its parent up. *(Author's call: the flat board sorted by the issue's own `updated`, and a parent whose subtasks are being worked would
-  otherwise sink.)* The card's age reading stays the top issue's own: its `updated`, or `resolved` on a Done card that has one. The sort key is not drawn.
+  otherwise sink.)* The card's age reading stays the top issue's own: its `updated`, or `resolved` on a Done card that has one. The sort key is not drawn. The one home of this order is
+  `sortTops(tops, under)` in `lib/jira.ts`. The board applies it per column where it applies `sortForBoard` today (`JiraBoardView.tsx:81`), after the
+  filter.
 
 ## 4. The card — `JiraCard`, §6.2 amended
 
@@ -88,8 +90,12 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
   - Each child's own descendants come from the **board's cached list**, indented 22 px per level, so the tree costs no Jira call beyond the one the modal
     already makes.
   - Rows are new: today's list draws key, summary and status text only (`JiraIssueModal.tsx:154`). Each row is a button with the type icon, key,
-    summary, assignee initials and the raw status pill, composed from the card's own pieces. `TypeIcon`, private to `JiraCard.tsx` today, moves to one
-    shared home so the card and the modal draw the same glyph.
+    summary, assignee initials and the raw status pill, composed from the card's own pieces. `TypeIcon`, private to `JiraCard.tsx` today, moves to
+    `components/ui/JiraTypeIcon.tsx`. The progress bar is `components/ui/SpreadBar.tsx`, drawn by both the card and the modal. CLAUDE.md gives a look
+    that two surfaces draw one home in `components/ui/`, and nothing there draws segments today: `ProgressRow` is one fill at DESIGN §3's 10 px.
+  - **The tree draws each key once.** The detail read's placement wins: an issue already drawn as a direct child is skipped where `childrenOf` would
+    draw it deeper. A reparent between the last poll and the open can otherwise put one issue in both places. An issue the card counted that the tree
+    no longer reaches is simply absent, because the tree is the fresher of the two.
 - **Where the board's list comes from.** *(Builder-check ruling.)* Today `JiraView` holds `openIssue`, the modal gets only `issue`
   (`JiraView.tsx:54`), and the list lives in `JiraBoardView`'s `useJiraBoard`. Opening a card passes the fold's `childrenOf` alongside the issue
   (`onOpenIssue(issue, childrenOf)`). `JiraView` holds both, and the modal takes `childrenOf` as a prop. It is a snapshot taken when the modal opened.
@@ -121,16 +127,19 @@ ticket block prints `detail.children.length` (`block.ts:76`), not this field, bu
 ## 9. Testing
 
 - `jira-lib` (jest, pure): `foldBoard` covers depth 1, 2 and 3, a parent off the board, a parent dropped by the Done window (absent from the list), a query
-  hit that folds, a self-parent and a two-cycle (each terminates, every member is a top, each issue appears exactly once, and `childrenOf` holds no edge between them), the sort by newest-under, the progress counts, and the
+  hit that folds, a self-parent and a two-cycle (each terminates, every member is a top, each issue appears exactly once, and `childrenOf` holds no edge between them), a child of a cycle member
+  folding under that member, `sortTops` by newest-under, the progress counts, and the
   `C children · D below them` wording at 0/1/many.
 - `jira-board` (jsdom): the board draws tops only, with the right column counts and band line; a filter on a folded child shows its top ringed with `1
   match: KEY`; a top that matches itself draws no ring; the filter options still offer a type only a folded issue carries.
 - `jira-modal` (jsdom): the Children tree indents the board's grandchildren; a row click swaps the modal's issue and leaves one dialog on the stack; a
-  detail child absent from the board lists with no subtree and counts once; with no `childrenOf` the tree is the direct children only.
+  detail child absent from the board lists with no subtree and counts once; with no `childrenOf` the tree is the direct children only; a reparented issue
+  that is both a detail child and a `childrenOf` descendant draws and counts once, as the direct child.
 - `jira-board` also: the band reads `… · 17 issues from 2 roots and 1 query · 5 cards · …` from the loaded list, keeps today's line while the list is
   loading and when nothing folds; `N matches` past one.
 
 ## 10. Docs that move with the code
 
-DESIGN.md §8.9.1 (the "flat cards" sentence, the marker-row bullet, a fold-block bullet, the ring) and §8.9.2 (Subtasks → Children, the tree, the row
+DESIGN.md §3 (a line beside "Progress bars: 10 px": the card-scale `SpreadBar` is 4 px, three segments in `--fill-progress`, `--fill-live`, `--ink3`, 2 px
+gaps, so `SpreadBar` has a subsection to cite); DESIGN.md §8.9.1 (the "flat cards" sentence, the marker-row bullet, a fold-block bullet, the ring) and §8.9.2 (Subtasks → Children, the tree, the row
 swap); `docs/subsystems/jira.md`'s board paragraph; the Jira spec's §1 row, §6.2 and §6.3 already point here.
