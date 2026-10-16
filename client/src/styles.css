@@ -250,10 +250,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    around the well, and so the well's 24 px top-left radius is drawn against white. Before the strip, `.main` carried a 24 px top margin for that
    curve, but `body` paints --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
 .maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--strip) }
-/* The shell strip (§8.0): what is true of the machine wherever you stand — today the tracker chip, right-aligned. Its height is `--main-gap`, and it
+/* The shell strip (§8.0): what is true of the machine wherever you stand — the tracker chip and the Jira chip, right-aligned, 8 px apart. Its height is `--main-gap`, and it
    keeps that height when empty, so the well's top edge never moves with whether a tracker is connected. */
 .topstrip {
-  height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end;
+  height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding: 0 var(--body-pad);
 }
 /* The well: --board with a 24 px top-LEFT radius — the one corner the rail and the strip meet, the design's app-shell inset (§8.0), visible now that
@@ -359,6 +359,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink2);
 }
 .tracker-pop-note { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.45 }
+/* The Jira chip's popover (§8.9.4) draws one line per board and no timer, so `.tracker-row`'s 120 px second column would be an empty gutter: one column
+   here. The line wraps, unlike `.tracker-row-name`, because a failure's sentence is the thing the row exists to show. */
+.jira-chip-board { grid-template-columns: minmax(0, 1fr) }
+.jira-chip-board-line { font-size: 13px; overflow-wrap: anywhere }
 
 /* ---------------------------------------------- Board section
    Every registered project's backlog on one board, read via GET /api/projects

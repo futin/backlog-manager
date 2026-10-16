@@ -152,8 +152,11 @@ const count = (n: number, noun: 'root' | 'query' | 'issue'): string => `${n} ${n
 /** The same, or `null` for zero, which every sentence below omits rather than print. */
 const countOrNull = (n: number, noun: 'root' | 'query' | 'issue'): string | null => (n > 0 ? count(n, noun) : null);
 
-/** The age half of a poll sentence: `polled 12 s ago`, or R8's `not polled yet`. `last` is Setup's off-board wording, where the poll is history. */
-function polledPhrase(polledAt: string | null, now: number, last = false): string {
+/**
+ * The age half of a poll sentence: `polled 12 s ago`, or R8's `not polled yet`. `last` is Setup's off-board wording, where the poll is history. Exported for
+ * the chip popover (Task 12), so a board's age is worded once across the Band, Setup and the chip.
+ */
+export function polledPhrase(polledAt: string | null, now: number, last = false): string {
   const age = pollAge(polledAt, now);
   return age === null ? 'not polled yet' : `${last ? 'last polled' : 'polled'} ${age} ago`;
 }

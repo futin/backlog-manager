@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import { SectionBoundary } from './components/SectionBoundary';
 import { SideRail } from './components/SideRail';
+import { JiraChip } from './components/JiraChip';
 import { TrackerChip } from './components/TrackerChip';
 import { SECTIONS, type Section } from './lib/sections';
 import type { JiraPage } from './lib/jira-page';
@@ -157,7 +158,14 @@ function AppShell() {
     rather than leaving it anchored to a chip that moved.
   */
   const narrow = useNarrow();
-  const chip = <TrackerChip section={section} />;
+  // Both chips are one home's occupants: the Jira chip draws only while Jira is configured, as the tracker chip only while a tracker is connected, and each
+  // renders `null` otherwise — so the strip (always in the tree) and the rail bar hold zero, one or two chips, never a hidden one.
+  const chip = (
+    <>
+      <TrackerChip section={section} />
+      <JiraChip section={section} />
+    </>
+  );
 
   /*
     No second clamp on the way to the render below, unlike the two-way guard
