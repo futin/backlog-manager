@@ -47,7 +47,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   version chip — read-only, git only — not an outbound-calling module), `registry/`, `static.ts` (serves `client/dist` only when built),
   `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
-- `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings), one run chip in the board's band, and the three-step
+- `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings) that ends in a version chip opening the What's new
+  drawer ([releases](docs/subsystems/releases.md)), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
 

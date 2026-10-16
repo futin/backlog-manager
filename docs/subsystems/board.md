@@ -50,7 +50,11 @@ readers already sit inside `SettingsProvider` and nothing outside Settings write
 Setup's `Open board` and the empty board's `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
 `change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`.
 
-Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
+The rail's last element is the version chip, `v0.2.0` or `v0.2.0+3`, with a cyan dot while a release has landed since this browser last opened the
+What's new drawer behind it; the shell owns the read, the dot and the drawer, and renders the drawer outside the rail. All of it is
+[releases.md](releases.md).
+
+Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it — the version chip is its last row. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
 
 ### Primitives
