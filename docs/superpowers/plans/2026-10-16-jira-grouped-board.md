@@ -67,7 +67,8 @@ Each is a decision, numbered so a reviewer can reject it by number.
   same reason: a default is how the next call site forgets it. `null` means "the list has not loaded" and reproduces today's line from `board.count`.
 - **R3 — "the list has loaded"** is exactly the condition under which the board draws columns today: not `list.loading`, and not (`list.error` with an empty
   list). The band and the columns read one condition, so the band cannot claim cards the columns are not drawing.
-- **R4 — two new primitive families.** `SpreadBar` draws `.ui-spread…` and `JiraTypeIcon` draws `.ui-type-icon` (the svg rule today scoped as
+- **R4 — two new primitive families.** `SpreadBar`'s root element's class is exactly `ui-spread` (guard 7 needs the bare `.ui-spread {` rule; children
+  are `.ui-spread-…`) and `JiraTypeIcon` draws `.ui-type-icon` (the svg rule today scoped as
   `.jira-card-type svg` moves there), both declared inside the `/* ── ui primitives` block, and `test/design-guards.test.ts` guard 7's `FAMILIES` gains both.
   `.jira-card-type` keeps only its layout (`inline-flex`, `flex: none`).
 - **R5 — `SpreadBar` draws only non-zero segments** (so a zero never leaves a double gap), sized by `flex-grow` proportional to its count, and renders
@@ -80,8 +81,10 @@ Each is a decision, numbered so a reviewer can reject it by number.
 - **R9 — the tree's "each key once" skip set** is the modal's own key plus every direct child's key, plus each key as it is emitted. Seeding all direct
   children first is what lets a reparented issue land as the direct child even when the stale branch that also holds it is drawn earlier; seeding the
   modal's own key stops a stale snapshot from drawing the open issue inside its own tree.
-- **R10 — tree rows are `li > button`** inside a `ul`, each `li` carrying `data-depth` (0 for a direct child) and its indent as `depth × 22 px`. The button's
+- **R10 — tree rows are `li > button`** inside a `ul`, each `li` carrying `data-depth` (0 for a direct child) and its indent INLINE as `padding-left:
+  depth × 22 px` — inline because jsdom never loads `styles.css`, so a stylesheet indent keyed on `data-depth` could not be asserted. The button's
   accessible name contains the key and the summary.
+- **R12 — `under` and `childrenOf` are typed `ReadonlyMap`** where spec §3 writes `Map`: a deliberate tightening (no reader may write the fold), not drift.
 - **R11 — `subtasksMarker` is deleted** with its last reader (Task 3), not left exported and unread.
 
 ## Review Focus
@@ -137,7 +140,8 @@ Behaviour:
   progress, to do (`2 done · 4 in progress · 3 to do`), `null` when all three are zero.
 - `childrenLine(direct, deeper)` — `null` at `direct === 0`; otherwise `C children` / `1 child`, plus ` · D below them` when `deeper > 0`.
 - `cardFold` — `null` when `under` has nothing for the key; else `direct` = `childrenOf[topKey]`'s length, `deeper` = `under[topKey]`'s length minus
-  `direct`, `line` = `childrenLine`, `progress` = `foldProgress(under[topKey])`, `caption` = `progressLine(progress)`.
+  `direct`, `line` = `childrenLine`, `progress` = `foldProgress(under[topKey])`, `caption` = `progressLine(progress)`. Both are non-null whenever `under`
+  has an entry (an issue under the top implies a direct child and a non-zero bucket); narrow on that stated reason, not a bare `!`.
 - `foldMatches` (§5, F1) — for each top: if `keep(top)`, the map gets `top.key → []`; else if any issue in `under[top.key]` is kept, `top.key → ` those
   keys in `under`'s order; else the top is absent (hidden). `keep` is the board's existing `matchesBoardFilters(i, applied, me)`, unchanged.
 - `matchMarker` — `[]` → `null`; one key → `{ word: '1 match: <KEY>', title: undefined }`; more → `{ word: '<N> matches', title: keys joined ', ' }`.
@@ -203,7 +207,8 @@ Behaviour:
 Behaviour: `SpreadBar` is a 4 px track of up to three segments — done `--fill-progress`, in progress `--fill-live`, to do `--ink3` — 2 px gaps, each
 non-zero segment `flex-grow` by its count (R5), nothing rendered when all are zero; the caption, when given, sits under it at 12 px `--ink3`. The track is
 `role="img"` with an `aria-label` equal to the caption (or, without one, the three counts in the caption's own words), since the segments are decoration. No
-text inside the bar. `.ui-marker-match` is `color: var(--amber-text)` — never bare `--amber` (design-guards forbids it).
+text inside the bar. `.ui-marker-match` is `color: var(--amber-text)` — never bare `--amber` (`test/daylight-contrast.test.ts` forbids it). `Marker`'s
+header also stops saying no marker passes a `title`: the `match` tone does (Task 4).
 
 - [ ] **Step 1: Write the failing tests** — `ui-spread-bar`: `{2,4,3}` draws three segments in order done/doing/todo, each with its class, and flex-grow 2,
   4, 3; `{0,1,0}` draws exactly one segment; `{0,0,0}` renders nothing (container empty); the caption `2 done · 4 in progress · 3 to do` is drawn and is the
@@ -258,7 +263,8 @@ marker row (R7), the fold block when `fold !== null`: the `line` (style per `Gro
   marker), citing DESIGN.md §8.9.1 and grouped-board spec §3/§4. Delete `subtasksMarker` and its import.
 - [ ] **Step 4: Run** `pnpm run test:jest -- test/jira-board.test.tsx test/jira-lib.test.ts test/jira-modal.test.tsx test/design-guards.test.ts` — PASS
   (`jira-modal`'s two `JiraView` cases must still pass untouched); typecheck.
-- [ ] **Step 5: Commit** — `feat(jira): the board draws one card per top issue`
+- [ ] **Step 5: Commit** — `feat(jira): the board draws one card per top issue`. The body says that until Task 4 a filter matching only a folded issue
+  hides its top, so a bisect does not read it as a bug.
 
 ### Task 4: Filters and search find folded issues (F1)
 
@@ -309,13 +315,15 @@ disc when unassigned, as on the card) and the raw status as a `neutral` `Pill`. 
 — so `JiraView` swaps the one modal's issue; `JiraIssueModal`'s existing key-stamped read then fetches the new issue's detail. Never a second `Modal`. The
 snapshot is taken when the card is clicked and is not refreshed by later board polls. No filter marking inside the tree (§8 non-goal).
 
-- [ ] **Step 1: Write the failing tests.** `mount` gains `childrenOf` (default `null`) and `onOpenIssue` (default a `jest.fn()`). Children fixtures reuse
-  `CARD` with distinct keys, statuses and `parent`.
+- [ ] **Step 1: Write the failing tests.** `mount` gains `childrenOf` (default `null`) and `onOpenIssue` (default a `jest.fn()`). The late-answer case's
+  direct `view.rerender(<JiraIssueModal issue onClose>)` (`test/jira-modal.test.tsx:242`) bypasses `mount` and must pass `childrenOf={null}` and an
+  `onOpenIssue` too, or the suite stops compiling under ts-jest. Children fixtures reuse `CARD` with distinct keys, statuses and `parent`; the `JiraView`
+  cases below rebuild the slice of Task 3's `GROUP` list they need locally in this suite (suites share no fixtures), with the same keys and statuses.
   - the existing Subtasks case becomes: heading `Children`, its pill `2`, two rows naming `PAY-132 Wire the refund call` and `PAY-133 Receipt copy` with
     their raw statuses; no heading `Subtasks` anywhere; no `in all` (nothing deeper, `childrenOf` null — "with no `childrenOf` the tree is the direct children
     only"). The "no heading when there are none" case asserts `Children` instead.
   - nested: detail children `[PAY-160, PAY-170]`, `childrenOf` `{PAY-160: [PAY-162, PAY-161]}` → rows in order PAY-160, PAY-162, PAY-161, PAY-170 with
-    `data-depth` 0, 1, 1, 0 and the depth-1 rows indented 22 px; `4 in all`; caption matches the four rows' statuses.
+    `data-depth` 0, 1, 1, 0 and the depth-1 rows' inline `padding-left` `22px` (R10); `4 in all`; caption matches the four rows' statuses.
   - a detail child the board does not hold: children `[PAY-160, PAY-175]`, index `{PAY-160: [PAY-161]}` → three rows, PAY-175 at depth 0 with nothing
     under it, `3 in all`, the caption sums to three.
   - reparent: children `[PAY-160, PAY-161]`, index `{PAY-160: [PAY-161, PAY-162]}` → PAY-161 drawn once, at depth 0; `3 in all`.
@@ -354,8 +362,8 @@ Behaviour:
   historical reference (specs and plans under `docs/superpowers/` stay as written).
 
 - [ ] **Step 1: Edit** the three DESIGN.md subsections and `docs/subsystems/jira.md`, new prose at 160 columns, existing prose not reflowed.
-- [ ] **Step 2: Verify** the grep above, then `pnpm run test:jest -- test/claude-rules.test.ts test/design-guards.test.ts` — PASS (they read these
-  files).
+- [ ] **Step 2: Verify** with the grep above — it is this task's only guard: no suite reads `.claude/DESIGN.md` or `docs/subsystems/jira.md`. Run
+  `pnpm run test:jest -- test/ui-spread-bar.test.tsx` only if `SpreadBar.tsx`'s header changed.
 - [ ] **Step 3: Commit** — `docs(jira): the grouped board in DESIGN.md and the Jira subsystem doc`
 
 ---
