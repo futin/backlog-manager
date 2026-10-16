@@ -5,10 +5,9 @@ import { Chip } from './ui/Chip';
 import { Dot } from './ui/Dot';
 import { Popover } from './ui/Popover';
 import { Segmented } from './ui/Segmented';
+import type { SortDir } from '../lib/board-sort';
 import type { ProjectHues } from '../lib/project-hue';
 import type { RegistryProject } from '../../../shared/types';
-
-export type SortDir = 'asc' | 'desc';
 
 /**
  * What the track needs to draw and drive a sort: the current key and direction, the options with the words each one is drawn with, and the two setters.

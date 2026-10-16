@@ -154,7 +154,7 @@ export type QueuedStrip = {
 
 /**
  * The `orchestrator:queued` strip, or null for none. A SIBLING of `liveBarFor` and deliberately not a fifth row of its precedence, though it paints in the
- * same 24 px band: `liveBarFor`'s set of cards is, by construction, `liveRank`'s `< 2` half in BoardView — the column order, the Status filter's "In
+ * same 24 px band: `liveBarFor`'s set of cards is, by construction, `liveRank`'s `< 2` half (lib/board-sort.ts) — the column order, the Status filter's "In
  * progress" and the board clock all at once — and a queued item is none of those. Nobody is on it; the label is a plan, never a claim (invariants.md).
  *
  * So the one precedence rule between the two lives here, in the `bar` argument: any live bar wins. That is what makes the claim beat the label. A claim
