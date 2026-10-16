@@ -8,11 +8,12 @@ import { AgentsModule } from './agents/agents.module';
 import { OrchestratorModule } from './orchestrator/orchestrator.module';
 import { HubModule } from './hub/hub.module';
 import { JiraModule } from './jira/jira.module';
+import { ReleasesModule } from './releases/releases.module';
 import { applySecurityMiddleware } from './security';
 import { clientDistModules } from './static';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), ItemsModule, AgentsModule, OrchestratorModule, HubModule, JiraModule, ...clientDistModules()],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ItemsModule, AgentsModule, OrchestratorModule, HubModule, JiraModule, ReleasesModule, ...clientDistModules()],
   controllers: [HealthController]
 })
 export class AppModule implements NestModule {
