@@ -229,6 +229,17 @@ export function soonestBoard(boards: readonly JiraBoardStatus[], _now: number): 
 const byName = (a: JiraBoardStatus, b: JiraBoardStatus): number => a.name.localeCompare(b.name);
 
 /**
+ * The per-browser key holding which board the Board page draws (`usePersistedState`, so the value is JSON). What is stored there is only ever a PREFERENCE:
+ * `pickBoard` below resolves it against the live list on every render, so a stale or hand-edited value can never become a request.
+ */
+export const JIRA_BOARD_KEY = 'backlog-manager.jira-board';
+
+/** The boards by name — the picker's order, and the order `pickBoard`'s fallback takes the first of, so the two cannot disagree about "first". */
+export function boardsByName(boards: readonly JiraBoardStatus[]): JiraBoardStatus[] {
+  return [...boards].sort(byName);
+}
+
+/**
  * Which board the page draws: the one the browser stored when it is still there, else the first by name. The stored value is `unknown` because it is
  * persisted — a deleted board (here or in another browser), garbage, or a number all fall through to the first by name, and the caller never asks the
  * server for a board that is not in the list. `null` only when there are no boards at all.
@@ -238,7 +249,88 @@ export function pickBoard(storedId: unknown, boards: readonly JiraBoardStatus[])
     const stored = boards.find((b) => b.id === storedId);
     if (stored !== undefined) return stored;
   }
-  return [...boards].sort(byName)[0] ?? null;
+  return boardsByName(boards)[0] ?? null;
+}
+
+// ── The Board page's filters ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the Board page's three filters and its search hold (spec §6.2). Per mount, never persisted — the global constraints' rule, because a filter that
+ * survived a reload would hide cards from a reader who no longer remembers setting it, and the band's list is cheap to narrow again.
+ *
+ * `type` and `sprint` are `undefined` for "any"; `sprint: null` is the `no sprint` pick, which is why "any" cannot also be `null`. `assignee` is the three
+ * words the panel draws.
+ */
+export type JiraAssigneeFilter = 'anyone' | 'me' | 'unassigned';
+
+export interface JiraBoardFilters {
+  type: string | undefined;
+  assignee: JiraAssigneeFilter;
+  sprint: string | null | undefined;
+  search: string;
+}
+
+export const NO_JIRA_FILTERS: JiraBoardFilters = { type: undefined, assignee: 'anyone', sprint: undefined, search: '' };
+
+const byText = (a: string, b: string): number => a.localeCompare(b, undefined, { numeric: true });
+
+/**
+ * The picks the panel offers, read off the LOADED list rather than off Jira's own catalogue: a type or a sprint no card on this board carries would be a
+ * chip that empties the columns, and the browser has no other source anyway (it never talks to Jira). Sorted, with `Sprint 9` before `Sprint 10`.
+ * `noSprint` says whether the `no sprint` chip has anything to show.
+ */
+export function boardFilterOptions(issues: readonly JiraIssue[]): { types: string[]; sprints: string[]; noSprint: boolean } {
+  const types = new Set<string>();
+  const sprints = new Set<string>();
+  let noSprint = false;
+  for (const i of issues) {
+    types.add(i.type.name);
+    if (i.sprint === null) noSprint = true;
+    else sprints.add(i.sprint);
+  }
+  return { types: [...types].sort(byText), sprints: [...sprints].sort(byText), noSprint };
+}
+
+/**
+ * The filters as they actually apply: a pick the current list no longer offers reads as "any" rather than as a filter that hides everything — the board was
+ * switched, or the sweep moved the last card of that sprint out — and `me` reads as `anyone` while the identity is unknown, since the panel draws no `me`
+ * chip then and a filter nobody can see must not be in force. The Board's own `projectValue` is the same fail-open, for the same reason.
+ */
+export function effectiveBoardFilters(
+  filters: JiraBoardFilters,
+  options: ReturnType<typeof boardFilterOptions>,
+  me: { accountId: string } | null
+): JiraBoardFilters {
+  const sprintOffered = filters.sprint === null ? options.noSprint : filters.sprint !== undefined && options.sprints.includes(filters.sprint);
+  return {
+    type: filters.type !== undefined && options.types.includes(filters.type) ? filters.type : undefined,
+    assignee: filters.assignee === 'me' && me === null ? 'anyone' : filters.assignee,
+    sprint: sprintOffered ? filters.sprint : undefined,
+    search: filters.search
+  };
+}
+
+/** How many of the three panel filters are set — the funnel's badge. The search is not one: it is in plain sight on the band, and `Clear all` leaves it. */
+export function boardFilterCount(f: JiraBoardFilters): number {
+  return (f.type !== undefined ? 1 : 0) + (f.assignee !== 'anyone' ? 1 : 0) + (f.sprint !== undefined ? 1 : 0);
+}
+
+/**
+ * Whether one card survives the (effective) filters and the search. The search is a case-insensitive substring of the KEY or the summary — a reader types
+ * `pay-12` as often as a word of the title — trimmed, so a stray space does not empty the board.
+ */
+export function matchesBoardFilters(issue: JiraIssue, f: JiraBoardFilters, me: { accountId: string } | null): boolean {
+  if (f.type !== undefined && issue.type.name !== f.type) return false;
+  if (f.sprint !== undefined && issue.sprint !== f.sprint) return false;
+  if (f.assignee === 'unassigned' && issue.assignee !== null) return false;
+  if (f.assignee === 'me' && (me === null || issue.assignee?.accountId !== me.accountId)) return false;
+  const q = f.search.trim().toLowerCase();
+  return q === '' || issue.key.toLowerCase().includes(q) || issue.summary.toLowerCase().includes(q);
+}
+
+/** `2 subtasks`, `1 subtask`, and nothing at zero — the card's marker, which says there is more under the card and not how much of it is done. */
+export function subtasksMarker(n: number): string | null {
+  return n > 0 ? `${n} ${n === 1 ? 'subtask' : 'subtasks'}` : null;
 }
 
 /** Setup's list order: by name, with boards that are not syncing (`off`) after every board that is. */

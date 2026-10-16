@@ -386,7 +386,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    the track's panel. */
 
 /* The band's search field (§8.3): 36 px, 12 px radius, a `--hairline` stroke.
-   Drawn by the Board's band and, since task-39, Archive's. */
+   Drawn by the Board's band and, since task-39, Archive's — and, since Jira
+   phase 2, the Jira board's (§8.9.1), which searches keys and summaries. */
 .board-band-search {
   font-family: inherit; font-size: 13px; color: var(--ink);
   height: 36px; width: 200px; min-width: 0; padding: 0 14px;
@@ -578,6 +579,51 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    are `Marker`'s (a `ui/` primitive); this rule only lays them out and pushes
    the dispatch chip to the right end. */
 .board-card-markers { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px }
+
+/* ---------------------------------------------- Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1)
+   The page is the Board's composition — `Band`, `FilterBar`, `.board-columns`, and `.board-card` with its face, title, foot, meta and marker rows — so this
+   family is only what a Jira issue has that a backlog item does not: the card's head row (type glyph, key, crumb), the initials disc in its foot, the band's
+   red sub-line, and the board picker. Colours are existing tokens; nothing here is under 11 px (guard 3). */
+
+/* The sub-line's failing reading: red while the last sweep could not read a root or a query (`bandSub`'s `failing`). The class, never an inline colour, so
+   each theme's `--red` is the red. */
+.jira-band-sub.failing { color: var(--red) }
+
+/* The picker is its Popover's positioning parent (the panel hangs `100% + 8px` under it, right edges together) and does not shrink in the band's wrapping
+   right slot. The board's name ellipsises inside the chip, so a long name cannot push the search and the filter track off the line. */
+.jira-picker { position: relative; flex: none; max-width: 100% }
+.jira-picker-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* One row per board, by name — the shape of the Sort panel's rows, with the tick on the board in view. */
+.jira-picker-opt {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left;
+  font-size: 13px; font-weight: 500; color: var(--ink2); cursor: pointer;
+}
+.jira-picker-opt:hover { background: var(--strip-hi) }
+.jira-picker-opt.on { color: var(--ink) }
+.jira-picker-opt span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-picker-tick {
+  flex: none; margin-left: auto; width: 16px; height: 16px; visibility: hidden;
+  stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.jira-picker-opt.on .jira-picker-tick { visibility: visible }
+
+/* The card's head: the type glyph and the key left, the crumb pushed right and ellipsised — the crumb is the one value on the row that can be long
+   (`↳ PAY-120 Refund flows`), and the key is the card's handle, so the crumb is what gives. */
+.jira-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
+.jira-card-type { display: inline-flex; flex: none }
+.jira-card-type svg { width: 14px; height: 14px; stroke: var(--ink3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
+.jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
+   the Board card's project name. An unassigned issue draws the disc empty and dashed, so the row keeps its shape. */
+.jira-card-who { display: flex; align-items: center; gap: 6px; min-width: 0 }
+.jira-card-av {
+  display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 999px;
+  background: var(--strip-hi); color: var(--ink); font-size: 11px; font-weight: 600;
+}
+.jira-card-av.none { background: none; border: 1px dashed var(--hairline2) }
+.jira-card-name { font-size: 12px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
 
 /* Project pill: the item's project, in that project's own hue, on its card and
    in the drawer head. Both halves now say the same thing — name in the text,
@@ -990,6 +1036,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .board-columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--col-gap); align-items: start }
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
+
+/* The Jira board's columns (Jira phase 2, spec §6.2; DESIGN.md §8.9.1): `.board-columns` with three tracks instead of four — To Do, In Progress, Done, one
+   per status category. Declared after the Board's three rules so the 1100 px step (two tracks) is overridden: three categories over two tracks would put
+   Done under To Do, which reads as a fourth column rather than as the third. Below 700 px they stack exactly as the Board's do. */
+.jira-board-columns { grid-template-columns: repeat(3, minmax(0, 1fr)) }
+@media (max-width: 700px) { .jira-board-columns { grid-template-columns: 1fr } }
 
 .board-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
 .board-col-name {
