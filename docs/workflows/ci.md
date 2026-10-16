@@ -65,4 +65,5 @@ Once it is applied, every direct push to `main` is refused, and in this repo tha
   sources:
     - .github/workflows
   kind: workflow
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->

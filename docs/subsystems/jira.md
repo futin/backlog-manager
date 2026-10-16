@@ -157,4 +157,5 @@ compose passthrough.
   sources:
     - server/src/jira
   kind: subsystem
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->
