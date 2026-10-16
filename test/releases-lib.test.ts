@@ -71,18 +71,31 @@ describe('TYPE_LABEL', () => {
 
 describe('dotState', () => {
   it('seeds the newest on a first visit, and on junk, with no dot', () => {
-    expect(dotState('0.2.0', null)).toEqual({ dot: false, seed: '0.2.0' });
-    expect(dotState('0.2.0', 'garbage')).toEqual({ dot: false, seed: '0.2.0' });
+    expect(dotState('0.2.0', null, false)).toEqual({ dot: false, seed: '0.2.0' });
+    expect(dotState('0.2.0', 'garbage', false)).toEqual({ dot: false, seed: '0.2.0' });
   });
 
   it('dots only when the newest is above the stored version', () => {
-    expect(dotState('0.2.0', '0.1.0')).toEqual({ dot: true, seed: null });
-    expect(dotState('0.2.0', '0.2.0')).toEqual({ dot: false, seed: null });
-    expect(dotState('0.2.0', '0.3.0')).toEqual({ dot: false, seed: null });
+    expect(dotState('0.2.0', '0.1.0', false)).toEqual({ dot: true, seed: null });
+    expect(dotState('0.2.0', '0.2.0', false)).toEqual({ dot: false, seed: null });
+    expect(dotState('0.2.0', '0.3.0', false)).toEqual({ dot: false, seed: null });
   });
 
   it('has nothing to say with no releases', () => {
-    expect(dotState(null, '0.1.0')).toEqual({ dot: false, seed: null });
+    expect(dotState(null, '0.1.0', false)).toEqual({ dot: false, seed: null });
+    expect(dotState(null, '0.1.0', true)).toEqual({ dot: false, seed: null });
+  });
+
+  it('with the drawer open, never dots and marks the newest seen when it is above the stored one or nothing valid is stored', () => {
+    expect(dotState('0.2.1', '0.1.0', true)).toEqual({ dot: false, seed: '0.2.1' });
+    expect(dotState('0.2.1', null, true)).toEqual({ dot: false, seed: '0.2.1' });
+    expect(dotState('0.2.1', 'v0.1.0', true)).toEqual({ dot: false, seed: '0.2.1' });
+    expect(dotState('0.2.1', '0.2.1', true)).toEqual({ dot: false, seed: null });
+  });
+
+  it('with the drawer open on an older checkout, keeps the higher stored version rather than writing a lower one', () => {
+    // Switching to a checkout behind the one last opened must not re-flag the releases between the two once the newer checkout is back.
+    expect(dotState('0.2.0', '0.3.0', true)).toEqual({ dot: false, seed: null });
   });
 });
 

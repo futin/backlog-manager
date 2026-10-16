@@ -47,7 +47,7 @@ does.
 
 **The dot.** A cyan dot sits in the chip while the newest release (the baseline counts) is above the version stored under `localStorage`
 `backlog-manager.releases-last-seen` — a raw version string, not JSON. Opening the drawer stores the newest, and keeps storing whatever is newest while it is
-open. A first visit, or a stored value that is not a version, seeds the newest without showing the dot (`dotState`), so a fresh browser never flags the whole
+open — but never a version below the stored one, so opening the drawer on an older checkout does not re-flag the releases it has not got. A first visit, or a stored value that is not a version, seeds the newest without showing the dot (`dotState`), so a fresh browser never flags the whole
 history as new. Storage that throws (a private window, blocked site data) means no dot, never a crash: `AppShell` mirrors the value in memory, so the seed it
 could not write still settles the dot. A per-browser convenience, not a record.
 

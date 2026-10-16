@@ -91,6 +91,18 @@ describe('the version chip in the shell', () => {
     expect(dot()).toBeNull();
   });
 
+  it('opened on a checkout older than the one last seen, keeps the higher stored version', async () => {
+    localStorage.setItem(LAST_SEEN_KEY, '0.3.0');
+    render(<App />);
+    await waitFor(() => expect(chip()).toBeInTheDocument());
+    expect(dot()).toBeNull();
+
+    await userEvent.click(chip() as HTMLElement);
+    expect(await screen.findByRole('dialog', { name: "What's new" })).toBeInTheDocument();
+    await waitFor(() => expect(releaseCalls).toBe(2));
+    expect(localStorage.getItem(LAST_SEEN_KEY)).toBe('0.3.0');
+  });
+
   it('seeds a first visit with the newest, and draws no dot', async () => {
     render(<App />);
     await waitFor(() => expect(chip()).toBeInTheDocument());

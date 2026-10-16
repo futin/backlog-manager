@@ -39,13 +39,17 @@ export function displayTitle(title: string): string {
 export const TYPE_LABEL: Record<Exclude<ReleaseType, 'baseline'>, string> = { feat: 'Feature', fix: 'Fix', perf: 'Performance' };
 
 /**
- * Should the chip carry the dot, and must storage be seeded? A dot only when the newest release is above the stored one; a missing or junk stored value is
- * not "everything is new" but a first visit, so it answers no dot and asks the caller to store the newest (`seed`). Pure: the caller does the writing.
+ * Should the chip carry the dot, and what must storage be set to (`seed`, `null` for nothing)? A dot only when the newest release is above the stored one; a
+ * missing or junk stored value is not "everything is new" but a first visit, so it answers no dot and asks the caller to store the newest. With the drawer
+ * `open` there is never a dot, and the newest is marked seen — but only when it is above what is stored: a checkout behind the one last opened must not write
+ * the lower version back, or the releases between the two would be flagged again once the newer checkout returns. Pure: the caller does the writing.
  */
-export function dotState(newest: string | null, stored: string | null): { dot: boolean; seed: string | null } {
+export function dotState(newest: string | null, stored: string | null, open: boolean): { dot: boolean; seed: string | null } {
   if (!isVersion(newest)) return { dot: false, seed: null };
   if (!isVersion(stored)) return { dot: false, seed: newest };
-  return { dot: compareVersions(newest, stored) > 0, seed: null };
+  const above = compareVersions(newest, stored) > 0;
+  if (open) return { dot: false, seed: above ? newest : null };
+  return { dot: above, seed: null };
 }
 
 /** The last version the viewer opened the drawer on, or `null` — a storage that throws reads as never having seen one. */

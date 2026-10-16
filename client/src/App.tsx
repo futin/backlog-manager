@@ -167,24 +167,24 @@ function AppShell() {
     `localStorage`, and the drawer, which renders here beside the rail rather than inside it — the phone rail hides with a transform, and a transformed
     ancestor turns a `position: fixed` panel into one positioned inside it. `seen` mirrors storage in memory so a storage that throws still behaves: the seed
     is written (or swallowed) and the dot computes against it, never against a value that cannot be read back. Opening the drawer re-reads, and while it is
-    open the newest version on screen is the one marked seen — a refresh that lands mid-read marks what it brought.
+    open the newest version on screen is the one marked seen — a refresh that lands mid-read marks what it brought. Which value to store, and whether to dot,
+    is `dotState`'s call; the shell only writes what it answers.
   */
   const releases = useReleases();
   const [seen, setSeen] = useState<string | null>(() => readLastSeen());
   const [whatsNew, setWhatsNew] = useState(false);
   const newest = releases.data?.releases[0]?.version ?? null;
-  const { dot, seed } = dotState(newest, seen);
-  const markSeen = whatsNew ? newest : seed;
+  const { dot, seed } = dotState(newest, seen, whatsNew);
   useEffect(() => {
-    if (markSeen === null || markSeen === seen) return;
-    writeLastSeen(markSeen);
-    setSeen(markSeen);
-  }, [markSeen, seen]);
+    if (seed === null || seed === seen) return;
+    writeLastSeen(seed);
+    setSeen(seed);
+  }, [seed, seen]);
   const current = releases.data?.current ?? null;
   const releaseChip = current
     ? {
         label: chipLabel(current),
-        dot: dot && !whatsNew,
+        dot,
         onOpen: () => {
           releases.refresh();
           setWhatsNew(true);
