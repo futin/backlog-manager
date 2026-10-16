@@ -1,16 +1,32 @@
-import { readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-import { DEFAULT_JIRA_INTERVAL, isJiraKey, isSyncInterval, type JiraBoard, type JiraQuery, type JiraSkill } from '../../../shared/types';
+import {
+  DEFAULT_JIRA_INTERVAL,
+  SYNC_INTERVALS,
+  isJiraKey,
+  isSyncInterval,
+  type JiraBoard,
+  type JiraQuery,
+  type JiraSkill,
+  type SyncInterval
+} from '../../../shared/types';
 
 /**
- * config.util.ts — ~/.backlog-manager/settings/jira.json, the READER half (spec §2; phase 1 of the Jira plan).
+ * config.util.ts — ~/.backlog-manager/settings/jira.json: the readers (spec §2, phase 1) and the writers (spec §5, phase 2).
  *
- * This is the fourth file the server writes, after `watchdog.json`, the pause-control files and `tracker-sync.json` — but the writers are phase 2's. This file
- * holds the reader only and no write path at all: a file that exists and cannot be read or parsed is REPORTED (`unreadable`, which becomes `configUnreadable`
- * on the status payload) and never replaced, so the Board page can say `jira.json cannot be read` rather than the false, and later destructive, `No boards
- * yet`.
+ * This is the fourth file the server writes, after `watchdog.json`, the pause-control files and `tracker-sync.json`, and the writers sit on
+ * `writeSyncInterval`'s contract: read the RAW parsed file, change exactly ONE entry (a board by id, one project's repo list by key), keep everything else —
+ * malformed entries and unknown top-level keys included, because the file is hand-edited and a writer that re-serialised only what it understood would
+ * delete the rest — and write `JSON.stringify(next, null, 2) + '\n'` to a temp file beside it and `rename` it over, so a reader never sees half a file.
+ * A file that exists and cannot be read or parsed is REPORTED by the reader (`unreadable`, which becomes `configUnreadable` on the status payload) and
+ * REFUSED by every writer (`JiraConfigUnreadableError`, a 409 at the route), never replaced: rewriting it from `{}` would turn one stray comma, or a file
+ * truncated by a full disk, into a file holding only the entry being written — every board, saved query and repo path gone, with nothing on disk left to
+ * recover them from (#270 is the same failure in `tracker-sync.json`). The Board page can then say `jira.json cannot be read` rather than the false, and
+ * later destructive, `No boards yet`. A parsed NON-object (`[1, 2]`, `null`, a bare string) has nothing in it to preserve and is replaced; a MISSING file is
+ * written fresh.
  *
  * It restates `sync-config.util.ts`'s argument for a per-ENTRY fallback. The file holds hand-edited, user-authored data — boards, saved JQL, repo paths, skill
  * prompts — and one stray value must cost only its own entry, never its neighbours: a board with a mistyped id is not a reason to lose the next board, and a
@@ -18,15 +34,16 @@ import { DEFAULT_JIRA_INTERVAL, isJiraKey, isSyncInterval, type JiraBoard, type 
  * goes one level finer, by design and recorded here as the deviation it is: a bad ROOT costs the root and a bad QUERY costs the query, not the board they sit
  * in, because a board that loses its whole contents over one lower-case key is the more surprising failure of the two.
  *
- * Read fresh on every call and cached nowhere — the file is edited by hand and by phase 2's writers, and a cache would be a second copy that disagrees with
- * the disk for as long as it lives. A parsed non-object (`[1, 2]`, `null`, a bare string) folds into "nothing" and is NOT unreadable, exactly as
- * `sync-config.util.ts`'s `readRaw` does, so this reader and phase 2's writers (which replace a parsed non-object, as `writeSyncInterval` does) agree on what
- * such a file means. A MISSING file is also nothing, not unreadable: a fresh install has no `jira.json` and has done nothing wrong.
+ * Read fresh on every call and cached nowhere — the file is edited by hand and by the writers, and a cache would be a second copy that disagrees with
+ * the disk for as long as it lives. A parsed non-object folds into "nothing" and is NOT unreadable, exactly as `sync-config.util.ts`'s `readRaw` does, so this
+ * reader and the writers (which replace a parsed non-object, as `writeSyncInterval` does) agree on what such a file means. A MISSING file is also nothing, not
+ * unreadable: a fresh install has no `jira.json` and has done nothing wrong.
  *
- * One validating function per entry kind (`readBoard`, `readQuery`, `readRepos`, `readSkill`) so phase 2's writers validate with the same code and add spec
- * §5's stricter WRITE-time rules (lengths, counts) on top — the reader accepts whatever is well-formed, because refusing a long-but-valid entry on read would
- * make a hand-edit that the writers would also have accepted vanish from the board. Each dropped entry is warned about once, naming the file and the entry's
- * index or id, so a vanished entry leaves a trace in the server log.
+ * One validating function per entry kind (`readBoard`, `readQuery`, `readRepos`, `readSkill`); the write-side parsers (`parseBoardWrite`, `parseReposWrite`)
+ * validate with the same helpers (`isJiraKey`, `isSyncInterval`, `JIRA_PROJECT_KEY_RE`, `JIRA_JQL_MAX_CHARS`) and add spec §5's stricter WRITE-time rules
+ * (lengths, counts) on top — the reader accepts whatever is well-formed, because refusing a long-but-valid entry on read would make a hand-edit that the
+ * writers would also have accepted vanish from the board. Each dropped entry is warned about once, naming the file and the entry's index or id, so a vanished
+ * entry leaves a trace in the server log.
  */
 
 /** The file, or `BM_JIRA_FILE` when set — `syncConfigFile()`'s shape, `env` a parameter for the same reason. */
@@ -195,4 +212,256 @@ export function readJiraConfig(file: string = jiraConfigFile()): JiraConfig {
     skills: readList(raw.skills, file, 'skill', readSkill),
     unreadable: null
   };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// Writers (phase 2). Called by the three POST routes under `/api/jira` and nothing else.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/**
+ * Thrown by every writer when `jira.json` EXISTS but cannot be read as JSON (or cannot be read at all, for any reason other than not existing), and mapped to a
+ * 409 by the routes. A class rather than a bare `Error` so a route can tell this refusal — a state of the file the user has to repair by hand — from an I/O
+ * failure in the write itself, which stays a 500. `SyncConfigUnreadableError`'s twin.
+ */
+export class JiraConfigUnreadableError extends Error {
+  constructor(
+    readonly file: string,
+    reason: string
+  ) {
+    super(`settings/jira.json ${reason} — fix or delete it by hand; nothing was written`);
+    this.name = 'JiraConfigUnreadableError';
+  }
+}
+
+/** Thrown by `writeBoard` (an update) and `deleteBoard` when the file holds no board with the id; the routes map it to a 404, and nothing was written. */
+export class JiraUnknownIdError extends Error {
+  constructor(readonly id: string) {
+    super(`no board with id ${id}`);
+    this.name = 'JiraUnknownIdError';
+  }
+}
+
+/** Spec §5's write-time bounds. The reader enforces none of them (see the header). */
+const JIRA_NAME_MAX_CHARS = 80;
+const JIRA_ROOTS_MAX = 20;
+const JIRA_QUERIES_MAX = 10;
+const JIRA_REPO_PATHS_MAX = 10;
+
+/** What `POST /api/jira/boards` validated: `id` is `null` for a create and whatever string the client sent for an update; a query's `id` likewise. */
+export interface JiraBoardWrite {
+  id: string | null;
+  name: string;
+  roots: string[];
+  queries: { id: string | null; label: string; jql: string }[];
+  interval: SyncInterval;
+}
+
+type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function trimmedLengthWithin(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.trim().length >= 1 && value.trim().length <= max;
+}
+
+/**
+ * Validate a `POST /api/jira/boards` body (spec §5) and return it trimmed. The error names the offending field, because the route returns it as the 400's
+ * `error` and the board sheet puts the sentence under the field. Whether an `id` EXISTS is not asked here — `writeBoard` knows the file; a malformed id on an
+ * update is the 404 the route gives, and only a value that is not a string or `null` is a 400 here (R11).
+ */
+export function parseBoardWrite(body: unknown): Parsed<JiraBoardWrite> {
+  if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
+  let id: string | null = null;
+  if (typeof body.id === 'string') id = body.id;
+  else if (body.id !== undefined && body.id !== null) return { ok: false, error: 'id must be a string or null' };
+  if (!trimmedLengthWithin(body.name, JIRA_NAME_MAX_CHARS)) return { ok: false, error: `name must be 1–${JIRA_NAME_MAX_CHARS} characters` };
+  if (!isSyncInterval(body.interval)) return { ok: false, error: `interval must be one of ${Object.keys(SYNC_INTERVALS).join(', ')}` };
+  const rawRoots = body.roots === undefined ? [] : body.roots;
+  if (!Array.isArray(rawRoots)) return { ok: false, error: 'roots must be an array of issue keys' };
+  const roots: string[] = [];
+  for (const root of rawRoots) {
+    const key = typeof root === 'string' ? root.trim() : root;
+    if (!isJiraKey(key)) return { ok: false, error: `roots must hold issue keys like PAY-1: ${JSON.stringify(root)}` };
+    if (!roots.includes(key)) roots.push(key);
+  }
+  if (roots.length > JIRA_ROOTS_MAX) return { ok: false, error: `roots holds at most ${JIRA_ROOTS_MAX} issue keys` };
+  const rawQueries = body.queries === undefined ? [] : body.queries;
+  if (!Array.isArray(rawQueries)) return { ok: false, error: 'queries must be an array' };
+  if (rawQueries.length > JIRA_QUERIES_MAX) return { ok: false, error: `queries holds at most ${JIRA_QUERIES_MAX} queries` };
+  const queries: JiraBoardWrite['queries'] = [];
+  for (const [i, q] of rawQueries.entries()) {
+    if (!isRecord(q)) return { ok: false, error: `queries[${i}] must be an object` };
+    if (!trimmedLengthWithin(q.label, JIRA_NAME_MAX_CHARS)) return { ok: false, error: `queries[${i}].label must be 1–${JIRA_NAME_MAX_CHARS} characters` };
+    if (!trimmedLengthWithin(q.jql, JIRA_JQL_MAX_CHARS)) return { ok: false, error: `queries[${i}].jql must be 1–${JIRA_JQL_MAX_CHARS} characters` };
+    // A query id that is not a string is no id at all (R3: an id only matters when the stored board holds it), so it reads as `null`, not as a 400.
+    queries.push({ id: typeof q.id === 'string' ? q.id : null, label: q.label.trim(), jql: q.jql.trim() });
+  }
+  if (roots.length === 0 && queries.length === 0) return { ok: false, error: 'a board needs at least one of roots or queries' };
+  return { ok: true, value: { id, name: body.name.trim(), roots, queries, interval: body.interval } };
+}
+
+/**
+ * One spelling per path (R4), or `null` when `raw` has none. The dashboard compares repository paths as raw strings, so the server stores exactly one
+ * spelling: `~` and a leading `~/` expand to `home`, `~user/…` is refused, the result must be absolute with no empty, `.` or `..` segment, and one trailing
+ * `/` is dropped (`/` alone stays `/`).
+ */
+export function normaliseRepoPath(raw: string, home: string): string | null {
+  let path = raw.trim();
+  if (path === '~' || path.startsWith('~/')) path = home + path.slice(1);
+  else if (path.startsWith('~')) return null;
+  if (!path.startsWith('/')) return null;
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  if (path === '/') return path;
+  return path
+    .slice(1)
+    .split('/')
+    .some((segment) => segment === '' || segment === '.' || segment === '..')
+    ? null
+    : path;
+}
+
+/** Validate a `POST /api/jira/repos` body: a project key and at most ten paths, normalised (R4) and deduplicated AFTER normalisation. `[]` is valid — it removes the key. */
+export function parseReposWrite(body: unknown, home: string): Parsed<{ project: string; paths: string[] }> {
+  if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
+  if (typeof body.project !== 'string' || !JIRA_PROJECT_KEY_RE.test(body.project)) return { ok: false, error: 'project must be a Jira project key like PAY' };
+  if (!Array.isArray(body.paths) || body.paths.some((p) => typeof p !== 'string')) return { ok: false, error: 'paths must be an array of strings' };
+  const paths: string[] = [];
+  for (const raw of body.paths as string[]) {
+    const path = normaliseRepoPath(raw, home);
+    if (path === null) return { ok: false, error: `path must be absolute and normalised: ${raw}` };
+    if (!paths.includes(path)) paths.push(path);
+  }
+  if (paths.length > JIRA_REPO_PATHS_MAX) return { ok: false, error: `paths holds at most ${JIRA_REPO_PATHS_MAX} paths per project` };
+  return { ok: true, value: { project: body.project, paths } };
+}
+
+/** A fresh id of one kind: the prefix and eight lower-case hex digits from four random bytes. Uniqueness within a file is `mintUnique`'s job. */
+export function mintJiraId(kind: 'b' | 'q' | 's'): string {
+  return `${kind}_${randomBytes(4).toString('hex')}`;
+}
+
+function mintUnique(kind: 'b' | 'q' | 's', taken: Set<string>): string {
+  let id = mintJiraId(kind);
+  while (taken.has(id)) id = mintJiraId(kind);
+  taken.add(id);
+  return id;
+}
+
+/**
+ * The raw parsed file for a writer, as an object it may spread from. A missing file is `{}`; a parsed non-object is `{}` too (nothing in it to keep); a file
+ * that does not parse, or cannot be read for any reason but ENOENT, throws `JiraConfigUnreadableError` — we cannot know what is in a file we could not read, so
+ * we must not replace it. See the header.
+ */
+function readRawForWrite(file: string): Record<string, unknown> {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    console.warn(`${file}: cannot be read (${(e as Error).message}) — refusing to overwrite it`);
+    throw new JiraConfigUnreadableError(file, 'cannot be read');
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    console.warn(`${file}: exists but does not parse as JSON — refusing to overwrite it, so nothing in it is lost`);
+    throw new JiraConfigUnreadableError(file, 'does not parse as JSON');
+  }
+  return isRecord(raw) ? raw : {};
+}
+
+/** Temp file in the same directory (same filesystem, so `rename` is atomic), then rename over the target; the temp file does not outlive a failed write. */
+function writeRawAtomic(file: string, next: Record<string, unknown>): void {
+  const dir = dirname(file);
+  mkdirSync(dir, { recursive: true });
+  const tmp = join(dir, `.jira.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  try {
+    writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+    renameSync(tmp, file);
+  } catch (e) {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // nothing to clean up: the failure was before the temp file existed
+    }
+    throw e;
+  }
+}
+
+/** Every id the file already holds — boards, their queries and skills, malformed entries' ids included — so a minted id can never collide with one. */
+function idsIn(current: Record<string, unknown>): Set<string> {
+  const ids = new Set<string>();
+  const take = (entry: unknown): void => {
+    if (isRecord(entry) && typeof entry.id === 'string') ids.add(entry.id);
+  };
+  for (const board of Array.isArray(current.boards) ? current.boards : []) {
+    take(board);
+    if (isRecord(board) && Array.isArray(board.queries)) board.queries.forEach(take);
+  }
+  if (Array.isArray(current.skills)) current.skills.forEach(take);
+  return ids;
+}
+
+/**
+ * Create a board (`input.id === null`) or update the one holding `input.id`, and return it as stored. A create ignores every id the client sent and mints
+ * fresh ones for the board and each query (R3: no stored board holds them). An update keeps a query's id only when the STORED board holds it — once each; a
+ * query's identity is never inferred from its label or JQL — and mints for every other query, so a client cannot choose an id. The board keeps its position in
+ * `boards`; every other entry, malformed ones included, and every other top-level key survive untouched. An update whose id the file does not hold (or holds
+ * only as an entry the reader would drop) throws `JiraUnknownIdError` before anything is written.
+ */
+export function writeBoard(input: JiraBoardWrite, file: string = jiraConfigFile()): JiraBoard {
+  const current = readRawForWrite(file);
+  const boards = Array.isArray(current.boards) ? [...current.boards] : [];
+  const taken = idsIn(current);
+  let index = -1;
+  let held = new Set<string>();
+  if (input.id !== null) {
+    // Matched on the id first and read second, so a neighbouring malformed entry is not warned about on every update.
+    index = boards.findIndex((entry) => isRecord(entry) && entry.id === input.id);
+    const stored = index < 0 ? null : readBoard(boards[index], file, `board "${input.id}"`);
+    if (stored === null) throw new JiraUnknownIdError(input.id);
+    held = new Set(stored.queries.map((q) => q.id));
+  }
+  // What a client sent is reserved even when it is not kept, so the id minted for such a query is provably not the one it asked for.
+  for (const q of input.queries) if (q.id !== null) taken.add(q.id);
+  const kept = new Set<string>();
+  const queries: JiraQuery[] = input.queries.map((q) => {
+    const id = q.id !== null && held.has(q.id) && !kept.has(q.id) ? q.id : mintUnique('q', taken);
+    kept.add(id);
+    return { id, label: q.label, jql: q.jql };
+  });
+  const board: JiraBoard = {
+    id: input.id !== null ? input.id : mintUnique('b', taken),
+    name: input.name,
+    roots: input.roots,
+    queries,
+    interval: input.interval
+  };
+  if (index >= 0) boards[index] = { ...(boards[index] as Record<string, unknown>), ...board };
+  else boards.push(board);
+  writeRawAtomic(file, { ...current, boards });
+  return board;
+}
+
+/**
+ * Remove every raw entry whose `id` is `id` (a board a hand-edit duplicated goes in one call), keeping the rest in order. An id the file does not hold throws
+ * `JiraUnknownIdError`, nothing written. Matched on the raw entries, not on what the reader accepts: removing a half-broken entry by its id is harmless.
+ */
+export function deleteBoard(id: string, file: string = jiraConfigFile()): void {
+  const current = readRawForWrite(file);
+  const boards = Array.isArray(current.boards) ? current.boards : [];
+  const rest = boards.filter((entry) => !(isRecord(entry) && entry.id === id));
+  if (rest.length === boards.length) throw new JiraUnknownIdError(id);
+  writeRawAtomic(file, { ...current, boards: rest });
+}
+
+/**
+ * Set one project's repository list, or remove its key when `paths` is empty. `paths` arrive normalised and deduplicated (`parseReposWrite`). Every other key
+ * of `repos` survives, a hand-written invalid one included; a `repos` that is not an object (an array, say) is replaced by one holding only this key.
+ */
+export function writeRepos(project: string, paths: string[], file: string = jiraConfigFile()): void {
+  const current = readRawForWrite(file);
+  const repos: Record<string, unknown> = isRecord(current.repos) ? { ...current.repos } : {};
+  if (paths.length === 0) delete repos[project];
+  else repos[project] = paths;
+  writeRawAtomic(file, { ...current, repos });
 }

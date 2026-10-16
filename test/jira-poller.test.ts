@@ -172,7 +172,9 @@ describe('unconfigured', () => {
       projects: [],
       skills: [],
       calls: { sweep: 0, last429At: null },
-      live: {}
+      live: {},
+      armed: false,
+      home: null
     });
   });
 });

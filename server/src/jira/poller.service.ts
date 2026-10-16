@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+
 import { Injectable } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
@@ -236,7 +238,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
         projects: [],
         skills: [],
         calls: { sweep: 0, last429At: null },
-        live: {}
+        live: {},
+        armed: false,
+        home: null
       };
     }
     this.expireWindow(Date.now());
@@ -266,7 +270,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       projects: this.projectsOf(config),
       skills: config.skills,
       calls: { sweep: this.sweepCalls, last429At: this.last429At },
-      live: {}
+      live: {},
+      armed: this.armed,
+      home: homedir()
     };
   }
 
