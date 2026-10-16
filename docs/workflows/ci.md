@@ -61,9 +61,50 @@ Once it is applied, every direct push to `main` is refused, and in this repo tha
   after the merge, not after the push.
 - `git-sync`'s trunk push is gated per repo by the dashboard's Phase B; until then it fails here like any other direct push.
 
+## Releases
+
+`.github/workflows/release.yml` is a thin caller of release-kit's reusable `release.yml` (`@v1`, with `kit-ref: v1` kept equal to that ref), run on every
+push to `main` and on `workflow_dispatch` — the same caller the dashboard has, byte for byte but for its header comment. Design: this repo's
+`docs/superpowers/specs/2026-10-16-release-versioning-design.md`, which adopts the dashboard's `2026-10-15-release-pipeline-design.md` §Phase C unchanged. It
+needs both `contents: write` (the tag push and the Release) and `pull-requests: read` — setting `contents` alone drops `pull-requests` to none and the PR
+lookup then fails on a private repo. The group is `release` with `cancel-in-progress: false`; GitHub still drops an older *pending* run when a newer one
+queues, so a run releases every unreleased commit since the last tag, not only its own.
+
+**The tag is the record.** The version exists only as an annotated `vX.Y.Z` tag whose message carries the PR title, the notes and `Release-*` trailers.
+`package.json` `version` is not read and is not bumped, and `.claude-plugin/plugin.json` keeps its own hand-bumped version; the same tags feed the GitHub
+Release.
+
+**What cuts one.** The PR title decides, and the version is bumped from the newest `vX.Y.Z` tag reachable from the commit:
+
+| Title | While major = 0 | From 1.0.0 |
+|---|---|---|
+| `feat` | minor | minor |
+| `fix`, `perf` | patch | patch |
+| `!` after the type or scope, or a `BREAKING CHANGE: ` line in the PR body | minor | major |
+
+`docs`, `chore`, `test`, `refactor`, `ci` and `build` cut nothing, and a `BREAKING CHANGE:` line on one of them is ignored. A commit on `main` with no PR —
+a direct push, or a `merge`-mode orchestrator run's `Merge backlog/<id>` — is skipped with the warning `no PR for <sha>`; the commits after it are still
+released. A `pr`-mode orchestrator run's PR is titled `<type>(backlog): N items` with the highest type among its merged items' commit subjects, so a run
+that merged a bug or a `feat` task releases, and a run of `chore`-only items does not.
+
+**Where the notes come from.** The `## What's new` section of the PR body (`.github/pull_request_template.md` carries it above `## Why this shape`; a
+`pr`-mode run's body opens with it, one line per merged item), up to the next `## ` heading, with HTML comments stripped first. A missing or empty section,
+which is what the untouched template yields, means the title alone is the entry. Delete the section from PRs with nothing user-visible.
+
+**Baseline.** Until a `vX.Y.Z` tag exists the workflow releases nothing and ends green with the warning `no baseline tag — see Baseline`. `v0.1.0` is tagged
+once, by hand, on the `main` commit that contains the workflow (`git pull`, then `git tag -a v0.1.0 <sha> -m "Baseline — versioning starts here"
+--cleanup=verbatim` and `git push origin v0.1.0`); every later version is cut from it.
+
+**Re-running.** `gh workflow run release.yml -f sha=<sha>` releases that commit and every unreleased commit before it; with no `sha` it uses the branch head.
+It is idempotent: a commit with its tag and its Release is left alone, and a tag whose Release is missing only gets the Release. That is also how the
+baseline gets its GitHub Release. A dispatch whose target has a later version tag fails with `a newer release exists: <tag>`, since versions are never
+assigned out of order; a push run in the same state ends green with `a newer release exists: <tag> — nothing to do`, because it can only be a superseded run.
+A dispatch `sha` must be a commit on `main`; any other commit fails with `target <sha> is not on origin/main` and nothing is tagged.
+
 <!-- docs-sync:
   sources:
     - .github/workflows
+    - .github/pull_request_template.md
   kind: workflow
   verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->
