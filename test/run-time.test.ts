@@ -4,6 +4,7 @@ import {
   formatSpanCompact,
   freshnessFraction,
   inStageMs,
+  isCompletedStage,
   isTerminalStage,
   itemDoneClock,
   itemDurationMs,
@@ -125,6 +126,30 @@ describe('isTerminalStage', () => {
     for (const stage of ['pending', 'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'] as const) {
       expect(isTerminalStage(stage)).toBe(false);
     }
+  });
+});
+
+describe('isCompletedStage', () => {
+  // Every RunStage listed literally, so a new stage fails typecheck here until someone decides whether it is a success exit (#284).
+  const expected: Record<RunStage, boolean> = {
+    pending: false,
+    preflight: false,
+    dispatched: false,
+    inspecting: false,
+    reviewing: false,
+    fixing: false,
+    verifying: false,
+    merging: false,
+    merged: true,
+    branched: true,
+    failed: false,
+    skipped: false,
+    'needs-answers': false,
+    ungroomed: false,
+    parked: false
+  };
+  it.each(Object.entries(expected) as [RunStage, boolean][])('%s → %s', (stage, completed) => {
+    expect(isCompletedStage(stage)).toBe(completed);
   });
 });
 

@@ -77,6 +77,18 @@ export function isTerminalStage(stage: RunStage): boolean {
 }
 
 /**
+ * Did this item finish successfully? True for exactly `merged` and `branched`, `RunStage`'s two success exits — one per `MergeMode`; `RunStage`'s own doc
+ * comment (shared/types.ts) is the account of why both are finished work and a queue item reaches only one of them.
+ *
+ * One predicate because the check was hand-typed at three sites (`aggregateRuns`' `itemsMerged`, `stepperTerminal`, the Runs list's `queueCounts`) and
+ * a third success exit would otherwise have to be remembered at each (#284). A type guard, so `stepperTerminal` can return the narrowed stage without a
+ * cast. `RunDetail`'s `branched` chip is deliberately not a caller: it counts `branched` ALONE, a different question.
+ */
+export function isCompletedStage(stage: RunStage): stage is 'merged' | 'branched' {
+  return stage === 'merged' || stage === 'branched';
+}
+
+/**
  * The item the run is working right now, or `null` when it is between items
  * (everything left is `pending`, or everything is done).
  *
@@ -515,7 +527,7 @@ export interface StepperDot {
  * claim an item did NOT merge when it did, either.
  */
 export function stepperTerminal(item: Pick<RunQueueItem, 'stage'>, mergeModeEffective: MergeMode): 'merged' | 'branched' {
-  if (item.stage === 'merged' || item.stage === 'branched') return item.stage;
+  if (isCompletedStage(item.stage)) return item.stage;
   return mergeModeEffective === 'branch' ? 'branched' : 'merged';
 }
 
