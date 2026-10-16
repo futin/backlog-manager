@@ -16,6 +16,7 @@ import {
   columnOf,
   effectiveBoardFilters,
   foldBoard,
+  foldMatches,
   matchesBoardFilters,
   pickBoard,
   sortTops,
@@ -50,7 +51,9 @@ import { JiraCard } from './JiraCard';
  *
  * **Filters are per mount** (the global constraints): type, assignee (`anyone` / `me` / `unassigned`; no `me` while the identity is unknown) and sprint, all
  * read off the LOADED list, plus the search over key and summary — none persisted, none a request. A pick the current list no longer offers reads as "any"
- * (`effectiveBoardFilters`), so switching boards cannot leave the columns emptied by a filter the panel no longer draws.
+ * (`effectiveBoardFilters`), so switching boards cannot leave the columns emptied by a filter the panel no longer draws. The options read EVERY loaded
+ * issue, folded or not, so a type only sub-tasks carry is still pickable; and a filter finds folded issues through their top card (F1, `foldMatches`),
+ * which is shown ringed with the match named rather than hidden — a fold must never make a matching issue unfindable (grouped-board spec §5).
  *
  * **The shapes that are not a board.** `configUnreadable` → `jira.json cannot be read — <reason>` (Review Focus 2): the credentials are in `.env`, so the
  * status still says `configured`, but the boards could not be read, and `No boards yet` would invite the reader to create a board the server would refuse to
@@ -100,13 +103,16 @@ export function JiraBoardView({
   const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
   // Memoised on the fold and the filters, so the minute tick above re-renders the cards without re-filtering and re-sorting up to 500 issues.
   const columns = useMemo(() => {
-    const kept = fold.tops.filter((i) => matchesBoardFilters(i, applied, me));
+    // F1 (grouped-board spec §5): a top is shown when it matches or when an issue folded under it does, with that issue's key to ring it by. The filter
+    // is `matchesBoardFilters` per issue, unchanged — a filter means the same thing folded or not.
+    const shown = foldMatches(fold, (i) => matchesBoardFilters(i, applied, me));
+    const kept = fold.tops.filter((i) => shown.has(i.key));
     return JIRA_COLUMNS.map((col) => ({
       ...col,
       cards: sortTops(
         kept.filter((i) => columnOf(i) === col.slug),
         fold.under
-      ).map((issue) => ({ issue, fold: cardFold(issue.key, fold) }))
+      ).map((issue) => ({ issue, fold: cardFold(issue.key, fold), matches: shown.get(issue.key) ?? [] }))
     }));
   }, [fold, applied, me]);
   // "The list has loaded" is the condition the columns below are drawn under, read once so the band and the columns cannot disagree about it.
@@ -185,7 +191,7 @@ export function JiraBoardView({
                   me={me}
                   now={now}
                   fold={c.fold}
-                  matches={[]}
+                  matches={c.matches}
                   onOpen={(issue) => onOpenIssue(issue, fold.childrenOf)}
                 />
               ))}

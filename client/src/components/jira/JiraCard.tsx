@@ -1,4 +1,4 @@
-import { cardAgeStamp, crumbOf, crumbText, initialsOf, type cardFold } from '../../lib/jira';
+import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, type cardFold } from '../../lib/jira';
 import type { JiraBoard, JiraIssue } from '../../../../shared/types';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Marker } from '../ui/Marker';
@@ -28,8 +28,14 @@ import { SpreadBar } from '../ui/SpreadBar';
  * reader's browser, with their cookies. The one link out is the issue's `url` exactly as the SERVER built it, in a new tab with no referrer; the card never
  * composes a Jira URL of its own.
  *
- * No `Run ▾` and no live strip: both are phase 5 (spec §12). The marker row draws only when it has something to say (a priority), the way the Board's
- * draws only when a marker applies.
+ * **The ring answers "why is this here"** (F1, grouped-board spec §5). `matches` holds the keys of folded issues that match the page's filter or search
+ * when this top does NOT match on its own; then the card carries a 2 px `--amber-solid` inset ring (`.jira-card-match`) and, first on its marker row, a
+ * `match` marker — `1 match: PAY-162`, or `N matches` with the keys in its title. A card that matches on its own needs no answer, so `matches` is empty
+ * and neither is drawn; with no filter and no search every top matches itself, so nothing is ever ringed then — no special case. The ring is a page
+ * class rather than a `.board-card` variant: it is this board's reading of a filter, not a look the Board's card has.
+ *
+ * No `Run ▾` and no live strip: both are phase 5 (spec §12). The marker row draws only when it has something to say (a match, a priority), the way the
+ * Board's draws only when a marker applies.
  *
  * The whole card is a `role="button"` that opens the issue (`onOpen`, which the page wires to the issue modal's slot), Enter and Space included, exactly as
  * `ItemCard`; the link out stops both the click and those two keys for the reasons `ItemCard`'s own link spells out at length — without it one click opens
@@ -53,11 +59,12 @@ export function JiraCard({
   onOpen: (issue: JiraIssue) => void;
 }) {
   const crumb = crumbText(crumbOf(issue, board, me));
+  const match = matchMarker(matches);
   const open = (): void => onOpen(issue);
 
   return (
     <div
-      className="board-card"
+      className={match === null ? 'board-card' : 'board-card jira-card-match'}
       role="button"
       tabIndex={0}
       onClick={open}
@@ -110,8 +117,13 @@ export function JiraCard({
             <SpreadBar done={fold.progress.done} doing={fold.progress.doing} todo={fold.progress.todo} caption={fold.caption} />
           </div>
         )}
-        {issue.priority !== null && (
+        {(match !== null || issue.priority !== null) && (
           <div className="board-card-markers" data-testid="marker-row">
+            {match !== null && (
+              <Marker tone="match" title={match.title}>
+                {match.word}
+              </Marker>
+            )}
             {/* `kind`, the marker's quiet `--ink3` word: a priority is a fact about the issue, not a state this board should colour — §8's "marks state
                 by ink, never by accent" — and Jira's own five-colour priority scale would be a second palette on the card. */}
             {issue.priority !== null && <Marker tone="kind">{issue.priority}</Marker>}

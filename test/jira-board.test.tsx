@@ -612,4 +612,68 @@ describe('the fold', () => {
     await screen.findByText('Cycle one');
     expect(visibleSummaries().sort()).toEqual(['Cycle one', 'Cycle two']);
   });
+
+  /*
+    F1 (grouped-board spec §5): a top card shows when it matches, or when any issue folded under it matches. Shown only for a folded match, it carries a
+    2 px amber ring and a `match` marker naming the match — the answer to "why is this here". A top that matches on its own draws neither.
+  */
+  describe('filters find folded issues (F1)', () => {
+    const search = async (text: string): Promise<void> => {
+      await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), text);
+    };
+    const ringed = (): Element[] => Array.from(document.querySelectorAll('.jira-card-match'));
+
+    // PAY-162 is a GRANDCHILD (epic → story → sub-task): its depth-0 top shows, not the intermediate story (Review Focus 2).
+    it('a search matching only a folded grandchild shows its top, ringed, naming the match', async () => {
+      await renderGroup();
+      await search('ledger');
+      expect(visibleSummaries()).toEqual(['Payments epic']);
+      expect(card('Payments epic')).toHaveClass('jira-card-match');
+      expect(within(card('Payments epic')).getByText('1 match: PAY-162')).toHaveClass('ui-marker', 'ui-marker-match');
+      expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['1', '0', '0']);
+    });
+
+    it('a search every top matches on its own rings nothing', async () => {
+      await renderGroup();
+      await search('PAY-1');
+      expect(visibleSummaries().sort()).toEqual(['Payments epic', 'Payout retries', 'Standalone task']);
+      expect(ringed()).toHaveLength(0);
+      expect(document.querySelector('.ui-marker-match')).toBeNull();
+    });
+
+    // `boardFilterOptions` reads every loaded issue, folded or not: a type only sub-tasks carry must still be pickable, though no card is one.
+    it('the Type filter offers a type only folded issues carry, and picking it rings their top with the count and the keys', async () => {
+      await renderGroup();
+      const dialog = await openFilters();
+      expect(within(within(dialog).getByRole('group', { name: 'Type' })).getByRole('button', { name: 'Sub-task' })).toBeInTheDocument();
+      await pick('Type', 'Sub-task');
+      expect(visibleSummaries()).toEqual(['Payments epic']);
+      expect(card('Payments epic')).toHaveClass('jira-card-match');
+      const marker = within(card('Payments epic')).getByText('2 matches');
+      expect(marker).toHaveClass('ui-marker-match');
+      expect(marker).toHaveAttribute('title', 'PAY-162, PAY-161');
+    });
+
+    // Review Focus 5: the band counts the unfiltered list, whatever the filters hide.
+    it('a filter never moves the band', async () => {
+      await renderGroup();
+      const before = document.querySelector('.jira-band-sub')?.textContent;
+      await pick('Type', 'Sub-task');
+      expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
+      expect(before).toContain('7 issues from 1 root and 1 query · 3 cards');
+    });
+
+    it('rings nothing with no filter and no search', async () => {
+      await renderGroup();
+      expect(ringed()).toHaveLength(0);
+    });
+
+    it('a top that matches on its own is not ringed', async () => {
+      await renderGroup();
+      await search('standalone');
+      expect(visibleSummaries()).toEqual(['Standalone task']);
+      expect(card('Standalone task')).not.toHaveClass('jira-card-match');
+      expect(within(card('Standalone task')).queryByText(/match/)).toBeNull();
+    });
+  });
 });

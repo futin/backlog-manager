@@ -628,6 +628,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    which are `SpreadBar`'s own look. The line is 12/500 --ink2: a sub-line of the card, a step quieter than the title and a step louder than the caption. */
 .jira-card-fold { display: flex; flex-direction: column; gap: 6px }
 .jira-card-fold-line { font-size: 12px; font-weight: 500; color: var(--ink2) }
+/* F1's ring (grouped-board spec §5): a top card shown only because an issue folded under it matches the filter. An INSET ring, so the card keeps its
+   size and the column does not shift by 4 px when a search starts; `--amber-solid` is the mark, and the `match` marker's word beside it is --amber-text. */
+.jira-card-match { box-shadow: inset 0 0 0 2px var(--amber-solid) }
 .jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
