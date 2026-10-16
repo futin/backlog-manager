@@ -250,10 +250,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    around the well, and so the well's 24 px top-left radius is drawn against white. Before the strip, `.main` carried a 24 px top margin for that
    curve, but `body` paints --board too, so the margin was grey on grey and the corner never showed (the tracker strip spec, §1). */
 .maincol { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--strip) }
-/* The shell strip (§8.0): what is true of the machine wherever you stand — today the tracker chip, right-aligned. Its height is `--main-gap`, and it
+/* The shell strip (§8.0): what is true of the machine wherever you stand — the tracker chip and the Jira chip, right-aligned, 8 px apart. Its height is `--main-gap`, and it
    keeps that height when empty, so the well's top edge never moves with whether a tracker is connected. */
 .topstrip {
-  height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end;
+  height: var(--main-gap); flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding: 0 var(--body-pad);
 }
 /* The well: --board with a 24 px top-LEFT radius — the one corner the rail and the strip meet, the design's app-shell inset (§8.0), visible now that
@@ -300,6 +300,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
      wordmark took the dashboard's 10 px dot and 9 px gap (2026-10-01), which made the brand 88 px rather than 83.8. The prompt-cursor wordmark that
      replaced it (2026-10-14) measures 87.8 px in this bar at 375 px, so the slack stands. */
   .rail-bar .tracker-chip .tracker-name:has(+ .tracker-meters) { display: none }
+  /* Jira phase 2: two chips in the bar — the GitHub tracker and Jira, siblings straight out of `chipSlot`, each a `.tracker-chip-root` — drop their
+     meters too, leaving avatar, pip and caret. The login rule above is not enough: with both chips the row measured ~178 px over the 351 px content box,
+     and since every item but ☰ is `flex: none`, ☰ — the phone's only section switch — was pushed past `.rail`'s `overflow-x: hidden` and clipped, the
+     failure #229 fixed for one chip and DESIGN.md §8.0's rule that ☰ never gives up space forbids. The pip still carries the one reading that must not
+     hide (red = access failing) and the popover prints every meter one tap away. `:has(+ …)` catches the first chip, `+` the second; a lone chip matches
+     neither and keeps its meters, and the desktop strip is outside this block entirely. */
+  .rail-bar .tracker-chip-root:has(+ .tracker-chip-root) .tracker-meters,
+  .rail-bar .tracker-chip-root + .tracker-chip-root .tracker-meters { display: none }
   /* In a bar the wordmark is a label rather than a page heading: the prompt drops to 17 px and the cursor scales with it (8 × 17, 6 px from the
      word). The kicker stays at 11 px where the dashboard's bar draws 10 — guard 3's floor (test/design-guards.test.ts), which this board keeps. */
   .rail-brand { padding: 0; gap: 3px }
@@ -359,6 +367,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   border-top: 1px solid var(--hairline); font-size: 12px; color: var(--ink2);
 }
 .tracker-pop-note { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.45 }
+/* The Jira chip's popover (§8.9.4) draws one line per board and no timer, so `.tracker-row`'s 120 px second column would be an empty gutter: one column
+   here. The line wraps, unlike `.tracker-row-name`, because a failure's sentence is the thing the row exists to show. */
+.jira-chip-board { grid-template-columns: minmax(0, 1fr) }
+.jira-chip-board-line { font-size: 13px; overflow-wrap: anywhere }
 
 /* ---------------------------------------------- Board section
    Every registered project's backlog on one board, read via GET /api/projects
@@ -386,7 +398,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    the track's panel. */
 
 /* The band's search field (§8.3): 36 px, 12 px radius, a `--hairline` stroke.
-   Drawn by the Board's band and, since task-39, Archive's. */
+   Drawn by the Board's band and, since task-39, Archive's — and, since Jira
+   phase 2, the Jira board's (§8.9.1), which searches keys and summaries. */
 .board-band-search {
   font-family: inherit; font-size: 13px; color: var(--ink);
   height: 36px; width: 200px; min-width: 0; padding: 0 14px;
@@ -578,6 +591,51 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    are `Marker`'s (a `ui/` primitive); this rule only lays them out and pushes
    the dispatch chip to the right end. */
 .board-card-markers { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px }
+
+/* ---------------------------------------------- Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1)
+   The page is the Board's composition — `Band`, `FilterBar`, `.board-columns`, and `.board-card` with its face, title, foot, meta and marker rows — so this
+   family is only what a Jira issue has that a backlog item does not: the card's head row (type glyph, key, crumb), the initials disc in its foot, the band's
+   red sub-line, and the board picker. Colours are existing tokens; nothing here is under 11 px (guard 3). */
+
+/* The sub-line's failing reading: red while the last sweep could not read a root or a query (`bandSub`'s `failing`). The class, never an inline colour, so
+   each theme's `--red` is the red. */
+.jira-band-sub.failing { color: var(--red) }
+
+/* The picker is its Popover's positioning parent (the panel hangs `100% + 8px` under it, right edges together) and does not shrink in the band's wrapping
+   right slot. The board's name ellipsises inside the chip, so a long name cannot push the search and the filter track off the line. */
+.jira-picker { position: relative; flex: none; max-width: 100% }
+.jira-picker-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* One row per board, by name — the shape of the Sort panel's rows, with the tick on the board in view. */
+.jira-picker-opt {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left;
+  font-size: 13px; font-weight: 500; color: var(--ink2); cursor: pointer;
+}
+.jira-picker-opt:hover { background: var(--strip-hi) }
+.jira-picker-opt.on { color: var(--ink) }
+.jira-picker-opt span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-picker-tick {
+  flex: none; margin-left: auto; width: 16px; height: 16px; visibility: hidden;
+  stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+}
+.jira-picker-opt.on .jira-picker-tick { visibility: visible }
+
+/* The card's head: the type glyph and the key left, the crumb pushed right and ellipsised — the crumb is the one value on the row that can be long
+   (`↳ PAY-120 Refund flows`), and the key is the card's handle, so the crumb is what gives. */
+.jira-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
+.jira-card-type { display: inline-flex; flex: none }
+.jira-card-type svg { width: 14px; height: 14px; stroke: var(--ink3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
+.jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
+   the Board card's project name. An unassigned issue draws the disc empty and dashed, so the row keeps its shape. */
+.jira-card-who { display: flex; align-items: center; gap: 6px; min-width: 0 }
+.jira-card-av {
+  display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 999px;
+  background: var(--strip-hi); color: var(--ink); font-size: 11px; font-weight: 600;
+}
+.jira-card-av.none { background: none; border: 1px dashed var(--hairline2) }
+.jira-card-name { font-size: 12px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
 
 /* Project pill: the item's project, in that project's own hue, on its card and
    in the drawer head. Both halves now say the same thing — name in the text,
@@ -991,6 +1049,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 @media (max-width: 1100px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 @media (max-width: 700px) { .board-columns { grid-template-columns: 1fr } }
 
+/* The Jira board's columns (Jira phase 2, spec §6.2; DESIGN.md §8.9.1): `.board-columns` with three tracks instead of four — To Do, In Progress, Done, one
+   per status category. Declared after the Board's three rules so the 1100 px step (two tracks) is overridden: three categories over two tracks would put
+   Done under To Do, which reads as a fourth column rather than as the third. Below 700 px they stack exactly as the Board's do. */
+.jira-board-columns { grid-template-columns: repeat(3, minmax(0, 1fr)) }
+@media (max-width: 700px) { .jira-board-columns { grid-template-columns: 1fr } }
+
 .board-col { display: flex; flex-direction: column; gap: var(--card-gap); min-width: 0 }
 .board-col-name {
   font-size: 15px; font-weight: 500;
@@ -1159,6 +1223,88 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* #225's claim control, under the dispatch one: the chip, or the inline confirm that replaces it, with a refusal on the line below. */
 .item-facts-claim { display: flex; flex-direction: column; align-items: flex-start; gap: 6px }
 .item-claim-note { margin: 0; font-size: 12px; color: var(--ink3) }
+
+/* The Jira issue modal's own additions (§8.9.2) — everything else in it is the item modal's `.item-facts*` / `.item-body*` above. The key row sits over the
+   facts list: the key at 13/500 --ink2 (the card's own key reading), the link out beside it in the body's link colour at 12. */
+.jira-modal-key { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
+.jira-modal-keyname { font-size: 13px; font-weight: 500; color: var(--ink2) }
+.jira-modal-key a { font-size: 12px; color: var(--cyan) }
+.jira-modal-subtasks { list-style: none; padding-left: 0 }
+.jira-modal-subkey { font-weight: 500; color: var(--ink2) }
+.jira-modal-substatus { font-size: 12px; color: var(--ink3); margin-left: 6px }
+.jira-modal-none, .jira-modal-comments { font-size: 12px; color: var(--ink3) }
+.jira-modal-comments { margin-top: 20px }
+.jira-modal-comments a { color: var(--cyan) }
+
+/* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
+   what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px
+   (guard 3). */
+
+/* A board's last-sweep failure, beside its `boardRowLine` sentence — `--red` as the Board page's failing sub-line draws it, so one failure reads one colour
+   on both pages. */
+.jira-setup-failure { color: var(--red) }
+/* The Repositories card's `no repository yet` line: `--mustard`, the mock's `.hint.warn` ("incomplete/pending" in theme.css) — a project that cannot Start
+   yet, not a refusal, so not the red of a failing sweep. The `×` beside each path is the board sheet's own (`.jira-sheet-x`'s rule, shared above). */
+.jira-setup-warn { color: var(--mustard) }
+/* The add row: the project Select and `Add` keep their size, the path field takes what is left (the row wraps at Settings' own narrow widths). */
+.jira-setup-add { justify-content: flex-start; gap: 8px }
+.jira-setup-add-path { flex: 1 1 160px; width: auto; min-width: 0 }
+/* The Connection card's value, in the control slot: 13 px as the mock draws it, `--ink`. */
+.jira-setup-value { font-size: 13px; color: var(--ink) }
+/* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */
+.jira-setup-filter { justify-content: flex-start }
+.jira-setup-filter .set-hint { margin-left: auto }
+
+/* The board sheet's sections. The body is `FormSheet`'s scrolling column; each section is a block of it with the mock's 15/500 heading over a 13 px why-line
+   (§8.1's row-name and hint sizes, so the sheet reads in the Setup page's register). */
+.jira-sheet-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0 }
+.jira-sheet-sec + .jira-sheet-sec { border-top: 1px solid var(--hairline); padding-top: 12px }
+.jira-sheet-sec-title { margin: 0; font-size: 15px; font-weight: 500; color: var(--ink) }
+.jira-sheet-why { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink2) }
+.jira-sheet-empty { margin: 0; font-size: 13px; color: var(--ink3) }
+.jira-sheet-name { width: 260px }
+
+/* A root: its key at the card's own key reading (12/500 --ink2), the remove × pushed right. */
+.jira-sheet-root { display: flex; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--hairline) }
+.jira-sheet-key { flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-sheet-x, .jira-setup-x {
+  margin-left: auto; flex: none; padding: 4px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: 14px; line-height: 1; color: var(--ink3);
+}
+.jira-sheet-x:hover, .jira-setup-x:hover:not(:disabled) { color: var(--ink) }
+
+/* The roots search is its Popover's positioning parent (the panel hangs under it, right edges together), and the field takes the section's full width. */
+.jira-sheet-search { position: relative; display: flex; flex-direction: column; gap: 6px }
+.jira-sheet-search-field { width: 100% }
+.jira-sheet-match {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left; cursor: pointer;
+  font-size: 13px; color: var(--ink);
+}
+.jira-sheet-match:hover:not(:disabled) { background: var(--strip-hi) }
+.jira-sheet-match:disabled { cursor: default; color: var(--ink3) }
+.jira-sheet-match-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-sheet-match-meta { flex: none; margin-left: auto; font-size: 12px; color: var(--ink3) }
+
+/* The four query chips wrap as one line of chips; the project `Select` takes the third chip's place while open. */
+.jira-sheet-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px }
+/* A query row: label and ×, the JQL box under them, the check line under that — the mock's `.qrow`. */
+.jira-sheet-query { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--hairline) }
+.jira-sheet-query-head { display: flex; align-items: center; gap: 8px }
+/* The JQL box is `.sheet-prompt` (the launch sheet's textarea); a JQL Jira refused strokes it red, as the mock's `.jqlbox.bad` does. */
+.jira-sheet-jql { font-size: 13px }
+.jira-sheet-jql.bad { border-color: var(--red) }
+.jira-sheet-check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 12px; color: var(--ink3) }
+.jira-sheet-check.ok { color: var(--green) }
+.jira-sheet-check.bad { color: var(--red) }
+.jira-sheet-check-when { color: var(--ink3) }
+
+/* The footer: `FormSheet`'s bar holds one child, this column — the actions on a line (Delete left, Cancel and Save right) and, under them, the server's
+   sentence when a save or a delete was refused. Red, as `.set-error` is: a write the server refused, not a warning. */
+.jira-sheet-foot { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px }
+.jira-sheet-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.jira-sheet-note { margin-right: auto; font-size: 12px; color: var(--ink3) }
+.jira-sheet-error { font-size: 13px; line-height: 1.45; color: var(--red) }
 
 /* Rendered item Markdown, at §6.1's scale: 15/400 body, 19/500 headings, code
    spans on --steel. The section headings are the store's fixed ## set

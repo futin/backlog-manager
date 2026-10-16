@@ -1,4 +1,4 @@
-import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
@@ -6,6 +6,7 @@ import { Select } from '../ui/Select';
 import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
+import { useJiraContext } from '../../hooks/JiraContext';
 import { useSettings } from '../../hooks/useSettings';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
@@ -61,8 +62,22 @@ const LANDINGS: { value: Landing; label: string }[] = [
   { value: 'board', label: 'Board' },
   { value: 'runs', label: 'Runs' },
   { value: 'archive', label: 'Archive' },
+  { value: 'jira', label: 'Jira' },
   { value: 'settings', label: 'Settings' }
 ];
+
+/**
+ * The `Opens on` list this machine can honour (Jira phase 2, spec §6.1): `Jira` only while `GET /api/jira` says `configured: true`, because the rail draws no
+ * Jira row otherwise and a pin to it would open on Board anyway — `App` falls a `jira` section to Board on that same answer. Before the status has answered
+ * the option is withheld too: offering it on a guess would let a reader pin a section this machine may not have.
+ *
+ * One exception, and it is not an offer: a STORED `jira` landing keeps its option on an unconfigured machine. A native select whose value matches no option
+ * renders blank (the reason `lib/settings.ts` clamps the dispatch defaults rather than keeping an unknown name), so the row would hide the very preference
+ * that is in force; drawn, it says what is stored and can be changed. Nothing is rewritten — the machine may get its credentials back, and the pin with them.
+ */
+function landingOptions(jiraConfigured: boolean, current: Landing): { value: Landing; label: string }[] {
+  return LANDINGS.filter((o) => o.value !== 'jira' || jiraConfigured || current === 'jira');
+}
 
 /**
  * The dot's three colors answer one question — "can I dispatch right now?" —
@@ -218,6 +233,7 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
 /** The Local page: everything in this browser's localStorage, and nothing else. */
 function LocalPage() {
   const { settings, update } = useSettings();
+  const jiraConfigured = useJiraContext().data?.configured === true;
 
   return (
     /* Two hand-balanced columns (§8.6), placed by hand rather than reflowed: a
@@ -312,7 +328,12 @@ function LocalPage() {
             </SettingsRow>
 
             <SettingsRow name="Opens on" hint="Which section this device lands on when you load the page.">
-              <Select label="Opens on" value={settings.landing} options={LANDINGS} onChange={(landing) => update({ landing })} />
+              <Select
+                label="Opens on"
+                value={settings.landing}
+                options={landingOptions(jiraConfigured, settings.landing)}
+                onChange={(landing) => update({ landing })}
+              />
             </SettingsRow>
           </SettingsGroup>
 

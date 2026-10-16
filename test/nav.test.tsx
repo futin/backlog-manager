@@ -384,8 +384,10 @@ describe('resolveSection', () => {
   it('passes every section the rail actually has straight through', () => {
     // Runs sits between Board and Archive here too — this list is read
     // straight off SideRail's TABS, so an out-of-order entry here would mean
-    // the rail itself drifted, not just this test.
-    expect(SECTIONS).toEqual(['board', 'runs', 'archive', 'settings']);
+    // the rail itself drifted, not just this test. Jira (Jira phase 2) sits
+    // between Archive and Settings; whether the rail DRAWS it is the status's
+    // call, which test/jira-sections.test.tsx owns.
+    expect(SECTIONS).toEqual(['board', 'runs', 'archive', 'jira', 'settings']);
     for (const s of SECTIONS) expect(resolveSection(s)).toBe(s);
   });
 

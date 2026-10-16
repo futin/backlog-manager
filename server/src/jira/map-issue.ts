@@ -1,6 +1,6 @@
 /**
  * map-issue.ts — raw Jira issue JSON → `JiraIssue`, the sprint-field pick and the Done window (Jira phase 1; spec §3 and §4, with §14 P3/P4/P5 as the
- * authority on what Jira actually sends). Pure: no I/O, no module state, and the clock arrives as `ctx.now`, so the poller (Task 6) and the search route call
+ * authority on what Jira actually sends). Pure: no I/O, no module state, and the clock arrives as `ctx.now`, so the poller and the search route call
  * it on whatever Jira handed back and a suite can pin the instant.
  *
  * Four decisions carry the design.

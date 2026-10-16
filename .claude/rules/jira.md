@@ -10,8 +10,15 @@ paths: ["server/src/jira/**"]
   carries as `configUnreadable` — and the sweep prunes no board cache while it says so. The fallback is per ENTRY, one level finer than spec §2 by design:
   `readBoard`, `readQuery`, `readRepos` and `readSkill` each drop only the entry that fails (a board whose id is not a `b_` id or whose name is empty, a root
   that fails `isJiraKey`, a query, a repos key or path, a skill), with one `console.warn` naming the file and the entry; a missing or unknown `interval` reads
-  `DEFAULT_JIRA_INTERVAL`. Phase 1 has NO write path: the writers land in phase 2 on `writeSyncInterval`'s contract — merge one entry into the raw parsed file,
-  temp-file-plus-rename, and refuse (409) rather than replace a file that is unreadable — validating with these same four functions. Why:
+  `DEFAULT_JIRA_INTERVAL`. The three writers are `writeBoard`, `deleteBoard` and `writeRepos` (same file), called by `POST /api/jira/boards`, `/boards/delete` and `/repos`
+  (`jira-write.controller.ts`) and by nothing else. Each is `writeSyncInterval`'s contract: read the RAW file (ENOENT starts from `{}`; a parsed non-object is
+  replaced), merge ONE entry — a board by id, one project's list by key — keeping every other entry, malformed ones and unknown top-level keys included, then
+  write a temp file in the same directory and `rename` it over. A file that exists and cannot be read or parsed throws `JiraConfigUnreadableError`, which the
+  route answers as a 409 carrying its message (`… nothing was written`) with the file byte-identical; an update or delete naming an id the file does not hold
+  throws `JiraUnknownIdError`, a 404 `unknown board`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
+  config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
+  bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos re-aim
+  nothing, since no sweep reads them. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
 - **The Jira token never leaves the server: the browser goes through `/api/jira`, and the poller is armed only while a board syncs.** `jiraEnv()`
   (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace is absent,

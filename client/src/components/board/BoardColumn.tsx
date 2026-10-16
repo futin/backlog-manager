@@ -19,13 +19,17 @@ import { Pill } from '../ui/Pill';
  * construction instead of by two files agreeing about a header's anatomy. The
  * union stays closed rather than becoming `Section` because the fifth member is
  * exactly what `RAMP_SLUGS` below has to be able to exclude.
+ *
+ * `todo`, `doing` and `done` are the Jira board's three columns (Jira phase 2): a tracker's status categories, which are neither a backlog TYPE nor a
+ * rejection, so they join the union as slugs with no ramp hue of their own. Each draws the same plain `Dot` the `out-of-scope` column does, and each is
+ * still a `.board-col-<slug>` hook should the column's look ever need a per-slug rule — none does yet, so `styles.css` carries none.
  */
-export type BoardColumnSlug = 'refactors' | 'ideas' | 'bugs' | 'tasks' | 'out-of-scope';
+export type BoardColumnSlug = 'refactors' | 'ideas' | 'bugs' | 'tasks' | 'out-of-scope' | 'todo' | 'doing' | 'done';
 
 /**
  * The four slugs that name a TYPE, and so carry the category ramp's hue (§8.2).
  *
- * `out-of-scope` is deliberately absent and falls through to `Dot`'s own
+ * `out-of-scope` (and, since Jira phase 2, `todo`/`doing`/`done`) is deliberately absent and falls through to `Dot`'s own
  * toneless base, a plain `--ink3` (§8.5): a rejection is a verdict rather than a
  * type, and giving it a ramp colour would put it in the same vocabulary as the
  * three columns beside it that are still live work. Written as a list to

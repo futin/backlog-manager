@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { JiraBoard, JiraQuery } from '../shared/types';
@@ -14,6 +14,7 @@ import {
   JIRA_POLL_MS,
   JIRA_QUERY_CAP,
   JIRA_ROOT_CAP,
+  JIRA_SAVE_SWEEP_WAIT_MS,
   JIRA_SEARCH_LIMIT,
   JIRA_SEARCH_MAX_CHARS,
   JiraPollerService
@@ -21,7 +22,7 @@ import {
 import { FakeJira, makeRawIssue, type JiraCall } from './helpers/jira';
 
 /**
- * Jira phase 1, Task 6 — `identity.ts` and `poller.service.ts` (spec §3, §5 and §8; plan Review Focus 2, 3 and 5; preflight rulings P1–P5, P13).
+ * Jira phase 1 — `identity.ts` and `poller.service.ts` (spec §3, §5 and §8; plan Review Focus 2, 3 and 5; preflight rulings P1–P5, P13).
  *
  * Every sweep is driven by `await poller.tick()`, never by a real timer: the chain's `setTimeout` is observed only through `armed`, and every case shuts the
  * poller down afterwards so no link outlives its case. The clock is `Date.now`, mocked and moved by hand — the poller builds every instant from it, so the
@@ -172,7 +173,9 @@ describe('unconfigured', () => {
       projects: [],
       skills: [],
       calls: { sweep: 0, last429At: null },
-      live: {}
+      live: {},
+      armed: false,
+      home: null
     });
   });
 });
@@ -1291,6 +1294,292 @@ describe('the 429 window never drifts (P1, final review I2)', () => {
     fake.deploymentType = 'Server';
     await poller.tick();
     expect(await poller.issueDetail('PAY-131')).toMatchObject({ ok: false, access: 'unsupported', response: { message: 'Jira Server/DC is not supported' } });
+  });
+});
+
+/**
+ * Jira phase 2 — a saved board is swept at once. Fake timers live in this describe only: `boardSaved` races its sweep against a
+ * `setTimeout`, so the cap has to be a clock the case moves. `Date` stays on the suite's own mock (`now`), because every instant the poller stores is
+ * arithmetic on it.
+ */
+describe('boardSaved and boardDeleted', () => {
+  let client: JiraClient;
+  const MIN5 = 300_000;
+
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['Date'] });
+    seedTree();
+    client = new JiraClient(fake.fetch);
+    poller = new JiraPollerService(client);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  /** Everything the poller has to say, flushed: microtasks and zero-delay timers, no clock movement. */
+  const flush = () => jest.advanceTimersByTimeAsync(0);
+
+  /** Holds the first `only` `search` calls the poller makes (all of them when omitted) until the case releases them, then answers each for real. */
+  function holdSearches(only?: number): { release: (i: number) => void; readonly held: number } {
+    const real = client.search.bind(client);
+    const calls: (() => void)[] = [];
+    let seen = 0;
+    jest.spyOn(client, 'search').mockImplementation((...args) => {
+      seen += 1;
+      if (only !== undefined && seen > only) return real(...args);
+      return new Promise((resolve) => calls.push(() => resolve(real(...args))));
+    });
+    return {
+      release: (i) => calls[i](),
+      get held() {
+        return calls.length;
+      }
+    };
+  }
+
+  it('a 5m board swept 10 s ago is swept at once, its polledAt moves and its next due time is 5 m from THIS sweep', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: '5m' })]);
+    await poller.tick();
+    now = T0 + 10_000;
+    fake.calls.length = 0;
+    await poller.tick();
+    expect(searches()).toEqual([]);
+
+    await poller.boardSaved(B1);
+    expect(searches()[0]).toBe('key = "PAY-120"');
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0 + 10_000));
+
+    fake.calls.length = 0;
+    now = T0 + 10_000 + MIN5 - 1;
+    await poller.tick();
+    expect(searches()).toEqual([]);
+    now = T0 + 10_000 + MIN5;
+    await poller.tick();
+    expect(searches()[0]).toBe('key = "PAY-120"');
+  });
+
+  it('an off board swept once is swept once more, and the chain is not left armed for it', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
+    await poller.tick();
+    expect(poller.armed).toBe(false);
+    now = T0 + 10_000;
+    fake.calls.length = 0;
+
+    await poller.boardSaved(B1);
+    expect(searches()[0]).toBe('key = "PAY-120"');
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0 + 10_000));
+    expect(poller.armed).toBe(false);
+
+    fake.calls.length = 0;
+    now = T0 + DAY;
+    await poller.tick();
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('forces only the saved board: a second 5m board swept 10 s ago gets no call from that sweep', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: '5m' }), board({ id: B2, name: 'Other', roots: ['PAY-131'], interval: '5m' })]);
+    await poller.tick();
+    now = T0 + 10_000;
+    fake.calls.length = 0;
+
+    await poller.boardSaved(B1);
+    expect(searches()).toContain('key = "PAY-120"');
+    expect(searches()).not.toContain('key = "PAY-131"');
+    expect(poller.boardIssues(B2)?.polledAt).toBe(iso(T0));
+  });
+
+  // A sweep clears the timer on entry, so the `armed` getter is false for its whole length; `status()` counts the tick in flight, because a poll that is
+  // running is the opposite of `idle` on the Connection card and the chip popover. The getter itself stays timer-only (`arm()`'s own test).
+  it('status() reports armed while a sweep is in flight, though the timer getter does not', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: '5m' })]);
+    const hold = holdSearches(1);
+    const sweep = poller.tick();
+    await flush();
+    expect(hold.held).toBe(1);
+    expect(poller.armed).toBe(false);
+    expect(poller.status().armed).toBe(true);
+
+    hold.release(0);
+    await sweep;
+    expect(poller.armed).toBe(true);
+    expect(poller.status().armed).toBe(true);
+  });
+
+  it('a sweep already in flight is not the answer: it resolves only after a sweep that STARTED after the call has finished', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: '5m' })]);
+    const hold = holdSearches(1);
+    const first = poller.tick();
+    await flush();
+    expect(hold.held).toBe(1);
+
+    // The "save": the in-flight sweep read jira.json before this line, so it knows nothing of B2.
+    writeConfig([board({ roots: ['PAY-120'], interval: '5m' }), board({ id: B2, name: 'Other', roots: ['PAY-131'], interval: '5m' })]);
+    let resolved = false;
+    const saved = poller.boardSaved(B2).then(() => {
+      resolved = true;
+    });
+    await flush();
+    expect(resolved).toBe(false);
+
+    hold.release(0);
+    await first;
+    await saved;
+    expect(resolved).toBe(true);
+    expect(poller.boardIssues(B2)?.polledAt).toBe(iso(T0));
+    expect(keysOf(B2)).toContain('PAY-131');
+  });
+
+  it('an in-flight sweep that spends the force on an older copy of the board does not spend the save: the board is swept again after it', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: '5m' })]);
+    await poller.tick();
+    // B2 is new and cold, listed first; B1 swept at T0 is not due at +10 s — only a force makes it due.
+    writeConfig([board({ id: B2, name: 'New', roots: ['PAY-131'], interval: '5m' }), board({ roots: ['PAY-120'], interval: '5m' })]);
+    now = T0 + 10_000;
+    fake.calls.length = 0;
+    const hold = holdSearches(1);
+    const first = poller.tick();
+    await flush();
+    expect(hold.held).toBe(1);
+
+    const saved = poller.boardSaved(B1);
+    hold.release(0);
+    await first;
+    await saved;
+    // Once inside the in-flight sweep (which read the file before the save), once more in the sweep the save asked for.
+    expect(searches().filter((j) => j === 'key = "PAY-120"')).toHaveLength(2);
+  });
+
+  it('an edited off board whose save-sweep fails whole-board keeps its force: armed, and re-swept once Jira recovers', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
+    await poller.tick();
+    expect(poller.armed).toBe(false);
+    const before = keysOf();
+
+    // The save: a new definition, whose sweep Jira answers with a 503.
+    writeConfig([board({ roots: ['PAY-131'], interval: 'off' })]);
+    now = T0 + 10_000;
+    fake.failNext = (c) => (isSearch(c.url) ? { status: 503 } : null);
+    await poller.boardSaved(B1);
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0));
+    expect(keysOf()).toEqual(before);
+    expect(poller.armed).toBe(true);
+
+    fake.failNext = null;
+    fake.calls.length = 0;
+    now += JIRA_POLL_MS;
+    await poller.tick();
+    expect(searches()[0]).toBe('key = "PAY-131"');
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
+    expect(keysOf()).toContain('PAY-131');
+    expect(poller.armed).toBe(false);
+  });
+
+  it('with the boot unanswered it resolves, the board is not polled, and it stays owed', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
+    fake.failWith = 'transport';
+    await poller.boardSaved(B1);
+    expect(poller.boardIssues(B1)?.polledAt).toBeNull();
+    expect(poller.armed).toBe(true);
+
+    fake.failWith = null;
+    now += JIRA_BACKOFF_MIN_MS;
+    await poller.tick();
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
+  });
+
+  it('inside a 429 window it resolves without a search call, and the force is kept for the sweep that finally can run', async () => {
+    // An `off` board: nothing but the force can make it due again, so the final sweep proves the force survived the window.
+    writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
+    await poller.tick();
+    now = T0 + 10_000;
+    fake.rateLimit = { retryAfter: 30 };
+    await poller.search('payments');
+    expect(poller.status().access).toBe('rate-limited');
+    fake.rateLimit = null;
+    fake.calls.length = 0;
+
+    await poller.boardSaved(B1);
+    expect(fake.calls).toEqual([]);
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0));
+    expect(poller.armed).toBe(true);
+
+    now += 30_000;
+    await poller.tick();
+    expect(searches()[0]).toBe('key = "PAY-120"');
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
+    expect(poller.armed).toBe(false);
+  });
+
+  it('a sweep slower than JIRA_SAVE_SWEEP_WAIT_MS stops being waited for at the cap, and its answer still lands in the cache', async () => {
+    expect(JIRA_SAVE_SWEEP_WAIT_MS).toBe(20_000);
+    await booted();
+    seedMany(3, 'SLO');
+    for (let i = 0; i < 3; i++) fake.answers.set(`slow ${i}`, [`SLO-${i + 1}`]);
+    writeConfig([
+      board({
+        interval: '5m',
+        queries: [0, 1, 2].map((i) => query(`slow ${i}`, `q_0000000${'abc'[i]}`, `slow ${i}`))
+      })
+    ]);
+    const hold = holdSearches();
+    let resolved = false;
+    const saved = poller.boardSaved(B1).then(() => {
+      resolved = true;
+    });
+
+    await flush();
+    expect(hold.held).toBe(1);
+    await jest.advanceTimersByTimeAsync(8_000);
+    hold.release(0);
+    await flush();
+    expect(hold.held).toBe(2);
+    await jest.advanceTimersByTimeAsync(8_000);
+    hold.release(1);
+    await flush();
+    expect(hold.held).toBe(3);
+    expect(resolved).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(3_999);
+    expect(resolved).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    await saved;
+    expect(resolved).toBe(true);
+    expect(poller.boardIssues(B1)?.polledAt).toBeNull();
+
+    now += 20_000;
+    hold.release(2);
+    await flush();
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
+    expect(keysOf()).toEqual(['SLO-1', 'SLO-2', 'SLO-3']);
+  });
+
+  it('boardDeleted drops the cache now: the id reads null once the file lacks it, and a board re-created under it starts cold', async () => {
+    writeConfig([board({ roots: ['PAY-120'] })]);
+    await poller.tick();
+    expect(keysOf()).toHaveLength(5);
+
+    writeConfig([]);
+    poller.boardDeleted(B1);
+    expect(poller.boardIssues(B1)).toBeNull();
+    expect((poller as unknown as { caches: Map<string, unknown> }).caches.has(B1)).toBe(false);
+
+    writeConfig([board({ roots: ['PAY-120'] })]);
+    expect(poller.boardIssues(B1)).toEqual({ issues: [], polledAt: null });
+  });
+
+  it('status() carries armed from the chain and home from the host, and null home while unconfigured', async () => {
+    writeConfig([board({ interval: 'off' })]);
+    await poller.tick();
+    expect(poller.status()).toMatchObject({ armed: false, home: homedir() });
+
+    writeConfig([board({ interval: '1m' })]);
+    await poller.tick();
+    expect(poller.armed).toBe(true);
+    expect(poller.status().armed).toBe(true);
+
+    delete process.env.BM_JIRA_TOKEN;
+    expect(poller.status()).toMatchObject({ configured: false, armed: false, home: null });
   });
 });
 

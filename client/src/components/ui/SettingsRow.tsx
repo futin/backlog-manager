@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { Sheet, SheetHead } from '../ui/Sheet';
+import { Sheet, SheetHead } from './Sheet';
 
 /*
   `Segmented` and `NumberField` used to live here and now live in
@@ -10,6 +10,11 @@ import { Sheet, SheetHead } from '../ui/Sheet';
   Settings' own — a row and a group are this card's COMPOSITION of `Sheet` plus
   rows, not patterns another surface reuses. §12.3 names both by hand for
   exactly that reason.
+
+  They moved from `settings/` to `ui/` in Jira phase 2: the Jira Setup page
+  composes the same `Sheet`-plus-rows shape for its Connection and Repositories
+  cards, and a composition only Settings could import would be a second copy of
+  it drawn beside this one. The names and behaviour are untouched.
 */
 
 /**
@@ -63,10 +68,15 @@ export function SettingsRow({ name, hint, children }: { name: string; hint?: Rea
  * class purely to LAY the card out (the rows' gap) — never to restate its look,
  * which is §12.1's rule and `test/design-guards.test.ts`'s guard 7.
  */
-export function SettingsGroup({ title, scope, children }: { title: string; scope: string; children: ReactNode }) {
+/*
+  `right` is `SheetHead`'s own right slot, passed through, and was added for Jira › Setup's Boards card (Jira phase 2, spec §6.4): its `New board` chip sits
+  in the card's head, beside the title, because it makes a row rather than belonging to one. Optional, and no Settings card passes it, so every card that
+  drew before draws the same.
+*/
+export function SettingsGroup({ title, scope, right, children }: { title: string; scope: string; right?: ReactNode; children: ReactNode }) {
   return (
     <Sheet as="section" className="set-group">
-      <SheetHead title={title} sub={scope} />
+      <SheetHead title={title} sub={scope} right={right} />
       {children}
     </Sheet>
   );

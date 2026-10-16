@@ -1,10 +1,11 @@
 # Jira
 
-The server half of the Jira Cloud integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md)): a parallel subsystem beside the item
+The Jira Cloud integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md)): a parallel subsystem beside the item
 sources, not a third source. A Jira board is a set of issue keys and saved JQL defined in one per-machine file; it has no `backlog/`, no `source.json` and no
-registry entry, and nothing in `items/` knows it exists. This doc describes **phase 1** (spec §12) — the client, the config reader, the poller and its
-caches, the issue mapping, the ADF converter, the ticket block and six read routes. Phase 1 has no write path at all and no UI: everything here is reachable
-through `/api/jira` and nothing draws it yet.
+registry entry, and nothing in `items/` knows it exists. This doc describes **phases 1 and 2** (spec §12). Phase 1 is the server's read half — the Jira
+client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and six read routes. Phase 2 adds `jira.json`'s
+writers behind three guarded write routes and the whole client section: a rail entry with two pages (Board and Setup), the issue modal, the shell chip and
+the Trackers row. Nothing yet writes to Jira itself — the assign and transition writes are phase 3.
 
 `server/src/jira/` is the third outbound-calling module, after `agents/` and `tracker/`, and the only one that talks to Atlassian.
 
@@ -13,17 +14,19 @@ through `/api/jira` and nothing draws it yet.
 - **Per machine, in `.env`**: `BM_JIRA_SITE` (a hostname only, `acme.atlassian.net`), `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN`. A scoped API token needs
   `read:jira-work`, `write:jira-work` and `read:jira-user`; a classic token works as it is. All three or none: any one missing (or blank) is
   `configured: false`, and every route but `GET /api/jira` answers 503. Compose passes each through as `'${BM_JIRA_<NAME>:-}'`, never a literal.
-- **Per machine, in `~/.backlog-manager/settings/jira.json`** (`BM_JIRA_FILE` overrides): `{ boards, repos, skills }`. Phase 1 reads it; phase 2 adds the
-  server's writers, and until then it is edited by hand.
+- **Per machine, in `~/.backlog-manager/settings/jira.json`** (`BM_JIRA_FILE` overrides): `{ boards, repos, skills }`. The server is its one writer
+  since phase 2 — the Setup page's boards and repository map, through the three write routes below — and a hand edit still lands, because every reader
+  reads it fresh and every writer merges one entry into the RAW file. `skills` has no writer until phase 5.
 - **Per project: nothing.** A mapped repository is a path in `jira.json` and never enters `registry.json`.
-- **Per browser**: nothing yet — the board pick, the page and `jiraDefaultAction` arrive with the client in phase 2 and phase 5.
+- **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | setup`, a module store) since
+  phase 2; `jiraDefaultAction` arrives with phase 5. The Board page's filters and summary search are per mount and never persisted.
 
 ## The module, file by file
 
 | file                 | what it holds                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `env.util.ts`        | `jiraEnv()` — the three variables, read per call, trimmed, never cached; `JIRA_ENV` is their one spelling and `isJiraHostname` the site check    |
-| `config.util.ts`     | `readJiraConfig()` and the per-entry readers (`readBoard`, `readQuery`, `readRepos`, `readSkill`); `isJiraId`, `JIRA_JQL_MAX_CHARS`             |
+| `config.util.ts`     | `readJiraConfig()` and the per-entry readers (`readBoard`, `readQuery`, `readRepos`, `readSkill`); `isJiraId`, `JIRA_JQL_MAX_CHARS`; since phase 2 the write half — `parseBoardWrite`, `parseReposWrite`, `normaliseRepoPath`, `mintJiraId`, the three writers `writeBoard`, `deleteBoard`, `writeRepos`, and their two refusals `JiraConfigUnreadableError`, `JiraUnknownIdError` |
 | `jira.client.ts`     | `JiraClient` — one `fetch` wrapper over the endpoints read; the gateway, the one auth header, the call counter, the deadline; `jqlString`        |
 | `errors.util.ts`     | `accessOf` and `jiraHttpError` — the one mapping from a Jira response to an access state and to an HTTP error (spec §8)                        |
 | `identity.ts`        | `JiraBootState` — the four boot answers, the token kind, the site-level `access`/`detail`, the 429 window and the 15 s → 5 min back-off        |
@@ -32,11 +35,12 @@ through `/api/jira` and nothing draws it yet.
 | `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30)              |
 | `poller.service.ts`  | `JiraPollerService` — the ticker, the boot sequence, the per-board caches, and every fresh read the routes make                                |
 | `jira.controller.ts` | the six read routes                                                                                                                            |
+| `jira-write.controller.ts` | the three write routes (phase 2), each behind `SameOriginPostGuard`                                                                      |
 | `jira.module.ts`     | `JiraModule` — the poller and the client (a factory value, the one place a suite swaps in a fake `fetch`), both exported                       |
 
-Not there yet, by phase: **2** — the `jira.json` writers and their guarded POSTs (boards, repos), the whole client section; **3** — the assign and transition
-writes and the cache splice that follows them; **4** — `skills/jira/` and `jira.mjs`; **5** — `prompt.util.ts`, the skills routes, `GET /api/jira/prompt`,
-`dispatch-jira`, `jira-stop` and the live-session map (`JiraStatusPayload.live` is always `{}` and `JiraIssueDetail.session` always `null` until then).
+Not there yet, by phase: **3** — the assign and transition writes and the cache splice that follows them; **4** — `skills/jira/` and `jira.mjs`; **5** —
+`prompt.util.ts`, the skills routes, `GET /api/jira/prompt`, `dispatch-jira`, `jira-stop` and the live-session map (`JiraStatusPayload.live` is always `{}` and
+`JiraIssueDetail.session` always `null` until then).
 
 ## Shapes
 
@@ -44,8 +48,11 @@ All in `shared/types.ts`: `JiraIssue` (one issue as the board draws it — key, 
 category, priority, assignee, reporter, parent, a subtask count, labels, sprint, created/updated/resolved), `JiraQuery`, `JiraBoard` (`interval` is the existing
 `SyncInterval`; `DEFAULT_JIRA_INTERVAL` is `1m`), `JiraSkill`, `JiraBoardFailure`, `JiraBoardStatus` (a board plus `polledAt`, `count`, `truncated`,
 `failures`), `JiraTransition`, `JiraIssueDetail` (an issue plus the Markdown description, children, transitions and the ids of the boards holding it) and
-`JiraStatusPayload`. `JiraAccess` is `ok | unconfigured | unsupported | unauthorized | forbidden | rate-limited | unreachable`; `JiraTokenKind` is
-`classic | scoped`. `isJiraKey` (`^[A-Z][A-Z0-9_]+-\d+$`) and `JIRA_KEY_RE` live there too, beside the existing `SYNC_INTERVALS`.
+`JiraStatusPayload`. Phase 2 widened the payload by two fields: `armed`, the poller's `armed` getter — the Connection card's `every 15 s` / `idle`
+has no other source — and `home`, `os.homedir()` read per call, `null` while unconfigured, because the Repositories card shows a path under `$HOME` as `~`
+and the browser has no other way to know `$HOME` (compose passes the host's `HOME` through, so the container's `homedir()` is the host's). `JiraAccess` is `ok |
+unconfigured | unsupported | unauthorized | forbidden | rate-limited | unreachable`; `JiraTokenKind` is `classic | scoped`. `isJiraKey`
+(`^[A-Z][A-Z0-9_]+-\d+$`) and `JIRA_KEY_RE` live there too, beside the existing `SYNC_INTERVALS`.
 
 ## Routes
 
@@ -61,8 +68,8 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/projects`          | every project the credentials see, `{ key, name }[]` sorted by key, paged by `startAt`                                          |
 | `GET /api/jira/jql/check?jql=`    | `{ ok: true, count }` or `{ ok: false, message }` (Jira rejected it — still a 200); `jql` required, over 2 000 characters → 400  |
 
-Every route but the first answers 503 `Jira is not configured` while unconfigured. `POST /api/jira/boards` and `GET /api/jira/prompt` are 404s until their
-phases. A failed Jira call is mapped once, by `jiraHttpError`, to a body `{ error, access?, retryAt? }`:
+Every route but the first answers 503 `Jira is not configured` while unconfigured. `GET /api/jira/prompt` is a 404 until phase 5. A failed Jira call is mapped
+once, by `jiraHttpError`, to a body `{ error, access?, retryAt? }`:
 
 | Jira                   | HTTP | `error`                                     |
 | ---------------------- | ---- | ------------------------------------------- |
@@ -79,6 +86,31 @@ answers its mapping and leaves `access` to the sweep. A read inside an open 429 
 sent. A read before the boot has a `cloudId` is refused from the boot state: the 401 mapping if that state is `unauthorized`, else 502 `Jira unreachable`.
 A read against an `unsupported` site is refused the same way, as 502 `Jira unreachable: Jira Server/DC is not supported`, but with `access: 'unsupported'` —
 what `GET /api/jira` says — rather than the `unreachable` its synthesised status would map to.
+
+### The write routes (phase 2)
+
+Three POSTs in `jira-write.controller.ts`, the only callers of the writers — POSTs because the app has no PUT or DELETE route anywhere. Each carries
+`SameOriginPostGuard` (`application/json` and a same-origin `Origin`, 403 otherwise), and inside each the order is fixed: guard → validate (400, naming the
+field) → configured (503 `Jira is not configured`) → write (404 / 409) → re-aim the poller. Every error body is `{ error }`. They are not gated on `access`:
+a save while the credential is rejected or the site `unsupported` touches only `jira.json`, and the sweep that follows is the poller's to skip.
+
+| route                           | body                                    | answers                                                                                           |
+| ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
+| `POST /api/jira/boards/delete`  | `{ id }`                                | `{ ok: true }`; drops the board's cache at once (`boardDeleted`) and re-`arm()`s; 404 for an unknown id, a second delete included |
+| `POST /api/jira/repos`          | `{ project, paths }`                    | `{ project, paths }` as stored, normalised and deduplicated; `[]` removes the project's key; re-aims nothing |
+
+`parseBoardWrite` holds spec §5's bounds: a trimmed `name` of 1–80; an `interval` in `SYNC_INTERVALS`; at most 20 roots, each passing `isJiraKey`,
+deduplicated; at most 10 queries, each a trimmed `label` of 1–80 and a `jql` of 1–`JIRA_JQL_MAX_CHARS`; at least one root or query. A non-string, non-null
+board `id` is a 400 naming `id`; `null` or absent is a create, whose client ids are ignored. On an update a query keeps its id only when the stored board
+holds it, and every other query is minted a fresh `q_` id — a query's identity is never inferred from its label or JQL. `parseReposWrite` takes a
+`JIRA_PROJECT_KEY_RE` key and at most 10 paths after `normaliseRepoPath`: trimmed, `~` and a leading `~/` expanded to `homedir()`, `~user/…` refused,
+absolute with no empty, `.` or `..` segment (400 `path must be absolute and normalised: <path>`), one trailing `/` dropped, duplicates removed after
+normalising — the dashboard compares paths as raw strings, so the server stores exactly one spelling.
+
+The two refusals are the writers' own, mapped once: `JiraConfigUnreadableError` is a 409 carrying its message (the file exists and does not read; nothing
+was written), `JiraUnknownIdError` a 404 `unknown board`. Why the writers read the raw file, merge one entry and write by temp-file-and-rename is
+[invariants.md](invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced).
 
 ## The poller
 
@@ -113,17 +145,76 @@ lands inside it leaves `rate-limited` standing (a sweep 401 still records `unaut
 unanswered then, the verdict the window covered (an `unauthorized`, say) comes back rather than `ok`. `calls.sweep` is approximately what the last tick sent — a
 route read made during the sweep is counted with it — and `calls.last429At` the last 429 met, by a sweep or a route.
 
+**A save (phase 2).** `boardSaved(id)` forces that board due — `forced`, a map from board id to the generation of the save, NOT a reset of its
+`polledAt`, which would empty the last good list — waits out a sweep already in flight (it read `jira.json` before the save, so it cannot spend the force),
+runs one that started after the call, and resolves when it is done or after `JIRA_SAVE_SWEEP_WAIT_MS` (20 s), whichever is first; it never rejects. The
+force is spent only by a sweep that SUCCEEDS on the board, so a boot still unanswered, a 429 window or a failing Jira leaves it owed and retried on the next
+tick — for an `off` board that is the only thing that would ever replace the list swept from the pre-edit definition. Past the cap the save has still landed
+and the sweep still runs to its end; the client's next status poll catches the list up. `boardDeleted(id)` drops the cache and the force at once, so a board
+re-created under the same id starts cold.
+
 **The cache.** `Map<boardId, { issues, polledAt, truncated, failures }>`, in memory, lost on restart; a board removed from `jira.json` is pruned on the next
 sweep, unless the file is unreadable. The issue detail, the roots search, the project list and the JQL check are fresh reads, never cached. The Jira board
 caches are the second cache in this server whose age is a rendered value; that widened rule's mechanism stays in `.claude/rules/tracker.md` beside the
 tracker cache's, which this doc points to rather than restates.
 
-## `jira.json`'s reader
+## `jira.json`'s reader and writers
 
 Read fresh on every use. Missing, or a parsed non-object: empty. Exists but cannot be read or parsed: empty with `unreadable` set, carried on the payload as
 `configUnreadable`, and never replaced. Everything else falls back per entry — a board needs a `b_` id and a name; a root must pass `isJiraKey`; a query
 needs a `q_` id, a label and JQL; a repos key must be a project key and each path a non-empty string; a skill needs an `s_` id, a name and a prompt — and each
 dropped entry is warned once. An `interval` that is missing or not one of `15s`, `1m`, `5m`, `off` reads `1m`.
+
+The three writers (phase 2) follow `writeSyncInterval`'s shape: read the RAW file; ENOENT starts from `{}`; a file that cannot be read or does not parse
+throws `JiraConfigUnreadableError` and writes nothing; a parsed non-object is replaced; otherwise merge ONE entry — a board by id (keeping its position in
+`boards`), one project's path list by key — and keep everything else, malformed entries and unknown top-level keys included, then write
+`JSON.stringify(next, null, 2) + '\n'` to a temp file in the same directory and `rename` it over. Ids are `b_`/`q_` plus eight lower-case hex digits,
+minted against every id the file already holds, malformed entries' included, so a minted id never collides.
+
+## The client (phase 2)
+
+The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the mechanism. The browser never talks to Jira: every request is to
+`/api/jira…`, a person is initials on a disc rather than Jira's `avatarUrls`, and every link out is `JiraIssue.url` as the server built it.
+
+- **The section.** `jira` is in `SECTIONS` (`client/src/lib/sections.ts`) between `archive` and `settings`, unconditionally, and `RAIL_LABEL.jira` is `Jira`.
+  The rail draws the row only while the status says `configured: true` (or while a stored `jira` section is held for the first answer), `App` falls a `jira`
+  section to Board on `configured: false` and on nothing else, and Settings' `Opens on` offers `Jira` only while configured. `JiraView` (lazy, like every
+  section) picks the page and holds the open issue. The two pages, `JIRA_PAGES` in `lib/jira-page.ts`, are held by `hooks/useJiraPage.ts`, a module store
+  with `useRunsMode`'s shape, and switched by the rail's tree or by `onOpenJiraPage` — the tree's own pair, built in `App` and handed down — never by an
+  in-page control. The rule and its reasons are
+  [invariants.md](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
+- **The provider and the hooks.** `JiraProvider` (`hooks/JiraContext.tsx`) holds the shell's ONE `useJira`, beside `TrackersProvider`, so the rail, the chip,
+  both pages and the Trackers row read one answer on one clock. `useJira` (`hooks/useJira.ts`) is `useTrackers`' shape: one read on mount and focus, a timer
+  aimed at the soonest syncing board's `polledAt + interval + TRACKER_FETCH_SLACK_MS` with a `JIRA_STATUS_FLOOR_MS` (15 s) floor, no timer while
+  unconfigured or with no syncing board, only the newest read allowed to write, and the last payload kept through a failed read — it is the second
+  deliberate exception to the `useCoalescedFetch` rule
+  ([invariants.md](invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)). `useJiraBoard(id, interval)`
+  (`hooks/useJiraBoard.ts`) IS on `useCoalescedFetch`: it polls `boards/:id/issues` every `BOARD_TRACKER_POLL_MS` while the board syncs, once and then only on
+  `reload` for an `off` one, and only an answer for the current id may write.
+- **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`JIRA_COLUMNS`, `columnOf`, `sortForBoard`), the card's crumb
+  (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`) and subtasks marker, the band line (`bandSub`), a Setup row's sentence (`boardRowLine`), the
+  failure phrase, the chip's CALLS reading (`callsReading`, against `JIRA_SWEEP_CALL_CEILING` = 100, red inside `JIRA_429_RED_MS` = 15 min of the last 429),
+  the Connection card's `sweepLine` and `accessPhrase`, the board pick (`JIRA_BOARD_KEY`, `pickBoard`, `boardsByName`), the filters, `JIRA_QUERY_PRESETS`,
+  `unmappedProjects` and `displayPath`. Nothing in it reads a clock: `now` is a required parameter, and every poll or check age goes through `pollAge` (a card's age is `elapsedSince`'s own reading).
+- **Jira › Board** (`components/jira/JiraBoardView.tsx`, `JiraCard.tsx`). The stored pick is a preference: `pickBoard` resolves it against the status's live
+  list on every render, and `useJiraBoard` is handed only the id that resolution returns — a deleted or hand-edited pick falls to the first board by name and
+  never becomes a request for `/boards/<that id>/issues`. Filters (type, assignee, sprint, the summary search) are read off the loaded list, per mount.
+  `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. A card click lands in `JiraView`'s open-issue slot.
+- **The issue modal** (`components/jira/JiraIssueModal.tsx`) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, draws every fact the card carried at
+  once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising `marked` config
+  `ItemModal` also uses), the children and the boards holding it. The held answer is stamped with its key, so a late answer for an issue the modal has left
+  is dropped. No controls in phase 2.
+- **Jira › Setup** (`components/jira/JiraSetupView.tsx`) makes the page's ONE `/api/jira/projects` read per mount and hands it to the board sheet and the
+  Repositories card. The Boards card's `Open board` writes the pick straight to `localStorage` (the page unmounts in the commit that navigates, so a
+  `usePersistedState` effect would never run) and calls `onOpenJiraPage('board')`. `JiraBoardSheet` composes `ui/FormSheet`, seeds its fields once at
+  mount, debounces the root search (`JIRA_ROOT_SEARCH_DEBOUNCE_MS`, 300 ms) and the JQL check (`JIRA_JQL_CHECK_DEBOUNCE_MS`, 500 ms), leaves validation to the
+  server, and on any answer but a 200 stays open with the server's sentence. `JiraReposGroup` sends a project's whole list per write, the typed path trimmed
+  but otherwise as typed — the server alone normalises. `JiraConnectionGroup` is a read-only report. Every landed write reloads the shell's status, even if
+  the page has gone.
+- **The chip and the Trackers row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` — the
+  strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
+  `Popover` reading with no links or buttons. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings ›
+  Shared › Trackers card (`components/settings/TrackersGroup.tsx`) closes on one read-only Jira row from the same `useJira`.
 
 ## The probe facts the code encodes
 
@@ -149,9 +240,10 @@ Spec §14's phase-0 probe, against a real Cloud site with a scoped token, and wh
 ## Tests
 
 jest, flat in `test/`, none reaching a real Jira: `jira-env`, `jira-config`, `jira-client`, `jira-adf`, `jira-map-issue`, `jira-block`, `jira-poller` and
-`jira-routes` (supertest through `listenLoopback`). `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a
-per-request failure hook; `test/helpers/env.ts` blanks the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the
-compose passthrough.
+`jira-routes` (supertest through `listenLoopback`); phase 2 adds `jira-config-write` (the writers), `jira-write-routes` (the three POSTs, supertest), the pure
+`jira-lib` (`lib/jira.ts`), and the jsdom suites `use-jira`, `jira-sections`, `jira-board`, `jira-modal`, `jira-setup` and `jira-chip`, which mock `fetch`.
+`test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
+the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the compose passthrough.
 
 <!-- docs-sync:
   sources:

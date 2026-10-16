@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+
 import { Injectable } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
@@ -78,10 +80,29 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  *
  * Every instant here — `polledAt`, `last429At`, the window, the back-off — comes from `Date.now()`, never `new Date()`, so a suite that mocks `Date.now`
  * controls the only clock this file reads.
+ *
+ * ## Why a saved board is swept at once, and waited for (phase 2)
+ *
+ * A board save lands in `jira.json`; the client reloads the board and `GET /api/jira` on the route's answer. If the route answered first, the client would read
+ * the pre-save list with nothing on its own clock to ask again for up to a whole interval (or ever, for `off`). So `boardSaved(id)` sweeps that board now and
+ * resolves when the sweep is done — raced against `JIRA_SAVE_SWEEP_WAIT_MS`, so a slow Jira holds the sheet for a bounded time and no longer: past the cap the
+ * save has still landed and the sweep still runs to its end, and the next status poll catches the list up. It never rejects.
+ *
+ * "Now" is `forced`, a map from board id to the generation of the save that asked — NOT a reset of the cache's `polledAt`, which would empty the board's last
+ * good list (`coldOwed` reads it, and an edit that fails to sweep must keep showing what the board last knew). `due()` honours it and `owed()` counts it. A
+ * sweep spends the force only when it SUCCEEDS on the board, so every way of not getting an answer — the boot unanswered, a 429 window caught at the top of
+ * the loop or opened mid-board, a 401, a 5xx, a transport error — leaves the board forced, owed, and retried on the next tick until Jira answers; for an `off`
+ * board that is the only thing that would ever replace the list swept from the pre-edit definition.
+ *
+ * A sweep already in flight is not the answer: it read `jira.json` at its top, before the save. Each sweep notes the generation it read the file under, and
+ * spends only a force no newer than that — so a sweep that reaches the board after the save, but on the older copy of it, answers nothing and spends nothing.
+ * `boardSaved` waits the in-flight sweep out and then runs one that STARTED after the call.
  */
 
 /** The base tick, the GitHub poller's. Every `SyncInterval` is a whole number of these, so the tick is the resolution and no board needs its own timer. */
 export const JIRA_POLL_MS = 15_000;
+/** The longest a board save waits for its own sweep; past it the route answers and the sweep finishes on its own. */
+export const JIRA_SAVE_SWEEP_WAIT_MS = 20_000;
 /** Issues kept per saved query. Silent: spec §3 ties `truncated` to the board cap alone, and the band's copy says `first 500 shown`. */
 export const JIRA_QUERY_CAP = 200;
 /** Issues kept per root walk, the root itself counting as the first. Silent, for the same reason. */
@@ -169,6 +190,13 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
   private readonly boot = new JiraBootState();
   private readonly caches = new Map<string, JiraBoardCache>();
+  /**
+   * Boards a save asked to have swept now (header), each with the generation (`forceSeq`) of the save that asked. `due()` honours it, `owed()` counts it,
+   * and a sweep spends it only when it SUCCEEDS on the board and read `jira.json` after that save (`run()`).
+   */
+  private readonly forced = new Map<string, number>();
+  /** Bumped by every `boardSaved`; a sweep remembers the value it read the file under, so it can tell a save it saw from one that landed after. */
+  private forceSeq = 0;
   /** The calls the last sweep made, for the chip's CALLS meter (§6). */
   private sweepCalls = 0;
   private last429At: string | null = null;
@@ -219,6 +247,39 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return running;
   }
 
+  /**
+   * A board was saved: sweep it now and resolve when a sweep that includes it has finished, or after `JIRA_SAVE_SWEEP_WAIT_MS`, whichever is first. Never
+   * rejects — a save has already landed by the time this is called, and a failing Jira is the board's `access`, not the route's error. Where the sweep cannot
+   * run (boot unanswered, a 429 window, `unsupported`) it returns early, as `run()` does, and this resolves with the board still owed.
+   */
+  async boardSaved(id: string): Promise<void> {
+    if (this.stopped) return;
+    this.forced.set(id, ++this.forceSeq);
+    const swept = (async (): Promise<void> => {
+      // The in-flight sweep read the file before the save, so it cannot spend this force (its generation is older); the sweep after it can.
+      if (this.inFlight !== null) await this.inFlight.catch(() => undefined);
+      // `tick()` is `sweep()`, which clears the pending link on entry — the one place that is done.
+      await this.tick();
+    })().catch(() => undefined);
+
+    let cap: NodeJS.Timeout | undefined;
+    const capped = new Promise<void>((resolve) => {
+      cap = setTimeout(resolve, JIRA_SAVE_SWEEP_WAIT_MS);
+      cap.unref?.();
+    });
+    try {
+      await Promise.race([swept, capped]);
+    } finally {
+      clearTimeout(cap);
+    }
+  }
+
+  /** A board was deleted: its cache goes now, not at the next sweep's hygiene pass — a board re-created under the same id must start cold. */
+  boardDeleted(id: string): void {
+    this.caches.delete(id);
+    this.forced.delete(id);
+  }
+
   /** `GET /api/jira`. No outbound call: everything here is memory, the env and `jira.json`. The credentials never appear (§10). */
   status(): JiraStatusPayload {
     const env = jiraEnv();
@@ -236,7 +297,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
         projects: [],
         skills: [],
         calls: { sweep: 0, last429At: null },
-        live: {}
+        live: {},
+        armed: false,
+        home: null
       };
     }
     this.expireWindow(Date.now());
@@ -266,7 +329,11 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       projects: this.projectsOf(config),
       skills: config.skills,
       calls: { sweep: this.sweepCalls, last429At: this.last429At },
-      live: {}
+      live: {},
+      // A sweep clears the timer on entry, so the `armed` getter reads false for its whole length — the poller's busiest moment, which the Connection card
+      // and the chip would then call `idle`. A tick in flight is a chain that is alive, so status counts it; the getter stays timer-only, as `arm()` needs.
+      armed: this.timer !== null || this.inFlight !== null,
+      home: homedir()
     };
   }
 
@@ -422,7 +489,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private owed(config: JiraConfig): boolean {
     if (this.boot.access === 'unsupported') return false;
     if (!this.boot.answered()) return true;
-    return config.boards.some((b) => b.interval !== 'off' || this.coldOwed(b));
+    return config.boards.some((b) => b.interval !== 'off' || this.coldOwed(b) || this.forced.has(b.id));
   }
 
   private coldOwed(board: JiraBoard): boolean {
@@ -431,7 +498,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
 
   /** Never swept (or never successfully) is due at any interval — the cold sweep; otherwise one interval since the last good sweep (§3). */
   private due(board: JiraBoard, now: number): boolean {
-    if (this.coldOwed(board)) return true;
+    if (this.coldOwed(board) || this.forced.has(board.id)) return true;
     const ms = SYNC_INTERVALS[board.interval];
     if (ms === null) return false;
     return now - Date.parse(this.caches.get(board.id)!.polledAt!) >= ms;
@@ -473,16 +540,19 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     if (!env.configured || this.boot.access === 'unsupported') return;
 
     const config = readJiraConfig();
+    // Taken next to the read: a force whose generation is at most this was set before the file was read, so this sweep sees the save it asked for.
+    const seen = this.forceSeq;
     // Memory hygiene only — every reader filters by the config anyway. An unreadable file prunes nothing: it reads as no boards, and the caches of the
     // boards it still holds must survive until it parses again.
     if (config.unreadable === null) {
       for (const id of [...this.caches.keys()]) if (!config.boards.some((b) => b.id === id)) this.caches.delete(id);
+      for (const id of [...this.forced.keys()]) if (!config.boards.some((b) => b.id === id)) this.forced.delete(id);
     }
 
     // The calls the routes made since the last tick are not this sweep's.
     this.client.takeCalls();
     try {
-      await this.run(env, config);
+      await this.run(env, config, seen);
     } finally {
       this.sweepCalls = this.client.takeCalls();
     }
@@ -490,7 +560,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     if (this.owed(readJiraConfig())) this.schedule();
   }
 
-  private async run(creds: { site: string; email: string; token: string }, config: JiraConfig): Promise<void> {
+  private async run(creds: { site: string; email: string; token: string }, config: JiraConfig, seen: number): Promise<void> {
     const now = Date.now();
     this.expireWindow(now);
     if (this.inWindow(now)) return;
@@ -508,7 +578,11 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       // ...or a 401: `me` is gone, and no board is searched without it.
       if (!this.boot.answered()) return;
       if (!this.due(board, Date.now())) continue;
+      const force = this.forced.get(board.id);
       if (!(await this.sweepBoard(board, auth))) return;
+      // Spent only by a success on a file read after the save (header): a whole-board failure — a 429 window opening mid-board, a 401, a 5xx — replaced
+      // nothing, so the board is still owed, and a save that landed after this sweep read the file is a newer force than the one it just answered.
+      if (force !== undefined && force <= seen && this.forced.get(board.id) === force) this.forced.delete(board.id);
     }
     // Every due board answered, so an earlier board-level `unreachable` is over — and only that verdict: a 429 or a 401 a ROUTE recorded while this sweep
     // awaited is evidence this sweep does not have, and clearing it would read `ok` while the routes are refused (§8: only those two move the state).

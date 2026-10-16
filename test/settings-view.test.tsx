@@ -658,7 +658,7 @@ describe('SettingsView', () => {
       // `./SettingsRow` may still hand over the row and the group — those are
       // this card's composition, not primitives (the design spec's §12.3) — and
       // nothing else.
-      const fromRow = /import \{([^}]*)\} from '\.\/SettingsRow'/.exec(src)?.[1] ?? '';
+      const fromRow = /import \{([^}]*)\} from '\.\.\/ui\/SettingsRow'/.exec(src)?.[1] ?? '';
       expect(fromRow.split(',').map((n) => n.trim())).toEqual(['SettingsGroup', 'SettingsRow']);
       // No bare `<select>` left anywhere: the primitive is the one home for the
       // look, so a hand-rolled one is a second.

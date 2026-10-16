@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { ItemModal } from '../client/src/components/board/ItemModal';
+import { renderMarkdown } from '../client/src/lib/markdown';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import type { BacklogItem } from '../shared/types';
 
@@ -224,6 +225,14 @@ describe('ItemModal', () => {
     await waitFor(() => expect(screen.getByText('click')).toBeInTheDocument());
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(document.querySelector('.item-body')?.innerHTML).not.toContain('javascript:');
+  });
+
+  // Task 4 hoisted the renderer out of the modal into `lib/markdown.ts`; calling it directly proves the hoist kept the sanitiser, with no component between.
+  it('renderMarkdown renders no javascript: href', () => {
+    const html = renderMarkdown('[x](javascript:alert(1))');
+    expect(html).not.toContain('javascript:');
+    expect(html).not.toContain('<a');
+    expect(html).toContain('x');
   });
 
   // Round 2: a scheme hidden behind an HTML character reference reads as "no

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
+import { BoardColumn } from '../client/src/components/board/BoardColumn';
 import BoardView from '../client/src/components/board/BoardView';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { readStyles, ruleBlock } from './helpers/css-rule';
@@ -136,6 +137,22 @@ describe('BoardColumn', () => {
       expect.stringContaining('ui-dot-ramp-bugs'),
       expect.stringContaining('ui-dot-ramp-tasks')
     ]);
+  });
+
+  /** Jira phase 2 widened `BoardColumnSlug` with the tracker's three status categories. A `todo` column is a column like any other — its label, its count
+   *  and its `.board-col-todo` hook — but it is off the ramp, so its dot is the plain toneless base and no `ui-dot-ramp-*` class appears anywhere in it. */
+  it.each(['todo', 'doing', 'done'] as const)('draws a %s column with its label and count and no ramp dot', (slug) => {
+    render(
+      <BoardColumn slug={slug} label={`Label ${slug}`} count={3}>
+        <div>card</div>
+      </BoardColumn>
+    );
+    const col = screen.getByTestId('board-col');
+    expect(col).toHaveClass(`board-col-${slug}`);
+    expect(screen.getByTestId('col-name')).toHaveTextContent(`Label ${slug}`);
+    expect(screen.getByTestId('col-count')).toHaveTextContent('3');
+    expect(col.querySelectorAll('.board-col-head .ui-dot')).toHaveLength(1);
+    expect(col.innerHTML).not.toContain('ui-dot-ramp-');
   });
 
   /** The count is a `Pill` — the primitive — inside the span that lays it out.

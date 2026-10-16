@@ -1,6 +1,6 @@
 import { useWatchdog } from '../../hooks/useWatchdog';
 import { formatSpanCompact } from '../../lib/run-time';
-import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 import type { WatchdogConfig } from '../../../../shared/types';

@@ -1,6 +1,7 @@
 # The board (client)
 
-A React SPA in four sections behind a side rail — Board, Runs, Archive, Settings — each its own lazy chunk. The server returns whole corpora, so most of what
+A React SPA in five sections behind a side rail — Board, Runs, Archive, Jira, Settings — each its own lazy chunk, Jira drawn only on a machine whose
+server says it is configured ([jira.md](jira.md) has its client half). The server returns whole corpora, so most of what
 appears on screen is decided here: whether an item is groomed, whether it belongs on the Board or in Archive, how long an item's work took, what a run cost.
 Those derivations live in `client/src/lib/` as one implementation each, so two surfaces cannot disagree about the same item.
 
@@ -12,10 +13,16 @@ reads, and which file owns each decision.
 
 ### The rail
 
-Board / Runs / Archive / Settings, a plain section switch. `SECTIONS` in `client/src/lib/sections.ts` is the one runtime list of them — it lived in
+Board / Runs / Archive / Jira / Settings, a plain section switch. `SECTIONS` in `client/src/lib/sections.ts` is the one runtime list of them — it lived in
 `SideRail.tsx` until the rail gained a `useSettings` read and the two files closed an import cycle — and the rail keeps only the LABELS, as a
 `Record<Section, string>`, so a section added to the list cannot ship without one. `resolveSection` in `App.tsx` maps a stored value that names no tab — the
 legacy `'projects'` included — onto Board, so an upgrade never opens on a blank main area.
+
+`jira` (Jira phase 2) is a member of the list unconditionally, because `resolveSection` runs in a `useState` initializer before `GET /api/jira` has
+answered; the conditional half is the shell's. The rail's `drawn` skips the Jira row unless the shell's one `useJira` says `configured: true`, or the status
+is still unknown while `jira` is the section on screen; `App` falls a `jira` section to Board on `configured: false` and holds it on anything else, drawn in
+`JiraView`'s `loading…` or `Jira unavailable` line; and Settings' `Opens on` offers `Jira` only while configured. Why each half is the way it is:
+[invariants.md](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured).
 
 A section that fails to render does not take the rail with it (#270). The lazy sections sit inside `SectionBoundary`
 (`client/src/components/SectionBoundary.tsx`), keyed by section, which draws `this section failed to load` and a reload button in the well; switching sections clears it. Its common cause — a rebuild
@@ -28,16 +35,20 @@ The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks w
 Runs and Archive each already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the section that
 made it and drops it on a section change, so Settings, which reports nothing, always shows a solid cursor.
 
-TWO sections have a sub-nav tree under their row: Runs (History, Watchdog) and Settings (Local, Shared). Both are drawn by one component, `RailTree`, because
+THREE sections have a sub-nav tree under their row: Runs (History, Watchdog), Jira (Board, Setup) and Settings (Local, Shared). All three are drawn by one
+component, `RailTree`, because
 the markup carries three details that must not drift — the `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone
-menu on a pick. What each call site supplies is only what legitimately differs: the item list, which of them is current, and what a pick writes. In both cases
+menu on a pick. What each call site supplies is only what legitimately differs: the item list, which of them is current, and what a pick writes. In every case
 the tree is the **only** control that switches between the two views — there is no in-page switch at any width (`.claude/DESIGN.md` §8.0).
 
 The two trees differ in where their value lives, and the difference is not arbitrary. Runs' mode goes through `useRunsMode` (`client/src/hooks/useRunsMode.ts`),
 a module-level value every mounted reader subscribes to, because the rail is not its only writer — the Watchdog page's own rows jump back to History with a run
 selected, and the Settings watchdog card's `Live view` link opens Watchdog — and a second copy would let the rail and the page look at different views;
 `lib/runs-mode.ts` stays the one home of the key, the member list and the guard. Settings' scope is a field on the settings object instead, because both of its
-readers already sit inside `SettingsProvider` and nothing outside Settings writes it.
+readers already sit inside `SettingsProvider` and nothing outside Settings writes it. Jira's page takes Runs' road for Runs' reason: `useJiraPage`
+(`client/src/hooks/useJiraPage.ts`) is a module store over `lib/jira-page.ts`'s `JIRA_PAGES`, key and guard, because the tree is not its only writer either —
+Setup's `Open board` and the empty board's `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
+`change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`.
 
 Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
@@ -60,16 +71,18 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
 | `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
-| `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block |
+| `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block; `JiraChip`'s POLL and CALLS |
 | `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
-| `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal` — the only modal in the app                                         |
-| `FormSheet`            | `.ui-form-sheet`  | `label`, `title`, `steps?`, `footer`, `children`, `onClose`                                      | `LaunchSheet`, `OrchestrateSheet`                                               |
-| `Popover`              | `.ui-popover`     | `label`, `width` (px), `anchor`, `onClose`, `children`                                           | `FilterBar`, `TrackerChip`                                                      |
+| `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal`, `JiraIssueModal` — the app's two modals                            |
+| `FormSheet`            | `.ui-form-sheet`  | `label`, `title`, `steps?`, `footer`, `children`, `onClose`                                      | `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`                             |
+| `Popover`              | `.ui-popover`     | `label`, `width` (px), `anchor`, `onClose`, `children`                                           | `FilterBar` (Filters, Sort), `TrackerChip`, `JiraChip`, the Jira board's picker, `JiraBoardSheet`'s roots search |
 | `Segmented`            | `.ui-seg`         | `value`, `options`, `onChange`, `disabled?`, `label?`, `pill?`                                   | Settings (density, text size, staleness), the Runs range control (stroked, not `pill`) |
 | `Select`               | `.ui-select`      | `value`, `options`, `onChange`, `disabled?`, `label?`                                            | Settings rows, `WatchdogGroup`'s three ladders, both sheets' pickers            |
 | `NumberField`          | `.ui-number`      | `value`, `min`, `max`, `unit?`, `onCommit`, `label?`                                             | nothing today — see below                                                       |
 | `Switch`               | `.ui-switch`      | `checked`, `onChange`, `label?`, `disabled?`, `onLabel?`, `offLabel?`                            | `WatchdogGroup`'s Enabled row, `LaunchSheet`'s toggle                           |
-| `Chevron`              | `.chev`           | `dir?: down\|up\|right` (default `down`), `className?` — one 10×10 stroked path, the other two directions rotations of it | `TrackerChip`'s caret (`up` while the popover is open), `DispatchButton`'s mark (`right`) |
+| `Chevron`              | `.chev`           | `dir?: down\|up\|right` (default `down`), `className?` — one 10×10 stroked path, the other two directions rotations of it | `TrackerChip`'s and `JiraChip`'s carets and the Jira board picker's (`up` while the popover is open), `DispatchButton`'s mark (`right`) |
+| `Fact`                 | `.item-fact*`     | `label`, `children` — one label over its value; the call site decides whether it is drawn at all | `ItemModal`, `JiraIssueModal` (the facts column)                                 |
+| `SettingsRow`, `SettingsGroup` | `.set-row`, `.set-group` | `SettingsRow{name, hint?, children?}`; `SettingsGroup{title, scope, right?, children}` | every Settings card, the Jira Setup cards, `JiraBoardSheet`'s Name & sync rows |
 
 `label` and `title` are separate props on both overlay shells because a dialog's accessible name and its visible title are different strings on every surface
 that draws one, and `title` is a node — a name cannot be derived from it.
@@ -80,12 +93,17 @@ than composing `ProgressRow` (the spec listed it as a composer), and `NumberFiel
 36 px control set guard 7 pins, and because a numeric row is the next Settings addition's obvious control; if a reader finds it still unused, deleting it means
 deleting the family and the guard entry together, in one change.
 
-`SettingsRow` and `SettingsGroup` are not primitives — they are the Settings card's own composition of `Sheet` plus rows, and stay under `settings/`. Everything
-else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`, `RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`,
-`StageBars`, `WatchdogMonitor` (runs). `RunControls`, `RunRowTime` and `FilterBar` sit at the top level of `components/`, like `lib/view-keys.ts`, because two
-lazy chunks read each of them. `FilterBar.tsx` is three components, not one: the band's filter-and-sort track with its two popovers (`FilterBar`), one section of
-the filter popover (`FilterSection`, whose `fill` flag lays a switch out full width) and the `Project` section both pages draw (`ProjectPicks`) — the last two
-so that no page draws a section heading or a project chip of its own. Its family is `.filter-bar*`, never `.ui-*`.
+The last two rows are the exception to the table's opening rule, and on purpose. `Fact` (hoisted out of `ItemModal`) and `SettingsRow`/`SettingsGroup`
+(promoted from `settings/`) moved into `ui/` in Jira phase 2 because a second surface now draws each — the Jira issue modal's facts column, the Jira Setup
+page's cards — and a component only one directory can import is the drift the one-home rule exists to stop. Their CLASSES did not move: `.item-fact*` and
+`.set-*` were never `.ui-*` families, they sit outside the ui primitives block, and guard 7 does not pin them, because the hoist moved the components and
+left their CSS byte-for-byte where both surfaces already read it. Everything else page-shaped stays in its section's directory: `ItemCard`, `BoardColumn`,
+`RunChip`, `ItemModal` (board); `RunsView`, `RunDetail`, `StageTrack`, `StageBars`, `WatchdogMonitor` (runs); `JiraView`, `JiraBoardView`, `JiraCard`,
+`JiraIssueModal`, `JiraSetupView`, `JiraBoardSheet`, `JiraReposGroup`, `JiraConnectionGroup` (jira). `JiraChip` sits at the top level of `components/` beside
+`TrackerChip`, because the shell draws it. `RunControls`, `RunRowTime` and `FilterBar` sit at the top level of `components/`, like `lib/view-keys.ts`, because
+two lazy chunks read each of them. `FilterBar.tsx` is three components, not one: the band's filter-and-sort track with its two popovers (`FilterBar`), one
+section of the filter popover (`FilterSection`, whose `fill` flag lays a switch out full width) and the `Project` section both pages draw (`ProjectPicks`) — the
+last two so that no page draws a section heading or a project chip of its own. Its family is `.filter-bar*`, never `.ui-*`.
 
 ### Board
 
@@ -95,7 +113,9 @@ keys and an `Ascending`/`Descending` switch, each key arriving in its natural di
 (refactors/ideas/bugs/tasks). Out-of-scope has no Board column at all; it belongs to Archive. A click on a card opens the **item modal** — `ItemModal`
 composing `Modal`: a facts column (project dot and name, id, section, the created / updated / last-commit stamps, `groomed`, tags, the `in progress since`
 reading while a session holds the item, the elapsed and token counters when present, the file path, the dispatch control) beside the item's rendered Markdown
-body, folding above it under 700 px.
+body, folding above it under 700 px. The body goes through `renderMarkdown` (`client/src/lib/markdown.ts`), the sanitising `marked` configuration hoisted
+out of `ItemModal` in Jira phase 2 so the Jira issue modal renders a ticket's description through the same function: raw HTML is dropped, a link may name only
+`http`, `https` or `mailto` (or no scheme), and an image may name no scheme at all, so the board makes no outbound fetch on a viewer's behalf.
 
 Beside the band's title sits the **run chip** (`RunChip`), the Board's whole account of orchestrator runs since the run strip, the starting strip and the run
 drawer left it: a `Dot` taking the worst state present and a count line naming every state in that same order — `2 runs · 1 live ›`, `1 run · crashed ›`,
@@ -130,10 +150,11 @@ queue:
    Settings default (or a `pr` pick left over from another project) reads as `merge` on any project whose source is not `github` — `files`, `unsupported` or
    none. Settings is pre-project, so it lists `pr` for every project and leaves the refusal to the sheet and to the server's 400.
 
-Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
-call `useDialogEscape` for whatever they wrap. Two further entries join the same stack while they are drawn and are not dialogs: `ui/Confirm` (bug-53),
-described with the detail sheet below, and `ui/Popover` — the tracker chip's panel and the band's Filters and Sort — which closes only itself, and whose
-click-outside is its own `pointerdown`, since the stack owns the key and not the pointer.
+Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet — are the five dialogs on the escape stack, and neither the
+sheets nor the modal binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for whatever they wrap. Two further entries join the same stack
+while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
+Filters and Sort, and Jira's chip, board picker and roots search — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
+owns the key and not the pointer.
 
 ### What leaves the Board
 
@@ -370,6 +391,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `syncCycleMs`: the deadline is the EARLIEST next stamp still ahead, a row is due for one base cycle after its own cycle ends, `off` rows are skipped, and a
   payload whose every github row is off sets no timer — nothing on the server moves it, and the card's own save refetches. Reads that overlap (focus, timer,
   the save's refetch) are sequenced, not cancelled (#231): only the newest may set state or arm the timer, so an older answer that settles last does nothing.
+- `hooks/useJira.ts` and `hooks/useJiraBoard.ts` (Jira phase 2) — the shell's one `GET /api/jira` instance, provided by `JiraProvider`
+  (`hooks/JiraContext.tsx`) on `useTrackers`' shape, and the Jira Board page's issue list on `useCoalescedFetch`; both are described in
+  [jira.md](jira.md#the-client-phase-2).
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.
@@ -377,10 +401,12 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Invariants
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the three per-item dispatch blocks
-and which one lets a click through, the dialog escape stack and its three entries, a crashed run rendering as crashed, "queue wait is not work",
-[Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope), and
-[the content-width stamp that the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in
-[invariants.md](invariants.md), with the failure each one encodes. Not restated here.
+and which one lets a click through, the dialog escape stack and its five dialogs, a crashed run rendering as crashed, "queue wait is not work",
+[Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope),
+[the Jira section's tree and its configured-only
+row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that
+the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in [invariants.md](invariants.md),
+with the failure each one encodes. Not restated here.
 
 <!-- docs-sync:
   sources:

@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 
 import { JiraClient } from './jira.client';
 import { JiraController } from './jira.controller';
+import { JiraWriteController } from './jira-write.controller';
 import { JiraPollerService } from './poller.service';
 
 /**
- * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, and the six read routes. It mirrors `TrackerModule`
+ * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the six read routes and — since phase 2 — the three write
+ * routes (`JiraWriteController`, which touches `jira.json` and the poller, never Jira itself). It mirrors `TrackerModule`
  * (`server/src/tracker/tracker.module.ts`), and for the same reasons.
  *
  * `JiraClient` is provided as a factory value rather than a decorated class: it has no Nest decorators on purpose (a test constructs one on a fake `fetch`
@@ -14,7 +16,7 @@ import { JiraPollerService } from './poller.service';
  * reports the CALLS meter, and two clients would each count half.
  *
  * Both providers are exported. The poller is the read side for everything that comes after this phase — the board's sheets (phase 3), the item modal
- * (phase 4) and the dispatch route (phase 5) all ask it, never Jira — and the client is exported for the write routes phase 2 adds, which must use the same
+ * (phase 4) and the dispatch route (phase 5) all ask it, never Jira — and the client is exported for the calls later phases add, which must use the same
  * instance for the same reason.
  *
  * The dependency runs one way: `AgentsModule` will import this module (phase 5's dispatch needs the poller's issue read and its cache), and this module
@@ -24,7 +26,7 @@ import { JiraPollerService } from './poller.service';
  * No `RegistryModule` import, unlike the tracker's: nothing here resolves a project. `jira.json` is read straight from its own file.
  */
 @Module({
-  controllers: [JiraController],
+  controllers: [JiraController, JiraWriteController],
   providers: [JiraPollerService, { provide: JiraClient, useFactory: () => new JiraClient() }],
   exports: [JiraPollerService, JiraClient]
 })

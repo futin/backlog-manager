@@ -6,9 +6,11 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { TrackersGroup } from '../client/src/components/settings/TrackersGroup';
+import { JiraContext } from '../client/src/hooks/JiraContext';
+import type { JiraState } from '../client/src/hooks/useJira';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SYNC_INTERVALS } from '../shared/types';
-import type { SyncInterval, TrackerProjectRow, TrackersPayload } from '../shared/types';
+import type { JiraBoardStatus, JiraStatusPayload, SyncInterval, TrackerProjectRow, TrackersPayload } from '../shared/types';
 
 /**
  * The Trackers card's one control (#17, spec §9): a per-repo sync picker on every `github` row. What it must never do is show a value the server did not
@@ -165,5 +167,79 @@ describe('the Trackers card’s sync picker', () => {
 
     await waitFor(() => expect(selected('alpha')).toBe('15s'));
     expect(selected('alpha-twin')).toBe('15s');
+  });
+});
+
+/**
+ * The Jira row (Jira phase 2; DESIGN.md §8.9.4): one read-only line after the GitHub rows, drawn only while Jira is configured. Jira's board
+ * intervals are NOT editable here — they live on Jira › Setup, which the row names and does not link (the rail's tree is the only page switch).
+ */
+function jiraBoard(id: string): JiraBoardStatus {
+  return { id, name: id, roots: ['PLAT-1'], queries: [], interval: '1m', polledAt: null, count: 0, truncated: false, failures: [] };
+}
+
+function jiraStatus(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
+  return {
+    configured: true,
+    configUnreadable: null,
+    site: 'acme.atlassian.net',
+    me: { accountId: 'a1', name: 'Ada' },
+    tokenKind: 'classic',
+    access: 'ok',
+    detail: null,
+    boards: [jiraBoard('b_00000001'), jiraBoard('b_00000002')],
+    repos: {},
+    projects: [],
+    skills: [],
+    calls: { sweep: 0, last429At: null },
+    live: {},
+    armed: true,
+    home: '/home/x',
+    ...over
+  };
+}
+
+async function renderWithJira(data: JiraStatusPayload | null): Promise<void> {
+  stubFetch();
+  const jira: JiraState = { data, loading: false, error: false, reload: () => {} };
+  render(
+    <JiraContext.Provider value={jira}>
+      <TrackersProvider>
+        <TrackersGroup />
+      </TrackersProvider>
+    </JiraContext.Provider>
+  );
+  await waitFor(() => expect(screen.getByText('alpha')).toBeInTheDocument());
+}
+
+describe('the Trackers card’s Jira row', () => {
+  it('reads the site, the board count and where the intervals live, and carries no control', async () => {
+    await renderWithJira(jiraStatus());
+    const jira = screen.getByText('acme.atlassian.net · 2 boards · intervals live on Jira › Setup').closest('.set-row') as HTMLElement;
+    expect(within(jira).getByText('Jira')).toBeInTheDocument();
+    expect(jira.querySelector('button, a, input, select')).toBeNull();
+    expect(jira.querySelector('.set-control')).toBeNull();
+  });
+
+  it('says `1 board` for one', async () => {
+    await renderWithJira(jiraStatus({ boards: [jiraBoard('b_00000001')] }));
+    expect(screen.getByText('acme.atlassian.net · 1 board · intervals live on Jira › Setup')).toBeInTheDocument();
+  });
+
+  it('sits after the GitHub rows', async () => {
+    await renderWithJira(jiraStatus());
+    const rowsText = [...document.querySelectorAll('.set-row .set-name')].map((n) => n.textContent);
+    expect(rowsText.indexOf('Jira')).toBeGreaterThan(rowsText.indexOf('beta'));
+  });
+
+  it('is absent while Jira is unconfigured or not yet answered', async () => {
+    await renderWithJira(jiraStatus({ configured: false, site: null, me: null, access: 'unconfigured', boards: [], home: null }));
+    expect(screen.queryByText(/intervals live on Jira/)).toBeNull();
+    expect(screen.queryByText('Jira')).toBeNull();
+  });
+
+  it('is absent before the first Jira answer', async () => {
+    await renderWithJira(null);
+    expect(screen.queryByText(/intervals live on Jira/)).toBeNull();
   });
 });

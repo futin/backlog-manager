@@ -1,7 +1,8 @@
 import { useState } from 'react';
 
-import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Segmented } from '../ui/Segmented';
+import { useJiraContext } from '../../hooks/JiraContext';
 import { useTrackersContext } from '../../hooks/TrackersContext';
 import { resetClock, trackerState } from '../../lib/tracker';
 import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS } from '../../../../shared/types';
@@ -41,9 +42,16 @@ const INTERVAL_OPTIONS = (Object.keys(SYNC_INTERVALS) as SyncInterval[]).map((va
  * is loaded, and whose it is.
  *
  * It no longer owns the fetch: the shell does (`TrackersProvider` in `App`), so this card and the strip chip read one answer on one clock.
+ *
+ * **The Jira row (Jira phase 2, DESIGN.md §8.9.4)** closes the card while Jira is configured: `acme.atlassian.net · 2 boards · intervals live on Jira ›
+ * Setup`, read from the shell's one `useJira`. It is a report and carries no control — a Jira board's interval is set on the Setup page's Boards card,
+ * beside the roots it polls, so a second picker here would be a second writer of one board's setting. `Jira › Setup` is text, not a link: the rail's tree
+ * is the only thing that switches sections or pages. It is drawn whatever state the GitHub half is in (a machine with Jira and no GitHub token still has
+ * a Jira row), and not at all before Jira has answered or while it is unconfigured.
  */
 export function TrackersGroup() {
   const { data, loading, error, saveInterval, refusals } = useTrackersContext();
+  const jira = useJiraContext().data;
   // One save in flight per repo: the pill is disabled until its answer lands, so a second click cannot race the first one's refetch.
   const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
   const save = (repo: string, interval: SyncInterval): void => {
@@ -95,6 +103,12 @@ export function TrackersGroup() {
           })}
           {data.projects.length === 0 && <SettingsRow name="Projects" hint="nothing registered yet" />}
         </>
+      )}
+      {jira !== null && jira.configured && (
+        <SettingsRow
+          name="Jira"
+          hint={`${jira.site ?? '—'} · ${jira.boards.length} ${jira.boards.length === 1 ? 'board' : 'boards'} · intervals live on Jira › Setup`}
+        />
       )}
       {error && data !== null && <SettingsRow name="Trackers" hint="the last read failed — showing the previous answer" />}
     </SettingsGroup>

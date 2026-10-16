@@ -9,7 +9,7 @@
  * `SECTIONS` as `undefined` — every suite that loaded the rail died on it.
  *
  * The cycle's real edge was `settings.ts` depending on a COMPONENT for a list
- * of four strings, which is the kind of dependency `lib/` exists to absorb.
+ * of section names (four then, five since Jira phase 2), which is the kind of dependency `lib/` exists to absorb.
  * With the list here, nothing about the arrangement that mattered changes: it
  * is still one home, still runtime-readable, and the rail still derives its own
  * tabs from it rather than restating them — `RAIL_LABEL` is a
@@ -26,7 +26,12 @@
  * The order is rail order, and the rail renders in it: Board's companions
  * first, with Runs seated between Board and Archive rather than after Settings
  * where a careless append would land it.
+ *
+ * `jira` (Jira phase 2, spec §6.1) sits between Archive and Settings for the same reason: it is about the work, and Settings — under its rule — is about the
+ * board. It is a member here unconditionally, although the rail draws its row only while `GET /api/jira` says `configured: true`: `resolveSection` runs in a
+ * `useState` initializer, before that answer exists, and a stored `jira` it refused would throw away the section a reader left on a configured machine. The
+ * conditional half is the shell's — `App`'s hold-and-fall and `SideRail`'s row — never this list's.
  */
-export const SECTIONS = ['board', 'runs', 'archive', 'settings'] as const;
+export const SECTIONS = ['board', 'runs', 'archive', 'jira', 'settings'] as const;
 
 export type Section = (typeof SECTIONS)[number];

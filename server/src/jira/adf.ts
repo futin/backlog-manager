@@ -1,6 +1,6 @@
 /**
  * adf.ts — Atlassian Document Format → Markdown, the read side only (Jira phase 1; spec §8). Pure: no I/O, no clock, no module state, so the ticket block
- * (Task 7) and the detail route can call it on whatever Jira handed back without a fixture beyond the JSON itself.
+ * (`block.ts`) and the detail route can call it on whatever Jira handed back without a fixture beyond the JSON itself.
  *
  * What it covers is the node inventory the phase-0 probe (§14 P10) saw on ten real descriptions — `paragraph heading bulletList orderedList listItem
  * codeBlock taskList taskItem media mediaSingle mention emoji inlineCard rule`, with `panel table tableRow tableHeader tableCell` collapsed to placeholders,
@@ -38,7 +38,7 @@ const MAX_DEPTH = 64;
 export const ADF_MEDIA_NAME_MAX = 128;
 
 /**
- * A placeholder line, anywhere in a line (P7). Deliberately NOT global: Task 7 uses it as a `.test` detector, and a global regex keeps `lastIndex` between
+ * A placeholder line, anywhere in a line (P7). Deliberately NOT global: `block.ts` uses it as a `.test` detector, and a global regex keeps `lastIndex` between
  * calls and answers every other call wrong. A caller that needs every match builds `new RegExp(ADF_PLACEHOLDER_RE.source, 'g')`.
  */
 export const ADF_PLACEHOLDER_RE = /\[(?:attachment(?:: [^\]\n]{0,256})?|(?:table|panel|expand) omitted)\]/;

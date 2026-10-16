@@ -27,7 +27,7 @@ import { useNarrow } from '../../hooks/useNarrow';
  * render it under a `container-type` ancestor (§8.4.1's `.runs-frame` is one), whose layout containment would pin it to that box instead of the viewport.
  *
  * **It is not a dialog, whatever its role says.** `role="dialog"` names it for a screen reader (the opening button carries `aria-haspopup="dialog"` and
- * `aria-expanded`), but it paints no scrim, traps no focus and is not counted among the three dialogs `useDialogEscape` ranks — the same standing `Confirm`
+ * `aria-expanded`), but it paints no scrim, traps no focus and is not counted among the five dialogs `useDialogEscape` ranks — the same standing `Confirm`
  * has. §8.7's "one modal, and nothing else floats" admits these panels for that reason: they float, but over nothing they hide.
  *
  * **The width travels as a custom property, never as an inline `width`.** `--ui-popover-width` is read by the base rule, and the phone rule

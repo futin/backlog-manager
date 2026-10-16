@@ -273,6 +273,10 @@ export const CONTENT_WIDTHS: readonly ContentWidth[] = ['fixed', 'full'];
  * `main` rendering nothing, so it has to be mapped onto something, whereas
  * `last` is a real preference that means "open where I left off" and is the
  * honest answer to a pin this build can no longer honour.
+ *
+ * `jira` (Jira phase 2) is kept like any section, although this machine may not have Jira configured: the clamp is pure and runs before `GET /api/jira`
+ * has answered, so it cannot know, and a pin it dropped on a slow first read would be gone for good. What a `jira` pin does on an unconfigured machine is
+ * the shell's call — `App` falls the section to Board on the answer that says so — and `Opens on` offers the option only while the status says configured.
  */
 const LANDINGS: readonly Landing[] = ['last', ...SECTIONS];
 
