@@ -77,7 +77,7 @@ describe('Modal', () => {
  * a second one is a design change, which means amending that section first,
  * not a diff this guard should pass silently.
  */
-describe('the item modal is the only modal', () => {
+describe('the item modal and the Jira issue modal are the only modals', () => {
   const SRC = join(__dirname, '..', 'client', 'src');
 
   function walk(dir: string): string[] {
@@ -94,11 +94,11 @@ describe('the item modal is the only modal', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('is composed by exactly one file — board/ItemModal.tsx', () => {
+  it('is composed by exactly two files — board/ItemModal.tsx and jira/JiraIssueModal.tsx', () => {
     const composers = files
       .filter((f) => !f.endsWith(join('ui', 'Modal.tsx')))
       .filter((f) => /from '[^']*ui\/Modal'/.test(readFileSync(f, 'utf8')))
       .map((f) => f.slice(SRC.length + 1));
-    expect(composers).toEqual([join('components', 'board', 'ItemModal.tsx')]);
+    expect(composers.sort()).toEqual([join('components', 'board', 'ItemModal.tsx'), join('components', 'jira', 'JiraIssueModal.tsx')]);
   });
 });

@@ -1212,6 +1212,18 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .item-facts-claim { display: flex; flex-direction: column; align-items: flex-start; gap: 6px }
 .item-claim-note { margin: 0; font-size: 12px; color: var(--ink3) }
 
+/* The Jira issue modal's own additions (§8.9.2) — everything else in it is the item modal's `.item-facts*` / `.item-body*` above. The key row sits over the
+   facts list: the key at 13/500 --ink2 (the card's own key reading), the link out beside it in the body's link colour at 12. */
+.jira-modal-key { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
+.jira-modal-keyname { font-size: 13px; font-weight: 500; color: var(--ink2) }
+.jira-modal-key a { font-size: 12px; color: var(--cyan) }
+.jira-modal-subtasks { list-style: none; padding-left: 0 }
+.jira-modal-subkey { font-weight: 500; color: var(--ink2) }
+.jira-modal-substatus { font-size: 12px; color: var(--ink3); margin-left: 6px }
+.jira-modal-none, .jira-modal-comments { font-size: 12px; color: var(--ink3) }
+.jira-modal-comments { margin-top: 20px }
+.jira-modal-comments a { color: var(--cyan) }
+
 /* Rendered item Markdown, at §6.1's scale: 15/400 body, 19/500 headings, code
    spans on --steel. The section headings are the store's fixed ## set
    (Symptom, Plan, …), so they carry a hairline rather than sitting on size

@@ -5,6 +5,7 @@ import { useJiraPage } from '../../hooks/useJiraPage';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraIssue } from '../../../../shared/types';
 import { JiraBoardView } from './JiraBoardView';
+import { JiraIssueModal } from './JiraIssueModal';
 import { JiraSetupView } from './JiraSetupView';
 
 /**
@@ -32,17 +33,22 @@ import { JiraSetupView } from './JiraSetupView';
  *
  * **The open issue is held HERE, not in the Board page.** The Board's card click lands in this slot (`onOpenIssue`), and the issue modal (Task 9) is drawn
  * from it. Held one level above the page so that the slot outlives a re-render of the board under it — a poll that reorders the columns, a board switch —
- * and is read by exactly one modal mount. Until Task 9 draws that modal the slot is written and not read.
+ * and is read by exactly one modal mount. The modal is drawn only beside the Board page: Setup has no card to open one from, and a page switch (the rail's
+ * tree) unmounts the modal with the page, so a stale issue never survives a trip to Setup and back.
  */
 export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data, error } = useJiraContext();
   const [page] = useJiraPage();
-  // Task 9 reads the first half and draws the issue modal from it.
-  const [, setOpenIssue] = useState<JiraIssue | null>(null);
+  const [openIssue, setOpenIssue] = useState<JiraIssue | null>(null);
 
   if (data === null) return <div className="board-empty">{error ? 'Jira unavailable' : 'loading…'}</div>;
   if (!data.configured) return <div className="board-empty">Jira is not configured</div>;
-  return page === 'setup' ? <JiraSetupView onOpenJiraPage={onOpenJiraPage} /> : (
-    <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={setOpenIssue} />
+  return page === 'setup' ? (
+    <JiraSetupView onOpenJiraPage={onOpenJiraPage} />
+  ) : (
+    <>
+      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={setOpenIssue} />
+      {openIssue !== null && <JiraIssueModal issue={openIssue} onClose={() => setOpenIssue(null)} />}
+    </>
   );
 }

@@ -13,7 +13,7 @@ import { useNarrow } from '../../hooks/useNarrow';
  * surface and take a smaller lift and no scrim), a 290 px facts column left
  * of a body with a clean top edge.
  *
- * **This is the only modal anywhere in this app, and that is a decision rather
+ * **This is the only modal shell anywhere in this app, and that is a decision rather
  * than a coincidence** — stated here because a future reader should not have to
  * re-derive it from the spec, the same way `RunControls`' header states its own
  * "why one component". There is no run modal and none is added: everything a
@@ -21,8 +21,10 @@ import { useNarrow } from '../../hooks/useNarrow';
  * always beside the list. That sheet, and not a modal, is also the only surface
  * able to hold `RunControls` at all — a Pause or a Resume has to have a
  * standing place for the length of a run, which a surface a reader opens and
- * closes does not offer. So `Modal` is composed by exactly one surface, the
- * item (`board/ItemModal.tsx`), and a second composer is a design change, not a
+ * closes does not offer. So `Modal` is composed by exactly two surfaces, the
+ * backlog item (`board/ItemModal.tsx`) and — since Jira phase 2 — the Jira
+ * issue (`jira/JiraIssueModal.tsx`, §8.9.2), which is the item modal's twin
+ * and has no run to show either; a third composer is a design change, not a
  * reuse.
  *
  * **It owns the scrim, the exit and the Escape key, and its composers own
