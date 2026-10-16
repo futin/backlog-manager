@@ -8,6 +8,7 @@ import {
   compareVersions,
   displayTitle,
   dotState,
+  formatReleaseDate,
   isVersion,
   readLastSeen,
   writeLastSeen
@@ -51,6 +52,14 @@ describe('displayTitle', () => {
     expect(displayTitle('feat(releases)!: version chip')).toBe('version chip');
     expect(displayTitle('fix: x')).toBe('x');
     expect(displayTitle('Baseline — versioning starts here')).toBe('Baseline — versioning starts here');
+  });
+});
+
+describe('formatReleaseDate', () => {
+  it('is day, short month and year, and shows an unparseable date as it came', () => {
+    // Midday UTC, so the viewer's timezone cannot move it to another day.
+    expect(formatReleaseDate('2026-10-16T12:00:00+00:00')).toBe('16 Oct 2026');
+    expect(formatReleaseDate('soon')).toBe('soon');
   });
 });
 

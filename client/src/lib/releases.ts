@@ -65,3 +65,10 @@ export function writeLastSeen(v: string): void {
     /* a private window or blocked site data */
   }
 }
+
+/** `16 Oct 2026`, in the viewer's own timezone; a date that does not parse is shown as it came rather than as `Invalid Date`. */
+export function formatReleaseDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}

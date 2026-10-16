@@ -9,16 +9,17 @@ paths: ["client/src/**"]
   refuses a starting project with the same `RUN_IN_PROGRESS_CODE`. `runHoldsItem` deliberately does NOT gain the parameter. Why:
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-  listener; five dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, and since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet` — and
+  listener; six dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet`, and since the
+  release chip `ReleasesDrawer` — and
   none binds its own (bug-23 — four until task-37 took the run drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog
-  again; three from then until Jira phase 2). Since task-40 the hook is called by the two overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the
+  again; three from then until Jira phase 2). Since task-40 the hook is called by the overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`, and `ui/Drawer.tsx`, whose one composer is `ReleasesDrawer`), not by the
   surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet` and `JiraBoardSheet`, so
   the two Jira surfaces joined by construction. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
   item modal's claim release (#225) and the board sheet's `Delete board` open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with six composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`) and the board sheet's roots
   search (`components/jira/JiraBoardSheet.tsx`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
-  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still five dialogs counted.
+  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still six dialogs counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
