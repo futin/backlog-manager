@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { Sheet, SheetHead } from '../ui/Sheet';
+import { Sheet, SheetHead } from './Sheet';
 
 /*
   `Segmented` and `NumberField` used to live here and now live in
@@ -10,6 +10,11 @@ import { Sheet, SheetHead } from '../ui/Sheet';
   Settings' own — a row and a group are this card's COMPOSITION of `Sheet` plus
   rows, not patterns another surface reuses. §12.3 names both by hand for
   exactly that reason.
+
+  They moved from `settings/` to `ui/` in Jira phase 2: the Jira Setup page
+  composes the same `Sheet`-plus-rows shape for its Connection and Repositories
+  cards, and a composition only Settings could import would be a second copy of
+  it drawn beside this one. The names and behaviour are untouched.
 */
 
 /**

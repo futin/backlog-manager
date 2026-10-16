@@ -1,4 +1,4 @@
-import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';

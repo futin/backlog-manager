@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { SettingsGroup, SettingsRow } from './SettingsRow';
+import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Segmented } from '../ui/Segmented';
 import { useTrackersContext } from '../../hooks/TrackersContext';
 import { resetClock, trackerState } from '../../lib/tracker';
