@@ -1495,7 +1495,9 @@ fallback for the whole queue, and the message sends them to fix something that i
 
 The mechanism is now shared rather than written twice. `useReverify` (`client/src/hooks/useReverify.ts`) owns "ask once, mark `aria-busy`, act on the fresh
 answer"; both `DispatchButton` and `BoardView`'s toolbar call it, and `test/dispatch-button.test.tsx` passing unchanged is what makes that extraction a refactor
-rather than a rewrite. What the hook deliberately does NOT own is the gate check: the two callers derive different answers (`dispatchGate(item, fresh)` versus
+rather than a rewrite. Since #272 the hook has one caller, `GatedChip` (`client/src/components/ui/GatedChip.tsx`), which both controls compose: it owns the
+rest of the disabled half too — which block shows, `aria-disabled` and the described reason — with the re-ask rule itself in `gateView`
+(`client/src/lib/gate-view.ts`). What the hook deliberately does NOT own is the gate check: the two callers derive different answers (`dispatchGate(item, fresh)` versus
 `projectDispatchGate(fresh, path)`) and have different sibling blocks, so folding the policy in would mean a config object per caller. The drift-prone half is
 the mechanics — a hand-written copy that acts on the stale render, or drops the in-flight guard, looks right and is wrong. The Escape effect the four dialogs
 each carried their own copy of read as one of the stateless idioms this repo repeats on purpose, right up until bug-23: two of those dialogs are mounted
@@ -1504,10 +1506,11 @@ hook rather than the counterexample to it.
 
 Three differences from the per-item case, each a consequence of the control being project-scoped rather than item-scoped:
 
-- **No three-condition `reverifiable`.** `showOrchestrate` _hides_ the button for the environment ladder, for an unfiltered board (`projectValue === ALL` leaves
-  the gate `null`) and for a project with a fresh run. So a rendered disabled button is blocked on project visibility and nothing else — the condition reduces
-  to "the reason is non-null", and the hook's own in-flight guard covers the rest. The fresh-run rule must not be re-derived from a status refetch in any case:
-  it comes from `useOrchestratorRuns`, which polls every 5s while any run is fresh and which a status payload cannot see at all.
+- **More of its blocks hide.** `showOrchestrate` _hides_ the button for the environment ladder, for an unfiltered board (`projectValue === ALL` leaves the gate
+  `null`) and for a project with a fresh run. The fresh-run rule must not be re-derived from a status refetch in any case: it comes from
+  `useOrchestratorRuns`, which polls every 5s while any run is fresh and which a status payload cannot see at all. A rendered disabled button is blocked on
+  project visibility, on sync-off (#17), or both — and until #272 it re-asked whenever visibility spoke, even beside sync-off, for an answer that could never
+  open the sheet. It now follows the per-item rule through `gateView`: re-ask only when visibility is the ONLY block.
 - **The project is captured at click time**, not re-read when the answer lands. The filter is a live `<select>`; the sheet has to open for what the reader
   clicked. There is deliberately no "the filter moved, discard the answer" guard: `orchestrating` is keyed on the project path precisely so a sheet outlives a
   filter change, and the window is one request wide.

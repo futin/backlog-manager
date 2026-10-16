@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
@@ -8,10 +8,10 @@ import { remoteAsLive } from '../../lib/remote-run';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { useReportWorking } from '../../hooks/useReportWorking';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { useReverify } from '../../hooks/useReverify';
 import { useSettings } from '../../hooks/useSettings';
 import { isInProgress, isLiveWork } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
+import { disabledReason } from '../../lib/gate-view';
 import { buildProjectHues } from '../../lib/project-hue';
 import { projectName } from '../../lib/project-label';
 import { PROJECT_KEY } from '../../lib/view-keys';
@@ -19,7 +19,7 @@ import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { FilterBar, FilterSection, ProjectPicks } from '../FilterBar';
 import type { FilterBarSort, SortDir } from '../FilterBar';
 import { Band } from '../ui/Band';
-import { Chip } from '../ui/Chip';
+import { GatedChip } from '../ui/GatedChip';
 import { Segmented } from '../ui/Segmented';
 import { BoardColumn } from './BoardColumn';
 import type { BoardColumnSlug } from './BoardColumn';
@@ -292,17 +292,6 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
      `orchestrateProject` (see that value's own guard) and unmount the sheet
      with no `onClose` ever firing. */
   const [orchestrating, setOrchestrating] = useState<string | null>(null);
-  // The reason span DispatchButton's own `reasonId` documents in full: an
-  // aria-describedby target has to be unique across the page, and this
-  // button (unlike DispatchButton's forty-per-board) only ever renders once,
-  // but `useId()` is still the right tool for a value that must survive
-  // Strict Mode's double-invoke with the same identity both times.
-  const orchestrateReasonId = useId();
-  /* bug-16: the toolbar's own half of the one-question click, from the same
-     hook DispatchButton uses. Declared up here with the other board-level
-     state rather than beside the gate below, because it is a hook and the
-     gate is a derivation. */
-  const { verifying: orchestrateVerifying, ask: askOrchestrate } = useReverify(reverifyAgents);
   /*
    * Task 12's `openRunProject` — which project's run drawer is open — is gone
    * with `RunDrawer` itself (task-37, DESIGN.md §8.3's "What leaves"). The
@@ -602,12 +591,11 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
      conditions again, exactly as before phase 3. */
   const orchestrateProject = registered.find((p) => p.path === projectValue);
   const showOrchestrate = orchestrateGate !== null && orchestrateGate.control !== 'hidden' && !orchestrateBusy;
-  const orchestrateGateReason = orchestrateGate?.control === 'disabled' ? orchestrateGate.reason : null;
+  const orchestrateGateReason = disabledReason(orchestrateGate);
   /* #17: a project whose sync is `off` cannot be drained — the driver claims and writes through the item routes, which refuse — so the chip is disabled
      with the server's sentence. Kept apart from the gate's reason because the click handles the two differently: a visibility block may be stale and is
-     re-asked, a sync-off block is read off the project list and no status refetch could clear it. */
+     re-asked, a sync-off block is read off the project list and no status refetch could clear it — `GatedChip`'s `gateBlock`/`otherBlock` split. */
   const orchestrateSyncOff = orchestrateProject === undefined ? null : syncOffReason(orchestrateProject);
-  const orchestrateBlockedReason = orchestrateGateReason ?? orchestrateSyncOff;
   // The registry's own display name, for the button's title and the sheet's
   // header — falls back to the raw path only in the unreachable case where
   // `projectValue` names a project `registered` no longer carries (the same
@@ -777,84 +765,27 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
             <Segmented<StatusFilter> pill label="Status" value={status} options={STATUS_OPTIONS} onChange={setStatus} />
           </FilterSection>
         </FilterBar>
-        {/* Task 13: the "drain this project's groomed queue" control.
-            `showOrchestrate`/`orchestrateBlockedReason` (computed above)
-            already encode all four visibility rules from the brief, so
-            this markup only has to react to them — the same hide-vs-disable
-            shape DispatchButton renders, restated by hand rather than
-            reused because DispatchButton's signature is fixed around one
-            `BacklogItem`, which a project-level control does not have.
-            task-37 redrew it as the page's one ink chip (DESIGN.md §8.3) and
-            touched none of those rules. */}
+        {/* Task 13: the "drain this project's groomed queue" control. `showOrchestrate` (computed above) is its four show-rules — a narrowed board,
+            the environment ladder, no fresh run, no starting run — and hiding is decided here, before anything renders. The disabled half is
+            `GatedChip` (#272), the one implementation it shares with DispatchButton: the visibility block is re-asked (bug-16) and sync-off is not.
+            task-37 drew it as the page's one ink chip (DESIGN.md §8.3). */}
         {showOrchestrate && (
-          <>
-            <Chip
-              variant="ink"
-              title={orchestrateBlockedReason ?? `drain ${orchestrateProjectName}'s groomed queue in a Claude session`}
-              aria-disabled={orchestrateBlockedReason !== null}
-              aria-describedby={orchestrateBlockedReason === null ? undefined : orchestrateReasonId}
-              // The one signal that a swallowed-looking click was actually
-              // answered (bug-16), for the reason DispatchButton carries the
-              // same attribute: the re-ask below is one request long, and
-              // styles.css keys a `progress` cursor and a lighter label off
-              // this, so the feedback is not screen-reader-only either.
-              aria-busy={orchestrateVerifying}
-              onClick={() => {
-                // The other half of aria-disabled: the browser fires a
-                // click on it regardless, so this is what decides what a
-                // blocked button does — and since bug-16 that is "ask the
-                // question once", not "nothing".
-                //
-                // Only ONE block can be speaking here, which is why there is
-                // no equivalent of DispatchButton's three-condition
-                // `reverifiable`: `showOrchestrate` above hides the control
-                // outright for the environment ladder, for an unfiltered
-                // board, and for a project with a fresh run, so a rendered
-                // disabled button is necessarily blocked on project
-                // visibility alone — the one block that can be silently
-                // stale, because `useAgents` refetches on mount and window
-                // focus only and a window that never loses focus is never
-                // asked again. (The fresh-run rule is fed by
-                // `useOrchestratorRuns`, which polls every 5s while any run
-                // is fresh, so it is never stale in this way and a status
-                // refetch could not see runs at all.) Nothing else recovers
-                // it here: unlike LaunchSheet, OrchestrateSheet re-derives
-                // no gate on open — its only server re-check is at Start,
-                // as an uncoded 409 — so the sheet that would correct a
-                // stale answer sits behind the control the stale answer
-                // made inert.
-                if (orchestrateBlockedReason !== null) {
-                  // Sync off alone: nothing to re-ask, and nothing to open.
-                  if (orchestrateGateReason === null) return;
-                  const syncOff = orchestrateSyncOff;
-                  // Captured, not re-read at resolve time: the filter can
-                  // change between the click and the answer — the panel is a
-                  // click away and stays open across picks — and the sheet
-                  // must open for the project the reader actually clicked for. Deliberately no "the
-                  // filter moved, discard the answer" guard — `orchestrating`
-                  // is keyed on the project path precisely so a sheet
-                  // outlives a filter change (see its declaration), and the
-                  // window here is one request wide.
-                  const path = projectValue;
-                  askOrchestrate((fresh) => {
-                    // Re-derived from the FRESH answer through the same
-                    // gate, so a status that came back with dispatch off or
-                    // the dashboard gone opens nothing either.
-                    if (projectDispatchGate(fresh, path).control === 'enabled' && syncOff === null) openOrchestrateSheet(path);
-                  });
-                  return;
-                }
-                openOrchestrateSheet(projectValue);
-              }}
-            >
-              Orchestrate
-            </Chip>
-            {orchestrateBlockedReason !== null && (
-              <span id={orchestrateReasonId} className="sr-only">
-                {orchestrateBlockedReason}
-              </span>
-            )}
-          </>
+          <GatedChip
+            variant="ink"
+            gateBlock={orchestrateGateReason}
+            otherBlock={orchestrateSyncOff}
+            idleTitle={`drain ${orchestrateProjectName}'s groomed queue in a Claude session`}
+            reverify={reverifyAgents}
+            // Both closures capture THIS render's `projectValue`: the filter can change between a re-asking click and its answer — the panel is a click
+            // away and stays open across picks — and the sheet must open for the project the reader actually clicked for. Deliberately no "the filter
+            // moved, discard the answer" guard: `orchestrating` is keyed on the project path precisely so a sheet outlives a filter change (see its
+            // declaration), and the window is one request wide. Nothing else recovers a stale visibility block here: unlike LaunchSheet,
+            // OrchestrateSheet re-derives no gate on open — its only server re-check is at Start, as an uncoded 409.
+            recheck={(fresh) => projectDispatchGate(fresh, projectValue).control === 'enabled'}
+            onActivate={() => openOrchestrateSheet(projectValue)}
+          >
+            Orchestrate
+          </GatedChip>
         )}
       </Band>
 

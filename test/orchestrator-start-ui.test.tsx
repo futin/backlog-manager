@@ -389,6 +389,29 @@ describe('toolbar Orchestrate button', () => {
     expect(statusCalls(fn)).toBe(before);
   });
 
+  // #272: the one behaviour the GatedChip extraction changes. Blocked on visibility AND sync-off, the chip used to re-ask anyway and then refuse to open
+  // inside the callback — a status fetch whose answer could never open the sheet. Now it re-asks only when the visibility block is the ONLY block, which
+  // is DispatchButton's rule, so the click is refused outright like any other non-reaskable block.
+  it('asks nothing when the visibility block is joined by a sync-off block', async () => {
+    const fn = stub({
+      agents: { ...READY, projectPaths: [] },
+      projects: [{ ...PROJECTS[0], source: 'github', repo: 'futin/alpha', interval: 'off' }]
+    });
+    await renderNarrowed();
+    const btn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    // The visibility reason outranks sync-off, in the title and in the description alike.
+    expect(btn.getAttribute('title')).toMatch(/^the dashboard does not list \/abs\/alpha/);
+    expect(btn).toHaveAccessibleDescription(/^the dashboard does not list \/abs\/alpha/);
+    const before = statusCalls(fn);
+
+    await userEvent.click(btn);
+
+    expect(btn).toHaveAttribute('aria-busy', 'false');
+    expect(statusCalls(fn)).toBe(before);
+    expect(screen.queryByRole('dialog', { name: /orchestrate/ })).not.toBeInTheDocument();
+  });
+
   // --- Dialog mutual exclusion ------------------------------------------
   // Task 12 made the item drawer and `RunDrawer` mutually exclusive because
   // both were `.drawer`s with no focus trap of their own — two mounted at once
