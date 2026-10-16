@@ -57,7 +57,13 @@ Each is a decision, recorded so a reviewer can reject it by number rather than r
   picker, the roots search), so it reads six. The Jira board's Filters are `FilterBar`'s own popover, already counted.
 - **R7 — what the modal leaves out in phase 2.** No `Assign to me`, `Move to…` (phase 3), `Run ▾` or `Stop session` (phase 5), and no `session` fact (phase 5;
   `JiraIssueDetail.session` is still typed `null`). The controls row is simply absent, not drawn disabled.
-- **R8 — `polledAt: null`.** A board not swept yet reads `not polled yet` wherever an age would be (Band, Setup row, chip popover), never `NaN` or `0s`.
+- **R8 — `polledAt: null`.** A board not swept yet reads `not polled yet` wherever an age would be (Band, Setup row, chip popover), never `NaN` or `0 s`.
+- **R9 — one age formatter.** Every poll/check age on a Jira surface goes through `pollAge` (`client/src/lib/tracker.ts`), which prints `12 s` under a minute
+  and `elapsedSince` above — the spec writes both `Xs` (§6.2) and `3 s` (§6.4); the existing formatter decides, so Jira and GitHub ages read alike.
+- **R10 — the chip draws one initial**, the first letter of `me.name` (`?` while `me` is null), as `TrackerChip` does and §6.5 says; `initialsOf` (two
+  letters) is the CARD's reading only.
+- **R11 — a non-string board `id`** (`7`, `{}`, `true`) in a `POST /api/jira/boards` body is a 400 naming `id`; `null` or absent is a create; any string goes
+  to `writeBoard`, where one the file does not hold is the 404.
 
 ## Global Constraints
 
@@ -82,7 +88,7 @@ Copied from the spec and CLAUDE.md; every task's requirements include these.
   summary search are per mount, never persisted.
 - Constants, one home each: `JIRA_SWEEP_CALL_CEILING = 100` and `JIRA_429_RED_MS = 15 * 60_000` and `JIRA_QUERY_PRESETS` in `lib/jira.ts`;
   `JIRA_STATUS_FLOOR_MS = 15_000` in `useJira.ts`; `JIRA_SAVE_SWEEP_WAIT_MS = 20_000` in `poller.service.ts`; `JIRA_JQL_CHECK_DEBOUNCE_MS = 500` in the board
-  sheet; `JIRA_BOARD_FILTER_FROM = 6` (the Boards card's filter field appears at six boards) in `lib/jira.ts`. The board poll reuses `BOARD_TRACKER_POLL_MS`.
+  sheet; `JIRA_BOARD_FILTER_FROM = 6` (the Boards card's filter field appears at six boards) in `lib/jira.ts`. The board poll reuses `BOARD_TRACKER_POLL_MS` (`client/src/hooks/useBoard.ts`).
 - jsdom suites mock `fetch`; fixture dates are relative to the clock the assertion runs under (`test/helpers/dates.ts`); NO suite reaches a real Jira.
 - Styles go in `client/src/styles.css` and must pass `test/design-guards.test.ts` (11 px floor, one uppercase rule, one home per `ui` family); colours are
   existing tokens only.
@@ -143,6 +149,7 @@ Not in this phase: `POST /api/jira/skills` and the Skills card, `jiraDefaultActi
 **Files:**
 - Modify: `shared/types.ts` (R1's two fields — the poller fills them in Task 2; until then `status()` must still compile, so add them there as `armed:
   this.armed`, `home: homedir()` / `false`, `null` in this task)
+- Modify: `server/src/jira/poller.service.ts` (`status()` only — R1's two fields)
 - Modify: `server/src/jira/config.util.ts` (header: the "reader half" paragraph becomes the writers' contract; keep the reasoning)
 - Test: `test/jira-config-write.test.ts` (new); `test/jira-config.test.ts` stays as is
 
@@ -159,7 +166,7 @@ Not in this phase: `POST /api/jira/skills` and the Skills card, `jiraDefaultActi
   - `parseBoardWrite`: a valid body round-trips trimmed (`'  Payments  '` → `'Payments'`); each of these is `ok: false` and the error names the field —
     `name` `''`/`'   '`/81 chars; `interval` `'2m'`/missing; 21 roots; a root `'pay-1'`; 11 queries; a query label `''`/81 chars; a jql `''`/2 001 chars; no
     roots AND no queries; a non-object body (`null`, `[]`, `'x'`). `['PAY-1', 'PAY-1']` reads as one root. A body with `id: 'b_0000000z'` is `ok` with `id`
-    kept as given — whether it exists is `writeBoard`'s question, and a malformed id on an update is the 404 the route gives.
+    kept as given — whether it exists is `writeBoard`'s question, and a malformed id on an update is the 404 the route gives; `id: 7` or `id: {}` is `ok: false` naming `id` (R11).
   - `writeBoard` create: no file → the file now holds exactly one board whose id matches `/^b_[0-9a-f]{8}$/`, each query a fresh `q_` id; the returned board
     equals `readJiraConfig().boards[0]`. A create whose body carried `id: null` and query ids `['q_deadbeef']` mints new ones for both (R3: no stored board
     holds them).
@@ -193,7 +200,8 @@ Not in this phase: `POST /api/jira/skills` and the Skills card, `jiraDefaultActi
 
 **Files:**
 - Modify: `server/src/jira/poller.service.ts`
-- Test: `test/jira-poller.test.ts` (extend, on its existing fake client and fake timers)
+- Test: `test/jira-poller.test.ts` (extend; its existing cases drive sweeps by `await poller.tick()` with real timers — the new `boardSaved` cases add
+  `jest.useFakeTimers()` in their own `describe`, restored after each)
 
 **Interfaces:**
 - Consumes: `writeBoard`, `deleteBoard` (Task 1).
@@ -210,8 +218,10 @@ Not in this phase: `POST /api/jira/skills` and the Skills card, `jiraDefaultActi
     `jira.json` before the save).
   - the boot not answered (`myself` failing): `boardSaved` resolves (the sweep returns early, as `run()` does), `polledAt` stays `null`, the board stays owed.
   - inside a 429 window: resolves without a search call.
-  - a sweep that takes longer than `JIRA_SAVE_SWEEP_WAIT_MS` (the fake client's search never settles): `boardSaved` resolves at 20 s of fake time, and the
-    sweep's eventual answer still lands in the cache.
+  - a sweep that takes longer than `JIRA_SAVE_SWEEP_WAIT_MS`: the client's own 10 s deadline (`JIRA_TIMEOUT_MS`) would abort one stalled call, so build it
+    from several calls each held under 10 s and totalling over 20 s — `jest.spyOn(client, 'search')` returning promises the test resolves by hand (or a
+    `delay` hook added to `test/helpers/jira.ts`'s fake). `boardSaved` resolves at 20 s of fake time, and once the test releases the remaining calls the
+    sweep's answer still lands in the cache.
   - `boardDeleted(id)`: `boardIssues(id)` is `null` once the file no longer holds the board, and the cache map no longer holds the id.
   - `status().armed` follows `armed`; `status().home` is `homedir()` when configured and `null` when not.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/jira-poller.test.ts` — the new cases FAIL.
@@ -296,7 +306,7 @@ Pure moves: no behaviour changes, every existing suite stays green.
   - `JIRA_COLUMNS: { slug: 'todo' | 'doing' | 'done'; label: string; category: JiraStatusCategory }[]` — `To Do`/`new`, `In Progress`/`indeterminate`,
     `Done`/`done`; `columnOf(issue): 'todo' | 'doing' | 'done'`.
   - `sortForBoard(issues): JiraIssue[]` — `updated` descending, ties by key ascending; never mutates.
-  - `cardAgeStamp(issue): string` — `resolved` for a `done` issue that has one, else `updated` (formatted by `lib/item-age.ts`'s existing formatter).
+  - `cardAgeStamp(issue): string` — `resolved` for a `done` issue that has one, else `updated` (formatted by `formatCreated` in `lib/item-age.ts`).
   - `crumbOf(issue, board: JiraBoard, me): { kind: 'root' } | { kind: 'parent'; key; summary } | { kind: 'mine' } | null` — precedence `root` (the key is one
     of `board.roots`) → `parent` → `mine` (assignee is `me.accountId`) → `null`.
   - `bandSub(board: JiraBoardStatus, site: string, now: number): { text: string; failing: boolean }`.
@@ -319,10 +329,10 @@ Pure moves: no behaviour changes, every existing suite stays green.
     `resolved` → `updated`.
   - `crumbOf` on a board with root `PAY-1`: `PAY-1` itself (with a parent `PAY-0`) → `root`; `PAY-2` with parent `PAY-1` assigned to me → `parent`; `PAY-3`
     with no parent assigned to me → `mine`; `PAY-4` with neither → `null`; `me: null` never yields `mine`.
-  - `bandSub` (site `acme.atlassian.net`): 14 issues, 2 roots, 1 query, polled 12 s ago → `acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 12s
+  - `bandSub` (site `acme.atlassian.net`): 14 issues, 2 roots, 1 query, polled 12 s ago → `acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 12 s
     ago`; 0 roots, 2 queries → `… from 2 queries …` (zero omitted, plural); `1 issue` singular; `polledAt: null` → `… · not polled yet` (R8); `truncated` →
     the text ends `· first 500 shown`; a `failures` entry → `failing: true` and the text names Jira's message (first failure; `+N more` when several).
-  - `boardRowLine`: `1m` board → `2 roots · 1 query · 14 issues · every 1m · polled 12s ago`; `off` → `… · sync off · last polled 12s ago`; zero counts omitted.
+  - `boardRowLine`: `1m` board → `2 roots · 1 query · 14 issues · every 1m · polled 12 s ago`; `off` → `… · sync off · last polled 12 s ago`; zero counts omitted.
   - `initialsOf('Ada Lovelace')` → `AL`; `'ada'` → `A`; `'Jean-Luc Picard Jr'` → `JP`; `''` → `?`.
   - `callsReading`: 40 calls → 0.4; 140 → 1; `last429At` 10 min ago → red; 16 min ago → not red; `null` → not red.
   - `soonestBoard`: a `5m` board polled 1 m ago and a `1m` board polled 30 s ago → the `1m` one; only `off` boards → `null`; a syncing board with `polledAt:
@@ -377,6 +387,7 @@ Pure moves: no behaviour changes, every existing suite stays green.
   and `client/src/components/settings/SettingsView.tsx` (`Opens on: Jira` offered only while configured)
 - Create: `client/src/components/jira/JiraView.tsx` (renders `JiraBoardView` or `JiraSetupView` by `useJiraPage()`; until Tasks 8 and 10 land, each page may
   be a placeholder that Tasks 8/10 replace — the placeholder must not ship past Task 10)
+- Modify: `.claude/DESIGN.md` — §8.9's four headings as one-line stubs, so the citations from this task on resolve; Task 13 fills them
 - Test: `test/jira-sections.test.tsx` (new)
 
 **Interfaces:**
@@ -397,7 +408,8 @@ Pure moves: no behaviour changes, every existing suite stays green.
 - [ ] **Step 2: Run** — FAIL.
 - [ ] **Step 3: Implement.** `resolveSection` already accepts any member of `SECTIONS`; the fall lives in `AppShell` as an effect on `useJiraContext().data`,
   calling `change('board')` only on the transition into `configured: false` while the section is `jira`.
-- [ ] **Step 4: Run** this suite plus `test/section-boundary.test.tsx`, `test/settings-view.test.tsx` and every suite that renders `SideRail` (`grep -rl
+- Modify: `test/nav.test.tsx` (~line 388 pins `SECTIONS` to the four names — it becomes the five, `jira` between `archive` and `settings`)
+- [ ] **Step 4: Run** this suite plus `test/nav.test.tsx`, `test/section-boundary.test.tsx`, `test/settings-view.test.tsx` and every suite that renders `SideRail` (`grep -rl
   SideRail test`) — PASS; typecheck.
 - [ ] **Step 5: Commit** — `feat(jira): the Jira rail section and its Board/Setup tree`
 
@@ -482,6 +494,8 @@ card's own `issue`; a failed read leaves those facts and shows `could not read t
   `client/src/components/jira/JiraBoardSheet.tsx`
 - Modify: `client/src/components/jira/JiraView.tsx`, `client/src/styles.css`
 - Test: `test/jira-setup.test.tsx` (new; this task's cases, Task 11 appends)
+- `JiraSetupView` owns the ONE `/api/jira/projects` fetch per mount and hands the list to the sheet and to Task 11's Repositories card — neither fetches
+  it itself.
 
 **Interfaces:**
 - Consumes: `boardsForSetup`, `boardRowLine`, `JIRA_QUERY_PRESETS`, `JIRA_BOARD_FILTER_FROM` (5); `useJiraContext` (6); `onOpenJiraPage` (7);
@@ -493,7 +507,7 @@ Behaviour (§6.4): Boards card — a `New board` chip in the head; rows from `bo
 (`FormSheet`) has three sections: **Name & sync** (name `.set-text`, interval `Segmented` over `SYNC_INTERVALS`, default `1m`); **Roots** (rows with ×; a
 search field whose `Popover` lists `/api/jira/search?q=` results — key + summary — and a pick adds the key; a search error shows under the field);
 **Queries** (preset chips per R5 plus `+ Custom JQL`; a row is label `.set-text` + JQL `.sheet-prompt` textarea + the check line from
-`/api/jira/jql/check`, debounced `JIRA_JQL_CHECK_DEBOUNCE_MS`: `4 issues match · checked 3s ago`, or Jira's parse message in red); footer `Delete board`
+`/api/jira/jql/check`, debounced `JIRA_JQL_CHECK_DEBOUNCE_MS`: `4 issues match · checked 3 s ago`, or Jira's parse message in red); footer `Delete board`
 (edit only, through `Confirm`) / `Cancel` / `Save` — `Create board` for a new one, disabled until a non-blank name and at least one root or query. Save
 POSTs the board (query rows carry their stored ids, R3), and on 200 calls `useJiraContext().reload()` and closes; on a 4xx/5xx the sheet stays open with
 every edit intact and the server's `error` under the footer. Delete POSTs `boards/delete` and, on 200, reloads and closes.
@@ -507,7 +521,7 @@ every edit intact and the server's `error` under the footer. Delete POSTs `board
   - `+ Assigned to me` adds a row whose label is `Assigned to me` and whose JQL is R5's text; `+ Unresolved in a project…` reveals a project `Select`
     (from `/api/jira/projects`) and picking `PAY` adds `Unresolved in PAY` / `project = "PAY" AND resolution = Unresolved`.
   - the check line: typing JQL fires ONE `/api/jira/jql/check` request 500 ms after the last keystroke (fake timers; three keystrokes 100 ms apart → one
-    request); `{ ok: true, count: 4 }` → `4 issues match · checked 0s ago`; `{ ok: false, message: "Field 'sprnt' does not exist" }` → that message in red.
+    request); `{ ok: true, count: 4 }` → `4 issues match · checked 0 s ago`; `{ ok: false, message: "Field 'sprnt' does not exist" }` → that message in red.
   - Save of an edited board POSTs `/api/jira/boards` with `content-type: application/json`, the stored board's `id`, and the stored query ids on the rows
     that came from it (a preset row added in this edit has `id: null`).
   - review focus 2: Save answering 409 `{ error: 'settings/jira.json does not parse as JSON — fix or delete it by hand; nothing was written' }` → the sheet
@@ -563,7 +577,7 @@ hint naming `read:jira-work`, `write:jira-work`, `read:jira-user`; last sweep �
 **Interfaces:**
 - Consumes: `soonestBoard`, `callsReading`, `initialsOf` (5); `pollProgress` (`lib/tracker.ts`); `useJiraContext` (6); `Meter`, `Popover`, `Chevron`.
 
-Behaviour (§6.5): on the `.tracker-chip*` classes — `initialsOf(me.name)` (or `?`), `Jira · <first name>`, a POLL meter from `pollProgress(soonest.polledAt,
+Behaviour (§6.5): on the `.tracker-chip*` classes — one initial (R10), `Jira · <first name>`, a POLL meter from `pollProgress(soonest.polledAt,
 now, SYNC_INTERVALS[soonest.interval])` (empty with no syncing board), a CALLS meter from `callsReading` (red while red), and a red pip while `access` is not
 `ok`. Its `Popover` is a reading only — site, one line per board (name · `polled <age>` or `not polled yet` · its failure), calls, last 429 — with no link
 and no button. Settings › Shared › Trackers gains one read-only row after the GitHub rows while configured: `<site> · N boards · intervals live on Jira ›
@@ -571,7 +585,7 @@ Setup` (`1 board` singular).
 
 - [ ] **Step 1: Write the failing tests:**
   - unconfigured → no chip, no Trackers row; configured → one chip in the strip at desktop width and one in the rail bar below 700 px (never both).
-  - the chip reads `AL` and `Jira · Ada` for `me.name = 'Ada Lovelace'`; `me: null` → `?`.
+  - the chip reads `A` and `Jira · Ada` for `me.name = 'Ada Lovelace'`; `me: null` → `?`.
   - `access: 'unauthorized'` → the red pip; `ok` → none.
   - CALLS: `sweep: 140` → the meter full; `last429At` 5 min ago → its red class.
   - the popover lists one line per board, a failing board's line carries Jira's message, and the popover contains no `<a>` and no `<button>`.
