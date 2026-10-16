@@ -1,10 +1,10 @@
 # The API
 
-Nest, one process, every route under `/api`. It owns six things: reading the registry, listing each registered project's items through whichever source owns
-them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, serving the Hub's three
-read-only Lookout widgets (`hub/`), and — behind a switch that is off by default — asking another local process to start a Claude Code session. It writes no
-item file and no run file; the only bytes it owns are three files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file, and
-`tracker-sync.json`.
+Nest, one process, every route under `/api`. It owns seven things: reading the registry, listing each registered project's items through whichever source owns
+them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
+boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), and — behind a switch that is off
+by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are three files under
+`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, and `tracker-sync.json`.
 
 ## Modules
 
@@ -93,7 +93,7 @@ Answers `{ id, released: true, stopped }`. The dispatch record is `DispatchRecor
 
 ### `tracker/`
 
-The second outbound-calling module, and the only other one. `github.client.ts` is a thin client over `fetch` with no Nest decorators — one constant host
+The second outbound-calling module, and the second of three (`jira/` is the third). `github.client.ts` is a thin client over `fetch` with no Nest decorators — one constant host
 (`api.github.com`), rate-limit headers recorded from every response including a `304`, and no throw on any status: every failure is a value the poller turns
 into an `access` state. `poller.service.ts` is a `setTimeout` chain in the watchdog's shape, armed only while a registered project resolves to `github` and
 `BM_GITHUB_TOKEN` is set; each tick makes two conditional requests per connected repo (issues, then every comment in the repo, each paginated to the end and
@@ -129,13 +129,21 @@ While a repo is `off`, every write path refuses with 409 `{ error: <the sentence
 `resume` in `AgentsService`, and `ItemsAbortService.abort` as its first check after the files refusal — before its dashboard stop, not only before its release. `plan()` names the same sentence as its `blocked`, so the launch sheet never offers what dispatch refuses. `backlog.mjs` prints
 the `error` verbatim and exits `1` through its generic non-2xx path — not `5`: the stack is up, the setting is the refusal.
 
+### `jira/`
+
+The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed only while the three `BM_JIRA_*`
+keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
+`jira.json` reader, the ADF converter and the ticket block. Six read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
+fresh (`?format=text` for the ticket block), the roots search, the project list and the JQL check — and no write route yet. The credentials are read per call
+and reach no payload. → [jira.md](jira.md), the full doc.
+
 ### `registry/`
 
 Read-only view of the registry file, re-read on every request so a capture made mid-session shows up on the next fetch.
 
 ### `agents/`
 
-The one module that calls anything outbound, and every POST in it is guarded by content-type and origin:
+One of the three modules that call outbound, and every POST in it is guarded by content-type and origin:
 
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
 - `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt.
@@ -229,6 +237,9 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
 - **`../claude-agents-dashboard`** — reached only from `agents/`, at an env-only URL, and never by the browser: every call goes board → this API → dashboard.
 - **`api.github.com`** — reached only from `tracker/`, with a token read per call from `BM_GITHUB_TOKEN`, and never by the browser: every call goes board → this
   API → GitHub, and the token reaches no payload.
+- **`api.atlassian.com`** — reached only from `jira/`, through the gateway path `/ex/jira/<cloudId>/rest/api/3`, with Basic credentials read per call from
+  `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN`, and never by the browser. Two calls go to the site itself (`https://<BM_JIRA_SITE>`): the unauthenticated `tenant_info`
+  that yields the `cloudId`, and the one `myself` probe that tells a classic token from a scoped one.
 - **The client** — same-origin `fetch` against these routes, plus the built bundle when `static.ts` finds one.
 - **A Lookout hub** — polls `/api/hub/widgets` server-side over the tailnet, read-only; the existing `.ts.net` Host allowance is what admits it.
 

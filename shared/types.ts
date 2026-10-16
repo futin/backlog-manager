@@ -403,7 +403,7 @@ export interface ProjectSummary {
   /**
    * When the poller last successfully read this repo, ISO, or `null` before
    * the first successful sync. The client renders its AGE — the tracker chip's
-   * POLL countdown, the item modal's `polled 12 s ago` — which is what keeps the one cache in this server honest: the items are at
+   * POLL countdown, the item modal's `polled 12 s ago` — which is what keeps the tracker cache honest: the items are at
    * most one poll interval old and the number says exactly how old.
    */
   polledAt: string | null;

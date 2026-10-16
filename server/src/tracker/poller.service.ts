@@ -50,11 +50,12 @@ import { SYNC_INTERVALS, type SyncInterval } from '../../../shared/types';
  * ## The cache, and why this one is allowed to exist
  *
  * **In memory, per repo, lost on restart, rebuilt by the first sync.** This is
- * the one cache in the server whose AGE IS A RENDERED VALUE: `polledAt`
- * travels in `ProjectSummary` and the board draws it (spec §5.5). It exists
- * because GitHub's hourly rate limit makes a per-request fetch impossible —
- * one board render would be one request per project — and its age being
- * visible on the board is what keeps it honest.
+ * one of the two caches in the server whose AGE IS A RENDERED VALUE (the Jira
+ * board caches in `jira/poller.service.ts` are the other): `polledAt` travels
+ * in `ProjectSummary` and the board draws it (spec §5.5). It exists because
+ * GitHub's hourly rate limit makes a per-request fetch impossible — one board
+ * render would be one request per project — and its age being visible on the
+ * board is what keeps it honest.
  *
  * The registry's "re-read per request, never cache" rule is UNTOUCHED, and so
  * is `resolveSource`'s. This poller re-reads both on every tick; what it keeps
