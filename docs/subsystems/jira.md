@@ -77,6 +77,8 @@ phases. A failed Jira call is mapped once, by `jiraHttpError`, to a body `{ erro
 Only a 401 (which resets `me` and restarts the boot retry) and a 429 (which opens the window) met on a ROUTE move the site-level `access`; anything else
 answers its mapping and leaves `access` to the sweep. A read inside an open 429 window is refused with the same 503 and the STORED `retryAt`, and no call is
 sent. A read before the boot has a `cloudId` is refused from the boot state: the 401 mapping if that state is `unauthorized`, else 502 `Jira unreachable`.
+A read against an `unsupported` site is refused the same way, as 502 `Jira unreachable: Jira Server/DC is not supported`, but with `access: 'unsupported'` —
+what `GET /api/jira` says — rather than the `unreachable` its synthesised status would map to.
 
 ## The poller
 
@@ -103,9 +105,13 @@ A root is `key = "K"` and then `JIRA_DESCENDANT_ROUNDS` (2) rounds of `parent in
 `failures` row (`kind`, the root key or query id, Jira's sentence) and the board proceeds; a root Jira answers with no issue is a `failures` row too. A sweep
 that finished every due board clears an earlier `unreachable`, and only that — a 401 or 429 a route recorded meanwhile stands.
 
-**The window.** A 429 stores its end (`Retry-After`, else `JIRA_RATE_LIMIT_DEFAULT_MS`, 60 s) once; the sweep makes no call inside it, and every route read is
-refused up front. It expires where it is read — the status payload, the read gate, the sweep — not by a timer, so a disarmed poller cannot leave a stale
-`rate-limited` standing. `calls.sweep` is what the last tick sent (route calls excluded) and `calls.last429At` the last 429 met, by a sweep or a route.
+**The window.** A 429 Jira sent stores its end (`Retry-After`, else `JIRA_RATE_LIMIT_DEFAULT_MS`, 60 s) once, and nothing moves it while it is in force
+(P1): a second 429 inside it — two reads that passed the gate together, a boot call already out — restamps `calls.last429At` and nothing else, and the 429
+the poller synthesises to refuse a call inside a window opens none. The sweep and the boot make no call inside it, a boot or sweep failure that lands inside
+it leaves `rate-limited` standing, and every route read is refused up front. It expires where it is read — the status payload, the read gate, the sweep —
+not by a timer, so a disarmed poller cannot leave a stale `rate-limited` standing; and if the boot is still unanswered then, the verdict the window covered
+(an `unauthorized`, say) comes back rather than `ok`. `calls.sweep` is approximately what the last tick sent — a route read made during the sweep is counted
+with it — and `calls.last429At` the last 429 met, by a sweep or a route.
 
 **The cache.** `Map<boardId, { issues, polledAt, truncated, failures }>`, in memory, lost on restart; a board removed from `jira.json` is pruned on the next
 sweep, unless the file is unreadable. The issue detail, the roots search, the project list and the JQL check are fresh reads, never cached. The Jira board

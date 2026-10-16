@@ -11,7 +11,7 @@ import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
 import type { JiraResult } from './poller.service';
 
 /**
- * The six read routes under `/api/jira` (Jira phase 1, spec §8 and §12). Every one answers from the poller's cache or status, or from ONE fresh read the
+ * The six read routes under `/api/jira` (Jira phase 1; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
  * poller performs for it — never from a call this file makes, so the 429 window, the boot's missing `cloudId` and the 401 bookkeeping have one home
  * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: board and query saves are phase 2's, the dispatch
  * route phase 5's, and `POST /api/jira/boards` / `GET /api/jira/prompt` are 404s until then (pinned by `test/jira-routes.test.ts`).

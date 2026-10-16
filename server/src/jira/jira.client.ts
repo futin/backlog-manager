@@ -206,8 +206,9 @@ export class JiraClient {
 }
 
 /**
- * Jira's own sentence for a failure: `errorMessages` first, then `errors` as `field: text`, joined by `; `, then a top-level `message` (the gateway's own shape). A body with none of them (an HTML gateway page, an
- * empty 502, both arrays empty) is `Jira answered <status>` — so a message is never empty and never raw HTML.
+ * Jira's own sentence for a failure: `errorMessages` first, then `errors` as `field: text`, joined by `; `, then a top-level `message` (the gateway's own
+ * shape). A body with none of them (an HTML gateway page, an empty 502, both arrays empty) is `Jira answered <status>` — so a message is never empty and
+ * never raw HTML.
  */
 function errorMessage(status: number, parsed: unknown): string {
   const body = (parsed ?? {}) as { errorMessages?: unknown; errors?: unknown; message?: unknown };

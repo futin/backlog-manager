@@ -51,11 +51,13 @@ function childLine(child: JiraIssue): string {
 }
 
 export function renderTicketBlock(detail: JiraIssueDetail): string {
+  const parent = detail.parent ? `${detail.parent.key} ${detail.parent.summary}` : ABSENT;
+  const labels = detail.labels.length > 0 ? detail.labels.join(', ') : ABSENT;
   const lines = [
     `${detail.key}${SEP}${detail.summary}`,
     `type: ${detail.type.name}${SEP}status: ${detail.status.name} (${CATEGORY_WORDS[detail.status.category]})${SEP}priority: ${orDash(detail.priority)}`,
-    `project: ${detail.project.key}${SEP}${detail.project.name}${SEP}parent: ${detail.parent ? `${detail.parent.key} ${detail.parent.summary}` : ABSENT}${SEP}sprint: ${orDash(detail.sprint)}`,
-    `assignee: ${orDash(detail.assignee?.name)}${SEP}reporter: ${orDash(detail.reporter)}${SEP}labels: ${detail.labels.length > 0 ? detail.labels.join(', ') : ABSENT}`,
+    `project: ${detail.project.key}${SEP}${detail.project.name}${SEP}parent: ${parent}${SEP}sprint: ${orDash(detail.sprint)}`,
+    `assignee: ${orDash(detail.assignee?.name)}${SEP}reporter: ${orDash(detail.reporter)}${SEP}labels: ${labels}`,
     `created: ${shortDate(detail.created)}${SEP}updated: ${shortDate(detail.updated)}${SEP}resolved: ${detail.resolved ? shortDate(detail.resolved) : ABSENT}`,
     `url: ${detail.url}`,
     ''

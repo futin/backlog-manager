@@ -9,13 +9,14 @@ import { DEFAULT_JIRA_INTERVAL, isJiraKey, isSyncInterval, type JiraBoard, type 
  *
  * This is the fourth file the server writes, after `watchdog.json`, the pause-control files and `tracker-sync.json` — but the writers are phase 2's. This file
  * holds the reader only and no write path at all: a file that exists and cannot be read or parsed is REPORTED (`unreadable`, which becomes `configUnreadable`
- * on the status payload) and never replaced, so the Board page can say `jira.json cannot be read` rather than the false, and later destructive, `No boards yet`.
+ * on the status payload) and never replaced, so the Board page can say `jira.json cannot be read` rather than the false, and later destructive, `No boards
+ * yet`.
  *
  * It restates `sync-config.util.ts`'s argument for a per-ENTRY fallback. The file holds hand-edited, user-authored data — boards, saved JQL, repo paths, skill
  * prompts — and one stray value must cost only its own entry, never its neighbours: a board with a mistyped id is not a reason to lose the next board, and a
  * `boards` key that is not an array is not a reason to lose `repos`. Spec §2 draws the line at the ENTRY (a board, a skill, one project's list). This reader
- * goes one level finer, by design and recorded here as the deviation it is: a bad ROOT costs the root and a bad QUERY costs the query, not the board they sit in,
- * because a board that loses its whole contents over one lower-case key is the more surprising failure of the two.
+ * goes one level finer, by design and recorded here as the deviation it is: a bad ROOT costs the root and a bad QUERY costs the query, not the board they sit
+ * in, because a board that loses its whole contents over one lower-case key is the more surprising failure of the two.
  *
  * Read fresh on every call and cached nowhere — the file is edited by hand and by phase 2's writers, and a cache would be a second copy that disagrees with
  * the disk for as long as it lives. A parsed non-object (`[1, 2]`, `null`, a bare string) folds into "nothing" and is NOT unreadable, exactly as

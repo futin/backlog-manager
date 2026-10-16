@@ -534,7 +534,8 @@ export function isSyncInterval(value: unknown): value is SyncInterval {
 // Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 is the server's READ half, so two fields are typed at their phase-1 value and
 // widen later without a rename: `JiraIssueDetail.session` is `null` (phase 5 makes it the live-session record) and `JiraStatusPayload.live` is always `{}`
 // (phase 5 makes it a map of key → live session). `JiraAction`, `JiraDispatchRequest` and its result are phase-5 shapes and are deliberately absent.
-// `JiraStatusPayload.tokenKind` is not in §4's list: it is the one extra boot probe's answer (§3, P14) and the Connection card needs it; §4 is amended to match.
+// `JiraStatusPayload.tokenKind` is not in §4's list: it is the one extra boot probe's answer (§3, P14) and the Connection card needs it; §4 is amended to
+// match.
 
 /** Jira's status category key. Jira's fourth key, `undefined` ("No Category"), is mapped to `new` by the server (P5), so the client never sees it. */
 export type JiraStatusCategory = 'new' | 'indeterminate' | 'done';

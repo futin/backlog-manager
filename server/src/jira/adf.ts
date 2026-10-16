@@ -1,16 +1,16 @@
 /**
- * adf.ts — Atlassian Document Format → Markdown, the read side only (Jira phase 1; spec §8). Pure: no I/O, no clock, no module state, so the ticket block (Task 7)
- * and the detail route can call it on whatever Jira handed back without a fixture beyond the JSON itself.
+ * adf.ts — Atlassian Document Format → Markdown, the read side only (Jira phase 1; spec §8). Pure: no I/O, no clock, no module state, so the ticket block
+ * (Task 7) and the detail route can call it on whatever Jira handed back without a fixture beyond the JSON itself.
  *
- * What it covers is the node inventory the phase-0 probe (§14 P10) saw on ten real descriptions — `paragraph heading bulletList orderedList listItem codeBlock
- * taskList taskItem media mediaSingle mention emoji inlineCard rule`, with `panel table tableRow tableHeader tableCell` collapsed to placeholders, and the marks
- * `strong em code link underline` — plus the documented nodes the probe did NOT see (`expand`, `date`, `status`, `strike`, `blockquote`, `hardBreak`), written
+ * What it covers is the node inventory the phase-0 probe (§14 P10) saw on ten real descriptions — `paragraph heading bulletList orderedList listItem
+ * codeBlock taskList taskItem media mediaSingle mention emoji inlineCard rule`, with `panel table tableRow tableHeader tableCell` collapsed to placeholders,
+ * and the marks `strong em code link underline` — plus the documented nodes the probe did NOT see (`expand`, `date`, `status`, `strike`, `blockquote`, `hardBreak`), written
  * from Atlassian's schema and exercised only by fixtures. P10 also found `taskList` on real descriptions, which the first draft of §8 had left out.
  *
  * Three decisions carry the design.
  *
- * 1. Text is ESCAPED, code is not. A description is prose; the person who wrote `snake_case_name` or `2 * 3` meant exactly that, and unescaped it would render as
- *    italics. `escapeMarkdown` therefore runs on every text node and on every label this file builds, and a code mark or codeBlock — where Markdown is already
+ * 1. Text is ESCAPED, code is not. A description is prose; the person who wrote `snake_case_name` or `2 * 3` meant exactly that, and unescaped it would
+ *    render as italics. `escapeMarkdown` therefore runs on every text node and on every label this file builds, and a code mark or codeBlock — where Markdown is already
  *    suspended — is left raw. A side effect P7 relies on: a person's literal `[table omitted]` becomes `\[table omitted\]` and cannot be mistaken for a
  *    placeholder by `ADF_PLACEHOLDER_RE` (a codeBlock holding that text still can — the one false positive, accepted in P7).
  * 2. What cannot be said in a line becomes a ONE-LINE placeholder — `[attachment: name]`, `[attachment]`, `[table omitted]`, `[panel omitted]`,
@@ -42,7 +42,10 @@ export const ADF_MEDIA_NAME_MAX = 128;
  */
 export const ADF_PLACEHOLDER_RE = /\[(?:attachment(?:: [^\]\n]{0,256})?|(?:table|panel|expand) omitted)\]/;
 
-/** Backslash-escape the characters Markdown would otherwise act on in running text. `>`, `#` and `-` are left alone — they only mean something at a line start. */
+/**
+ * Backslash-escape the characters Markdown would otherwise act on in running text. `>`, `#` and `-` are left alone — they only mean something at a line
+ * start.
+ */
 export function escapeMarkdown(text: string): string {
   return text.replace(/[\\`*_[\]<~]/g, '\\$&');
 }

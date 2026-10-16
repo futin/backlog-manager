@@ -222,7 +222,11 @@ describe('response normalisation', () => {
   // undici's `fetch` rejects with a bare `TypeError('fetch failed')` and puts the reason in `cause`; without it a mistyped `BM_JIRA_SITE` reads as nothing
   // more than "fetch failed" (final review minor 3).
   it.each([
-    ['its message', Object.assign(new Error('getaddrinfo ENOTFOUND acme.atlassian.nett'), { code: 'ENOTFOUND' }), 'fetch failed: getaddrinfo ENOTFOUND acme.atlassian.nett'],
+    [
+      'its message',
+      Object.assign(new Error('getaddrinfo ENOTFOUND acme.atlassian.nett'), { code: 'ENOTFOUND' }),
+      'fetch failed: getaddrinfo ENOTFOUND acme.atlassian.nett'
+    ],
     ['its code, when the message is empty', Object.assign(new Error(''), { code: 'ECONNREFUSED' }), 'fetch failed: ECONNREFUSED'],
     ['nothing, for a cause that is not an error', { detail: 'x' }, 'fetch failed']
   ])('a rejection with a cause appends %s', async (_, cause, message) => {

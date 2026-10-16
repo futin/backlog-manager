@@ -15,9 +15,10 @@ paths: ["server/src/jira/**"]
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
 - **The Jira token never leaves the server: the browser goes through `/api/jira`, and the poller is armed only while a board syncs.** `jiraEnv()`
   (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace is absent,
-  the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem in site, email, token order. Every call is
+  the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem — emptiness first, in site/email/token order, then the
+  hostname shape. Every call is
   `JiraClient.request`'s: the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` (`GATEWAY_HOST`, not configurable), except the unauthenticated
-  `tenant_info` (no `authorization` header at all) and the one `myselfAtSite` probe, sent once and only after the gateway `myself` answered 200 (P2).
+  `tenant_info` (no `authorization` header at all) and the one `myselfAtSite` probe, sent once and only after the gateway `myself` answered 200 (spec §3).
   `authorization: Basic …` is built there and nowhere else, and every `message` is Jira's sentence or the transport error's, never the request.
   `JiraStatusPayload` carries `site`, `me.name`, `me.accountId` and `tokenKind` — never the email or the token. Compose passes all three as
   `'${BM_JIRA_<NAME>:-}'`, pinned through `JIRA_ENV` by `test/compose-env.test.ts`. `JiraPollerService` is a `setTimeout` chain on `JIRA_POLL_MS`, `unref`'d,

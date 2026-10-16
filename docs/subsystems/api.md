@@ -93,7 +93,7 @@ Answers `{ id, released: true, stopped }`. The dispatch record is `DispatchRecor
 
 ### `tracker/`
 
-The second outbound-calling module, and the second of three (`jira/` is the third). `github.client.ts` is a thin client over `fetch` with no Nest decorators — one constant host
+The second of three outbound-calling modules (`jira/` is the third): `github.client.ts` is a thin client over `fetch`, no Nest decorators — one constant host
 (`api.github.com`), rate-limit headers recorded from every response including a `304`, and no throw on any status: every failure is a value the poller turns
 into an `access` state. `poller.service.ts` is a `setTimeout` chain in the watchdog's shape, armed only while a registered project resolves to `github` and
 `BM_GITHUB_TOKEN` is set; each tick makes two conditional requests per connected repo (issues, then every comment in the repo, each paginated to the end and
