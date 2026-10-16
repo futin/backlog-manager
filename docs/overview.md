@@ -48,7 +48,8 @@ Five artefacts hold everything, and the single-writer column is the load-bearing
 
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
-guarantee is untouched by it.
+guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and, until the Jira integration's phase 2 adds its writers, is edited
+by hand ([subsystems/jira.md](subsystems/jira.md)).
 
 ### The API — [full doc](subsystems/api.md)
 
@@ -97,8 +98,9 @@ about the same item; the ones the server needs too live in [`shared/`](../shared
 Six skills under `skills/`, three CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
 retro home's only writer and the one of the three nothing else reads at runtime), and one agent under `agents/` that the orchestrator dispatches to review an
 item's branch before it merges. `backlog-orchestrate` is the only skill that touches git history at all — it works one item per worktree and merges each into
-the run's base branch (`main` unless the run was given `--base`), or leaves a reviewed branch per item in branch mode, and for a tracker project it is also the
-only one that pushes — while execute does the work and groom writes the plans, neither of them committing anything.
+the run's base branch (`main` unless the run was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only —
+merges them onto a run branch of its own and opens one pull request into the base, and for a tracker project it is also the only one that pushes — while execute
+does the work and groom writes the plans, neither of them committing anything.
 
 An install is a copy of the pushed `HEAD`, never the working tree; see [workflows/publishing.md](workflows/publishing.md).
 

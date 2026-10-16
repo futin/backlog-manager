@@ -127,8 +127,8 @@ queue:
    function with `null` and gets `Merge into the base branch`; `null` there means "no base is knowable", never `main`. The third option, `pr`, reads
    `Open a PR into <base>` (`Open a PR into the base branch` in Settings) and is **offered only for a `github`-source project**: the sheet takes a `source`
    prop that `BoardView` passes from the registered project's `ProjectSummary.source` — never off `items[0]`, which an empty queue does not have — and a `pr`
-   Settings default (or a `pr` pick left over from another project) reads as `merge` on a files project. Settings is pre-project, so it lists `pr` for every
-   project and leaves the refusal to the sheet and to the server's 400.
+   Settings default (or a `pr` pick left over from another project) reads as `merge` on any project whose source is not `github` — `files`, `unsupported` or
+   none. Settings is pre-project, so it lists `pr` for every project and leaves the refusal to the sheet and to the server's 400.
 
 Both sheets and the item modal are the three dialogs on the escape stack, and neither the sheets nor the modal binds a key of its own: `Modal` and `FormSheet`
 call `useDialogEscape` for whatever they wrap. Two further entries join the same stack while they are drawn and are not dialogs: `ui/Confirm` (bug-53),

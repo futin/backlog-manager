@@ -60,3 +60,9 @@ Once it is applied, every direct push to `main` is refused, and in this repo tha
 - **[publishing.md](publishing.md)'s "commit, on main" then `git push`** becomes a PR; `pnpm run plugin:sync` still installs from the pushed `main`, so it runs
   after the merge, not after the push.
 - `git-sync`'s trunk push is gated per repo by the dashboard's Phase B; until then it fails here like any other direct push.
+
+<!-- docs-sync:
+  sources:
+    - .github/workflows
+  kind: workflow
+-->
