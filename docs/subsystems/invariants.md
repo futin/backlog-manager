@@ -2248,7 +2248,7 @@ which also makes re-running the command over an already-recorded transcript harm
 a numeric field a future CLI renames reads `null`, never `0`; and `usage` is optional on the queue item, so a run archived before this landed reads `null` from
 `runUsageTotals`/`itemUsageTotals` (`client/src/lib/run-stats.ts`) and renders nothing at all rather than `$0.00`.
 
-That is why nothing on the path from run file to view defaults it to `[]` — `RunDetail`'s row mapper passes it through undefaulted where it defaults
+That is why nothing on the path from run file to view defaults it to `[]` — the detail sheet's row mapper (`rowsFromLive`/`rowsFromArchive`, `client/src/lib/run-detail.ts`) passes it through undefaulted where it defaults
 `assumptions`, deliberately.
 
 **Where the reading shows up** — unchanged in WHAT is shown, and renamed by task-38 only because the surfaces were: the **History row** (`wall · $`), the detail

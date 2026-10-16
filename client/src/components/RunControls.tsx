@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 
 import { ApiError, cancelPauseOrchestrate, pauseOrchestrate, resumeOrchestrate, stopOrchestrate } from '../lib/agents';
-import { isTerminalStage } from '../lib/run-time';
+import { inFlightItemId } from '../lib/run-time';
 import { isCrashed } from '../lib/run-watchdog';
 import { Chip } from './ui/Chip';
 import { Confirm } from './ui/Confirm';
@@ -89,25 +89,6 @@ export type RunControlsRun = Pick<OrchestratorRun, 'status' | 'project'> & {
 /** Which call a completed click made — the hosts react differently to a
  *  resume (they also mark the poll) than to the other two. */
 export type RunControlsChange = 'pause' | 'cancel' | 'resume' | 'stop';
-
-/**
- * The item the run is working right now, or `null` when it is between items
- * (everything left is `pending`, or everything is done).
- *
- * "Neither `pending` nor terminal" is the same definition `RunStrip`'s own
- * in-flight lookup uses, backed by `isTerminalStage`'s `Record<RunStage,
- * true>` pin — so a stage added to the vocabulary has to be classified
- * there, once, rather than remembered here.
- *
- * FIRST match, not last: a queue is worked in order, so the earliest
- * non-terminal, non-pending entry is the one actually in flight. (A run only
- * ever has one, but reading the first makes that assumption explicit rather
- * than load-bearing.)
- */
-export function inFlightItemId(queue: RunControlsRun['queue']): string | null {
-  const item = queue.find((q) => q.stage !== 'pending' && !isTerminalStage(q.stage));
-  return item?.id ?? null;
-}
 
 export function RunControls({
   run,

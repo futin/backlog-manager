@@ -7,7 +7,8 @@ import '@testing-library/jest-dom';
 
 import { ApiError } from '../client/src/lib/agents';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
-import { RunControls, inFlightItemId } from '../client/src/components/RunControls';
+import { RunControls } from '../client/src/components/RunControls';
+import { inFlightItemId } from '../client/src/lib/run-time';
 import type { RunControlsChange, RunControlsRun } from '../client/src/components/RunControls';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
