@@ -28,10 +28,13 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
 ## 3. The fold — `lib/jira.ts`, one derivation
 
 - **Top card.** An issue is a *top* when its `parent` is `null`, or its `parent.key` is not in the board's loaded list. Every other issue folds into the
-  top reached by walking `parent.key` up through the loaded list. The walk keeps a visited set and stops at a key it has seen before. Jira has no cycles,
+  top reached by walking `parent.key` up through the loaded list. The walk keeps a visited set, and **an issue whose walk comes back to itself — a
+  self-parent, or any member of a cycle — is a top**, so each issue lands exactly once and a cycle draws as its members side by side. Jira has no cycles,
   but the list is our own cache, and a malformed one must not hang the page. `foldBoard(issues) → { tops: JiraIssue[], under: Map<topKey, JiraIssue[]>,
   childrenOf: Map<key, JiraIssue[]> }` is the one home of this walk. `childrenOf` is the on-board parent → direct-children index the walk builds anyway,
-  and the modal's tree reads it for whichever issue the modal shows, a mid-level one included. The board, the band count, the filters and the modal tree
+  and the modal's tree reads it for whichever issue the modal shows, a mid-level one included. It holds only **fold edges**, child → the parent it folded
+  under, so a top is nobody's child and the index is acyclic by construction: the tree recurses it with no guard of its own. Each list is in
+  `sortForBoard` order (the issue's own `updated`, descending). The board, the band count, the filters and the modal tree
   all read `foldBoard`. None of them walks parents on its own.
 - **What "on the board" means** is the loaded list, exactly. So it covers four cases that need no extra code:
   - A parent that left through the 14-day Done window is not on the board, so its open children become tops and keep their parent crumb.
@@ -51,14 +54,17 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
   draws a **fold block** above the marker row instead:
   - `C children · D below them`. C is the direct children on the board and D is everything deeper; at D = 0 the line is `C children` (`1 child`). *(Author's call on
     the wording: the mock's line.)*
-  - A **4 px progress bar** over all folded issues, segmented done / in progress / to do in `--green2`, `--amber` and `--ink3` (the three column dots'
-    tokens), with a 12 px `--ink3` line under it: `2 done · 4 in progress · 3 to do`, each zero omitted.
+  - A **4 px progress bar** over all folded issues, segmented done / in progress / to do in `--fill-progress`, `--fill-live` and `--ink3` — the repo's
+    fill tokens (`shared/theme.css`), since the Jira column dots are all the plain `Dot` and carry no hue to borrow — with a 12 px `--ink3` line under it: `2 done · 4 in progress · 3 to do`, each zero omitted.
   - A top with nothing folded draws no fold block, and nothing marks its Jira subtasks count. A subtask off the board is not this board's business.
 - **Column count pill:** counts cards (tops), not issues.
-- **Band sub-line:** `N issues as M cards`, in place of `N issues`, when M < N. When nothing folds it stays as it is. The source counts (`from R roots and Q
+- **Band sub-line:** gains an `M cards` part when M < N (the mocks' `17 issues as 5 cards` is superseded by the line below). When nothing folds it stays
+  as it is. The source counts (`from R roots and Q
   queries`) are unchanged. *(Builder-check ruling.)* N and M both come from the **loaded list**: N is its length and M is `tops.length`, both unfiltered.
   Today `bandSub` reads N from the status poll's `board.count`, a different poller that can disagree with the list for one interval. A line that says
-  "17 as 5" has to count one list. `bandSub` therefore takes the fold's two numbers.
+  "17 as 5" has to count one list. `bandSub` therefore takes the fold's two numbers. The cards count is its own ` · `-separated part after the sources:
+  `acme.atlassian.net · 17 issues from 2 roots and 1 query · 5 cards · polled 8 s ago`. While the list has not loaded — `useJiraBoard` loading, or a
+  failed first read that holds no list — the band reads today's line from `board.count`, with no cards part.
 - **For phase 5, not built here:** a live session on a folded issue shows its strip on the top card, naming the folded key. `Run ▾` on the card runs the
   top issue, and a folded issue is run from its own modal. *(Author's call, recorded so phase 5 does not rediscover it.)*
 
@@ -66,7 +72,8 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
 
 - A top card is shown when **it** matches, or when **any issue folded under it** matches. "Matches" means the existing `matchesBoardFilters` plus the
   summary/key search, applied per issue, unchanged.
-- When the top shows only because of folded matches, the card carries a 2 px `--amber` inset ring and an amber marker:
+- When the top shows only because of folded matches, the card carries a 2 px `--amber-solid` inset ring and a marker in a new `MarkerTone` `match`, inked
+  `--amber-text` (theme.css: an amber word beside an amber mark that already carries the signal):
   - `1 match: PAY-162` when there is one match.
   - `N matches` when there is more than one, with the keys in the marker's `title`.
 - A top that matches on its own draws neither, even if folded issues match too. The ring answers "why is this here", and a card that matches needs no answer.
@@ -80,7 +87,9 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
   - Direct children come from the detail read's `children`, which is already fetched fresh on open.
   - Each child's own descendants come from the **board's cached list**, indented 22 px per level, so the tree costs no Jira call beyond the one the modal
     already makes.
-  - Rows show type icon, key, summary, assignee initials and raw status pill, as the list does today.
+  - Rows are new: today's list draws key, summary and status text only (`JiraIssueModal.tsx:154`). Each row is a button with the type icon, key,
+    summary, assignee initials and the raw status pill, composed from the card's own pieces. `TypeIcon`, private to `JiraCard.tsx` today, moves to one
+    shared home so the card and the modal draw the same glyph.
 - **Where the board's list comes from.** *(Builder-check ruling.)* Today `JiraView` holds `openIssue`, the modal gets only `issue`
   (`JiraView.tsx:54`), and the list lives in `JiraBoardView`'s `useJiraBoard`. Opening a card passes the fold's `childrenOf` alongside the issue
   (`onOpenIssue(issue, childrenOf)`). `JiraView` holds both, and the modal takes `childrenOf` as a prop. It is a snapshot taken when the modal opened.
@@ -97,28 +106,29 @@ becomes unreachable: every folded issue opens from its top card's modal, and a f
 
 ## 7. What does not change
 
-Server, routes, `JiraIssue`, the sweep, the cache and `jira.json`. This is a client-only change. `JiraIssue.subtasks` stays on the wire, because the ticket
-block and the `jira` skill print it. No new persisted state: the fold is derived on every render, never stored, and there is no flat/grouped toggle.
+Server, routes, `JiraIssue`, the sweep, the cache and `jira.json`. This is a client-only change. `JiraIssue.subtasks` stays on the wire, unread by the board: the
+ticket block prints `detail.children.length` (`block.ts:76`), not this field, but dropping a wire field is a server change this design does not need. No new persisted state: the fold is derived on every render, never stored, and there is no flat/grouped toggle.
 
 ## 8. Goals, non-goals, anti-goals
 
 - **Goals:** the folded board described above; every issue still reachable in two clicks or fewer from its top card's modal (one per level); filters
   never hide an issue that matches.
 - **Non-goals:** an in-place expand on the card; a flat/grouped switch; marking filter matches inside the modal tree; reordering children in the modal (it
-  keeps Jira's order for direct children and the board's sort for deeper ones).
+  keeps the detail read's order for direct children and `childrenOf`'s `sortForBoard` order for deeper ones).
 - **Anti-goals:** a fold that pulls a card out of its own column; a second walk of the parent chain anywhere outside `foldBoard`; any Jira call added by
   the fold or the tree.
 
 ## 9. Testing
 
 - `jira-lib` (jest, pure): `foldBoard` covers depth 1, 2 and 3, a parent off the board, a parent dropped by the Done window (absent from the list), a query
-  hit that folds, a self-parent and a two-cycle (each terminates, each issue appears exactly once), the sort by newest-under, the progress counts, and the
+  hit that folds, a self-parent and a two-cycle (each terminates, every member is a top, each issue appears exactly once, and `childrenOf` holds no edge between them), the sort by newest-under, the progress counts, and the
   `C children · D below them` wording at 0/1/many.
 - `jira-board` (jsdom): the board draws tops only, with the right column counts and band line; a filter on a folded child shows its top ringed with `1
   match: KEY`; a top that matches itself draws no ring; the filter options still offer a type only a folded issue carries.
 - `jira-modal` (jsdom): the Children tree indents the board's grandchildren; a row click swaps the modal's issue and leaves one dialog on the stack; a
   detail child absent from the board lists with no subtree and counts once; with no `childrenOf` the tree is the direct children only.
-- `jira-board` also: the band reads `N issues as M cards` from the loaded list, and stays unchanged when nothing folds; `N matches` past one.
+- `jira-board` also: the band reads `… · 17 issues from 2 roots and 1 query · 5 cards · …` from the loaded list, keeps today's line while the list is
+  loading and when nothing folds; `N matches` past one.
 
 ## 10. Docs that move with the code
 
