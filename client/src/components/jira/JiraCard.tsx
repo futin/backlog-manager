@@ -1,5 +1,6 @@
 import { cardAgeStamp, crumbOf, crumbText, initialsOf, subtasksMarker } from '../../lib/jira';
 import type { JiraBoard, JiraIssue } from '../../../../shared/types';
+import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Marker } from '../ui/Marker';
 import { Pill } from '../ui/Pill';
 
@@ -62,7 +63,7 @@ export function JiraCard({
           {/* The type is the icon's title rather than a word on the row: the key and the crumb need the width, and the type is the reading a person
               hovers for, not the one they scan by. */}
           <span className="jira-card-type" title={issue.type.name}>
-            <TypeIcon type={issue.type} />
+            <JiraTypeIcon type={issue.type} />
           </span>
           <span className="jira-card-key">{issue.key}</span>
           {crumb !== null && <span className="jira-card-crumb">{crumb}</span>}
@@ -103,28 +104,5 @@ export function JiraCard({
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * The type glyph, by what the type IS rather than what a team named it: a sub-task by Jira's own flag, an epic (or anything above it) by hierarchy level,
- * then a bug and a story by name — the two standard names every Jira site ships — and every other type the plain task square. The mocks' glyphs, as 14 px
- * outline strokes in the head's ink; `aria-hidden`, because the type name is the wrapper's title and a screen reader gets it from the column and modal.
- */
-function TypeIcon({ type }: { type: JiraIssue['type'] }) {
-  const name = type.name.toLowerCase();
-  const path = type.subtask
-    ? 'M5 4v10h12M13 10l4 4-4 4'
-    : type.level >= 1
-      ? 'M13 2 3 14h7l-1 8 10-12h-7z'
-      : name === 'bug'
-        ? 'M12 7a6 6 0 1 1 0 12a6 6 0 1 1 0-12M12 7V4M8 9 5 7M16 9l3-2M7 14H4M20 14h-3M8 18l-3 2M16 18l3 2'
-        : name === 'story'
-          ? 'M6 3h12v18l-6-4-6 4z'
-          : 'M5 5h14v14H5zM9 12l2 2 4-4';
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={path} />
-    </svg>
   );
 }

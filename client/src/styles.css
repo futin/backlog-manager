@@ -624,7 +624,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    (`↳ PAY-120 Refund flows`), and the key is the card's handle, so the crumb is what gives. */
 .jira-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
 .jira-card-type { display: inline-flex; flex: none }
-.jira-card-type svg { width: 14px; height: 14px; stroke: var(--ink3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
 .jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
@@ -2891,6 +2890,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    it — and no rule of its own beyond the colour, because a marker is a weight
    and an ink and nothing else (§8.3). */
 .ui-marker-untyped { color: var(--amber-ink) }
+/* The Jira card's F1 marker (grouped-board spec §5). `--amber-text`, the amber word set on paper: the card's 2 px `--amber-solid` ring beside it
+   already carries the hue, and bare `--amber` fails daylight contrast as type (test/daylight-contrast.test.ts). */
+.ui-marker-match { color: var(--amber-text) }
+
+/* JiraTypeIcon — a Jira issue's type glyph (DESIGN.md §8.9.1), 14 px outline strokes in --ink3. One home because the card and the modal's Children tree
+   both draw it; the card's `.jira-card-type` keeps only its layout. */
+.ui-type-icon { width: 14px; height: 14px; flex: none; stroke: var(--ink3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
 
 /* task-45's tracker reading outside the card: the poll-age line under the
    item modal's title, 12/400 --ink3, the sub-line ink this design already uses
@@ -2917,6 +2923,17 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    which §12.1 forbids and which would recolour every meter on the board. */
 .ui-progress-fill-warn { background: var(--amber-solid) }
 .ui-progress-caption { font-size: 11px; font-weight: 400; color: var(--ink3) }
+
+/* SpreadBar — the card-scale spread bar (DESIGN.md §3, §8.9.1; grouped-board spec §4): a 4 px track of up to three segments with 2 px gaps, done /
+   in progress / to do in --fill-progress, --fill-live and --ink3, each growing by its count. No track colour of its own: a spread has no remainder, so
+   there is nothing for a `--steel` track to show. The caption under it is 12 px --ink3. */
+.ui-spread { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.ui-spread-track { display: flex; gap: 2px; height: 4px }
+.ui-spread-seg { flex-basis: 0; min-width: 2px; border-radius: 2px }
+.ui-spread-done { background: var(--fill-progress) }
+.ui-spread-doing { background: var(--fill-live) }
+.ui-spread-todo { background: var(--ink3) }
+.ui-spread-caption { font-size: 12px; font-weight: 400; color: var(--ink3) }
 
 /* Meter — the strip chip's line meter (§8.0 shell strip, §7's meter row at chip size; the tracker strip spec, §3). Label over value, both 11 px — guard 3's
    floor, where the dashboard draws 9.5 — and a 3.5 px flat --steel track. The fill has NO transition: it advances once a second, and a tween would draw

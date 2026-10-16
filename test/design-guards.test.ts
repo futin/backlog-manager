@@ -331,6 +331,8 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-dot',
     '.ui-marker',
     '.ui-progress',
+    '.ui-spread',
+    '.ui-type-icon',
     '.ui-meter',
     '.ui-ledger',
     '.ui-seg',
