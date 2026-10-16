@@ -50,7 +50,7 @@ export function JiraChip({ section }: { section: Section }) {
   if (!visible) return null;
 
   const name = data.me?.name.trim() ?? '';
-  const initial = name === '' ? '?' : name.charAt(0).toUpperCase();
+  const initial = initialOf(name);
   const first = name.split(/\s+/)[0];
   const calls = callsReading(data.calls, now);
 
@@ -85,6 +85,9 @@ export function JiraChip({ section }: { section: Section }) {
   );
 }
 
+/** R10's one initial — the first letter of the (trimmed) name, `?` for none — in one place for the chip and its popover. */
+const initialOf = (name: string): string => (name === '' ? '?' : name.charAt(0).toUpperCase());
+
 type Reading = { value: string; fraction: number | null; tone: 'green' | 'amber' | 'red' };
 
 /**
@@ -116,7 +119,7 @@ function JiraPopover({ data, now, anchor, onClose }: { data: JiraStatusPayload; 
   return (
     <Popover label="Jira" width={420} anchor={anchor} onClose={onClose}>
       <div className="tracker-pop-id">
-        <span className="tracker-av">{name === '' ? '?' : name.charAt(0).toUpperCase()}</span>
+        <span className="tracker-av">{initialOf(name)}</span>
         <span className="tracker-pop-who">
           <span className="tracker-name">{name === '' ? 'no identity' : name}</span>
           <span className="tracker-pop-sub">{data.site}</span>

@@ -35,4 +35,27 @@ describe('narrow rail bar stylesheet rules', () => {
     const wide = narrow.reduce((rest, block) => rest.replace(block, ''), css);
     expect(ruleBlocks(wide, HIDE)).toEqual([]);
   });
+
+  // R12: two chips (GitHub tracker + Jira) in the bar would run ~178 px over and clip ☰, so both drop their meters; one chip keeps them.
+  const FIRST = '.rail-bar .tracker-chip-root:has(+ .tracker-chip-root) .tracker-meters';
+  const SECOND = '.rail-bar .tracker-chip-root + .tracker-chip-root .tracker-meters';
+
+  it('drops BOTH chips’ meters from the phone’s rail bar when two chips share it, and only then', () => {
+    expect(inNarrow(FIRST).some((body) => /display\s*:\s*none/.test(body))).toBe(true);
+    expect(inNarrow(SECOND).some((body) => /display\s*:\s*none/.test(body))).toBe(true);
+    // Both rules are sibling-conditioned, so a lone chip matches neither: no unconditional rule hides `.tracker-meters` in the bar.
+    const unconditional = [...css.matchAll(/([^{}]*)\{([^{}]*)\}/g)]
+      .filter((m) => /display\s*:\s*none/.test(m[2]))
+      .flatMap((m) => m[1].split(','))
+      .map((sel) => sel.trim().replace(/\s+/g, ' '))
+      .filter((sel) => /\.tracker-meters$/.test(sel))
+      .filter((sel) => !sel.includes(':has(+ .tracker-chip-root)') && !sel.includes('.tracker-chip-root + .tracker-chip-root'));
+    expect(unconditional).toEqual([]);
+  });
+
+  it('keeps the two-chip rule out of the desktop strip', () => {
+    const wide = narrow.reduce((rest, block) => rest.replace(block, ''), css);
+    expect(ruleBlocks(wide, FIRST)).toEqual([]);
+    expect(ruleBlocks(wide, SECOND)).toEqual([]);
+  });
 });

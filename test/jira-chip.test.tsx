@@ -124,6 +124,11 @@ describe('JiraChip', () => {
     expect(fillOf(meterOf(chip(), 'POLL'))).toBe('25%');
     update(status({ boards: [board({ interval: 'off' })] }));
     expect(fillOf(meterOf(chip(), 'POLL'))).toBe('0%');
+    expect(within(meterOf(chip(), 'POLL')).getByText('sync off')).toBeInTheDocument();
+    expect(meterOf(chip(), 'POLL')).toHaveAttribute('data-tone', 'amber');
+    update(status({ boards: [] }));
+    expect(within(meterOf(chip(), 'POLL')).getByText('—')).toBeInTheDocument();
+    expect(fillOf(meterOf(chip(), 'POLL'))).toBe('0%');
     update(status({ boards: [board({ polledAt: null })] }));
     expect(fillOf(meterOf(chip(), 'POLL'))).toBe('0%');
     expect(within(meterOf(chip(), 'POLL')).getByText('…')).toBeInTheDocument();

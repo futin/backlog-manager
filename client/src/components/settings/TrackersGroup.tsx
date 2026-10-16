@@ -107,7 +107,7 @@ export function TrackersGroup() {
       {jira !== null && jira.configured && (
         <SettingsRow
           name="Jira"
-          hint={`${jira.site ?? 'Jira'} · ${jira.boards.length} ${jira.boards.length === 1 ? 'board' : 'boards'} · intervals live on Jira › Setup`}
+          hint={`${jira.site ?? '—'} · ${jira.boards.length} ${jira.boards.length === 1 ? 'board' : 'boards'} · intervals live on Jira › Setup`}
         />
       )}
       {error && data !== null && <SettingsRow name="Trackers" hint="the last read failed — showing the previous answer" />}
