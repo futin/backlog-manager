@@ -76,6 +76,31 @@ export function isTerminalStage(stage: RunStage): boolean {
   return !RUN_CLAIMED_STAGES.includes(stage);
 }
 
+/**
+ * The item the run is working right now, or `null` when it is between items
+ * (everything left is `pending`, or everything is done).
+ *
+ * "Neither `pending` nor terminal" is the same definition `RunStrip`'s own
+ * in-flight lookup uses, backed by `isTerminalStage`'s `Record<RunStage,
+ * true>` pin — so a stage added to the vocabulary has to be classified
+ * there, once, rather than remembered here.
+ *
+ * FIRST match, not last: a queue is worked in order, so the earliest
+ * non-terminal, non-pending entry is the one actually in flight. (A run only
+ * ever has one, but reading the first makes that assumption explicit rather
+ * than load-bearing.)
+ *
+ * Lived in RunControls.tsx until #271 moved it here, beside the one function
+ * it calls: the Runs detail sheet's model (`runDetailModel`, lib/run-detail.ts)
+ * reads it too, and `lib/` imports nothing from `components/`. The parameter
+ * is structural for the same reason — any queue of `{ id, stage }` will do,
+ * so neither caller's run type has to be named here.
+ */
+export function inFlightItemId(queue: readonly Pick<RunQueueItem, 'id' | 'stage'>[]): string | null {
+  const item = queue.find((q) => q.stage !== 'pending' && !isTerminalStage(q.stage));
+  return item?.id ?? null;
+}
+
 /** `Date.parse`, but `null` instead of `NaN` — the one conversion every derivation below starts from. */
 function parseStamp(iso: string | undefined): number | null {
   if (iso === undefined) return null;
