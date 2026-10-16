@@ -1,9 +1,12 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import { SectionBoundary } from './components/SectionBoundary';
 import { SideRail } from './components/SideRail';
 import { TrackerChip } from './components/TrackerChip';
 import { SECTIONS, type Section } from './lib/sections';
+import type { JiraPage } from './lib/jira-page';
+import { JiraProvider, useJiraContext } from './hooks/JiraContext';
+import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { TrackersProvider } from './hooks/TrackersContext';
 import { useNarrow } from './hooks/useNarrow';
@@ -14,6 +17,7 @@ import { setRunsMode } from './hooks/useRunsMode';
 const BoardView = lazy(() => import('./components/board/BoardView'));
 const RunsView = lazy(() => import('./components/runs/RunsView'));
 const ArchiveView = lazy(() => import('./components/archive/ArchiveView'));
+const JiraView = lazy(() => import('./components/jira/JiraView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 
 /** Where an unrecognised section name lands. See `resolveSection`. */
@@ -52,7 +56,11 @@ export function App() {
     <SettingsProvider>
       {/* The shell's one `useTrackers` (the tracker strip spec, §4): the strip chip and Settings' Trackers card read one answer on one clock. */}
       <TrackersProvider>
-        <AppShell />
+        {/* The shell's one `useJira` (Jira phase 2, spec §6.1), beside the trackers' for the same reason: the rail's Jira row, the shell's hold-and-fall
+            below, the chip and both Jira pages read one answer on one clock. Above `AppShell`, because the fall is decided there. */}
+        <JiraProvider>
+          <AppShell />
+        </JiraProvider>
       </TrackersProvider>
     </SettingsProvider>
   );
@@ -112,6 +120,37 @@ function AppShell() {
   };
 
   /*
+    The Jira section's hold-and-fall (Jira phase 2, spec §6.1). `resolveSection` takes a stored `jira` like any section — it runs in the initializer above,
+    long before `GET /api/jira` has answered — so whether Jira is really there is decided here, on the status, and only one answer decides it: an answer
+    that says `configured: false` while Jira is the section moves the shell to Board, through `change`, so the section key records `board` too. Nothing
+    else moves it. While the status is unknown (not answered yet, or every read so far failed: `data` null) the section is HELD, drawn in `JiraView`'s
+    loading or unavailable shape, and the rail keeps its row — a network blip at load must not throw away the section a reader left on a configured
+    machine (Review Focus 5). A failure after a `configured: true` keeps that answer (`useJira` keeps the last payload), so it holds as well.
+
+    Keyed on the STATE (`configured === false` with `jira` current) rather than on a remembered previous value: it fires on the transition into
+    `configured: false`, which is the case the spec names, and also covers the one other way the pair could arise — a `change('jira')` landing while the
+    status already says unconfigured — where falling is equally right, since the rail draws no row there to stand on. `change` is left out of the
+    dependencies: it is a fresh closure every render, and the two values it reads are the two listed.
+
+    A `landing: 'jira'` preference takes the same fall: it seeds the initializer exactly as a stored section does, and the preference itself is left as
+    set — the machine may get its credentials back.
+  */
+  const jiraConfigured = useJiraContext().data?.configured;
+  useEffect(() => {
+    if (jiraConfigured === false && section === 'jira') change('board');
+  }, [jiraConfigured, section]);
+
+  /*
+    What the Jira section's two in-page links open (`Open board` on Setup, the empty board's chip to Setup): the same PAIR the rail's Jira tree calls, in
+    the same order — the page store first, then this shell's `change` — exactly as `onOpenWatchdog` below is the Runs tree's pair. Handed down rather than
+    rebuilt inside the pages, so a link and a tree entry mean the same thing by construction and the section key is recorded in one place.
+  */
+  const onOpenJiraPage = (p: JiraPage): void => {
+    setJiraPage(p);
+    change('jira');
+  };
+
+  /*
     The tracker chip has ONE home at a time, chosen here from the same `useNarrow` reading the rail uses (§8.0; the tracker strip spec, §1.2): the
     shell strip at desktop width, the rail's phone bar below 700 px, where the strip is not drawn. Never both, hidden by CSS — two mounted chips would
     be two one-second clocks and two popovers able to join the Escape stack. A change of home remounts it, which is what closes an open popover
@@ -159,6 +198,7 @@ function AppShell() {
                 {section === 'board' && <BoardView onOpenRuns={() => change('runs')} onWorking={report.board} />}
                 {section === 'runs' && <RunsView onWorking={report.runs} />}
                 {section === 'archive' && <ArchiveView onWorking={report.archive} />}
+                {section === 'jira' && <JiraView onOpenJiraPage={onOpenJiraPage} />}
                 {/* Settings' watchdog card carries a `Live view` link to Runs ›
                   Watchdog (DESIGN.md §8.6), and this is what it opens with — the
                   same PAIR the rail's own Watchdog sub-nav entry calls, in the

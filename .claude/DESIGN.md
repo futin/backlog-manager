@@ -411,3 +411,23 @@ Four places on this board move on their own, and one mechanism covers all four r
 - The **wordmark's cursor** (§8.0) blinks while a run on this machine is working — `.rail-cursor.blink`, the one class `SideRail` adds from `working`.
 
 All four are silenced under `prefers-reduced-motion: reduce` through the same pattern this codebase already uses, not a mechanism written new for this redesign: a blanket `@media (prefers-reduced-motion: reduce)` rule (`client/src/styles.css:728`) cuts every animation's duration to near zero and runs it once, which freezes it on its LAST keyframe rather than cancelling it — wrong whenever that last frame is not the element's resting state. Three elements already needed the fix for exactly that reason: an explicit `animation: none` after the unconditional rule, in whichever reduced-motion block sits nearest it, carrying `!important` whenever that unconditional rule outranks it on specificity. `.board-card-stage-glyph` is the worked example (`:735`): its unconditional rule is `.board-card-stage .board-card-stage-glyph` (`:464`), two classes deep, so plain source order cannot win and the override needs the flag. `.watchdog-lamp-armed` needs it too, in its own block (`:1443`). `.run-track-dot-current` / `.run-track-node[data-in="live"]` need neither: each shares its selector with its own unconditional rule earlier in the same section, so source order alone settles it (`:2180-2181`). The four this section names carry the same explicit override, each judged per selector: `.ui-dot-breathe` (`:2373`), the stage track's `.run-track-dot-current` (`:2181`), `.run-controls-needs-you` (`:877`) and `.rail-cursor.blink` (beside its own rule in the shell section), none of them needing the flag, because each shares its selector with the unconditional rule it corrects and comes after it — a cursor frozen on `opacity: 0` would read as no wordmark at all. `test/motion-style.test.ts` drives all four from one table, and asserts the glyph's `!important` beside them so that "only where it is needed" stays a judgement rather than a habit. (Every line number here is a pointer, not a contract — they move.)
+
+### 8.9 Jira
+
+The Jira section (Jira phase 2): a rail row between Archive and Settings, drawn only while `GET /api/jira` says configured, with a Board/Setup tree (§8.0). Stub — Task 13 of the phase-2 plan writes the subsections below; until then each is a heading for components to cite.
+
+#### 8.9.1 Board
+
+Stub — written in Task 13.
+
+#### 8.9.2 Issue modal
+
+Stub — written in Task 13.
+
+#### 8.9.3 Setup
+
+Stub — written in Task 13.
+
+#### 8.9.4 Chip and Trackers row
+
+Stub — written in Task 13.

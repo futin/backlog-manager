@@ -1,8 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
+import { useJiraContext } from '../hooks/JiraContext';
+import { useJiraPage } from '../hooks/useJiraPage';
 import { useNarrow } from '../hooks/useNarrow';
 import { useRunsMode } from '../hooks/useRunsMode';
 import { useSettings } from '../hooks/useSettings';
+import { JIRA_PAGES, type JiraPage } from '../lib/jira-page';
 import { RUNS_MODES, type RunsMode } from '../lib/runs-mode';
 import { SECTIONS, type Section } from '../lib/sections';
 import { SETTINGS_SCOPES, type SettingsScope } from '../lib/settings';
@@ -22,6 +25,7 @@ const RAIL_LABEL: Record<Section, string> = {
   board: 'Board',
   runs: 'Runs',
   archive: 'Archive',
+  jira: 'Jira',
   settings: 'Settings'
 };
 
@@ -51,8 +55,9 @@ interface Props {
 }
 
 /**
- * Top-level section switch: board · runs · archive · settings, and — for the
- * one section that has sub-views — the tree under it.
+ * Top-level section switch: board · runs · archive · jira · settings (jira only
+ * while the site is configured — see `drawn` below), and — for each section
+ * that has sub-views — the tree under it.
  *
  * .claude/DESIGN.md §8.0 is the whole specification of this component: the
  * dashboard's own rail — 240 px, 24 px padding, 36 px rows 4 px apart at 14/500
@@ -90,6 +95,18 @@ export function SideRail({ section, onChange, chipSlot, working }: Props) {
   // because `RunsView` writes it too, from a surface with no settings context
   // in its way; nothing outside Settings ever writes this one.
   const { settings, update } = useSettings();
+  // The Jira section's page — `useRunsMode`'s module store and its reason: this tree and the Board page's own `Set up` chip (threaded down from `App` as
+  // `onOpenJiraPage`) are two mounted writers of one value, and a `usePersistedState` per caller would leave the other looking at a stale page.
+  const [jiraPage, setJiraPage] = useJiraPage();
+  /*
+    The Jira row (Jira phase 2, spec §6.1) is drawn while `GET /api/jira` says `configured: true`, and in ONE other case: the status is still unknown
+    (`data` null — not answered yet, or every read so far failed) and Jira is the section on screen. That is the shell's hold (`App`): a stored `jira` is
+    kept until an answer says `configured: false`, and a held section with no row of its own would leave the reader on a page the rail does not name. An
+    answer of `configured: false` hides the row at once, and the shell falls to Board on the same answer. Unknown with another section open draws nothing:
+    a row that appeared on a guess and vanished on the answer would be the rail flickering on every load of an unconfigured machine.
+  */
+  const jira = useJiraContext().data;
+  const drawn = (id: Section): boolean => id !== 'jira' || jira?.configured === true || (jira === null && section === 'jira');
 
   /*
     The wordmark (§8.0): a `BACKLOG` kicker over `› manager▌`, a terminal prompt in the one UI face — the dashboard's own, so the two neighbouring tabs
@@ -131,7 +148,7 @@ export function SideRail({ section, onChange, chipSlot, working }: Props) {
       )}
 
       {(!narrow || menuOpen) &&
-        SECTIONS.map((id) => (
+        SECTIONS.filter(drawn).map((id) => (
           <div key={id}>
             {id === 'settings' && <div className="rail-rule" aria-hidden="true" />}
             <button
@@ -154,6 +171,19 @@ export function SideRail({ section, onChange, chipSlot, working }: Props) {
                 value={runsMode}
                 labelFor={(m) => RAIL_SUB_LABEL[m]}
                 onPick={setRunsMode}
+                onChange={onChange}
+                closeMenu={() => setMenuOpen(false)}
+              />
+            )}
+            {id === 'jira' && treeOpen('jira') && (
+              <RailTree
+                label="Jira pages"
+                section="jira"
+                current={section}
+                items={JIRA_PAGES}
+                value={jiraPage}
+                labelFor={(p) => RAIL_JIRA_LABEL[p]}
+                onPick={setJiraPage}
                 onChange={onChange}
                 closeMenu={() => setMenuOpen(false)}
               />
@@ -282,7 +312,7 @@ function useRailHidden(narrow: boolean, menuOpen: boolean): boolean {
  * `--ink` at every row weight — an icon names the section, never its state).
  *
  * Inline SVG rather than an icon package, the same bargain `SectionLoading`
- * makes in App.tsx: four paths do not justify shipping a font or a component
+ * makes in App.tsx: five paths do not justify shipping a font or a component
  * library through the bundle.
  */
 function RailIcon({ section }: { section: Section }) {
@@ -337,6 +367,19 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
   shared: 'Shared'
 };
 
+/**
+ * The Jira tree's labels (Jira phase 2, spec §6.1; DESIGN.md §8.9) — `RAIL_SUB_LABEL`'s rule: the only labels these two pages have, because neither page
+ * draws a switch of its own at any width. `Open board` on Setup and the empty board's chip to Setup are this tree's own navigation handed down through
+ * `App` (`onOpenJiraPage`), not second controls with wording of their own to keep in step.
+ *
+ * `Board` repeats the top-level Board row's word on purpose: under the `Jira` row it reads as Jira's board, and the page it opens is a board — three
+ * columns of cards — in the same sense the section above it is.
+ */
+const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
+  board: 'Board',
+  setup: 'Setup'
+};
+
 const ICON_PATHS: Record<Section, ReactNode> = {
   // Three columns — the board's own shape.
   board: (
@@ -356,6 +399,13 @@ const ICON_PATHS: Record<Section, ReactNode> = {
     <>
       <path d="M2 4.5h12v2.5H2zM3 7v6.5h10V7" />
       <path d="M6.5 9.5h3" />
+    </>
+  ),
+  // A ticket — a notched stub and a tear line: the unit an issue tracker deals in, drawn as a shape rather than any product's mark.
+  jira: (
+    <>
+      <path d="M2.5 4.5h11v2.25a1.25 1.25 0 0 0 0 2.5v2.25h-11V9.25a1.25 1.25 0 0 0 0-2.5z" />
+      <path d="M10 4.5v7" strokeDasharray="1.5 1.5" />
     </>
   ),
   // A slider row — two tracks, two handles.
