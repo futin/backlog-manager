@@ -1,7 +1,7 @@
 import { formatCreated } from './item-age';
 import { pollAge } from './tracker';
 import { SYNC_INTERVALS } from '../../../shared/types';
-import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraStatusCategory, JiraStatusPayload } from '../../../shared/types';
+import type { JiraBoard, JiraBoardFailure, JiraBoardStatus, JiraIssue, JiraStatusCategory, JiraStatusPayload } from '../../../shared/types';
 
 /**
  * jira.ts — what the client says about Jira (Jira phase 2, spec §6). The one home of every derivation the Jira board, its modal, Setup and the rail chip
@@ -29,20 +29,25 @@ export const JIRA_429_RED_MS = 15 * 60_000;
 export const JIRA_BOARD_FILTER_FROM = 6;
 
 /**
- * The board sheet's three query chips (R5), the ONE home of their JQL. `Unresolved in <KEY>` carries the placeholder literally: the chip reveals a
- * `Select` over `/api/jira/projects` in place and substitutes the picked key before the row is added. All three are bounded — Jira Cloud refuses an
- * unbounded JQL (P2) — and the sheet's check line verifies them like any other row.
+ * The board sheet's query chips (R5), the ONE home of their copy and JQL. `chip` is the text on the chip (the sheet draws the leading `+`), `label` the
+ * label the row it adds is born with, and they differ for exactly one preset: `Unresolved in a project…` reveals a `Select` over `/api/jira/projects` in
+ * place, and the row it adds is labelled `Unresolved in <KEY>` with the picked key substituted for the placeholder in `label` and `jql` alike. All of them
+ * are bounded — Jira Cloud refuses an unbounded JQL (P2) — and the sheet's check line verifies them like any other row.
  */
 export interface JiraQueryPreset {
+  chip: string;
   label: string;
   jql: string;
 }
 
 export const JIRA_QUERY_PRESETS: readonly JiraQueryPreset[] = [
-  { label: 'Assigned to me', jql: 'assignee = currentUser() AND statusCategory != Done' },
-  { label: 'Open in current sprint', jql: 'sprint in openSprints() AND statusCategory != Done' },
-  { label: 'Unresolved in <KEY>', jql: 'project = "<KEY>" AND resolution = Unresolved' }
+  { chip: 'Assigned to me', label: 'Assigned to me', jql: 'assignee = currentUser() AND statusCategory != Done' },
+  { chip: 'Open in current sprint', label: 'Open in current sprint', jql: 'sprint in openSprints() AND statusCategory != Done' },
+  { chip: 'Unresolved in a project…', label: 'Unresolved in <KEY>', jql: 'project = "<KEY>" AND resolution = Unresolved' }
 ];
+
+/** The fourth chip, `+ Custom JQL` (R5): an empty row for a person to write, labelled `Custom query`. Not a preset — it has no JQL of its own. */
+export const JIRA_CUSTOM_QUERY: JiraQueryPreset = { chip: 'Custom JQL', label: 'Custom query', jql: '' };
 
 // ── Columns, order, the card ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -77,12 +82,14 @@ export function sortForBoard(issues: readonly JiraIssue[]): JiraIssue[] {
 
 /**
  * The date on a card's foot: when a DONE issue was resolved (that is the date that matters to someone reading the Done column), otherwise when it last
- * changed. An issue with no resolution — done by a workflow that never sets one — and one that is not done but still carries a stale `resolved` from a
- * reopen both fall to `updated`. Printed through `formatCreated`, the board's one short-date vocabulary.
+ * changed. An issue with no resolution — done by a workflow that never sets one — and one that is not done but still carries a stale `resolved` from a reopen
+ * both fall to `updated`. Printed through `formatCreated`, the board's one short-date vocabulary, as a bare date with no `resolved` prefix (the spec's "a
+ * Done card reads its age, not `resolved Oct 11`"); `now` is the caller's, so the year suffix is decided by the same clock as every other reading on the
+ * page.
  */
-export function cardAgeStamp(issue: JiraIssue): string {
+export function cardAgeStamp(issue: JiraIssue, now: number): string {
   const stamp = issue.status.category === 'done' && issue.resolved !== null ? issue.resolved : issue.updated;
-  return formatCreated(stamp);
+  return formatCreated(stamp, now);
 }
 
 export type JiraCrumb = { kind: 'root' } | { kind: 'parent'; key: string; summary: string } | { kind: 'mine' } | null;
@@ -97,6 +104,17 @@ export function crumbOf(issue: JiraIssue, board: JiraBoard, me: { accountId: str
   if (issue.parent !== null) return { kind: 'parent', key: issue.parent.key, summary: issue.parent.summary };
   if (me !== null && issue.assignee !== null && issue.assignee.accountId === me.accountId) return { kind: 'mine' };
   return null;
+}
+
+/**
+ * The crumb's words, which the card renders verbatim — this file is the one home of crumb text (spec §6.1), so the card holds no copy of `root`, the
+ * parent line or `Assigned to me`. `null` for no crumb, which draws nothing.
+ */
+export function crumbText(crumb: JiraCrumb): string | null {
+  if (crumb === null) return null;
+  if (crumb.kind === 'root') return 'root';
+  if (crumb.kind === 'parent') return `↳ ${crumb.key} ${crumb.summary}`;
+  return 'Assigned to me';
 }
 
 /**
@@ -127,6 +145,17 @@ function polledPhrase(polledAt: string | null, now: number, last = false): strin
 }
 
 /**
+ * What the last sweep could not read, as one phrase: Jira's own message for the FIRST failure, `+N more` when there are several. `null` when there is
+ * nothing to say. The one derivation behind the Band's red sub-line and the Setup row's red failure — Jira's sentence ("Field 'foo' does not exist") is
+ * the one a person can act on, and two surfaces must not word one failure two ways.
+ */
+export function failurePhrase(failures: readonly JiraBoardFailure[]): string | null {
+  if (failures.length === 0) return null;
+  const more = failures.length - 1;
+  return `${failures[0].message}${more > 0 ? ` +${more} more` : ''}`;
+}
+
+/**
  * The Board page's sub-line under the band: `acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 12 s ago`. A zero source is omitted rather
  * than printed as `0 roots`, since a query-only board has no roots to count.
  *
@@ -137,20 +166,18 @@ function polledPhrase(polledAt: string | null, now: number, last = false): strin
 export function bandSub(board: JiraBoardStatus, site: string, now: number): { text: string; failing: boolean } {
   const sources = [countOrNull(board.roots.length, 'root'), countOrNull(board.queries.length, 'query')].filter((s): s is string => s !== null);
   const parts = [site, `${count(board.count, 'issue')}${sources.length > 0 ? ` from ${sources.join(' and ')}` : ''}`, polledPhrase(board.polledAt, now)];
-  const failing = board.failures.length > 0;
-  if (failing) {
-    const more = board.failures.length - 1;
-    parts.push(`${board.failures[0].message}${more > 0 ? ` +${more} more` : ''}`);
-  }
+  const failure = failurePhrase(board.failures);
+  if (failure !== null) parts.push(failure);
   if (board.truncated) parts.push('first 500 shown');
-  return { text: parts.join(' · '), failing };
+  return { text: parts.join(' · '), failing: failure !== null };
 }
 
 /**
- * Setup's one line per board: `2 roots · 1 query · 14 issues · every 1m · polled 12 s ago`. Zero counts are omitted. An `off` board says `sync off` where
- * the interval would be and `last polled` where `polled` would, because for it the age is not a heartbeat but the date of the last time anyone looked.
+ * Setup's one line per board: `2 roots · 1 query · 14 issues · every 1m · polled 12 s ago`. Zero counts are omitted, and the failure travels beside the text
+ * (`failure`, `failurePhrase`'s words) so Setup can draw it red without re-deriving it. An `off` board says `sync off` where the interval would be and `last
+ * polled` where `polled` would, because for it the age is not a heartbeat but the date of the last time anyone looked.
  */
-export function boardRowLine(board: JiraBoardStatus, now: number): { text: string; failing: boolean } {
+export function boardRowLine(board: JiraBoardStatus, now: number): { text: string; failing: boolean; failure: string | null } {
   const off = board.interval === 'off';
   const parts = [
     countOrNull(board.roots.length, 'root'),
@@ -159,7 +186,8 @@ export function boardRowLine(board: JiraBoardStatus, now: number): { text: strin
     off ? 'sync off' : `every ${board.interval}`,
     polledPhrase(board.polledAt, now, off)
   ].filter((s): s is string => s !== null);
-  return { text: parts.join(' · '), failing: board.failures.length > 0 };
+  const failure = failurePhrase(board.failures);
+  return { text: parts.join(' · '), failing: failure !== null, failure };
 }
 
 // ── Meters and picks ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -186,8 +214,8 @@ export function soonestBoard(boards: readonly JiraBoardStatus[], _now: number): 
   let best: JiraBoardStatus | null = null;
   let bestDue = Infinity;
   for (const b of boards) {
-    const ms = SYNC_INTERVALS[b.interval];
-    if (ms === null) continue;
+    const ms: unknown = SYNC_INTERVALS[b.interval];
+    if (typeof ms !== 'number') continue;
     const polled = b.polledAt === null ? NaN : Date.parse(b.polledAt);
     const due = Number.isNaN(polled) ? -Infinity : polled + ms;
     if (best === null || due < bestDue) {

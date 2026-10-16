@@ -8,6 +8,7 @@ import {
   JIRA_429_RED_MS,
   JIRA_BOARD_FILTER_FROM,
   JIRA_COLUMNS,
+  JIRA_CUSTOM_QUERY,
   JIRA_QUERY_PRESETS,
   JIRA_SWEEP_CALL_CEILING,
   bandSub,
@@ -17,6 +18,8 @@ import {
   cardAgeStamp,
   columnOf,
   crumbOf,
+  crumbText,
+  failurePhrase,
   displayPath,
   initialsOf,
   isJiraStatusPayload,
@@ -136,22 +139,31 @@ describe('sortForBoard', () => {
 });
 
 describe('cardAgeStamp', () => {
-  const updated = '2026-03-04T10:00:00.000Z';
-  const resolved = '2026-02-01T10:00:00.000Z';
+  // Relative to the clock the assertion runs under; `now` is passed, not read, so the year-suffix decision is the test's own.
+  const now = Date.now();
+  const updated = daysAgoStamp(3);
+  const resolved = daysAgoStamp(40);
 
-  it('reads resolved for a done issue that has one', () => {
+  it('reads resolved for a done issue that has one, with no prefix', () => {
     const i = issue({ status: { name: 'Done', category: 'done' }, updated, resolved });
-    expect(cardAgeStamp(i)).toBe(formatCreated(resolved));
+    expect(cardAgeStamp(i, now)).toBe(formatCreated(resolved, now));
+    expect(cardAgeStamp(i, now)).not.toContain('resolved');
   });
 
   it('falls back to updated for a done issue with no resolution', () => {
     const i = issue({ status: { name: 'Done', category: 'done' }, updated, resolved: null });
-    expect(cardAgeStamp(i)).toBe(formatCreated(updated));
+    expect(cardAgeStamp(i, now)).toBe(formatCreated(updated, now));
   });
 
   it('ignores a stale resolved on an issue that is not done', () => {
     const i = issue({ status: { name: 'Doing', category: 'indeterminate' }, updated, resolved });
-    expect(cardAgeStamp(i)).toBe(formatCreated(updated));
+    expect(cardAgeStamp(i, now)).toBe(formatCreated(updated, now));
+  });
+
+  it('takes the year suffix decision from the now it is given', () => {
+    const i = issue({ updated: '2020-06-15T10:00:00.000Z' });
+    expect(cardAgeStamp(i, Date.parse('2020-12-01T00:00:00Z'))).toBe('jun 15');
+    expect(cardAgeStamp(i, Date.parse('2026-12-01T00:00:00Z'))).toBe("jun 15 '20");
   });
 });
 
@@ -182,6 +194,30 @@ describe('crumbOf', () => {
 
   it('never reads mine while me is unknown', () => {
     expect(crumbOf(issue({ key: 'PAY-3', assignee: mine }), b, null)).toBeNull();
+  });
+});
+
+describe('crumbText', () => {
+  it('prints the three crumbs the card draws, verbatim', () => {
+    expect(crumbText({ kind: 'root' })).toBe('root');
+    expect(crumbText({ kind: 'parent', key: 'PAY-120', summary: 'Refund flows' })).toBe('↳ PAY-120 Refund flows');
+    expect(crumbText({ kind: 'mine' })).toBe('Assigned to me');
+  });
+
+  it('prints nothing for no crumb', () => {
+    expect(crumbText(null)).toBeNull();
+  });
+});
+
+describe('failurePhrase', () => {
+  it('is null with no failures', () => {
+    expect(failurePhrase([])).toBeNull();
+  });
+
+  it("is Jira's message for one, and the first message plus a count for several", () => {
+    const f = (message: string) => ({ kind: 'root' as const, id: 'PAY-9', message });
+    expect(failurePhrase([f('Issue does not exist')])).toBe('Issue does not exist');
+    expect(failurePhrase([f('Issue does not exist'), f('Bad JQL'), f('Worse JQL')])).toBe('Issue does not exist +2 more');
   });
 });
 
@@ -253,7 +289,8 @@ describe('boardRowLine', () => {
     const now = Date.now();
     expect(boardRowLine(board({ polledAt: ago(now, 12 * SECOND) }), now)).toEqual({
       text: '2 roots · 1 query · 14 issues · every 1m · polled 12 s ago',
-      failing: false
+      failing: false,
+      failure: null
     });
   });
 
@@ -276,7 +313,24 @@ describe('boardRowLine', () => {
 
   it('is failing when the last sweep left a failure', () => {
     const now = Date.now();
-    expect(boardRowLine(board({ polledAt: ago(now, SECOND), failures: [{ kind: 'root', id: 'PAY-9', message: 'nope' }] }), now).failing).toBe(true);
+    const row = boardRowLine(
+      board({
+        polledAt: ago(now, SECOND),
+        failures: [
+          { kind: 'root', id: 'PAY-9', message: 'Issue does not exist' },
+          { kind: 'query', id: 'q_1', message: 'Bad JQL' }
+        ]
+      }),
+      now
+    );
+    expect(row.failing).toBe(true);
+    // The message travels beside the text, not inside it, so Setup can draw it red without re-deriving it.
+    expect(row.failure).toBe('Issue does not exist +1 more');
+    expect(row.text).not.toContain('Issue does not exist');
+  });
+
+  it('carries no failure for a clean board', () => {
+    expect(boardRowLine(board({ polledAt: ago(Date.now(), SECOND) }), Date.now()).failure).toBeNull();
   });
 });
 
@@ -397,12 +451,20 @@ describe('displayPath', () => {
 });
 
 describe('constants', () => {
-  it('pins the filter threshold and the three presets (R5)', () => {
+  it('pins the filter threshold', () => {
     expect(JIRA_BOARD_FILTER_FROM).toBe(6);
-    expect(JIRA_QUERY_PRESETS.map((p) => p.label)).toEqual(['Assigned to me', 'Open in current sprint', 'Unresolved in <KEY>']);
-    expect(JIRA_QUERY_PRESETS[0].jql).toBe('assignee = currentUser() AND statusCategory != Done');
-    expect(JIRA_QUERY_PRESETS[1].jql).toBe('sprint in openSprints() AND statusCategory != Done');
-    expect(JIRA_QUERY_PRESETS[2].jql).toBe('project = "<KEY>" AND resolution = Unresolved');
+  });
+
+  it('pins the three presets (R5): the chip text, the row label and the JQL each', () => {
+    expect(JIRA_QUERY_PRESETS).toEqual([
+      { chip: 'Assigned to me', label: 'Assigned to me', jql: 'assignee = currentUser() AND statusCategory != Done' },
+      { chip: 'Open in current sprint', label: 'Open in current sprint', jql: 'sprint in openSprints() AND statusCategory != Done' },
+      { chip: 'Unresolved in a project…', label: 'Unresolved in <KEY>', jql: 'project = "<KEY>" AND resolution = Unresolved' }
+    ]);
+  });
+
+  it('pins the custom chip beside them: an empty row labelled Custom query (R5)', () => {
+    expect(JIRA_CUSTOM_QUERY).toEqual({ chip: 'Custom JQL', label: 'Custom query', jql: '' });
   });
 });
 
