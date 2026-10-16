@@ -28,15 +28,22 @@ import { readStyles, ruleBlock } from './helpers/css-rule';
  * one — two of them now, since one component renders both of
  * `DispatchButton`'s old shapes — as source assertions rather than as copies
  * of one stylesheet rule.
+ *
+ * #272 moved the busy attribute itself into `GatedChip`, the one component
+ * both re-asking controls now compose, so the chain has two links: GatedChip
+ * draws a `Chip` carrying `aria-busy`, and each control composes GatedChip.
+ * A caller that dropped back to a raw `Chip` breaks the second link.
  */
 const ROOT = join(__dirname, '..');
 const BUSY = "[aria-busy='true']";
 const DISABLED = "[aria-disabled='true']";
 
 /* Every control whose disabled state can be clicked to re-ask the status, and
-   the source that draws it. `DispatchButton` is the card's chip and the item
+   the source that composes it. `DispatchButton` is the card's chip and the item
    drawer's (bug-13 — ONE shape since task-37, where there were two);
-   `BoardView` is the band's Orchestrate chip (bug-16). */
+   `BoardView` is the band's Orchestrate chip (bug-16). Both reach `aria-busy`
+   through `GatedChip` (#272). */
+const GATED_CHIP = 'client/src/components/ui/GatedChip.tsx';
 const REVERIFYING_CONTROLS = [
   ['the card / drawer dispatch chip', 'client/src/components/board/DispatchButton.tsx'],
   ['the band Orchestrate chip', 'client/src/components/board/BoardView.tsx']
@@ -70,8 +77,13 @@ describe('re-asking control busy stylesheet rules', () => {
      for the same reason the rules themselves are read from the sheet — a
      rendered assertion here would prove the attribute is on some element, not
      that the element is the one the stylesheet paints. */
-  it.each(REVERIFYING_CONTROLS)('draws %s as a Chip carrying aria-busy', (_name, file) => {
-    const src = readFileSync(join(ROOT, file), 'utf8');
+  it('draws GatedChip as a Chip carrying aria-busy', () => {
+    const src = readFileSync(join(ROOT, GATED_CHIP), 'utf8');
     expect(src).toMatch(/<Chip[\s\S]{0,2000}?aria-busy=/);
+  });
+
+  it.each(REVERIFYING_CONTROLS)('draws %s as a GatedChip', (_name, file) => {
+    const src = readFileSync(join(ROOT, file), 'utf8');
+    expect(src).toMatch(/<GatedChip\b/);
   });
 });

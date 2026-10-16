@@ -55,7 +55,8 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Band`                 | `.ui-band`        | `title`, `sub?`, `children` (right slot), `className?` (the page's layout class)                 | every page: Board, Runs History, Runs Watchdog, Archive, Settings               |
 | `Sheet`, `SheetHead`   | `.ui-sheet`       | `Sheet{children, as?, className?}`; `SheetHead{title, sub?, right?}`                             | Runs (Live, History, detail), Watchdog (Watching, Activity), `SettingsRow`'s card |
 | `FigureStrip`, `Figure`| `.ui-figure`      | `FigureStrip{children, cols?: 3\|5, testId?, className?}`; `Figure{label, value?, unit?, line?, tone?, wide?, title?, testId?, children?}` | Runs History (six cells, the sixth `wide`), Watchdog (three)                     |
-| `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
+| `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `GatedChip`, both sheets, load-more |
+| `GatedChip`            | none (draws `.ui-chip`) | `gateBlock`, `otherBlock`, `idleTitle`, `reverify?`, `recheck`, `onActivate`, `variant?`, `size?`, `children` (a node, or a function of `blocked`) — the disabled half is `gateView` (`lib/gate-view.ts`) | `DispatchButton` (card and modal), the Board band's Orchestrate chip |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
@@ -304,7 +305,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   row — one `trackerState`, an access reason still winning over it. Because the server refuses every write and spawn for it, the card's and modal's dispatch
   control is DISABLED with the server's sentence (`syncOffReason`, byte-equal to `syncOffBlock`, pinned on both sides) — carried on `DispatchButton`'s
   `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
-  whose click re-asks nothing for this reason because no status refetch could clear it.
+  whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
+  on `GatedChip`'s one rule.
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
