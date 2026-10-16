@@ -337,6 +337,23 @@ describe('configured, tenant_info unreachable at boot (P3, Review Focus 2)', () 
   });
 });
 
+describe('configured, an unsupported site (P5, final review minor 4)', () => {
+  beforeAll(async () => {
+    prepare('unsupported');
+    fake.deploymentType = 'Server';
+    await build(false);
+  });
+  afterAll(() => app.close());
+
+  it('a fresh read answers 502 with access unsupported — what GET /api/jira says — and sends no call', async () => {
+    expect((await get('').expect(200)).body.access).toBe('unsupported');
+    const calls = fake.calls.length;
+    const res = await get('/issue/PAY-131').expect(502);
+    expect(res.body).toEqual({ error: 'Jira unreachable: Jira Server/DC is not supported', access: 'unsupported' });
+    expect(fake.calls.length).toBe(calls);
+  });
+});
+
 describe('configured, a route meets a 429 (P8)', () => {
   beforeAll(async () => {
     prepare('rate-limited');

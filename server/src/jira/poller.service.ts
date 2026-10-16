@@ -4,6 +4,7 @@ import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/comm
 import {
   SYNC_INTERVALS,
   isJiraKey,
+  type JiraAccess,
   type JiraBoard,
   type JiraBoardFailure,
   type JiraIssue,
@@ -67,6 +68,13 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * sending: the sweep makes NO call inside it, and a route's read is refused with a synthesised 429 carrying the STORED instant (P1), so two reads a second
  * apart answer the same `retryAt` rather than one that slides forward with the clock.
  *
+ * Checking before sending is not enough on its own, because calls already in flight when the window opens still land inside it. So `openWindow` is the one
+ * home of the rule that the stored end never moves while it is in force: a second 429 inside it (two route reads that passed the gate together, a boot call
+ * that was already out) restamps `last429At` and nothing else; a synthesised refusal (`synthetic`, remembered in `SYNTHETIC`) opens nothing at all, because
+ * Jira never sent it; the boot asks nothing more once a window is in force, and a boot or sweep failure that lands inside one does not overwrite
+ * `rate-limited`. When the window ends, the verdict it covered comes back (`beforeWindow`) unless the boot has since answered in full — a 401 that was in
+ * force when the 429 arrived is still the truth about the credentials, and `ok` would hide it.
+ *
  * Every instant here — `polledAt`, `last429At`, the window, the back-off — comes from `Date.now()`, never `new Date()`, so a suite that mocks `Date.now`
  * controls the only clock this file reads.
  */
@@ -98,8 +106,15 @@ export interface JiraBoardCache {
   failures: JiraBoardFailure[];
 }
 
-/** A fresh read's outcome. `retryAt` rides only on a 429 (fresh or refused inside the window) and is the stored window end, verbatim (P1). */
-export type JiraResult<T> = { ok: true; value: T } | { ok: false; response: JiraResponse<unknown>; retryAt?: string };
+/**
+ * A fresh read's outcome. `retryAt` rides only on a 429 (fresh or refused inside the window) and is the stored window end, verbatim (P1). `access` rides
+ * only where the response's status would say the wrong thing — an `unsupported` site refused up front is a synthesised `0`, which `accessOf` reads as
+ * `unreachable`, while `GET /api/jira` says `unsupported`.
+ */
+export type JiraResult<T> = { ok: true; value: T } | { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess };
+
+/** A failed fresh read, as the routes receive it. */
+type JiraRefusal = { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess };
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -125,9 +140,17 @@ function entryMessage(res: JiraResponse<unknown>): string {
   return res.message ?? `Jira answered ${res.status}`;
 }
 
+/**
+ * Every response this file made up rather than received. Held by identity, not by a field on the response, so `JiraResponse` stays the client's shape and a
+ * synthesised 429 can never be told apart from Jira's by anything but this set — which `openWindow` consults, so only Jira can open a window (header).
+ */
+const SYNTHETIC = new WeakSet<JiraResponse<unknown>>();
+
 /** A synthesised response, for an answer this file gives without asking Jira (P3, the 429 window). */
 function synthetic(status: number, message: string | null): JiraResponse<unknown> {
-  return { status, data: null, message, retryAfter: null };
+  const res: JiraResponse<unknown> = { status, data: null, message, retryAfter: null };
+  SYNTHETIC.add(res);
+  return res;
 }
 
 interface Pages {
@@ -148,6 +171,8 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   /** The calls the last sweep made, for the chip's CALLS meter (§6). */
   private sweepCalls = 0;
   private last429At: string | null = null;
+  /** The verdict a 429 window covered, restored when the window ends with the boot still unanswered (header). `null` while no window is open. */
+  private beforeWindow: { access: JiraAccess; detail: string | null } | null = null;
 
   constructor(private readonly client: JiraClient) {}
 
@@ -273,6 +298,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     const children = await this.pages(auth, `parent in (${jqlString(key)})`, ctx, JIRA_ROOT_CAP);
     if (children.failure !== null) return this.routeFailed(children.failure);
 
+    // A window opened (by a sweep, or another route) while the first two calls were out: the third is one Jira has already said it will refuse.
+    const refused = this.windowRefusal();
+    if (refused !== null) return refused;
     const offered = await this.client.transitions(auth, key);
     if (!ok(offered)) return this.routeFailed(offered);
     const transitions: JiraTransition[] = (Array.isArray(offered.data?.transitions) ? offered.data.transitions : []).filter(isObj).map((t) => {
@@ -420,9 +448,19 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private expireWindow(now: number): void {
     if (this.boot.retryAt === null || now < this.boot.retryAt) return;
     this.boot.retryAt = null;
-    if (this.boot.access === 'rate-limited') {
+    const before = this.beforeWindow;
+    this.beforeWindow = null;
+    if (this.boot.access !== 'rate-limited') return;
+    if (this.boot.answered()) {
       this.boot.access = 'ok';
-      this.boot.detail = this.boot.answered() ? null : 'connecting';
+      this.boot.detail = null;
+    } else if (before !== null && before.access !== 'ok' && before.access !== 'rate-limited') {
+      // The boot is still missing something, and what the window covered said why: a 401 or an outage is still the last thing Jira told us.
+      this.boot.access = before.access;
+      this.boot.detail = before.detail;
+    } else {
+      this.boot.access = 'ok';
+      this.boot.detail = 'connecting';
     }
   }
 
@@ -486,14 +524,18 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       if (!this.bootAnswered(res)) return false;
       const cloudId = res.data?.cloudId;
       if (typeof cloudId !== 'string' || cloudId === '') {
-        this.boot.fail(null, 'tenant_info carried no cloudId', Date.now());
+        this.bootFail(null, 'tenant_info carried no cloudId');
         return false;
       }
       this.boot.cloudId = cloudId;
     }
     const auth: JiraAuth = { ...creds, cloudId: this.boot.cloudId };
+    // Every later step asks this first: a route may have met a 429 while the step before awaited, and the boot makes no call inside a window (header). No
+    // `fail` either — the window already says when to ask again, and the boot resumes from the step it stopped at.
+    const windowOpen = (): boolean => this.inWindow(Date.now());
 
     if (!this.boot.serverInfoOk) {
+      if (windowOpen()) return false;
       const res = await this.client.serverInfo(auth);
       // A 404 is what the gateway answers for a site that is not Cloud; a `deploymentType` other than `Cloud` is Server/DC saying so itself. Both are
       // FINAL, so only an explicit answer counts: a 2xx with no `deploymentType` (a proxy's page, a body that did not parse) is a retryable failure.
@@ -505,30 +547,35 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       }
       if (!this.bootAnswered(res)) return false;
       if (deployment !== 'Cloud') {
-        this.boot.fail(null, 'serverInfo carried no deploymentType', Date.now());
+        this.bootFail(null, 'serverInfo carried no deploymentType');
         return false;
       }
       this.boot.serverInfoOk = true;
     }
 
     if (this.boot.me === null) {
+      if (windowOpen()) return false;
       const res = await this.client.myself(auth);
       if (!this.bootAnswered(res)) return false;
       const accountId = res.data?.accountId;
       if (typeof accountId !== 'string' || accountId === '') {
-        this.boot.fail(null, 'myself carried no accountId', Date.now());
+        this.bootFail(null, 'myself carried no accountId');
         return false;
       }
       this.boot.me = { accountId, name: str(res.data?.displayName) };
-      // Only now, with the gateway's 200 in hand (P2): a bad token is a 401 at the site too, and would otherwise be recorded as `scoped`.
-      if (!this.boot.tokenProbed) {
-        this.boot.tokenProbed = true;
-        const probe = await this.client.myselfAtSite(auth);
-        this.boot.tokenKind = ok(probe) ? 'classic' : probe.status === 401 ? 'scoped' : null;
-      }
+    }
+
+    // Only once the gateway's `myself` has answered 200 (P2): a bad token is a 401 at the site too, and would otherwise be recorded as `scoped`. Its own
+    // step rather than a tail of the one above, so a window that opens between the two still gets the probe asked when it ends.
+    if (!this.boot.tokenProbed && this.boot.me !== null) {
+      if (windowOpen()) return false;
+      this.boot.tokenProbed = true;
+      const probe = await this.client.myselfAtSite(auth);
+      this.boot.tokenKind = ok(probe) ? 'classic' : probe.status === 401 ? 'scoped' : null;
     }
 
     if (!this.boot.fieldsOk) {
+      if (windowOpen()) return false;
       const res = await this.client.fields(auth);
       if (!this.bootAnswered(res)) return false;
       const fields = (Array.isArray(res.data) ? res.data : []).filter(
@@ -551,15 +598,30 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       this.openWindow(res);
       return false;
     }
-    this.boot.fail(accessOf(res), detailOf(res), Date.now());
+    this.bootFail(accessOf(res), detailOf(res));
     return false;
   }
 
+  /** `boot.fail`, except inside a 429 window: a boot call that was already out when a route opened one must not overwrite `rate-limited` (header). */
+  private bootFail(access: JiraAccess | null, detail: string): void {
+    if (this.inWindow(Date.now())) return;
+    this.boot.fail(access, detail, Date.now());
+  }
+
+  /**
+   * The one place a window opens, and the one place it is kept from moving (P1, header): only a 429 Jira sent opens one, and a 429 met while one is in force
+   * restamps `last429At` — it is still the last 429 Jira sent — and leaves the stored end, `access` and `detail` alone.
+   */
   private openWindow(res: JiraResponse<unknown>): void {
+    if (SYNTHETIC.has(res)) return;
     const now = Date.now();
-    const until = now + (res.retryAfter !== null ? res.retryAfter * 1000 : JIRA_RATE_LIMIT_DEFAULT_MS);
-    this.boot.retryAt = until;
     this.last429At = iso(now);
+    // A window that ran out but was not yet expired where it is read restores its verdict first, so the one captured below is not `rate-limited`.
+    this.expireWindow(now);
+    if (this.inWindow(now)) return;
+    const until = now + (res.retryAfter !== null ? res.retryAfter * 1000 : JIRA_RATE_LIMIT_DEFAULT_MS);
+    this.beforeWindow = { access: this.boot.access, detail: this.boot.detail };
+    this.boot.retryAt = until;
     this.boot.access = 'rate-limited';
     this.boot.detail = `Jira rate limit — retry after ${iso(until)}`;
   }
@@ -568,11 +630,13 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   private boardFailed(res: JiraResponse<unknown>): false {
     if (res.status === 401) {
       this.boot.reset();
-      this.boot.fail('unauthorized', detailOf(res), Date.now());
+      // Once per streak, as in `routeFailed`: a route that met the 401 while this search awaited has already restarted the boot retry.
+      if (this.boot.access !== 'unauthorized') this.boot.fail('unauthorized', detailOf(res), Date.now());
     } else if (res.status === 429) {
-      // A window already open (a route's, or the synthetic refusal from `pages`) keeps its end: reopening would move the instant the routes report (P1).
-      if (!this.inWindow(Date.now())) this.openWindow(res);
-    } else {
+      // `openWindow` keeps an open window's end and ignores the synthetic refusal from `pages` (P1).
+      this.openWindow(res);
+    } else if (!this.inWindow(Date.now())) {
+      // Inside a window a route opened while this search was out, `rate-limited` is the newer and more useful verdict.
       this.boot.access = 'unreachable';
       this.boot.detail = detailOf(res);
     }
@@ -692,12 +756,12 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * is no gateway path to ask — answering from the boot state (P3: a 401 state is the 401, anything else `unreachable` with the boot's detail); and for an
    * `unsupported` site, which no read can change. Unconfigured never reaches here past the routes (they answer 503 first), but is refused all the same.
    */
-  private gate(): { auth: JiraAuth } | { refused: { ok: false; response: JiraResponse<unknown>; retryAt?: string } } {
+  private gate(): { auth: JiraAuth } | { refused: JiraRefusal } {
     const env = jiraEnv();
     if (!env.configured) return { refused: { ok: false, response: synthetic(0, env.detail) } };
-    this.expireWindow(Date.now());
-    if (this.inWindow(Date.now())) return { refused: { ok: false, response: synthetic(429, null), retryAt: iso(this.boot.retryAt!) } };
-    if (this.boot.access === 'unsupported') return { refused: { ok: false, response: synthetic(0, UNSUPPORTED) } };
+    const inWindow = this.windowRefusal();
+    if (inWindow !== null) return { refused: inWindow };
+    if (this.boot.access === 'unsupported') return { refused: { ok: false, response: synthetic(0, UNSUPPORTED), access: 'unsupported' } };
     if (this.boot.cloudId === null) {
       const detail = this.boot.detail ?? 'connecting';
       return { refused: { ok: false, response: this.boot.access === 'unauthorized' ? synthetic(401, detail) : synthetic(0, detail) } };
@@ -709,7 +773,14 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * A fresh read's failure. Only a 401 (the credentials stopped working: `me` reset, the boot retry restarts) and a 429 (the window opens) move the
    * site-level state; a 0, 5xx, 400, 403 or 404 on a route answers its mapping and leaves `access` to the sweep (§8).
    */
-  private routeFailed(res: JiraResponse<unknown>): { ok: false; response: JiraResponse<unknown>; retryAt?: string } {
+  /** The refusal a read gets inside a 429 window — a synthesised 429 and the STORED instant (P1) — or `null` when none is in force. */
+  private windowRefusal(): JiraRefusal | null {
+    this.expireWindow(Date.now());
+    if (!this.inWindow(Date.now())) return null;
+    return { ok: false, response: synthetic(429, null), retryAt: iso(this.boot.retryAt!) };
+  }
+
+  private routeFailed(res: JiraResponse<unknown>): JiraRefusal {
     if (res.status === 401) {
       this.boot.reset();
       // Once per streak: a read refused again while already `unauthorized` must not double the back-off and slide the boot's retry out to the cap.
@@ -718,7 +789,9 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     }
     if (res.status === 429) {
       this.openWindow(res);
-      return { ok: false, response: res, retryAt: iso(this.boot.retryAt!) };
+      // The stored end on every 429 path (P1) — the one this 429 opened, or the one already in force that it did not move. A synthesised 429 whose window
+      // has somehow ended carries none, and `jiraHttpError` falls back to the default.
+      return this.boot.retryAt === null ? { ok: false, response: res } : { ok: false, response: res, retryAt: iso(this.boot.retryAt) };
     }
     return { ok: false, response: res };
   }

@@ -49,8 +49,15 @@ export interface RawIssue {
   fields: Record<string, unknown>;
 }
 
-/** What `failNext` may answer: a status (with an optional JSON body), a transport failure, or `null` to let the request through. */
-export type FailNext = (call: { method: string; url: string; body: unknown }) => { status: number; body?: unknown } | 'transport' | null;
+/**
+ * What `failNext` may answer: a status (with an optional JSON body and headers — a `retry-after` on one 429 and not the next), a transport failure, or
+ * `null` to let the request through.
+ */
+export type FailNext = (call: {
+  method: string;
+  url: string;
+  body: unknown;
+}) => { status: number; body?: unknown; headers?: Record<string, string> } | 'transport' | null;
 
 const GATEWAY = /^https:\/\/api\.atlassian\.com\/ex\/jira\/([^/]+)\/rest\/api\/3(\/[^?]*)?(?:\?(.*))?$/;
 const SITE = /^https:\/\/([^/]+)\/(.*?)(?:\?(.*))?$/;
@@ -174,7 +181,7 @@ export class FakeJira {
 
     const hook = this.failNext?.({ method, url, body });
     if (hook === 'transport') throw new TypeError('fetch failed');
-    if (hook) return this.json(hook.status, hook.body);
+    if (hook) return this.json(hook.status, hook.body, hook.headers);
     if (this.failWith === 'transport') throw new TypeError('fetch failed');
     if (this.failWith !== null) return this.json(this.failWith, undefined);
 

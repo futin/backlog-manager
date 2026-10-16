@@ -1120,6 +1120,180 @@ describe('route verdicts against the sweep (review round 1)', () => {
   });
 });
 
+describe('the 429 window never drifts (P1, final review I2)', () => {
+  const RA = (seconds: number) => ({ 'retry-after': String(seconds) });
+  /** Awaited by the next fetch before it reaches the fake: the one way to land another caller's WHOLE answer inside a call's await. */
+  let before: ((url: string) => Promise<void>) | null = null;
+
+  /** Rebuild the poller over a fetch that awaits `before` first. A hook clears `before` before it awaits, so its own calls pass straight through. */
+  function interleaved(): void {
+    poller.onApplicationShutdown();
+    before = null;
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      const hook = before;
+      if (hook !== null) await hook(url);
+      return fake.fetch(url, init);
+    };
+    poller = new JiraPollerService(new JiraClient(fetchImpl as unknown as typeof fetch));
+  }
+
+  it('two route reads that both meet a 429 answer the FIRST window end; the second never moves it', async () => {
+    await booted();
+    let n = 0;
+    fake.failNext = (c) => (c.url.includes('/issue/PAY-131') ? { status: 429, headers: RA(++n === 1 ? 30 : 90) } : null);
+    const [a, b] = await Promise.all([poller.issueDetail('PAY-131'), poller.issueDetail('PAY-131')]);
+    expect(n).toBe(2);
+    const until = iso(T0 + 30_000);
+    expect(a).toMatchObject({ ok: false, response: { status: 429 }, retryAt: until });
+    expect(b).toMatchObject({ ok: false, response: { status: 429 }, retryAt: until });
+    expect(poller.status()).toMatchObject({ access: 'rate-limited', detail: `Jira rate limit — retry after ${until}` });
+    now += 1_000;
+    expect(await poller.search('refund')).toMatchObject({ ok: false, retryAt: until });
+  });
+
+  it.each([
+    ['serverInfo', ['tenant_info', 'search summary ~ "refund*"', 'serverInfo'], ['myself', 'site myself', 'field']],
+    ['myself', ['tenant_info', 'serverInfo', 'search summary ~ "refund*"', 'myself'], ['site myself', 'field']]
+  ])('a route 429 landing while the boot awaits %s: no further boot call inside the window', async (call, inWindow, afterWindow) => {
+    interleaved();
+    fake.failNext = (c) => (isSearch(c.url) ? { status: 429, headers: RA(30) } : null);
+    before = async (url) => {
+      if (!url.endsWith(`/${call}`) || url.startsWith('https://acme.atlassian.net/')) return;
+      before = null;
+      await poller.search('refund');
+    };
+    await poller.tick();
+    const until = iso(T0 + 30_000);
+    // The call the route landed inside answered 200 and is kept; nothing after it is asked until the window ends, and then only what is still missing.
+    expect(labels()).toEqual(inWindow);
+    expect(poller.status()).toMatchObject({ access: 'rate-limited', detail: `Jira rate limit — retry after ${until}`, me: null });
+    expect(poller.armed).toBe(true);
+
+    fake.failNext = null;
+    fake.calls.length = 0;
+    now = T0 + 30_000;
+    await poller.tick();
+    expect(labels()).toEqual(afterWindow);
+    expect(poller.status()).toMatchObject({ access: 'ok', detail: null, me: { accountId: 'acc-1' } });
+  });
+
+  it.each([
+    ['a 500', { status: 500 }],
+    ['a 429 with Retry-After: 90', { status: 429, headers: RA(90) }]
+  ])('a boot call answering %s inside a route-opened window leaves the window and rate-limited standing', async (_, answer) => {
+    interleaved();
+    fake.failNext = (c) => (isSearch(c.url) ? { status: 429, headers: RA(30) } : c.url.endsWith('/serverInfo') ? answer : null);
+    before = async (url) => {
+      if (!url.endsWith('/serverInfo')) return;
+      before = null;
+      await poller.search('refund');
+    };
+    await poller.tick();
+    expect(poller.status()).toMatchObject({ access: 'rate-limited', detail: `Jira rate limit — retry after ${iso(T0 + 30_000)}` });
+    expect(await poller.search('refund')).toMatchObject({ ok: false, retryAt: iso(T0 + 30_000) });
+  });
+
+  it('a sweep 429 opened while a detail read awaits its issue: the read answers the sweep’s instant, and a synthetic refusal opens nothing', async () => {
+    interleaved();
+    seedTree();
+    await booted();
+    writeConfig([board({ roots: ['PAY-120'] })]);
+    fake.failNext = (c) => (isSearch(c.url) && (c.body as { jql: string }).jql === 'key = "PAY-120"' ? { status: 429, headers: RA(5) } : null);
+    before = async (url) => {
+      if (!url.includes('/issue/PAY-131')) return;
+      before = null;
+      await poller.tick();
+      now = T0 + 1_000;
+    };
+    const r = await poller.issueDetail('PAY-131');
+    expect(r).toMatchObject({ ok: false, response: { status: 429 }, retryAt: iso(T0 + 5_000) });
+    expect(poller.status()).toMatchObject({
+      access: 'rate-limited',
+      detail: `Jira rate limit — retry after ${iso(T0 + 5_000)}`,
+      calls: { last429At: iso(T0) }
+    });
+    // The children search was refused up front, and the transitions read never sent.
+    expect(labels()).toEqual(['search key = "PAY-120"', 'issue/PAY-131']);
+
+    fake.failNext = null;
+    fake.calls.length = 0;
+    now = T0 + 5_000;
+    expect((await poller.issueDetail('PAY-131')).ok).toBe(true);
+    expect(labels()[0]).toBe('issue/PAY-131');
+  });
+
+  it('a window opened while a detail read awaits its children: the transitions read is never sent', async () => {
+    interleaved();
+    seedTree();
+    await booted();
+    fake.failNext = (c) => (c.url.includes('/project/search') ? { status: 429, headers: RA(30) } : null);
+    before = async (url) => {
+      if (!isSearch(url)) return;
+      before = null;
+      await poller.projects();
+    };
+    expect(await poller.issueDetail('PAY-131')).toMatchObject({ ok: false, response: { status: 429 }, retryAt: iso(T0 + 30_000) });
+    expect(labels()).toEqual(['issue/PAY-131', 'project/search', 'search parent in ("PAY-131")']);
+  });
+
+  it('a sweep 5xx landing inside a window a route opened while it awaited leaves rate-limited standing', async () => {
+    interleaved();
+    seedTree();
+    writeConfig([board({ roots: ['PAY-120'] })]);
+    await poller.tick();
+    now = T0 + 60_000;
+    fake.failNext = (c) => (c.url.includes('/project/search') ? { status: 429, headers: RA(30) } : isSearch(c.url) ? { status: 502 } : null);
+    before = async (url) => {
+      if (!isSearch(url)) return;
+      before = null;
+      await poller.projects();
+    };
+    await poller.tick();
+    expect(poller.status()).toMatchObject({ access: 'rate-limited', detail: `Jira rate limit — retry after ${iso(T0 + 90_000)}` });
+  });
+
+  it('a sweep 401 landing after a route already recorded unauthorized does not double the back-off (final review minor 5)', async () => {
+    interleaved();
+    seedTree();
+    writeConfig([board({ roots: ['PAY-120'] })]);
+    await poller.tick();
+    now = T0 + 60_000;
+    fake.failNext = (c) => (c.url.includes('/issue/PAY-131') || isSearch(c.url) ? { status: 401 } : null);
+    before = async (url) => {
+      if (!isSearch(url)) return;
+      before = null;
+      await poller.issueDetail('PAY-131');
+    };
+    await poller.tick();
+    expect(poller.status()).toMatchObject({ access: 'unauthorized', me: null });
+    fake.failNext = null;
+    fake.calls.length = 0;
+    now = T0 + 60_000 + JIRA_BACKOFF_MIN_MS;
+    await poller.tick();
+    expect(labels()[0]).toBe('myself');
+  });
+
+  it('a window expiring over an unauthorized boot reads unauthorized again, not ok (final review minor 7)', async () => {
+    await booted();
+    fake.unauthorized = true;
+    await poller.issueDetail('PAY-131');
+    expect(poller.status()).toMatchObject({ access: 'unauthorized', detail: 'Unauthorized' });
+    fake.unauthorized = false;
+    fake.rateLimit = { retryAfter: 30 };
+    expect(await poller.search('refund')).toMatchObject({ ok: false, response: { status: 429 } });
+    expect(poller.status().access).toBe('rate-limited');
+    fake.rateLimit = null;
+    now = T0 + 30_000;
+    expect(poller.status()).toMatchObject({ access: 'unauthorized', detail: 'Unauthorized', me: null });
+  });
+
+  it('an unsupported site refuses a fresh read with access unsupported, not unreachable (final review minor 4)', async () => {
+    fake.deploymentType = 'Server';
+    await poller.tick();
+    expect(await poller.issueDetail('PAY-131')).toMatchObject({ ok: false, access: 'unsupported', response: { message: 'Jira Server/DC is not supported' } });
+  });
+});
+
 describe('the token', () => {
   it('appears in no status payload', async () => {
     seedTree();

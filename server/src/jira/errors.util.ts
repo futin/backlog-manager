@@ -50,9 +50,12 @@ export function accessOf(res: JiraResponse<unknown>): JiraAccess | null {
  * `opts.retryAt` is for a read refused INSIDE a known 429 window: the poller hands back a synthesised 429 and the STORED instant, and it is used verbatim.
  * Recomputing it from the clock would make every refused read answer a later instant than the one before, and the window would appear to slide forever.
  * Without it the instant is now plus `Retry-After`, or plus `JIRA_RATE_LIMIT_DEFAULT_MS` when Jira sent none.
+ *
+ * `opts.access` overrides `accessOf` for a refusal whose synthesised status would name the wrong state: an `unsupported` site's read is refused as a `0`,
+ * and its body must say `unsupported`, as `GET /api/jira` does, not `unreachable`.
  */
-export function jiraHttpError(res: JiraResponse<unknown>, opts?: { retryAt?: string }): HttpException {
-  const access = accessOf(res);
+export function jiraHttpError(res: JiraResponse<unknown>, opts?: { retryAt?: string; access?: JiraAccess }): HttpException {
+  const access = opts?.access ?? accessOf(res);
   const message = res.message ?? `Jira answered ${res.status}`;
   const body = (error: string, extra: { retryAt?: string } = {}): Record<string, unknown> => ({ error, ...(access === null ? {} : { access }), ...extra });
 

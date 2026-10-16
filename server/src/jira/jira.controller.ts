@@ -108,9 +108,12 @@ export class JiraController {
     if (!jiraEnv().configured) throw new HttpException({ error: 'Jira is not configured' }, 503);
   }
 
-  /** The value of a fresh read, or the §8 error for its failure — `retryAt` handed through verbatim so a refused read never slides the window. */
+  /**
+   * The value of a fresh read, or the §8 error for its failure — `retryAt` handed through verbatim so a refused read never slides the window, and `access`
+   * where the poller knows better than the status (an `unsupported` site).
+   */
   private unwrap<T>(result: JiraResult<T>): T {
     if (result.ok) return result.value;
-    throw jiraHttpError(result.response, result.retryAt === undefined ? undefined : { retryAt: result.retryAt });
+    throw jiraHttpError(result.response, { retryAt: result.retryAt, access: result.access });
   }
 }
