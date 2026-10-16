@@ -51,7 +51,7 @@ The ruleset itself is release-kit's; this part is the repo's adaptation to it.
   `branch` mode is unaffected.
 - **Docs and flows that assume a direct push are updated:** `docs/workflows/publishing.md` (commit on a branch → PR → merge, then `pnpm run plugin:sync`,
   which installs from the pushed `main`), `docs/workflows/ci.md` §The ruleset (state becomes "applied on <date>"), `CLAUDE.md` where it says
-  `feat`/`fix`/`perf` "cut a release once Phase C lands", and the project memory note on how this repo is pushed. Specs and plans, committed straight
+  `feat`/`fix`/`perf` "cut a release once Phase C lands", and the project memory note `worktree-session-cannot-touch-main-checkout.md`. Specs and plans, committed straight
   to `main` by habit today, also go through PRs (type `docs`, so they cut no release).
 - `git-sync`'s trunk push failing here is the dashboard's concern (its Phase B), not this repo's.
 
@@ -63,7 +63,10 @@ dictated workflow files for the user to type. The ruleset apply and the baseline
 - **`.github/workflows/release.yml`**: a byte-for-byte copy of the dashboard's caller (`uses: futin/release-kit/.github/workflows/release.yml@v1`,
   `kit-ref: v1`, `push` to `main` plus `workflow_dispatch` with `sha`, `permissions: contents: write, pull-requests: read`, `concurrency: release`,
   `cancel-in-progress: false`), header comment adapted to point at this repo's ci.md.
-- **`.github/pull_request_template.md`**: copy the dashboard's, keeping its uncommented `## What's new` section with the placeholder in an HTML comment.
+- **`.github/pull_request_template.md`**: **adapted** from the dashboard's, not copied: its dashboard-only text goes (the "someone using the dashboard"
+  lead, "this repo has no HTTP harness and no component renderer" — false here — its scope list, and the `refuseWrite`/`ANSWER_TOKEN` example), replaced
+  by this board's equivalents (the board as the user surface, this repo's scopes, jest + supertest as the harness). The `## What's new` heading stays
+  byte-equal — `extractWhatsNew` matches the trimmed line `## What's new` exactly — uncommented, with its placeholder in an HTML comment.
   The orchestrator's `pr-draft` body does not use the template and already has the section.
 - **Baseline tag**: after the PR that adds `release.yml` merges (type `ci`, so it cuts nothing and the "no baseline tag" warning is harmless), the user tags
   `v0.1.0` on that merge commit — annotated, subject `Baseline — versioning starts here`, no trailers — and pushes it. Dictated in the plan, not run by
@@ -79,19 +82,24 @@ dictated workflow files for the user to type. The ruleset apply and the baseline
   `pr?`, `breaking`, `notes`, `url?`; `current: { version, ahead } | null`, `releases` newest first). Same shape, so a later shared consumer (a Lookout
   widget, say) reads both apps alike.
 - **`GET /api/releases`**, in a new Nest module (`server/src/releases/`), read-only, no outbound call. It reads **this app's own checkout** — found by
-  walking up from the server's own files to the directory holding `.git`, never `process.cwd()` — which is `/app` in the compose stack (`.:/app` mounts the
-  checkout with its `.git`, in both `docker:up` and `docker:run`).
-- **Git through `runGit` (R4)**: tag names and messages via one `for-each-ref` over `refs/tags/v*` sorted newest first, keeping annotated tags whose name is
-  exactly `vX.Y.Z`; `current` via `git describe` with release-kit's filter, mirrored exactly (`--match 'v[0-9]*.[0-9]*.[0-9]*' --exclude 'v*[!0-9.]*'`, no `--tags`;
-`DESCRIBE_FILTER`, `VERSION_TAG` and the GitHub-URL regex are not exported, so the server reproduces them from release-kit's `dist/` — my call: parity wins). Each message goes through
+  walking up from the server's own files to the directory holding a `.git` entry (file or directory — a linked worktree's is a file), never `process.cwd()` — which is `/app` in the compose stack (`.:/app` mounts the
+  checkout with its `.git`, in both `docker:up` and `docker:run`). **Test seam (my call):** `BM_RELEASES_ROOT`, read per request like its siblings
+  `BM_REGISTRY_FILE` and `BM_ORCH_HOME`, replaces the walk-up when set; the memo key includes the root, so switching it never serves another repo's answer.
+- **Git through `runGit` (R4)**: tag names and messages via one `for-each-ref` over `refs/tags/v*` sorted newest first — creation date descending, ties broken by version descending, because `--sort=-creatordate` has 1 s
+  resolution and breaks ties by ascending refname (`git.js` `versionTags`) — keeping annotated tags whose name is
+  exactly `vX.Y.Z`; `current` via `git describe --long` with release-kit's filter, mirrored exactly (`--match 'v[0-9]*.[0-9]*.[0-9]*' --exclude 'v*[!0-9.]*'`,
+  no `--tags`), parsed as `^v(X.Y.Z)-(N)-g<sha>$` — `--long` is what makes HEAD-on-a-tag print `-0-g<sha>` rather than the bare tag
+  (`read-releases.js` `LONG_DESCRIBE`); `DESCRIBE_FILTER`, `VERSION_TAG` and the GitHub-URL regex are not exported, so the server reproduces them from release-kit's `dist/` — my call: parity wins). Each message goes through
   release-kit's `parseTagMessage`; the PR `url` is built from the `origin` remote when it is a GitHub URL. The output must equal what `readReleases` would
   return for the same repo — the test asserts that against `readReleases` itself, so drift in release-kit shows up here.
 - **Empty shape, never an error**: not a checkout, git missing, a `runGit` timeout or failure, or no `v*` tags → `200 { current: null, releases: [] }`.
+  These are new `runGit` call sites, so `.claude/rules/items.md`'s `runGit` bullet — which enumerates every call site and what `null` means to each — gains
+  "the releases reads → the empty shape", and that file's `paths:` widens to `server/src/releases/**` so the rule loads for a session editing the module.
 - **Memo** keyed on HEAD plus the mtimes of `packed-refs` and `refs/tags` under `--git-common-dir`, exactly as the dashboard's (its releases.md §The memo
   has the reasoning); a key git cannot produce is never memoised; concurrent requests under one key share one read. This memo is unrelated to the items
   memo and must not share code with the `uncommitted` read.
 - **Dependency**: `release-kit` added as `github:futin/release-kit#v1.1.0` beside `lookout-widgets`, imported only for its pure helpers. Its `dist/cjs` has a `require` condition, so the CommonJS server and jest load it; a local `.d.ts` shim
-like `server/src/hub/lookout-widgets.d.ts` is fine if the types do not resolve.
+like `server/src/hub/lookout-widgets.d.ts` is required, because the package has only `exports` and this repo's `moduleResolution: "node"` ignores it.
 - **CLAUDE.md Layout** gains the module in the `server/src/` line; it is not an outbound-calling module, so "the ONLY three" stays three.
 
 ### UI
@@ -99,27 +107,33 @@ like `server/src/hub/lookout-widgets.d.ts` is fine if the types do not resolve.
 The dashboard's releases.md §The chip and §The drawer are the behaviour spec; deltas for this board:
 
 - **Chip**: the rail's last element on desktop (below Settings' tree, sunk to the rail foot), the last row of the phone menu. `v0.2.0`, or `v0.2.0+3`;
-  absent when `current` is null. Unseen dot as the dashboard's, under `localStorage` key `backlog-manager.releases.lastSeen` (raw version string,
+  absent when `current` is null — deliberately, as in the dashboard, even when `releases` is non-empty (a branch cut before the baseline). Unseen dot as the dashboard's, under `localStorage` key `backlog-manager.releases-last-seen` (raw version string,
   first visit seeds without a dot, a throwing storage means no dot).
 - **Drawer**: newest first; version, Feature / Fix / Performance badge, separate Breaking badge, date, title without its `type(scope)!: ` prefix, notes
   through the board's existing markdown renderer (`lib/markdown.ts`), `PR #N` link. The baseline renders as a divider, `Versioning starts here · v0.1.0`.
   Full screen below the board's narrow breakpoint, a 400 px right panel over a scrim above it.
-- **Escape**: the drawer joins `useDialogEscape`'s stack while drawn — the topmost dialog is the only one that closes (CLAUDE.md invariant).
+- **Escape**: the drawer joins `useDialogEscape`'s stack while drawn — the topmost dialog is the only one that closes (CLAUDE.md invariant). A right-hand
+  drawer is a third overlay shape, so (my call) it gets its own shell, `ui/Drawer.tsx`, which calls the hook exactly as `ui/Modal.tsx` and
+  `ui/FormSheet.tsx` do — "the shells call it" stays true. The dialog count becomes six, and every home of that count is updated in the same PR:
+  `.claude/rules/board.md` (the Escape bullet), `docs/subsystems/invariants.md` (its reasoning), the `hooks/useDialogEscape.ts` header,
+  `test/dialog-escape.test.tsx`, and DESIGN.md §8.7.
 - **Fetch**: once on load and again when the chip opens the drawer; no poll.
 - **Code homes**: every decision (chip label, dot, version compare `0.10.0 > 0.9.0`, title prefix strip) in `client/src/lib/releases.ts`, no React; the
   hook in `hooks/`; the drawer in `components/`. Header comments cite the new DESIGN.md subsection.
 - **DESIGN.md** §8.7 Overlays' count of dialogs and overlay shapes is updated for the drawer, and DESIGN.md gains a §8.10 Releases subsection (chip, drawer, badge tints) in the board's tokens; the badges use status tokens on their own tint, and
   any contrast guard the board already runs over theme pairs covers them.
 - **Docs**: a new `docs/subsystems/releases.md` (with a docs-sync stamp, like its siblings), linked from `docs/overview.md` and the CLAUDE.md `client/src/`
-  line.
+  line; `docs/subsystems/api.md` §Modules and `docs/subsystems/board.md` gain the module and the chip/drawer.
 
 ## Rollout
 
 1. **PR A — `ci(release): add release workflow`**: `release.yml`, the PR template, ci.md §Releases. Merged by hand (the ruleset is not on yet).
 2. **User**: tag `v0.1.0` on PR A's merge commit and push it.
 3. **User**: set this machine's Settings default merge mode to `pr`, and drain at least one groomed item of this repo in a `pr`-mode run; its PR
-   (`feat|fix(backlog): N items`) is merged by squash. That merge cuts the first real release — **the first end-to-end proof of Part 2**. If no groomed
-   item is ready, grooming one is part of this step.
+   is merged by squash. The run should include a bug (its commit subject is `fix`) or a task whose subject is `feat`: `prTitle` takes the highest type
+   among the merged items' subjects and falls to `chore(backlog)` otherwise, and `chore` cuts nothing. A `feat|fix` PR cuts the first real release —
+   **the first end-to-end proof of Part 2**. If it comes out `chore`, the PR-mode proof the ruleset waits on still holds; merge it, and PR C's merge becomes
+   the first release proof instead. If no groomed item is ready, grooming one is part of this step.
 4. **User**: apply the ruleset (dry run, then for real). From here every change is a PR.
 5. **PR B — the docs half of Part 1** (`docs: …`): publishing.md, ci.md §The ruleset, CLAUDE.md, the orchestrator-mode guidance.
 6. **PR C — `feat(releases): version chip and What's new drawer`**: Part 3. Its merge cuts the next minor release.
@@ -133,7 +147,7 @@ planner's call.
 - `/api/releases` over a tmpdir git repo through the real Nest app (`listenLoopback`): no git dir → empty shape; no tags → empty shape; only a lightweight
   `v9.9.9` and a lightweight `v1` → empty shape; baseline + two releases → newest first, baseline typed `baseline`; HEAD exactly on a tag → `ahead: 0`; a
   commit after the first read → `ahead: 1` (the memo key moved); a tag cut without moving HEAD → appears (common-dir mtimes); non-GitHub origin → no `url`;
-  a `runGit` timeout (the existing test seam for `GIT_TIMEOUT_MS`) → empty shape, 200.
+  a `runGit` timeout (the existing `__setGitTimeoutMs` seam) → empty shape, 200.
 - Parity: for the populated fixture, the route's `releases`/`current` deep-equal release-kit's own `readReleases` on the same repo.
 - Client lib (jest): dot decision, first-visit seed, invalid stored value, version comparison, chip label with and without `ahead`, title prefix strip.
 - Drawer (jsdom): renders entries and the baseline divider; Escape closes only the drawer when another dialog is under it.
@@ -143,7 +157,7 @@ planner's call.
 
 ## Left to the builder
 
-File names inside the new module and components, the exact `for-each-ref` format string, the hook's shape, how the drawer's markup maps onto existing
+File names inside the new module and components, the `for-each-ref` format string (within what parity with `readReleases` allows: NUL-separated fields, `%(creatordate:iso-strict)`), the hook's shape, how the drawer's markup maps onto existing
 `components/ui/` pieces, and whether PR B merges into PR A.
 
 ## Out of scope
