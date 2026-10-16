@@ -1320,8 +1320,8 @@ describe('boardSaved and boardDeleted', () => {
   /** Everything the poller has to say, flushed: microtasks and zero-delay timers, no clock movement. */
   const flush = () => jest.advanceTimersByTimeAsync(0);
 
-  /** Holds every `search` the poller makes until the case releases it, then answers it for real. Returns the held calls in order. */
-  function holdSearches(only?: number): { release: (i: number) => void; held: number } & { calls: (() => void)[] } {
+  /** Holds the first `only` `search` calls the poller makes (all of them when omitted) until the case releases them, then answers each for real. */
+  function holdSearches(only?: number): { release: (i: number) => void; readonly held: number } {
     const real = client.search.bind(client);
     const calls: (() => void)[] = [];
     let seen = 0;
@@ -1330,7 +1330,12 @@ describe('boardSaved and boardDeleted', () => {
       if (only !== undefined && seen > only) return real(...args);
       return new Promise((resolve) => calls.push(() => resolve(real(...args))));
     });
-    return { calls, release: (i) => calls[i](), get held() { return calls.length; } };
+    return {
+      release: (i) => calls[i](),
+      get held() {
+        return calls.length;
+      }
+    };
   }
 
   it('a 5m board swept 10 s ago is swept at once, its polledAt moves and its next due time is 5 m from THIS sweep', async () => {
@@ -1426,6 +1431,31 @@ describe('boardSaved and boardDeleted', () => {
     await saved;
     // Once inside the in-flight sweep (which read the file before the save), once more in the sweep the save asked for.
     expect(searches().filter((j) => j === 'key = "PAY-120"')).toHaveLength(2);
+  });
+
+  it('an edited off board whose save-sweep fails whole-board keeps its force: armed, and re-swept once Jira recovers', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: 'off' })]);
+    await poller.tick();
+    expect(poller.armed).toBe(false);
+    const before = keysOf();
+
+    // The save: a new definition, whose sweep Jira answers with a 503.
+    writeConfig([board({ roots: ['PAY-131'], interval: 'off' })]);
+    now = T0 + 10_000;
+    fake.failNext = (c) => (isSearch(c.url) ? { status: 503 } : null);
+    await poller.boardSaved(B1);
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(T0));
+    expect(keysOf()).toEqual(before);
+    expect(poller.armed).toBe(true);
+
+    fake.failNext = null;
+    fake.calls.length = 0;
+    now += JIRA_POLL_MS;
+    await poller.tick();
+    expect(searches()[0]).toBe('key = "PAY-131"');
+    expect(poller.boardIssues(B1)?.polledAt).toBe(iso(now));
+    expect(keysOf()).toContain('PAY-131');
+    expect(poller.armed).toBe(false);
   });
 
   it('with the boot unanswered it resolves, the board is not polled, and it stays owed', async () => {
