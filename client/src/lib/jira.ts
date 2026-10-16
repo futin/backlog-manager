@@ -1,7 +1,7 @@
 import { elapsedSince, formatCreated } from './item-age';
 import { pollAge } from './tracker';
 import { SYNC_INTERVALS } from '../../../shared/types';
-import type { JiraBoard, JiraBoardFailure, JiraBoardStatus, JiraIssue, JiraStatusCategory, JiraStatusPayload } from '../../../shared/types';
+import type { JiraAccess, JiraBoard, JiraBoardFailure, JiraBoardStatus, JiraIssue, JiraStatusCategory, JiraStatusPayload } from '../../../shared/types';
 
 /**
  * jira.ts — what the client says about Jira (Jira phase 2, spec §6). The one home of every derivation the Jira board, its modal, Setup and the rail chip
@@ -216,6 +216,42 @@ export function callsReading(calls: JiraStatusPayload['calls'], now: number): { 
     fraction: Math.min(calls.sweep / JIRA_SWEEP_CALL_CEILING, 1),
     red: !Number.isNaN(at) && now - at < JIRA_429_RED_MS
   };
+}
+
+/**
+ * The Connection card's last-sweep reading, in the two halves it draws: `lead` — `every 15 s · 12 calls` while the poller is `armed` (a tick is scheduled; the
+ * server's base tick is 15 s, `TRACKER_POLL_MS`), `idle · 12 calls` otherwise — and `rate`, the 429 clause: `last 429 4m ago` (through `pollAge`, R9) or
+ * `no 429 since start`, with `red` set by `callsReading`'s own window so this card and the chip's meter agree on when Jira "recently refused". An unparseable
+ * `last429At` still says a 429 happened, but not when, and is never red.
+ */
+export function sweepLine(armed: boolean, calls: JiraStatusPayload['calls'], now: number): { lead: string; rate: string; red: boolean } {
+  const lead = `${armed ? 'every 15 s' : 'idle'} · ${calls.sweep} ${calls.sweep === 1 ? 'call' : 'calls'}`;
+  if (calls.last429At === null) return { lead, rate: 'no 429 since start', red: false };
+  const age = pollAge(calls.last429At, now);
+  return { lead, rate: age === null ? 'last 429 at an unknown time' : `last 429 ${age} ago`, red: callsReading(calls, now).red };
+}
+
+/**
+ * One sentence per `access` that is not `ok`, for the Connection card's red line (the server's own `detail` follows it). `ok` is `null`: nothing is wrong,
+ * so nothing is drawn. `unconfigured` is here for completeness — the page is never drawn then, the rail hides it.
+ */
+export function accessPhrase(access: JiraAccess): string | null {
+  switch (access) {
+    case 'ok':
+      return null;
+    case 'unconfigured':
+      return 'Jira is not configured on this server';
+    case 'unsupported':
+      return 'this site is not Jira Cloud';
+    case 'unauthorized':
+      return 'Jira rejected the credentials';
+    case 'forbidden':
+      return 'Jira refused a call (403)';
+    case 'rate-limited':
+      return 'Jira is rate-limiting this server (429)';
+    case 'unreachable':
+      return 'Jira did not answer';
+  }
 }
 
 /**

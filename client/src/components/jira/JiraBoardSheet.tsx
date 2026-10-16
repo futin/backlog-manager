@@ -75,8 +75,8 @@ export function errorOf(body: unknown, fallback: string): string {
   return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string' ? (body as { error: string }).error : fallback;
 }
 
-/** Every write here goes out as JSON: the server's `SameOriginPostGuard` refuses any other content type with a 403. */
-async function postJson(url: string, body: unknown): Promise<{ ok: boolean; status: number; body: unknown }> {
+/** Every write here goes out as JSON: the server's `SameOriginPostGuard` refuses any other content type with a 403. Exported for the Repositories card's write. */
+export async function postJson(url: string, body: unknown): Promise<{ ok: boolean; status: number; body: unknown }> {
   const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
 }

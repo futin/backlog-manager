@@ -15,6 +15,7 @@ import {
   boardRowLine,
   boardsForSetup,
   callsReading,
+  sweepLine,
   cardAgeStamp,
   columnOf,
   crumbOf,
@@ -551,5 +552,26 @@ describe('useJiraPage', () => {
     const a = renderHook(() => useJiraPage());
     act(() => setJiraPage('setup'));
     expect(a.result.current[0]).toBe('setup');
+  });
+});
+
+describe('sweepLine', () => {
+  const now = Date.parse('2026-10-16T12:00:00Z');
+  const ago = (ms: number): string => new Date(now - ms).toISOString();
+
+  it('reads every 15 s while armed and idle otherwise, with the call count', () => {
+    expect(sweepLine(true, { sweep: 12, last429At: null }, now)).toEqual({ lead: 'every 15 s · 12 calls', rate: 'no 429 since start', red: false });
+    expect(sweepLine(false, { sweep: 0, last429At: null }, now).lead).toBe('idle · 0 calls');
+    expect(sweepLine(true, { sweep: 1, last429At: null }, now).lead).toBe('every 15 s · 1 call');
+  });
+
+  it('ages a 429 through pollAge and reddens it only inside JIRA_429_RED_MS', () => {
+    expect(sweepLine(true, { sweep: 3, last429At: ago(40_000) }, now)).toMatchObject({ rate: 'last 429 40 s ago', red: true });
+    expect(sweepLine(true, { sweep: 3, last429At: ago(JIRA_429_RED_MS - 1) }, now).red).toBe(true);
+    expect(sweepLine(true, { sweep: 3, last429At: ago(JIRA_429_RED_MS) }, now).red).toBe(false);
+  });
+
+  it('says a 429 happened, but not when, for a stamp it cannot parse — and does not redden it', () => {
+    expect(sweepLine(true, { sweep: 3, last429At: 'garbage' }, now)).toMatchObject({ rate: 'last 429 at an unknown time', red: false });
   });
 });

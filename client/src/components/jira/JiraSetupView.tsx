@@ -10,6 +10,8 @@ import { Chip } from '../ui/Chip';
 import { Pill } from '../ui/Pill';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { JiraBoardSheet, errorOf, type JiraProjectList } from './JiraBoardSheet';
+import { JiraConnectionGroup } from './JiraConnectionGroup';
+import { JiraReposGroup } from './JiraReposGroup';
 
 /**
  * Jira › Setup (Jira phase 2, spec §6.4; `Setup.html`, `BoardsTen.html`; DESIGN.md §8.9.3, and §8.6 for the card language it borrows whole).
@@ -18,7 +20,7 @@ import { JiraBoardSheet, errorOf, type JiraProjectList } from './JiraBoardSheet'
  * the host, so it is Settings › Shared's scope word), then cards composed from `SettingsGroup` / `SettingsRow` in Settings' own two hand-balanced columns
  * (`.set-cols` / `.set-col`, folding to one at Settings' 1100 px — which also covers the plan's "stacking below 700 px"; a third breakpoint for the same
  * card language would let the two pages fold at different widths for no reason). Hand-balanced for §8.6's reason: a masonry reflow would move a card to
- * the other side as its neighbour grew a row. The left column is Boards, then Repositories (Task 11); the right is Connection (Task 11) and, in phase 5,
+ * the other side as its neighbour grew a row. The left column is Boards, then Repositories; the right is Connection and, in phase 5,
  * Skills — the mock's split, which keeps the two cards a person edits on one side and the report on the other.
  *
  * **The Boards card** (this task): a `New board` chip in the head; one row per board in `boardsForSetup`'s order (by name, `off` boards last), each its name
@@ -35,7 +37,7 @@ import { JiraBoardSheet, errorOf, type JiraProjectList } from './JiraBoardSheet'
  * request (Review Focus 3).
  *
  * **The ONE `/api/jira/projects` read** is this page's, per mount (spec §5: fetched when Setup opens, never on the poll). The sheet's `Unresolved in a
- * project…` `Select` and Task 11's Repositories card are handed the list; neither fetches it, so opening the sheet five times costs Jira nothing.
+ * project…` `Select` and the Repositories card are handed the list; neither fetches it, so opening the sheet five times costs Jira nothing.
  */
 export function JiraSetupView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data } = useJiraContext();
@@ -67,9 +69,11 @@ export function JiraSetupView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage
             onEdit={(b) => setSheet({ board: b })}
             onOpen={openBoard}
           />
+          <JiraReposGroup projects={projects} />
         </div>
-        {/* The right column: Connection (Task 11) lands here. Drawn empty until then so the Boards card already has its final width. */}
-        <div className="set-col" />
+        <div className="set-col">
+          <JiraConnectionGroup />
+        </div>
       </div>
       {sheet !== null && (
         <JiraBoardSheet board={sheet.board} projects={projects} onClose={() => setSheet(null)} onSaved={() => setSheet(null)} />

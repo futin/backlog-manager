@@ -1231,6 +1231,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* A board's last-sweep failure, beside its `boardRowLine` sentence — `--red` as the Board page's failing sub-line draws it, so one failure reads one colour
    on both pages. */
 .jira-setup-failure { color: var(--red) }
+/* The Repositories card's `no repository yet` line: `--mustard`, the mock's `.hint.warn` ("incomplete/pending" in theme.css) — a project that cannot Start
+   yet, not a refusal, so not the red of a failing sweep. The `×` beside each path is the board sheet's own (`.jira-sheet-x`'s rule, shared above). */
+.jira-setup-warn { color: var(--mustard) }
+/* The add row: the project Select and `Add` keep their size, the path field takes what is left (the row wraps at Settings' own narrow widths). */
+.jira-setup-add { justify-content: flex-start; gap: 8px }
+.jira-setup-add-path { flex: 1 1 160px; width: auto; min-width: 0 }
+/* The Connection card's value, in the control slot: 13 px as the mock draws it, `--ink`. */
+.jira-setup-value { font-size: 13px; color: var(--ink) }
 /* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */
 .jira-setup-filter { justify-content: flex-start }
 .jira-setup-filter .set-hint { margin-left: auto }
@@ -1247,11 +1255,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* A root: its key at the card's own key reading (12/500 --ink2), the remove × pushed right. */
 .jira-sheet-root { display: flex; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--hairline) }
 .jira-sheet-key { flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
-.jira-sheet-x {
+.jira-sheet-x, .jira-setup-x {
   margin-left: auto; flex: none; padding: 4px; border: 0; background: none; cursor: pointer;
   font-family: inherit; font-size: 14px; line-height: 1; color: var(--ink3);
 }
-.jira-sheet-x:hover { color: var(--ink) }
+.jira-sheet-x:hover, .jira-setup-x:hover:not(:disabled) { color: var(--ink) }
 
 /* The roots search is its Popover's positioning parent (the panel hangs under it, right edges together), and the field takes the section's full width. */
 .jira-sheet-search { position: relative; display: flex; flex-direction: column; gap: 6px }

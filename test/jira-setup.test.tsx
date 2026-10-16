@@ -8,7 +8,7 @@ import '@testing-library/jest-dom';
 import JiraView from '../client/src/components/jira/JiraView';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
-import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, boardRowLine } from '../client/src/lib/jira';
+import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, accessPhrase, boardRowLine } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import type { JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
 
@@ -21,7 +21,7 @@ import type { JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/ty
   Escape are asserted against the same store the rail's tree writes. Every request is recorded with its init, because several cases are about a request that
   must NOT be made and the save cases are about the body. Fixture stamps are relative to the clock the assertion runs under (`test/fixture-clock.test.ts`).
 
-  Task 11 appends the Repositories and Connection cases to this file.
+  Task 11 appends the Repositories and Connection cases below (the last two describes).
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
@@ -103,6 +103,9 @@ let statusAnswer: JiraStatusPayload;
 let searchAnswer: (q: string) => Promise<Response>;
 let checkAnswer: (jql: string) => Promise<Response>;
 let saveAnswer: () => Promise<Response>;
+/* `POST /api/jira/repos`. The default does what the server does — stores the project's list (an empty one removes the key) in the status the next
+   `GET /api/jira` answers — so a case can watch the card follow its own save. A case that wants a refusal replaces it. */
+let reposAnswer: (body: { project: string; paths: string[] }) => Promise<Response>;
 let sent: Sent[];
 
 const answer = (body: unknown, code = 200) =>
@@ -115,6 +118,13 @@ beforeEach(() => {
   searchAnswer = () => answer([]);
   checkAnswer = () => answer({ ok: true, count: 0 });
   saveAnswer = () => answer({ ...ALPHA });
+  reposAnswer = (body) => {
+    const repos = { ...statusAnswer.repos };
+    if (body.paths.length === 0) delete repos[body.project];
+    else repos[body.project] = body.paths;
+    statusAnswer = { ...statusAnswer, repos };
+    return answer(body);
+  };
   sent = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -130,6 +140,7 @@ beforeEach(() => {
     if (url.startsWith('/api/jira/jql/check?jql=')) return checkAnswer(new URLSearchParams(url.split('?')[1]).get('jql') ?? '');
     if (url === '/api/jira/boards') return saveAnswer();
     if (url === '/api/jira/boards/delete') return answer({ ok: true });
+    if (url === '/api/jira/repos') return reposAnswer(JSON.parse(String(init?.body)));
     if (url.startsWith('/api/jira/boards/')) return answer({ issues: [], polledAt: null });
     return answer({});
   }) as unknown as typeof fetch;
@@ -505,5 +516,232 @@ describe('Escape', () => {
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByTestId('jira-board-delete')).toBeNull();
     expect(screen.getByRole('dialog', { name: 'Edit board Alpha board' })).toBeInTheDocument();
+  });
+});
+
+/* ── Task 11: Repositories and Connection ─────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+
+const PROJECTS = [
+  { key: 'PAY', name: 'Payments' },
+  { key: 'OPS', name: 'Platform' }
+];
+
+const reposCard = (): HTMLElement => screen.getByRole('heading', { name: 'Repositories' }).closest('section') as HTMLElement;
+const connectionCard = (): HTMLElement => screen.getByRole('heading', { name: 'Connection' }).closest('section') as HTMLElement;
+const repoNames = (): string[] => Array.from(reposCard().querySelectorAll('.set-row .set-name')).map((n) => n.textContent ?? '');
+const repoHints = (): string[] => Array.from(reposCard().querySelectorAll('.set-row .set-hint')).map((n) => n.textContent ?? '');
+const addField = (): HTMLInputElement => within(reposCard()).getByRole('textbox', { name: 'Repository path' }) as HTMLInputElement;
+const repoPosts = (): { project: string; paths: string[] }[] => posts('/api/jira/repos').map((p) => JSON.parse(String(p.init?.body)));
+const statusReads = (): number => sent.filter((s) => s.url === '/api/jira').length;
+
+/* The project list is `JiraSetupView`'s one read, answered a tick after the heading draws, so a case that picks from the Select waits for its options. */
+async function pickProject(project: string): Promise<void> {
+  const select = within(reposCard()).getByRole('combobox', { name: 'Jira project' });
+  await waitFor(() => expect(within(select).getAllByRole('option').length).toBeGreaterThan(1));
+  await userEvent.selectOptions(select, project);
+}
+
+async function addRepo(project: string, path: string): Promise<void> {
+  await pickProject(project);
+  await userEvent.clear(addField());
+  await userEvent.type(addField(), path);
+  await userEvent.click(within(reposCard()).getByRole('button', { name: 'Add' }));
+}
+
+describe('the Repositories card', () => {
+  it('draws one row per mapped path through displayPath, and × on the second POSTs the project\'s remaining list', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-2'] }, home: '/Users/ada' });
+    await renderSetup();
+
+    expect(repoHints().filter((h) => h.startsWith('~'))).toEqual(['~/pay', '~/pay-2']);
+    expect(repoNames().slice(0, 2)).toEqual(['PAY · Payments', 'PAY']);
+
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay-2' }));
+    await waitFor(() => expect(repoPosts()).toEqual([{ project: 'PAY', paths: ['/Users/ada/pay'] }]));
+    expect(posts('/api/jira/repos')[0].init?.headers).toEqual({ 'content-type': 'application/json' });
+    // The status was asked for again, and the card follows it.
+    await waitFor(() => expect(repoHints().filter((h) => h.startsWith('~'))).toEqual(['~/pay']));
+  });
+
+  it('shows a path as stored while it is not under the home, and never rewrites one that only shares a prefix with it', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/Users/adam/pay'], OPS: ['/srv/ops'] }, home: '/Users/ada' });
+    await renderSetup();
+    expect(repoHints()).toEqual(expect.arrayContaining(['/Users/adam/pay', '/srv/ops']));
+  });
+
+  it('draws a warning row for each project with issues and no path, and none for a mapped one', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    await renderSetup();
+    const warnings = within(reposCard()).getAllByText(/^no repository yet/);
+    expect(warnings.map((w) => w.textContent)).toEqual(['no repository yet — OPS cards cannot Start until a path is mapped']);
+    expect(warnings[0]).toHaveClass('jira-setup-warn');
+    expect(repoNames()).toContain('OPS · Platform');
+  });
+
+  it('removing a project\'s last path POSTs an empty list, and the project then reads as unmapped', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'], OPS: ['/home/ada/ops'] } });
+    await renderSetup();
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay' }));
+    await waitFor(() => expect(repoPosts()).toEqual([{ project: 'PAY', paths: [] }]));
+    await screen.findByText('no repository yet — PAY cards cannot Start until a path is mapped');
+  });
+
+  it('Add sends the typed path as typed (the server expands ~) with the project\'s whole list, then reloads the status and clears the field', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    await renderSetup();
+    const before = statusReads();
+
+    await addRepo('OPS', '~/ops');
+    await waitFor(() => expect(repoPosts()).toEqual([{ project: 'OPS', paths: ['~/ops'] }]));
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
+    await waitFor(() => expect(addField().value).toBe(''));
+    expect(within(reposCard()).queryByText(/^no repository yet/)).toBeNull();
+
+    // A second path for a mapped project is appended to that project's list, not sent alone.
+    await addRepo('PAY', '/home/ada/pay-2');
+    await waitFor(() => expect(repoPosts()[1]).toEqual({ project: 'PAY', paths: ['/home/ada/pay', '/home/ada/pay-2'] }));
+  });
+
+  it('keeps the typed path and shows the server\'s sentence under the add row on a refusal', async () => {
+    statusAnswer = status({ projects: PROJECTS });
+    reposAnswer = () => answer({ error: 'path must be absolute and normalised: x/y' }, 400);
+    await renderSetup();
+
+    await addRepo('OPS', 'x/y');
+    const message = await within(reposCard()).findByText('path must be absolute and normalised: x/y');
+    expect(message).toHaveClass('set-error');
+    expect(addField().value).toBe('x/y');
+    // The refusal is a write that did not land: no status reload was asked for beyond the mount's own.
+    expect(statusReads()).toBe(1);
+  });
+
+  it('says so when the answer has no sentence or the server does not answer, and a refused × removes nothing', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    reposAnswer = () => answer(null, 502);
+    await renderSetup();
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Remove ~/pay' }));
+    expect(await within(reposCard()).findByText('the repositories were not saved (HTTP 502)')).toHaveClass('set-error');
+    expect(repoHints()).toEqual(expect.arrayContaining(['~/pay']));
+
+    reposAnswer = () => Promise.reject(new Error('down'));
+    await addRepo('OPS', '/x');
+    expect(await within(reposCard()).findByText('the repositories were not saved — the server did not answer')).toBeInTheDocument();
+  });
+
+  it('keeps Add disabled until a project and a path are both given', async () => {
+    statusAnswer = status({ projects: PROJECTS });
+    await renderSetup();
+    const add = within(reposCard()).getByRole('button', { name: 'Add' });
+    expect(add).toBeDisabled();
+    await pickProject('PAY');
+    expect(add).toBeDisabled();
+    await userEvent.type(addField(), '   ');
+    expect(add).toBeDisabled();
+    await userEvent.type(addField(), '/a');
+    expect(add).toBeEnabled();
+  });
+
+  it('offers the whole /api/jira/projects list in the Select, `KEY · name`, and states the dispatch rule', async () => {
+    await renderSetup();
+    const select = within(reposCard()).getByRole('combobox', { name: 'Jira project' });
+    await waitFor(() => expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['project…', 'OPS · Platform', 'PAY · Payments']));
+    expect(within(reposCard()).getByText('a path the dashboard cannot see is refused at dispatch, not here')).toBeInTheDocument();
+  });
+
+  it('says why the Select is empty when the project list could not be read, and still lists the mapped paths', async () => {
+    const real = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/jira/projects' ? answer({ error: 'Jira refused: forbidden' }, 502) : real(input, init)
+    ) as unknown as typeof fetch;
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    await renderSetup();
+    await within(reposCard()).findByText('Jira refused: forbidden');
+    expect(within(reposCard()).getByRole('combobox', { name: 'Jira project' })).toBeDisabled();
+    expect(repoHints()).toEqual(expect.arrayContaining(['~/pay']));
+  });
+
+  it('fetches /api/jira/projects once per Setup mount, and not again when the status reloads', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    await renderSetup();
+    expect(urls('/api/jira/projects')).toHaveLength(1);
+
+    await addRepo('OPS', '/home/ada/ops');
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(1));
+    const reads = statusReads();
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(reads));
+    expect(urls('/api/jira/projects')).toHaveLength(1);
+  });
+});
+
+describe('the Connection card', () => {
+  const rowText = (name: string): string => (within(connectionCard()).getByText(name).closest('.set-row') as HTMLElement).textContent ?? '';
+
+  it('reports the site, who is signed in, the token kind with the three scopes named, and the last sweep while armed', async () => {
+    statusAnswer = status({ me: { accountId: 'acc-ada', name: 'Ada Lovelace' }, tokenKind: 'scoped', armed: true, calls: { sweep: 12, last429At: null } });
+    await renderSetup();
+    expect(rowText('Site')).toContain('acme.atlassian.net');
+    expect(rowText('Signed in as')).toContain('Ada Lovelace');
+    const token = rowText('Token');
+    expect(token).toContain('scoped');
+    for (const scope of ['read:jira-work', 'write:jira-work', 'read:jira-user']) expect(token).toContain(scope);
+    expect(rowText('Last sweep')).toContain('every 15 s · 12 calls · no 429 since start');
+    expect(within(connectionCard()).getByText('restart the server to change it')).toBeInTheDocument();
+  });
+
+  it('reads idle while the poller is not armed', async () => {
+    statusAnswer = status({ armed: false, calls: { sweep: 12, last429At: null } });
+    await renderSetup();
+    expect(rowText('Last sweep')).toContain('idle · 12 calls · no 429 since start');
+  });
+
+  it('says no identity when Jira has not answered /myself, and draws a classic token as classic', async () => {
+    statusAnswer = status({ me: null, tokenKind: 'classic' });
+    await renderSetup();
+    expect(rowText('Signed in as')).toContain('no identity');
+    expect(rowText('Token')).toContain('classic');
+  });
+
+  it('draws a last 429 as an age, red while it is inside the red window', async () => {
+    statusAnswer = status({ calls: { sweep: 3, last429At: new Date(Date.now() - 4 * 60_000 - 5_000).toISOString() } });
+    await renderSetup();
+    expect(within(connectionCard()).getByText('last 429 4m ago')).toHaveClass('jira-setup-failure');
+    expect(rowText('Last sweep')).toContain('every 15 s · 3 calls · last 429 4m ago');
+  });
+
+  it('draws an old 429 in the neutral colour', async () => {
+    statusAnswer = status({ calls: { sweep: 3, last429At: new Date(Date.now() - 2 * 3_600_000 - 5_000).toISOString() } });
+    await renderSetup();
+    expect(within(connectionCard()).getByText('last 429 2h ago')).not.toHaveClass('jira-setup-failure');
+  });
+
+  it('names a refused credential in red on the Signed in as row, with the server\'s detail', async () => {
+    statusAnswer = status({ access: 'unauthorized', detail: 'Jira answered 401' });
+    await renderSetup();
+    const row = within(connectionCard()).getByText('Signed in as').closest('.set-row') as HTMLElement;
+    expect(within(row).getByText(accessPhrase('unauthorized') as string)).toHaveClass('jira-setup-failure');
+    expect(row.textContent).toContain('Jira answered 401');
+  });
+
+  it('draws nothing red while access is ok and no 429 is recent', async () => {
+    await renderSetup();
+    expect(connectionCard().querySelector('.jira-setup-failure')).toBeNull();
+  });
+
+  it('puts no e-mail address anywhere on the page for a payload that carries none', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    await renderSetup();
+    expect(document.body.textContent).not.toContain('@');
+  });
+});
+
+describe('accessPhrase', () => {
+  it('has a sentence for every access except ok, and null for ok', () => {
+    expect(accessPhrase('ok')).toBeNull();
+    for (const a of ['unconfigured', 'unsupported', 'unauthorized', 'forbidden', 'rate-limited', 'unreachable'] as const) {
+      expect(typeof accessPhrase(a)).toBe('string');
+    }
   });
 });
