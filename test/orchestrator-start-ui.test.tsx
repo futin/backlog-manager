@@ -518,6 +518,16 @@ describe('toolbar Orchestrate button', () => {
 //     than merely unhelpful. `RUN_IN_PROGRESS_CODE` (shared/types.ts) is
 //     what makes the lock 409 distinguishable from the other three at all.
 // =====================================================================
+/** Two clicks that both land before React re-renders — `test/run-controls.test.tsx`'s `doubleClick`, for the same reason: `userEvent.click` awaits between
+ *  clicks, so the second lands on a re-rendered (disabled) control and the case would pass with the guard deleted. Only a raw dispatch pair inside one `act`
+ *  reaches `useAction`'s ref guard (#286). */
+function doubleClick(el: HTMLElement): void {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 describe('OrchestrateSheet', () => {
   const realFetch = global.fetch;
 
@@ -781,6 +791,25 @@ describe('OrchestrateSheet', () => {
       questionMode: 'park', base: 'main'
     });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // #286 — before useAction, `start` had no guard at all: both clicks of one tick POSTed, and the second came back as the run lock's 409.
+  it('sends one start for a double-click on start', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } });
+    const answered = global.fetch as jest.Mock;
+    let starts = 0;
+    // The start never answers, so the in-flight window stays open for the whole case and nothing settles after it ends.
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).endsWith('/api/agents/orchestrate')) return answered(input, init);
+      starts += 1;
+      return new Promise(() => {});
+    }) as jest.Mock;
+    renderSheet();
+    await toModes();
+
+    doubleClick(screen.getByRole('button', { name: 'start' }));
+
+    expect(starts).toBe(1);
   });
 
   it('omits model and effort when both are left on default', async () => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { dispatchAgent, fetchAgentPlan, sessionUrl } from '../../lib/agents';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
+import { useAction } from '../../hooks/useAction';
 import { useSettings } from '../../hooks/useSettings';
 import { staleTakeover } from '../../lib/tracker';
 import { Chip } from '../ui/Chip';
@@ -42,8 +43,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const [model, setModel] = useState(settings.dispatchDefaultModel);
   const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
   const [remoteControl, setRemoteControl] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAction();
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,26 +70,25 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
 
   const launch = (): void => {
     if (plan === null) return;
-    setBusy(true);
-    setError(null);
-    dispatchAgent({
-      itemPath: item.path,
-      // The server's derivation, echoed back — and re-derived there before
-      // anything spawns. Sending it makes a stale sheet fail loudly ("this
-      // item's next step is groom") instead of quietly doing the wrong work.
-      action: plan.action,
-      prompt,
-      permissionMode: mode,
-      // Spread, not `model: model || undefined`: the key is absent from the
-      // request rather than present-and-empty, which is the shape the server's
-      // `pickFrom` and the dashboard's own parser both read as "no flag".
-      ...(model === '' ? {} : { model }),
-      ...(effort === '' ? {} : { effort }),
-      remoteControl
-    })
-      .then((r) => setSessionId(r.sessionId))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false));
+    run(
+      () =>
+        dispatchAgent({
+          itemPath: item.path,
+          // The server's derivation, echoed back — and re-derived there before
+          // anything spawns. Sending it makes a stale sheet fail loudly ("this
+          // item's next step is groom") instead of quietly doing the wrong work.
+          action: plan.action,
+          prompt,
+          permissionMode: mode,
+          // Spread, not `model: model || undefined`: the key is absent from the
+          // request rather than present-and-empty, which is the shape the server's
+          // `pickFrom` and the dashboard's own parser both read as "no flag".
+          ...(model === '' ? {} : { model }),
+          ...(effort === '' ? {} : { effort }),
+          remoteControl
+        }),
+      { onSuccess: (r) => setSessionId(r.sessionId) }
+    );
   };
 
   const blocked = plan?.blocked ?? planError;
