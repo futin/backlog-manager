@@ -16,7 +16,7 @@ paths: ["server/src/jira/**"]
   write a temp file in the same directory and `rename` it over. A file that exists and cannot be read or parsed throws `JiraConfigUnreadableError`, which the
   route answers as a 409 carrying its message (`… nothing was written`) with the file byte-identical; an update or delete naming an id the file does not hold
   throws `JiraUnknownIdError`, a 404 `unknown board`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
-  config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (R2: sweeps that board,
+  config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
   bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos re-aim
   nothing, since no sweep reads them. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)

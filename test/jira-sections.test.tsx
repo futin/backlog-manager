@@ -15,7 +15,7 @@ import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
 import type { JiraStatusPayload } from '../shared/types';
 
 /*
-  The Jira section in the shell (Jira phase 2, Task 7; spec §6.1; DESIGN.md §8.0 and §8.9): `jira` in `SECTIONS`, its rail row drawn only while
+  The Jira section in the shell (Jira phase 2; spec §6.1; DESIGN.md §8.0 and §8.9): `jira` in `SECTIONS`, its rail row drawn only while
   `GET /api/jira` says `configured: true`, its Board/Setup tree, and the shell's hold-and-fall — a held `jira` section stays put while the status is unknown
   or failing, and only an answer that says `configured: false` moves the shell to `board`.
 

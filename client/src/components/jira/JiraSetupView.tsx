@@ -118,7 +118,7 @@ function BoardsGroup({
   onEdit: (b: JiraBoardStatus) => void;
   onOpen: (b: JiraBoardStatus) => void;
 }) {
-  // Each row's age reads `polled 12 s ago` under a minute (R9's `pollAge`), so the clock ticks by the second, as the Board page's band does.
+  // Each row's age reads `polled 12 s ago` under a minute (`pollAge`), so the clock ticks by the second, as the Board page's band does.
   const now = useNow(true, 1_000);
   const [filter, setFilter] = useState('');
   const sorted = boardsForSetup(boards);

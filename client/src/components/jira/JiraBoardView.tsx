@@ -55,7 +55,7 @@ import { JiraCard } from './JiraCard';
  * `onOpenJiraPage('setup')` — the rail's own navigation threaded down from `App`, so it means what the tree's `Setup` entry means by construction and is not a
  * second page switch (the section has no in-page switch at any width, spec §6.1). A board with no issues draws its three empty columns.
  *
- * Clicking a card calls `onOpenIssue` — the slot the issue modal (Task 9) fills. No `Run ▾` and no live strip: phase 5.
+ * Clicking a card calls `onOpenIssue` — the slot the issue modal fills. No `Run ▾` and no live strip: phase 5.
  */
 export function JiraBoardView({ onOpenJiraPage, onOpenIssue }: { onOpenJiraPage: (p: JiraPage) => void; onOpenIssue: (issue: JiraIssue) => void }) {
   const { data } = useJiraContext();
@@ -66,7 +66,7 @@ export function JiraBoardView({ onOpenJiraPage, onOpenIssue }: { onOpenJiraPage:
   const board = unreadable === null ? pickBoard(stored, boards) : null;
   // The ONLY id this page ever asks the server about (Review Focus 3).
   const list = useJiraBoard(board?.id ?? null, board?.interval ?? null);
-  // Card dates are day stamps, so a minute's tick is plenty; the band's seconds have their own clock below.
+  // Card ages are relative (`now`, `4m`, `2h`, `6d`), so a minute's tick is plenty; the band's seconds have their own clock below.
   const now = useNow(true);
 
   const [filters, setFilters] = useState<JiraBoardFilters>(NO_JIRA_FILTERS);

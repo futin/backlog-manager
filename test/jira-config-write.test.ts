@@ -132,7 +132,7 @@ describe('parseBoardWrite', () => {
     for (const body of [null, [], 'x', 7, undefined]) expect(parseBoardWrite(body).ok).toBe(false);
   });
 
-  it('keeps an id as given, and refuses one that is not a string or null (R11)', () => {
+  it('keeps an id as given, and refuses one that is not a string or null', () => {
     const r = parseBoardWrite({ ...valid, id: 'b_0000000z' });
     expect(r.ok && r.value.id).toBe('b_0000000z');
     const n = parseBoardWrite({ ...valid, id: null });
@@ -285,7 +285,7 @@ describe('deleteBoard', () => {
   });
 });
 
-describe('normaliseRepoPath (R4)', () => {
+describe('normaliseRepoPath', () => {
   const home = '/Users/ada';
 
   it('expands ~, trims, and drops one trailing slash', () => {

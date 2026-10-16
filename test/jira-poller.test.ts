@@ -22,7 +22,7 @@ import {
 import { FakeJira, makeRawIssue, type JiraCall } from './helpers/jira';
 
 /**
- * Jira phase 1, Task 6 — `identity.ts` and `poller.service.ts` (spec §3, §5 and §8; plan Review Focus 2, 3 and 5; preflight rulings P1–P5, P13).
+ * Jira phase 1 — `identity.ts` and `poller.service.ts` (spec §3, §5 and §8; plan Review Focus 2, 3 and 5; preflight rulings P1–P5, P13).
  *
  * Every sweep is driven by `await poller.tick()`, never by a real timer: the chain's `setTimeout` is observed only through `armed`, and every case shuts the
  * poller down afterwards so no link outlives its case. The clock is `Date.now`, mocked and moved by hand — the poller builds every instant from it, so the
@@ -1298,7 +1298,7 @@ describe('the 429 window never drifts (P1, final review I2)', () => {
 });
 
 /**
- * Jira phase 2, Task 2 — a saved board is swept at once (R2). Fake timers live in this describe only: `boardSaved` races its sweep against a
+ * Jira phase 2 — a saved board is swept at once. Fake timers live in this describe only: `boardSaved` races its sweep against a
  * `setTimeout`, so the cap has to be a clock the case moves. `Date` stays on the suite's own mock (`now`), because every instant the poller stores is
  * arithmetic on it.
  */

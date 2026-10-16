@@ -48,7 +48,7 @@ All in `shared/types.ts`: `JiraIssue` (one issue as the board draws it — key, 
 category, priority, assignee, reporter, parent, a subtask count, labels, sprint, created/updated/resolved), `JiraQuery`, `JiraBoard` (`interval` is the existing
 `SyncInterval`; `DEFAULT_JIRA_INTERVAL` is `1m`), `JiraSkill`, `JiraBoardFailure`, `JiraBoardStatus` (a board plus `polledAt`, `count`, `truncated`,
 `failures`), `JiraTransition`, `JiraIssueDetail` (an issue plus the Markdown description, children, transitions and the ids of the boards holding it) and
-`JiraStatusPayload`. Phase 2 widened the payload by two fields (R1): `armed`, the poller's `armed` getter — the Connection card's `every 15 s` / `idle`
+`JiraStatusPayload`. Phase 2 widened the payload by two fields: `armed`, the poller's `armed` getter — the Connection card's `every 15 s` / `idle`
 has no other source — and `home`, `os.homedir()` read per call, `null` while unconfigured, because the Repositories card shows a path under `$HOME` as `~`
 and the browser has no other way to know `$HOME` (compose passes the host's `HOME` through, so the container's `homedir()` is the host's). `JiraAccess` is `ok |
 unconfigured | unsupported | unauthorized | forbidden | rate-limited | unreachable`; `JiraTokenKind` is `classic | scoped`. `isJiraKey`
@@ -102,9 +102,9 @@ a save while the credential is rejected or the site `unsupported` touches only `
 
 `parseBoardWrite` holds spec §5's bounds: a trimmed `name` of 1–80; an `interval` in `SYNC_INTERVALS`; at most 20 roots, each passing `isJiraKey`,
 deduplicated; at most 10 queries, each a trimmed `label` of 1–80 and a `jql` of 1–`JIRA_JQL_MAX_CHARS`; at least one root or query. A non-string, non-null
-board `id` is a 400 naming `id` (R11); `null` or absent is a create, whose client ids are ignored. On an update a query keeps its id only when the stored board
-holds it, and every other query is minted a fresh `q_` id (R3) — a query's identity is never inferred from its label or JQL. `parseReposWrite` takes a
-`JIRA_PROJECT_KEY_RE` key and at most 10 paths after `normaliseRepoPath` (R4): trimmed, `~` and a leading `~/` expanded to `homedir()`, `~user/…` refused,
+board `id` is a 400 naming `id`; `null` or absent is a create, whose client ids are ignored. On an update a query keeps its id only when the stored board
+holds it, and every other query is minted a fresh `q_` id — a query's identity is never inferred from its label or JQL. `parseReposWrite` takes a
+`JIRA_PROJECT_KEY_RE` key and at most 10 paths after `normaliseRepoPath`: trimmed, `~` and a leading `~/` expanded to `homedir()`, `~user/…` refused,
 absolute with no empty, `.` or `..` segment (400 `path must be absolute and normalised: <path>`), one trailing `/` dropped, duplicates removed after
 normalising — the dashboard compares paths as raw strings, so the server stores exactly one spelling.
 
@@ -145,7 +145,7 @@ lands inside it leaves `rate-limited` standing (a sweep 401 still records `unaut
 unanswered then, the verdict the window covered (an `unauthorized`, say) comes back rather than `ok`. `calls.sweep` is approximately what the last tick sent — a
 route read made during the sweep is counted with it — and `calls.last429At` the last 429 met, by a sweep or a route.
 
-**A save (phase 2, R2).** `boardSaved(id)` forces that board due — `forced`, a map from board id to the generation of the save, NOT a reset of its
+**A save (phase 2).** `boardSaved(id)` forces that board due — `forced`, a map from board id to the generation of the save, NOT a reset of its
 `polledAt`, which would empty the last good list — waits out a sweep already in flight (it read `jira.json` before the save, so it cannot spend the force),
 runs one that started after the call, and resolves when it is done or after `JIRA_SAVE_SWEEP_WAIT_MS` (20 s), whichever is first; it never rejects. The
 force is spent only by a sweep that SUCCEEDS on the board, so a boot still unanswered, a 429 window or a failing Jira leaves it owed and retried on the next
@@ -195,7 +195,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`) and subtasks marker, the band line (`bandSub`), a Setup row's sentence (`boardRowLine`), the
   failure phrase, the chip's CALLS reading (`callsReading`, against `JIRA_SWEEP_CALL_CEILING` = 100, red inside `JIRA_429_RED_MS` = 15 min of the last 429),
   the Connection card's `sweepLine` and `accessPhrase`, the board pick (`JIRA_BOARD_KEY`, `pickBoard`, `boardsByName`), the filters, `JIRA_QUERY_PRESETS`,
-  `unmappedProjects` and `displayPath`. Nothing in it reads a clock: `now` is a required parameter, and every age goes through `pollAge` (R9).
+  `unmappedProjects` and `displayPath`. Nothing in it reads a clock: `now` is a required parameter, and every poll or check age goes through `pollAge` (a card's age is `elapsedSince`'s own reading).
 - **Jira › Board** (`components/jira/JiraBoardView.tsx`, `JiraCard.tsx`). The stored pick is a preference: `pickBoard` resolves it against the status's live
   list on every render, and `useJiraBoard` is handed only the id that resolution returns — a deleted or hand-edited pick falls to the first board by name and
   never becomes a request for `/boards/<that id>/issues`. Filters (type, assignee, sprint, the summary search) are read off the loaded list, per mount.
@@ -203,7 +203,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
 - **The issue modal** (`components/jira/JiraIssueModal.tsx`) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, draws every fact the card carried at
   once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising `marked` config
   `ItemModal` also uses), the children and the boards holding it. The held answer is stamped with its key, so a late answer for an issue the modal has left
-  is dropped. No controls in phase 2 (R7).
+  is dropped. No controls in phase 2.
 - **Jira › Setup** (`components/jira/JiraSetupView.tsx`) makes the page's ONE `/api/jira/projects` read per mount and hands it to the board sheet and the
   Repositories card. The Boards card's `Open board` writes the pick straight to `localStorage` (the page unmounts in the commit that navigates, so a
   `usePersistedState` effect would never run) and calls `onOpenJiraPage('board')`. `JiraBoardSheet` composes `ui/FormSheet`, seeds its fields once at
@@ -213,7 +213,7 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   the page has gone.
 - **The chip and the Trackers row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` — the
   strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
-  `Popover` reading with no links or buttons. With both chips in the rail bar neither draws its meters (R12, a CSS rule in the 700 px block). The Settings ›
+  `Popover` reading with no links or buttons. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings ›
   Shared › Trackers card (`components/settings/TrackersGroup.tsx`) closes on one read-only Jira row from the same `useJira`.
 
 ## The probe facts the code encodes

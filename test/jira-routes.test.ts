@@ -17,7 +17,7 @@ import { FakeJira, makeRawIssue } from './helpers/jira';
 import { makeRegistry } from './helpers/store';
 
 /**
- * Jira phase 1, Task 8 — the six read routes under `/api/jira` over the real `AppModule` (spec §8 and §12; preflight rulings P3, P8, P9, P10, P11, P14, P18).
+ * Jira phase 1 — the six read routes under `/api/jira` over the real `AppModule` (spec §8 and §12; preflight rulings P3, P8, P9, P10, P11, P14, P18).
  *
  * One app per describe, because the configuration IS the describe: the keys and the fake's switches must be in place BEFORE `app.init()` (the poller's boot
  * tick runs at init), and a 429 window or a 401 opened by one case would turn every later case in the same app into that refusal. Every app is built on

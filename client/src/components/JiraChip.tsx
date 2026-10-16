@@ -24,7 +24,7 @@ import type { JiraBoardStatus, JiraStatusPayload } from '../../../shared/types';
  * would be two one-second clocks and two popovers able to join the Escape stack). It is drawn only while `configured` is true: an unconfigured machine pays
  * for no interval and sees no chip.
  *
- * **One initial (R10).** The first letter of `me.name`, `?` while `me` is null — the same shape `TrackerChip` has for a login. `initialsOf`'s two letters are
+ * **One initial.** The first letter of `me.name`, `?` while `me` is null — the same shape `TrackerChip` has for a login. `initialsOf`'s two letters are
  * the board CARD's reading and belong nowhere else.
  *
  * **Name versus description (#230), as `TrackerChip` does.** The accessible name is `Jira: <full name>` and never moves; the meters' readings change every
@@ -85,7 +85,7 @@ export function JiraChip({ section }: { section: Section }) {
   );
 }
 
-/** R10's one initial — the first letter of the (trimmed) name, `?` for none — in one place for the chip and its popover. */
+/** The one initial — the first letter of the (trimmed) name, `?` for none — in one place for the chip and its popover. */
 const initialOf = (name: string): string => (name === '' ? '?' : name.charAt(0).toUpperCase());
 
 type Reading = { value: string; fraction: number | null; tone: 'green' | 'amber' | 'red' };

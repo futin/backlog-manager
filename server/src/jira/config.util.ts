@@ -265,7 +265,7 @@ function trimmedLengthWithin(value: unknown, max: number): value is string {
 /**
  * Validate a `POST /api/jira/boards` body (spec §5) and return it trimmed. The error names the offending field, because the route returns it as the 400's
  * `error` and the board sheet puts the sentence under the field. Whether an `id` EXISTS is not asked here — `writeBoard` knows the file; a malformed id on an
- * update is the 404 the route gives, and only a value that is not a string or `null` is a 400 here (R11).
+ * update is the 404 the route gives, and only a value that is not a string or `null` is a 400 here.
  */
 export function parseBoardWrite(body: unknown): Parsed<JiraBoardWrite> {
   if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
@@ -291,7 +291,7 @@ export function parseBoardWrite(body: unknown): Parsed<JiraBoardWrite> {
     if (!isRecord(q)) return { ok: false, error: `queries[${i}] must be an object` };
     if (!trimmedLengthWithin(q.label, JIRA_NAME_MAX_CHARS)) return { ok: false, error: `queries[${i}].label must be 1–${JIRA_NAME_MAX_CHARS} characters` };
     if (!trimmedLengthWithin(q.jql, JIRA_JQL_MAX_CHARS)) return { ok: false, error: `queries[${i}].jql must be 1–${JIRA_JQL_MAX_CHARS} characters` };
-    // A query id that is not a string is no id at all (R3: an id only matters when the stored board holds it), so it reads as `null`, not as a 400.
+    // A query id that is not a string is no id at all (an id only matters when the stored board holds it), so it reads as `null`, not as a 400.
     queries.push({ id: typeof q.id === 'string' ? q.id : null, label: q.label.trim(), jql: q.jql.trim() });
   }
   if (roots.length === 0 && queries.length === 0) return { ok: false, error: 'a board needs at least one of roots or queries' };
@@ -299,7 +299,7 @@ export function parseBoardWrite(body: unknown): Parsed<JiraBoardWrite> {
 }
 
 /**
- * One spelling per path (R4), or `null` when `raw` has none. The dashboard compares repository paths as raw strings, so the server stores exactly one
+ * One spelling per path, or `null` when `raw` has none. The dashboard compares repository paths as raw strings, so the server stores exactly one
  * spelling: `~` and a leading `~/` expand to `home`, `~user/…` is refused, the result must be absolute with no empty, `.` or `..` segment, and one trailing
  * `/` is dropped (`/` alone stays `/`).
  */
@@ -320,7 +320,7 @@ export function normaliseRepoPath(raw: string, home: string): string | null {
     : path;
 }
 
-/** Validate a `POST /api/jira/repos` body: a project key and at most ten paths, normalised (R4) and deduplicated AFTER normalisation. `[]` is valid — it removes the key. */
+/** Validate a `POST /api/jira/repos` body: a project key and at most ten paths, normalised and deduplicated AFTER normalisation. `[]` is valid — it removes the key. */
 export function parseReposWrite(body: unknown, home: string): Parsed<{ project: string; paths: string[] }> {
   if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
   if (typeof body.project !== 'string' || !JIRA_PROJECT_KEY_RE.test(body.project)) return { ok: false, error: 'project must be a Jira project key like PAY' };
@@ -405,7 +405,7 @@ function idsIn(current: Record<string, unknown>): Set<string> {
 
 /**
  * Create a board (`input.id === null`) or update the one holding `input.id`, and return it as stored. A create ignores every id the client sent and mints
- * fresh ones for the board and each query (R3: no stored board holds them). An update keeps a query's id only when the STORED board holds it — once each; a
+ * fresh ones for the board and each query (no stored board holds them). An update keeps a query's id only when the STORED board holds it — once each; a
  * query's identity is never inferred from its label or JQL — and mints for every other query, so a client cannot choose an id. The board keeps its position in
  * `boards`; every other entry, malformed ones included, and every other top-level key survive untouched. An update whose id the file does not hold (or holds
  * only as an entry the reader would drop) throws `JiraUnknownIdError` before anything is written.

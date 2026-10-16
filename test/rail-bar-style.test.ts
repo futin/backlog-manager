@@ -36,7 +36,7 @@ describe('narrow rail bar stylesheet rules', () => {
     expect(ruleBlocks(wide, HIDE)).toEqual([]);
   });
 
-  // R12: two chips (GitHub tracker + Jira) in the bar would run ~178 px over and clip ☰, so both drop their meters; one chip keeps them.
+  // Jira phase 2: two chips (GitHub tracker + Jira) in the bar would run ~178 px over and clip ☰, so both drop their meters; one chip keeps them.
   const FIRST = '.rail-bar .tracker-chip-root:has(+ .tracker-chip-root) .tracker-meters';
   const SECOND = '.rail-bar .tracker-chip-root + .tracker-chip-root .tracker-meters';
 

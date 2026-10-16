@@ -4,7 +4,7 @@ import { JIRA_RATE_LIMIT_DEFAULT_MS, accessOf, jiraHttpError } from '../server/s
 import { FakeJira, makeRawIssue } from './helpers/jira';
 
 /**
- * The Jira client, the §8 error mapping, and the fake both are tested against (Jira phase 1, Task 3; spec §3 and §8).
+ * The Jira client, the §8 error mapping, and the fake both are tested against (Jira phase 1; spec §3 and §8).
  *
  * The client is driven over `FakeJira.fetch`, so what it puts on the wire is read off the fake's call log rather than asserted against a stub. The last
  * describe tests the fake itself: every later suite (the poller, the routes, the status payload) leans on its search resolution, its paging and its

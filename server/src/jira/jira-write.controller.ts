@@ -26,7 +26,7 @@ import { JiraPollerService } from './poller.service';
  * repair it, and nothing was written — #270's refusal, restated for three writers), and `JiraUnknownIdError` is a 404 `unknown board`, the same sentence and
  * status the read route gives a malformed or absent id. Anything else the writer throws is an I/O failure and stays Nest's 500.
  *
- * After the write, the poller is re-aimed. A saved board awaits `boardSaved` (R2), which sweeps THAT board and resolves when the sweep is done or after its
+ * After the write, the poller is re-aimed. A saved board awaits `boardSaved`, which sweeps THAT board and resolves when the sweep is done or after its
  * own `JIRA_SAVE_SWEEP_WAIT_MS` cap — it already races itself and never rejects, so this route adds no second timer. A deleted board drops its cache at once
  * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos write re-aims nothing: no sweep reads `repos`.
  */

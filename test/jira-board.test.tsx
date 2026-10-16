@@ -15,7 +15,7 @@ import { daysAgoStamp } from './helpers/dates';
 import type { JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
 
 /*
-  Jira › Board (Jira phase 2, Task 8; spec §6.2; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, in the style of `tracker-board.test.tsx`: the band
+  Jira › Board (Jira phase 2; spec §6.2; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, in the style of `tracker-board.test.tsx`: the band
   and its picker, the three filters and the summary search, the three status-category columns and the card face, and the two shapes that must never be
   confused with an empty site — a `jira.json` that cannot be read (Review Focus 2) and a stored board pick that names no board (Review Focus 3).
 
@@ -469,7 +469,7 @@ it('draws no page switch inside main', async () => {
   expect(within(main).queryByRole('button', { name: /^(Board|Setup)$/ })).toBeNull();
   expect(within(main).queryByRole('tab')).toBeNull();
   expect(within(main).queryByRole('tablist')).toBeNull();
-  // And the card's click goes to the slot the issue modal fills — no throw, no dialog yet (Task 9 draws it).
+  // And the card's click goes to the slot the issue modal fills — no throw, no dialog from this page alone.
   await act(async () => {
     card('Refund partial captures').click();
   });

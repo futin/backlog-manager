@@ -14,7 +14,7 @@ import { errorOf, postJson, type JiraProjectList } from './JiraBoardSheet';
  * are worked in. It is `jira.json`'s `repos` map, one project key to a list of absolute paths, and the only thing on this page that is not about boards.
  *
  * - **One row per mapped path**, the project (`PAY · Payments` on the project's first row, the bare key on its later ones — the name once is enough), the
- *   path through `displayPath` (`$HOME` as `~`, from the status' own `home`, R1), and a `×`. The names come from the STATUS' `projects`, the union of every
+ *   path through `displayPath` (`$HOME` as `~`, from the status' own `home`), and a `×`. The names come from the STATUS' `projects`, the union of every
  *   key seen on a board and every mapped key, so a mapped project no board shows any more still reads by key.
  * - **A warning row per `unmappedProjects` entry** — a project with issues on some board and no path — in the words the spec gives, after the mapped rows.
  * - **The add row**: a project `Select` over `/api/jira/projects`, a path field and `Add`. That list is `JiraSetupView`'s ONE read, handed down: this card
@@ -23,7 +23,7 @@ import { errorOf, postJson, type JiraProjectList } from './JiraBoardSheet';
  *
  * **A write replaces one project's whole list** (`POST /api/jira/repos` `{ project, paths }`, spec §5), so `×` sends the list minus that path and `Add` the
  * list plus the typed one. An emptied list removes the key, which is how a project becomes unmapped again. The typed path goes out TRIMMED but otherwise as
- * typed — `~/ops` stays `~/ops`: the SERVER expands `~` and normalises (R4), so the browser holds no second normaliser to drift from it, and the one spelling
+ * typed — `~/ops` stays `~/ops`: the SERVER expands `~` and normalises, so the browser holds no second normaliser to drift from it, and the one spelling
  * the server stores is what the status then reads back. A refusal (400 with the path's sentence, 409 for a `jira.json` that cannot be read, 503) is shown
  * under the add row in the server's words and changes nothing locally: the typed path stays in the field and a refused `×` removes no row — the card only
  * ever draws what the status says is stored. A landed write reloads the status even if this page has gone (`reload` is the shell's, which outlives it),

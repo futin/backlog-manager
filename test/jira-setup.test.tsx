@@ -13,7 +13,7 @@ import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import type { JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
 
 /*
-  Jira › Setup (Jira phase 2, Task 10; spec §6.4; DESIGN.md §8.9.3) — the real page over a mocked `fetch`, in `jira-board.test.tsx`'s style: the Boards
+  Jira › Setup (Jira phase 2; spec §6.4; DESIGN.md §8.9.3) — the real page over a mocked `fetch`, in `jira-board.test.tsx`'s style: the Boards
   card (its order, its line per board, `Open board`, the filter field from the sixth board) and the board sheet (new and edit, the roots search, the four
   query chips, the debounced JQL check, Save and Delete, and Review Focus 2's unreadable `jira.json`).
 
@@ -21,7 +21,7 @@ import type { JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/ty
   Escape are asserted against the same store the rail's tree writes. Every request is recorded with its init, because several cases are about a request that
   must NOT be made and the save cases are about the body. Fixture stamps are relative to the clock the assertion runs under (`test/fixture-clock.test.ts`).
 
-  Task 11 appends the Repositories and Connection cases below (the last two describes).
+  The Repositories and Connection cases follow below (the last two describes).
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
@@ -319,7 +319,7 @@ describe('the board sheet — new', () => {
     expect(await within(dialog).findByText('Jira refused the search: reserved character')).toBeInTheDocument();
   });
 
-  it('`+ Assigned to me` adds a row with R5’s label and JQL', async () => {
+  it('`+ Assigned to me` adds a row with the preset’s label and JQL', async () => {
     await renderSetup();
     const dialog = await openNew();
     await userEvent.click(within(dialog).getByRole('button', { name: '+ Assigned to me' }));
@@ -519,7 +519,7 @@ describe('Escape', () => {
   });
 });
 
-/* ── Task 11: Repositories and Connection ─────────────────────────────────────────────────────────────────────────────────────────────────────────── */
+/* ── Repositories and Connection ─────────────────────────────────────────────────────────────────────────────────────────────────────────── */
 
 const PROJECTS = [
   { key: 'PAY', name: 'Payments' },

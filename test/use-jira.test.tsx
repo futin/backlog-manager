@@ -12,7 +12,7 @@ import { TRACKER_FETCH_SLACK_MS } from '../client/src/hooks/useTrackers';
 import type { JiraBoardStatus, JiraIssue, JiraStatusPayload, SyncInterval } from '../shared/types';
 
 /**
- * `useJira` on the boards' own clock (Jira phase 2, Task 6): one read of `GET /api/jira` on mount and on focus, then exactly one pending timer aimed at
+ * `useJira` on the boards' own clock (Jira phase 2): one read of `GET /api/jira` on mount and on focus, then exactly one pending timer aimed at
  * the soonest board's next poll, plus `useJiraBoard`'s coalesced poll of one board's list. Fake timers throughout; every fetch is counted and every
  * date is relative to the clock the assertion runs under.
  */

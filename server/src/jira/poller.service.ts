@@ -81,7 +81,7 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * Every instant here — `polledAt`, `last429At`, the window, the back-off — comes from `Date.now()`, never `new Date()`, so a suite that mocks `Date.now`
  * controls the only clock this file reads.
  *
- * ## Why a saved board is swept at once, and waited for (phase 2, R2)
+ * ## Why a saved board is swept at once, and waited for (phase 2)
  *
  * A board save lands in `jira.json`; the client reloads the board and `GET /api/jira` on the route's answer. If the route answered first, the client would read
  * the pre-save list with nothing on its own clock to ask again for up to a whole interval (or ever, for `off`). So `boardSaved(id)` sweeps that board now and
@@ -101,7 +101,7 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
 
 /** The base tick, the GitHub poller's. Every `SyncInterval` is a whole number of these, so the tick is the resolution and no board needs its own timer. */
 export const JIRA_POLL_MS = 15_000;
-/** The longest a board save waits for its own sweep (R2); past it the route answers and the sweep finishes on its own. */
+/** The longest a board save waits for its own sweep; past it the route answers and the sweep finishes on its own. */
 export const JIRA_SAVE_SWEEP_WAIT_MS = 20_000;
 /** Issues kept per saved query. Silent: spec §3 ties `truncated` to the board cap alone, and the band's copy says `first 500 shown`. */
 export const JIRA_QUERY_CAP = 200;

@@ -15,7 +15,7 @@ import { FakeJira, makeRawIssue } from './helpers/jira';
 import { makeRegistry } from './helpers/store';
 
 /**
- * Jira phase 2, Task 3 — the three write routes under `/api/jira` over the real `AppModule` (spec §5 and §8; R2, R4, R11; Review Focus 1 and 2).
+ * Jira phase 2 — the three write routes under `/api/jira` over the real `AppModule` (spec §5 and §8; Review Focus 1 and 2).
  *
  * The same shape as `test/jira-routes.test.ts`: one app per describe, because the configuration IS the describe (the fake's switches and the `jira.json` the
  * poller boots against must be in place before `app.init()`), every app on a `JiraClient` over a fake `fetch`, so nothing here reaches a real Jira.
@@ -137,7 +137,7 @@ describe('configured, against a healthy Jira', () => {
   });
   afterAll(() => app.close());
 
-  it('POST /boards creates a board: 200, a minted id, listed by GET /api/jira, and swept before the answer (R2)', async () => {
+  it('POST /boards creates a board: 200, a minted id, listed by GET /api/jira, and swept before the answer', async () => {
     expect(searches()).toEqual([]);
     const res = await post('/boards', BOARD).expect(200);
     expect(res.body).toEqual({ ...BOARD, id: expect.stringMatching(/^b_[0-9a-f]{8}$/) });
@@ -164,7 +164,7 @@ describe('configured, against a healthy Jira', () => {
     expect((await post('/boards', { ...BOARD, id }).expect(404)).body).toEqual({ error: 'unknown board' });
   });
 
-  it('POST /boards with a non-string id is 400 naming id (R11)', async () => {
+  it('POST /boards with a non-string id is 400 naming id', async () => {
     const res = await post('/boards', { ...BOARD, id: 7 }).expect(400);
     expect(res.body.error).toContain('id');
   });

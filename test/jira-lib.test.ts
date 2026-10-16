@@ -36,7 +36,7 @@ import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraStatusPayload } from '.
 import { daysAgoStamp } from './helpers/dates';
 
 /**
- * The client's Jira derivations (Jira phase 2, Task 5). Every case builds its stamps from the clock the assertion runs under (`test/helpers/dates.ts`, and
+ * The client's Jira derivations (Jira phase 2). Every case builds its stamps from the clock the assertion runs under (`test/helpers/dates.ts`, and
  * `now` below), never from an absolute literal: a fixture dated the day it was written is an expiry date, not a constant.
  */
 
@@ -270,7 +270,7 @@ describe('bandSub', () => {
     expect(bandSub(board({ count: 1, polledAt: ago(now, 12 * SECOND) }), site, now).text).toContain(' · 1 issue from ');
   });
 
-  it('reads not polled yet where an age would be (R8)', () => {
+  it('reads not polled yet where an age would be', () => {
     expect(bandSub(board({ polledAt: null }), site, Date.now()).text).toBe('acme.atlassian.net · 14 issues from 2 roots and 1 query · not polled yet');
   });
 
@@ -328,7 +328,7 @@ describe('boardRowLine', () => {
     expect(boardRowLine(board({ roots: [], count: 0, polledAt: ago(now, 12 * SECOND) }), now).text).toBe('1 query · every 1m · polled 12 s ago');
   });
 
-  it('reads not polled yet for a board never swept (R8)', () => {
+  it('reads not polled yet for a board never swept', () => {
     expect(boardRowLine(board({ polledAt: null }), Date.now()).text).toBe('2 roots · 1 query · 14 issues · every 1m · not polled yet');
     expect(boardRowLine(board({ interval: 'off', polledAt: null }), Date.now()).text).toBe('2 roots · 1 query · 14 issues · sync off · not polled yet');
   });
@@ -477,7 +477,7 @@ describe('constants', () => {
     expect(JIRA_BOARD_FILTER_FROM).toBe(6);
   });
 
-  it('pins the three presets (R5): the chip text, the row label and the JQL each', () => {
+  it('pins the three presets: the chip text, the row label and the JQL each', () => {
     expect(JIRA_QUERY_PRESETS).toEqual([
       { chip: 'Assigned to me', label: 'Assigned to me', jql: 'assignee = currentUser() AND statusCategory != Done' },
       { chip: 'Open in current sprint', label: 'Open in current sprint', jql: 'sprint in openSprints() AND statusCategory != Done' },
@@ -485,7 +485,7 @@ describe('constants', () => {
     ]);
   });
 
-  it('pins the custom chip beside them: an empty row labelled Custom query (R5)', () => {
+  it('pins the custom chip beside them: an empty row labelled Custom query', () => {
     expect(JIRA_CUSTOM_QUERY).toEqual({ chip: 'Custom JQL', label: 'Custom query', jql: '' });
   });
 });

@@ -31,7 +31,7 @@ import { JiraSetupView } from './JiraSetupView';
  * Once a status has said `configured: true`, a later failed read keeps it (`useJira` keeps the last answer through a failure), so a page that is up stays
  * up through a blip; what a page says about a stale or failing status is that page's business.
  *
- * **The open issue is held HERE, not in the Board page.** The Board's card click lands in this slot (`onOpenIssue`), and the issue modal (Task 9) is drawn
+ * **The open issue is held HERE, not in the Board page.** The Board's card click lands in this slot (`onOpenIssue`), and the issue modal is drawn
  * from it. Held one level above the page so that the slot outlives a re-render of the board under it — a poll that reorders the columns, a board switch —
  * and is read by exactly one modal mount. The modal is drawn only beside the Board page: Setup has no card to open one from, and the slot is cleared whenever `page`
  * changes, so a stale issue never survives a trip to Setup and back (JiraView itself does not unmount on a page switch).

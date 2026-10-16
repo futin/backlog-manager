@@ -15,7 +15,7 @@ import type { Section } from '../client/src/lib/sections';
 import type { JiraBoardStatus, JiraStatusPayload } from '../shared/types';
 
 /**
- * The Jira chip and its popover (Jira phase 2, Task 12; spec §6.5; DESIGN.md §8.9.4). The context is provided directly, as `tracker-chip.test.tsx` does for
+ * The Jira chip and its popover (Jira phase 2; spec §6.5; DESIGN.md §8.9.4). The context is provided directly, as `tracker-chip.test.tsx` does for
  * its own: what this suite owns is what the chip READS off a status payload, and `use-jira.test.tsx` owns how the payload arrives. The two home cases at the
  * bottom mount the real `App` instead, because "one chip in exactly one home" is a fact about the shell. Fake timers pin `useNow`'s one-second tick.
  */
@@ -97,7 +97,7 @@ describe('JiraChip', () => {
     expect(chip()).toBeInTheDocument();
   });
 
-  it('reads one initial (R10) and `Jira · <first name>`', () => {
+  it('reads one initial and `Jira · <first name>`', () => {
     renderChip(status());
     expect(chip().querySelector('.tracker-av')).toHaveTextContent(/^A$/);
     expect(within(chip()).getByText('Jira · Ada')).toBeInTheDocument();

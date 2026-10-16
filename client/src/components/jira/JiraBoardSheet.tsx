@@ -29,7 +29,7 @@ import { SettingsRow } from '../ui/SettingsRow';
  * - **Roots** — the keys, one row each with ×, and a search field whose `Popover` lists `/api/jira/search` answers; a pick adds the key. Only the KEY is
  *   stored (`JiraBoard.roots` is `string[]`), so a row reads the key alone: the summary shown in the popover is not kept, and an edited board's roots arrive
  *   without one — fetching each to draw a summary would be twenty Jira calls to decorate a list the person already knows.
- * - **Queries** — the four chips (`JIRA_QUERY_PRESETS` and `JIRA_CUSTOM_QUERY`, R5; the leading `+ ` is drawn here, the presets store their chip text
+ * - **Queries** — the four chips (`JIRA_QUERY_PRESETS` and `JIRA_CUSTOM_QUERY`; the leading `+ ` is drawn here, the presets store their chip text
  *   without it) and a row per query: label `.set-text`, JQL `.sheet-prompt` textarea, and the check line.
  *
  * **Every refusal keeps the sheet.** Save and Delete leave it open on any answer but a 200, with every edit where the person left it and the server's own
@@ -38,7 +38,7 @@ import { SettingsRow } from '../ui/SettingsRow';
  * the sheet repeats only the one rule a person cannot miss — a name and at least one root or query — as the disabled action, because a button that is
  * clickable and then refuses for an empty form teaches nothing.
  *
- * **A save waits for its sweep.** The route answers after the poller has swept the saved board, bounded at `JIRA_SAVE_SWEEP_WAIT_MS` (20 s, R2), so the
+ * **A save waits for its sweep.** The route answers after the poller has swept the saved board, bounded at `JIRA_SAVE_SWEEP_WAIT_MS` (20 s), so the
  * action reads `saving…` for that long at most and the reload that follows shows the board already polled. The cap is the server's; the sheet adds no
  * timer of its own, and a server that never answered would leave `saving…` up with Cancel still live.
  *
@@ -55,7 +55,7 @@ export const JIRA_JQL_CHECK_DEBOUNCE_MS = 500;
  */
 export const JIRA_ROOT_SEARCH_DEBOUNCE_MS = 300;
 
-/** A query row as the sheet holds it: the stored id (R3 — kept only for a row that came from the board), plus a local key React can reconcile on. */
+/** A query row as the sheet holds it: the stored id (kept only for a row that came from the board), plus a local key React can reconcile on. */
 interface QueryRowState {
   key: number;
   id: string | null;
@@ -128,7 +128,7 @@ export function JiraBoardSheet({
         queries: rows.map((r) => ({ id: r.id, label: r.label, jql: r.jql }))
       });
       // A landed save reloads the status even when the sheet was closed (Escape, Cancel) while it was in flight: the write happened, and the card under the
-      // sheet would otherwise read the pre-save board until the next status poll — which, for a page of `off` boards, is never (R2's own reason).
+      // sheet would otherwise read the pre-save board until the next status poll — which, for a page of `off` boards, is never (the reason the route waits for the sweep at all).
       if (answer.ok) reload();
       if (!mounted.current) return;
       if (!answer.ok) {
@@ -288,7 +288,7 @@ export function JiraBoardSheet({
 }
 
 /**
- * The `Unresolved in a project…` chip's `Select`, drawn in the chip's place while open (R5). Its first option is a placeholder so that picking the first
+ * The `Unresolved in a project…` chip's `Select`, drawn in the chip's place while open. Its first option is a placeholder so that picking the first
  * real project is a change; a pick adds the row and puts the chip back. The list is `JiraSetupView`'s one read; while it is still loading the `Select` is
  * disabled, and a failed read says so rather than offering an empty list that reads as "no projects".
  */
@@ -393,7 +393,7 @@ type Check = { kind: 'idle' } | { kind: 'checking' } | { kind: 'ok'; count: numb
 /**
  * One query row: label, JQL, and the check line — `/api/jira/jql/check` for the row's JQL, `JIRA_JQL_CHECK_DEBOUNCE_MS` after the last edit (so three
  * keystrokes 100 ms apart are ONE request), and again for a row that arrives with JQL (a preset, or an edited board's stored query), so every row says
- * whether Jira accepts it before Save is pressed. `4 issues match · checked 3 s ago` (the age through `pollAge`, R9), or Jira's parse message in red — the
+ * whether Jira accepts it before Save is pressed. `4 issues match · checked 3 s ago` (the age through `pollAge`), or Jira's parse message in red — the
  * server folds a parse error and the count call's refusal of an unbounded query into one `{ ok: false, message }` (spec §5). A refused CHECK (400, 503) is
  * red too, with the server's sentence: a line that said nothing then would read as a JQL nobody had looked at.
  */

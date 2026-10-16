@@ -657,10 +657,10 @@ export interface JiraStatusPayload {
   /** `sweep` is every call the last tick made, however many boards it swept; `last429At` is an ISO instant or `null`. */
   calls: { sweep: number; last429At: string | null };
   live: Record<string, never>;
-  /** The poller's `armed` getter: a tick is scheduled. The Connection row's `every 15 s` / `idle` has no other source (R1). Always `false` while unconfigured. */
+  /** The poller's `armed` getter: a tick is scheduled. The Connection row's `every 15 s` / `idle` has no other source. Always `false` while unconfigured. */
   armed: boolean;
   /**
-   * `os.homedir()`, read per call, `null` while unconfigured (R1). The Repositories card shows a path under `$HOME` as `~` and the browser has no other way to
+   * `os.homedir()`, read per call, `null` while unconfigured. The Repositories card shows a path under `$HOME` as `~` and the browser has no other way to
    * know `$HOME`; the compose stack passes the host's `HOME` through, so the container's `homedir()` is the host's.
    */
   home: string | null;

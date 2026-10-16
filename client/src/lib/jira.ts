@@ -9,8 +9,8 @@ import type { JiraAccess, JiraBoard, JiraBoardFailure, JiraBoardStatus, JiraIssu
  *
  * Nothing here reads a clock of its own. `now` is a REQUIRED parameter wherever an age is printed, with no `Date.now()` default — `tracker.ts`'s rule and
  * its reason: a default is how the next call site reads its own clock without noticing, and then one surface ages two readings against two instants.
- * Every age goes through `pollAge` (R9), so a Jira poll reads `12 s` and `4m` exactly as a GitHub one does, and a board not swept yet reads `not polled
- * yet` (R8) wherever an age would be — never `NaN`, never `0 s`, which is the opposite claim.
+ * Every poll or check age goes through `pollAge`, so a Jira poll reads `12 s` and `4m` exactly as a GitHub one does (a card's age is `elapsedSince`'s own
+ * reading), and a board not swept yet reads `not polled yet` wherever an age would be — never `NaN`, never `0 s`, which is the opposite claim.
  */
 
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ export const JIRA_429_RED_MS = 15 * 60_000;
 export const JIRA_BOARD_FILTER_FROM = 6;
 
 /**
- * The board sheet's query chips (R5), the ONE home of their copy and JQL. `chip` is the text on the chip (the sheet draws the leading `+`), `label` the
+ * The board sheet's query chips, the ONE home of their copy and JQL. `chip` is the text on the chip (the sheet draws the leading `+`), `label` the
  * label the row it adds is born with, and they differ for exactly one preset: `Unresolved in a project…` reveals a `Select` over `/api/jira/projects` in
  * place, and the row it adds is labelled `Unresolved in <KEY>` with the picked key substituted for the placeholder in `label` and `jql` alike. All of them
  * are bounded — Jira Cloud refuses an unbounded JQL (P2) — and the sheet's check line verifies them like any other row.
@@ -46,7 +46,7 @@ export const JIRA_QUERY_PRESETS: readonly JiraQueryPreset[] = [
   { chip: 'Unresolved in a project…', label: 'Unresolved in <KEY>', jql: 'project = "<KEY>" AND resolution = Unresolved' }
 ];
 
-/** The fourth chip, `+ Custom JQL` (R5): an empty row for a person to write, labelled `Custom query`. Not a preset — it has no JQL of its own. */
+/** The fourth chip, `+ Custom JQL`: an empty row for a person to write, labelled `Custom query`. Not a preset — it has no JQL of its own. */
 export const JIRA_CUSTOM_QUERY: JiraQueryPreset = { chip: 'Custom JQL', label: 'Custom query', jql: '' };
 
 // ── Columns, order, the card ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ export function crumbText(crumb: JiraCrumb): string | null {
 
 /**
  * The card's person badge: the first letter of the first two words, upper-cased. `Jean-Luc Picard Jr` is `JP` — a hyphenated name is one word. Nothing to
- * read is `?`. (The rail chip draws ONE initial, `me.name`'s first letter — R10; this two-letter reading is the card's alone.)
+ * read is `?`. (The rail chip draws ONE initial, `me.name`'s first letter; this two-letter reading is the card's alone.)
  */
 export function initialsOf(name: string): string {
   const letters = name
@@ -153,8 +153,8 @@ const count = (n: number, noun: 'root' | 'query' | 'issue'): string => `${n} ${n
 const countOrNull = (n: number, noun: 'root' | 'query' | 'issue'): string | null => (n > 0 ? count(n, noun) : null);
 
 /**
- * The age half of a poll sentence: `polled 12 s ago`, or R8's `not polled yet`. `last` is Setup's off-board wording, where the poll is history. Exported for
- * the chip popover (Task 12), so a board's age is worded once across the Band, Setup and the chip.
+ * The age half of a poll sentence: `polled 12 s ago`, or `not polled yet`. `last` is Setup's off-board wording, where the poll is history. Exported for
+ * the chip popover, so a board's age is worded once across the Band, Setup and the chip.
  */
 export function polledPhrase(polledAt: string | null, now: number, last = false): string {
   const age = pollAge(polledAt, now);
@@ -223,7 +223,7 @@ export function callsReading(calls: JiraStatusPayload['calls'], now: number): { 
 
 /**
  * The Connection card's last-sweep reading, in the two halves it draws: `lead` — `every 15 s · 12 calls` while the poller is `armed` (a tick is scheduled; the
- * server's base tick is 15 s, `TRACKER_POLL_MS`), `idle · 12 calls` otherwise — and `rate`, the 429 clause: `last 429 4m ago` (through `pollAge`, R9) or
+ * server's base tick is 15 s, `TRACKER_POLL_MS`), `idle · 12 calls` otherwise — and `rate`, the 429 clause: `last 429 4m ago` (through `pollAge`) or
  * `no 429 since start`, with `red` set by `callsReading`'s own window so this card and the chip's meter agree on when Jira "recently refused". An unparseable
  * `last429At` still says a 429 happened, but not when, and is never red.
  */
@@ -411,8 +411,9 @@ export function displayPath(path: string, home: string | null): string {
 
 /**
  * The shape guard `useJira` reads `GET /api/jira` through (`isTrackersPayload`'s role and reason). It checks what a render MAPS or READS without a
- * null-safe expression — the three collections and the two fields phase 2 added — because a body missing one throws a `TypeError` inside a render, and
- * React unmounts the page when it does. A wrong-shaped ROW degrades to a row that says less instead.
+ * null-safe expression — the three collections and `armed`, the field phase 2 added (it proves a phase-2 server, so `home` is read null-safely after
+ * it) — because a body missing one throws a `TypeError` inside a render, and React unmounts the page when it does. A wrong-shaped ROW degrades to a
+ * row that says less instead.
  */
 export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

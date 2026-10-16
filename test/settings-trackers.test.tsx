@@ -171,7 +171,7 @@ describe('the Trackers card’s sync picker', () => {
 });
 
 /**
- * The Jira row (Jira phase 2, Task 12; DESIGN.md §8.9.4): one read-only line after the GitHub rows, drawn only while Jira is configured. Jira's board
+ * The Jira row (Jira phase 2; DESIGN.md §8.9.4): one read-only line after the GitHub rows, drawn only while Jira is configured. Jira's board
  * intervals are NOT editable here — they live on Jira › Setup, which the row names and does not link (the rail's tree is the only page switch).
  */
 function jiraBoard(id: string): JiraBoardStatus {

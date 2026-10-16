@@ -300,7 +300,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
      wordmark took the dashboard's 10 px dot and 9 px gap (2026-10-01), which made the brand 88 px rather than 83.8. The prompt-cursor wordmark that
      replaced it (2026-10-14) measures 87.8 px in this bar at 375 px, so the slack stands. */
   .rail-bar .tracker-chip .tracker-name:has(+ .tracker-meters) { display: none }
-  /* R12 (Jira phase 2): two chips in the bar — the GitHub tracker and Jira, siblings straight out of `chipSlot`, each a `.tracker-chip-root` — drop their
+  /* Jira phase 2: two chips in the bar — the GitHub tracker and Jira, siblings straight out of `chipSlot`, each a `.tracker-chip-root` — drop their
      meters too, leaving avatar, pip and caret. The login rule above is not enough: with both chips the row measured ~178 px over the 351 px content box,
      and since every item but ☰ is `flex: none`, ☰ — the phone's only section switch — was pushed past `.rail`'s `overflow-x: hidden` and clipped, the
      failure #229 fixed for one chip and DESIGN.md §8.0's rule that ☰ never gives up space forbids. The pip still carries the one reading that must not

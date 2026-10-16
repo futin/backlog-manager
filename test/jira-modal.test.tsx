@@ -14,10 +14,10 @@ import { daysAgoStamp } from './helpers/dates';
 import type { JiraBoardStatus, JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../shared/types';
 
 /*
-  Jira › the issue modal (Jira phase 2, Task 9; spec §6.3 minus R7; DESIGN.md §8.9.2) — the real modal over a mocked `fetch`. It composes `ui/Modal`, so the
+  Jira › the issue modal (Jira phase 2; spec §6.3 minus its controls; DESIGN.md §8.9.2) — the real modal over a mocked `fetch`. It composes `ui/Modal`, so the
   scrim, the close control and the Escape key are the shell's and are asserted here only as far as "this surface still gets them". What it owns: the facts
   column (drawn from the CARD's issue while the detail loads, and kept when the read fails), the description through the sanitising renderer, the Subtasks
-  list, and the absence of every control (R7). Fixture stamps are relative to the clock the assertion runs under (`test/helpers/dates.ts`).
+  list, and the absence of every control. Fixture stamps are relative to the clock the assertion runs under (`test/helpers/dates.ts`).
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
@@ -252,7 +252,7 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
   });
 });
 
-describe('JiraIssueModal — phase 2 has no controls (R7)', () => {
+describe('JiraIssueModal — phase 2 has no controls', () => {
   it('draws no Assign to me, Move to, Run or Stop session', async () => {
     mount();
     await screen.findByText('not');

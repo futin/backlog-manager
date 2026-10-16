@@ -3032,7 +3032,7 @@ makes first because the route's read and the writer's read would be two reads: a
 the person to fix or delete the file by hand and that nothing was written, the one sentence the board sheet shows under its footer with every edit intact.
 
 **Config writes do not wait on Jira.** They are open under `access: unauthorized` and `unsupported`: they touch only `jira.json`, and a person whose token
-expired is exactly the one who needs to be able to correct a board. The sweep a save triggers is the poller's, bounded (R2) and a no-op where it cannot run,
+expired is exactly the one who needs to be able to correct a board. The sweep a save triggers is the poller's, bounded and a no-op where it cannot run,
 so the route answers 200 with the board either way.
 
 **The fallback is per entry, because the data is hand-written.** One bad value costs its own entry: a board with a mistyped id, a root that is not an issue

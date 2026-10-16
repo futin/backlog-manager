@@ -8,14 +8,15 @@ import { Fact } from '../ui/Fact';
 import { Modal } from '../ui/Modal';
 
 /**
- * JiraIssueModal — one Jira issue's detail, READ-ONLY (Jira phase 2, spec §6.3 minus R7; DESIGN.md §8.9.2, which applies §8.7's sidecar to a Jira issue).
+ * JiraIssueModal — one Jira issue's detail, READ-ONLY (Jira phase 2, spec §6.3 minus its controls; DESIGN.md §8.9.2, which applies §8.7's sidecar to a
+ * Jira issue).
  *
  * **It is the item modal's twin, not a second modal design.** It composes `ui/Modal` exactly as `board/ItemModal.tsx` does — so the scrim, the close
  * control, the Escape key (the LIFO stack in `useDialogEscape`, called by the shell and never here) and the 700 px fold are the shell's — and draws the same
  * facts column through `ui/Fact` and the same body through `.item-body`. `Modal`'s composer list is `[ItemModal, JiraIssueModal]` and a third is a design
  * change.
  *
- * **Phase 2 has no controls (R7).** No `Assign to me`, `Move to…`, `Run ▾` or `Stop session`, and no `session` fact: the controls row is ABSENT, not drawn
+ * **Phase 2 has no controls.** No `Assign to me`, `Move to…`, `Run ▾` or `Stop session`, and no `session` fact: the controls row is ABSENT, not drawn
  * disabled, because a disabled control is a promise that a later phase has not kept yet. `JiraIssueDetail.session` is still typed `null`, and so is unread.
  *
  * **Two sources, one column.** The card hands over the `JiraIssue` it was drawn from, and every fact the card already carries is drawn from it at once —

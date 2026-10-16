@@ -1,5 +1,5 @@
 /**
- * jira.ts — an in-memory Jira Cloud over the dozen endpoints this app touches (Jira phase 1, Task 3; spec §3, §6 and §8).
+ * jira.ts — an in-memory Jira Cloud over the dozen endpoints this app touches (Jira phase 1; spec §3, §6 and §8).
  *
  * ## Why a whole little server rather than a stub per case
  *
@@ -214,7 +214,7 @@ export class FakeJira {
       const req = body as { jql: string; fields: string[]; maxResults: number; nextPageToken?: string };
       const found = this.resolve(req.jql);
       if ('error' in found) return this.refuse(400, found.error);
-      // The token is a page INDEX (`p1` points at the second page, `p2` the third), not an offset: that is what Task 6's paging cases assert.
+      // The token is a page INDEX (`p1` points at the second page, `p2` the third), not an offset: that is what the poller's paging cases assert.
       const page = req.nextPageToken ? Number(req.nextPageToken.replace(/^p/, '')) : 0;
       const start = page * req.maxResults;
       const end = Math.min(start + req.maxResults, found.keys.length);
