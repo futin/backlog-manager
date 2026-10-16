@@ -19,8 +19,8 @@ import type { MergeMode, OrchestratorRun, RunStage } from '../../../shared/types
  * The two stages below are the same claim's other half.
  *
  * Exported so a test can assert against the exact list the card renders
- * from, not a restatement of it. Read by ItemCard (the live strip), BoardView
- * (the column rank) and the Runs detail sheet's `active` chip
+ * from, not a restatement of it. Read by ItemCard (the live strip), `liveRank`
+ * (the column rank, lib/board-sort.ts) and the Runs detail sheet's `active` chip
  * (`runDetailModel`, lib/run-detail.ts) — one list, three readers, none
  * restating another. It lived in ItemCard.tsx until #271 moved it here,
  * beside the stage tone and glyph tables: `lib/` imports nothing from

@@ -9,28 +9,27 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { useReportWorking } from '../../hooks/useReportWorking';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useSettings } from '../../hooks/useSettings';
-import { isInProgress, isLiveWork } from '../../lib/item-progress';
 import { isStale, leavesBoard } from '../../lib/item-stale';
+import { NATURAL_DIR, liveRank, resolveSortKey, sortItems } from '../../lib/board-sort';
+import type { SortDir, SortKey } from '../../lib/board-sort';
 import { disabledReason } from '../../lib/gate-view';
 import { buildProjectHues } from '../../lib/project-hue';
 import { projectName } from '../../lib/project-label';
 import { PROJECT_KEY } from '../../lib/view-keys';
 import { projectDispatchGate, runClaimBlock } from '../../../../shared/agent';
 import { FilterBar, FilterSection, ProjectPicks } from '../FilterBar';
-import type { FilterBarSort, SortDir } from '../FilterBar';
+import type { FilterBarSort } from '../FilterBar';
 import { Band } from '../ui/Band';
 import { GatedChip } from '../ui/GatedChip';
 import { Segmented } from '../ui/Segmented';
 import { BoardColumn } from './BoardColumn';
 import type { BoardColumnSlug } from './BoardColumn';
 import { ItemCard } from './ItemCard';
-import { ACTIVE_RUN_STAGES } from '../../lib/run-stage';
 import type { RunCardState } from './ItemCard';
 import { ItemModal } from './ItemModal';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunChip } from './RunChip';
-import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
 import type { BacklogItem, RunStage, Section } from '../../../../shared/types';
 
 /* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
@@ -49,7 +48,6 @@ const SORT_DIR_KEY = 'backlog-manager.sort-dir';
 const ALL = 'all';
 
 type StatusFilter = 'open' | 'started' | 'done' | 'all';
-type SortKey = 'created' | 'name' | 'project';
 
 /* The Status switch's four options, in the order the old select listed them. `started` is labelled `In progress` because that is what the filter
    admits — live work by `liveRank`, not merely a `started:` stamp — and the value stays `started` because it is what STATUS_KEY has always stored. */
@@ -67,11 +65,6 @@ const SORT_OPTIONS: FilterBarSort<SortKey>['options'] = [
   { value: 'name', label: 'Name', hint: 'title, A–Z' },
   { value: 'project', label: 'Project', hint: 'grouped by repo' }
 ];
-
-/* Each key's natural direction — the order the board drew for it before the direction existed: newest first for `created`, A–Z for the other two.
-   A key change lands on the new key's own (so `Name` never opens Z→A because `Created` was descending), and a missing or unrecognised stored direction
-   resolves to it; the dashboard leaves the direction alone on every pick, and this board deliberately does not. */
-const NATURAL_DIR: Record<SortKey, SortDir> = { created: 'desc', name: 'asc', project: 'asc' };
 
 /**
  * Fixed column order — the design's order (Refactoring · Ideas · Bugs ·
@@ -96,138 +89,6 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
   { section: 'bugs', label: 'Bugs', slug: 'bugs' },
   { section: 'tasks', label: 'Tasks', slug: 'tasks' }
 ];
-
-/**
- * `created` compares as a string: backlog.mjs writes fixed-width UTC
- * YYYY-MM-DD, where lexicographic order is chronological order, and an
- * unparseable value sorts predictably instead of NaN-scrambling the list.
- *
- * A tracker item's `created` is the other shape — GitHub's full `created_at`, `YYYY-MM-DDTHH:MM:SSZ` (#237) — and string order still holds: every stamp is
- * the same fixed-width UTC `Z` form, so two same-day issues order by their time instead of tying and keeping the API's order (oldest issue first). In a
- * column mixing both shapes, a stamp sorts above the bare date of its own day (the date is its prefix), so a same-day files item lands below it under
- * Newest first. That is accepted, and pinned in board.test.tsx, rather than parsed away.
- *
- * A record keyed on `SortKey`, not the three-branch if/else this used to be:
- * `sortItems` below gives every sort a shared primary key (live work
- * first — `liveRank`), and a primary key that has to run in front of whichever comparator
- * is selected can only be written once against a record's shared call site —
- * three separate branches would each need their own copy of it.
- *
- * Each one is written ASCENDING and handed the direction as a `sign`, which it applies to its own key's comparison and to nothing else (the
- * band-filter spec's §3). That is the whole reason the sign is a parameter rather than a negation of the comparator's result at the call site: `project`
- * breaks its ties newest first, and a negated result would flip the tie-break with the key, so `Project (desc)` would read Z→A *and* oldest first inside
- * every project. `created` was `b` against `a` before the direction existed; it is `a` against `b` now and arrives at the same newest-first order through
- * its natural `desc`.
- */
-const COMPARATORS: Record<SortKey, (a: BacklogItem, b: BacklogItem, sign: 1 | -1) => number> = {
-  name: (a, b, sign) => sign * a.title.localeCompare(b.title),
-  project: (a, b, sign) => sign * a.project.localeCompare(b.project) || b.created.localeCompare(a.created),
-  created: (a, b, sign) => sign * a.created.localeCompare(b.created)
-};
-
-/* The key the board orders by, out of whatever SORT_KEY holds.
-
-   The `SortKey` type is not a promise that the stored value is one. It
-   arrives from localStorage through `usePersistedState`, which JSON.parses
-   whatever is stored and hands back anything it finds — the type describes
-   what this build WRITES, never what it is capable of READING. A key
-   hand-edited, or written by a later build and then rolled back, misses
-   `COMPARATORS` entirely, and an unguarded miss is *called*: `undefined(a, b)`
-   throws inside render. With no ErrorBoundary anywhere in client/src React
-   unmounted the tree to a blank page; since #270 `SectionBoundary` catches it
-   and draws a reload prompt instead, but the reload re-reads the same stored
-   key and throws again, so only clearing site data recovers either way.
-   Degrading to `created` is precisely what the if/else chain the record
-   replaced did in its final `else`, so this restores behaviour rather than
-   adding a new rule.
-
-   Resolved here, once, rather than as a `COMPARATORS[sort] ?? COMPARATORS.created`
-   lookup inside `sortItems` (where it lived until the band's filter track):
-   the sort track reads the key too now — it prints `Sort: <label> (<dir>)` and
-   ticks the chosen row — and a raw value handed to it would print `Sort: newest`
-   over a board ordered by Created, or, for a stored object, render that object
-   as a React child, which is the same failure by another road. One
-   resolution feeds the order, the label, the ticked row and the natural
-   direction, so the four cannot disagree. An own-property test rather than
-   `??`, because `COMPARATORS['constructor']` is not undefined.
-
-   Deliberately NOT matched by the Status filter, which reads the same
-   unvalidated storage and is left unguarded on purpose: a stale status value
-   just matches nothing in the four type columns, leaving a visibly narrowed
-   board — the filter button raised with a `1` on it, no option lit in the
-   Status switch — whose fix is `Clear all`, one click inside the panel that
-   button opens. (The Project filter goes further still and fails open to
-   "all".) The asymmetry is the point — a degraded board a user can reason
-   about is a different class of problem from a page that isn't there. */
-function resolveSortKey(stored: unknown): SortKey {
-  return typeof stored === 'string' && Object.prototype.hasOwnProperty.call(COMPARATORS, stored) ? (stored as SortKey) : 'created';
-}
-
-/**
- * The primary sort key every comparator shares, and the board's one answer to
- * "is anybody on this right now". Lower sorts first, so live cards float to the
- * top of their column no matter which comparator is selected, and whichever one
- * is selected still decides order *within* each rank — two live cards do not
- * collapse to file order against each other just because they tied.
- *
- *   0 — a fresh run is BLOCKED on a person (`ATTENTION_RUN_STAGES`).
- *   1 — a fresh run is working it (`ACTIVE_RUN_STAGES`), or a hand-run session
- *       has stamped `started:` on the file (`isInProgress`) and, on a tracker
- *       item, its claim still has a heartbeat inside `CLAIM_STALE_MS`
- *       (`isLiveWork`, #227).
- *   2 — everything else — a stale tracker claim among it.
- *
- * Rank 0 sits above running work because it is the only one of the three that
- * is waiting on the reader: a run that has stopped and will not restart on its
- * own is the single most actionable thing a column can contain.
- *
- * Hand-run and orchestrator-run live work deliberately TIE at rank 1. Both mean
- * "somebody is on this", and there is no reading under which one of them
- * deserves to sit above the other — the selected sort orders them against each
- * other exactly as it always has.
- *
- * Three readers, and they must not disagree: this rank orders the columns, its
- * `< 2` half is the Status filter's `started` predicate, and the same `< 2` half
- * gates the board's clock (`hasLive`). It is also, by construction, exactly the
- * set of cards `liveBarFor` (ItemCard.tsx) draws a bar for — the rank and the
- * marker are the same claim, one sorted and one painted, which is why neither
- * restates the other's stage lists.
- *
- * The card's queued band (`queuedStripFor`) paints in the same place and is
- * deliberately NOT in that set: an `orchestrator:queued` item is a plan nobody
- * is on yet, so it neither floats up a column nor counts as In progress.
- *
- * `now` is the clock the claim is aged against, and `null` asks for the UNAGED
- * reading — `isInProgress` alone, a stale claim still counted live. Exactly one
- * reader wants that: the gate on the board's clock (`hasLive`), which has to be
- * computed before the clock exists and has to run for a claim that is live now
- * so the card can be seen going stale later. Every other reader passes `now`.
- */
-const liveRank = (item: BacklogItem, stage: RunStage | undefined, now: number | null): 0 | 1 | 2 => {
-  if (stage !== undefined && ATTENTION_RUN_STAGES.includes(stage)) return 0;
-  if ((stage !== undefined && ACTIVE_RUN_STAGES.includes(stage)) || (now === null ? isInProgress(item) : isLiveWork(item, now))) return 1;
-  return 2;
-};
-
-/**
- * Onto a copy, never in place — the array belongs to the fetched index.
- *
- * `stageFor` is threaded in rather than read off the item: an orchestrated
- * item's file says nothing about the run working it (see `liveBarFor`'s own
- * comment for why), so the primary key can no longer be a pure function of one
- * item and the lookup has to come from the caller that holds the run payload.
- *
- * `sort` is already resolved (`resolveSortKey`, above), so the lookup cannot miss. `dir` reaches the key's own comparison only: `liveRank` stays the
- * primary key in both directions, because "live cards first" is not an order the reader chose and so not one a direction can turn over — the sort
- * popover's foot line says as much.
- */
-function sortItems(items: BacklogItem[], sort: SortKey, dir: SortDir, stageFor: (item: BacklogItem) => RunStage | undefined, now: number): BacklogItem[] {
-  const out = [...items];
-  const compare = COMPARATORS[sort];
-  const sign = dir === 'asc' ? 1 : -1;
-  out.sort((a, b) => liveRank(a, stageFor(a), now) - liveRank(b, stageFor(b), now) || compare(a, b, sign));
-  return out;
-}
 
 /**
  * The board: every registered project's items in four fixed type columns.
