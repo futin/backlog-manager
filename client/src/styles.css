@@ -1265,7 +1265,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-sheet-name { width: 260px }
 
 /* A root: its key at the card's own key reading (12/500 --ink2), the remove × pushed right. */
-.jira-sheet-root { display: flex; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--hairline) }
+.jira-sheet-root { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; border-bottom: 1px solid var(--hairline) }
 .jira-sheet-key { flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-sheet-x, .jira-setup-x {
   margin-left: auto; flex: none; padding: 4px; border: 0; background: none; cursor: pointer;
