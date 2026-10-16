@@ -1224,6 +1224,68 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-modal-comments { margin-top: 20px }
 .jira-modal-comments a { color: var(--cyan) }
 
+/* Jira › Setup (§8.9.3) — the page is Settings' own card language (`.set`, `.set-cols`, `.set-group`, `.set-row`, `.set-text`; §8.6), so what follows is only
+   what Setup adds to it: the Boards card's red failure and filter row, and the board sheet's body. Colours are existing tokens; nothing is under 11 px
+   (guard 3). */
+
+/* A board's last-sweep failure, beside its `boardRowLine` sentence — `--red` as the Board page's failing sub-line draws it, so one failure reads one colour
+   on both pages. */
+.jira-setup-failure { color: var(--red) }
+/* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */
+.jira-setup-filter { justify-content: flex-start }
+.jira-setup-filter .set-hint { margin-left: auto }
+
+/* The board sheet's sections. The body is `FormSheet`'s scrolling column; each section is a block of it with the mock's 15/500 heading over a 13 px why-line
+   (§8.1's row-name and hint sizes, so the sheet reads in the Setup page's register). */
+.jira-sheet-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0 }
+.jira-sheet-sec + .jira-sheet-sec { border-top: 1px solid var(--hairline); padding-top: 12px }
+.jira-sheet-sec-title { margin: 0; font-size: 15px; font-weight: 500; color: var(--ink) }
+.jira-sheet-why { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink2) }
+.jira-sheet-empty { margin: 0; font-size: 13px; color: var(--ink3) }
+.jira-sheet-name { width: 260px }
+
+/* A root: its key at the card's own key reading (12/500 --ink2), the remove × pushed right. */
+.jira-sheet-root { display: flex; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--hairline) }
+.jira-sheet-key { flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-sheet-x {
+  margin-left: auto; flex: none; padding: 4px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: 14px; line-height: 1; color: var(--ink3);
+}
+.jira-sheet-x:hover { color: var(--ink) }
+
+/* The roots search is its Popover's positioning parent (the panel hangs under it, right edges together), and the field takes the section's full width. */
+.jira-sheet-search { position: relative; display: flex; flex-direction: column; gap: 6px }
+.jira-sheet-search-field { width: 100% }
+.jira-sheet-match {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px;
+  border: 0; border-radius: 8px; background: none; text-align: left; cursor: pointer;
+  font-size: 13px; color: var(--ink);
+}
+.jira-sheet-match:hover:not(:disabled) { background: var(--strip-hi) }
+.jira-sheet-match:disabled { cursor: default; color: var(--ink3) }
+.jira-sheet-match-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.jira-sheet-match-meta { flex: none; margin-left: auto; font-size: 12px; color: var(--ink3) }
+
+/* The four query chips wrap as one line of chips; the project `Select` takes the third chip's place while open. */
+.jira-sheet-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px }
+/* A query row: label and ×, the JQL box under them, the check line under that — the mock's `.qrow`. */
+.jira-sheet-query { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--hairline) }
+.jira-sheet-query-head { display: flex; align-items: center; gap: 8px }
+/* The JQL box is `.sheet-prompt` (the launch sheet's textarea); a JQL Jira refused strokes it red, as the mock's `.jqlbox.bad` does. */
+.jira-sheet-jql { font-size: 13px }
+.jira-sheet-jql.bad { border-color: var(--red) }
+.jira-sheet-check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 12px; color: var(--ink3) }
+.jira-sheet-check.ok { color: var(--green) }
+.jira-sheet-check.bad { color: var(--red) }
+.jira-sheet-check-when { color: var(--ink3) }
+
+/* The footer: `FormSheet`'s bar holds one child, this column — the actions on a line (Delete left, Cancel and Save right) and, under them, the server's
+   sentence when a save or a delete was refused. Red, as `.set-error` is: a write the server refused, not a warning. */
+.jira-sheet-foot { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px }
+.jira-sheet-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.jira-sheet-note { margin-right: auto; font-size: 12px; color: var(--ink3) }
+.jira-sheet-error { font-size: 13px; line-height: 1.45; color: var(--red) }
+
 /* Rendered item Markdown, at §6.1's scale: 15/400 body, 19/500 headings, code
    spans on --steel. The section headings are the store's fixed ## set
    (Symptom, Plan, …), so they carry a hairline rather than sitting on size

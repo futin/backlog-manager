@@ -68,10 +68,15 @@ export function SettingsRow({ name, hint, children }: { name: string; hint?: Rea
  * class purely to LAY the card out (the rows' gap) — never to restate its look,
  * which is §12.1's rule and `test/design-guards.test.ts`'s guard 7.
  */
-export function SettingsGroup({ title, scope, children }: { title: string; scope: string; children: ReactNode }) {
+/*
+  `right` is `SheetHead`'s own right slot, passed through, and was added for Jira › Setup's Boards card (Jira phase 2, spec §6.4): its `New board` chip sits
+  in the card's head, beside the title, because it makes a row rather than belonging to one. Optional, and no Settings card passes it, so every card that
+  drew before draws the same.
+*/
+export function SettingsGroup({ title, scope, right, children }: { title: string; scope: string; right?: ReactNode; children: ReactNode }) {
   return (
     <Sheet as="section" className="set-group">
-      <SheetHead title={title} sub={scope} />
+      <SheetHead title={title} sub={scope} right={right} />
       {children}
     </Sheet>
   );

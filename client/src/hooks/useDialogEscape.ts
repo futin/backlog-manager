@@ -28,8 +28,9 @@ import { useEffect, useRef } from 'react';
  * beside this one, and one press would close it and the dialog under it.
  *
  * The second non-dialog entry is `ui/Popover.tsx`, the panel that hangs under a control, in the same shape: mounted only while open, one call to this hook,
- * closing only itself. It has four composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, and the Jira board's
- * picker (`components/jira/JiraBoardView.tsx`, Jira phase 2; R6 counts six once the Jira chip and the roots search land) — and each is its own
+ * closing only itself. It has five composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, the Jira board's
+ * picker (`components/jira/JiraBoardView.tsx`, Jira phase 2) and the board sheet's roots search (`components/jira/JiraBoardSheet.tsx`, drawn OVER that
+ * sheet, so it is the topmost entry while open; R6 counts six once the Jira chip lands) — and each is its own
  * entry while it is open. Its click-outside is its own `pointerdown` listener — this module owns the key, not the pointer.
  *
  * They stay `window` listeners rather than becoming element handlers because
