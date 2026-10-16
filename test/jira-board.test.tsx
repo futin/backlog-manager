@@ -256,7 +256,7 @@ describe('which board the page draws', () => {
 describe('the band', () => {
   it('reads bandSub’s text for the board under the title', async () => {
     await renderAlpha();
-    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now());
+    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now(), { issues: 4, cards: 4 });
     expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · polled 10m ago');
     expect(document.querySelector('.ui-band-sub')?.textContent).toBe(sub.text);
     expect(document.querySelector('.jira-band-sub')).not.toHaveClass('failing');

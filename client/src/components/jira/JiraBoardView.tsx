@@ -170,7 +170,7 @@ function newer(a: string, b: string | null): boolean {
  */
 function BandSub({ board, site }: { board: JiraBoardStatus; site: string }) {
   const now = useNow(true, 1_000);
-  const sub = bandSub(board, site, now);
+  const sub = bandSub(board, site, now, null);
   return <span className={sub.failing ? 'jira-band-sub failing' : 'jira-band-sub'}>{sub.text}</span>;
 }
 
