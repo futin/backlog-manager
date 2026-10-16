@@ -22,6 +22,7 @@ import {
   failurePhrase,
   displayPath,
   initialsOf,
+  issueDatesLine,
   isJiraStatusPayload,
   pickBoard,
   soonestBoard,
@@ -29,7 +30,7 @@ import {
   unmappedProjects
 } from '../client/src/lib/jira';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
-import { formatCreated } from '../client/src/lib/item-age';
+import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
 
@@ -139,31 +140,51 @@ describe('sortForBoard', () => {
 });
 
 describe('cardAgeStamp', () => {
-  // Relative to the clock the assertion runs under; `now` is passed, not read, so the year-suffix decision is the test's own.
+  // Relative to the clock the assertion runs under; `now` is passed, not read, so the reading is the test's own. A card's age is `elapsedSince`'s board
+  // vocabulary (`now` / `4m` / `2h` / `6d`), not a date — the spec's "the age of `updated`" and the mocks' `2 days ago`.
   const now = Date.now();
   const updated = daysAgoStamp(3);
   const resolved = daysAgoStamp(40);
 
-  it('reads resolved for a done issue that has one, with no prefix', () => {
+  it('reads the age of resolved for a done issue that has one, with no prefix', () => {
     const i = issue({ status: { name: 'Done', category: 'done' }, updated, resolved });
-    expect(cardAgeStamp(i, now)).toBe(formatCreated(resolved, now));
-    expect(cardAgeStamp(i, now)).not.toContain('resolved');
+    expect(cardAgeStamp(i, now)).toBe('40d');
   });
 
-  it('falls back to updated for a done issue with no resolution', () => {
+  it('falls back to the age of updated for a done issue with no resolution', () => {
     const i = issue({ status: { name: 'Done', category: 'done' }, updated, resolved: null });
-    expect(cardAgeStamp(i, now)).toBe(formatCreated(updated, now));
+    expect(cardAgeStamp(i, now)).toBe('3d');
   });
 
   it('ignores a stale resolved on an issue that is not done', () => {
     const i = issue({ status: { name: 'Doing', category: 'indeterminate' }, updated, resolved });
-    expect(cardAgeStamp(i, now)).toBe(formatCreated(updated, now));
+    expect(cardAgeStamp(i, now)).toBe('3d');
   });
 
-  it('takes the year suffix decision from the now it is given', () => {
-    const i = issue({ updated: '2020-06-15T10:00:00.000Z' });
-    expect(cardAgeStamp(i, Date.parse('2020-12-01T00:00:00Z'))).toBe('jun 15');
-    expect(cardAgeStamp(i, Date.parse('2026-12-01T00:00:00Z'))).toBe("jun 15 '20");
+  it('climbs the ladder from the now it is given: now, minutes, hours, days', () => {
+    const at = Date.parse('2026-06-15T12:00:00Z');
+    const aged = (ms: number): string => cardAgeStamp(issue({ updated: new Date(at - ms).toISOString() }), at);
+    expect(aged(20 * SECOND)).toBe('now');
+    expect(aged(4 * MINUTE)).toBe('4m');
+    expect(aged(2 * HOUR)).toBe('2h');
+    expect(aged(6 * 24 * HOUR)).toBe('6d');
+  });
+
+  it('prints the raw stamp rather than NaN when it cannot be aged', () => {
+    expect(cardAgeStamp(issue({ updated: 'garbage' }), now)).toBe('garbage');
+  });
+});
+
+describe('issueDatesLine', () => {
+  it('is the created date and the relative age of updated, the modal\'s `created · updated` value', () => {
+    const at = Date.parse('2026-10-16T12:00:00Z');
+    const i = issue({ created: '2026-10-02T09:00:00Z', updated: new Date(at - 4 * MINUTE).toISOString() });
+    expect(issueDatesLine(i, at)).toBe(`${formatCreated(i.created, at)} · 4m`);
+  });
+
+  it('takes the year suffix of created from the now it is given', () => {
+    const i = issue({ created: '2020-06-15T10:00:00.000Z', updated: '2020-06-16T10:00:00.000Z' });
+    expect(issueDatesLine(i, Date.parse('2026-12-01T00:00:00Z'))).toBe("jun 15 '20 · " + elapsedSince(i.updated, Date.parse('2026-12-01T00:00:00Z')));
   });
 });
 

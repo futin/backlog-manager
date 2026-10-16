@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
-import { formatCreated } from '../../lib/item-age';
-import { JIRA_COLUMNS, displayPath } from '../../lib/jira';
+import { JIRA_COLUMNS, displayPath, issueDatesLine } from '../../lib/jira';
 import { renderMarkdown } from '../../lib/markdown';
 import type { JiraIssue, JiraIssueDetail } from '../../../../shared/types';
 import { Fact } from '../ui/Fact';
@@ -31,10 +30,12 @@ import { Modal } from '../ui/Modal';
  *
  * **State belongs to a key.** The held answer is stamped with the issue key it was read for, and only that key's answer is read: reopening the modal on
  * another issue while a read is in flight never paints the first issue's description under the second one's title, and a late answer for a key the modal
- * has left is dropped. Facts that come from the detail (`on boards`) are simply absent while the held answer is for another key.
+ * has left is dropped. Facts that come from the detail (`on boards`) are simply absent while the held answer is for another key — and also once it has landed, if none of the
+ * boards it names is one the shell's status knows (a board deleted a moment ago): the spec lists the fact unconditionally, but a label with nothing under it is
+ * the empty fact `Fact`'s own header says never to draw.
  *
  * Repositories are read from the shell's one status (`useJiraContext`): the mapped paths for the issue's PROJECT key through `displayPath` (the same `~`
- * reading the Setup card gives), or the hint that says where to map one. The date line takes `Date.now()` once per render and ticks nothing — the modal is
+ * reading the Setup card gives), or the hint that says where to map one. The `created · updated` line (`issueDatesLine`) takes `Date.now()` once per render and ticks nothing — the modal is
  * opened, read and closed, the reasoning `ItemModal` gives for the same choice.
  */
 
@@ -112,12 +113,12 @@ export function JiraIssueModal({ issue, onClose }: { issue: JiraIssue; onClose: 
         </a>
       </div>
       <dl className="item-facts-list">
-        <Fact label="type">{typeLine}</Fact>
+        <Fact label="type · parent">{typeLine}</Fact>
         <Fact label="status">{`${src.status.name} · ${categoryWord(src.status.category)}`}</Fact>
-        {priorityLine !== '' && <Fact label="priority">{priorityLine}</Fact>}
-        <Fact label="people">{people}</Fact>
+        {priorityLine !== '' && <Fact label="priority · sprint">{priorityLine}</Fact>}
+        <Fact label="assignee · reporter">{people}</Fact>
         {src.labels.length > 0 && <Fact label="labels">{src.labels.join(', ')}</Fact>}
-        <Fact label="dates">{`created ${formatCreated(src.created, now)} · updated ${formatCreated(src.updated, now)}`}</Fact>
+        <Fact label="created · updated">{issueDatesLine(src, now)}</Fact>
         {boardNames.length > 0 && <Fact label="on boards">{boardNames.join(', ')}</Fact>}
         <Fact label="repository">
           {data === null || paths.length === 0 ? (

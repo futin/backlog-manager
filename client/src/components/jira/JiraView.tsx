@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraPage } from '../../hooks/useJiraPage';
@@ -33,13 +33,16 @@ import { JiraSetupView } from './JiraSetupView';
  *
  * **The open issue is held HERE, not in the Board page.** The Board's card click lands in this slot (`onOpenIssue`), and the issue modal (Task 9) is drawn
  * from it. Held one level above the page so that the slot outlives a re-render of the board under it — a poll that reorders the columns, a board switch —
- * and is read by exactly one modal mount. The modal is drawn only beside the Board page: Setup has no card to open one from, and a page switch (the rail's
- * tree) unmounts the modal with the page, so a stale issue never survives a trip to Setup and back.
+ * and is read by exactly one modal mount. The modal is drawn only beside the Board page: Setup has no card to open one from, and the slot is cleared whenever `page`
+ * changes, so a stale issue never survives a trip to Setup and back (JiraView itself does not unmount on a page switch).
  */
 export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data, error } = useJiraContext();
   const [page] = useJiraPage();
   const [openIssue, setOpenIssue] = useState<JiraIssue | null>(null);
+  // The slot is JiraView's, and JiraView does not unmount on a page switch, so leaving the Board must clear it by hand — otherwise returning to Board would
+  // redraw the modal for an issue the reader closed the page on.
+  useEffect(() => setOpenIssue(null), [page]);
 
   if (data === null) return <div className="board-empty">{error ? 'Jira unavailable' : 'loading…'}</div>;
   if (!data.configured) return <div className="board-empty">Jira is not configured</div>;

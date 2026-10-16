@@ -1,4 +1,4 @@
-import { formatCreated } from './item-age';
+import { elapsedSince, formatCreated } from './item-age';
 import { pollAge } from './tracker';
 import { SYNC_INTERVALS } from '../../../shared/types';
 import type { JiraBoard, JiraBoardFailure, JiraBoardStatus, JiraIssue, JiraStatusCategory, JiraStatusPayload } from '../../../shared/types';
@@ -81,15 +81,29 @@ export function sortForBoard(issues: readonly JiraIssue[]): JiraIssue[] {
 }
 
 /**
- * The date on a card's foot: when a DONE issue was resolved (that is the date that matters to someone reading the Done column), otherwise when it last
- * changed. An issue with no resolution — done by a workflow that never sets one — and one that is not done but still carries a stale `resolved` from a reopen
- * both fall to `updated`. Printed through `formatCreated`, the board's one short-date vocabulary, as a bare date with no `resolved` prefix (the spec's "a
- * Done card reads its age, not `resolved Oct 11`"); `now` is the caller's, so the year suffix is decided by the same clock as every other reading on the
- * page.
+ * The age on a card's foot: how long ago a DONE issue was resolved (that is the age that matters to someone reading the Done column), otherwise how long
+ * ago it last changed. An issue with no resolution — done by a workflow that never sets one — and one that is not done but still carries a stale `resolved`
+ * from a reopen both fall to `updated`. No `resolved` prefix.
+ *
+ * **An AGE, not a date**, through `elapsedSince` — the board's one age vocabulary (`now`, `4m`, `2h`, `6d`), the one a backlog card's `in progress` marker
+ * reads. The spec says a card shows "the age of `updated`" (§6.2) and "a Done card reads its age, not `resolved Oct 11`" (its picked-mocks note), and the
+ * picked mocks draw `4 min ago` / `2 days ago`, never `Oct 11`; a date is what the MODAL's `created` fact is for (`issueDatesLine`). `now` is the caller's, so
+ * every card on a page is aged against one clock. A stamp that cannot be aged (nothing validates Jira's ISO strings on the way in) is printed as it came
+ * rather than as `NaN`.
  */
 export function cardAgeStamp(issue: JiraIssue, now: number): string {
   const stamp = issue.status.category === 'done' && issue.resolved !== null ? issue.resolved : issue.updated;
-  return formatCreated(stamp, now);
+  return elapsedSince(stamp, now) ?? stamp;
+}
+
+/**
+ * The issue modal's `created · updated` fact, as one value: `created` as a short date (`formatCreated`, with its year suffix decided by `now`) and the
+ * relative age of `updated` (`elapsedSince`, the same vocabulary the card's `cardAgeStamp` reads) — the mock's `Oct 2 · 4 min ago`, in the board's own
+ * words. Lives here, with the card's age, because both are one reading of one pair of stamps and the spec's one-home rule (§6.1) says a derivation is not
+ * restated in a component.
+ */
+export function issueDatesLine(issue: JiraIssue, now: number): string {
+  return `${formatCreated(issue.created, now)} · ${elapsedSince(issue.updated, now) ?? issue.updated}`;
 }
 
 export type JiraCrumb = { kind: 'root' } | { kind: 'parent'; key: string; summary: string } | { kind: 'mine' } | null;

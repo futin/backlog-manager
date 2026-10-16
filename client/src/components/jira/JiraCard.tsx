@@ -13,7 +13,7 @@ import { Pill } from '../ui/Pill';
  * carries the RAW status name, because `In Review` and `In Progress` are one column and two very different facts to the person reading it.
  *
  * **Everything the card prints comes from `lib/jira.ts`.** The crumb's words (`root`, `↳ PAY-120 Refund flows`, `Assigned to me`) are `crumbText`'s, the
- * initials `initialsOf`'s, the date `cardAgeStamp`'s (with the page's `now`, so the year suffix is decided by one clock), the subtasks marker
+ * initials `initialsOf`'s, the age `cardAgeStamp`'s (a relative `4m` / `2d`, aged against the page's `now` so every card shares one clock), the subtasks marker
  * `subtasksMarker`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
  *
  * **The browser never talks to Jira.** The person is initials on a disc, never Jira's `avatarUrls` — an `<img>` would be a request to Atlassian from every

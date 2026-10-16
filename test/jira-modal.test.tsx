@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -9,6 +9,7 @@ import { JiraIssueModal } from '../client/src/components/jira/JiraIssueModal';
 import JiraView from '../client/src/components/jira/JiraView';
 import { JiraContext } from '../client/src/hooks/JiraContext';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
+import { formatCreated } from '../client/src/lib/item-age';
 import { daysAgoStamp } from './helpers/dates';
 import type { JiraBoardStatus, JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../shared/types';
 
@@ -123,11 +124,13 @@ describe('JiraIssueModal — the read', () => {
     await screen.findByText(/not/);
 
     expect(screen.getByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
-    expect(fact('type')).toHaveTextContent('Story · PAY-120 Refund flows');
+    expect(fact('type · parent')).toHaveTextContent('Story · PAY-120 Refund flows');
     expect(fact('status')).toHaveTextContent('In Review · in progress');
-    expect(fact('priority')).toHaveTextContent('High · Sprint 42');
-    expect(fact('people')).toHaveTextContent('Ada Lovelace · Grace Hopper');
+    expect(fact('priority · sprint')).toHaveTextContent('High · Sprint 42');
+    expect(fact('assignee · reporter')).toHaveTextContent('Ada Lovelace · Grace Hopper');
     expect(fact('labels')).toHaveTextContent('payments, refunds');
+    // created is a short date, updated the board's relative age (`1d`): the fixture is 10 days old and updated 1 day ago.
+    expect(fact('created · updated')).toHaveTextContent(`${formatCreated(CARD.created)} · 1d`);
     // Only the board whose id the detail names, by NAME — `Platform` is a board the issue is not on.
     expect(fact('on boards')).toHaveTextContent('Payments');
     expect(fact('on boards')).not.toHaveTextContent('Platform');
@@ -220,7 +223,7 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
 
     expect(await screen.findByText('could not read the ticket — Jira unreachable: timeout')).toBeInTheDocument();
     expect(fact('status')).toHaveTextContent('In Review · in progress');
-    expect(fact('people')).toHaveTextContent('Ada Lovelace · Grace Hopper');
+    expect(fact('assignee · reporter')).toHaveTextContent('Ada Lovelace · Grace Hopper');
     expect(screen.queryByText('loading…')).toBeNull();
   });
 
@@ -294,5 +297,30 @@ describe('JiraView — the open-issue slot draws the modal', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('does not bring the modal back for an issue the reader left on when the page returns to Board', async () => {
+    window.localStorage.clear();
+    setJiraPage('board');
+    const board = status();
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/jira/issue/')) return json(detail());
+      if (url.includes('/issues')) return json({ issues: [CARD], polledAt: daysAgoStamp(0) });
+      return json(board);
+    }) as unknown as typeof fetch;
+    render(
+      <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: () => {} }}>
+        <JiraView onOpenJiraPage={jest.fn()} />
+      </JiraContext.Provider>
+    );
+    await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
+    await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
+
+    act(() => setJiraPage('setup'));
+    expect(screen.queryByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeNull();
+    act(() => setJiraPage('board'));
+    await screen.findByRole('button', { name: /Refund partial captures/ });
+    expect(screen.queryByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeNull();
   });
 });
