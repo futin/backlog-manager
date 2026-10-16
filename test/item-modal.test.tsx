@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -428,6 +428,16 @@ describe('ItemModal', () => {
 
 /* #225 — the claim control under the facts column. The label is `claimControl`'s (pinned case by case in tracker-lib.test.ts); what this suite pins is
    that the modal draws it, gates both labels behind the inline confirm, and posts only on accept. */
+/** Two clicks that both land before React re-renders — `test/run-controls.test.tsx`'s `doubleClick`, for the same reason: `userEvent.click` awaits between
+ *  clicks, so the second lands on a re-rendered (disabled) control and the case would pass with the guard deleted. Only a raw dispatch pair inside one `act`
+ *  reaches `useAction`'s ref guard (#286). */
+function doubleClick(el: HTMLElement): void {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 describe('ItemModal claim control', () => {
   const TRACKER: BacklogItem = {
     ...ITEM,
@@ -506,6 +516,24 @@ describe('ItemModal claim control', () => {
     expect(screen.getByTestId('claim-release')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(posts).toEqual([]);
+  });
+
+  // #286 — before useAction, `accept` guarded with `setStage('busy')` alone, which the second click of the same tick never sees: both sent `abortClaim`.
+  it('sends one release for a double-click on the confirm', async () => {
+    render(<ItemModal item={held()} hues={HUES} onClose={() => {}} onReleased={() => {}} />);
+    await screen.findByText('body');
+    const answered = global.fetch as jest.Mock;
+    // The release never answers, so the in-flight window stays open for the whole case and nothing settles after it ends.
+    global.fetch = jest.fn((url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return answered(url, init);
+      posts.push({ url, body: JSON.parse(String(init.body)) });
+      return new Promise(() => {});
+    }) as jest.Mock;
+
+    await userEvent.click(screen.getByTestId('claim-release'));
+    doubleClick(screen.getByTestId('claim-release-confirm-accept'));
+
+    expect(posts).toHaveLength(1);
   });
 
   it('prints the server refusal verbatim, keeps the chip, and does not re-read the board', async () => {

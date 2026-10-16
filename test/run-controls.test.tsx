@@ -58,7 +58,7 @@ const OPEN_GATE = { canResume: true, blockedReason: null };
  * where nothing on screen has changed yet because the host's `resuming` mark
  * is set from `onChanged` — i.e. after the request settles. Dispatching both
  * events in one `act` reproduces exactly that: both handlers run against the
- * same render, and only `act`'s own `if (busy) return` can stop the second.
+ * same render, and only `act`'s own guard (`useAction`'s ref, #286) can stop the second.
  */
 function doubleClick(el: HTMLElement): void {
   act(() => {
