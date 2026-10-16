@@ -238,6 +238,19 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    end, as the dashboard's is, so the rule stops short of the rows' fills. */
 .rail-rule { border-top: 1px solid var(--hairline); margin: 24px 4px }
 
+/* The version chip (DESIGN.md §8.10), the dashboard's `.rel-chip`: the rail's last element, sunk to its foot by `margin-top: auto` in the rail's column,
+   and in the phone menu its last row. A pill on the recessed well in the board's own ink — status lives in the dot alone, cyan for a release not opened
+   yet. 28 px tall, the rail's quiet size, not a 36 px control: it is a reading you can tap, not a section. */
+.rail-release {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  margin: auto 0 0 8px; min-height: 28px; padding: 4px 10px;
+  font-family: inherit; font-size: 12px; font-weight: 500; color: var(--ink2);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 999px;
+  cursor: pointer; transition: color .15s, border-color .15s;
+}
+.rail-release:hover { color: var(--ink); border-color: var(--hairline2) }
+.rail-release-dot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--cyan) }
+
 /* The phone's ☰, and the wordmark row it sits in — both render only under
    useNarrow, so neither is ever in the desktop tree. */
 .rail-bar { display: none }
@@ -316,6 +329,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
   .rail-link { min-height: 44px; border-radius: 12px }
+  /* The phone menu's last row: no foot to sink to, so a fixed gap under the rows instead, and the menu's own bottom padding beneath it. */
+  .rail-release { margin: 12px 0 8px 8px }
   .rail-sublink { min-height: 40px }
   .main { border-top-left-radius: 0 }
 }
