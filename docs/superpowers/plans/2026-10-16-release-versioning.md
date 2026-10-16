@@ -51,12 +51,13 @@ reference for the chip and drawer.
 
 **Files:**
 - Create: `.github/workflows/release.yml`, `.github/pull_request_template.md`
-- Modify: `docs/workflows/ci.md` (new §Releases after §The ruleset; docs-sync stamp's `sources` already covers `.github/workflows`)
+- Modify: `docs/workflows/ci.md` (new §Releases after §The ruleset; its docs-sync `sources` gains `.github/pull_request_template.md` beside `.github/workflows`)
 
 **Interfaces:** Produces the workflow that later tasks' merges exercise; no code interface.
 
 - [ ] **Step 1:** Copy `claude-agents-dashboard/.github/workflows/release.yml` verbatim, then change only the header comment to point at this repo's
-  `docs/workflows/ci.md` §Releases. Verify: `diff` against the dashboard file shows changed lines inside the leading comment block only.
+  `docs/workflows/ci.md` §Releases. Verify: `diff` against the dashboard file shows changed lines inside the leading comment block only — possibly none, since its header already names
+  `docs/workflows/ci.md §Releases`, the same relative path here.
 - [ ] **Step 2:** Write the PR template, adapted from the dashboard's (spec §Part 2): keep its section order and its `## What's new` heading at column 0,
   uncommented, placeholder hint in an HTML comment; replace the dashboard-only text (the "someone using the dashboard" lead → the board; the "no HTTP
   harness and no component renderer" line → jest + supertest + jsdom suites; the scope list → this repo's scopes, taken from `git log --format=%s | grep -oE
@@ -67,7 +68,7 @@ reference for the chip and drawer.
 - [ ] **Step 4:** Write ci.md §Releases: what cuts a release (merged PR, title type `feat|fix|perf`), bump rules by reference to release-kit, the baseline tag
   and its subject, direct pushes and `Merge backlog/<id>` commits warned as `no PR for <sha>` and skipped, a re-run via `workflow_dispatch` with `sha`.
 - [ ] **Step 5:** Commit, push, open PR A. Verify on the PR: `ci / checks`, `ci / pr-title`, `ci / skills` green. After the user squash-merges it, the
-  `release` run on `main` is green with the annotation `no baseline tag` (record the run URL in PR C's body).
+  `release` run on `main` is green with the annotation `no baseline tag — see Baseline` (record the run URL in PR C's body).
 
 ## User checkpoints (between PR A and PR B — dictated, not run)
 
@@ -77,19 +78,23 @@ reference for the chip and drawer.
    title cuts nothing but still proves PR mode, and PR C becomes the first release proof.
 3. `scripts/apply-repo-settings.sh futin/backlog-manager` from a release-kit checkout: dry run, read it, then for real.
 
-The session resumes at Task 2 once the user says checkpoint 3 is done (or earlier, if they choose to land PR B first — it is `docs`, cuts nothing).
+The session resumes at Task 2 only once the user says checkpoint 3 is done: Task 2 writes "applied on <date>", which would be false before it. (The spec
+allowed the swap; this plan forbids it so the docs never claim a ruleset that is not on.)
 
 ## Task 2: PR-only `main` docs (PR B)
 
 **Files:**
 - Modify: `docs/workflows/publishing.md`, `docs/workflows/ci.md` (§The ruleset), `CLAUDE.md` (the `pr-title` convention line ending "cut a release once
-  Phase C lands"), memory `~/.claude/projects/-Users-andrejajevtic-Documents-custom-projects-backlog-manager/memory/worktree-session-cannot-touch-main-checkout.md`
+  Phase C lands")
+- Outside the PR (a session edit, never in PR B's diff): memory
+  `~/.claude/projects/-Users-andrejajevtic-Documents-custom-projects-backlog-manager/memory/worktree-session-cannot-touch-main-checkout.md`
 
 - [ ] **Step 1:** publishing.md: "commit, on main, then `git push`" becomes branch → PR → squash-merge → `pnpm run plugin:sync` (installs from the pushed
   `main`, so it runs after the merge).
 - [ ] **Step 2:** ci.md §The ruleset: state line becomes `applied on <date the user gives>`; keep the precondition sentence as history ("waited for one
   PR-mode run, #<that PR>"); the orchestrator guidance there says runs on this repo use `pr` merge mode, `merge` mode parks at the push.
-- [ ] **Step 3:** CLAUDE.md: replace "cut a release once Phase C lands" with "cut a release (`docs/workflows/ci.md` §Releases)". `test/claude-rules.test.ts`
+- [ ] **Step 3:** CLAUDE.md: replace "cut a release once Phase C lands" with "cut a release (`docs/workflows/ci.md` §Releases)", and "(it becomes the
+  squash commit once squash-only merges are applied)" with "(it is the squash commit)"; the bullet stays ≤ 80 words (tier one, `test/helpers/rule-tiers.ts`). `test/claude-rules.test.ts`
   compares headlines byte-for-byte with `.claude/rules/` — this line is in §Conventions, not a rules headline; run `pnpm run test:jest -- claude-rules` to
   confirm green.
 - [ ] **Step 4:** Memory note: add that `main` is PR-only since <date>; specs and plans go through `docs:` PRs too.
@@ -106,7 +111,7 @@ The session resumes at Task 2 once the user says checkpoint 3 is done (or earlie
 - `interface Release { version: string; date: string; title: string; type: ReleaseType; scope?: string; pr?: number; breaking: boolean; notes: string; url?: string }`
 - `interface ReleasesResponse { current: { version: string; ahead: number } | null; releases: Release[] }`
 
-- [ ] **Step 1:** `pnpm add release-kit@github:futin/release-kit#v1.1.0`. Verify `node -e "require('release-kit').parseTagMessage"` prints a function.
+- [ ] **Step 1:** `pnpm add release-kit@github:futin/release-kit#v1.1.0`. Verify `node -p "typeof require('release-kit').parseTagMessage"` prints `function`.
 - [ ] **Step 2:** Add the types (field order and optionality exactly as above — the dashboard's `shared/types.ts` `Release` is the source) and the shim
   (`declare module 'release-kit'` re-exporting `release-kit/dist/esm/index`).
 - [ ] **Step 3:** `pnpm run typecheck` green. Commit `chore(releases): add release-kit and the Release types` (inside PR C; the PR title is what releases).
@@ -132,13 +137,15 @@ meanings and the memo exactly per spec (key = root + HEAD + mtimes of `packed-re
 memoised; concurrent same-key calls share one promise).
 
 - [ ] **Step 1: Write the failing tests** in `test/api-releases.test.ts`. One tmpdir root per suite (`claimTmpRoot`), the real `AppModule` via
-  `listenLoopback`, `BM_RELEASES_ROOT` set per case; fixtures built with `git init -b main`, commits, and tags written with release-kit's `formatTagMessage`
-  through `git tag -a … -F <file> --cleanup=verbatim`. Cases and exact expectations:
+  `listenLoopback`, `BM_RELEASES_ROOT` set per case; fixtures built with `git init -b main` and commits; the baseline is `git tag -a v0.1.0 -m "Baseline — versioning starts here"` (no
+  trailers — `formatTagMessage` cannot produce it), and each release tag is `formatTagMessage(...)` written to a file and tagged with `git tag -a … -F <file>
+  --cleanup=verbatim`. `formatTagMessage` appends ` (#<pr>)` itself, so its inputs are `{ title: 'feat(releases): version chip', type: 'feat', scope:
+  'releases', pr: 12, breaking: false, notes: '- Shows the running version' }` and `{ title: 'fix(api)!: tighten', type: 'fix', scope: 'api', pr: 13,
+  breaking: true, notes: '' }`. Cases and exact expectations:
   - `BM_RELEASES_ROOT` → a plain empty directory → `200 {"current":null,"releases":[]}`
   - a repo with commits, no tags → the same empty shape
   - only a lightweight `v9.9.9` and a lightweight `v1` → the empty shape
-  - baseline `v0.1.0` (subject `Baseline — versioning starts here`, no trailers), then `v0.2.0` from `feat(releases): version chip (#12)` with notes
-    `- Shows the running version`, then `v0.2.1` from `fix(api)!: tighten (#13)` (breaking) on HEAD → `releases` versions `["0.2.1","0.2.0","0.1.0"]`;
+  - baseline `v0.1.0` (subject `Baseline — versioning starts here`, no trailers), then `v0.2.0` and `v0.2.1` from the two inputs above, `v0.2.1` on HEAD → `releases` versions `["0.2.1","0.2.0","0.1.0"]`;
     `0.1.0` has `type: "baseline"`, `breaking: false`, no `pr`; `0.2.0` has `title: "feat(releases): version chip"`, `type: "feat"`, `scope: "releases"`,
     `pr: 12`, `notes: "- Shows the running version"`; `0.2.1` has `breaking: true`; `current` is `{"version":"0.2.1","ahead":0}`
   - then one more commit, same server → `current.ahead === 1` (memo key moved)
@@ -154,10 +161,10 @@ memoised; concurrent same-key calls share one promise).
   - concurrency: two `read()` calls started together → `runGit` (via `jest.spyOn` on the `git-run.util` module) saw `for-each-ref` once
 - [ ] **Step 2:** `pnpm run test:jest -- api-releases` → FAIL (module missing).
 - [ ] **Step 3:** Implement `releasesRoot`, `ReleasesService.read`, `ReleasesController` (`@Controller('api/releases')`, `@Get()`), `ReleasesModule`; register
-  in `AppModule`. Header comment on the service: why `runGit` and not `readReleases` (spec R4), why the common dir, why failures are not memoised.
+  in `AppModule`. Header comment on the service: why `runGit` and not `readReleases` (spec R4), why the common dir, why failures are not memoised, and that this memo never shares code with the `uncommitted` read.
 - [ ] **Step 4:** `pnpm run test:jest -- api-releases git-run vite-proxy csp` → PASS; `pnpm run typecheck` → PASS.
 - [ ] **Step 5:** Docs: items.md `runGit` bullet gains the four releases meanings (`for-each-ref` → empty shape · `describe` → `current: null` ·
-  `remote get-url` → no `url` · `rev-parse` → not memoised) and `paths:` gains `"server/src/releases/**"`; invariants.md's count follows; api.md and the
+  `remote get-url` → no `url` · `rev-parse` → not memoised) and `paths:` gains `"server/src/releases/**"`; both counts go five → nine (`resolveBaseBranch`'s two calls are one site); api.md and the
   CLAUDE.md Layout line gain `releases/` ("read-only, git only — not an outbound-calling module"). `pnpm run test:jest -- claude-rules` → PASS.
 - [ ] **Step 6:** Commit `feat(releases): GET /api/releases from the checkout's tags`.
 
@@ -189,14 +196,16 @@ memoised; concurrent same-key calls share one promise).
 - Modify: `client/src/styles.css` (`ui primitives` block gains the `.ui-drawer` family; drawer + badge rules), `test/design-guards.test.ts` (`FAMILIES` gains
   the drawer family), `.claude/DESIGN.md` (§8.7: three overlay shapes, six dialogs; new §8.10 Releases), the six-dialog homes — `.claude/rules/board.md`
   Escape bullet, `docs/subsystems/invariants.md` Escape entry, `client/src/hooks/useDialogEscape.ts` header, `docs/subsystems/board.md` (lines ~153 and ~404),
-  `test/dialog-count-docs.test.ts` (five → six, names gain `ReleasesDrawer`), `test/dialog-escape.test.tsx` (stale "three" describe → six, plus the new case)
+  `test/dialog-count-docs.test.ts` (five → six, names gain `ReleasesDrawer`; the hook comment's `Three of them now, not four` and `Five since Jira phase 2`
+  stay as history and a `Six since` pin is added), `test/dialog-escape.test.tsx` (the stale "three dialogs" describe → six, which means mounting
+  `JiraIssueModal` and `JiraBoardSheet` with their fetch stubs too, plus the new case)
 
 **Interfaces:**
 - Produces: `Drawer({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode })` — scrim + right panel 400 px from the narrow
   breakpoint up, full screen below it; calls `useDialogEscape(onClose)`; scrim click and the ✕ (`aria-label="Close"`) call `onClose`.
 - Produces: `ReleasesDrawer({ data, onClose }: { data: ReleasesResponse; onClose: () => void })`.
 
-- [ ] **Step 1: Failing tests** (`releases-drawer.test.tsx`, jsdom), with Task 4's fixture values as data: heading `What's new`; entries in the given order;
+- [ ] **Step 1: Failing tests** (`releases-drawer.test.tsx`, jsdom), with Task 4's fixture values as data, `0.2.0`'s notes extended by a `### Sub` line: heading `What's new`; every entry shows its date; entries in the given order;
   `0.2.0` shows `Feature` badge, title `version chip`, the notes rendered through `renderMarkdown` (a `### Sub` note line → an `h3`), link text `PR #12` with
   the given `href`; `0.2.1` shows `Fix` and a separate `Breaking`; an entry with empty notes renders no notes element; an entry without `url` shows no link;
   the baseline renders `Versioning starts here · v0.1.0` and no badge. `dialog-escape.test.tsx`: an item modal open, then the drawer → one Escape closes
@@ -221,13 +230,16 @@ memoised; concurrent same-key calls share one promise).
 - `SideRail` gains `releases?: { label: string; dot: boolean; onOpen: () => void }`; the chip renders only when it is set.
 
 - [ ] **Step 1: Failing tests** (`rail.test.tsx`): no `releases` prop → no chip; label `v0.2.0+3` rendered as the rail's last element at desktop width and as
-  the phone menu's last row (menu open); `dot: true` → the dot element present; clicking the chip calls `onOpen` and, on the phone, closes the menu. An
-  `AppShell`-level case with `fetch` mocked to the Task 4 fixture: stored `0.1.0` → dot shown; click → drawer open, `localStorage` holds `0.2.1`, dot gone;
-  `localStorage` throwing on every call → no dot, chip still opens the drawer; `current: null` → no chip.
+  the phone menu's last row (menu open); `dot: true` → the dot element present; clicking the chip calls `onOpen` and, on the phone, closes the menu. App-level cases
+  in a new `test/releases-app.test.tsx` that renders `<App />` (`AppShell` is unexported) with `test/nav.test.tsx`'s `jest.mock` stubs for `BoardView` and
+  `SettingsView` and a `fetch` routed by URL (`/api/releases` → the Task 4 fixture, every other route → the empty answer `nav.test.tsx` gives it): stored
+  `0.1.0` → dot shown; click → drawer open, `/api/releases` fetched twice (load + open), `localStorage` holds `0.2.1`, dot gone; `localStorage` throwing on
+  every call → no dot, chip still opens the drawer; `current: null` → no chip. A hook case (`renderHook`): one fetch on mount, one per `refresh()`, a
+  rejected fetch keeps the previous `data`.
 - [ ] **Step 2:** run → FAIL. **Step 3:** implement: `AppShell` owns `useReleases`, `dotState`/`readLastSeen`/`writeLastSeen` (seed written on load when
   `seed` is non-null), and renders `ReleasesDrawer` outside `.rail` (the dashboard's §The drawer reason: a transformed ancestor clips `position: fixed`).
-- [ ] **Step 4:** `pnpm run test:jest -- rail releases rail-bar-style` → PASS; `pnpm run typecheck` → PASS; `pnpm run build` → PASS.
-- [ ] **Step 5: Live check:** start the API and client on the host on free ports (record the pids; kill only those), with `BM_RELEASES_ROOT` unset in the
+- [ ] **Step 4:** `pnpm run test:jest -- rail releases rail-bar-style nav` → PASS; `pnpm run typecheck` → PASS; `pnpm run build` → PASS.
+- [ ] **Step 5: Live check:** the user runs `git fetch --tags` in the main checkout first (Terminal panel); then start the API and client on the host on free ports (record the pids; kill only those), with `BM_RELEASES_ROOT` unset in the
   worktree: chip shows `v0.1.0+N` (or the proof run's version), drawer opens, Escape closes; phone width 375 px: chip is the menu's last row.
 - [ ] **Step 6:** Write `docs/subsystems/releases.md` (modelled on the dashboard's; sources list + docs-sync stamp like its siblings), link it from
   `docs/overview.md` and the CLAUDE.md `client/src/` line. Commit; open PR C with title `feat(releases): version chip and What's new drawer` and a `##
