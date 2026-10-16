@@ -1,16 +1,19 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import { SectionBoundary } from './components/SectionBoundary';
+import { ReleasesDrawer } from './components/ReleasesDrawer';
 import { SideRail } from './components/SideRail';
 import { JiraChip } from './components/JiraChip';
 import { TrackerChip } from './components/TrackerChip';
 import { SECTIONS, type Section } from './lib/sections';
+import { chipLabel, dotState, readLastSeen, writeLastSeen } from './lib/releases';
 import type { JiraPage } from './lib/jira-page';
 import { JiraProvider, useJiraContext } from './hooks/JiraContext';
 import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { TrackersProvider } from './hooks/TrackersContext';
 import { useNarrow } from './hooks/useNarrow';
+import { useReleases } from './hooks/useReleases';
 import { usePersistedState } from './hooks/usePersistedState';
 import { setRunsMode } from './hooks/useRunsMode';
 
@@ -158,6 +161,37 @@ function AppShell() {
     rather than leaving it anchored to a chip that moved.
   */
   const narrow = useNarrow();
+
+  /*
+    The version chip and the What's new drawer (DESIGN.md §8.10, docs/subsystems/releases.md). The shell owns all of it: the read, the unseen dot over
+    `localStorage`, and the drawer, which renders here beside the rail rather than inside it — the phone rail hides with a transform, and a transformed
+    ancestor turns a `position: fixed` panel into one positioned inside it. `seen` mirrors storage in memory so a storage that throws still behaves: the seed
+    is written (or swallowed) and the dot computes against it, never against a value that cannot be read back. Opening the drawer re-reads, and while it is
+    open the newest version on screen is the one marked seen — a refresh that lands mid-read marks what it brought. Which value to store, and whether to dot,
+    is `dotState`'s call; the shell only writes what it answers.
+  */
+  const releases = useReleases();
+  const [seen, setSeen] = useState<string | null>(() => readLastSeen());
+  const [whatsNew, setWhatsNew] = useState(false);
+  const newest = releases.data?.releases[0]?.version ?? null;
+  const { dot, seed } = dotState(newest, seen, whatsNew);
+  useEffect(() => {
+    if (seed === null || seed === seen) return;
+    writeLastSeen(seed);
+    setSeen(seed);
+  }, [seed, seen]);
+  const current = releases.data?.current ?? null;
+  const releaseChip = current
+    ? {
+        label: chipLabel(current),
+        dot,
+        onOpen: () => {
+          releases.refresh();
+          setWhatsNew(true);
+        }
+      }
+    : undefined;
+
   // Both chips are one home's occupants: the Jira chip draws only while Jira is configured, as the tracker chip only while a tracker is connected, and each
   // renders `null` otherwise — so the strip (always in the tree) and the rail bar hold zero, one or two chips, never a hidden one.
   const chip = (
@@ -176,7 +210,8 @@ function AppShell() {
   */
   return (
     <div className="shell">
-      <SideRail section={section} onChange={change} chipSlot={narrow ? chip : undefined} working={working} />
+      <SideRail section={section} onChange={change} chipSlot={narrow ? chip : undefined} working={working} releases={releaseChip} />
+      {whatsNew && releases.data && <ReleasesDrawer data={releases.data} onClose={() => setWhatsNew(false)} />}
       {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
           curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
           The strip is always in the tree, empty without a tracker, so its height (`--main-gap`, which `.runs-board` subtracts) never depends on

@@ -50,7 +50,11 @@ readers already sit inside `SettingsProvider` and nothing outside Settings write
 Setup's `Open board` and the empty board's `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
 `change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`.
 
-Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
+The rail's last element is the version chip, `v0.2.0` or `v0.2.0+3`, with a cyan dot while a release has landed since this browser last opened the
+What's new drawer behind it; the shell owns the read, the dot and the drawer, and renders the drawer outside the rail. All of it is
+[releases.md](releases.md).
+
+Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it — the version chip is its last row. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
 
 ### Primitives
@@ -150,8 +154,9 @@ queue:
    Settings default (or a `pr` pick left over from another project) reads as `merge` on any project whose source is not `github` — `files`, `unsupported` or
    none. Settings is pre-project, so it lists `pr` for every project and leaves the refusal to the sheet and to the server's 400.
 
-Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet — are the five dialogs on the escape stack, and neither the
-sheets nor the modal binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for whatever they wrap. Two further entries join the same stack
+Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, and since the release chip the What's new drawer — are the six
+dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal`, `FormSheet` and `Drawer` call
+`useDialogEscape` for whatever they wrap. Two further entries join the same stack
 while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
 Filters and Sort, and Jira's chip, board picker and roots search — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
 owns the key and not the pointer.
@@ -401,7 +406,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Invariants
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the three per-item dispatch blocks
-and which one lets a click through, the dialog escape stack and its five dialogs, a crashed run rendering as crashed, "queue wait is not work",
+and which one lets a click through, the dialog escape stack and its six dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
 row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that
