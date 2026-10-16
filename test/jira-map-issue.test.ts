@@ -1,3 +1,5 @@
+import { performance } from 'node:perf_hooks';
+
 import { JIRA_DONE_WINDOW_DAYS, JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapContext } from '../server/src/jira/map-issue';
 import { makeRawIssue } from './helpers/jira';
 
@@ -205,6 +207,20 @@ describe('pickSprintField (P4)', () => {
         { id: 'customfield_10', name: 'B', schema: { custom: GH } }
       ])
     ).toBe('customfield_9');
+  });
+
+  // A field id is Jira's, but a hostile site could send any string; the numeric-tail regex this replaced backtracked O(n²) on a long digit run with no
+  // digit at the end (~1.3 s for this one).
+  it('reads the numeric tail of a 30 000-digit id that does not end in a digit in linear time, and sorts it last', () => {
+    const odd = `customfield_${'1'.repeat(30_000)}x`;
+    const started = performance.now();
+    const picked = pickSprintField([
+      { id: odd, name: 'A', schema: { custom: GH } },
+      { id: 'customfield_10020', name: 'B', schema: { custom: GH } }
+    ]);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(picked).toBe('customfield_10020');
+    expect(pickSprintField([{ id: odd, name: 'A', schema: { custom: GH } }, { id: 'customfield_7', name: 'B', schema: { custom: GH } }])).toBe('customfield_7');
   });
 
   it('is null when there is none, and for an empty list', () => {

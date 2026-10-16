@@ -67,10 +67,14 @@ export function categoryOf(key: unknown): JiraStatusCategory {
   return key === 'indeterminate' || key === 'done' ? key : 'new';
 }
 
-/** The numeric tail of `customfield_10020`; a non-conforming id sorts last rather than throwing. */
+/**
+ * The numeric tail of `customfield_10020`; a non-conforming id sorts last rather than throwing. Scanned from the end by hand, not `/(\d+)$/`: that regex
+ * retries from every digit of a long run that does not end the string, O(n²) on an id a hostile site could send (~1.3 s for 30 000 digits).
+ */
 const fieldNumber = (id: string): number => {
-  const m = /(\d+)$/.exec(id);
-  return m ? Number(m[1]) : Number.POSITIVE_INFINITY;
+  let i = id.length;
+  while (i > 0 && id.charCodeAt(i - 1) >= 48 && id.charCodeAt(i - 1) <= 57) i--;
+  return i === id.length ? Number.POSITIVE_INFINITY : Number(id.slice(i));
 };
 
 /** The id of the sprint custom field in a `GET field` answer (P4), or `null`. See the header for the tie-break. */

@@ -30,10 +30,17 @@
 const MAX_DEPTH = 64;
 
 /**
+ * The longest attachment name a placeholder carries, before escaping; a longer `alt` is cut to it. `escapeMarkdown` at most doubles a name, so the escaped
+ * name is at most twice this — the bound `ADF_PLACEHOLDER_RE` writes into its name class. Without a bound on both sides the detector scanned to the end of
+ * the line from every `[attachment: ` start, quadratic in a remote description.
+ */
+export const ADF_MEDIA_NAME_MAX = 128;
+
+/**
  * A placeholder line, anywhere in a line (P7). Deliberately NOT global: Task 7 uses it as a `.test` detector, and a global regex keeps `lastIndex` between
  * calls and answers every other call wrong. A caller that needs every match builds `new RegExp(ADF_PLACEHOLDER_RE.source, 'g')`.
  */
-export const ADF_PLACEHOLDER_RE = /\[(?:attachment(?:: [^\]\n]*)?|(?:table|panel|expand) omitted)\]/;
+export const ADF_PLACEHOLDER_RE = /\[(?:attachment(?:: [^\]\n]{0,256})?|(?:table|panel|expand) omitted)\]/;
 
 /** Backslash-escape the characters Markdown would otherwise act on in running text. `>`, `#` and `-` are left alone — they only mean something at a line start. */
 export function escapeMarkdown(text: string): string {
@@ -140,9 +147,14 @@ function codeSpan(core: string): string {
 
 const text: Renderer = (node) => {
   const raw = typeof node.text === 'string' ? node.text : '';
-  // Whitespace goes OUTSIDE the marks: `** b **` is not bold in Markdown. A whitespace-only run carries no marks at all.
-  const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(raw) as RegExpExecArray;
-  if (core === '') return raw;
+  // Whitespace goes OUTSIDE the marks: `** b **` is not bold in Markdown. A whitespace-only run carries no marks at all. Sliced by `trimStart`/`trimEnd`,
+  // not a regex: `/^(\s*)([\s\S]*?)(\s*)$/` backtracked O(n²) on an interior run (~1.4 s for 30 000 spaces), and `trim` strips exactly `\s`'s set.
+  const start = raw.length - raw.trimStart().length;
+  const end = raw.trimEnd().length;
+  if (start >= end) return raw;
+  const lead = raw.slice(0, start);
+  const core = raw.slice(start, end);
+  const trail = raw.slice(end);
   const marks = Array.isArray(node.marks) ? node.marks.filter(isNode) : [];
   const has = (type: string): boolean => marks.some((m) => m.type === type);
   let out = has('code') ? codeSpan(core) : escapeMarkdown(core);
@@ -159,7 +171,8 @@ const text: Renderer = (node) => {
 const media: Renderer = (node, ctx) => {
   const alt = attrsOf(node).alt;
   // A `]` or a newline in a file name would end the placeholder early (and defeat ADF_PLACEHOLDER_RE), so it is removed before the name is escaped.
-  const name = typeof alt === 'string' ? alt.replace(/[\]\r\n]+/g, '').trim() : '';
+  // Cut to ADF_MEDIA_NAME_MAX after the trim, so the escaped name stays inside the detector's bound.
+  const name = typeof alt === 'string' ? alt.replace(/[\]\r\n]+/g, '').trim().slice(0, ADF_MEDIA_NAME_MAX).trimEnd() : '';
   return placeholder(ctx, name === '' ? '[attachment]' : `[attachment: ${escapeMarkdown(name)}]`);
 };
 

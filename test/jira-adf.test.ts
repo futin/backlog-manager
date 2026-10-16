@@ -1,4 +1,6 @@
-import { ADF_PLACEHOLDER_RE, adfToMarkdown, escapeMarkdown } from '../server/src/jira/adf';
+import { performance } from 'node:perf_hooks';
+
+import { ADF_MEDIA_NAME_MAX, ADF_PLACEHOLDER_RE, adfToMarkdown, escapeMarkdown } from '../server/src/jira/adf';
 
 /**
  * Jira integration, spec §8 (ADF → Markdown) and §14 P10 (the node inventory seen on real descriptions). One minimal fixture per node kind; every fixture is
@@ -139,6 +141,22 @@ describe('adfToMarkdown — marks', () => {
     expect(md(para(text('a'), text(' b ', [{ type: 'strong' }]), text('c')))).toBe('a **b** c');
   });
 
+  // A description is remote input up to ~32k characters and is converted on every issue read, so the split must be linear: the regex it replaced backtracked
+  // O(n²) on an INTERIOR whitespace run (~1.4 s for this one, synchronous, blocking every route). The bound is generous; the regression is three orders out.
+  it('splits an interior whitespace run of 30 000 in linear time, keeping it inside the marks', () => {
+    const run = ' '.repeat(30_000);
+    const started = performance.now();
+    const out = md(para(text(`a${run}b`, [{ type: 'strong' }])));
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(out).toBe(`**a${run}b**`);
+  });
+
+  it('keeps leading and trailing whitespace outside the marks around an interior run', () => {
+    // Between two plain nodes, because the document trims its own edges. `\u00a0` is whitespace to both `\s` and `trim`, the equivalence the split rests on.
+    expect(md(para(text('x'), text(' \ta  b\n ', [{ type: 'em' }]), text('y')))).toBe('x \t_a  b_\n y');
+    expect(md(para(text('x'), text(' \u00a0 ', [{ type: 'strong' }]), text('y')))).toBe('x \u00a0 y');
+  });
+
   it('puts a link outside the other marks', () => {
     expect(md(para(text('x', [{ type: 'strong' }, { type: 'link', attrs: { href: 'https://e.com' } }])))).toBe('[**x**](https://e.com)');
   });
@@ -223,6 +241,13 @@ describe('adfToMarkdown — placeholders', () => {
     expect(md(media({ alt: 'a]b' }))).toBe('[attachment: ab]');
   });
 
+  it('caps an alt at ADF_MEDIA_NAME_MAX characters, so the escaped name always fits ADF_PLACEHOLDER_RE', () => {
+    // Every character escapable: the escaped name is twice the cap, the longest a placeholder can carry.
+    const out = md(media({ alt: '_'.repeat(ADF_MEDIA_NAME_MAX + 50) }));
+    expect(out).toBe(`[attachment: ${'\\_'.repeat(ADF_MEDIA_NAME_MAX)}]`);
+    expect(ADF_PLACEHOLDER_RE.test(out)).toBe(true);
+  });
+
   it('renders a table, panel and expand as one-line placeholders, never their content', () => {
     expect(adfToMarkdown(doc(table))).toEqual({ markdown: '[table omitted]', placeholders: 1 });
     expect(adfToMarkdown(doc(panel))).toEqual({ markdown: '[panel omitted]', placeholders: 1 });
@@ -256,6 +281,15 @@ describe('adfToMarkdown — placeholders', () => {
 
     it.each(['[attachments]', '[table]', '[omitted]', 'attachment', '\\[table omitted\\]'])('does not match %j', (line) => {
       expect(ADF_PLACEHOLDER_RE.test(line)).toBe(false);
+    });
+
+    // The detector runs on every `?format=text` over a remote description; an unbounded name scanned to the end of the line from every `[attachment: `
+    // start, so a line made of nothing else was quadratic.
+    it('rejects 100 000 characters of unterminated "[attachment: " starts in linear time', () => {
+      const line = '[attachment: '.repeat(Math.ceil(100_000 / 13));
+      const started = performance.now();
+      expect(ADF_PLACEHOLDER_RE.test(line)).toBe(false);
+      expect(performance.now() - started).toBeLessThan(100);
     });
 
     it('is stateless, so a detector may call .test on it repeatedly', () => {
