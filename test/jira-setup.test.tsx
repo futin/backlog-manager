@@ -416,6 +416,24 @@ describe('the board sheet — edit, save, delete', () => {
     await waitFor(() => expect(urls('/api/jira').filter((u) => u === '/api/jira').length).toBeGreaterThan(statusReads));
   });
 
+  it('a save that lands after the sheet was closed still reloads the status', async () => {
+    let land: (r: Response) => void = () => undefined;
+    saveAnswer = () => new Promise<Response>((resolve) => (land = resolve));
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(within(dialog).getByRole('button', { name: 'saving…' })).toBeDisabled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: /^Edit board/ })).toBeNull();
+    const statusReads = urls('/api/jira').filter((u) => u === '/api/jira').length;
+
+    await act(async () => {
+      land({ ok: true, status: 200, json: () => Promise.resolve({ ...ALPHA }) } as Response);
+    });
+    await waitFor(() => expect(urls('/api/jira').filter((u) => u === '/api/jira').length).toBeGreaterThan(statusReads));
+  });
+
   it('Review Focus 2: a 409 keeps the sheet open, every edit intact, the server’s sentence under the footer', async () => {
     const sentence = 'settings/jira.json does not parse as JSON — fix or delete it by hand; nothing was written';
     saveAnswer = () => answer({ error: sentence }, 409);

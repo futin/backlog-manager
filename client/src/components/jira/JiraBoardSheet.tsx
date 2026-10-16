@@ -127,12 +127,14 @@ export function JiraBoardSheet({
         roots,
         queries: rows.map((r) => ({ id: r.id, label: r.label, jql: r.jql }))
       });
+      // A landed save reloads the status even when the sheet was closed (Escape, Cancel) while it was in flight: the write happened, and the card under the
+      // sheet would otherwise read the pre-save board until the next status poll — which, for a page of `off` boards, is never (R2's own reason).
+      if (answer.ok) reload();
       if (!mounted.current) return;
       if (!answer.ok) {
         setError(errorOf(answer.body, `the board was not saved (HTTP ${answer.status})`));
         return;
       }
-      reload();
       onSaved(answer.body as JiraBoard);
     } catch {
       if (mounted.current) setError('the board was not saved — the server did not answer');
@@ -148,12 +150,13 @@ export function JiraBoardSheet({
     setError(null);
     try {
       const answer = await postJson('/api/jira/boards/delete', { id: board.id });
+      // Reloaded even if the sheet is already gone, for the reason Save gives.
+      if (answer.ok) reload();
       if (!mounted.current) return;
       if (!answer.ok) {
         setError(errorOf(answer.body, `the board was not deleted (HTTP ${answer.status})`));
         return;
       }
-      reload();
       onClose();
     } catch {
       if (mounted.current) setError('the board was not deleted — the server did not answer');
