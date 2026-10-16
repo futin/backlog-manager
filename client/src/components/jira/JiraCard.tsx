@@ -1,8 +1,9 @@
-import { cardAgeStamp, crumbOf, crumbText, initialsOf, subtasksMarker } from '../../lib/jira';
+import { cardAgeStamp, crumbOf, crumbText, initialsOf, type cardFold } from '../../lib/jira';
 import type { JiraBoard, JiraIssue } from '../../../../shared/types';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Marker } from '../ui/Marker';
 import { Pill } from '../ui/Pill';
+import { SpreadBar } from '../ui/SpreadBar';
 
 /**
  * JiraCard — one issue on the Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's card to a Jira issue).
@@ -14,15 +15,21 @@ import { Pill } from '../ui/Pill';
  * carries the RAW status name, because `In Review` and `In Progress` are one column and two very different facts to the person reading it.
  *
  * **Everything the card prints comes from `lib/jira.ts`.** The crumb's words (`root`, `↳ PAY-120 Refund flows`, `Assigned to me`) are `crumbText`'s, the
- * initials `initialsOf`'s, the age `cardAgeStamp`'s (a relative `4m` / `2d`, aged against the page's `now` so every card shares one clock), the subtasks marker
- * `subtasksMarker`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
+ * initials `initialsOf`'s, the age `cardAgeStamp`'s (a relative `4m` / `2d`, aged against the page's `now` so every card shares one clock), the fold
+ * block's line and caption `cardFold`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
+ *
+ * **A card is a TOP issue** (grouped-board spec §3–§4): every on-board descendant folds into it, and `fold` is what the card says about them — the
+ * `C children · D below them` line, then `SpreadBar` with its `done · in progress · to do` caption — drawn after the foot and before the marker row,
+ * and only when something is folded. The `N subtasks` marker this card used to draw is gone: `JiraIssue.subtasks` counts Jira subtasks on the board or
+ * not, and a subtask off the board is not this board's business, so nothing here reads it. The age stays the top's OWN, never the newest under it (that
+ * is only the column's sort key, and it is never drawn).
  *
  * **The browser never talks to Jira.** The person is initials on a disc, never Jira's `avatarUrls` — an `<img>` would be a request to Atlassian from every
  * reader's browser, with their cookies. The one link out is the issue's `url` exactly as the SERVER built it, in a new tab with no referrer; the card never
  * composes a Jira URL of its own.
  *
- * No `Run ▾` and no live strip: both are phase 5 (spec §12). The marker row draws only when it has something to say (a priority, a subtask count), the way
- * the Board's draws only when a marker applies.
+ * No `Run ▾` and no live strip: both are phase 5 (spec §12). The marker row draws only when it has something to say (a priority), the way the Board's
+ * draws only when a marker applies.
  *
  * The whole card is a `role="button"` that opens the issue (`onOpen`, which the page wires to the issue modal's slot), Enter and Space included, exactly as
  * `ItemCard`; the link out stops both the click and those two keys for the reasons `ItemCard`'s own link spells out at length — without it one click opens
@@ -33,16 +40,19 @@ export function JiraCard({
   board,
   me,
   now,
+  fold,
+  matches,
   onOpen
 }: {
   issue: JiraIssue;
   board: JiraBoard;
   me: { accountId: string } | null;
   now: number;
+  fold: ReturnType<typeof cardFold>;
+  matches: readonly string[];
   onOpen: (issue: JiraIssue) => void;
 }) {
   const crumb = crumbText(crumbOf(issue, board, me));
-  const subtasks = subtasksMarker(issue.subtasks);
   const open = (): void => onOpen(issue);
 
   return (
@@ -94,12 +104,17 @@ export function JiraCard({
             ↗
           </a>
         </div>
-        {(issue.priority !== null || subtasks !== null) && (
+        {fold !== null && (
+          <div className="jira-card-fold">
+            <div className="jira-card-fold-line">{fold.line}</div>
+            <SpreadBar done={fold.progress.done} doing={fold.progress.doing} todo={fold.progress.todo} caption={fold.caption} />
+          </div>
+        )}
+        {issue.priority !== null && (
           <div className="board-card-markers" data-testid="marker-row">
             {/* `kind`, the marker's quiet `--ink3` word: a priority is a fact about the issue, not a state this board should colour — §8's "marks state
                 by ink, never by accent" — and Jira's own five-colour priority scale would be a second palette on the card. */}
             {issue.priority !== null && <Marker tone="kind">{issue.priority}</Marker>}
-            {subtasks !== null && <Marker tone="kind">{subtasks}</Marker>}
           </div>
         )}
       </div>

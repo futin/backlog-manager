@@ -624,6 +624,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    (`↳ PAY-120 Refund flows`), and the key is the card's handle, so the crumb is what gives. */
 .jira-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
 .jira-card-type { display: inline-flex; flex: none }
+/* The fold block (grouped-board spec §4, DESIGN.md §8.9.1): after the foot and before the marker row — the line, then the spread bar and its caption,
+   which are `SpreadBar`'s own look. The line is 12/500 --ink2: a sub-line of the card, a step quieter than the title and a step louder than the caption. */
+.jira-card-fold { display: flex; flex-direction: column; gap: 6px }
+.jira-card-fold-line { font-size: 12px; font-weight: 500; color: var(--ink2) }
 .jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like

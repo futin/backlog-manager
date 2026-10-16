@@ -620,11 +620,6 @@ export function matchesBoardFilters(issue: JiraIssue, f: JiraBoardFilters, me: {
   return q === '' || issue.key.toLowerCase().includes(q) || issue.summary.toLowerCase().includes(q);
 }
 
-/** `2 subtasks`, `1 subtask`, and nothing at zero — the card's marker, which says there is more under the card and not how much of it is done. */
-export function subtasksMarker(n: number): string | null {
-  return n > 0 ? `${n} ${n === 1 ? 'subtask' : 'subtasks'}` : null;
-}
-
 /** Setup's list order: by name, with boards that are not syncing (`off`) after every board that is. */
 export function boardsForSetup(boards: readonly JiraBoardStatus[]): JiraBoardStatus[] {
   const rank = (b: JiraBoardStatus): number => (b.interval === 'off' ? 1 : 0);
