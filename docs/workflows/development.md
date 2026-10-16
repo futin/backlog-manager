@@ -21,11 +21,14 @@ cp .env.example .env
 ```
 
 Everything in [`.env.example`](../../.env.example) is commented out and documents its own default; the file matters for four things — moving the host-side
-ports, pointing the container at a project tree that isn't `~/Documents/custom-projects`, turning dispatch on, and giving the tracker poller its
-`BM_GITHUB_TOKEN`. `BM_AGENTS` is **off** by default, and compose passes it through as `${BM_AGENTS:-off}` rather than setting a literal, so that documented
-default survives the documented quick start. `BM_GITHUB_TOKEN` is passed through the same way (`${BM_GITHUB_TOKEN:-}`), because a literal there would be a
-token committed to the repo; absent is a supported state, and the poller stays disarmed. `BM_API_PORT` also moves the skills: in a tracker project
-`backlog.mjs` dials `http://127.0.0.1:${BM_API_PORT:-4322}`, so there is no second port setting for them.
+ports, pointing the container at a project tree that isn't `~/Documents/custom-projects`, turning dispatch on, giving the tracker poller its
+`BM_GITHUB_TOKEN`, and giving the Jira poller its three credentials. `BM_AGENTS` is **off** by default, and compose passes it through as
+`${BM_AGENTS:-off}` rather than setting a literal, so that documented default survives the documented quick start. `BM_GITHUB_TOKEN` is passed through the
+same way (`${BM_GITHUB_TOKEN:-}`), because a literal there would be a token committed to the repo; absent is a supported state, and the poller stays disarmed.
+`BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are passed through the same way (`${BM_JIRA_SITE:-}` and so on), all three and not only the token — the
+email and the site would commit one machine's account — and until all three are set the server reads Jira as not configured and its poller stays disarmed
+([jira.md](../subsystems/jira.md)). `BM_API_PORT` also moves the skills: in a tracker project `backlog.mjs` dials `http://127.0.0.1:${BM_API_PORT:-4322}`, so
+there is no second port setting for them.
 
 ### The whole stack
 
@@ -180,5 +183,5 @@ stack topology (`host.docker.internal`), not a policy default, so it is overrida
     - scripts/test-all.mjs
     - server/src/main.ts
   kind: workflow
-  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->

@@ -84,5 +84,5 @@ one.
     - scripts/sync-plugin.test.mjs
     - .claude-plugin
   kind: workflow
-  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->

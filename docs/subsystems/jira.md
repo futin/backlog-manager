@@ -24,7 +24,7 @@ through `/api/jira` and nothing draws it yet.
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `env.util.ts`        | `jiraEnv()` — the three variables, read per call, trimmed, never cached; `JIRA_ENV` is their one spelling and `isJiraHostname` the site check    |
 | `config.util.ts`     | `readJiraConfig()` and the per-entry readers (`readBoard`, `readQuery`, `readRepos`, `readSkill`); `isJiraId`, `JIRA_JQL_MAX_CHARS`             |
-| `jira.client.ts`     | `JiraClient` — one `fetch` wrapper over the dozen endpoints read; the gateway, the one auth header, the call counter, the deadline; `jqlString` |
+| `jira.client.ts`     | `JiraClient` — one `fetch` wrapper over the endpoints read; the gateway, the one auth header, the call counter, the deadline; `jqlString`        |
 | `errors.util.ts`     | `accessOf` and `jiraHttpError` — the one mapping from a Jira response to an access state and to an HTTP error (spec §8)                        |
 | `identity.ts`        | `JiraBootState` — the four boot answers, the token kind, the site-level `access`/`detail`, the 429 window and the 15 s → 5 min back-off        |
 | `map-issue.ts`       | `mapJiraIssue`, `pickSprintField`, `categoryOf`, `JIRA_ISSUE_FIELDS` and the Done window (`JIRA_DONE_WINDOW_DAYS`)                             |
@@ -129,7 +129,8 @@ dropped entry is warned once. An `interval` that is missing or not one of `15s`,
 
 Spec §14's phase-0 probe, against a real Cloud site with a scoped token, and where each one landed:
 
-- **P1** — a scoped token is 401 at `https://<site>` and 200 on the gateway → every call goes through `api.atlassian.com/ex/jira/<cloudId>`.
+- **P1** — a scoped token is 401 at `https://<site>` and 200 on the gateway → every authenticated call goes through `api.atlassian.com/ex/jira/<cloudId>`, bar
+  the one `myself` at the site that tells `tokenKind`.
 - **P2** — `search/jql` pages by a string `nextPageToken`, present only while `isLast: false`, with no `total`; unbounded JQL is a 400 → `pages` follows the
   token and stops on a page with none; every query the server builds is bounded.
 - **P3** — `hierarchyLevel` is on every type and an unknown key is 200 with no issues → `type.level` decides hierarchy; an empty root is a `failures` row.
@@ -151,3 +152,10 @@ jest, flat in `test/`, none reaching a real Jira: `jira-env`, `jira-config`, `ji
 `jira-routes` (supertest through `listenLoopback`). `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a
 per-request failure hook; `test/helpers/env.ts` blanks the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the
 compose passthrough.
+
+<!-- docs-sync:
+  sources:
+    - server/src/jira
+  kind: subsystem
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+-->

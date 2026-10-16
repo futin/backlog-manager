@@ -39,10 +39,12 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   server makes to anybody's items), `agents/` (the
   dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
   `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the read routes under
-  `/api/jira`) — those three are the outbound-calling modules, and the ONLY three — `orchestrator/` (a read-only view of the run-state directory, plus the
+  `/api/jira`, → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three — `orchestrator/`
+  (a read-only view of the run-state directory, plus the
   in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (#249 — three read-only
   Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, no actions), `registry/`, `static.ts` (serves `client/dist` only when built),
-  `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
+  `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
+  → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: four lazy sections behind a side rail (Board, Runs, Archive, Settings), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
@@ -261,5 +263,5 @@ of them, and to be opened by hand before editing through any other route (`Write
     - vite.config.ts
     - pnpm-workspace.yaml
   kind: index
-  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->

@@ -69,7 +69,7 @@ that caller.
 `ItemsService.writerFor(projectPath)` is the one gate: registry compare (raw string, never realpath), `resolveSource` per request, then the adapter's `writer` —
 answering `unregistered` (404), `files` (400, `this project's items are files — the skills write them directly`), `unsupported` (400, `resolveSource`'s own
 reason) or the call. None of those four makes a network request. `FilesSource` has no writer at all. Refusals travel as values (`WriteRefusal`) and one
-function maps them — `answer` (`write-answer.util.ts`), shared by every write route and by `GET /api/items/claim` (#270): `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited` 429 · anything else 502.
+function maps them — `answer` (`write-answer.util.ts`), shared by every write route and by `GET /api/items/claim` (#270): `no-token` 503 · `not-found` 404 · `conflict` 409 · `sync-off` 409 · `rate-limited` 429 · anything else 502.
 
 Writes to one item are serialised in-process (`Map<urn, Promise>`), and every response is absorbed into the poller's cache so the next board read shows it —
 `polledAt` is NOT moved, because nothing was polled. `GET /api/items/claim?project=&id=` is the one READ beside them, unguarded like every other GET,
@@ -151,7 +151,8 @@ One of the three modules that call outbound, and every POST in it is guarded by 
 - `POST /api/agents/orchestrate` — spawns a headless `/backlog-orchestrate` run for one project. The prompt is composed server-side, so a caller can influence
   which items, which modes and which base branch, and nothing else. A TRACKER project is accepted since task-47: `resolveIds` proves its ids against
   `ItemsService` rather than against a directory scan, accepts `#31` / the URN / a bare `31`, and **emits bare digits alone**, so the prompt never carries a
-  `#`.
+  `#`. A URN must name the project's own repository, compared case-insensitively, or the id is a 400 (#270) — the digits after the `#` are never read alone.
+  `mergeMode: 'pr'` is accepted only for a project whose source resolves to `github`; any other project is a 400.
 - `POST /api/agents/resume` — re-spawns a run that crashed or was paused.
 - `POST /api/agents/pause` — writes the pause request a live run reads back at its dispatch gates.
 - `POST /api/agents/stop` — writes a STOP request to the same one control file (`kind: 'stop'`) and then attempts one `/backlog-orchestrate --abort` spawn.
@@ -252,5 +253,5 @@ origin guard, the derive-never-accept rule for dispatch, and the watchdog's armi
   sources:
     - server/src
   kind: subsystem
-  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->

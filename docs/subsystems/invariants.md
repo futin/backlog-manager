@@ -847,6 +847,12 @@ declaration it can see and names any published path missing from it — warn, ne
 actionable line is not buried under install output, and it can never abort in the window between the uninstall and the install, which is the one that would
 leave a machine with no plugin.
 
+**The two sides list their files differently (#270).** The repo side hashes only what git tracks (`publishedDigests(root, { tracked: true })`, through
+`git ls-files`); the install side walks its directory. The installer clones git, so what git tracks is the most an install can ever carry, and the dirty check
+(`git status --porcelain`) cannot see an ignored file: walking the repo hashed a Finder `.DS_Store` under `skills/` into the repo's digest, so every sync
+reinstalled, still differed afterwards, and exited 1 asking for a `plugin.json` bump. The install side keeps the walk because it is a plain copy with no `.git`
+to ask, where any stray file really is a difference from what git delivered.
+
 ## `started:` and `phase:` are the lifecycle keys in frontmatter, and neither is a status
 
 The `status:` ban stands (both parsers still throw on it), unaffected by either of these keys — a second answer to "which directory holds this file" is the
@@ -2420,8 +2426,8 @@ The third read, added by #235, answers each flagged row's fate: `git ls-tree -r 
 and a flagged path missing from that listing is `absent`. The fate is "does `main` hold this path at all", never "which of the two membership reads found it",
 because neither read implies a fate: an item committed on a branch `main` does not contain is reported by `diff` and is still absent from `main` (case 4), and an
 item `git rm --cached` from the index while still committed on `main` is reported by `ls-files --others` and is still present there (case 27). One spawn rather
-than `cat-file -e main:<path>` per flagged row, because this runs synchronously on a request path. It carries `-c core.quotePath=false` like the other two —
-an escaped listing would not contain a raw non-ASCII path and would misreport an edited item as absent (case 28).
+than `cat-file -e main:<path>` per flagged row, because this runs on a request path and each read is awaited in turn. It carries `-c core.quotePath=false`
+like the other two — an escaped listing would not contain a raw non-ASCII path and would misreport an edited item as absent (case 28).
 
 A failure of _any_ of the three reads fails the whole question (`known: false`). Reporting the part that worked — paths without their fates included — would be
 a confident, incomplete statement of fact about someone's repository, which is the one thing this render must never be.
@@ -2813,9 +2819,10 @@ A literal `BM_AGENTS: 'on'` was a wrong default; a literal token would be a cred
 than editing the line. Pinned by `test/compose-env.test.ts`, which also asserts the key compose uses is the constant the server reads
 (`GITHUB_TOKEN_ENV`), so a rename that missed one half fails here rather than on a machine with a token set.
 
-**Outbound calls go to one constant host.** `API` in `server/src/tracker/github.client.ts` is the only host any request in this app can reach, nothing in a
-request shape names a host, and `repo` is validated (`isRepo`, `owner/name` over GitHub's own character set) before it is interpolated into a path. A repo
-string arrives from a marker file someone committed, which is not a trusted input just because it is not a request body.
+**Outbound calls go to one constant host.** `API` in `server/src/tracker/github.client.ts` is the only host any request this module makes can
+reach (`jira/` keeps its own host rule, stated in its token section below), nothing in a request shape names a host, and `repo` is validated (`isRepo`,
+`owner/name` over GitHub's own character set) before it is interpolated into a path. A repo string arrives from a marker file someone
+committed, which is not a trusted input just because it is not a request body.
 
 **Armed, idle, off — the watchdog's shape, for the watchdog's reasons.** `TrackerPollerService` is a `setTimeout` chain, never a `setInterval`: the next tick is
 scheduled after the current tick's awaits complete, so two ticks can never overlap by construction, and a tick waiting on a slow `api.github.com` can never be
@@ -3414,6 +3421,13 @@ without it the item ran review and verification on a released claim, every heart
 runs `start`, `stop`, `heartbeat`, `move` or `comment` on the item at all, which is the exact opposite of the files arrangement, where execute stamps the item
 file itself.
 
+**A re-claim out of `parked` bills only what came after the park (#267).** The new claim is seeded from the newest prior one's counters, and those are the ones
+the park's release just wrote — the item's `usage` as it stood then — so a release that summed the whole of `usage` again billed the pre-park spend twice.
+`stage` therefore records what the seed already carries as `claimBilled` when it takes the claim, and the next release bills the difference, floored at zero.
+A total rather than an entry index, because `usage` replaces an entry by slot and a resumed driver re-recording a pre-park transcript moves no index; only a
+difference of totals bills that as nothing. And only in `stage`, never in `claim`: a resumed driver's takeover inherits a claim that was never released, whose
+seed has billed none of it.
+
 **The reason is the worktree.** A files item's marker is a line in a file the execute session has in its own tree. A tracker item's marker is a comment on an
 issue, and the session that would post it lives in a directory with no `run.json`, no run id, and no way to say which run it belongs to — so a claim it posted
 would be indistinguishable from a hand `backlog.mjs start`, and the resumed-driver takeover below could never recognise it. The driver has all three facts.
@@ -3742,5 +3756,5 @@ clock, not a request.
     - test
     - docker-compose.yml
   kind: subsystem
-  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->

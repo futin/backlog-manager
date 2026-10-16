@@ -22,6 +22,13 @@ in its own worktree and its own headless `backlog-execute` session — then comm
 branch before the next one starts. The base is `main` unless the run was started with `--base <ref>`, and it is the ref items are gated at, worktrees are cut
 from and merges land in. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
 
+Told `--merge-mode pr` — tracker projects only; `init` refuses any other with exit `1` and nothing written — it merges the same way, but onto a run branch of
+its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch `--base` named. The run file's `base` is then the run branch and the new
+`prTarget` is what `--base` named, so every command that reads `base` needs no change. The tool makes no GitHub call: at the finish the driver runs
+`orchestrate.mjs pr-draft` (writes the body, prints the title and the two branch names), opens the pull request with `gh pr create`, and records the URL with
+`orchestrate.mjs pr --url`. A run that merged nothing has its empty run branch deleted by `finish`. The mechanism and its reasoning are in
+[invariants.md](invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run).
+
 `backlog-execute` never commits and never pushes; `backlog-groom` lands on disk only, so an item has to be committed before an orchestrator run can read it.
 
 ### The CLIs
@@ -176,5 +183,5 @@ skill's own `SKILL.md` is the authority on how that skill behaves; this doc is t
     - skills
     - agents
   kind: subsystem
-  verified: 2e22fb3e30a84a08d4829ef5e607d028c55431b0
+  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->
