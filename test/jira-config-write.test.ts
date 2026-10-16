@@ -296,7 +296,7 @@ describe('normaliseRepoPath (R4)', () => {
   });
 
   it('refuses everything that is not exactly one spelling', () => {
-    for (const raw of ['/a//b', '/a/./b', '/a/../b', 'x/y', '~bob/x', '', '   ', '/a//']) expect(normaliseRepoPath(raw, home)).toBeNull();
+    for (const raw of ['/a//b', '/a/./b', '/a/../b', 'x/y', '~bob/x', '', '   ', '/a//', '//']) expect(normaliseRepoPath(raw, home)).toBeNull();
   });
 });
 

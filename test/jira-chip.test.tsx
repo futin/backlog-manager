@@ -166,10 +166,11 @@ describe('JiraChip', () => {
     const pop = screen.getByRole('dialog', { name: 'Jira' });
     expect(within(pop).getByText('acme.atlassian.net')).toBeInTheDocument();
     const lines = within(pop).getAllByTestId('jira-chip-board');
+    // By name (`boardsByName`), the order the picker and Setup use — not the file's order, which is Platform, Growth, Ops.
     expect(lines.map((l) => l.textContent)).toEqual([
-      'Platform · polled 12 s ago',
       'Growth · not polled yet',
-      "Ops · polled 1m ago · Field 'foo' does not exist"
+      "Ops · polled 1m ago · Field 'foo' does not exist",
+      'Platform · polled 12 s ago'
     ]);
     // The Connection card's copy, from the same two functions, so the two surfaces cannot word one fact two ways.
     const calls = status({ calls: { sweep: 12, last429At: ago(4 * 60_000) } }).calls;

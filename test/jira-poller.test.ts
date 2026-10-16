@@ -1389,6 +1389,23 @@ describe('boardSaved and boardDeleted', () => {
     expect(poller.boardIssues(B2)?.polledAt).toBe(iso(T0));
   });
 
+  // A sweep clears the timer on entry, so the `armed` getter is false for its whole length; `status()` counts the tick in flight, because a poll that is
+  // running is the opposite of `idle` on the Connection card and the chip popover. The getter itself stays timer-only (`arm()`'s own test).
+  it('status() reports armed while a sweep is in flight, though the timer getter does not', async () => {
+    writeConfig([board({ roots: ['PAY-120'], interval: '5m' })]);
+    const hold = holdSearches(1);
+    const sweep = poller.tick();
+    await flush();
+    expect(hold.held).toBe(1);
+    expect(poller.armed).toBe(false);
+    expect(poller.status().armed).toBe(true);
+
+    hold.release(0);
+    await sweep;
+    expect(poller.armed).toBe(true);
+    expect(poller.status().armed).toBe(true);
+  });
+
   it('a sweep already in flight is not the answer: it resolves only after a sweep that STARTED after the call has finished', async () => {
     writeConfig([board({ roots: ['PAY-120'], interval: '5m' })]);
     const hold = holdSearches(1);

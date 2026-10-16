@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { JiraIssue, SyncInterval } from '../../../shared/types';
+import { useJiraContext } from './JiraContext';
 import { BOARD_TRACKER_POLL_MS } from './useBoard';
 import { useCoalescedFetch } from './useCoalescedFetch';
 import { useMountedRef } from './useMountedRef';
@@ -23,6 +24,8 @@ import { useMountedRef } from './useMountedRef';
  * held list is for another id the hook reads as empty and `loading`. A `null` id reads as empty and not loading — there is nothing to wait for.
  *
  * A failed read keeps the list already held (for the same id) and raises `error`, as `useBoard` does: one dropped poll is not "this board is empty".
+ * A 404 is the one failure that is a fact, not a dropped poll: the board was deleted in another browser. The shell's status is re-read at once, so the page
+ * falls to the first board by name now and not at that board's next poll (up to its whole interval, and never for a page of `off` boards).
  */
 export interface JiraBoardState {
   issues: JiraIssue[];
@@ -47,12 +50,16 @@ export function useJiraBoard(id: string | null, interval: SyncInterval | null): 
   const mounted = useMountedRef();
   const idRef = useRef(id);
   idRef.current = id;
+  const { reload: reloadStatus } = useJiraContext();
+  const reloadStatusRef = useRef(reloadStatus);
+  reloadStatusRef.current = reloadStatus;
 
   const load = useCallback(async (): Promise<void> => {
     const asked = idRef.current;
     if (asked === null) return;
     try {
-      const res = await fetch(`/api/jira/boards/${asked}/issues`);
+      const res = await fetch(`/api/jira/boards/${encodeURIComponent(asked)}/issues`);
+      if (res.status === 404 && mounted.current && idRef.current === asked) reloadStatusRef.current();
       if (!res.ok) throw new Error(String(res.status));
       const body = (await res.json()) as { issues?: unknown; polledAt?: unknown };
       if (!Array.isArray(body.issues)) throw new Error('malformed board response');

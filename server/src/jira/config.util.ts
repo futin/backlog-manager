@@ -308,8 +308,10 @@ export function normaliseRepoPath(raw: string, home: string): string | null {
   if (path === '~' || path.startsWith('~/')) path = home + path.slice(1);
   else if (path.startsWith('~')) return null;
   if (!path.startsWith('/')) return null;
-  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  // `/` alone is the root and is kept; it is checked BEFORE the trailing slash is dropped, because `//` would otherwise shrink to `/` and pass for it
+  // without ever reaching the empty-segment check below.
   if (path === '/') return path;
+  if (path.endsWith('/')) path = path.slice(0, -1);
   return path
     .slice(1)
     .split('/')

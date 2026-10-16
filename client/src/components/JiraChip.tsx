@@ -6,7 +6,7 @@ import { Meter } from './ui/Meter';
 import { Popover } from './ui/Popover';
 import { useJiraContext } from '../hooks/JiraContext';
 import { useNow } from '../hooks/useNow';
-import { accessPhrase, callsReading, failurePhrase, polledPhrase, soonestBoard, sweepLine } from '../lib/jira';
+import { accessPhrase, boardsByName, callsReading, failurePhrase, polledPhrase, soonestBoard, sweepLine } from '../lib/jira';
 import type { Section } from '../lib/sections';
 import { pollProgress } from '../lib/tracker';
 import { SYNC_INTERVALS } from '../../../shared/types';
@@ -131,7 +131,7 @@ function JiraPopover({ data, now, anchor, onClose }: { data: JiraStatusPayload; 
           {data.detail ? ` · ${data.detail}` : ''}
         </p>
       )}
-      {data.boards.map((board) => {
+      {boardsByName(data.boards).map((board) => {
         const failure = failurePhrase(board.failures);
         return (
           <div className="tracker-row jira-chip-board" data-testid="jira-chip-board" key={board.id}>

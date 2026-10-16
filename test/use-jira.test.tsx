@@ -4,7 +4,7 @@
 import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
-import { JiraProvider, useJiraContext } from '../client/src/hooks/JiraContext';
+import { JiraContext, JiraProvider, useJiraContext } from '../client/src/hooks/JiraContext';
 import { BOARD_TRACKER_POLL_MS } from '../client/src/hooks/useBoard';
 import { JIRA_STATUS_FLOOR_MS, useJira } from '../client/src/hooks/useJira';
 import { useJiraBoard } from '../client/src/hooks/useJiraBoard';
@@ -378,6 +378,33 @@ describe('useJiraBoard', () => {
     boardFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response));
     await advance(BOARD_TRACKER_POLL_MS);
     expect(screen.getByTestId('b')).toHaveTextContent('B_1-1|stamp|false|true');
+  });
+
+  it('asks for an id percent-encoded, as the modal does', async () => {
+    render(<BoardProbe id="b/1 x" interval="1m" />);
+    await flush();
+    expect(boardFetch).toHaveBeenCalledWith('/api/jira/boards/b%2F1%20x/issues');
+  });
+
+  // A 404 is a board deleted in another browser: the shell's status is re-read at once (so the page falls to the next board), and a plain failure is not.
+  it('re-reads the shell status on a 404 from the list, and on no other failure', async () => {
+    const reload = jest.fn();
+    const withShell = (id: string) => (
+      <JiraContext.Provider value={{ data: null, loading: false, error: false, reload }}>
+        <BoardProbe id={id} interval="1m" />
+      </JiraContext.Provider>
+    );
+    boardFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response));
+    const { rerender } = render(withShell('b_1'));
+    await flush();
+    expect(screen.getByTestId('b')).toHaveTextContent('empty|null|false|true');
+    expect(reload).not.toHaveBeenCalled();
+
+    boardFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response));
+    rerender(withShell('b_2'));
+    await flush();
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('b')).toHaveTextContent('empty|null|false|true');
   });
 
   it('has at most one request of its own in flight when a poll tick lands mid-flight', async () => {
