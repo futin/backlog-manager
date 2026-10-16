@@ -103,6 +103,8 @@ let statusAnswer: JiraStatusPayload;
 let searchAnswer: (q: string) => Promise<Response>;
 let checkAnswer: (jql: string) => Promise<Response>;
 let saveAnswer: () => Promise<Response>;
+/* `GET /api/jira/boards/:id/issues` — the board's cached list, which the edit sheet reads once for its roots' summaries. */
+let boardIssuesAnswer: (id: string) => Promise<Response>;
 /* `POST /api/jira/repos`. The default does what the server does — stores the project's list (an empty one removes the key) in the status the next
    `GET /api/jira` answers — so a case can watch the card follow its own save. A case that wants a refusal replaces it. */
 let reposAnswer: (body: { project: string; paths: string[] }) => Promise<Response>;
@@ -118,6 +120,7 @@ beforeEach(() => {
   searchAnswer = () => answer([]);
   checkAnswer = () => answer({ ok: true, count: 0 });
   saveAnswer = () => answer({ ...ALPHA });
+  boardIssuesAnswer = () => answer({ issues: [], polledAt: null });
   reposAnswer = (body) => {
     const repos = { ...statusAnswer.repos };
     if (body.paths.length === 0) delete repos[body.project];
@@ -141,6 +144,8 @@ beforeEach(() => {
     if (url === '/api/jira/boards') return saveAnswer();
     if (url === '/api/jira/boards/delete') return answer({ ok: true });
     if (url === '/api/jira/repos') return reposAnswer(JSON.parse(String(init?.body)));
+    const issuesOf = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
+    if (issuesOf !== null) return boardIssuesAnswer(decodeURIComponent(issuesOf[1]));
     if (url.startsWith('/api/jira/boards/')) return answer({ issues: [], polledAt: null });
     return answer({});
   }) as unknown as typeof fetch;
@@ -425,6 +430,34 @@ describe('the board sheet — edit, save, delete', () => {
     });
     // …and the status is read again, so the card reads the saved board without waiting for the next poll.
     await waitFor(() => expect(urls('/api/jira').filter((u) => u === '/api/jira').length).toBeGreaterThan(statusReads));
+  });
+
+  it('an edited board’s roots read their summaries from the board’s cached list — one read of it, and no Jira search', async () => {
+    const pay7 = { ...issue('PAY-7', 'Ledger export'), parent: { key: 'PAY-120', summary: 'Refund flows' } };
+    boardIssuesAnswer = (id) => answer(id === ALPHA.id ? { issues: [issue('PAY-120', 'Refund flows'), pay7], polledAt: null } : { issues: [], polledAt: null });
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+
+    const row = within(dialog).getByRole('button', { name: 'Remove PAY-120' }).closest('.jira-sheet-root') as HTMLElement;
+    await waitFor(() => expect(row).toHaveTextContent('Refund flows'));
+    expect(urls(`/api/jira/boards/${ALPHA.id}/issues`)).toHaveLength(1);
+    expect(urls('/api/jira/search')).toEqual([]);
+  });
+
+  it('a root the cached list does not hold reads its key alone, and a picked root reads the summary the search showed', async () => {
+    searchAnswer = (q) => answer(q === 'PAY-9' ? [issue('PAY-9', 'Chargebacks')] : []);
+    await renderSetup();
+    const dialog = await openEdit('Alpha board');
+    await waitFor(() => expect(urls(`/api/jira/boards/${ALPHA.id}/issues`)).toHaveLength(1));
+
+    const known = within(dialog).getByRole('button', { name: 'Remove PAY-120' }).closest('.jira-sheet-root') as HTMLElement;
+    expect(known.textContent).toBe('PAY-120×');
+
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'Search issues' }), 'PAY-9');
+    const matches = await screen.findByRole('dialog', { name: 'Matches' });
+    await userEvent.click(within(matches).getByRole('button', { name: /PAY-9/ }));
+    const picked = within(dialog).getByRole('button', { name: 'Remove PAY-9' }).closest('.jira-sheet-root') as HTMLElement;
+    expect(picked).toHaveTextContent('Chargebacks');
   });
 
   it('a save that lands after the sheet was closed still reloads the status', async () => {

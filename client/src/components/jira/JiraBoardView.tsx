@@ -12,13 +12,17 @@ import {
   boardFilterCount,
   boardFilterOptions,
   boardsByName,
+  cardFold,
   columnOf,
   effectiveBoardFilters,
+  foldBoard,
+  foldMatches,
   matchesBoardFilters,
   pickBoard,
-  sortForBoard,
+  sortTops,
   type JiraAssigneeFilter,
-  type JiraBoardFilters
+  type JiraBoardFilters,
+  type JiraChildrenIndex
 } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
 import type { JiraBoardStatus, JiraIssue } from '../../../../shared/types';
@@ -47,7 +51,9 @@ import { JiraCard } from './JiraCard';
  *
  * **Filters are per mount** (the global constraints): type, assignee (`anyone` / `me` / `unassigned`; no `me` while the identity is unknown) and sprint, all
  * read off the LOADED list, plus the search over key and summary — none persisted, none a request. A pick the current list no longer offers reads as "any"
- * (`effectiveBoardFilters`), so switching boards cannot leave the columns emptied by a filter the panel no longer draws.
+ * (`effectiveBoardFilters`), so switching boards cannot leave the columns emptied by a filter the panel no longer draws. The options read EVERY loaded
+ * issue, folded or not, so a type only sub-tasks carry is still pickable; and a filter finds folded issues through their top card (F1, `foldMatches`),
+ * which is shown ringed with the match named rather than hidden — a fold must never make a matching issue unfindable (grouped-board spec §5).
  *
  * **The shapes that are not a board.** `configUnreadable` → `jira.json cannot be read — <reason>` (Review Focus 2): the credentials are in `.env`, so the
  * status still says `configured`, but the boards could not be read, and `No boards yet` would invite the reader to create a board the server would refuse to
@@ -55,9 +61,28 @@ import { JiraCard } from './JiraCard';
  * `onOpenJiraPage('setup')` — the rail's own navigation threaded down from `App`, so it means what the tree's `Setup` entry means by construction and is not a
  * second page switch (the section has no in-page switch at any width, spec §6.1). A board with no issues draws its three empty columns.
  *
- * Clicking a card calls `onOpenIssue` — the slot the issue modal fills. No `Run ▾` and no live strip: phase 5.
+ * **One card per top issue** (grouped-board spec §3–§4; DESIGN.md §8.9.1). `foldBoard` folds every on-board descendant into its topmost on-board ancestor,
+ * and the columns draw only the tops — each in its OWN status category's column, whatever its folded issues' columns are — ordered by `sortTops` (the
+ * newest `updated` across the top and everything under it). This page never walks a parent chain itself: the fold is the one walk, and the columns, the
+ * band's counts and the click below all read its result. The column count pill counts cards. The fold is memoised on the list, so the minute tick
+ * re-renders the cards without re-folding up to 500 issues.
+ *
+ * **The band's numbers are the LOADED list's**, unfiltered: its length and its tops, so `17 issues · 5 cards` counts one list — not the status poll's
+ * `board.count`, a different poller one interval apart. They are passed only once the list has loaded, which is exactly the condition under which the
+ * columns are drawn (not loading, and not a failed first read with nothing in hand); before that the band reads today's line from `board.count`, so it
+ * can never claim cards the columns are not drawing.
+ *
+ * Clicking a card calls `onOpenIssue(issue, childrenOf)` — the slot the issue modal fills, plus the fold's parent → children index as a snapshot, so the
+ * modal's Children tree can reach the grandchildren the detail read does not return without a Jira call of its own (grouped-board spec §6). No `Run ▾` and
+ * no live strip: phase 5.
  */
-export function JiraBoardView({ onOpenJiraPage, onOpenIssue }: { onOpenJiraPage: (p: JiraPage) => void; onOpenIssue: (issue: JiraIssue) => void }) {
+export function JiraBoardView({
+  onOpenJiraPage,
+  onOpenIssue
+}: {
+  onOpenJiraPage: (p: JiraPage) => void;
+  onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex) => void;
+}) {
   const { data } = useJiraContext();
   const [stored, setStored] = usePersistedState<unknown>(JIRA_BOARD_KEY, null);
   const boards = data?.boards ?? [];
@@ -75,11 +100,23 @@ export function JiraBoardView({ onOpenJiraPage, onOpenIssue }: { onOpenJiraPage:
   const me = data?.me ?? null;
   const options = useMemo(() => boardFilterOptions(list.issues), [list.issues]);
   const applied = useMemo(() => effectiveBoardFilters(filters, options, me), [filters, options, me]);
-  // Memoised on the list and the filters, so the minute tick above re-renders the cards without re-filtering and re-sorting up to 500 issues.
+  const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
+  // Memoised on the fold and the filters, so the minute tick above re-renders the cards without re-filtering and re-sorting up to 500 issues.
   const columns = useMemo(() => {
-    const kept = list.issues.filter((i) => matchesBoardFilters(i, applied, me));
-    return JIRA_COLUMNS.map((col) => ({ ...col, issues: sortForBoard(kept.filter((i) => columnOf(i) === col.slug)) }));
-  }, [list.issues, applied, me]);
+    // F1 (grouped-board spec §5): a top is shown when it matches or when an issue folded under it does, with that issue's key to ring it by. The filter
+    // is `matchesBoardFilters` per issue, unchanged — a filter means the same thing folded or not.
+    const shown = foldMatches(fold, (i) => matchesBoardFilters(i, applied, me));
+    const kept = fold.tops.filter((i) => shown.has(i.key));
+    return JIRA_COLUMNS.map((col) => ({
+      ...col,
+      cards: sortTops(
+        kept.filter((i) => columnOf(i) === col.slug),
+        fold.under
+      ).map((issue) => ({ issue, fold: cardFold(issue.key, fold), matches: shown.get(issue.key) ?? [] }))
+    }));
+  }, [fold, applied, me]);
+  // "The list has loaded" is the condition the columns below are drawn under, read once so the band and the columns cannot disagree about it.
+  const loaded = !list.loading && !(list.error && list.issues.length === 0);
 
   if (unreadable !== null || board === null) {
     return (
@@ -103,7 +140,10 @@ export function JiraBoardView({ onOpenJiraPage, onOpenIssue }: { onOpenJiraPage:
 
   return (
     <div className="board">
-      <Band title={board.name} sub={<BandSub board={shown} site={data?.site ?? ''} />}>
+      <Band
+        title={board.name}
+        sub={<BandSub board={shown} site={data?.site ?? ''} fold={loaded ? { issues: list.issues.length, cards: fold.tops.length } : null} />}
+      >
         <BoardPicker boards={boards} current={board} onPick={setStored} />
         <input
           type="search"
@@ -139,20 +179,27 @@ export function JiraBoardView({ onOpenJiraPage, onOpenIssue }: { onOpenJiraPage:
         </FilterBar>
       </Band>
 
-      {list.loading ? (
-        <div className="board-empty">loading…</div>
-      ) : list.error && list.issues.length === 0 ? (
-        <div className="board-empty">board unavailable</div>
-      ) : (
+      {loaded ? (
         <div className="board-columns jira-board-columns">
           {columns.map((col) => (
-            <BoardColumn key={col.slug} slug={col.slug} label={col.label} count={col.issues.length}>
-              {col.issues.map((issue) => (
-                <JiraCard key={issue.key} issue={issue} board={board} me={me} now={now} onOpen={onOpenIssue} />
+            <BoardColumn key={col.slug} slug={col.slug} label={col.label} count={col.cards.length}>
+              {col.cards.map((c) => (
+                <JiraCard
+                  key={c.issue.key}
+                  issue={c.issue}
+                  board={board}
+                  me={me}
+                  now={now}
+                  fold={c.fold}
+                  matches={c.matches}
+                  onOpen={(issue) => onOpenIssue(issue, fold.childrenOf)}
+                />
               ))}
             </BoardColumn>
           ))}
         </div>
+      ) : (
+        <div className="board-empty">{list.loading ? 'loading…' : 'board unavailable'}</div>
       )}
     </div>
   );
@@ -168,9 +215,9 @@ function newer(a: string, b: string | null): boolean {
  * The band's sub-line on its own one-second clock: `polled 12 s ago` needs seconds, and ticking the whole page for it would re-render every card once a
  * second for a date that changes once a day. `.failing` is the red reading — the class rather than a colour on the text, so the theme owns the red.
  */
-function BandSub({ board, site }: { board: JiraBoardStatus; site: string }) {
+function BandSub({ board, site, fold }: { board: JiraBoardStatus; site: string; fold: { issues: number; cards: number } | null }) {
   const now = useNow(true, 1_000);
-  const sub = bandSub(board, site, now);
+  const sub = bandSub(board, site, now, fold);
   return <span className={sub.failing ? 'jira-band-sub failing' : 'jira-band-sub'}>{sub.text}</span>;
 }
 

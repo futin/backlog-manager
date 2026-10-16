@@ -51,8 +51,8 @@ function issue(over: Partial<JiraIssue>): JiraIssue {
   };
 }
 
-/* The first board's list. Each issue is there for a reading: PAY-131 is the full card face (parent crumb, `In Review`, two subtasks, `High`), PAY-120 the
-   board's root (one subtask, nobody, no sprint), PAY-140 the Done column (another person, another sprint, a Bug), PAY-151 the `Assigned to me` crumb and the
+/* The first board's list. Each issue is there for a reading: PAY-131 is the full card face (a parent crumb, `In Review`, `High`) — its parent is OFF the
+   board, so it stays a card of its own rather than folding (grouped-board spec §3); PAY-120 the board's root (nobody, no sprint), PAY-140 the Done column (another person, another sprint, a Bug), PAY-151 the `Assigned to me` crumb and the
    newest card in To Do, so the column's order is a fact about `updated` and not about list order. */
 const PAY_131 = issue({
   key: 'PAY-131',
@@ -61,7 +61,7 @@ const PAY_131 = issue({
   status: { name: 'In Review', category: 'indeterminate' },
   priority: 'High',
   assignee: ADA,
-  parent: { key: 'PAY-120', summary: 'Refund flows' },
+  parent: { key: 'PAY-99', summary: 'Payments platform' },
   subtasks: 2,
   sprint: 'Sprint 42',
   updated: daysAgoStamp(1)
@@ -256,7 +256,7 @@ describe('which board the page draws', () => {
 describe('the band', () => {
   it('reads bandSub’s text for the board under the title', async () => {
     await renderAlpha();
-    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now());
+    const sub = bandSub(ALPHA, 'acme.atlassian.net', Date.now(), { issues: 4, cards: 4 });
     expect(sub.text).toBe('acme.atlassian.net · 4 issues from 1 root and 1 query · polled 10m ago');
     expect(document.querySelector('.ui-band-sub')?.textContent).toBe(sub.text);
     expect(document.querySelector('.jira-band-sub')).not.toHaveClass('failing');
@@ -290,27 +290,30 @@ describe('the columns', () => {
 });
 
 describe('the card', () => {
-  it('draws the key, crumb, summary, person, raw status, subtasks and priority', async () => {
+  it('draws the key, crumb, summary, person, raw status and priority', async () => {
     await renderAlpha();
     const c = card('Refund partial captures');
     expect(within(c).getByText('PAY-131')).toBeInTheDocument();
-    expect(within(c).getByText('↳ PAY-120 Refund flows')).toBeInTheDocument();
+    expect(within(c).getByText('↳ PAY-99 Payments platform')).toBeInTheDocument();
     expect(within(c).getByText('AL')).toBeInTheDocument();
     expect(within(c).getByText('Ada Lovelace')).toBeInTheDocument();
     expect(within(c).getByText('In Review')).toBeInTheDocument();
-    expect(within(c).getByText('2 subtasks')).toBeInTheDocument();
     expect(within(c).getByText('High')).toBeInTheDocument();
     expect(within(c).getByTitle('Story')).toBeInTheDocument();
   });
 
-  it('reads `root` for a root, `Assigned to me` for my own, `1 subtask` and `unassigned`; zero subtasks draws no marker', async () => {
+  it('reads `root` for a root, `Assigned to me` for my own, and `unassigned`', async () => {
     await renderAlpha();
     expect(within(card('Refund flows')).getByText('root')).toBeInTheDocument();
-    expect(within(card('Refund flows')).getByText('1 subtask')).toBeInTheDocument();
     expect(within(card('Refund flows')).getByText('unassigned')).toBeInTheDocument();
     expect(within(card('Rounding wrong on invoices over 1,000')).getByText('Assigned to me')).toBeInTheDocument();
-    expect(within(card('Rounding wrong on invoices over 1,000')).queryByText(/subtask/)).toBeNull();
-    expect(within(card('Currency symbol missing on receipts')).queryByText(/subtask/)).toBeNull();
+  });
+
+  // Grouped-board spec §4: the `N subtasks` marker is gone. `JiraIssue.subtasks` counts Jira subtasks on the board or not, which is not this board's
+  // business — what sits under a card is the fold block's to say. PAY-131 and PAY-120 both carry a non-zero `subtasks`, so this is not vacuous.
+  it('draws no subtask count anywhere', async () => {
+    await renderAlpha();
+    expect(document.querySelector('.board-columns')?.textContent).not.toMatch(/subtask/);
   });
 
   // The browser never talks to Jira: initials, never an avatar image; the link out is the server's own `url`, opened in a new tab with no referrer.
@@ -327,14 +330,14 @@ describe('the card', () => {
     await renderAlpha();
     await userEvent.click(card('Refund partial captures'));
     expect(onOpenIssue).toHaveBeenCalledTimes(1);
-    expect(onOpenIssue).toHaveBeenCalledWith(PAY_131);
+    expect(onOpenIssue).toHaveBeenCalledWith(PAY_131, expect.any(Map));
 
     await userEvent.click(within(card('Refund flows')).getByRole('link'));
     expect(onOpenIssue).toHaveBeenCalledTimes(1);
 
     card('Refund flows').focus();
     await userEvent.keyboard('{Enter}');
-    expect(onOpenIssue).toHaveBeenLastCalledWith(PAY_120);
+    expect(onOpenIssue).toHaveBeenLastCalledWith(PAY_120, expect.any(Map));
   });
 });
 
@@ -472,5 +475,205 @@ it('draws no page switch inside main', async () => {
   // And the card's click goes to the slot the issue modal fills — no throw, no dialog from this page alone.
   await act(async () => {
     card('Refund partial captures').click();
+  });
+});
+
+/*
+  Grouped-board spec §3–§4: the board draws one card per TOP issue, and every on-board descendant folds into its topmost on-board ancestor. GROUP is the
+  shape the user's own board has — an epic root with stories under it and sub-tasks under those — plus a standalone task and a story whose parent is off
+  the board. Served for ALPHA's id, with ALPHA's status `count` left at 4, so the band case can tell the loaded list (7) from the status poll (4).
+*/
+describe('the fold', () => {
+  const G_120 = issue({ key: 'PAY-120', summary: 'Payments epic', type: { name: 'Epic', level: 1, subtask: false }, updated: daysAgoStamp(5) });
+  const G_160 = issue({
+    key: 'PAY-160',
+    type: { name: 'Story', level: 0, subtask: false },
+    status: { name: 'In Progress', category: 'indeterminate' },
+    parent: { key: 'PAY-120', summary: 'Payments epic' },
+    updated: daysAgoStamp(4)
+  });
+  const G_161 = issue({
+    key: 'PAY-161',
+    type: { name: 'Sub-task', level: -1, subtask: true },
+    status: { name: 'Done', category: 'done' },
+    parent: { key: 'PAY-160', summary: 'Summary of PAY-160' },
+    updated: daysAgoStamp(3),
+    resolved: daysAgoStamp(3)
+  });
+  const G_162 = issue({
+    key: 'PAY-162',
+    summary: 'Ledger rounding fix',
+    type: { name: 'Sub-task', level: -1, subtask: true },
+    parent: { key: 'PAY-160', summary: 'Summary of PAY-160' },
+    updated: daysAgoStamp(0)
+  });
+  const G_170 = issue({
+    key: 'PAY-170',
+    type: { name: 'Story', level: 0, subtask: false },
+    status: { name: 'Done', category: 'done' },
+    parent: { key: 'PAY-120', summary: 'Payments epic' },
+    updated: daysAgoStamp(6),
+    resolved: daysAgoStamp(6)
+  });
+  const G_180 = issue({ key: 'PAY-180', summary: 'Standalone task', updated: daysAgoStamp(1) });
+  const G_190 = issue({
+    key: 'PAY-190',
+    summary: 'Payout retries',
+    status: { name: 'In Progress', category: 'indeterminate' },
+    parent: { key: 'PAY-999', summary: 'Billing platform' },
+    updated: daysAgoStamp(2)
+  });
+  const GROUP = [G_120, G_160, G_161, G_162, G_170, G_180, G_190];
+
+  async function renderGroup(): Promise<void> {
+    lists[ALPHA.id] = GROUP;
+    renderPage();
+    await screen.findByText('Standalone task');
+  }
+
+  it('draws tops only: column counts count cards, and no folded issue is drawn anywhere', async () => {
+    await renderGroup();
+    expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['2', '1', '0']);
+    for (const folded of ['Summary of PAY-160', 'Summary of PAY-161', 'Ledger rounding fix', 'Summary of PAY-170']) {
+      expect(screen.queryByText(folded)).toBeNull();
+    }
+  });
+
+  // Review Focus 3: PAY-161 and PAY-170 are done, but they are folded under a To Do epic, which stays in its OWN column; the Done column gains nothing.
+  it('keeps a top in its own column whatever its folded issues’ columns are', async () => {
+    await renderGroup();
+    expect(summariesIn('Done')).toEqual([]);
+    expect(summariesIn('In Progress')).toEqual(['Payout retries']);
+  });
+
+  // Sort (§3): PAY-120's own `updated` (5 d) is older than PAY-180's (1 d), but PAY-162 under it was touched today, so the epic rises above the task.
+  it('sorts tops by the newest updated across each top and everything folded under it', async () => {
+    await renderGroup();
+    expect(summariesIn('To Do')).toEqual(['Payments epic', 'Standalone task']);
+  });
+
+  it('draws the fold block on a top with folded issues: the children line, a three-segment bar and its caption', async () => {
+    await renderGroup();
+    const c = card('Payments epic');
+    expect(within(c).getByText('2 children · 2 below them')).toBeInTheDocument();
+    expect(within(c).getByText('2 done · 1 in progress · 1 to do')).toBeInTheDocument();
+    expect(c.querySelectorAll('.ui-spread-seg')).toHaveLength(3);
+    // The age is the top's own (§3: the sort key is never drawn) — 5 d, not PAY-162's `now`.
+    expect(c.querySelector('.board-card-meta')?.textContent).toBe('5d');
+  });
+
+  it('draws no fold block on a top with nothing folded, and an off-board parent still reads as the crumb', async () => {
+    await renderGroup();
+    expect(card('Standalone task').querySelector('.jira-card-fold')).toBeNull();
+    expect(card('Payout retries').querySelector('.jira-card-fold')).toBeNull();
+    expect(within(card('Payout retries')).getByText('↳ PAY-999 Billing platform')).toBeInTheDocument();
+  });
+
+  // Spec §6, "Where the board's list comes from": a card click hands the modal the fold's `childrenOf`, so its tree can reach the grandchildren.
+  it('a card click passes the fold’s childrenOf with the issue', async () => {
+    await renderGroup();
+    await userEvent.click(card('Payments epic'));
+    expect(onOpenIssue).toHaveBeenCalledTimes(1);
+    const [opened, index] = onOpenIssue.mock.calls[0] as [JiraIssue, ReadonlyMap<string, readonly JiraIssue[]>];
+    expect(opened).toBe(G_120);
+    expect(index.get('PAY-120')?.map((i) => i.key)).toEqual(['PAY-160', 'PAY-170']);
+    expect(index.get('PAY-160')?.map((i) => i.key)).toEqual(['PAY-162', 'PAY-161']);
+  });
+
+  it('the band counts the loaded list, not the status poll, and adds the cards part', async () => {
+    await renderGroup();
+    expect(document.querySelector('.jira-band-sub')?.textContent).toBe('acme.atlassian.net · 7 issues from 1 root and 1 query · 3 cards · polled 10m ago');
+  });
+
+  it('the band reads the status count, with no cards part, while the list has not loaded', async () => {
+    const answered = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL) =>
+      /\/issues$/.test(String(input)) ? new Promise<Response>(() => {}) : answered(input)
+    ) as unknown as typeof fetch;
+    renderPage();
+    await screen.findByText('loading…');
+    await waitFor(() => expect(document.querySelector('.jira-band-sub')?.textContent).toBe(bandSub(ALPHA, 'acme.atlassian.net', Date.now(), null).text));
+    expect(document.querySelector('.jira-band-sub')?.textContent).toContain(' · 4 issues ');
+    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('card');
+  });
+
+  it('on a list where nothing folds the band has no cards part', async () => {
+    await renderAlpha();
+    expect(document.querySelector('.jira-band-sub')?.textContent).not.toContain('card');
+  });
+
+  // Review Focus 1: a cached list with a cycle renders, terminates and draws each member once.
+  it('draws a two-cycle as two cards, and settles', async () => {
+    lists[ALPHA.id] = [
+      issue({ key: 'PAY-1', summary: 'Cycle one', parent: { key: 'PAY-2', summary: 'Cycle two' } }),
+      issue({ key: 'PAY-2', summary: 'Cycle two', parent: { key: 'PAY-1', summary: 'Cycle one' } })
+    ];
+    renderPage();
+    await screen.findByText('Cycle one');
+    expect(visibleSummaries().sort()).toEqual(['Cycle one', 'Cycle two']);
+  });
+
+  /*
+    F1 (grouped-board spec §5): a top card shows when it matches, or when any issue folded under it matches. Shown only for a folded match, it carries a
+    2 px amber ring and a `match` marker naming the match — the answer to "why is this here". A top that matches on its own draws neither.
+  */
+  describe('filters find folded issues (F1)', () => {
+    const search = async (text: string): Promise<void> => {
+      await userEvent.type(screen.getByRole('searchbox', { name: 'Search issues' }), text);
+    };
+    const ringed = (): Element[] => Array.from(document.querySelectorAll('.jira-card-match'));
+
+    // PAY-162 is a GRANDCHILD (epic → story → sub-task): its depth-0 top shows, not the intermediate story (Review Focus 2).
+    it('a search matching only a folded grandchild shows its top, ringed, naming the match', async () => {
+      await renderGroup();
+      await search('ledger');
+      expect(visibleSummaries()).toEqual(['Payments epic']);
+      expect(card('Payments epic')).toHaveClass('jira-card-match');
+      expect(within(card('Payments epic')).getByText('1 match: PAY-162')).toHaveClass('ui-marker', 'ui-marker-match');
+      expect(screen.getAllByTestId('col-count').map((n) => n.textContent)).toEqual(['1', '0', '0']);
+    });
+
+    it('a search every top matches on its own rings nothing', async () => {
+      await renderGroup();
+      await search('PAY-1');
+      expect(visibleSummaries().sort()).toEqual(['Payments epic', 'Payout retries', 'Standalone task']);
+      expect(ringed()).toHaveLength(0);
+      expect(document.querySelector('.ui-marker-match')).toBeNull();
+    });
+
+    // `boardFilterOptions` reads every loaded issue, folded or not: a type only sub-tasks carry must still be pickable, though no card is one.
+    it('the Type filter offers a type only folded issues carry, and picking it rings their top with the count and the keys', async () => {
+      await renderGroup();
+      const dialog = await openFilters();
+      expect(within(within(dialog).getByRole('group', { name: 'Type' })).getByRole('button', { name: 'Sub-task' })).toBeInTheDocument();
+      await pick('Type', 'Sub-task');
+      expect(visibleSummaries()).toEqual(['Payments epic']);
+      expect(card('Payments epic')).toHaveClass('jira-card-match');
+      const marker = within(card('Payments epic')).getByText('2 matches');
+      expect(marker).toHaveClass('ui-marker-match');
+      expect(marker).toHaveAttribute('title', 'PAY-162, PAY-161');
+    });
+
+    // Review Focus 5: the band counts the unfiltered list, whatever the filters hide.
+    it('a filter never moves the band', async () => {
+      await renderGroup();
+      const before = document.querySelector('.jira-band-sub')?.textContent;
+      await pick('Type', 'Sub-task');
+      expect(document.querySelector('.jira-band-sub')?.textContent).toBe(before);
+      expect(before).toContain('7 issues from 1 root and 1 query · 3 cards');
+    });
+
+    it('rings nothing with no filter and no search', async () => {
+      await renderGroup();
+      expect(ringed()).toHaveLength(0);
+    });
+
+    it('a top that matches on its own is not ringed', async () => {
+      await renderGroup();
+      await search('standalone');
+      expect(visibleSummaries()).toEqual(['Standalone task']);
+      expect(card('Standalone task')).not.toHaveClass('jira-card-match');
+      expect(within(card('Standalone task')).queryByText(/match/)).toBeNull();
+    });
   });
 });

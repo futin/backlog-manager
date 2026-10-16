@@ -27,8 +27,11 @@ import { SettingsRow } from '../ui/SettingsRow';
  * - **Name & sync** — two `SettingsRow`s (§8.6's row, the same one Setup's cards draw): the name in a `.set-text`, the interval as a `Segmented` pill over
  *   `SYNC_INTERVALS`, the same control the Trackers card draws for a GitHub repo's interval, so the two read alike.
  * - **Roots** — the keys, one row each with ×, and a search field whose `Popover` lists `/api/jira/search` answers; a pick adds the key. Only the KEY is
- *   stored (`JiraBoard.roots` is `string[]`), so a row reads the key alone: the summary shown in the popover is not kept, and an edited board's roots arrive
- *   without one — fetching each to draw a summary would be twenty Jira calls to decorate a list the person already knows.
+ *   stored (`JiraBoard.roots` is `string[]`), so the summary a row reads beside it is display-only and comes from one of two places that cost no Jira call:
+ *   the search answer a root was picked from, or — for an edited board — ONE read of the board's cached list (`/api/jira/boards/:id/issues`, served from the
+ *   poller's cache), which holds every root the last sweep reached. Fetching each root fresh would be twenty Jira calls to decorate a list. A root the cache
+ *   does not hold (not swept yet, or one Jira no longer knows — the Band names that failure) reads its key alone; the read is never retried and a failed one
+ *   is silent, because a missing summary costs the person nothing the key does not already say.
  * - **Queries** — the four chips (`JIRA_QUERY_PRESETS` and `JIRA_CUSTOM_QUERY`; the leading `+ ` is drawn here, the presets store their chip text
  *   without it) and a row per query: label `.set-text`, JQL `.sheet-prompt` textarea, and the check line.
  *
@@ -101,6 +104,7 @@ export function JiraBoardSheet({
   const [name, setName] = useState(board?.name ?? '');
   const [interval, setSyncInterval] = useState<SyncInterval>(board?.interval ?? DEFAULT_JIRA_INTERVAL);
   const [roots, setRoots] = useState<string[]>(board?.roots ?? []);
+  const [summaries, setSummaries] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [rows, setRows] = useState<QueryRowState[]>(() => (board?.queries ?? []).map((q) => ({ key: nextKey.current++, ...q })));
   const [pickingProject, setPickingProject] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -108,6 +112,34 @@ export function JiraBoardSheet({
   const [error, setError] = useState<string | null>(null);
 
   const ready = name.trim() !== '' && (roots.length > 0 || rows.length > 0);
+
+  // The edited board's roots' summaries, from its cached list — once, at mount, like every other seed here (see the header's Roots bullet). A pick made
+  // before this answers keeps the summary it brought: the cache only fills keys the map does not hold yet.
+  const boardId = board?.id ?? null;
+  useEffect(() => {
+    if (boardId === null) return;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/jira/boards/${encodeURIComponent(boardId)}/issues`);
+        if (!res.ok) return;
+        const body = (await res.json()) as { issues?: unknown };
+        if (!mounted.current || !Array.isArray(body.issues)) return;
+        const cached = body.issues as JiraIssue[];
+        setSummaries((prev) => {
+          const next = new Map(prev);
+          for (const i of cached) if (typeof i?.key === 'string' && typeof i.summary === 'string' && !next.has(i.key)) next.set(i.key, i.summary);
+          return next;
+        });
+      } catch {
+        // Silent: the rows read their keys, as they did before this answered.
+      }
+    })();
+  }, [boardId, mounted]);
+
+  const addRoot = (picked: JiraIssue): void => {
+    setRoots((rs) => (rs.includes(picked.key) ? rs : [...rs, picked.key]));
+    setSummaries((prev) => new Map(prev).set(picked.key, picked.summary));
+  };
 
   const addRow = (preset: JiraQueryPreset, projectKey?: string): void => {
     const fill = (s: string): string => (projectKey === undefined ? s : s.split('<KEY>').join(projectKey));
@@ -239,13 +271,14 @@ export function JiraBoardSheet({
           roots.map((key) => (
             <div key={key} className="jira-sheet-root">
               <span className="jira-sheet-key">{key}</span>
+              {summaries.has(key) && <span className="jira-sheet-match-summary">{summaries.get(key)}</span>}
               <button type="button" className="jira-sheet-x" aria-label={`Remove ${key}`} onClick={() => setRoots((rs) => rs.filter((r) => r !== key))}>
                 ×
               </button>
             </div>
           ))
         )}
-        <RootSearch roots={roots} onPick={(key) => setRoots((rs) => (rs.includes(key) ? rs : [...rs, key]))} />
+        <RootSearch roots={roots} onPick={addRoot} />
       </section>
 
       <section className="jira-sheet-sec" aria-label="Queries">
@@ -310,7 +343,7 @@ function ProjectPick({ projects, onPick }: { projects: JiraProjectList; onPick: 
  * The popover's anchor is the field's wrapper, so a press in the field does not count as "outside" and typing on keeps the list up; Escape closes the list
  * first, then (a second press) the sheet.
  */
-function RootSearch({ roots, onPick }: { roots: readonly string[]; onPick: (key: string) => void }) {
+function RootSearch({ roots, onPick }: { roots: readonly string[]; onPick: (picked: JiraIssue) => void }) {
   const mounted = useMountedRef();
   const wrap = useRef<HTMLDivElement>(null);
   const latest = useRef(0);
@@ -350,8 +383,8 @@ function RootSearch({ roots, onPick }: { roots: readonly string[]; onPick: (key:
     return () => clearTimeout(timer);
   }, [text, mounted]);
 
-  const pick = (key: string): void => {
-    onPick(key);
+  const pick = (picked: JiraIssue): void => {
+    onPick(picked);
     setText('');
   };
 
@@ -374,7 +407,7 @@ function RootSearch({ roots, onPick }: { roots: readonly string[]; onPick: (key:
             matches.map((m) => {
               const already = roots.includes(m.key);
               return (
-                <button key={m.key} type="button" className="jira-sheet-match" disabled={already} onClick={() => pick(m.key)}>
+                <button key={m.key} type="button" className="jira-sheet-match" disabled={already} onClick={() => pick(m)}>
                   <span className="jira-sheet-key">{m.key}</span>
                   <span className="jira-sheet-match-summary">{m.summary}</span>
                   {already && <span className="jira-sheet-match-meta">already a root</span>}
