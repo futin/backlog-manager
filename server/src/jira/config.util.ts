@@ -48,8 +48,10 @@ export function isJiraId(kind: 'b' | 'q' | 's', value: unknown): value is string
 export const JIRA_PROJECT_KEY_RE = /^[A-Z][A-Z0-9_]+$/;
 
 /**
- * The longest saved JQL, in characters. The ONE home of this number: the write route that refuses a longer query and anything that sizes a request body by it
- * import it from here, so the cap cannot be spelled two ways. The READER does not enforce it (see the header) — it is a write-time rule.
+ * The longest JQL this server takes from a person, in characters. The ONE home of this number: `GET /api/jira/jql/check` (phase 1, the board sheet's check
+ * line) is its first consumer and phase 2's save route will be the second, so the cap cannot be spelled two ways. The jira.json READER does not enforce
+ * it (see the header): a file that already holds a longer query still loads, and the rule is applied where a person's text ENTERS the server, not where
+ * it is read back.
  */
 export const JIRA_JQL_MAX_CHARS = 2000;
 
