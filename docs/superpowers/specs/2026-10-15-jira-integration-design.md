@@ -65,7 +65,7 @@ source) read as this spec states them; BoardsTen's and NewBoard's tile wording i
 
 - `jira.client.ts` — one `fetch` wrapper: Basic auth from the env, every call on Atlassian's gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/…` — the one
   base both token kinds answer on (P14: a scoped token gets 401 at `https://<site>`); the `cloudId` comes from `GET https://<site>/_edge/tenant_info` (unauthenticated) at
-  boot, held in memory, re-read on the ticker until it answers; only `browse` links use `https://<site>`. JSON in and out, `AbortSignal.timeout`. Maps 401 →
+  boot, held in memory, re-read on the ticker until it answers; only `browse` links use `https://<site>`. JSON in and out, a 10 s deadline per call — a `setTimeout` plus an `AbortController`, not `AbortSignal.timeout`, whose timer jest's fake timers never advance. Maps 401 →
   `unauthorized`, 403 → `forbidden`, 429 → `rate-limited` carrying the `Retry-After` instant, network/timeout → `unreachable`. Counts calls per sweep and
   stamps the last 429, for the chip.
 - `config.util.ts` — `readJiraConfig()` and one writer per entry kind (`writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill`, `deleteSkill`) over `jira.json`, plus
@@ -136,7 +136,7 @@ Shapes, not code: the implementer owns the exact TypeScript.
 - `JiraQuery`: `id, label, jql`. `JiraBoard`: `id, name, roots: key[], queries: JiraQuery[], interval: SyncInterval` (the existing type; `DEFAULT_JIRA_INTERVAL
   = '1m'`).
 - `JiraSkill`: `id, name, prompt` (the template). `JiraAction` = `'execute' | 'context' | { skill: id }`.
-- `JiraStatusPayload`: `configured, configUnreadable (null, or why jira.json could not be read), site, me { accountId, name } | null, access, detail, boards: (JiraBoard & { polledAt, count, truncated, failures: { kind: 'root' | 'query', id, message }[] })[],
+- `JiraStatusPayload`: `configured, configUnreadable (null, or why jira.json could not be read), site, me { accountId, name } | null, tokenKind: JiraTokenKind | null (classic | scoped, from §3's one site probe; null until it answers), access, detail, boards: (JiraBoard & { polledAt, count, truncated, failures: { kind: 'root' | 'query', id, message }[] })[],
   repos: Record<projectKey, path[]>, projects { key, name }[] (the union of project keys seen on any board cache and the mapped keys — no outbound call), skills: JiraSkill[], calls { sweep (every call the last tick made, however many boards it swept), last429At }, live: Record<key, { name, startedAt, repo, starting: boolean }>` — a `starting` entry is included, so a card reads `starting` from the first write.
   `access` is one of `ok | unconfigured | unsupported | unauthorized | forbidden | rate-limited | unreachable`.
 - `JiraIssueDetail extends JiraIssue`: `description` (Markdown), `children: JiraIssue[]`, `transitions { id, name, to { name, category } }[]`,
@@ -357,7 +357,8 @@ Shared › Trackers gains one read-only Jira row (`<site> · N boards · interva
 ## 12. Phases — one plan and one PR each
 
 0. **Probe** — verify the API facts in §14 against a real site; amend this spec.
-1. **Server read** — client, config reader, poller, map, ADF, identity, block, the read routes, `GET /api/jira`; `.env.example` and the compose
+1. **Server read** — client, config reader, poller, map, ADF, identity, block, the read routes (`?format=text` included — the block and the detail route
+   are both here, so it is one header), `GET /api/jira`; `.env.example` and the compose
    passthrough of the three keys (as `BM_GITHUB_TOKEN` has); `docs/subsystems/jira.md`; `.claude/rules/jira.md` with the rules this phase builds: the
    `jira.json` reader half, the token (its `jira.mjs` half waits for phase 4), the JQL quoting, the Done window, and the widened cache-age and
    outbound-modules lines of §13.
@@ -366,7 +367,7 @@ Shared › Trackers gains one read-only Jira row (`<site> · N boards · interva
    rule of §13 (the Run ▾ rule waits for phase 5); DESIGN.md gains §8.9 for the Jira surfaces (every component cites its subsection), and §8.7's composer count and its two "only modal" / "not by two" sentences, `board.md`'s Escape
    bullet, `invariants.md`'s Escape section and `test/dialog-count-docs.test.ts` move from three composers to five (the issue modal and the board sheet).
 3. **Writes** — assign and transition routes, the modal controls, the splice; the write rule of §13.
-4. **Skill** — `skills/jira`, `?format=text`, docs, publish; the widened exit-5 bullet and the token rule's `jira.mjs` half.
+4. **Skill** — `skills/jira` (over phase 1's `?format=text`), docs, publish, and `skills/jira/**` added to `jira.md`'s `paths:`; the widened exit-5 bullet and the token rule's `jira.mjs` half.
 5. **Run** — Skills card and its two routes, `jiraDefaultAction`, the menu, the launch sheet, the prompt route, `dispatch-jira`, `jira-stop`, the live map, its agents-side
    reconciler and the strip; the Run ▾ rule, the live-map rule, the dispatch and spawn-prompt widenings of §13; the composer count moves to six (the launch sheet).
 
@@ -380,7 +381,7 @@ claude-rules suite enforces that all three exist and agree.
 
 | headline                                                                                                                                    | rules file     |
 | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.                 | `jira.md` (new, `paths: ["server/src/jira/**", "skills/jira/**"]` — the tenth rule file; CLAUDE.md's count follows) |
+| `~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.                 | `jira.md` (new, `paths: ["server/src/jira/**"]` until phase 4 creates `skills/jira/` and adds it — `test/claude-rules.test.ts` fails a glob that matches no tracked file; the tenth rule file; CLAUDE.md's count follows) |
 | The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs. | `jira.md`  |
 | The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key. | `jira.md`  |
 | Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map time.                                 | `jira.md`      |
@@ -416,7 +417,7 @@ against a ticket the user names. A finding that changed the spec is applied in �
 | P8  | `POST /rest/api/3/jql/parse?validation=strict { queries }` returns per-query errors; `POST /rest/api/3/search/approximate-count { jql }` returns `count` | both 200 as assumed: parse answers `queries[].errors[]` strings (`Field 'sprnt' does not exist or you do not have permission to view it.`) but **passes an unbounded query**; `approximate-count` answers `{ count }` and is the call that refuses unbounded JQL (400, P2's message). → §5 check route |
 | P9  | a 429 carries `Retry-After` in seconds; whether `X-RateLimit-*` headers exist                                                                        | no 429 met. Every normal answer carries `x-ratelimit-limit`, `x-ratelimit-remaining`, `ratelimit`, `ratelimit-policy`; the client keeps counting its own calls for the CALLS meter (the headers are per gateway bucket, not per sweep) and reads only `Retry-After` on a 429 — unverified, the 60 s default stands |
 | P10 | the ADF node inventory on a real description: media, mention, table, panel, expand, emoji, inlineCard, date, status                                  | over 10 descriptions: `doc, paragraph, text, heading, bulletList, orderedList, listItem, codeBlock, panel, table, tableRow, tableHeader, tableCell, taskList, taskItem, media, mediaSingle, mention, emoji, inlineCard, rule`; marks `strong, em, code, link, underline`. No `expand`, `date` or `status` seen. A description is an ADF object, never a string. → §8 taskList |
-| P11 | `GET /rest/api/3/project/search` lists the projects the token sees, with paging                                                                     | 200, paged: `values[]`, `isLast`, `nextPage` (a URL), `startAt`, `maxResults`, `total` (8 here) — the route follows `nextPage` until `isLast` |
+| P11 | `GET /rest/api/3/project/search` lists the projects the token sees, with paging                                                                     | 200, paged: `values[]`, `isLast`, `nextPage` (a URL), `startAt`, `maxResults`, `total` (8 here) — the route pages by `startAt` until `isLast`, never following `nextPage`: Basic auth is never sent to a URL Jira handed back |
 | P12 | answered from code, no probe needed: `POST /api/sessions/<id>/stop` answers 404 `no live session` for a gone session (`items-abort.service.ts`), and `GET /api/sessions` carries each session's status (`dashboardSessionStatus`, `agents.service.ts`) — §3 reconciles the live map against it | known |
 | P13 | `GET /rest/api/3/serverInfo` answers `deploymentType: "Cloud"` on a Cloud site, and is absent or says otherwise on Server/DC                       | `deploymentType: "Cloud"`, `version: 1001.0.0-SNAPSHOT`; Server/DC not probed |
 | P14 | (found, not assumed) the token kind decides the base URL                                                                   | scoped token → gateway only; cloudId from `GET https://<site>/_edge/tenant_info` (200, unauthenticated, `{ cloudId }`). → §3 client, §6 Connection |

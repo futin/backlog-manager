@@ -15,6 +15,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [README.md](../README.md)                            | the human front door — what this is, quick start, the surfaces                                                          |
 | [CLAUDE.md](../CLAUDE.md)                            | the normative index: one headline per rule — mechanism in `.claude/rules/`, reasoning in `subsystems/invariants.md`     |
 | [subsystems/api.md](subsystems/api.md)               | the Nest side: what each module owns, which reads are cached and which must never be                                    |
+| [subsystems/jira.md](subsystems/jira.md)             | the Jira integration's server half: the client, the board poller and its caches, the `/api/jira` read routes            |
 | [subsystems/board.md](subsystems/board.md)           | the client: the four surfaces, and what the browser derives rather than fetches                                         |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
 | [subsystems/skills.md](subsystems/skills.md)         | the six skills, the CLIs beneath them, and the reviewer agent                                                           |
@@ -23,7 +24,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
 | [workflows/ci.md](workflows/ci.md)                   | the PR gate: `ci / checks`, `ci / pr-title`, `ci / skills` from release-kit, and the `main-pr-only` ruleset             |
 
-`.claude/rules/` sits beside that table rather than in it: nine path-scoped files that a session loads automatically when it reads a file under their `paths:`
+`.claude/rules/` sits beside that table rather than in it: ten path-scoped files that a session loads automatically when it reads a file under their `paths:`
 glob, each the one home of the mechanism text for the rules scoped to its paths — CLAUDE.md keeps the headlines, `subsystems/invariants.md` the reasoning. They
 are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot in them is mechanical: a dead anchor, a glob that matches nothing,
 a headline that no longer matches CLAUDE.md's, an anchor homed in two files or in none.
@@ -65,14 +66,18 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`orchestrator/`** — a read-only view of the run-state directory, current run and archived runs alike, plus two pieces of in-memory bookkeeping that are lost
   on restart on purpose: what the watchdog has done, and which projects this process has just asked to start a run. Since task-48 it also derives the runs
   other machines drove on a tracker project from the poller's cached claim comments, and serves them in a separate `remote` array, never among the local runs.
-- **`agents/`** — one of the two modules that make an outbound call — to the local claude-agents-dashboard — and the only one that can start a session. Off
+- **`agents/`** — one of the three modules that make an outbound call — to the local claude-agents-dashboard — and the only one that can start a session. Off
   unless `BM_AGENTS` says otherwise; every POST here is additionally guarded by content-type and `Origin`, because loopback is no boundary against a page in
   this machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
   while some run file says `running`.
-- **`tracker/`** — the other outbound-calling module: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set, the
-  in-memory issue cache the `github` adapter answers from (the one cache in this server whose age is rendered, as `polledAt`), the nine-label bootstrap, the
-  claim protocol's pure half (`claim.ts` — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for Settings. The token
-  is read per call from the environment and reaches no payload.
+- **`tracker/`** — the second of three outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
+  the in-memory issue cache the `github` adapter answers from (one of the two caches in this server whose age is rendered, as `polledAt`), the nine-label
+  bootstrap, the claim protocol's pure half (`claim.ts` — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for
+  Settings. The token is read per call from the environment and reaches no payload.
+- **`jira/`** — the third outbound-calling module, and only while `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are all set: a Jira Cloud client on
+  Atlassian's gateway, a poller that sweeps the boards in `~/.backlog-manager/settings/jira.json` into in-memory caches (the second cache whose age is
+  rendered), and six read routes under `/api/jira` — phase 1 of the [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md), with no
+  write path yet; [full doc](subsystems/jira.md).
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
   package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog.

@@ -403,7 +403,7 @@ export interface ProjectSummary {
   /**
    * When the poller last successfully read this repo, ISO, or `null` before
    * the first successful sync. The client renders its AGE — the tracker chip's
-   * POLL countdown, the item modal's `polled 12 s ago` — which is what keeps the one cache in this server honest: the items are at
+   * POLL countdown, the item modal's `polled 12 s ago` — which is what keeps the tracker cache honest: the items are at
    * most one poll interval old and the number says exactly how old.
    */
   polledAt: string | null;
@@ -528,6 +528,148 @@ export const DEFAULT_SYNC_INTERVAL: SyncInterval = '15s';
 /** Own-key check, so `toString` and `__proto__` — both "in" any object literal — are not tokens. */
 export function isSyncInterval(value: unknown): value is SyncInterval {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SYNC_INTERVALS, value);
+}
+
+// ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 is the server's READ half, so two fields are typed at their phase-1 value and
+// widen later without a rename: `JiraIssueDetail.session` is `null` (phase 5 makes it the live-session record) and `JiraStatusPayload.live` is always `{}`
+// (phase 5 makes it a map of key → live session). `JiraAction`, `JiraDispatchRequest` and its result are phase-5 shapes and are deliberately absent.
+// `JiraStatusPayload.tokenKind` is not in §4's list: it is the one extra boot probe's answer (§3, P14) and the Connection card needs it; §4 is amended to
+// match.
+
+/** Jira's status category key. Jira's fourth key, `undefined` ("No Category"), is mapped to `new` by the server (P5), so the client never sees it. */
+export type JiraStatusCategory = 'new' | 'indeterminate' | 'done';
+
+/**
+ * What the last sweep (or the last route that met a 401 or a 429) concluded about the site, as one word. `unconfigured` is the three env vars missing;
+ * `unsupported` is a site that is not Jira Cloud (P13). Every other value names the HTTP outcome the user can act on.
+ */
+export type JiraAccess = 'ok' | 'unconfigured' | 'unsupported' | 'unauthorized' | 'forbidden' | 'rate-limited' | 'unreachable';
+
+/**
+ * Which kind of API token the credentials are: `classic` answers on `https://<site>/rest/api/3/…` too, `scoped` only on the `api.atlassian.com` gateway (P14).
+ * Decided once per process by a single `GET /myself` against the site itself.
+ */
+export type JiraTokenKind = 'classic' | 'scoped';
+
+/** One issue as the board draws it. Filled by exactly the sweep's field list (§4), so a board render costs no per-issue call. */
+export interface JiraIssue {
+  key: string;
+  id: string;
+  /** `https://<site>/browse/<key>` — the one place the site rather than the gateway is a link target. */
+  url: string;
+  summary: string;
+  project: { key: string; name: string };
+  /** `level` is Jira's hierarchy level (-1 subtask, 0 standard, 1 epic, …); `subtask` is the flag Jira carries beside it. */
+  type: { name: string; level: number; subtask: boolean };
+  status: { name: string; category: JiraStatusCategory };
+  priority: string | null;
+  assignee: { accountId: string; name: string } | null;
+  /** The reporter's display name only — nothing acts on a reporter, so no accountId is carried. */
+  reporter: string | null;
+  parent: { key: string; summary: string } | null;
+  /** A count, not the issues: the detail route fetches the children itself. */
+  subtasks: number;
+  labels: string[];
+  /** The active sprint's name from the discovered sprint field, or `null`. */
+  sprint: string | null;
+  /** ISO instants, as Jira sends them. */
+  created: string;
+  updated: string;
+  resolved: string | null;
+}
+
+/** A saved JQL a board shows alongside its roots. A person's JQL, passed to Jira verbatim. */
+export interface JiraQuery {
+  id: string;
+  label: string;
+  jql: string;
+}
+
+/** One board: the issues it follows by root key (with their descendants) plus its saved queries. `interval` is the existing `SyncInterval`. */
+export interface JiraBoard {
+  id: string;
+  name: string;
+  roots: string[];
+  queries: JiraQuery[];
+  interval: SyncInterval;
+}
+
+/** A prompt template the Start sheet offers beside `execute` and `context`. `prompt` is the template itself, not a rendered prompt. */
+export interface JiraSkill {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
+/** One root or query that the last sweep could not read, kept beside the board so a partial list is never mistaken for a whole one. */
+export interface JiraBoardFailure {
+  kind: 'root' | 'query';
+  id: string;
+  message: string;
+}
+
+/** A board plus what its last sweep found. `polledAt` is `null` until the first sweep answers. */
+export interface JiraBoardStatus extends JiraBoard {
+  polledAt: string | null;
+  count: number;
+  truncated: boolean;
+  failures: JiraBoardFailure[];
+}
+
+/** One workflow transition the issue offers right now. */
+export interface JiraTransition {
+  id: string;
+  name: string;
+  to: { name: string; category: JiraStatusCategory };
+}
+
+/** `GET /api/jira/issue/:key`, read fresh. `session` is `null` in phase 1; phase 5 widens it to the live-session record. */
+export interface JiraIssueDetail extends JiraIssue {
+  /** Markdown, converted from Jira's ADF (§8). */
+  description: string;
+  children: JiraIssue[];
+  transitions: JiraTransition[];
+  /** The ids of the boards whose cache holds this issue. */
+  boards: string[];
+  session: null;
+}
+
+/**
+ * `GET /api/jira`. `configured: false` is the whole payload's "draw nothing Jira" signal — the other fields then carry their empty values. The credentials
+ * never appear here: `site`, `me.name` and `me.accountId` are the only identity facts that leave the server (§10). `live` is always `{}` in phase 1.
+ */
+export interface JiraStatusPayload {
+  configured: boolean;
+  /** `null`, or why `jira.json` exists but could not be read or parsed — in which case the server reports it and never replaces the file. */
+  configUnreadable: string | null;
+  site: string | null;
+  me: { accountId: string; name: string } | null;
+  tokenKind: JiraTokenKind | null;
+  access: JiraAccess;
+  detail: string | null;
+  boards: JiraBoardStatus[];
+  /** Project key → the absolute repo paths mapped to it. */
+  repos: Record<string, string[]>;
+  /** The union of project keys seen on any board cache and the mapped keys — no outbound call. */
+  projects: { key: string; name: string }[];
+  skills: JiraSkill[];
+  /** `sweep` is every call the last tick made, however many boards it swept; `last429At` is an ISO instant or `null`. */
+  calls: { sweep: number; last429At: string | null };
+  live: Record<string, never>;
+}
+
+/** What a board with no `interval` of its own polls at. Jira allows more headroom than GitHub, so the default is `1m`, not `DEFAULT_SYNC_INTERVAL`. */
+export const DEFAULT_JIRA_INTERVAL: SyncInterval = '1m';
+
+/**
+ * A Jira issue key: an upper-case project key (two characters or more, letters, digits and `_`) and a number. Anchored at both ends and with no `m` flag, so
+ * a trailing newline cannot slip past `$` — `'PAY-1\n'` is not a key, which matters because a key is spliced into JQL double-quoted and into a URL path.
+ */
+export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]+-\d+$/;
+
+export function isJiraKey(value: unknown): value is string {
+  return typeof value === 'string' && JIRA_KEY_RE.test(value);
 }
 
 /**

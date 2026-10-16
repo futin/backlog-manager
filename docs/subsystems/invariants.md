@@ -2854,11 +2854,13 @@ slowing a live run's sync costs latency, and that is the user's call. The route 
 the starting entries, and hosting it in `TrackerModule` would be a module cycle. Remote runs are the read-side twin: an `off` repo derives none, because a
 frozen comment cache would otherwise show another machine's run as live for as long as sync stays off.
 
-## The tracker cache is the one cache in this server whose age is a rendered value
+## The tracker and Jira caches are the two caches in this server whose age is a rendered value
 
 `TrackerPollerService` holds every connected repo's issues in memory, per repo, lost on restart and rebuilt by the first sync (task-45, spec §5.1). Every other
 read in this server is per request and uncached — the registry, each project's source marker, the run files, `uncommitted` — and those rules are untouched: this
 poller re-reads all of them on every tick. What it keeps is the one thing behind a network call with an hourly budget.
+The Jira board cache is the second (`JiraPollerService`, one list per board, `polledAt` per board in `GET /api/jira`), allowed for the same reason and kept
+honest the same way; everything below is about the tracker's.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
@@ -2926,7 +2928,7 @@ which is what makes per-item claim watching cheap. Phase 2 made the call with no
 its tests would not move in the phase that also introduced the protocol they feed — and that bet paid: task-46 added `TrackerPollerService.comments()` over the
 same cache and changed nothing about the loop. `test/tracker-poll.test.ts` asserted the call explicitly while it had no reader, precisely because a call with no
 reader is what a later edit deletes as dead. Task-48 gave `comments()` its second reader, `RemoteRunsService`, which derives other machines' runs from the same
-cached comments on every `GET /api/orchestrator/runs` and keeps no cache of its own — this stays the one cache.
+cached comments on every `GET /api/orchestrator/runs` and keeps no cache of its own — this stays the one tracker cache.
 
 **Rate limits are a state, not an exception.** Nothing in `github.client.ts` throws on an HTTP status: every response — including a transport failure, which
 surfaces as `status: 0` — comes back as a value the poller turns into `access` and `detail`, because every one of them is something the board renders rather
@@ -2941,6 +2943,73 @@ as success because another machine's poller winning the race still leaves the la
 than a lifecycle write: the issue→item mapping cannot work without the set. `skills/backlog/tools/backlog.mjs`'s `connect` writes issue forms that pre-apply the
 four `type:*` labels and CANNOT import that module — a skill's `tools/` is a standalone copy of what was pushed — so the agreement is enforced the other way
 round: `test/tracker-labels.test.ts` reads the skill's source as text and asserts the two lists match. A comment asking two files to stay in step is what drifts.
+
+## `jira.json` has exactly one writer, and a file that cannot be read is never replaced
+
+The Jira integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md) §2) keeps its boards, saved queries, repository map and skill
+prompts in `~/.backlog-manager/settings/jira.json` — the fourth file under `settings/`, and the first one a person is expected to edit by hand as well as
+through the server. It takes `tracker-sync.json`'s posture (the settings-file exception above): read fresh on every use, cached nowhere, one writer — the
+server — and phase 1 ships the reader alone, so until phase 2's writers land the only hands on the file are the person's.
+
+**An unreadable file is reported, never treated as empty.** `readJiraConfig` answers `unreadable` for a file that exists but cannot be read or parsed, and
+`GET /api/jira` carries it as `configUnreadable`. The failure this prevents is the one #270 found in `tracker-sync.json`'s writer, one step earlier: a
+board that renders `No boards yet` over a file with a stray comma invites the person to create a board, and the write that follows — reading the file as `{}`
+and writing one board back — would erase every board, query and mapping the file held. So the reader says the file is broken, the sweep prunes no board
+cache while it is (a board the file still holds keeps its list until the file parses again), and phase 2's writers refuse with a 409 rather than replace it.
+A MISSING file is a fresh install and reads as empty; so does a file that parses to something other than an object, which is what `tracker-sync.json`'s
+writer already replaces and so what phase 2's writers must agree with.
+
+**The fallback is per entry, because the data is hand-written.** One bad value costs its own entry: a board with a mistyped id, a root that is not an issue
+key, a query with an empty label, a repos path that is not a string. Spec §2 drew the line at the board; the reader goes one level finer — a bad root or
+query costs itself, not the board it sits in — because a board that vanishes over one lower-case key is the more surprising failure. Every drop is warned
+once, naming the file and the entry, so a vanished entry leaves a trace in the server log. The mechanism is `server/src/jira/config.util.ts`.
+
+## The Jira token never leaves the server, and the poller is armed only while a board syncs
+
+The GitHub token's rule (above), stated again for a second credential rather than assumed to cover it: this app now holds secrets for two services, and a rule
+written about `BM_GITHUB_TOKEN` is not the one a reader of `server/src/jira/` will look for. `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are read by
+`jiraEnv()` per call and never cached; no route returns the email or the token, no payload carries them, and the browser never talks to Atlassian — every call
+is board → `/api/jira` → Jira. `GET /api/jira` says `site`, `me.name`, `me.accountId` and `tokenKind`, which is what the Connection card needs to show the
+right account is in place and nothing more.
+
+**One header, one host, one place.** `JiraClient.request` builds the `authorization` header and every call passes through it, which is what makes "the token
+is in no URL and no message" a property of one function rather than of every call site. Every call goes to the API gateway, a constant, because that is the one
+address a scoped token can reach (spec §14 P14) — so nothing in a request names a host. The two site-URL calls are deliberate: `tenant_info` carries no
+credential at all, and the `myself` probe that tells a classic token from a scoped one is sent once, after the gateway has already accepted the credential.
+Project listing pages by `startAt` rather than following the `nextPage` URL Jira returns, so Basic auth is never sent to an address a response body chose.
+
+**Armed only while there is something to do.** The poller is the GitHub poller's `setTimeout` chain, and it arms on the same "still owed" logic: a board that
+polls, a board owed its one cold sweep, or a boot answer still missing. An unconfigured install, or one whose every board is `off` and already swept, makes no
+call to Atlassian at all — and `unsupported` (a Server/DC site) disarms for good, because no retry will make it Cloud. Compose passes the three keys as
+interpolations with empty defaults, never literals — bug-25's rule, where a literal is an account committed to a public repository.
+
+## Jira's Done column is a window, not a store
+
+A board's roots are walked to their descendants, and a long-lived epic accumulates done children for as long as it lives. Kept, they would bury the open work
+under a Done column that only grows; the board is "what is live", and a query author who wants history has JQL for it. So a `done` issue whose resolution —
+or, when Jira recorded none (a workflow that moves into a done status without setting one), whose last update — is more than `JIRA_DONE_WINDOW_DAYS` (14)
+old is dropped as it is mapped (spec §3).
+
+**At map time, and in one file.** `mapJiraIssue` applies it, so the cache, the board payload and the client never see an expired issue and none of them holds
+a second copy of the 14. Dropping before the caps means an expired issue never takes a place a live one needed. The window is for the `done` category alone:
+an issue reopened after an earlier close still carries that stale `resolutiondate`, and dropping it would hide exactly the work that came back.
+
+**The walk still sees what the window dropped.** The next `parent in` round names every key Jira returned, mapped or not, so a closed story's open subtask
+stays on the board. And the window is the SWEEP's: the issue detail, its children and the roots search pass `now: null`, because a person who opens or
+searches for a specific issue must get it however old it is — a picker that could not find last month's closed epic would read as "Jira does not know it".
+
+## Every value the server puts into JQL is quoted and escaped, and a person's JQL is passed verbatim
+
+Two sources write JQL in this app, and they are trusted in opposite ways. The SERVER builds queries from values — a root key, the keys a walk round returned,
+the text typed into the roots picker — and every one is a double-quoted string with `\` and `"` backslash-escaped (`jqlString`, `key = "PAY-1"`). A key is
+also validated by `isJiraKey` before it gets there, but the quoting does not rely on it: the keys a walk interpolates come out of Jira's own response, and the
+search term is free text by definition. Without the quoting, a search for `x" OR project = SECRET` would be a query the person did not write, run with the
+server's credentials — and the escaping is what makes `"` and `\` searchable at all rather than a 400.
+
+A PERSON's JQL — a board's saved query, the text in the board sheet's check line — is theirs to write, and the server never edits it: no added clause, no
+rewritten order, no quoting. Jira parses it and Jira refuses it (`jql/parse?validation=strict` for the check, a 400 on a sweep that becomes a `failures` row
+on the board, never a dropped board). Rewriting it would be guessing at what the person meant, and a filter that silently differs from the one typed is worse
+than one Jira rejects out loud. The only bound is length (`JIRA_JQL_MAX_CHARS`, 2 000), because a query that long is a paste accident, not a filter.
 
 ## A tracker project has no item files, and that shows up in three places
 
@@ -3050,7 +3119,8 @@ no other way; the headless session never holds the token.
 **The ninth write route is `abort` (#225), and it is the one outside `items/`.** `POST /api/items/abort`, body `{ project, id }`, releases a live claim
 whose session was stopped from the dashboard, or died, without running its own closing `stop` — before it, a board-dispatched groom or execute left its item
 reading as in progress on every machine until the heartbeat went stale. It lives in `agents/items-abort.controller.ts` because it calls the dashboard, and
-`agents/` and `tracker/` stay the only outbound-calling modules; it gates and maps through the same exported `writable` and `answer`, carries the same class
+`agents/`, `tracker/` and — since the Jira integration — `jira/` are the only outbound-calling modules; it gates and maps through the same exported
+`writable` and `answer`, carries the same class
 guard, and its release goes through `ItemWriter.release` on the same per-URN chain. Two proofs, one per case: a session THIS server dispatched (an in-memory
 `DispatchRecordsService` entry — lost on restart on purpose, like a starting run) is stopped through the dashboard first, and only a 200 or the `no live
 session` 404 lets the release through; any other session needs the claim's `host` to equal this server's `BM_MACHINE_NAME` and the dashboard's session list to

@@ -107,6 +107,14 @@ services:
       # with no connected project never needs one, and the poller is disarmed
       # without it.
       BM_GITHUB_TOKEN: '${BM_GITHUB_TOKEN:-}'
+      # The three Jira Cloud credentials (Jira phase 1). bug-25's rule again, for all three and not only the token: an interpolation with an empty default,
+      # NEVER a literal. The email is half of the Basic credential and the site is the host it is sent to, so a literal for any of them commits one machine's
+      # account to this repository — and a literal token can only be undone by revoking it. `:-` so an empty value reads as absent, which the server reports
+      # as `configured: false` (the Jira section is not drawn) rather than sending a blank credential and explaining the 401. Pinned through the server's own
+      # spellings (`JIRA_ENV`) by test/compose-env.test.ts.
+      BM_JIRA_SITE: '${BM_JIRA_SITE:-}'
+      BM_JIRA_EMAIL: '${BM_JIRA_EMAIL:-}'
+      BM_JIRA_TOKEN: '${BM_JIRA_TOKEN:-}'
       # The name this machine's tracker claims record (#225). backlog.mjs and
       # orchestrate.mjs read it on the host; the server reads it only for the
       # board's Release claim on a session it did not dispatch, which releases

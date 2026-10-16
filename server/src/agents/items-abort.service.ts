@@ -18,10 +18,10 @@ const STOP_TIMEOUT_MS = 10_000;
  *
  * ## Why this is in `agents/`, when the route is under `/api/items`
  *
- * Because it calls the dashboard, and `agents/` and `tracker/` are this server's only two outbound-calling modules. `ItemsModule` knows nothing about the
- * dashboard and must not start to. The release itself still goes through the `ItemWriter` seam like every other item write — `writable` and `answer` are the
- * same two functions `items-write.controller.ts` gates and maps with, imported rather than copied — so "what can write to an issue" is still answered by
- * reading `github.source.ts`.
+ * Because it calls the dashboard, and `agents/`, `tracker/` and `jira/` are this server's only three outbound-calling modules (and the dashboard is `agents/`'s
+ * alone). `ItemsModule` knows nothing about the dashboard and must not start to. The release itself still goes through the `ItemWriter` seam like every other
+ * item write — `writable` and `answer` are the same two functions `items-write.controller.ts` gates and maps with, imported rather than copied — so "what can
+ * write to an issue" is still answered by reading `github.source.ts`.
  *
  * ## The two cases, and why each proof is the one it is
  *

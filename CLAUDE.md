@@ -38,7 +38,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   adapters, and — since task-46 — the eight guarded write routes in `items-write.controller.ts`, which with the ninth, `abort`, are the ONLY writes this
   server makes to anybody's items), `agents/` (the
   dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
-  `trackers` route and `tracker-sync.json`'s reader/writer) — those two are the outbound-calling modules, and the ONLY two — `orchestrator/` (a read-only view of the run-state directory, plus the
+  `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the read routes under
+  `/api/jira`) — those three are the outbound-calling modules, and the ONLY three — `orchestrator/` (a read-only view of the run-state directory, plus the
   in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (#249 — three read-only
   Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, no actions), `registry/`, `static.ts` (serves `client/dist` only when built),
   `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by). → [docs/subsystems/api.md](docs/subsystems/api.md)
@@ -62,7 +63,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   board, not by typing the trigger into a terminal.** → [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge.
-- `.claude/rules/` — nine path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
+- `.claude/rules/` — ten path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps each rule's headline, `docs/subsystems/invariants.md` its reasoning. Guarded by
   `test/claude-rules.test.ts`: bullets only, each anchored exactly once, one home per anchor, headlines byte-equal with the ones below.
 - `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
@@ -116,8 +117,16 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
-- **The tracker cache is the one cache in this server whose age is a rendered value.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-cache-is-the-one-cache-in-this-server-whose-age-is-a-rendered-value)
+- **The tracker and Jira caches are the two caches in this server whose age is a rendered value.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-and-jira-caches-are-the-two-caches-in-this-server-whose-age-is-a-rendered-value)
+- **`~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
+  Why: [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
+- **The Jira token never leaves the server: the browser goes through `/api/jira`, and the poller is armed only while a board syncs.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-only-while-a-board-syncs)
+- **Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map
+  time.** Why: [invariants.md](docs/subsystems/invariants.md#jiras-done-column-is-a-window-not-a-store)
+- **Every value the server puts into JQL — a key or the search term — is quoted and escaped, and a person's JQL is passed verbatim for Jira to parse.**
+  Why: [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,
