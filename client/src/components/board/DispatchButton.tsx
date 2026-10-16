@@ -1,11 +1,9 @@
-import { useId } from 'react';
-
 import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
-import { useReverify } from '../../hooks/useReverify';
+import { disabledReason } from '../../lib/gate-view';
 import { progressBlock } from '../../lib/item-progress';
 import { Chevron } from '../ui/Chevron';
-import { Chip } from '../ui/Chip';
+import { GatedChip } from '../ui/GatedChip';
 
 /**
  * Whether this item gets a dispatch control at all — the two "no control, not
@@ -46,8 +44,8 @@ export function dispatchAvailable(item: BacklogItem, status: AgentsStatus | null
  * three the item file itself can answer, since `started:` is right there in
  * its frontmatter), and an orchestrator run has already claimed this item
  * (handed in as `runBlock`, because nothing in the item file or the status
- * payload can know it). All three disable with their reason; see the `blocked`
- * line below for why they read in that order.
+ * payload can know it). All three disable with their reason; see the comment
+ * above `gateBlock` below for why they read in that order.
  *
  * Exactly ONE of the three lets a click do something anyway, and that is
  * bug-13: a project-visibility block is the only one that can be silently
@@ -103,8 +101,8 @@ export function DispatchButton({
    * (`itemSyncOff`, lib/tracker.ts) when no run block speaks: the same kind of
    * fact — read off a payload this leaf does not hold, the project list — and
    * the same kind of block, a per-project one that DISABLES and never hides.
-   * It is excluded from `reverifiable` below for `runBlock`'s own reason: a
-   * status refetch cannot move it.
+   * It is never re-asked (`gateView`'s `reverifiable`, lib/gate-view.ts) for
+   * `runBlock`'s own reason: a status refetch cannot move it.
    */
   runBlock?: string | null;
   /**
@@ -133,21 +131,6 @@ export function DispatchButton({
    */
   reverify?: () => Promise<AgentsStatus>;
 }) {
-  // Stable per mounted button, and unique across the forty of them a board can
-  // hold — `item.id` is not, since two projects can both own `task-1`, and the
-  // drawer renders a second button for an item the card already rendered one
-  // for. A duplicated id would point aria-describedby at the wrong card's span.
-  const reasonId = useId();
-  /* The re-ask a click on a project-visibility block provokes (bug-13).
-     `verifying` is only ever true between that click and the status answering
-     it, and drives `aria-busy` below so a click that looks like it did nothing
-     is legible as "asked, same answer"; `ask` carries the guard that keeps an
-     impatient reader from queueing one status fetch per click on a control
-     that stays disabled while the first is still in flight. Both now live in
-     `useReverify` (bug-16), which the toolbar's Orchestrate control shares —
-     see its own comment for why the gate check stays out here with the
-     callers. */
-  const { verifying, ask } = useReverify(reverify);
   const action = deriveAction(item);
   /* The same two rules `dispatchAvailable` states, read through it rather than
      restated: this component and `ItemCard`'s marker row have to agree about
@@ -176,34 +159,13 @@ export function DispatchButton({
    * worktree's copy, so the registry's copy of a claimed item normally carries
    * no stamp at all — and when they do, the file wins.
    */
-  const gateBlock = gate.control === 'disabled' ? gate.reason : null;
+  const gateBlock = disabledReason(gate);
   /* The two a click can never clear, in that same precedence — split out
      from the gate's own block rather than folded into one string because
      bug-13's re-ask has to know WHICH of the three is speaking. Kept as one
      value because the answer it feeds is the same for both: refuse, ask
      nothing. */
   const itemBlock = progressBlock(item, Date.now()) ?? runBlock;
-  const blocked = gateBlock ?? itemBlock;
-
-  /*
-   * bug-13: whether a click on this (blocked) button may re-ask the status
-   * instead of being swallowed. All three conditions are load-bearing.
-   *
-   * `gateBlock !== null` — the project-visibility block is the one that can
-   * be stale, because it is derived from a payload this tab fetched at some
-   * earlier moment and has no trigger to re-fetch while the window keeps
-   * focus.
-   *
-   * `itemBlock === null` — and it must be the ONLY block. Clearing the
-   * visibility half of "invisible project AND claimed by a run" would still
-   * leave the click refused, so there is nothing worth asking; a
-   * simultaneously-blocked button therefore behaves exactly as the run-claim
-   * (or in-progress) case does, which is what it looks like to the reader
-   * anyway once the more fundamental reason is the one on screen.
-   *
-   * `reverify !== undefined` — a caller that handed us no way to ask.
-   */
-  const reverifiable = gateBlock !== null && itemBlock === null && reverify !== undefined;
 
   return (
     <>
@@ -244,85 +206,34 @@ export function DispatchButton({
           if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
         }}
       >
-        <Chip
+        {/* The disabled mechanics — the disabled flag, the described reason, the busy state and bug-13's re-ask — are `GatedChip`'s (#272); this
+            component keeps the policy: its gate, re-run over the fresh status, and the two blocks a click can never clear. */}
+        <GatedChip
           size={28}
-          // The reason, not a generic tooltip: "the dashboard does not list
-          // <path>" is a fixable thing, and nowhere else says it. Deliberately
-          // NOT swapped out while `verifying` — the reason has to still be
-          // readable when the re-ask comes back with the same answer.
-          title={blocked ?? `dispatch ${action} to a Claude session`}
-          // aria-disabled, NOT `Chip`'s own `disabled` prop, and the guard in
-          // onClick is what actually makes it inert. A `disabled` button is
-          // removed from the tab order and from the accessibility tree's
-          // interactive surface, so a keyboard user cannot reach it — and all
-          // three disabled states here name something specific and actionable
-          // (which project the dashboard cannot see; which session holds this
-          // item and since when; which run stage owns it). `title` on an
-          // unreachable element is announced unreliably at best; the
-          // aria-describedby span below is what makes it dependable, and it is
-          // only readable if the control can be focused at all.
-          aria-disabled={blocked !== null}
-          aria-describedby={blocked === null ? undefined : reasonId}
-          // The one signal that a swallowed-looking click was actually answered
-          // (bug-13). An attribute rather than a spinner or a second label: the
-          // re-ask is one request long, and styles.css keys a `progress` cursor
-          // and a lighter label off this same attribute, so the feedback is not
-          // screen-reader-only either.
-          aria-busy={verifying}
-          onClick={() => {
-            // The other half of aria-disabled: the browser will not stop a
-            // click on a control that is only *labelled* disabled, so this does
-            // — except for the one block a click is allowed to re-ask (bug-13;
-            // see `reverifiable` above for the three conditions).
-            if (blocked !== null) {
-              if (!reverifiable) return;
-              // `ask` no-ops while an ask is already in flight, and `reverify`
-              // never rejects (useAgents.ts explains why it resolves to a
-              // flatly-off status instead), so there is no failure branch here:
-              // an off status simply is not `enabled` and opens nothing.
-              ask((fresh) => {
-                // Re-derived from the FRESH answer, not from the render this
-                // click came from — and through the same gate, so a status that
-                // came back with dispatch off or the dashboard gone opens
-                // nothing either. The two blocks `reverifiable` already ruled
-                // out cannot have changed in the meantime: one is on the item
-                // file this board is rendering, the other is a prop.
-                if (dispatchGate(item, fresh).control === 'enabled') onDispatch();
-              });
-              return;
-            }
-            onDispatch();
-          }}
+          gateBlock={gateBlock}
+          otherBlock={itemBlock}
+          idleTitle={`dispatch ${action} to a Claude session`}
+          reverify={reverify}
+          // Through the same gate, so a status that came back with dispatch off or the dashboard gone opens nothing either. `itemBlock` cannot
+          // have changed in the meantime: one half is on the item file this board is rendering, the other is a prop.
+          recheck={(fresh) => dispatchGate(item, fresh).control === 'enabled'}
+          onActivate={onDispatch}
         >
-          {/* The action IS the tone class: `groom` and `execute` are the two
-              AgentAction values plus `capture`, so the palette can never drift
-              from the derivation. `blocked` replaces the tone rather than
-              joining it — a dimmed word is the disabled reading, and a
-              --mustard word at 45% opacity would be a third colour nobody
-              chose. */}
-          <span className={blocked === null ? `dispatch-word ${action}` : 'dispatch-word blocked'}>{actionLabel(item, action)}</span>
-          {/* `Chevron` is aria-hidden: the accessible name is the action word alone. */}
-          <Chevron dir="right" className="dispatch-mark" />
-        </Chip>
+          {(blocked) => (
+            <>
+              {/* The action IS the tone class: `groom` and `execute` are the two
+                  AgentAction values plus `capture`, so the palette can never drift
+                  from the derivation. `blocked` replaces the tone rather than
+                  joining it — a dimmed word is the disabled reading, and a
+                  --mustard word at 45% opacity would be a third colour nobody
+                  chose. */}
+              <span className={blocked ? 'dispatch-word blocked' : `dispatch-word ${action}`}>{actionLabel(item, action)}</span>
+              {/* `Chevron` is aria-hidden: the accessible name is the action word alone. */}
+              <Chevron dir="right" className="dispatch-mark" />
+            </>
+          )}
+        </GatedChip>
       </span>
-      {/* Visually hidden, deliberately not `aria-label`: the label is the
-          action word, and folding a two-line explanation into it would make
-          every screen reader announce the whole sentence as the control's
-          name. A description is the right slot for "why this cannot be used
-          right now", and for the project-visibility reason it is the only
-          place in the UI that states the condition at all — Settings reports
-          a project *count*, not which projects are missing. (The other two each
-          have a second telling: the board's run chip for a run claim, though
-          the chip names a count and not this card, and this card's own live
-          strip for a session already holding the item, though the strip prints
-          an elapsed rather than a reason not to dispatch.) Rendered as a
-          sibling rather than a child so its text stays out of the button's
-          accessible name. */}
-      {blocked !== null && (
-        <span id={reasonId} className="sr-only">
-          {blocked}
-        </span>
-      )}
     </>
   );
 }

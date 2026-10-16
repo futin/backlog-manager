@@ -7,7 +7,8 @@ import '@testing-library/jest-dom';
 
 import { ApiError } from '../client/src/lib/agents';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
-import { RunControls, inFlightItemId } from '../client/src/components/RunControls';
+import { RunControls } from '../client/src/components/RunControls';
+import { inFlightItemId } from '../client/src/lib/run-time';
 import type { RunControlsChange, RunControlsRun } from '../client/src/components/RunControls';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
@@ -57,7 +58,7 @@ const OPEN_GATE = { canResume: true, blockedReason: null };
  * where nothing on screen has changed yet because the host's `resuming` mark
  * is set from `onChanged` — i.e. after the request settles. Dispatching both
  * events in one `act` reproduces exactly that: both handlers run against the
- * same render, and only `act`'s own `if (busy) return` can stop the second.
+ * same render, and only `act`'s own guard (`useAction`'s ref, #286) can stop the second.
  */
 function doubleClick(el: HTMLElement): void {
   act(() => {

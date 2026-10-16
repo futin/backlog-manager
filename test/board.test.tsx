@@ -671,7 +671,7 @@ describe('BoardView', () => {
   });
 
   /* A status value this build never wrote — the Status filter's stored value is deliberately unvalidated (see the comment over `resolveSortKey`
-     in BoardView.tsx). It lights nothing in the switch, counts as set, and narrows the board to nothing; the raised button and Clear all are the way
+     in lib/board-sort.ts). It lights nothing in the switch, counts as set, and narrows the board to nothing; the raised button and Clear all are the way
      back. The board has no columns to wait on here — it renders the no-matches state — so the render waits on that instead of `renderBoard`. */
   it('a stored unrecognised status lights no Status option, counts as one set, and Clear all recovers', async () => {
     localStorage.setItem('backlog-manager.status', JSON.stringify('stale'));
@@ -815,7 +815,8 @@ describe('BoardView', () => {
     // as fetched would pass a "didn't crash" check and fail this one.
     expect(titles).toEqual(['new-idle', 'mid-idle', 'old-idle']);
     // And the track says so. The order alone cannot tell `resolveSortKey` from a `COMPARATORS[sort] ?? COMPARATORS.created` lookup inside `sortItems` —
-    // both draw created-desc here — but only the resolved key reaches the track: the raw one prints `Sort: newest ()` (FilterBar's label falls back to
+    // both draw created-desc here. The guard itself is pinned directly in test/board-sort.test.ts now (#258); this test exists for the resolved key
+    // reaching the track, which no unit test can see. Only the resolved key reaches the track: the raw one prints `Sort: newest ()` (FilterBar's label falls back to
     // the key, and `NATURAL_DIR` has no direction for it) over a board ordered by Created, and ticks no row in the panel.
     expect(sortLabel()).toHaveTextContent('Sort: Created (desc)');
     await userEvent.click(screen.getByRole('button', { name: 'Change sort' }));

@@ -1001,7 +1001,7 @@ export type RunStage =
  * branch-mode run that finished the item successfully has let go of it just
  * as completely as a merge-mode run has.
  *
- * NOT the same list as `ACTIVE_RUN_STAGES` (client ItemCard.tsx), and the two
+ * NOT the same list as `ACTIVE_RUN_STAGES` (client lib/run-stage.ts), and the two
  * must not be unified: that one answers "does this card show a live stage
  * badge" and correctly EXCLUDES `pending`/`preflight` (a badge that flickers
  * on for the fraction of a poll cycle preflight takes is noise). They overlap
