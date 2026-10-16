@@ -304,10 +304,6 @@ describe('configured, against a healthy Jira', () => {
   });
 
   describe('what this phase does not have', () => {
-    it('POST /api/jira/boards is 404', async () => {
-      await request(app.getHttpServer()).post('/api/jira/boards').set('content-type', 'application/json').send('{}').expect(404);
-    });
-
     it('GET /api/jira/prompt is 404', async () => {
       await get('/prompt').expect(404);
     });

@@ -2956,15 +2956,28 @@ round: `test/tracker-labels.test.ts` reads the skill's source as text and assert
 The Jira integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md) §2) keeps its boards, saved queries, repository map and skill
 prompts in `~/.backlog-manager/settings/jira.json` — the fourth file under `settings/`, and the first one a person is expected to edit by hand as well as
 through the server. It takes `tracker-sync.json`'s posture (the settings-file exception above): read fresh on every use, cached nowhere, one writer — the
-server — and phase 1 ships the reader alone, so until phase 2's writers land the only hands on the file are the person's.
+server, through three routes, `POST /api/jira/boards`, `/boards/delete` and `/repos` — and a person's hand-edits, which the writers are built to survive.
 
 **An unreadable file is reported, never treated as empty.** `readJiraConfig` answers `unreadable` for a file that exists but cannot be read or parsed, and
 `GET /api/jira` carries it as `configUnreadable`. The failure this prevents is the one #270 found in `tracker-sync.json`'s writer, one step earlier: a
 board that renders `No boards yet` over a file with a stray comma invites the person to create a board, and the write that follows — reading the file as `{}`
 and writing one board back — would erase every board, query and mapping the file held. So the reader says the file is broken, the sweep prunes no board
-cache while it is (a board the file still holds keeps its list until the file parses again), and phase 2's writers refuse with a 409 rather than replace it.
+cache while it is (a board the file still holds keeps its list until the file parses again), and all three writers refuse with a 409 rather than replace it.
 A MISSING file is a fresh install and reads as empty; so does a file that parses to something other than an object, which is what `tracker-sync.json`'s
-writer already replaces and so what phase 2's writers must agree with.
+writer already replaces and so what the three writers agree with.
+
+**Three writers, one contract, and the refusal is each writer's own.** `writeBoard`, `deleteBoard` and `writeRepos` each read the RAW file, not what the reader
+would accept, because a writer that round-tripped through the reader would silently drop every entry the reader warned about — the same erasure #270 found,
+by a quieter road. They merge exactly one entry (a board by id, one project's list by key) and leave the rest untouched, hand-written junk and unknown
+top-level keys included, so a person's annotation or a newer version's key survives a save made by an older one. The write is a temp file in the same
+directory and a `rename`, so a crash leaves the old file or the new one and never half of either. The refusal is the writer's rather than a check the route
+makes first because the route's read and the writer's read would be two reads: a file that broke between them would be replaced after the check passed. So
+`JiraConfigUnreadableError` comes out of the one read the write is built on, and the route's only job is to map it to a 409 with the message — which tells
+the person to fix or delete the file by hand and that nothing was written, the one sentence the board sheet shows under its footer with every edit intact.
+
+**Config writes do not wait on Jira.** They are open under `access: unauthorized` and `unsupported`: they touch only `jira.json`, and a person whose token
+expired is exactly the one who needs to be able to correct a board. The sweep a save triggers is the poller's, bounded (R2) and a no-op where it cannot run,
+so the route answers 200 with the board either way.
 
 **The fallback is per entry, because the data is hand-written.** One bad value costs its own entry: a board with a mistyped id, a root that is not an issue
 key, a query with an empty label, a repos path that is not a string. Spec §2 drew the line at the board; the reader goes one level finer — a bad root or

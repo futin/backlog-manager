@@ -13,8 +13,8 @@ import type { JiraResult } from './poller.service';
 /**
  * The six read routes under `/api/jira` (Jira phase 1; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
  * poller performs for it — never from a call this file makes, so the 429 window, the boot's missing `cloudId` and the 401 bookkeeping have one home
- * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: board and query saves are phase 2's, the dispatch
- * route phase 5's, and `POST /api/jira/boards` / `GET /api/jira/prompt` are 404s until then (pinned by `test/jira-routes.test.ts`).
+ * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: the board and repository writes live in
+ * `jira-write.controller.ts` (phase 2), the dispatch route is phase 5's, and `GET /api/jira/prompt` is a 404 until then (pinned by `test/jira-routes.test.ts`).
  *
  * The order inside every method is the same, and it is part of the contract: validate the parameter (400, or 404 for a board id that cannot be one of
  * ours), THEN refuse when Jira is not configured (503), THEN ask the poller. A malformed request is wrong whatever the environment, so it must not read as
