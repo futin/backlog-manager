@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readAgentsConfig } from '../server/src/agents/config.util';
+import { JIRA_ENV } from '../server/src/jira/env.util';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 
 /**
@@ -106,6 +107,30 @@ describe('docker-compose BM_GITHUB_TOKEN', () => {
     // that missed compose would otherwise pass here and fail only on a machine
     // with a token set.
     expect(assignments(GITHUB_TOKEN_ENV)).toEqual(['${BM_GITHUB_TOKEN:-}']);
+  });
+});
+
+/**
+ * The same shape again for the three Jira credentials (Jira phase 1, spec §10 and §12) — extended here for the reason the GitHub block gives: the rule is "how
+ * compose passes an environment value through", and it already has a home. All three, not only the token: the email is half of the Basic credential and the
+ * site is the host that credential is sent to, so a literal for any of them is one machine's account committed to a public repository. Asserted through
+ * `JIRA_ENV`, the server's own spellings, so a rename that missed compose fails here rather than on a machine with Jira set.
+ */
+describe('docker-compose BM_JIRA_SITE / BM_JIRA_EMAIL / BM_JIRA_TOKEN', () => {
+  it.each(Object.values(JIRA_ENV))('passes %s through with an empty default', (key) => {
+    expect(assignments(key)).toEqual([`\${${key}:-}`]);
+  });
+
+  it.each(Object.values(JIRA_ENV))('holds no literal value for %s', (key) => {
+    // An interpolation or nothing — the GitHub case's check, for the same reason: a pattern for what a token (or an email, or a site) looks like is the
+    // thing that goes stale, and a value that is not an interpolation is wrong whatever it looks like.
+    const found = assignments(key);
+    expect(found.length).toBeGreaterThan(0);
+    for (const value of found) expect(value.startsWith('${')).toBe(true);
+  });
+
+  it('spells the three variables the way the server reads them', () => {
+    expect(JIRA_ENV).toEqual({ site: 'BM_JIRA_SITE', email: 'BM_JIRA_EMAIL', token: 'BM_JIRA_TOKEN' });
   });
 });
 

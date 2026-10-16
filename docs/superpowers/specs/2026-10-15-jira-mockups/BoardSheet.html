@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Edit a Jira board: the sheet</title>
+<link rel="stylesheet" href="jira.css">
+</head>
+<body>
+
+
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+
+<div style="width:760px;height:1240px;position:relative;background:#F4F4F3;font-family:'Hanken Grotesk',Helvetica,Arial,sans-serif;overflow:hidden">
+  <div class="scrim" style="padding:40px 70px" role="dialog" aria-modal="true" aria-label="Edit board Sprint 42 · mine">
+    <div class="sheet">
+      <div class="head"><div><h3>Sprint 42 · mine</h3><p>edit board · 14 issues on it now · saved to this machine only</p></div><button class="x" aria-label="Close">×</button></div>
+      <div class="secs" aria-hidden="true"><span class="on">Name &amp; sync</span><span>Roots · 2</span><span>Queries · 1</span></div>
+      <div class="sec">
+        <div class="srow first"><div class="lbl"><span class="name">Name</span></div><div class="ctl"><span class="field ink" style="width:260px">Sprint 42 · mine</span></div></div>
+        <div class="srow"><div class="lbl"><span class="name">Sync interval</span><span class="hint">how often this machine asks Jira for this board</span></div><div class="ctl"><span class="seg" role="radiogroup" aria-label="Sync interval"><span>15s</span><span class="on">1m</span><span>5m</span><span>off</span></span></div></div>
+      </div>
+      <div class="sec">
+        <h3>Roots</h3><p class="why">An epic, story or task to follow with everything under it — three levels deep, so an epic brings its stories and their subtasks.</p>
+        <div class="srow first"><span class="k"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>PAY-120</span><span style="font-size:14px">Refund flows</span><span class="hint">· epic · 7 under it</span><div class="ctl"><button class="x" aria-label="Remove PAY-120">×</button></div></div>
+        <div class="srow"><span class="k"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>PAY-160</span><span style="font-size:14px">Chargeback intake form</span><span class="hint">· story · 3 under it</span><div class="ctl"><button class="x" aria-label="Remove PAY-160">×</button></div></div>
+        <div class="srow" style="flex-direction:column;align-items:stretch;gap:0">
+          <label class="field full ink" for="q"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:var(--ink2);fill:none;stroke-width:1.6" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>payout<span style="color:var(--ink3)">… a key, or words from the summary</span></label>
+          <div class="drop" role="listbox" aria-label="Matches">
+            <div class="r on"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg><span class="k">PAY-170</span><span>Payout scheduling</span><span class="meta">epic · 11 under it · add</span></div>
+            <div class="r"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="6"/><path d="M12 7V4M8 9 5 7M16 9l3-2M7 14H4M20 14h-3M8 18l-3 2M16 18l3 2"/></svg><span class="k">PAY-148</span><span>Payout report times out past 10k rows</span><span class="meta">bug · already here via a query</span></div>
+            <div class="r"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 3 3 5-6"/></svg><span class="k">OPS-88</span><span>Rotate the payout signing key</span><span class="meta">task · add</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="sec">
+        <h3>Queries</h3><p class="why">JQL, run as you on every poll, 200 issues each at most. Start from a preset or write your own; the line under each one is Jira's answer, checked when you stop typing.</p>
+        <div class="presets" style="padding-top:0"><span class="chip sm">+ Assigned to me</span><span class="chip sm">+ Open in current sprint</span><span class="chip sm">+ Unresolved in a project…</span><span class="chip sm">+ Custom JQL</span></div>
+        <div class="qrow"><div class="ql"><span class="field ink">Assigned to me</span><span class="hint">preset</span><button class="x" aria-label="Remove query">×</button></div><div class="jqlbox">assignee = currentUser() AND resolution = EMPTY</div><div class="check"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg>4 issues match<span class="when">checked 3 s ago</span></div></div>
+        <div class="qrow"><div class="ql"><span class="field ink">Billing bugs this quarter</span><span class="hint">custom</span><button class="x" aria-label="Remove query">×</button></div><div class="jqlbox bad">project = PAY AND type = Bug AND sprnt in openSprints()</div><div class="check bad"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>Jira: Field 'sprnt' does not exist or you do not have permission to view it.<span class="when">checked 1 s ago</span></div></div>
+      </div>
+      <div class="foot"><span class="chip sm danger">Delete board</span><span class="note" style="margin-left:8px">polled again right after you save</span><span class="chip" style="margin-left:auto">Cancel</span><span class="chip ink">Save</span></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

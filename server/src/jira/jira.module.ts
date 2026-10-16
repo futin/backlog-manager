@@ -1,0 +1,31 @@
+import { Module } from '@nestjs/common';
+
+import { JiraClient } from './jira.client';
+import { JiraController } from './jira.controller';
+import { JiraPollerService } from './poller.service';
+
+/**
+ * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, and the six read routes. It mirrors `TrackerModule`
+ * (`server/src/tracker/tracker.module.ts`), and for the same reasons.
+ *
+ * `JiraClient` is provided as a factory value rather than a decorated class: it has no Nest decorators on purpose (a test constructs one on a fake `fetch`
+ * and needs no module to do it), so the factory is where the real `fetch` is bound and the one place a suite overrides to intercept every outbound call
+ * this server can make to Jira. One instance for the whole process is also what makes the call counter a single reading — `takeCalls()` is how the poller
+ * reports the CALLS meter, and two clients would each count half.
+ *
+ * Both providers are exported. The poller is the read side for everything that comes after this phase — the board's sheets (phase 3), the item modal
+ * (phase 4) and the dispatch route (phase 5) all ask it, never Jira — and the client is exported for the write routes phase 2 adds, which must use the same
+ * instance for the same reason.
+ *
+ * The dependency runs one way: `AgentsModule` will import this module (phase 5's dispatch needs the poller's issue read and its cache), and this module
+ * never imports `AgentsModule`. A Jira seam that reached back into the dispatcher would make the read side depend on the thing that acts on it, and a
+ * cycle between two modules that both own a timer is the one place Nest's forward references would hide a start-up ordering bug.
+ *
+ * No `RegistryModule` import, unlike the tracker's: nothing here resolves a project. `jira.json` is read straight from its own file.
+ */
+@Module({
+  controllers: [JiraController],
+  providers: [JiraPollerService, { provide: JiraClient, useFactory: () => new JiraClient() }],
+  exports: [JiraPollerService, JiraClient]
+})
+export class JiraModule {}

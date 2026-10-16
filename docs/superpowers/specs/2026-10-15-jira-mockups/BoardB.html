@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jira board, option B: flat cards with a parent crumb</title>
+<link rel="stylesheet" href="jira.css">
+</head>
+<body>
+
+
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <div class="wordmark"><div class="kicker">Backlog</div><h1 class="prompt" aria-label="Backlog Manager" style="margin:4px 0 0"><span class="caret" aria-hidden="true">›</span><span aria-hidden="true">manager</span><span class="cursor" aria-hidden="true"></span></h1></div>
+    <a class="nav" href="#board"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>Board</a>
+    <a class="nav" href="#runs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l14 8-14 8z"/></svg>Runs</a>
+    <a class="nav" href="#archive"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></svg>Archive</a>
+    <a class="nav on" href="#jira" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 12l9 9 9-9z"/><path d="M12 8l-4 4 4 4 4-4z"/></svg>Jira</a>
+    <div class="tree"><a class="on" href="#jira-board">Board</a><a href="#jira-setup">Setup</a></div>
+    <div class="rule"></div>
+    <a class="nav" href="#settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.8-1L14.5 3h-5l-.3 2.6a7 7 0 0 0-1.8 1l-2.3-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.8 1l.3 2.6h5l.3-2.6a7 7 0 0 0 1.8-1l2.3 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg>Settings</a>
+  </nav>
+  <div class="maincol">
+    <div class="topstrip">
+      <button class="acct" aria-label="GitHub tracker: futin"><span class="avatar">F</span><span class="login"><small>GitHub</small>futin</span><span class="meter"><span class="lab">POLL <b>9 s</b></span><span class="bar"><i style="width:40%"></i></span></span><span class="meter"><span class="lab">API <b>4%</b></span><span class="bar"><i style="width:4%"></i></span></span><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+      <button class="acct" aria-label="Jira tracker: ada"><span class="avatar">A</span><span class="login"><small>Jira</small>ada</span><span class="meter"><span class="lab">POLL <b>52 s</b></span><span class="bar"><i style="width:13%"></i></span></span><span class="meter"><span class="lab">CALLS <b>14</b></span><span class="bar"><i class="green" style="width:14%"></i></span></span><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+    </div>
+    <div class="well">
+      <header class="band">
+        <div class="text"><h2>Sprint 42 · mine</h2><p class="sub" style="flex-basis:auto">acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 8 s ago</p></div>
+        <div class="right">
+          <button class="chip" aria-label="Pick a Jira board">Sprint 42 · mine <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+          <label class="search"><span>search summaries</span></label>
+          <div class="track" role="group" aria-label="Filter and sort">
+            <button class="fb" aria-label="Filters"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg></button>
+            <span class="div"></span>
+            <span class="read">Sort: <b>Updated</b> (desc)</span>
+            <button class="fb" aria-label="Sort"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h4M18 5v14M15 16l3 3 3-3"/></svg></button>
+          </div>
+        </div>
+      </header>
+      <div class="cols">
+        <section class="col" aria-label="To Do">
+          <div class="colh"><i class="dot" style="background:var(--ink3)"></i><span class="name">To Do</span><span class="pill">6</span></div>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="6"/><path d="M12 7V4M8 9 5 7M16 9l3-2M7 14H4M20 14h-3M8 18l-3 2M16 18l3 2"/></svg><span class="key">PAY-151</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg>Assigned to me</span></div>
+            <div class="t">Currency rounding wrong on invoices over 1,000</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill">Backlog</span><span class="meta">4 min ago</span></div>
+            <div class="mrow"><span class="mk red">Highest</span><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg><span class="key">PAY-136</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg>PAY-134 Partial refund API</span></div>
+            <div class="t">Validate the partial amount against the captured total</div>
+            <div class="foot"><span class="who"><span class="av none">—</span><span>unassigned</span></span><span class="pill">To Do</span><span class="meta">1 h ago</span></div>
+            <div class="mrow"><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span class="key">PAY-134</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>PAY-120 Refund flows</span></div>
+            <div class="t">Partial refund API</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill">Backlog</span><span class="meta">1 h ago</span></div>
+            <div class="mrow"><span class="mk amber">High</span><span class="mk">1 subtask</span><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg><span class="key">PAY-162</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>PAY-160 Chargeback intake form</span></div>
+            <div class="t">Evidence upload, 3 files max</div>
+            <div class="foot"><span class="who"><span class="av">CM</span><span>Cho M.</span></span><span class="pill">To Do</span><span class="meta">yesterday</span></div>
+            <div class="mrow"><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 3 3 5-6"/></svg><span class="key">PAY-140</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>PAY-120 Refund flows</span></div>
+            <div class="t">Refund webhook retries with backoff</div>
+            <div class="foot"><span class="who"><span class="av">BK</span><span>Ben K.</span></span><span class="pill">Selected</span><span class="meta">2 days ago</span></div>
+            <div class="mrow"><span class="mk">Medium</span><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 3 3 5-6"/></svg><span class="key">OPS-88</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg>Assigned to me</span></div>
+            <div class="t">Rotate the payout signing key</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill">Backlog</span><span class="meta">6 days ago</span></div>
+            <div class="mrow"><span class="mk">Low</span><span class="chip sm dis" title="no repository mapped for OPS — Jira › Setup › Repositories">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+        </section>
+        <section class="col" aria-label="In Progress">
+          <div class="colh"><i class="dot" style="background:var(--amber)"></i><span class="name">In Progress</span><span class="pill">5</span></div>
+          <button class="card"><div class="live">session · payments-api<b>12m</b></div><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span class="key">PAY-131</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>PAY-120 Refund flows</span></div>
+            <div class="t">Refund ledger entries</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill live">In Progress</span><span class="meta">just now</span></div>
+            <div class="mrow"><span class="mk amber">High</span><span class="mk">2 subtasks</span><span class="chip sm dis" title="a session is working this issue (jira:PAY-131, 12m)">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg><span class="key">PAY-132</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>PAY-131 Refund ledger entries</span></div>
+            <div class="t">Ledger migration</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill live">In Progress</span><span class="meta">10 min ago</span></div>
+            <div class="mrow"><span class="chip sm dis" title="a session is working its parent (jira:PAY-131)">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="6"/><path d="M12 7V4M8 9 5 7M16 9l3-2M7 14H4M20 14h-3M8 18l-3 2M16 18l3 2"/></svg><span class="key">PAY-148</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg>Assigned to me</span></div>
+            <div class="t">Payout report times out past 10k rows</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill live">In Progress</span><span class="meta">35 min ago</span></div>
+            <div class="mrow"><span class="mk amber">High</span><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg><span class="key">PAY-133</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>PAY-131 Refund ledger entries</span></div>
+            <div class="t">Ledger writer</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill live">In Review</span><span class="meta">2 h ago</span></div>
+            <div class="mrow"><span class="chip sm dis" title="a session is working its parent (jira:PAY-131)">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg><span class="key">PAY-163</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>PAY-160 Chargeback intake form</span></div>
+            <div class="t">Form validation</div>
+            <div class="foot"><span class="who"><span class="av">CM</span><span>Cho M.</span></span><span class="pill live">In Review</span><span class="meta">3 h ago</span></div>
+            <div class="mrow"><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span class="key">PAY-160</span><span class="crumb">root</span></div>
+            <div class="t">Chargeback intake form</div>
+            <div class="foot"><span class="who"><span class="av">CM</span><span>Cho M.</span></span><span class="pill live">In Progress</span><span class="meta">yesterday</span></div>
+            <div class="mrow"><span class="mk">Medium</span><span class="mk">1 of 3 subtasks done</span><span class="chip sm">Run <svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span></div>
+          </div></button>
+        </section>
+        <section class="col" aria-label="Done">
+          <div class="colh"><i class="dot" style="background:var(--green2)"></i><span class="name">Done</span><span class="pill">3</span></div>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg><span class="key">PAY-161</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>PAY-160 Chargeback intake form</span></div>
+            <div class="t">Intake route and schema</div>
+            <div class="foot"><span class="who"><span class="av">CM</span><span>Cho M.</span></span><span class="pill done">Done</span><span class="meta">resolved Oct 11</span></div>
+            <div class="mrow"><span class="mk green">done</span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span class="key">PAY-128</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>PAY-120 Refund flows</span></div>
+            <div class="t">Refund data model</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill done">Done</span><span class="meta">resolved Oct 9</span></div>
+            <div class="mrow"><span class="mk green">done</span><span class="mk">1 subtask</span></div>
+          </div></button>
+          <button class="card"><div class="face">
+            <div class="head"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v10h12M13 10l4 4-4 4"/></svg><span class="key">PAY-129</span><span class="crumb"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg>PAY-128 Refund data model</span></div>
+            <div class="t">Schema and migration</div>
+            <div class="foot"><span class="who"><span class="av">AL</span><span>Ada L.</span></span><span class="pill done">Done</span><span class="meta">resolved Oct 8</span></div>
+            <div class="mrow"><span class="mk green">done</span></div>
+          </div></button>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jira setup page, v2</title>
+<link rel="stylesheet" href="jira.css">
+</head>
+<body>
+
+
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <div class="wordmark"><div class="kicker">Backlog</div><h1 class="prompt" aria-label="Backlog Manager" style="margin:4px 0 0"><span class="caret" aria-hidden="true">›</span><span aria-hidden="true">manager</span><span class="cursor" aria-hidden="true"></span></h1></div>
+    <a class="nav" href="#board"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>Board</a>
+    <a class="nav" href="#runs"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4l14 8-14 8z"/></svg>Runs</a>
+    <a class="nav" href="#archive"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></svg>Archive</a>
+    <a class="nav on" href="#jira" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 12l9 9 9-9z"/><path d="M12 8l-4 4 4 4 4-4z"/></svg>Jira</a>
+    <div class="tree"><a href="#jira-board">Board</a><a class="on" href="#jira-setup">Setup</a></div>
+    <div class="rule"></div>
+    <a class="nav" href="#settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.8-1L14.5 3h-5l-.3 2.6a7 7 0 0 0-1.8 1l-2.3-1-2 3.4L5.1 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.8 1l.3 2.6h5l.3-2.6a7 7 0 0 0 1.8-1l2.3 1 2-3.4-2-1.5c.1-.3.1-.7.1-1z"/></svg>Settings</a>
+  </nav>
+  <div class="maincol">
+    <div class="topstrip">
+      <button class="acct" aria-label="GitHub tracker: futin"><span class="avatar">F</span><span class="login"><small>GitHub</small>futin</span><span class="meter"><span class="lab">POLL <b>9 s</b></span><span class="bar"><i style="width:40%"></i></span></span><span class="meter"><span class="lab">API <b>4%</b></span><span class="bar"><i style="width:4%"></i></span></span><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+      <button class="acct" aria-label="Jira tracker: ada"><span class="avatar">A</span><span class="login"><small>Jira</small>ada</span><span class="meter"><span class="lab">POLL <b>52 s</b></span><span class="bar"><i style="width:13%"></i></span></span><span class="meter"><span class="lab">CALLS <b>14</b></span><span class="bar"><i class="green" style="width:14%"></i></span></span><svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></button>
+    </div>
+    <div class="well">
+      <header class="band">
+        <div class="text"><h2>Setup</h2><p class="sub" style="flex-basis:auto">the boards this machine follows, and where each Jira project's code lives · ~/.backlog-manager/settings/jira.json</p></div>
+        <div class="right"><span class="pillt">this machine</span></div>
+      </header>
+      <div class="two">
+        <div class="stack">
+          <section class="scard" aria-label="Boards">
+            <div style="display:flex;align-items:flex-start;gap:12px"><div><h3>Boards</h3><p class="scope">this machine · a board is a named set of roots and queries, polled on its own interval · Open board switches to Jira › Board with it picked; Edit opens the sheet</p></div><span class="chip sm" style="margin-left:auto;flex:none">New board</span></div>
+            <div class="srow first" style="background:var(--strip-hi);margin:0 -24px;padding-left:24px;padding-right:24px"><div class="lbl"><span class="name">Sprint 42 · mine <span class="pill done" style="margin-left:4px">open</span></span><span class="hint">2 roots · 1 query · 14 issues · every 1m · polled 52 s ago</span></div><div class="ctl"><span class="chip sm">Open board</span><span class="chip sm">Edit</span></div></div>
+            <div class="srow"><div class="lbl"><span class="name">Refund flows</span><span class="hint">1 root · 9 issues · every 5m · polled 3 min ago</span></div><div class="ctl"><span class="chip sm">Open board</span><span class="chip sm">Edit</span></div></div>
+            <div class="srow"><div class="lbl"><span class="name" style="color:var(--ink3)">Billing bugs <span class="pill" style="margin-left:4px">sync off</span></span><span class="hint">1 query · 0 issues · last polled 2 h ago</span></div><div class="ctl"><span class="chip sm">Open board</span><span class="chip sm">Edit</span></div></div>
+          </section>
+          <section class="scard" aria-label="Repositories">
+            <h3>Repositories</h3><p class="scope">this machine · which local checkouts a Jira project's tickets are worked in · set up front, before any ticket is on a board</p>
+            <div class="srow first"><div class="lbl"><span class="name">PAY <span style="font-weight:400;color:var(--ink2)">· Payments</span></span><span class="hint">~/work/payments-api</span></div><div class="ctl"><button class="x" aria-label="Remove path">×</button></div></div>
+            <div class="srow"><div class="lbl"><span class="name" style="color:var(--ink3)">PAY</span><span class="hint">~/work/payments-web</span></div><div class="ctl"><button class="x" aria-label="Remove path">×</button></div></div>
+            <div class="srow"><div class="lbl"><span class="name">OPS <span style="font-weight:400;color:var(--ink2)">· Platform</span></span><span class="hint warn">no repository yet — OPS cards draw no dispatch control</span></div></div>
+            <div class="srow" style="gap:8px"><span class="sel" style="width:180px" aria-label="Jira project">OPS · Platform<svg class="chev" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5"/></svg></span><label class="field ink" style="flex:1" for="p">~/work/platform-ops</label><span class="chip sm">Add</span></div>
+            <div class="srow"><span class="hint">Projects come from Jira (every one the token can see). The dashboard must also be able to see the path — the same rule Board dispatch follows.</span></div>
+          </section>
+        </div>
+        <div class="stack">
+          <section class="scard" aria-label="Connection">
+            <h3>Connection</h3><p class="scope">this machine · a report of the server's .env, nothing here is editable · restart the server to change it</p>
+            <div class="srow first"><div class="lbl"><span class="name">Site</span><span class="hint">BM_JIRA_SITE</span></div><div class="ctl"><span style="font-size:13px">acme.atlassian.net</span></div></div>
+            <div class="srow"><div class="lbl"><span class="name">Signed in as</span><span class="hint">BM_JIRA_EMAIL + BM_JIRA_TOKEN · the name is Jira's answer to /myself</span></div><div class="ctl"><span class="av">AL</span><span style="font-size:13px">Ada Lovelace</span><span class="pill done">ok</span></div></div>
+            <div class="srow"><div class="lbl"><span class="name">Token scopes</span><span class="hint">read:jira-work · write:jira-work · read:jira-user — a scoped API token, no OAuth app</span></div><div class="ctl"><span class="pill done">all three</span></div></div>
+            <div class="srow"><div class="lbl"><span class="name">Sweep</span><span class="hint">every 15 s, syncing each board whose interval is due · 14 calls last sweep · no 429 today</span></div><div class="ctl"><span style="font-size:13px;color:var(--ink2)">8 s ago</span></div></div>
+          </section>
+          <section class="scard" aria-label="Skills">
+            <h3>Skills</h3><p class="scope">this machine · what Run ▾ offers on every issue besides the two built-ins · a name and the prompt the session starts with</p>
+            <div class="srow first"><div class="lbl"><span class="name">Work it end to end</span><span class="hint">built-in · branch, implement, verify, then move the issue</span></div><div class="ctl"><span class="pill">built-in</span></div></div>
+            <div class="srow"><div class="lbl"><span class="name">Open with the ticket loaded</span><span class="hint">built-in · the session starts with the ticket and waits for you</span></div><div class="ctl"><span class="pill">built-in</span></div></div>
+            <div class="srow"><div class="lbl"><span class="name">Groom ticket</span><span class="jql">/jira-groom {key}</span></div><div class="ctl"><button class="x" aria-label="Remove skill">×</button></div></div>
+            <div class="srow"><div class="lbl"><span class="name">Summarise changes</span><span class="jql">/summarise-jira-ticket-changes {key}</span></div><div class="ctl"><button class="x" aria-label="Remove skill">×</button></div></div>
+            <div class="srow" style="gap:8px"><label class="field ink" style="width:160px" for="sn">Draft test plan</label><label class="field ink" style="flex:1" for="sp">/test-plan {key} — {summary}</label><span class="chip sm">Add</span></div>
+            <div class="srow"><span class="hint">Placeholders: {key} {summary} {url} {repo} {description}. The ticket itself is appended to every prompt, built-in or not, by the server. A skill has to exist in the repo or your Claude install — this list only names it.</span></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
