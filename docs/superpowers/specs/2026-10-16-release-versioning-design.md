@@ -17,7 +17,7 @@ The point is a durable **release record** for this app: what shipped, when, unde
   runs on every PR.
 - The `main-pr-only` ruleset and squash-only merge settings are **not applied** (ci.md §The ruleset, "deliberately", waiting on PR mode). The repo allows
   merge, squash and rebase merges today.
-- Since 2026-10-01, 79 first-parent commits reached `main`: **5 via a PR, 18 `Merge backlog/<id>` orchestrator merges, 56 direct pushes.** A
+- Since 2026-10-01, 79 first-parent commits reached `main`: **5 via a PR, 18 `Merge backlog/<id>` orchestrator merges, 56 other commits without a PR.** A
   PR-only release pipeline would miss ~94% of changes unless PRs become the only way in — which is why this design applies the ruleset (decision R1).
 - `backlog-orchestrate`'s `pr` merge mode has shipped, and its `pr-draft` already composes a Conventional PR title and a body whose first section is
   `## What's new` (merged items, queue order) — the section release-kit's tag message takes verbatim (`orchestrate.mjs` around `pr-draft`).
@@ -60,13 +60,13 @@ The ruleset itself is release-kit's; this part is the repo's adaptation to it.
 Both workflow-side files are **written and committed by the session** in PR A (user, 2026-10-16), and reviewed in that PR — unlike the parent spec, which
 dictated workflow files for the user to type. The ruleset apply and the baseline tag stay the user's steps.
 
-- **`.github/workflows/release.yml`**: a byte-for-byte copy of the dashboard's caller (`uses: futin/release-kit/.github/workflows/release.yml@v1`,
+- **`.github/workflows/release.yml`**: a copy of the dashboard's caller, differing only in its header comment (`uses: futin/release-kit/.github/workflows/release.yml@v1`,
   `kit-ref: v1`, `push` to `main` plus `workflow_dispatch` with `sha`, `permissions: contents: write, pull-requests: read`, `concurrency: release`,
-  `cancel-in-progress: false`), header comment adapted to point at this repo's ci.md.
+  `cancel-in-progress: false`), the header pointing at this repo's ci.md.
 - **`.github/pull_request_template.md`**: **adapted** from the dashboard's, not copied: its dashboard-only text goes (the "someone using the dashboard"
   lead, "this repo has no HTTP harness and no component renderer" — false here — its scope list, and the `refuseWrite`/`ANSWER_TOKEN` example), replaced
   by this board's equivalents (the board as the user surface, this repo's scopes, jest + supertest as the harness). The `## What's new` heading stays
-  byte-equal — `extractWhatsNew` matches the trimmed line `## What's new` exactly — uncommented, with its placeholder in an HTML comment.
+  byte-equal — `extractWhatsNew` matches `## What's new` at column 0, trailing whitespace ignored — uncommented, with its placeholder in an HTML comment.
   The orchestrator's `pr-draft` body does not use the template and already has the section.
 - **Baseline tag**: after the PR that adds `release.yml` merges (type `ci`, so it cuts nothing and the "no baseline tag" warning is harmless), the user tags
   `v0.1.0` on that merge commit — annotated, subject `Baseline — versioning starts here`, no trailers — and pushes it. Dictated in the plan, not run by
@@ -92,13 +92,18 @@ dictated workflow files for the user to type. The ruleset apply and the baseline
   (`read-releases.js` `LONG_DESCRIBE`); `DESCRIBE_FILTER`, `VERSION_TAG` and the GitHub-URL regex are not exported, so the server reproduces them from release-kit's `dist/` — my call: parity wins). Each message goes through
   release-kit's `parseTagMessage`; the PR `url` is built from the `origin` remote when it is a GitHub URL. The output must equal what `readReleases` would
   return for the same repo — the test asserts that against `readReleases` itself, so drift in release-kit shows up here.
-- **Empty shape, never an error**: not a checkout, git missing, a `runGit` timeout or failure, or no `v*` tags → `200 { current: null, releases: [] }`.
+- **Never an error, and a failure degrades per read**, as `readReleases` catches per call (`read-releases.js`): `for-each-ref` → `null` (not a
+  checkout, git missing, a timeout) is the empty shape `200 { current: null, releases: [] }`, as is no `v*` tag; `describe` → `null` gives
+  `current: null` with `releases` kept (and `describe` is not run at all when `releases` is empty); `remote get-url origin` → `null` (no origin, as in most
+  tmpdir fixtures) only drops `url`; the memo-key `rev-parse` → `null` answers a fresh read, not memoised.
   These are new `runGit` call sites, so `.claude/rules/items.md`'s `runGit` bullet — which enumerates every call site and what `null` means to each — gains
-  "the releases reads → the empty shape", and that file's `paths:` widens to `server/src/releases/**` so the rule loads for a session editing the module.
+  those four meanings (and `docs/subsystems/invariants.md`'s count of `runGit` call sites follows), and that file's `paths:` widens to `server/src/releases/**` so the rule loads for a session editing the module.
 - **Memo** keyed on HEAD plus the mtimes of `packed-refs` and `refs/tags` under `--git-common-dir`, exactly as the dashboard's (its releases.md §The memo
-  has the reasoning); a key git cannot produce is never memoised; concurrent requests under one key share one read. This memo is unrelated to the items
+  has the reasoning); a key git cannot produce is never memoised; a read whose `for-each-ref` or `describe` came back `null` is answered but not memoised
+  either, so a timeout never pins the empty shape until HEAD or a tag moves (the precedent is `lastCommitDates`, `.claude/rules/items.md`); concurrent
+  requests under one key share one read. This memo is unrelated to the items
   memo and must not share code with the `uncommitted` read.
-- **Dependency**: `release-kit` added as `github:futin/release-kit#v1.1.0` beside `lookout-widgets`, imported only for its pure helpers. Its `dist/cjs` has a `require` condition, so the CommonJS server and jest load it; a local `.d.ts` shim
+- **Dependency**: `release-kit` added as `github:futin/release-kit#v1.1.0` beside `lookout-widgets`, imported by `server/src` only for its pure helpers (the parity test, outside `server/src`, imports `readReleases` too). Its `dist/cjs` has a `require` condition, so the CommonJS server and jest load it; a local `.d.ts` shim
 like `server/src/hub/lookout-widgets.d.ts` is required, because the package has only `exports` and this repo's `moduleResolution: "node"` ignores it.
 - **CLAUDE.md Layout** gains the module in the `server/src/` line; it is not an outbound-calling module, so "the ONLY three" stays three.
 
@@ -114,9 +119,11 @@ The dashboard's releases.md §The chip and §The drawer are the behaviour spec; 
   Full screen below the board's narrow breakpoint, a 400 px right panel over a scrim above it.
 - **Escape**: the drawer joins `useDialogEscape`'s stack while drawn — the topmost dialog is the only one that closes (CLAUDE.md invariant). A right-hand
   drawer is a third overlay shape, so (my call) it gets its own shell, `ui/Drawer.tsx`, which calls the hook exactly as `ui/Modal.tsx` and
-  `ui/FormSheet.tsx` do — "the shells call it" stays true. The dialog count becomes six, and every home of that count is updated in the same PR:
+  `ui/FormSheet.tsx` do — a new primitive family, so `test/design-guards.test.ts`'s `FAMILIES` list and the `ui primitives` block of `styles.css` gain it,
+  and DESIGN.md §8.7's "both shapes" becomes three — "the shells call it" stays true. The dialog count becomes six, and every home of that count is updated in the same PR:
   `.claude/rules/board.md` (the Escape bullet), `docs/subsystems/invariants.md` (its reasoning), the `hooks/useDialogEscape.ts` header,
-  `test/dialog-escape.test.tsx`, and DESIGN.md §8.7.
+  `test/dialog-escape.test.tsx`, DESIGN.md §8.7, `docs/subsystems/board.md` (its two "five dialogs" mentions), and `test/dialog-count-docs.test.ts`, which
+  pins "five" and the five names in those homes and must move to six with them (`test/dialog-escape.test.tsx`'s stale "three" describe moves to six too).
 - **Fetch**: once on load and again when the chip opens the drawer; no poll.
 - **Code homes**: every decision (chip label, dot, version compare `0.10.0 > 0.9.0`, title prefix strip) in `client/src/lib/releases.ts`, no React; the
   hook in `hooks/`; the drawer in `components/`. Header comments cite the new DESIGN.md subsection.
@@ -127,15 +134,16 @@ The dashboard's releases.md §The chip and §The drawer are the behaviour spec; 
 
 ## Rollout
 
-1. **PR A — `ci(release): add release workflow`**: `release.yml`, the PR template, ci.md §Releases. Merged by hand (the ruleset is not on yet).
-2. **User**: tag `v0.1.0` on PR A's merge commit and push it.
+1. **PR A — `ci(release): add release workflow`**: `release.yml`, the PR template, ci.md §Releases. Squash-merged by hand (the ruleset is not on yet,
+   and a rebase merge would leave no single commit to tag); PR B likewise.
+2. **User**: `git pull`, then tag `v0.1.0` on PR A's squash commit and push it.
 3. **User**: set this machine's Settings default merge mode to `pr`, and drain at least one groomed item of this repo in a `pr`-mode run; its PR
    is merged by squash. The run should include a bug (its commit subject is `fix`) or a task whose subject is `feat`: `prTitle` takes the highest type
    among the merged items' subjects and falls to `chore(backlog)` otherwise, and `chore` cuts nothing. A `feat|fix` PR cuts the first real release —
    **the first end-to-end proof of Part 2**. If it comes out `chore`, the PR-mode proof the ruleset waits on still holds; merge it, and PR C's merge becomes
    the first release proof instead. If no groomed item is ready, grooming one is part of this step.
 4. **User**: apply the ruleset (dry run, then for real). From here every change is a PR.
-5. **PR B — the docs half of Part 1** (`docs: …`): publishing.md, ci.md §The ruleset, CLAUDE.md, the orchestrator-mode guidance.
+5. **PR B — the docs half of Part 1** (`docs: …`): publishing.md, ci.md §The ruleset, CLAUDE.md, the orchestrator-mode guidance (in ci.md §The ruleset, which already carries it).
 6. **PR C — `feat(releases): version chip and What's new drawer`**: Part 3. Its merge cuts the next minor release.
 
 No step names a fixed version past the baseline: step 3's run decides what the first release is. Steps 4–5 may swap if the user prefers the docs to land
@@ -147,7 +155,8 @@ planner's call.
 - `/api/releases` over a tmpdir git repo through the real Nest app (`listenLoopback`): no git dir → empty shape; no tags → empty shape; only a lightweight
   `v9.9.9` and a lightweight `v1` → empty shape; baseline + two releases → newest first, baseline typed `baseline`; HEAD exactly on a tag → `ahead: 0`; a
   commit after the first read → `ahead: 1` (the memo key moved); a tag cut without moving HEAD → appears (common-dir mtimes); non-GitHub origin → no `url`;
-  a `runGit` timeout (the existing `__setGitTimeoutMs` seam) → empty shape, 200.
+  a `runGit` timeout (the existing `__setGitTimeoutMs` seam) → empty shape, 200, and the next request after the timeout is lifted → populated (a failed
+  read is not memoised); a failing `describe` alone → `current: null` with `releases` kept.
 - Parity: for the populated fixture, the route's `releases`/`current` deep-equal release-kit's own `readReleases` on the same repo.
 - Client lib (jest): dot decision, first-visit seed, invalid stored value, version comparison, chip label with and without `ahead`, title prefix strip.
 - Drawer (jsdom): renders entries and the baseline divider; Escape closes only the drawer when another dialog is under it.
