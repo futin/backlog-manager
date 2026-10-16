@@ -10,14 +10,16 @@ import JiraView from '../client/src/components/jira/JiraView';
 import { JiraContext } from '../client/src/hooks/JiraContext';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { formatCreated } from '../client/src/lib/item-age';
+import type { JiraChildrenIndex } from '../client/src/lib/jira';
 import { daysAgoStamp } from './helpers/dates';
 import type { JiraBoardStatus, JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../shared/types';
 
 /*
   Jira › the issue modal (Jira phase 2; spec §6.3 minus its controls; DESIGN.md §8.9.2) — the real modal over a mocked `fetch`. It composes `ui/Modal`, so the
   scrim, the close control and the Escape key are the shell's and are asserted here only as far as "this surface still gets them". What it owns: the facts
-  column (drawn from the CARD's issue while the detail loads, and kept when the read fails), the description through the sanitising renderer, the Subtasks
-  list, and the absence of every control. Fixture stamps are relative to the clock the assertion runs under (`test/helpers/dates.ts`).
+  column (drawn from the CARD's issue while the detail loads, and kept when the read fails), the description through the sanitising renderer, the Children
+  tree (grouped-board spec §6) and its row swap inside the one modal, and the absence of every control. Fixture stamps are relative to the clock the
+  assertion runs under (`test/helpers/dates.ts`).
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
@@ -88,18 +90,38 @@ function json(body: unknown, init: { status?: number } = {}): Response {
   return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as Response;
 }
 
-function mount(opts: { status?: Partial<JiraStatusPayload>; issue?: JiraIssue; onClose?: () => void } = {}) {
+let onOpenIssue: jest.Mock;
+
+function mount(
+  opts: { status?: Partial<JiraStatusPayload>; issue?: JiraIssue; onClose?: () => void; childrenOf?: JiraChildrenIndex | null; onOpenIssue?: jest.Mock } = {}
+) {
+  onOpenIssue = opts.onOpenIssue ?? jest.fn();
   return render(
     <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload: () => {} }}>
-      <JiraIssueModal issue={opts.issue ?? CARD} onClose={opts.onClose ?? (() => {})} />
+      <JiraIssueModal issue={opts.issue ?? CARD} childrenOf={opts.childrenOf ?? null} onOpenIssue={onOpenIssue} onClose={opts.onClose ?? (() => {})} />
     </JiraContext.Provider>
   );
 }
 
+/** A child of the open issue: CARD with its own key, summary, status category and parent. */
+const kid = (key: string, summary: string, category: JiraIssue['status']['category'], parent = 'PAY-131', name?: string): JiraIssue => ({
+  ...CARD,
+  key,
+  summary,
+  status: { name: name ?? { new: 'To Do', indeterminate: 'In Progress', done: 'Done' }[category], category },
+  parent: { key: parent, summary: 'parent' }
+});
+
+/** The tree's rows, as `KEY/depth`, in document order. */
+const treeRows = (): string[] =>
+  Array.from(document.querySelectorAll<HTMLElement>('.jira-tree > li')).map((li) => `${li.querySelector('.jira-tree-key')?.textContent}/${li.dataset.depth}`);
+
 /** The facts column's value for one label, or null when that fact is not drawn. */
 function fact(label: string): HTMLElement | null {
   const dialog = screen.getByRole('dialog');
-  const dt = within(dialog).queryAllByText(label).find((n) => n.tagName === 'DT');
+  const dt = within(dialog)
+    .queryAllByText(label)
+    .find((n) => n.tagName === 'DT');
   return dt === undefined ? null : (dt.nextElementSibling as HTMLElement);
 }
 
@@ -158,24 +180,90 @@ describe('JiraIssueModal — the body', () => {
     expect(body.innerHTML).not.toMatch(/javascript:/i);
   });
 
-  it('lists the children with their raw status names under a Subtasks heading', async () => {
-    const child = (key: string, summary: string, name: string): JiraIssue => ({ ...CARD, key, summary, status: { name, category: 'new' }, parent: null });
-    answer = () => json(detail({ children: [child('PAY-132', 'Wire the refund call', 'Selected for Development'), child('PAY-133', 'Receipt copy', 'Blocked')] }));
+  // Grouped-board spec §6: Subtasks became Children. With no `childrenOf` (no board behind the modal) the tree is the direct children only, so nothing
+  // is deeper and no `in all` is drawn.
+  it('lists the children with their raw status names under a Children heading, with the direct count in its pill', async () => {
+    answer = () =>
+      json(
+        detail({
+          children: [
+            kid('PAY-132', 'Wire the refund call', 'new', 'PAY-131', 'Selected for Development'),
+            kid('PAY-133', 'Receipt copy', 'new', 'PAY-131', 'Blocked')
+          ]
+        })
+      );
     mount();
 
-    expect(await screen.findByRole('heading', { name: 'Subtasks' })).toBeInTheDocument();
-    const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(2);
-    expect(items[0]).toHaveTextContent('PAY-132');
-    expect(items[0]).toHaveTextContent('Wire the refund call');
-    expect(items[0]).toHaveTextContent('Selected for Development');
-    expect(items[1]).toHaveTextContent('Blocked');
+    expect(await screen.findByRole('heading', { name: 'Children' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Subtasks' })).toBeNull();
+    expect((document.querySelector('.jira-tree-head .ui-pill') as HTMLElement).textContent).toBe('2');
+    const rows = within(document.querySelector('.jira-tree') as HTMLElement).getAllByRole('button');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAccessibleName(expect.stringContaining('PAY-132'));
+    expect(rows[0]).toHaveAccessibleName(expect.stringContaining('Wire the refund call'));
+    expect(rows[0]).toHaveTextContent('Selected for Development');
+    expect(rows[1]).toHaveAccessibleName(expect.stringContaining('PAY-133 Receipt copy'));
+    expect(rows[1]).toHaveTextContent('Blocked');
+    expect(screen.queryByText(/in all/)).toBeNull();
   });
 
-  it('draws no Subtasks heading when there are none', async () => {
+  it('draws no Children heading when there are none', async () => {
     mount();
     await screen.findByText('not');
-    expect(screen.queryByRole('heading', { name: 'Subtasks' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Children' })).toBeNull();
+  });
+
+  // The snapshot's descendants hang under the fresh direct children, depth-first in the index's own order, indented 22 px a level (R10).
+  it("hangs the board snapshot's grandchildren under their direct child, and counts every row in all", async () => {
+    answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate'), kid('PAY-170', 'Payout story', 'done')] }));
+    const childrenOf: JiraChildrenIndex = new Map([
+      ['PAY-160', [kid('PAY-162', 'Ledger rounding fix', 'new', 'PAY-160'), kid('PAY-161', 'Ledger schema', 'done', 'PAY-160')]]
+    ]);
+    mount({ childrenOf });
+
+    await screen.findByRole('heading', { name: 'Children' });
+    expect(treeRows()).toEqual(['PAY-160/0', 'PAY-162/1', 'PAY-161/1', 'PAY-170/0']);
+    const lis = Array.from(document.querySelectorAll<HTMLElement>('.jira-tree > li'));
+    expect(lis.map((li) => li.style.paddingLeft)).toEqual(['0px', '22px', '22px', '0px']);
+    expect((document.querySelector('.jira-tree-head .ui-pill') as HTMLElement).textContent).toBe('2');
+    expect(screen.getByText('4 in all')).toBeInTheDocument();
+    expect(screen.getByRole('dialog').querySelector('.ui-spread-caption')).toHaveTextContent('2 done · 1 in progress · 1 to do');
+  });
+
+  // Review Focus 4's modal half: the fresh read holds a child the board does not, so the snapshot has nothing under it.
+  it('draws a direct child the board does not hold at depth 0 with nothing under it', async () => {
+    answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate'), kid('PAY-175', 'New child', 'new')] }));
+    mount({ childrenOf: new Map([['PAY-160', [kid('PAY-161', 'Ledger schema', 'done', 'PAY-160')]]]) });
+
+    await screen.findByRole('heading', { name: 'Children' });
+    expect(treeRows()).toEqual(['PAY-160/0', 'PAY-161/1', 'PAY-175/0']);
+    expect(screen.getByText('3 in all')).toBeInTheDocument();
+    expect(screen.getByRole('dialog').querySelector('.ui-spread-caption')).toHaveTextContent('1 done · 1 in progress · 1 to do');
+  });
+
+  // Reparented since the last poll: the fresh read says PAY-161 is a direct child, the stale snapshot still files it under PAY-160 — drawn once, where the
+  // fresh read puts it.
+  it('draws an issue reparented since the last poll once, as the direct child the fresh read says it is', async () => {
+    answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate'), kid('PAY-161', 'Ledger schema', 'done')] }));
+    mount({
+      childrenOf: new Map([['PAY-160', [kid('PAY-161', 'Ledger schema', 'done', 'PAY-160'), kid('PAY-162', 'Ledger rounding fix', 'new', 'PAY-160')]]])
+    });
+
+    await screen.findByRole('heading', { name: 'Children' });
+    expect(treeRows()).toEqual(['PAY-160/0', 'PAY-162/1', 'PAY-161/0']);
+    expect(screen.getByText('3 in all')).toBeInTheDocument();
+  });
+
+  it('hands a row click to onOpenIssue with that row and the very snapshot the modal was given', async () => {
+    const deep = kid('PAY-162', 'Ledger rounding fix', 'new', 'PAY-160');
+    answer = () => json(detail({ children: [kid('PAY-160', 'Ledger story', 'indeterminate')] }));
+    const childrenOf: JiraChildrenIndex = new Map([['PAY-160', [deep]]]);
+    mount({ childrenOf });
+
+    await userEvent.click(await screen.findByRole('button', { name: /PAY-162 Ledger rounding fix/ }));
+    expect(onOpenIssue).toHaveBeenCalledTimes(1);
+    expect(onOpenIssue.mock.calls[0][0]).toBe(deep);
+    expect(onOpenIssue.mock.calls[0][1]).toBe(childrenOf);
   });
 
   it('says comments stay in Jira, with the link', async () => {
@@ -241,7 +329,7 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
     const other: JiraIssue = { ...CARD, key: 'PAY-9', summary: 'Another' };
     view.rerender(
       <JiraContext.Provider value={{ data: status(), loading: false, error: false, reload: () => {} }}>
-        <JiraIssueModal issue={other} onClose={() => {}} />
+        <JiraIssueModal issue={other} childrenOf={null} onOpenIssue={jest.fn()} onClose={() => {}} />
       </JiraContext.Provider>
     );
 
@@ -296,6 +384,90 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     expect(await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  // Task 3's GROUP slice, rebuilt here (suites share no fixtures): PAY-120 the epic, PAY-160 and PAY-170 under it, PAY-161 and PAY-162 under PAY-160 —
+  // with the board suite's `updated` ages too, because the fold index lists siblings newest first, which is what puts PAY-162 above PAY-161.
+  const groupIssue = (
+    key: string,
+    summary: string,
+    category: JiraIssue['status']['category'],
+    parent: string | null,
+    type: JiraIssue['type'],
+    days: number
+  ): JiraIssue => ({
+    ...kid(key, summary, category, parent ?? 'none'),
+    parent: parent === null ? null : { key: parent, summary: 'parent' },
+    type,
+    updated: daysAgoStamp(days)
+  });
+  const STORY = { name: 'Story', level: 0, subtask: false };
+  const SUB = { name: 'Sub-task', level: -1, subtask: true };
+  const G_120 = groupIssue('PAY-120', 'Payments epic', 'new', null, { name: 'Epic', level: 1, subtask: false }, 5);
+  const G_160 = groupIssue('PAY-160', 'Ledger story', 'indeterminate', 'PAY-120', STORY, 4);
+  const G_161 = groupIssue('PAY-161', 'Ledger schema', 'done', 'PAY-160', SUB, 3);
+  const G_162 = groupIssue('PAY-162', 'Ledger rounding fix', 'new', 'PAY-160', SUB, 0);
+  const G_170 = groupIssue('PAY-170', 'Payout story', 'done', 'PAY-120', STORY, 6);
+  const GROUP = [G_120, G_160, G_161, G_162, G_170];
+
+  /** JiraView over GROUP, each issue's detail answered by its URL; returns the URLs requested. */
+  function mountView(details: Record<string, Partial<JiraIssueDetail>>): string[] {
+    window.localStorage.clear();
+    setJiraPage('board');
+    const board = status();
+    const requested: string[] = [];
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      const key = url.match(/^\/api\/jira\/issue\/([^/?]+)/)?.[1];
+      if (key !== undefined) {
+        const own = GROUP.find((g) => g.key === key) ?? { key };
+        return json(detail({ ...own, children: [], ...details[key] }));
+      }
+      if (url.includes('/issues')) return json({ issues: GROUP, polledAt: daysAgoStamp(0) });
+      return json(board);
+    }) as unknown as typeof fetch;
+    render(
+      <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: () => {} }}>
+        <JiraView onOpenJiraPage={jest.fn()} />
+      </JiraContext.Provider>
+    );
+    return requested;
+  }
+
+  // Grouped-board spec §6: a row swaps the ONE modal's issue — never a second Modal, so Escape still has one owner — and the snapshot taken at the card
+  // click is what hangs PAY-162 under PAY-160.
+  it("swaps the one modal to a tree row's issue, fetching it once, and Escape closes it", async () => {
+    const requested = mountView({ 'PAY-120': { children: [G_160, G_170] } });
+
+    await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
+    expect(await screen.findByRole('dialog', { name: 'PAY-120 Payments epic' })).toBeInTheDocument();
+    await screen.findByRole('heading', { name: 'Children' });
+    expect(treeRows()).toEqual(['PAY-160/0', 'PAY-162/1', 'PAY-161/1', 'PAY-170/0']);
+
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-162/ }));
+    expect(await screen.findByRole('dialog', { name: 'PAY-162 Ledger rounding fix' })).toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    await waitFor(() => expect(requested.filter((u) => u.startsWith('/api/jira/issue/PAY-162'))).toHaveLength(1));
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  // Review Focus 4: a direct child the board list does not hold still opens, in the same single dialog, from the issue the row carries.
+  it('opens a direct child the board does not hold in the same single dialog', async () => {
+    const PAY_175 = groupIssue('PAY-175', 'New child', 'new', 'PAY-120', STORY, 0);
+    mountView({ 'PAY-120': { children: [G_160, PAY_175] }, 'PAY-175': { ...PAY_175, children: [] } });
+
+    await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
+    await screen.findByRole('heading', { name: 'Children' });
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-175/ }));
+
+    expect(await screen.findByRole('dialog', { name: 'PAY-175 New child' })).toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Children' })).toBeNull());
+    await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 

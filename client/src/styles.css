@@ -1235,9 +1235,20 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-modal-key { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
 .jira-modal-keyname { font-size: 13px; font-weight: 500; color: var(--ink2) }
 .jira-modal-key a { font-size: 12px; color: var(--cyan) }
-.jira-modal-subtasks { list-style: none; padding-left: 0 }
-.jira-modal-subkey { font-weight: 500; color: var(--ink2) }
-.jira-modal-substatus { font-size: 12px; color: var(--ink3); margin-left: 6px }
+/* The Children tree (§8.9.2): a head row (h3, the direct count's pill, `N in all` pushed right), the spread bar, then one button per row, indented 22 px
+   a level by an inline style. A row reads like a one-line card — glyph, key, summary, the card's initials disc, the raw status pill. */
+.jira-tree-head { display: flex; align-items: center; gap: 8px; margin-top: 20px }
+.jira-tree-head h3 { margin: 0 }
+.jira-tree-all { margin-left: auto; font-size: 12px; color: var(--ink3) }
+.jira-tree-spread { margin: 8px 0 6px }
+.jira-tree { list-style: none; padding-left: 0; margin: 0 }
+.jira-tree-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px;
+  background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.jira-tree-row:hover { background: var(--strip-hi) }
+.jira-tree-key { font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-tree-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .jira-modal-none, .jira-modal-comments { font-size: 12px; color: var(--ink3) }
 .jira-modal-comments { margin-top: 20px }
 .jira-modal-comments a { color: var(--cyan) }

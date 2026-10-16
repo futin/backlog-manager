@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
-import { JIRA_COLUMNS, displayPath, issueDatesLine } from '../../lib/jira';
+import { JIRA_COLUMNS, displayPath, initialsOf, issueDatesLine, modalTree, progressLine, type JiraChildrenIndex } from '../../lib/jira';
 import { renderMarkdown } from '../../lib/markdown';
 import type { JiraIssue, JiraIssueDetail } from '../../../../shared/types';
 import { Fact } from '../ui/Fact';
+import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
+import { Pill } from '../ui/Pill';
+import { SpreadBar } from '../ui/SpreadBar';
 
 /**
  * JiraIssueModal — one Jira issue's detail, READ-ONLY (Jira phase 2, spec §6.3 minus its controls; DESIGN.md §8.9.2, which applies §8.7's sidecar to a
@@ -38,6 +41,15 @@ import { Modal } from '../ui/Modal';
  * Repositories are read from the shell's one status (`useJiraContext`): the mapped paths for the issue's PROJECT key through `displayPath` (the same `~`
  * reading the Setup card gives), or the hint that says where to map one. The `created · updated` line (`issueDatesLine`) takes `Date.now()` once per render and ticks nothing — the modal is
  * opened, read and closed, the reasoning `ItemModal` gives for the same choice.
+ *
+ * **Children are a tree, and a row swaps THIS modal's issue** (DESIGN.md §8.9.2; grouped-board spec §6). The detail's `children` are the direct children,
+ * fresh; under each hang its descendants from `childrenOf`, the board's fold index as it stood when the card was clicked (`modalTree`). That snapshot is not
+ * refreshed by later board polls: the tree costs no Jira call beyond the one read this modal already makes, and a row a poll moved is at worst one poll old
+ * while the direct children never are. `null` (no board behind the modal) draws the direct children only. The head row counts the DIRECT children in its
+ * pill and says `N in all` only when the tree draws more rows than that; the spread bar counts the rows as drawn. No filter marking inside the tree — the
+ * filter ring is the card's (spec §8 non-goal). A row click hands the row's issue and the SAME snapshot to `onOpenIssue`, which is the very setter the board
+ * calls, so `JiraView` swaps the one modal's issue and the key-stamped read below fetches the new detail. Never a second `Modal`: Escape has one owner, and a
+ * stack of issue modals would make it close one layer of a walk the reader thinks of as one dialog.
  */
 
 type Held = { key: string; detail: JiraIssueDetail } | { key: string; failure: string };
@@ -68,7 +80,17 @@ function isIssueDetail(value: unknown): value is JiraIssueDetail {
   return typeof d.description === 'string' && Array.isArray(d.children) && Array.isArray(d.boards);
 }
 
-export function JiraIssueModal({ issue, onClose }: { issue: JiraIssue; onClose: () => void }) {
+export function JiraIssueModal({
+  issue,
+  childrenOf,
+  onOpenIssue,
+  onClose
+}: {
+  issue: JiraIssue;
+  childrenOf: JiraChildrenIndex | null;
+  onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  onClose: () => void;
+}) {
   const { data } = useJiraContext();
   const [held, setHeld] = useState<Held | null>(null);
 
@@ -98,8 +120,7 @@ export function JiraIssueModal({ issue, onClose }: { issue: JiraIssue; onClose: 
   const src: JiraIssue = detail ?? issue;
 
   const now = Date.now();
-  const boardNames =
-    detail === null || data === null ? [] : data.boards.filter((b) => detail.boards.includes(b.id)).map((b) => b.name);
+  const boardNames = detail === null || data === null ? [] : data.boards.filter((b) => detail.boards.includes(b.id)).map((b) => b.name);
   const paths = data?.repos[src.project.key] ?? [];
   const typeLine = [src.type.name, src.parent === null ? null : `${src.parent.key} ${src.parent.summary}`].filter((p) => p !== null).join(' · ');
   const priorityLine = [src.priority, src.sprint].filter((p) => p !== null && p !== '').join(' · ');
@@ -147,18 +168,7 @@ export function JiraIssueModal({ issue, onClose }: { issue: JiraIssue; onClose: 
             ) : (
               <div dangerouslySetInnerHTML={{ __html: renderMarkdown(detail.description) }} />
             )}
-            {detail.children.length > 0 && (
-              <>
-                <h3>Subtasks</h3>
-                <ul className="jira-modal-subtasks">
-                  {detail.children.map((c) => (
-                    <li key={c.key}>
-                      <span className="jira-modal-subkey">{c.key}</span> {c.summary} <span className="jira-modal-substatus">{c.status.name}</span>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
+            {detail.children.length > 0 && <ChildrenTree selfKey={detail.key} direct={detail.children} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />}
           </>
         )}
         <p className="jira-modal-comments">
@@ -169,5 +179,50 @@ export function JiraIssueModal({ issue, onClose }: { issue: JiraIssue; onClose: 
         </p>
       </div>
     </Modal>
+  );
+}
+
+/** The Children section — head row, spread bar, tree — over `modalTree` (see the header). Drawn only when the detail has direct children. */
+function ChildrenTree({
+  selfKey,
+  direct,
+  childrenOf,
+  onOpenIssue
+}: {
+  selfKey: string;
+  direct: readonly JiraIssue[];
+  childrenOf: JiraChildrenIndex | null;
+  onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+}) {
+  const { rows, progress } = modalTree(selfKey, direct, childrenOf);
+  return (
+    <>
+      <div className="jira-tree-head">
+        <h3>Children</h3>
+        <Pill tone="neutral">{direct.length}</Pill>
+        {rows.length > direct.length && <span className="jira-tree-all">{`${rows.length} in all`}</span>}
+      </div>
+      {/* Wrapped, because the spacing is this surface's and the primitive's own selectors stay in the ui block (design-guard 7). */}
+      <div className="jira-tree-spread">
+        <SpreadBar done={progress.done} doing={progress.doing} todo={progress.todo} caption={progressLine(progress)} />
+      </div>
+      <ul className="jira-tree">
+        {rows.map(({ issue: row, depth }) => (
+          // The indent is the one inline style: a depth is data, and a class per depth would cap how deep a tree may go.
+          <li key={row.key} data-depth={depth} style={{ paddingLeft: depth * 22 }}>
+            <button type="button" className="jira-tree-row" onClick={() => onOpenIssue(row, childrenOf)}>
+              <JiraTypeIcon type={row.type} />
+              {/* The spaces between the spans are what the button's accessible name reads as word breaks: `PAY-162 Ledger rounding fix`. */}
+              <span className="jira-tree-key">{row.key}</span> <span className="jira-tree-summary">{row.summary}</span>{' '}
+              {/* The card's own disc: initials or the empty one, never an image, so every row's status pill lines up. */}
+              <span className={row.assignee === null ? 'jira-card-av none' : 'jira-card-av'} aria-hidden="true">
+                {row.assignee === null ? '' : initialsOf(row.assignee.name)}
+              </span>
+              <Pill tone="neutral">{row.status.name}</Pill>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
