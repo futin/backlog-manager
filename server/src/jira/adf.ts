@@ -4,15 +4,16 @@
  *
  * What it covers is the node inventory the phase-0 probe (§14 P10) saw on ten real descriptions — `paragraph heading bulletList orderedList listItem
  * codeBlock taskList taskItem media mediaSingle mention emoji inlineCard rule`, with `panel table tableRow tableHeader tableCell` collapsed to placeholders,
- * and the marks `strong em code link underline` — plus the documented nodes the probe did NOT see (`expand`, `date`, `status`, `strike`, `blockquote`, `hardBreak`), written
- * from Atlassian's schema and exercised only by fixtures. P10 also found `taskList` on real descriptions, which the first draft of §8 had left out.
+ * and the marks `strong em code link underline` — plus the documented nodes the probe did NOT see (`expand`, `date`, `status`, `strike`, `blockquote`,
+ * `hardBreak`), written from Atlassian's schema and exercised only by fixtures. P10 also found `taskList` on real descriptions, which the first draft of §8
+ * had left out.
  *
  * Three decisions carry the design.
  *
  * 1. Text is ESCAPED, code is not. A description is prose; the person who wrote `snake_case_name` or `2 * 3` meant exactly that, and unescaped it would
- *    render as italics. `escapeMarkdown` therefore runs on every text node and on every label this file builds, and a code mark or codeBlock — where Markdown is already
- *    suspended — is left raw. A side effect P7 relies on: a person's literal `[table omitted]` becomes `\[table omitted\]` and cannot be mistaken for a
- *    placeholder by `ADF_PLACEHOLDER_RE` (a codeBlock holding that text still can — the one false positive, accepted in P7).
+ *    render as italics. `escapeMarkdown` therefore runs on every text node and on every label this file builds, and a code mark or codeBlock — where Markdown
+ *    is already suspended — is left raw. A side effect P7 relies on: a person's literal `[table omitted]` becomes `\[table omitted\]` and cannot be mistaken
+ *    for a placeholder by `ADF_PLACEHOLDER_RE` (a codeBlock holding that text still can — the one false positive, accepted in P7).
  * 2. What cannot be said in a line becomes a ONE-LINE placeholder — `[attachment: name]`, `[attachment]`, `[table omitted]`, `[panel omitted]`,
  *    `[expand omitted]` — never a half-rendered table. `adfToMarkdown` counts them and `ADF_PLACEHOLDER_RE` is the one home of what one looks like, so the
  *    ticket block's "something was omitted — open in Jira" line detects them with the same pattern that wrote them. The pattern matches ANYWHERE in a line

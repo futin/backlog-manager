@@ -107,11 +107,11 @@ that finished every due board clears an earlier `unreachable`, and only that —
 
 **The window.** A 429 Jira sent stores its end (`Retry-After`, else `JIRA_RATE_LIMIT_DEFAULT_MS`, 60 s) once, and nothing moves it while it is in force
 (P1): a second 429 inside it — two reads that passed the gate together, a boot call already out — restamps `calls.last429At` and nothing else, and the 429
-the poller synthesises to refuse a call inside a window opens none. The sweep and the boot make no call inside it, a boot or sweep failure that lands inside
-it leaves `rate-limited` standing, and every route read is refused up front. It expires where it is read — the status payload, the read gate, the sweep —
-not by a timer, so a disarmed poller cannot leave a stale `rate-limited` standing; and if the boot is still unanswered then, the verdict the window covered
-(an `unauthorized`, say) comes back rather than `ok`. `calls.sweep` is approximately what the last tick sent — a route read made during the sweep is counted
-with it — and `calls.last429At` the last 429 met, by a sweep or a route.
+the poller synthesises to refuse a call inside a window opens none. The sweep and the boot make no call inside it, a boot or sweep 5xx or transport failure that
+lands inside it leaves `rate-limited` standing (a sweep 401 still records `unauthorized`), and every route read is refused up front. It expires where it is read
+— the status payload, the read gate, the sweep — not by a timer, so a disarmed poller cannot leave a stale `rate-limited` standing; and if the boot is still
+unanswered then, the verdict the window covered (an `unauthorized`, say) comes back rather than `ok`. `calls.sweep` is approximately what the last tick sent — a
+route read made during the sweep is counted with it — and `calls.last429At` the last 429 met, by a sweep or a route.
 
 **The cache.** `Map<boardId, { issues, polledAt, truncated, failures }>`, in memory, lost on restart; a board removed from `jira.json` is pruned on the next
 sweep, unless the file is unreadable. The issue detail, the roots search, the project list and the JQL check are fresh reads, never cached. The Jira board

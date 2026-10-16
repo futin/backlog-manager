@@ -71,9 +71,10 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * Checking before sending is not enough on its own, because calls already in flight when the window opens still land inside it. So `openWindow` is the one
  * home of the rule that the stored end never moves while it is in force: a second 429 inside it (two route reads that passed the gate together, a boot call
  * that was already out) restamps `last429At` and nothing else; a synthesised refusal (`synthetic`, remembered in `SYNTHETIC`) opens nothing at all, because
- * Jira never sent it; the boot asks nothing more once a window is in force, and a boot or sweep failure that lands inside one does not overwrite
- * `rate-limited`. When the window ends, the verdict it covered comes back (`beforeWindow`) unless the boot has since answered in full — a 401 that was in
- * force when the 429 arrived is still the truth about the credentials, and `ok` would hide it.
+ * Jira never sent it; the boot asks nothing more once a window is in force, and a boot or sweep 5xx or transport failure that lands inside one does not
+ * overwrite `rate-limited` — a sweep 401 still records `unauthorized`, because a 401 is evidence about the credentials, not the window. When the window ends,
+ * the verdict it covered comes back (`beforeWindow`) unless the boot has since answered in full — a 401 that was in force when the 429 arrived is still the
+ * truth about the credentials, and `ok` would hide it.
  *
  * Every instant here — `polledAt`, `last429At`, the window, the back-off — comes from `Date.now()`, never `new Date()`, so a suite that mocks `Date.now`
  * controls the only clock this file reads.
@@ -769,10 +770,6 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return { auth: { site: env.site, email: env.email, token: env.token, cloudId: this.boot.cloudId } };
   }
 
-  /**
-   * A fresh read's failure. Only a 401 (the credentials stopped working: `me` reset, the boot retry restarts) and a 429 (the window opens) move the
-   * site-level state; a 0, 5xx, 400, 403 or 404 on a route answers its mapping and leaves `access` to the sweep (§8).
-   */
   /** The refusal a read gets inside a 429 window — a synthesised 429 and the STORED instant (P1) — or `null` when none is in force. */
   private windowRefusal(): JiraRefusal | null {
     this.expireWindow(Date.now());
@@ -780,6 +777,10 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return { ok: false, response: synthetic(429, null), retryAt: iso(this.boot.retryAt!) };
   }
 
+  /**
+   * A fresh read's failure. Only a 401 (the credentials stopped working: `me` reset, the boot retry restarts) and a 429 (the window opens) move the
+   * site-level state; a 0, 5xx, 400, 403 or 404 on a route answers its mapping and leaves `access` to the sweep (§8).
+   */
   private routeFailed(res: JiraResponse<unknown>): JiraRefusal {
     if (res.status === 401) {
       this.boot.reset();
