@@ -52,6 +52,12 @@ interface Props {
    * lands — reads as not working, because nothing that knows of a run has said there is one.
    */
   working?: boolean;
+  /**
+   * The version chip (DESIGN.md §8.10): the running version's label, whether a release has landed since this browser last opened the drawer, and the open.
+   * Every part is `App`'s — the read, the dot's storage, the drawer — because the drawer must render outside the rail (a transformed ancestor clips a
+   * `position: fixed` panel, and the phone rail hides with a transform). Absent, no chip: the checkout has no version, or the read has not answered.
+   */
+  releases?: { label: string; dot: boolean; onOpen: () => void };
 }
 
 /**
@@ -75,7 +81,7 @@ interface Props {
  * belongs beside the board, in the board toolbar, not in the switch that
  * decides which section is showing.
  */
-export function SideRail({ section, onChange, chipSlot, working }: Props) {
+export function SideRail({ section, onChange, chipSlot, working, releases }: Props) {
   const narrow = useNarrow();
   const [menuOpen, setMenuOpen] = useState(false);
   const hidden = useRailHidden(narrow, menuOpen);
@@ -203,6 +209,22 @@ export function SideRail({ section, onChange, chipSlot, working }: Props) {
             )}
           </div>
         ))}
+
+      {/* The rail's last element, sunk to its foot at desktop width; in the phone menu its last row, drawn only while the menu is open like every row.
+          Status lives in the dot alone (§8.10). A click closes the menu as a section row's does, so the drawer is not opened behind it. */}
+      {releases && (!narrow || menuOpen) && (
+        <button
+          type="button"
+          className="rail-release"
+          onClick={() => {
+            releases.onOpen();
+            setMenuOpen(false);
+          }}
+        >
+          {releases.dot && <span className="rail-release-dot" role="img" aria-label="new release" />}
+          {releases.label}
+        </button>
+      )}
     </nav>
   );
 }

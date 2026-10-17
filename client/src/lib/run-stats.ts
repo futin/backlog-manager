@@ -1,4 +1,4 @@
-import { isTerminalStage, itemDurationMs, runIsLive } from './run-time';
+import { isCompletedStage, isTerminalStage, itemDurationMs, runIsLive } from './run-time';
 import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../../../shared/types';
 
 /**
@@ -447,7 +447,7 @@ export interface RunAggregates {
  * otherwise print a red 0% for having done nothing at all.
  *
  * `runs`' element type is a structural shape, not `OrchestratorArchiveRun`
- * itself — the same generalization `RunsView.tsx`'s own `queueCounts`
+ * itself — the same generalization `lib/runs-list.ts`' own `queueCounts`
  * already made, and for the identical reason: a re-review found the
  * aggregate tiles this function feeds still reading the archive record for
  * a live-backed run while `RunRow` beside them had already been fixed to
@@ -517,7 +517,7 @@ export function aggregateRuns(
       // ("counted as completed, alongside merged") — a branch-mode item that
       // reached a reviewed branch is exactly as finished, and exactly as
       // much real orchestrator work, as one that reached `main`.
-      if (item.stage === 'merged' || item.stage === 'branched') {
+      if (isCompletedStage(item.stage)) {
         itemsMerged += 1;
         const work = itemDurationMs(item, now);
         if (work !== null) mergedWorkTimes.push(work);

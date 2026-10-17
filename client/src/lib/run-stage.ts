@@ -2,6 +2,33 @@ import { isCrashed } from './run-watchdog';
 import type { MergeMode, OrchestratorRun, RunStage } from '../../../shared/types';
 
 /**
+ * The `RunStage` values that mean the orchestrator is working this item right
+ * now — a literal list rather than "everything not terminal and not pending",
+ * because that broader formula would also catch `preflight`, and Task 11's own
+ * brief enumerates exactly these six as "shown" without it. Preflight is a real
+ * pipeline stage (it sits between `pending` and `dispatched` in RunStage's
+ * own documented order — see shared/types.ts) but a usually-instant one for
+ * an already-groomed item, and a card that flickered a marker on for the
+ * fraction of a poll cycle preflight actually takes would read as noise
+ * rather than as a state anyone could act on.
+ *
+ * Task 9 turned what these six earn from a footer chip into the card's own
+ * live strip: "which of these twelve is being worked" is a question asked of a
+ * whole column at once, and a 9.5px chip in a card's foot could no more answer
+ * it than the 3px amber inset the hand-run bar replaced could.
+ * The two stages below are the same claim's other half.
+ *
+ * Exported so a test can assert against the exact list the card renders
+ * from, not a restatement of it. Read by ItemCard (the live strip), `liveRank`
+ * (the column rank, lib/board-sort.ts) and the Runs detail sheet's `active` chip
+ * (`runDetailModel`, lib/run-detail.ts) — one list, three readers, none
+ * restating another. It lived in ItemCard.tsx until #271 moved it here,
+ * beside the stage tone and glyph tables: `lib/` imports nothing from
+ * `components/`, and the detail sheet's model is a `lib/` module.
+ */
+export const ACTIVE_RUN_STAGES: readonly RunStage[] = ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
+
+/**
  * The visual register a run stage is read in. Six tones, not fifteen: a
  * reader scanning a queue wants "is this done / working / waiting / blocked /
  * broken / never-ran", and the stage word itself — which is always printed

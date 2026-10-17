@@ -50,7 +50,11 @@ readers already sit inside `SettingsProvider` and nothing outside Settings write
 Setup's `Open board` and the empty board's `Open Setup` land on a page too, through `onOpenJiraPage`, the tree's own pair (`setJiraPage`, then the shell's
 `change`) built once in `App` and handed down, as the Settings watchdog card's `Live view` is `onOpenWatchdog`.
 
-Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
+The rail's last element is the version chip, `v0.2.0` or `v0.2.0+3`, with a cyan dot while a release has landed since this browser last opened the
+What's new drawer behind it; the shell owns the read, the dot and the drawer, and renders the drawer outside the rail. All of it is
+[releases.md](releases.md).
+
+Below 700 px the rail is a bar across the top with a menu, and every tree stands open inside it — the version chip is its last row. `useNarrow` (`client/src/hooks/useNarrow.ts`) is the one place
 JavaScript knows that breakpoint; everything else reads it from there or from a media query.
 
 ### Primitives
@@ -66,7 +70,8 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Band`                 | `.ui-band`        | `title`, `sub?`, `children` (right slot), `className?` (the page's layout class)                 | every page: Board, Runs History, Runs Watchdog, Archive, Settings               |
 | `Sheet`, `SheetHead`   | `.ui-sheet`       | `Sheet{children, as?, className?}`; `SheetHead{title, sub?, right?}`                             | Runs (Live, History, detail), Watchdog (Watching, Activity), `SettingsRow`'s card |
 | `FigureStrip`, `Figure`| `.ui-figure`      | `FigureStrip{children, cols?: 3\|5, testId?, className?}`; `Figure{label, value?, unit?, line?, tone?, wide?, title?, testId?, children?}` | Runs History (six cells, the sixth `wide`), Watchdog (three)                     |
-| `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
+| `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `GatedChip`, both sheets, load-more |
+| `GatedChip`            | none (draws `.ui-chip`) | `gateBlock`, `otherBlock`, `idleTitle`, `reverify?`, `recheck`, `onActivate`, `variant?`, `size?`, `children` (a node, or a function of `blocked`) — the disabled half is `gateView` (`lib/gate-view.ts`) | `DispatchButton` (card and modal), the Board band's Orchestrate chip |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
@@ -150,8 +155,9 @@ queue:
    Settings default (or a `pr` pick left over from another project) reads as `merge` on any project whose source is not `github` — `files`, `unsupported` or
    none. Settings is pre-project, so it lists `pr` for every project and leaves the refusal to the sheet and to the server's 400.
 
-Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet — are the five dialogs on the escape stack, and neither the
-sheets nor the modal binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for whatever they wrap. Two further entries join the same stack
+Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, and since the release chip the What's new drawer — are the six
+dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal`, `FormSheet` and `Drawer` call
+`useDialogEscape` for whatever they wrap. Two further entries join the same stack
 while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
 Filters and Sort, and Jira's chip, board picker and roots search — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
 owns the key and not the pointer.
@@ -229,6 +235,8 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
   its count, so the section earns the screen only when it has something in it. Selection is one run across both sheets: the first live run is selected on
   arrival, and with nothing live the newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
+  Every reading in the head, the facts strip, the notes and the chip row is `runDetailModel` (`lib/run-detail.ts`, #271) — a pure function of the three
+  tiers and one `now`, unit-tested without a render; the component keeps the fetch, the clock, the rows' own JSX and the machine-time rollup.
   For a remote run the sheet is read-only: `Remote run: its controls are on the machine that ran it.` stands where `RunControls` would, nothing fetches
   `archive/run`, and a line under the items says the ones the run has not claimed yet are not visible from here. A LOCAL run of a tracker project that has
   claimed nothing yet says `Not visible from other machines: this run has not claimed an issue yet.` — `lib/remote-run.ts` holds all three derivations, and
@@ -323,7 +331,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   row — one `trackerState`, an access reason still winning over it. Because the server refuses every write and spawn for it, the card's and modal's dispatch
   control is DISABLED with the server's sentence (`syncOffReason`, byte-equal to `syncOffBlock`, pinned on both sides) — carried on `DispatchButton`'s
   `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
-  whose click re-asks nothing for this reason because no status refetch could clear it.
+  whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
+  on `GatedChip`'s one rule.
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
@@ -371,10 +380,14 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Interfaces
 
 - `lib/agents.ts` — same-origin fetches against `/api`.
+- `lib/board-sort.ts` (#258) — the Board's sort pipeline, pure: `SortKey`/`SortDir`, `NATURAL_DIR`, `COMPARATORS`, `resolveSortKey`, `liveRank` and
+  `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns` and
   `useWatchdog`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
+- `hooks/useAction.ts` — the one home of a click-fired mutation's in-flight guard, `busy`, `error` and message mapping (#286, bug-19's layer 1): `RunControls`,
+  `LaunchSheet`, `OrchestrateSheet` and `ClaimRelease` keep only their own success and refusal branches.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` entry is present, plus a grace window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
@@ -401,7 +414,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Invariants
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the three per-item dispatch blocks
-and which one lets a click through, the dialog escape stack and its five dialogs, a crashed run rendering as crashed, "queue wait is not work",
+and which one lets a click through, the dialog escape stack and its six dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
 row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that

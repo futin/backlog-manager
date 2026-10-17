@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/items/**", "server/src/git-run.util.ts"]
+paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/releases/**"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -69,7 +69,8 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts"]
   "did it exit 0" tests `!== null`. `GIT_TIMEOUT_MS` is 10 000, `execFile`'s `timeout`; the synchronous callers carried 5 s because that was a cap on how long
   the whole process could freeze, and async removes the freeze, so the bound now only says how long a request waits before the degraded answer. The call sites
   and what a `null` means to each: `lastCommitDates` → the empty map (falls back to `created`), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
-  `resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list. No call site grew a new branch for a timeout and none may:
+  `resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list, and `ReleasesService`'s four reads — `for-each-ref` → the
+  empty shape, `describe` → `current: null`, `remote get-url` → no `url`, `rev-parse` → the answer is not memoised. No call site grew a new branch for a timeout and none may:
   a caller with a reason a timeout should differ from a missing repo is a new decision, not a refactor. `stdout` only, stdin closed, stderr dropped.
   `test/git-run.test.ts` is the guard: a fake slow `git` on `PATH`, the timeout landing in each branch above, the sharing cases, a route case in which
   `/api/health` answers in tens of milliseconds while `/api/items` waits out a 1 s git, and a grep that fails on `execFileSync`, `spawnSync` or `execSync`

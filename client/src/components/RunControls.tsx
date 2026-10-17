@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
+import { useAction } from '../hooks/useAction';
 import { ApiError, cancelPauseOrchestrate, pauseOrchestrate, resumeOrchestrate, stopOrchestrate } from '../lib/agents';
-import { isTerminalStage } from '../lib/run-time';
+import { inFlightItemId } from '../lib/run-time';
 import { isCrashed } from '../lib/run-watchdog';
 import { Chip } from './ui/Chip';
 import { Confirm } from './ui/Confirm';
@@ -42,7 +43,7 @@ import type { OrchestratorRun, RunQueueItem, RunWatchdog } from '../../../shared
  * paused run, and dropping it from the crashed one reopens the double spawn.
  *
  * **The crashed branch dispatches through `act` like every other branch, and
- * that is bug-19's layer 1.** `act`'s `if (busy) return` is the only guard
+ * that is bug-19's layer 1.** `act`'s `useAction` guard is the only guard
  * that can catch a second click before the first answer lands — the hosts'
  * own `resuming` mark is set from `onChanged`, i.e. AFTER the request settles,
  * so for the whole in-flight window nothing above that line has changed on
@@ -90,25 +91,6 @@ export type RunControlsRun = Pick<OrchestratorRun, 'status' | 'project'> & {
  *  resume (they also mark the poll) than to the other two. */
 export type RunControlsChange = 'pause' | 'cancel' | 'resume' | 'stop';
 
-/**
- * The item the run is working right now, or `null` when it is between items
- * (everything left is `pending`, or everything is done).
- *
- * "Neither `pending` nor terminal" is the same definition `RunStrip`'s own
- * in-flight lookup uses, backed by `isTerminalStage`'s `Record<RunStage,
- * true>` pin — so a stage added to the vocabulary has to be classified
- * there, once, rather than remembered here.
- *
- * FIRST match, not last: a queue is worked in order, so the earliest
- * non-terminal, non-pending entry is the one actually in flight. (A run only
- * ever has one, but reading the first makes that assumption explicit rather
- * than load-bearing.)
- */
-export function inFlightItemId(queue: RunControlsRun['queue']): string | null {
-  const item = queue.find((q) => q.stage !== 'pending' && !isTerminalStage(q.stage));
-  return item?.id ?? null;
-}
-
 export function RunControls({
   run,
   gate,
@@ -120,29 +102,9 @@ export function RunControls({
   resuming: boolean;
   onChanged: (kind: RunControlsChange) => void;
 }): JSX.Element | null {
-  const [error, setError] = useState<string | null>(null);
-  /**
-   * bug-19's layer 1, in two halves — and they are two on purpose.
-   *
-   * `busyRef` is the GUARD. It has to be a ref rather than the state below
-   * because `setBusy(true)` does not change the value `busy` holds in this
-   * render's closure: two clicks dispatched before React re-renders both read
-   * `false` and both fire. A state-backed check only catches a second click
-   * that arrives after a repaint — which is most of them, and is the shape
-   * bug-19's own occurrence had (three clicks inside ten seconds), but it is
-   * not the guarantee the invariant states. A ref is assigned and read in the
-   * same synchronous turn, so "the only layer that can catch a second click
-   * before the first answer lands" is true of every second click rather than
-   * of the slow ones. Measured: with the ref removed, two clicks in one tick
-   * send two POSTs.
-   *
-   * `busy` is the RENDERING. A ref does not re-render, and the control has to
-   * swap itself for the `Resuming…` word while the request is out — the
-   * host's own `resuming` mark cannot do it, being set from `onChanged`, i.e.
-   * after the request settles.
-   */
-  const busyRef = useRef(false);
-  const [busy, setBusy] = useState(false);
+  // bug-19's layer 1 — the synchronous in-flight guard and the rendered `busy` — is `useAction`'s (hooks/useAction.ts), which says why it takes both a ref
+  // and a state. One hook for all four of this row's mutations, so a pause and a resume can never overlap.
+  const { busy, error, run: runAction } = useAction();
   /**
    * bug-39 — `StopResult.abortRefused` from the click this component made,
    * or `null`.
@@ -165,13 +127,9 @@ export function RunControls({
   const [confirmingStop, setConfirmingStop] = useState(false);
 
   const act = (kind: RunControlsChange, call: () => Promise<unknown>): void => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
-    setError(null);
-    call()
-      .then(() => onChanged(kind))
-      .catch((err: unknown) => {
+    runAction(call, {
+      onSuccess: () => onChanged(kind),
+      onError: (err) => {
         // The crashed strip's own rule, reused verbatim: a resume refused
         // because the run is already alive means the run came back under
         // this very click — the outcome the click wanted, so it takes the
@@ -179,16 +137,11 @@ export function RunControls({
         // just fixed itself.
         if (kind === 'resume' && err instanceof ApiError && err.code === RUN_IN_PROGRESS_CODE) {
           onChanged(kind);
-          return;
+          return true;
         }
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      // Both halves cleared on BOTH settle paths — a spawn that threw started
-      // no session, and the server's own lock is likewise cleared there.
-      .finally(() => {
-        busyRef.current = false;
-        setBusy(false);
-      });
+        return false;
+      }
+    });
   };
 
   const errorNode =

@@ -12,6 +12,15 @@ import {
   JIRA_QUERY_PRESETS,
   JIRA_SWEEP_CALL_CEILING,
   bandSub,
+  cardFold,
+  childrenLine,
+  foldBoard,
+  foldMatches,
+  foldProgress,
+  matchMarker,
+  modalTree,
+  progressLine,
+  sortTops,
   boardRowLine,
   boardsForSetup,
   callsReading,
@@ -30,6 +39,7 @@ import {
   sortForBoard,
   unmappedProjects
 } from '../client/src/lib/jira';
+import type { JiraFold } from '../client/src/lib/jira';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
 import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
@@ -249,7 +259,7 @@ describe('bandSub', () => {
   it('names the count, the sources and the age of the poll', () => {
     const now = Date.now();
     const b = board({ count: 14, polledAt: ago(now, 12 * SECOND) });
-    expect(bandSub(b, site, now)).toEqual({ text: 'acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 12 s ago', failing: false });
+    expect(bandSub(b, site, now, null)).toEqual({ text: 'acme.atlassian.net · 14 issues from 2 roots and 1 query · polled 12 s ago', failing: false });
   });
 
   it('omits a zero source and pluralises the other', () => {
@@ -262,27 +272,27 @@ describe('bandSub', () => {
       ],
       polledAt: ago(now, 12 * SECOND)
     });
-    expect(bandSub(b, site, now).text).toBe('acme.atlassian.net · 14 issues from 2 queries · polled 12 s ago');
+    expect(bandSub(b, site, now, null).text).toBe('acme.atlassian.net · 14 issues from 2 queries · polled 12 s ago');
   });
 
   it('says 1 issue in the singular', () => {
     const now = Date.now();
-    expect(bandSub(board({ count: 1, polledAt: ago(now, 12 * SECOND) }), site, now).text).toContain(' · 1 issue from ');
+    expect(bandSub(board({ count: 1, polledAt: ago(now, 12 * SECOND) }), site, now, null).text).toContain(' · 1 issue from ');
   });
 
   it('reads not polled yet where an age would be', () => {
-    expect(bandSub(board({ polledAt: null }), site, Date.now()).text).toBe('acme.atlassian.net · 14 issues from 2 roots and 1 query · not polled yet');
+    expect(bandSub(board({ polledAt: null }), site, Date.now(), null).text).toBe('acme.atlassian.net · 14 issues from 2 roots and 1 query · not polled yet');
   });
 
   it('ends on the cap when the list is truncated', () => {
     const now = Date.now();
-    const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now).text;
+    const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, null).text;
     expect(text.endsWith(' · first 500 shown')).toBe(true);
   });
 
   it("is failing and names Jira's message for the first failure, with the rest counted", () => {
     const now = Date.now();
-    const one = bandSub(board({ polledAt: ago(now, 12 * SECOND), failures: [{ kind: 'root', id: 'PAY-9', message: 'Issue does not exist' }] }), site, now);
+    const one = bandSub(board({ polledAt: ago(now, 12 * SECOND), failures: [{ kind: 'root', id: 'PAY-9', message: 'Issue does not exist' }] }), site, now, null);
     expect(one.failing).toBe(true);
     expect(one.text).toContain('Issue does not exist');
     expect(one.text).not.toContain('more');
@@ -297,7 +307,8 @@ describe('bandSub', () => {
         ]
       }),
       site,
-      now
+      now,
+      null
     );
     expect(three.failing).toBe(true);
     expect(three.text).toContain('Issue does not exist');
@@ -573,5 +584,286 @@ describe('sweepLine', () => {
 
   it('says a 429 happened, but not when, for a stamp it cannot parse — and does not redden it', () => {
     expect(sweepLine(true, { sweep: 3, last429At: 'garbage' }, now)).toMatchObject({ rate: 'last 429 at an unknown time', red: false });
+  });
+});
+
+// ── The fold (grouped-board spec §3–§6) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+describe('the fold', () => {
+  const now = Date.now();
+
+  /**
+   * An issue keyed `key` under `parent` (`null` for none), updated `h` hours before `now`. Every case gives each issue a distinct `h`, so the
+   * `sortForBoard` order every `under` and `childrenOf` list is held in is a fact of the case rather than an accident of insertion order.
+   */
+  const n = (key: string, parent: string | null, h: number, over: Partial<JiraIssue> = {}): JiraIssue =>
+    issue({
+      key,
+      summary: `${key} summary`,
+      parent: parent === null ? null : { key: parent, summary: `${parent} summary` },
+      updated: ago(now, h * HOUR),
+      ...over
+    });
+  const keys = (list: readonly JiraIssue[] | undefined): string[] => (list ?? []).map((i) => i.key);
+  const asObject = (m: ReadonlyMap<string, readonly JiraIssue[]>): Record<string, string[]> => Object.fromEntries([...m].map(([k, v]) => [k, keys(v)]));
+  const todo = { status: { name: 'To Do', category: 'new' as const } };
+  const doing = { status: { name: 'In Progress', category: 'indeterminate' as const } };
+  const done = { status: { name: 'Done', category: 'done' as const } };
+
+  /** `foldBoard`, plus the one property every case owes: each input key lands exactly once, as a top or in exactly one `under` list. */
+  function fold(input: JiraIssue[]): JiraFold {
+    const f = foldBoard(input);
+    const landed = [...keys(f.tops), ...[...f.under.values()].flatMap((l) => keys(l))].sort();
+    expect(landed).toEqual(keys(input).sort());
+    return f;
+  }
+
+  describe('foldBoard', () => {
+    it('folds a depth-1 child under its parent', () => {
+      const f = fold([n('E1', null, 5), n('S1', 'E1', 3)]);
+      expect(keys(f.tops)).toEqual(['E1']);
+      expect(asObject(f.under)).toEqual({ E1: ['S1'] });
+      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'] });
+      expect(f.childrenOf.has('S1')).toBe(false);
+    });
+
+    it('folds depth 2 and 3 into the topmost ancestor, in sortForBoard order, with one childrenOf edge per level', () => {
+      const f = fold([n('E1', null, 5), n('S1', 'E1', 3), n('T1', 'S1', 4), n('U1', 'T1', 1)]);
+      expect(keys(f.tops)).toEqual(['E1']);
+      expect(asObject(f.under)).toEqual({ E1: ['U1', 'S1', 'T1'] });
+      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'], S1: ['T1'], T1: ['U1'] });
+    });
+
+    it('makes an issue whose parent is off the board a top, and its crumb still names that parent', () => {
+      const s2 = n('S2', 'X-9', 2);
+      const f = fold([n('E1', null, 5), s2]);
+      expect(keys(f.tops)).toEqual(['E1', 'S2']);
+      expect(f.under.size).toBe(0);
+      expect(crumbText(crumbOf(s2, board({ roots: [] }), null))).toBe('↳ X-9 X-9 summary');
+    });
+
+    it('lifts the open children of a parent dropped by the Done window (absent from the list)', () => {
+      const f = fold([n('S1', 'E1', 3), n('T1', 'S1', 4)]);
+      expect(keys(f.tops)).toEqual(['S1']);
+      expect(asObject(f.under)).toEqual({ S1: ['T1'] });
+    });
+
+    it('folds a query hit that is also a descendant of a root like any other descendant', () => {
+      const f = fold([n('E1', null, 5), n('S1', 'E1', 3), n('Q1', 'S1', 2)]);
+      expect(keys(f.tops)).toEqual(['E1']);
+      expect(keys(f.under.get('E1'))).toContain('Q1');
+      expect(asObject(f.childrenOf)).toEqual({ E1: ['S1'], S1: ['Q1'] });
+    });
+
+    it('terminates on a self-parent, which is its own top', () => {
+      const f = fold([n('A', 'A', 1)]);
+      expect(keys(f.tops)).toEqual(['A']);
+      expect(f.under.size).toBe(0);
+      expect(f.childrenOf.size).toBe(0);
+    });
+
+    it('draws a two-cycle as both members side by side, in input order, with no edge between them', () => {
+      const f = fold([n('A', 'B', 1), n('B', 'A', 2)]);
+      expect(keys(f.tops)).toEqual(['A', 'B']);
+      expect(f.under.size).toBe(0);
+      expect(f.childrenOf.size).toBe(0);
+    });
+
+    it('folds a child of a cycle member under that member, and nothing between the members', () => {
+      const f = fold([n('A', 'B', 1), n('B', 'A', 2), n('C', 'A', 3)]);
+      expect(keys(f.tops)).toEqual(['A', 'B']);
+      expect(asObject(f.under)).toEqual({ A: ['C'] });
+      expect(asObject(f.childrenOf)).toEqual({ A: ['C'] });
+    });
+
+    it('never mutates the list it is given', () => {
+      const input = [n('T1', 'S1', 4), n('E1', null, 5), n('U1', 'T1', 1), n('S1', 'E1', 3)];
+      const before = [...input];
+      fold(input);
+      expect(input).toHaveLength(before.length);
+      input.forEach((x, i) => expect(x).toBe(before[i]));
+    });
+  });
+
+  describe('sortTops', () => {
+    it('ranks a top by the newest updated across it and everything folded under it', () => {
+      const p = n('P', null, 5 * 24);
+      const q = n('Q', null, 24);
+      const f = fold([q, p, n('P1', 'P', 0)]);
+      expect(keys(sortTops(f.tops, f.under))).toEqual(['P', 'Q']);
+    });
+
+    it('breaks a tie on the newest stamp by key in plain string order', () => {
+      const f = fold([n('B-2', null, 3), n('A-1', null, 3)]);
+      expect(keys(sortTops(f.tops, f.under))).toEqual(['A-1', 'B-2']);
+    });
+
+    it('sorts an unparseable stamp last, and returns a new array', () => {
+      const tops = [n('X', null, 0, { updated: 'not a date' }), n('Y', null, 30 * 24)];
+      const sorted = sortTops(tops, new Map());
+      expect(keys(sorted)).toEqual(['Y', 'X']);
+      expect(sorted).not.toBe(tops);
+      expect(keys(tops)).toEqual(['X', 'Y']);
+    });
+  });
+
+  describe('foldProgress and progressLine', () => {
+    const many = (count: number, over: Partial<JiraIssue>, tag: string): JiraIssue[] => Array.from({ length: count }, (_, i) => n(`${tag}${i}`, null, i, over));
+
+    it('buckets by column and prints every non-zero part, done first', () => {
+      const p = foldProgress([...many(3, todo, 'T'), ...many(2, done, 'D'), ...many(4, doing, 'G')]);
+      expect(p).toEqual({ done: 2, doing: 4, todo: 3 });
+      expect(progressLine(p)).toBe('2 done · 4 in progress · 3 to do');
+    });
+
+    it('omits each zero part', () => {
+      expect(progressLine({ done: 0, doing: 1, todo: 0 })).toBe('1 in progress');
+      expect(progressLine({ done: 1, doing: 0, todo: 2 })).toBe('1 done · 2 to do');
+    });
+
+    it('is null when there is nothing to count', () => {
+      expect(foldProgress([])).toEqual({ done: 0, doing: 0, todo: 0 });
+      expect(progressLine({ done: 0, doing: 0, todo: 0 })).toBeNull();
+    });
+  });
+
+  describe('childrenLine', () => {
+    it.each([
+      [0, 0, null],
+      [1, 0, '1 child'],
+      [3, 0, '3 children'],
+      [1, 1, '1 child · 1 below them'],
+      [2, 7, '2 children · 7 below them']
+    ])('(%i, %i) → %p', (direct, deeper, line) => {
+      expect(childrenLine(direct, deeper)).toBe(line);
+    });
+  });
+
+  describe('cardFold', () => {
+    const f = foldBoard([n('E1', null, 5), n('S1', 'E1', 3, doing), n('T1', 'S1', 4, done), n('U1', 'T1', 1, todo), n('R', null, 6)]);
+
+    it('reads the top’s direct children, everything deeper, and the spread', () => {
+      expect(cardFold('E1', f)).toEqual({
+        line: '1 child · 2 below them',
+        progress: { done: 1, doing: 1, todo: 1 },
+        caption: '1 done · 1 in progress · 1 to do'
+      });
+    });
+
+    it('is null for a top with nothing folded', () => {
+      expect(cardFold('R', f)).toBeNull();
+    });
+  });
+
+  describe('foldMatches (F1)', () => {
+    const f = foldBoard([n('E1', null, 5), n('S1', 'E1', 3), n('T1', 'S1', 4), n('R', null, 6)]);
+    const only = (...ks: string[]) => (i: JiraIssue): boolean => ks.includes(i.key);
+
+    it('keeps every top that matches on its own, with no ring keys', () => {
+      expect(Object.fromEntries(foldMatches(f, () => true))).toEqual({ E1: [], R: [] });
+    });
+
+    it('keeps a top for a folded match alone, naming that match', () => {
+      expect(Object.fromEntries(foldMatches(f, only('T1')))).toEqual({ E1: ['T1'] });
+    });
+
+    it('draws no ring keys on a top that matches itself, even when folded issues match too', () => {
+      expect(Object.fromEntries(foldMatches(f, only('E1', 'T1')))).toEqual({ E1: [] });
+    });
+
+    it('hides everything when nothing matches', () => {
+      expect(foldMatches(f, () => false).size).toBe(0);
+    });
+
+    it('keeps a matching cycle member on its own', () => {
+      const cycle = foldBoard([n('A', 'B', 1), n('B', 'A', 2)]);
+      expect(Object.fromEntries(foldMatches(cycle, only('B')))).toEqual({ B: [] });
+    });
+  });
+
+  describe('matchMarker', () => {
+    it('is null for no match', () => {
+      expect(matchMarker([])).toBeNull();
+    });
+
+    it('names a single match in the word itself', () => {
+      expect(matchMarker(['PAY-162'])).toEqual({ word: '1 match: PAY-162', title: undefined });
+    });
+
+    it('counts several and puts their keys in the title', () => {
+      expect(matchMarker(['PAY-162', 'PAY-161'])).toEqual({ word: '2 matches', title: 'PAY-162, PAY-161' });
+    });
+  });
+
+  describe('modalTree', () => {
+    const rows = (t: ReturnType<typeof modalTree>): string[] => t.rows.map((r) => `${r.issue.key}/${r.depth}`);
+
+    it('draws the direct children only, at depth 0, with no board context', () => {
+      const t = modalTree('SELF', [n('A', 'SELF', 1), n('B', 'SELF', 2)], null);
+      expect(rows(t)).toEqual(['A/0', 'B/0']);
+    });
+
+    it('nests each child’s on-board descendants depth-first under it', () => {
+      const index = new Map([
+        ['A', [n('A1', 'A', 3)]],
+        ['A1', [n('A2', 'A1', 4)]]
+      ]);
+      expect(rows(modalTree('SELF', [n('A', 'SELF', 1), n('B', 'SELF', 2)], index))).toEqual(['A/0', 'A1/1', 'A2/2', 'B/0']);
+    });
+
+    it('lists a direct child the board does not hold, with nothing under it', () => {
+      const index = new Map([['A', [n('A1', 'A', 3)]]]);
+      expect(rows(modalTree('SELF', [n('A', 'SELF', 1), n('Z', 'SELF', 2)], index))).toEqual(['A/0', 'A1/1', 'Z/0']);
+    });
+
+    it('draws a reparented issue once, as the direct child', () => {
+      const index = new Map([['A', [n('X', 'A', 3), n('Y', 'A', 4)]]]);
+      expect(rows(modalTree('SELF', [n('A', 'SELF', 1), n('X', 'SELF', 2)], index))).toEqual(['A/0', 'Y/1', 'X/0']);
+    });
+
+    it('never draws the open issue inside its own tree, nor the branch under it', () => {
+      const index = new Map([
+        ['A', [n('SELF', 'A', 3), n('A1', 'A', 4)]],
+        ['SELF', [n('K', 'SELF', 5)]]
+      ]);
+      expect(rows(modalTree('SELF', [n('A', 'SELF', 1)], index))).toEqual(['A/0', 'A1/1']);
+    });
+
+    it('counts the rows as drawn', () => {
+      const index = new Map([['A', [n('A1', 'A', 3, done), n('A2', 'A', 4, doing)]]]);
+      const t = modalTree('SELF', [n('A', 'SELF', 1, doing), n('Z', 'SELF', 2, todo)], index);
+      expect(t.progress).toEqual({ done: 1, doing: 2, todo: 1 });
+    });
+  });
+
+  describe('bandSub with a fold', () => {
+    const site = 'acme.atlassian.net';
+    const b = board({ count: 14, polledAt: ago(now, 12 * SECOND) });
+
+    it('counts the loaded list and adds the cards part after the sources', () => {
+      expect(bandSub(b, site, now, { issues: 17, cards: 5 }).text).toBe(
+        'acme.atlassian.net · 17 issues from 2 roots and 1 query · 5 cards · polled 12 s ago'
+      );
+    });
+
+    it('reads today’s line exactly when nothing folds', () => {
+      expect(bandSub(b, site, now, { issues: 14, cards: 14 }).text).toBe(bandSub(b, site, now, null).text);
+    });
+
+    it('says 1 card in the singular', () => {
+      expect(bandSub(b, site, now, { issues: 3, cards: 1 }).text).toContain(' · 1 card · ');
+    });
+
+    it('draws no cards part on an empty list', () => {
+      const text = bandSub(b, site, now, { issues: 0, cards: 0 }).text;
+      expect(text).toContain('0 issues');
+      expect(text).not.toContain('card');
+    });
+
+    it('still ends on the cap', () => {
+      const text = bandSub(board({ truncated: true, polledAt: ago(now, 12 * SECOND) }), site, now, { issues: 17, cards: 5 }).text;
+      expect(text).toContain(' · 5 cards · ');
+      expect(text.endsWith(' · first 500 shown')).toBe(true);
+    });
   });
 });

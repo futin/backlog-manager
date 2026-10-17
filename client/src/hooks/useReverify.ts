@@ -13,11 +13,13 @@ import type { AgentsStatus } from '../../../shared/types';
  * fetched, so a control disabled with "the dashboard does not list <path>"
  * stays disabled forever while the thing it names is already fixed. bug-13
  * gave the card's dispatch button a click that re-asks; bug-16 gave the
- * toolbar's Orchestrate button the same click. This is the half they share.
+ * toolbar's Orchestrate button the same click. This is the half they share —
+ * and since #272 they share it through `GatedChip` (components/ui), this
+ * hook's one caller, which both controls compose.
  *
- * What is shared is the MECHANICS, not the policy — the caller still runs its
- * own gate over the fresh status inside `act`. The two callers derive
- * genuinely different answers (`dispatchGate(item, fresh)` versus
+ * What is shared is the MECHANICS, not the policy — GatedChip runs its
+ * caller's `recheck` over the fresh status inside `act`. The two controls
+ * derive genuinely different answers (`dispatchGate(item, fresh)` versus
  * `projectDispatchGate(fresh, path)`) and have different sibling blocks, so
  * folding the gate in here would mean a config object per caller; the
  * drift-prone part is "ask once, mark busy, act on the fresh answer", which is

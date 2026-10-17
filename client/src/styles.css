@@ -238,6 +238,19 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    end, as the dashboard's is, so the rule stops short of the rows' fills. */
 .rail-rule { border-top: 1px solid var(--hairline); margin: 24px 4px }
 
+/* The version chip (DESIGN.md §8.10), the dashboard's `.rel-chip`: the rail's last element, sunk to its foot by `margin-top: auto` in the rail's column,
+   and in the phone menu its last row. A pill on the recessed well in the board's own ink — status lives in the dot alone, cyan for a release not opened
+   yet. 28 px tall, the rail's quiet size, not a 36 px control: it is a reading you can tap, not a section. */
+.rail-release {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  margin: auto 0 0 8px; min-height: 28px; padding: 4px 10px;
+  font-family: inherit; font-size: 12px; font-weight: 500; color: var(--ink2);
+  background: var(--steel); border: 1px solid var(--hairline); border-radius: 999px;
+  cursor: pointer; transition: color .15s, border-color .15s;
+}
+.rail-release:hover { color: var(--ink); border-color: var(--hairline2) }
+.rail-release-dot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--cyan) }
+
 /* The phone's ☰, and the wordmark row it sits in — both render only under
    useNarrow, so neither is ever in the desktop tree. */
 .rail-bar { display: none }
@@ -316,6 +329,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
   .rail-link { min-height: 44px; border-radius: 12px }
+  /* The phone menu's last row: no foot to sink to, so a fixed gap under the rows instead, and the menu's own bottom padding beneath it. */
+  .rail-release { margin: 12px 0 8px 8px }
   .rail-sublink { min-height: 40px }
   .main { border-top-left-radius: 0 }
 }
@@ -624,7 +639,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    (`↳ PAY-120 Refund flows`), and the key is the card's handle, so the crumb is what gives. */
 .jira-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--ink3) }
 .jira-card-type { display: inline-flex; flex: none }
-.jira-card-type svg { width: 14px; height: 14px; stroke: var(--ink3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
+/* The fold block (grouped-board spec §4, DESIGN.md §8.9.1): after the foot and before the marker row — the line, then the spread bar and its caption,
+   which are `SpreadBar`'s own look. The line is 12/500 --ink2: a sub-line of the card, a step quieter than the title and a step louder than the caption. */
+.jira-card-fold { display: flex; flex-direction: column; gap: 6px }
+.jira-card-fold-line { font-size: 12px; font-weight: 500; color: var(--ink2) }
+/* F1's ring (grouped-board spec §5): a top card shown only because an issue folded under it matches the filter. An INSET ring, so the card keeps its
+   size and the column does not shift by 4 px when a search starts; `--amber-solid` is the mark, and the `match` marker's word beside it is --amber-text. */
+.jira-card-match { box-shadow: inset 0 0 0 2px var(--amber-solid) }
 .jira-card-key { flex: none; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-card-crumb { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The foot's person: a 20 px initials disc on `--strip-hi` (never an avatar image — the browser does not talk to Jira) and the name, which ellipsises like
@@ -1229,9 +1250,20 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-modal-key { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
 .jira-modal-keyname { font-size: 13px; font-weight: 500; color: var(--ink2) }
 .jira-modal-key a { font-size: 12px; color: var(--cyan) }
-.jira-modal-subtasks { list-style: none; padding-left: 0 }
-.jira-modal-subkey { font-weight: 500; color: var(--ink2) }
-.jira-modal-substatus { font-size: 12px; color: var(--ink3); margin-left: 6px }
+/* The Children tree (§8.9.2): a head row (h3, the direct count's pill, `N in all` pushed right), the spread bar, then one button per row, indented 22 px
+   a level by an inline style. A row reads like a one-line card — glyph, key, summary, the card's initials disc, the raw status pill. */
+.jira-tree-head { display: flex; align-items: center; gap: 8px; margin-top: 20px }
+.jira-tree-head h3 { margin: 0 }
+.jira-tree-all { margin-left: auto; font-size: 12px; color: var(--ink3) }
+.jira-tree-spread { margin: 8px 0 6px }
+.jira-tree { list-style: none; padding-left: 0; margin: 0 }
+.jira-tree-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px;
+  background: none; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.jira-tree-row:hover { background: var(--strip-hi) }
+.jira-tree-key { font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-tree-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .jira-modal-none, .jira-modal-comments { font-size: 12px; color: var(--ink3) }
 .jira-modal-comments { margin-top: 20px }
 .jira-modal-comments a { color: var(--cyan) }
@@ -1265,7 +1297,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-sheet-name { width: 260px }
 
 /* A root: its key at the card's own key reading (12/500 --ink2), the remove × pushed right. */
-.jira-sheet-root { display: flex; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--hairline) }
+.jira-sheet-root { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 13px; border-bottom: 1px solid var(--hairline) }
 .jira-sheet-key { flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-sheet-x, .jira-setup-x {
   margin-left: auto; flex: none; padding: 4px; border: 0; background: none; cursor: pointer;
@@ -2679,6 +2711,35 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   .run-track-dot-current { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 30%, transparent) }
 }
 
+/* What's new — the releases drawer's content (DESIGN.md §8.10), inside `ui/Drawer`. The dashboard's look: a head with the running version, then one entry
+   per release on a hairline, the baseline as a rule with its words in the gap. Badges are the type in its status colour on its own tint, Breaking always
+   a badge of its own on the red one — one distinct token per badge, mixed from the tokens so each theme's hue carries through. */
+.releases-head { display: flex; align-items: baseline; gap: 10px; padding: 18px 48px 12px 20px; border-bottom: 1px solid var(--hairline); flex: none; min-width: 0 }
+.releases-head-t { margin: 0; font-size: 19px; font-weight: 500; color: var(--ink); white-space: nowrap }
+.releases-head-s { min-width: 0; font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.releases-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; display: flex; flex-direction: column }
+.releases-entry { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-top: 1px solid var(--hairline); min-width: 0 }
+.releases-entry:first-child { border-top: 0 }
+.releases-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.releases-ver { font-size: 14px; font-weight: 600; color: var(--ink) }
+.releases-date { margin-left: auto; font-size: 12px; color: var(--ink3) }
+.releases-title { font-size: 14px; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere }
+.releases-notes { font-size: 13px; color: var(--ink2); line-height: 1.5; overflow-wrap: anywhere }
+.releases-notes > :first-child { margin-top: 0 }
+.releases-notes > :last-child { margin-bottom: 0 }
+.releases-notes h3 { font-size: 13px; font-weight: 600; color: var(--ink); margin: 10px 0 4px }
+.releases-notes ul { margin: 0; padding-left: 18px }
+.releases-badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; white-space: nowrap }
+.releases-badge-feat { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
+.releases-badge-fix { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
+.releases-badge-perf { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, var(--strip)) }
+.releases-badge-breaking { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
+.releases-pr { align-self: flex-start; font-size: 12px; color: var(--cyan); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--cyan) 40%, transparent) }
+.releases-pr:hover { border-bottom-color: var(--cyan) }
+.releases-base { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink3) }
+.releases-base::before, .releases-base::after { content: ""; flex: 1; height: 1px; background: var(--hairline) }
+.releases-base .releases-date { margin-left: 0 }
+
 /* ── ui primitives ────────────────────────────────────────────────────────────
    Every class family owned by a component in client/src/components/ui/, and
    nothing else. The design spec's §12.1 rule, restated where it is enforced:
@@ -2891,6 +2952,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    it — and no rule of its own beyond the colour, because a marker is a weight
    and an ink and nothing else (§8.3). */
 .ui-marker-untyped { color: var(--amber-ink) }
+/* The Jira card's F1 marker (grouped-board spec §5). `--amber-text`, the amber word set on paper: the card's 2 px `--amber-solid` ring beside it
+   already carries the hue, and bare `--amber` fails daylight contrast as type (test/daylight-contrast.test.ts). */
+.ui-marker-match { color: var(--amber-text) }
+
+/* JiraTypeIcon — a Jira issue's type glyph (DESIGN.md §8.9.1), 14 px outline strokes in --ink3. One home because the card and the modal's Children tree
+   both draw it; the card's `.jira-card-type` keeps only its layout. */
+.ui-type-icon { width: 14px; height: 14px; flex: none; stroke: var(--ink3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round }
 
 /* task-45's tracker reading outside the card: the poll-age line under the
    item modal's title, 12/400 --ink3, the sub-line ink this design already uses
@@ -2917,6 +2985,17 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    which §12.1 forbids and which would recolour every meter on the board. */
 .ui-progress-fill-warn { background: var(--amber-solid) }
 .ui-progress-caption { font-size: 11px; font-weight: 400; color: var(--ink3) }
+
+/* SpreadBar — the card-scale spread bar (DESIGN.md §3, §8.9.1; grouped-board spec §4): a 4 px track of up to three segments with 2 px gaps, done /
+   in progress / to do in --fill-progress, --fill-live and --ink3, each growing by its count. No track colour of its own: a spread has no remainder, so
+   there is nothing for a `--steel` track to show. The caption under it is 12 px --ink3. */
+.ui-spread { display: flex; flex-direction: column; gap: 4px; min-width: 0 }
+.ui-spread-track { display: flex; gap: 2px; height: 4px }
+.ui-spread-seg { flex-basis: 0; min-width: 2px; border-radius: 2px }
+.ui-spread-done { background: var(--fill-progress) }
+.ui-spread-doing { background: var(--fill-live) }
+.ui-spread-todo { background: var(--ink3) }
+.ui-spread-caption { font-size: 12px; font-weight: 400; color: var(--ink3) }
 
 /* Meter — the strip chip's line meter (§8.0 shell strip, §7's meter row at chip size; the tracker strip spec, §3). Label over value, both 11 px — guard 3's
    floor, where the dashboard draws 9.5 — and a 3.5 px flat --steel track. The fill has NO transition: it advances once a second, and a tween would draw
@@ -3129,6 +3208,26 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-form-sheet-steps { padding: 0 20px 10px; border-bottom: 1px solid var(--hairline) }
 .ui-form-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px }
 .ui-form-sheet-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--hairline) }
+
+/* Drawer — the third overlay shape (§8.7): a 400 px panel against the window's right edge over the scrim, the dashboard's releases drawer. Above the modal
+   and the sheet (80 over their 60 and 70) because it opens from the rail with either of them still open, and the Escape stack already ranks it last. The
+   same `/ --font-scale` division every fixed dimension here carries, and the same one shell lift, laid leftward because the panel's only open edge is its
+   left. Under 700 px it is the screen. */
+.ui-drawer-scrim { position: fixed; inset: 0; z-index: 80; display: flex; justify-content: flex-end; background: var(--scrim) }
+.ui-drawer {
+  position: relative; width: min(400px, calc(100vw / var(--font-scale, 1)));
+  height: calc(100dvh / var(--font-scale, 1));
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--strip); border-left: 1px solid var(--hairline);
+  box-shadow: -24px 0 64px var(--shadow2);
+}
+.ui-drawer-narrow { width: calc(100vw / var(--font-scale, 1)); border-left: none; box-shadow: none }
+.ui-drawer-close {
+  position: absolute; top: 14px; right: 14px; z-index: 1;
+  font-family: inherit; font-size: 13px; line-height: 1; color: var(--ink3);
+  background: none; border: none; padding: 6px; cursor: pointer;
+}
+.ui-drawer-close:hover { color: var(--ink) }
 
 /* Popover — the panel under a control (§8.7). Absolute against the caller's `position: relative` wrapper, which also holds the opening control, so it hangs
    8 px below it with the right edges together and nothing is measured in JS. A hairline border and the SMALL lift (`0 8px 24px`) rather than the dialogs'

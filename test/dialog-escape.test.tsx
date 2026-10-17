@@ -31,11 +31,15 @@ import BoardView from '../client/src/components/board/BoardView';
 import { ItemModal } from '../client/src/components/board/ItemModal';
 import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
+import { JiraBoardSheet } from '../client/src/components/jira/JiraBoardSheet';
+import { JiraIssueModal } from '../client/src/components/jira/JiraIssueModal';
+import { ReleasesDrawer } from '../client/src/components/ReleasesDrawer';
 import { Confirm } from '../client/src/components/ui/Confirm';
+import { JiraContext } from '../client/src/hooks/JiraContext';
 import { useDialogEscape } from '../client/src/hooks/useDialogEscape';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
-import type { AgentsStatus, BacklogItem, ItemsIndex, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
+import type { AgentsStatus, BacklogItem, ItemsIndex, JiraIssue, JiraStatusPayload, OrchestratorRunsPayload, ProjectSummary, ReleasesResponse } from '../shared/types';
 
 const READY: AgentsStatus = {
   enabled: true,
@@ -106,6 +110,14 @@ function stubFetch(items: BacklogItem[]): void {
   const index: ItemsIndex = { items, errors: [] };
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.includes('/api/jira/issue/')) {
+      // The detail the issue modal reads on mount, so the six-deep case layers over a loaded modal rather than its failure shape.
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ...JIRA_CARD, description: '', children: [], transitions: [], boards: [], session: null })
+      } as Response);
+    }
     if (url.includes('/api/items/body')) {
       return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') } as Response);
     }
@@ -212,12 +224,56 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
   });
 });
 
+const JIRA_CARD: JiraIssue = {
+  key: 'PAY-131',
+  id: '10131',
+  url: 'https://acme.atlassian.net/browse/PAY-131',
+  summary: 'Refund partial captures',
+  project: { key: 'PAY', name: 'Payments' },
+  type: { name: 'Story', level: 0, subtask: false },
+  status: { name: 'In Review', category: 'indeterminate' },
+  priority: 'High',
+  assignee: null,
+  reporter: null,
+  parent: null,
+  subtasks: 0,
+  labels: [],
+  sprint: null,
+  created: daysAgoStamp(10),
+  updated: daysAgoStamp(1),
+  resolved: null
+};
+
+const JIRA_STATUS: JiraStatusPayload = {
+  configured: true,
+  configUnreadable: null,
+  site: 'acme.atlassian.net',
+  me: null,
+  tokenKind: 'classic',
+  access: 'ok',
+  detail: null,
+  boards: [],
+  repos: {},
+  projects: [],
+  skills: [],
+  calls: { sweep: 0, last429At: null },
+  live: {},
+  armed: false,
+  home: '/Users/ada'
+};
+
+const RELEASES: ReleasesResponse = {
+  current: { version: '0.1.0', ahead: 0 },
+  releases: [{ version: '0.1.0', date: '2026-10-14T12:00:00+00:00', title: 'Baseline — versioning starts here', type: 'baseline', breaking: false, notes: '' }]
+};
+
 /**
- * Task-40's test case 5: the stack ranks THREE dialogs, not four, and Escape
- * still closes exactly the topmost of them.
+ * Task-40's test case 5, grown with the stack: it ranks SIX dialogs — three
+ * when task-40 wrote it, five since Jira phase 2, six since the What's new
+ * drawer — and Escape still closes exactly the topmost of them.
  *
  * Direct-rendered rather than driven through a host, because no host mounts
- * all three: the Board deliberately makes the orchestrate sheet and the item
+ * all of them: the Board deliberately makes the orchestrate sheet and the item
  * modal mutually exclusive (`openOrchestrateSheet` clears `open`), so the
  * three-deep stack is reachable only by mounting the three components
  * themselves. That is the right level anyway — what is being pinned is the
@@ -227,25 +283,62 @@ describe('Escape with the launch sheet layered over the item drawer', () => {
  * content is the Runs page's inline detail sheet, which is not a dialog and
  * has nothing for Escape to close.
  */
-describe('the three dialogs on the stack', () => {
+describe('the six dialogs on the stack', () => {
   const HUES = buildProjectHues([{ name: 'alpha', path: '/abs/alpha', createdAt: '2026-08-26T00:00:00.000Z' }]);
 
-  it('closes them one at a time, topmost first, across all three callers', async () => {
+  it('closes them one at a time, topmost first, across all six callers', async () => {
     stubFetch([fakeItem()]);
     const item = fakeItem();
-    const closeModal = jest.fn();
-    const closeLaunch = jest.fn();
-    const closeOrchestrate = jest.fn();
+    const close = Array.from({ length: 6 }, () => jest.fn());
+    const jira = { data: JIRA_STATUS, loading: false, error: false, reload: () => {} };
 
-    // Mount order is the ranking (the hook's own contract), so these three
-    // renders are the test's whole setup.
-    render(<ItemModal item={item} hues={HUES} onClose={closeModal} />);
-    render(<LaunchSheet item={item} onClose={closeLaunch} />);
-    render(<OrchestrateSheet project="/abs/alpha" projectName="alpha" source="files" items={[item]} spawnMaxPermission="acceptEdits" onClose={closeOrchestrate} refresh={() => {}} />);
-    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(3));
+    // Mount order is the ranking (the hook's own contract), so these six
+    // renders are the test's whole setup; each unmount below is what a host
+    // does on close, so the key is handed down one dialog at a time.
+    const views = [
+      render(<ItemModal item={item} hues={HUES} onClose={close[0]} />),
+      render(<LaunchSheet item={item} onClose={close[1]} />),
+      render(<OrchestrateSheet project="/abs/alpha" projectName="alpha" source="files" items={[item]} spawnMaxPermission="acceptEdits" onClose={close[2]} refresh={() => {}} />),
+      render(
+        <JiraContext.Provider value={jira}>
+          <JiraIssueModal issue={JIRA_CARD} childrenOf={null} onOpenIssue={() => {}} onClose={close[3]} />
+        </JiraContext.Provider>
+      ),
+      render(
+        <JiraContext.Provider value={jira}>
+          <JiraBoardSheet board={null} projects={{ list: [], error: null }} onClose={close[4]} onSaved={() => {}} />
+        </JiraContext.Provider>
+      ),
+      render(<ReleasesDrawer data={RELEASES} onClose={close[5]} />)
+    ];
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(6));
+
+    for (let top = 5; top >= 0; top--) {
+      await userEvent.keyboard('{Escape}');
+      expect(close.map((f) => f.mock.calls.length)).toEqual(close.map((_, i) => (i === top ? 1 : 0)));
+      close[top].mockClear();
+      views[top].unmount();
+    }
+  });
+
+  /* The What's new drawer opens from the rail with whatever else is already
+     open left alone, so the item modal can be under it: one Escape is the
+     drawer's, and the modal keeps its own for the next press. */
+  it("closes the What's new drawer over an open item modal, and leaves the modal for the next press", async () => {
+    stubFetch([fakeItem()]);
+    const closeModal = jest.fn();
+    const closeDrawer = jest.fn();
+
+    render(<ItemModal item={fakeItem()} hues={HUES} onClose={closeModal} />);
+    const drawer = render(<ReleasesDrawer data={RELEASES} onClose={closeDrawer} />);
+    await waitFor(() => expect(screen.getAllByRole('dialog')).toHaveLength(2));
 
     await userEvent.keyboard('{Escape}');
-    expect([closeModal.mock.calls.length, closeLaunch.mock.calls.length, closeOrchestrate.mock.calls.length]).toEqual([0, 0, 1]);
+    expect([closeModal.mock.calls.length, closeDrawer.mock.calls.length]).toEqual([0, 1]);
+
+    drawer.unmount();
+    await userEvent.keyboard('{Escape}');
+    expect([closeModal.mock.calls.length, closeDrawer.mock.calls.length]).toEqual([1, 1]);
   });
 
   /* The other half of "topmost only": as each dialog unmounts, the next one

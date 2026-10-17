@@ -16,7 +16,7 @@ describe('Marker', () => {
   });
 
   it('lands each tone as its own class', () => {
-    for (const tone of ['groomed', 'kind', 'done', 'stale'] as const) {
+    for (const tone of ['groomed', 'kind', 'done', 'stale', 'match'] as const) {
       const { unmount } = render(<Marker tone={tone}>x</Marker>);
       expect(screen.getByText('x')).toHaveClass(`ui-marker-${tone}`);
       unmount();

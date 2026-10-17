@@ -17,6 +17,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [subsystems/api.md](subsystems/api.md)               | the Nest side: what each module owns, which reads are cached and which must never be                                    |
 | [subsystems/jira.md](subsystems/jira.md)             | the Jira integration's server half: the client, the board poller and its caches, the `/api/jira` read routes            |
 | [subsystems/board.md](subsystems/board.md)           | the client: the four surfaces, and what the browser derives rather than fetches                                         |
+| [subsystems/releases.md](subsystems/releases.md)     | the board's own versions: `GET /api/releases` from the checkout's tags, the rail's version chip and the What's new drawer |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
 | [subsystems/skills.md](subsystems/skills.md)         | the six skills, the CLIs beneath them, and the reviewer agent                                                           |
 | [subsystems/invariants.md](subsystems/invariants.md) | the rationale behind the rules whose "why" outruns one line — most encode a failure that already happened               |
@@ -91,7 +92,8 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 A React SPA, five sections behind a side rail ([`App.tsx`](../client/src/App.tsx)) and each one its own lazy chunk: Board, Runs, Archive, Jira (drawn only when
 configured), Settings. The server returns whole corpora, so most of what you see is decided in the browser — whether an item is groomed, whether it belongs on
 the Board or in Archive, how long an item's work took, what a run's cost was. Those derivations live in `client/src/lib/` as one implementation each, precisely
-so two surfaces cannot disagree about the same item; the ones the server needs too live in [`shared/`](../shared/agent.ts) beside the wire types.
+so two surfaces cannot disagree about the same item; the ones the server needs too live in [`shared/`](../shared/agent.ts) beside the wire types. The
+rail ends in a version chip that opens a What's new drawer of every release, read from the checkout's own tags ([releases](subsystems/releases.md)).
 
 ### The skills — [full doc](subsystems/skills.md)
 

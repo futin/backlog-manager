@@ -1495,7 +1495,9 @@ fallback for the whole queue, and the message sends them to fix something that i
 
 The mechanism is now shared rather than written twice. `useReverify` (`client/src/hooks/useReverify.ts`) owns "ask once, mark `aria-busy`, act on the fresh
 answer"; both `DispatchButton` and `BoardView`'s toolbar call it, and `test/dispatch-button.test.tsx` passing unchanged is what makes that extraction a refactor
-rather than a rewrite. What the hook deliberately does NOT own is the gate check: the two callers derive different answers (`dispatchGate(item, fresh)` versus
+rather than a rewrite. Since #272 the hook has one caller, `GatedChip` (`client/src/components/ui/GatedChip.tsx`), which both controls compose: it owns the
+rest of the disabled half too — which block shows, `aria-disabled` and the described reason — with the re-ask rule itself in `gateView`
+(`client/src/lib/gate-view.ts`). What the hook deliberately does NOT own is the gate check: the two callers derive different answers (`dispatchGate(item, fresh)` versus
 `projectDispatchGate(fresh, path)`) and have different sibling blocks, so folding the policy in would mean a config object per caller. The drift-prone half is
 the mechanics — a hand-written copy that acts on the stale render, or drops the in-flight guard, looks right and is wrong. The Escape effect the four dialogs
 each carried their own copy of read as one of the stateless idioms this repo repeats on purpose, right up until bug-23: two of those dialogs are mounted
@@ -1504,10 +1506,11 @@ hook rather than the counterexample to it.
 
 Three differences from the per-item case, each a consequence of the control being project-scoped rather than item-scoped:
 
-- **No three-condition `reverifiable`.** `showOrchestrate` _hides_ the button for the environment ladder, for an unfiltered board (`projectValue === ALL` leaves
-  the gate `null`) and for a project with a fresh run. So a rendered disabled button is blocked on project visibility and nothing else — the condition reduces
-  to "the reason is non-null", and the hook's own in-flight guard covers the rest. The fresh-run rule must not be re-derived from a status refetch in any case:
-  it comes from `useOrchestratorRuns`, which polls every 5s while any run is fresh and which a status payload cannot see at all.
+- **More of its blocks hide.** `showOrchestrate` _hides_ the button for the environment ladder, for an unfiltered board (`projectValue === ALL` leaves the gate
+  `null`) and for a project with a fresh run. The fresh-run rule must not be re-derived from a status refetch in any case: it comes from
+  `useOrchestratorRuns`, which polls every 5s while any run is fresh and which a status payload cannot see at all. A rendered disabled button is blocked on
+  project visibility, on sync-off (#17), or both — and until #272 it re-asked whenever visibility spoke, even beside sync-off, for an answer that could never
+  open the sheet. It now follows the per-item rule through `gateView`: re-ask only when visibility is the ONLY block.
 - **The project is captured at click time**, not re-read when the answer lands. The filter is a live `<select>`; the sheet has to open for what the reader
   clicked. There is deliberately no "the filter moved, discard the answer" guard: `orchestrating` is keyed on the project path precisely so a sheet outlives a
   filter change, and the window is one request wide.
@@ -1689,8 +1692,9 @@ the one settings key a hand-edited localStorage value could turn into script exe
 ## Escape has one owner, and the topmost dialog is the only one that closes
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-listener, installed on the first entry and removed with the last; all five dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
-`OrchestrateSheet`, and since Jira phase 2 the Jira issue modal (`jira/JiraIssueModal.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`) — are on it
+listener, installed on the first entry and removed with the last; all six dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
+`OrchestrateSheet`, since Jira phase 2 the Jira issue modal (`jira/JiraIssueModal.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), and since the
+release chip the What's new drawer (`ReleasesDrawer.tsx`) — are on it
 and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
 is the Runs page's own sheet — inline, beside the list, never a dialog — so it is off the stack rather than migrated onto it, and `useDialogEscape` itself is
 untouched. They used to bind four, unguarded, and two of them are mounted together by design — Board and Archive both keep the item modal open behind the launch
@@ -1708,6 +1712,12 @@ three run through, and a sixth composer of either shell would join the same way.
 was one: the issue modal is the same sidecar reading — a facts column and a body — of a ticket instead of an item, and it holds no run state, so the reason
 the run's detail is an always-visible sheet rather than a modal (a modal has no standing place for Pause and Resume) does not reach it.
 
+The What's new drawer made it six through a THIRD shell. `ReleasesDrawer` composes `ui/Drawer.tsx` — a scrim and a right-edge panel, the dashboard's
+releases drawer — and `Drawer` calls `useDialogEscape` once, as `Modal` and `FormSheet` do, so the drawer joined by the same construction with no line of the
+hook changed. It is the one dialog that opens from the rail, so it can land over any of the other five (an item modal left open, then the chip), and that is
+the case the stack exists for: `test/dialog-escape.test.tsx` mounts the item modal and then the drawer and proves one Escape closes only the drawer, and its
+stack case now mounts all six in order and hands the key down them one at a time.
+
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
 the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its two composers and nothing else floating but `Popover`'s
 panels, which hang under their control without a scrim. The Jira board sheet's `Delete board` asks through it too, drawn inside the sheet. It calls
@@ -1721,7 +1731,7 @@ and in the same shape: it MOUNTS only while open, calling `useDialogEscape` once
 it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown`
 on `document` while it is open, ignoring a press on its panel and on the control that opened it (that control's click is what toggles it). The dashboard's
 `useDismiss` bundles the two into one hook with its own `keydown` listener, which is exactly the second Escape owner this section forbids, and is why it was not
-copied. Still five dialogs counted.
+copied. Still six dialogs counted.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the
@@ -2258,7 +2268,7 @@ which also makes re-running the command over an already-recorded transcript harm
 a numeric field a future CLI renames reads `null`, never `0`; and `usage` is optional on the queue item, so a run archived before this landed reads `null` from
 `runUsageTotals`/`itemUsageTotals` (`client/src/lib/run-stats.ts`) and renders nothing at all rather than `$0.00`.
 
-That is why nothing on the path from run file to view defaults it to `[]` — `RunDetail`'s row mapper passes it through undefaulted where it defaults
+That is why nothing on the path from run file to view defaults it to `[]` — the detail sheet's row mapper (`rowsFromLive`/`rowsFromArchive`, `client/src/lib/run-detail.ts`) passes it through undefaulted where it defaults
 `assumptions`, deliberately.
 
 **Where the reading shows up** — unchanged in WHAT is shown, and renamed by task-38 only because the surfaces were: the **History row** (`wall · $`), the detail
@@ -3757,8 +3767,10 @@ in 58 ms while `/api/items` waits 1.1 s on a fake `git` that sleeps for a second
 Each call site already had exactly one failure branch, and each degrades rather than throws, so `runGit` answers `null` for a timeout, a non-zero exit, a spawn
 error (`ENOENT`, a `cwd` that is not a directory) and an oversized output alike, and a timeout lands in whatever that site did with `null` before:
 `lastCommitDates` → the empty map (every caller reads it as "fall back to `created`"), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
-`resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list. A command that succeeds and prints nothing answers `''`, not
-`null`, so `show-ref --quiet` callers test `!== null`. Nobody added a "timed out" branch, because none of the five has a reason to treat a slow repository
+`resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list, and `ReleasesService`'s four reads (2026-10-16, the release
+chip) — `for-each-ref` → the empty shape, `describe` → `current: null` with the releases kept, `remote get-url` → no `url`, `rev-parse` → the answer is not
+memoised. A command that succeeds and prints nothing answers `''`, not `null`, so `show-ref --quiet` callers test `!== null`. Nobody added a "timed out" branch,
+because none of the nine has a reason to treat a slow repository
 differently from an absent one; a site that grows one is making a new decision and should say so here.
 
 **Ten seconds, not five.** The synchronous callers carried 5 s, and that number was a cap on how long the entire process could be frozen, so it had to be short.

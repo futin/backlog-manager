@@ -1001,7 +1001,7 @@ export type RunStage =
  * branch-mode run that finished the item successfully has let go of it just
  * as completely as a merge-mode run has.
  *
- * NOT the same list as `ACTIVE_RUN_STAGES` (client ItemCard.tsx), and the two
+ * NOT the same list as `ACTIVE_RUN_STAGES` (client lib/run-stage.ts), and the two
  * must not be unified: that one answers "does this card show a live stage
  * badge" and correctly EXCLUDES `pending`/`preflight` (a badge that flickers
  * on for the fraction of a poll cycle preflight takes is noise). They overlap
@@ -2490,4 +2490,38 @@ export interface ClaimRefused {
     ageMs: number;
     commentId: number;
   };
+}
+
+/**
+ * What a release is: `feat`, `fix` and `perf` cut one; `baseline` is the hand-cut tag versioning starts from. Field for field the dashboard's own type, so a
+ * later reader of both apps' `/api/releases` (a Lookout widget, say) reads them alike (docs/superpowers/specs/2026-10-16-release-versioning-design.md §API).
+ */
+export type ReleaseType = 'feat' | 'fix' | 'perf' | 'baseline';
+
+/** One annotated `vX.Y.Z` tag of this app's own checkout, as release-kit's `parseTagMessage` reads its message (`docs/subsystems/releases.md`). */
+export interface Release {
+  /** No leading `v`: `0.2.0`. */
+  version: string;
+  /** Tag creation time, ISO. */
+  date: string;
+  /** The tag subject without its trailing `(#N)` — still carrying the Conventional Commits prefix, which the client strips for display. */
+  title: string;
+  type: ReleaseType;
+  scope?: string;
+  pr?: number;
+  breaking: boolean;
+  /** The PR's `## What's new` section, markdown; empty when it had none. */
+  notes: string;
+  /** The PR page, present only when `pr` is and `origin` is a GitHub remote. */
+  url?: string;
+}
+
+/**
+ * `GET /api/releases` — the board's own release history, read from this checkout's tags. `current` is `git describe --long` against those tags: on a tag
+ * `ahead` is 0, three commits past one it is 3, and `null` when no release tag is reachable from HEAD even if `releases` is not empty. Never an error status.
+ */
+export interface ReleasesResponse {
+  current: { version: string; ahead: number } | null;
+  /** Newest first. */
+  releases: Release[];
 }

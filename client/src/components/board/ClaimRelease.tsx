@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { useAction } from '../../hooks/useAction';
 import { abortClaim } from '../../lib/agents';
 import { claimControl, shortSession } from '../../lib/tracker';
 import { elapsedSince } from '../../lib/item-age';
@@ -25,8 +26,10 @@ import type { BacklogItem } from '../../../../shared/types';
  * snapshot it was opened with and would otherwise still offer the control.
  */
 export function ClaimRelease({ item, onReleased }: { item: BacklogItem; onReleased?: () => void }) {
-  const [stage, setStage] = useState<'idle' | 'confirm' | 'busy' | 'done'>('idle');
-  const [error, setError] = useState<string | null>(null);
+  const [stage, setStage] = useState<'idle' | 'confirm' | 'done'>('idle');
+  // The in-flight guard, `busy` and the refusal's message are `useAction`'s (#286). `busy` was a stage here once, which the second click of one tick never
+  // saw — both clicks sent `abortClaim`.
+  const { busy, error, run } = useAction();
 
   if (stage === 'done') {
     return (
@@ -43,18 +46,16 @@ export function ClaimRelease({ item, onReleased }: { item: BacklogItem; onReleas
   const host = item.holder.host === undefined || item.holder.host === '' ? '' : ` on ${item.holder.host}`;
   const age = elapsedSince(item.holder.heartbeat, Date.now());
 
+  // The confirm closes at once and the chip comes back disabled while the request is out. A refusal needs no handler: the stage is already back at `idle`,
+  // which is where the chip and the printed message belong.
   const accept = (): void => {
-    setStage('busy');
-    setError(null);
-    abortClaim(item.projectPath, item.id)
-      .then(() => {
+    setStage('idle');
+    run(() => abortClaim(item.projectPath, item.id), {
+      onSuccess: () => {
         setStage('done');
         onReleased?.();
-      })
-      .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : String(e));
-        setStage('idle');
-      });
+      }
+    });
   };
 
   return (
@@ -85,7 +86,7 @@ export function ClaimRelease({ item, onReleased }: { item: BacklogItem; onReleas
                 ? 'release a claim with no heartbeat inside the stale window'
                 : 'release a claim whose session has ended'
           }
-          disabled={stage === 'busy'}
+          disabled={busy}
           onClick={() => setStage('confirm')}
         >
           {label}

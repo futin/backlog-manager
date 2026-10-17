@@ -1,7 +1,9 @@
-import { cardAgeStamp, crumbOf, crumbText, initialsOf, subtasksMarker } from '../../lib/jira';
+import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, type cardFold } from '../../lib/jira';
 import type { JiraBoard, JiraIssue } from '../../../../shared/types';
+import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Marker } from '../ui/Marker';
 import { Pill } from '../ui/Pill';
+import { SpreadBar } from '../ui/SpreadBar';
 
 /**
  * JiraCard — one issue on the Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's card to a Jira issue).
@@ -13,15 +15,27 @@ import { Pill } from '../ui/Pill';
  * carries the RAW status name, because `In Review` and `In Progress` are one column and two very different facts to the person reading it.
  *
  * **Everything the card prints comes from `lib/jira.ts`.** The crumb's words (`root`, `↳ PAY-120 Refund flows`, `Assigned to me`) are `crumbText`'s, the
- * initials `initialsOf`'s, the age `cardAgeStamp`'s (a relative `4m` / `2d`, aged against the page's `now` so every card shares one clock), the subtasks marker
- * `subtasksMarker`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
+ * initials `initialsOf`'s, the age `cardAgeStamp`'s (a relative `4m` / `2d`, aged against the page's `now` so every card shares one clock), the fold
+ * block's line and caption `cardFold`'s — this file holds no copy of any of them (spec §6.1's one-home rule).
+ *
+ * **A card is a TOP issue** (grouped-board spec §3–§4): every on-board descendant folds into it, and `fold` is what the card says about them — the
+ * `C children · D below them` line, then `SpreadBar` with its `done · in progress · to do` caption — drawn after the foot and before the marker row,
+ * and only when something is folded. The `N subtasks` marker this card used to draw is gone: `JiraIssue.subtasks` counts Jira subtasks on the board or
+ * not, and a subtask off the board is not this board's business, so nothing here reads it. The age stays the top's OWN, never the newest under it (that
+ * is only the column's sort key, and it is never drawn).
  *
  * **The browser never talks to Jira.** The person is initials on a disc, never Jira's `avatarUrls` — an `<img>` would be a request to Atlassian from every
  * reader's browser, with their cookies. The one link out is the issue's `url` exactly as the SERVER built it, in a new tab with no referrer; the card never
  * composes a Jira URL of its own.
  *
- * No `Run ▾` and no live strip: both are phase 5 (spec §12). The marker row draws only when it has something to say (a priority, a subtask count), the way
- * the Board's draws only when a marker applies.
+ * **The ring answers "why is this here"** (F1, grouped-board spec §5). `matches` holds the keys of folded issues that match the page's filter or search
+ * when this top does NOT match on its own; then the card carries a 2 px `--amber-solid` inset ring (`.jira-card-match`) and, first on its marker row, a
+ * `match` marker — `1 match: PAY-162`, or `N matches` with the keys in its title. A card that matches on its own needs no answer, so `matches` is empty
+ * and neither is drawn; with no filter and no search every top matches itself, so nothing is ever ringed then — no special case. The ring is a page
+ * class rather than a `.board-card` variant: it is this board's reading of a filter, not a look the Board's card has.
+ *
+ * No `Run ▾` and no live strip: both are phase 5 (spec §12). The marker row draws only when it has something to say (a match, a priority), the way the
+ * Board's draws only when a marker applies.
  *
  * The whole card is a `role="button"` that opens the issue (`onOpen`, which the page wires to the issue modal's slot), Enter and Space included, exactly as
  * `ItemCard`; the link out stops both the click and those two keys for the reasons `ItemCard`'s own link spells out at length — without it one click opens
@@ -32,21 +46,25 @@ export function JiraCard({
   board,
   me,
   now,
+  fold,
+  matches,
   onOpen
 }: {
   issue: JiraIssue;
   board: JiraBoard;
   me: { accountId: string } | null;
   now: number;
+  fold: ReturnType<typeof cardFold>;
+  matches: readonly string[];
   onOpen: (issue: JiraIssue) => void;
 }) {
   const crumb = crumbText(crumbOf(issue, board, me));
-  const subtasks = subtasksMarker(issue.subtasks);
+  const match = matchMarker(matches);
   const open = (): void => onOpen(issue);
 
   return (
     <div
-      className="board-card"
+      className={match === null ? 'board-card' : 'board-card jira-card-match'}
       role="button"
       tabIndex={0}
       onClick={open}
@@ -62,7 +80,7 @@ export function JiraCard({
           {/* The type is the icon's title rather than a word on the row: the key and the crumb need the width, and the type is the reading a person
               hovers for, not the one they scan by. */}
           <span className="jira-card-type" title={issue.type.name}>
-            <TypeIcon type={issue.type} />
+            <JiraTypeIcon type={issue.type} />
           </span>
           <span className="jira-card-key">{issue.key}</span>
           {crumb !== null && <span className="jira-card-crumb">{crumb}</span>}
@@ -93,38 +111,25 @@ export function JiraCard({
             ↗
           </a>
         </div>
-        {(issue.priority !== null || subtasks !== null) && (
+        {fold !== null && (
+          <div className="jira-card-fold">
+            <div className="jira-card-fold-line">{fold.line}</div>
+            <SpreadBar done={fold.progress.done} doing={fold.progress.doing} todo={fold.progress.todo} caption={fold.caption} />
+          </div>
+        )}
+        {(match !== null || issue.priority !== null) && (
           <div className="board-card-markers" data-testid="marker-row">
+            {match !== null && (
+              <Marker tone="match" title={match.title}>
+                {match.word}
+              </Marker>
+            )}
             {/* `kind`, the marker's quiet `--ink3` word: a priority is a fact about the issue, not a state this board should colour — §8's "marks state
                 by ink, never by accent" — and Jira's own five-colour priority scale would be a second palette on the card. */}
             {issue.priority !== null && <Marker tone="kind">{issue.priority}</Marker>}
-            {subtasks !== null && <Marker tone="kind">{subtasks}</Marker>}
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * The type glyph, by what the type IS rather than what a team named it: a sub-task by Jira's own flag, an epic (or anything above it) by hierarchy level,
- * then a bug and a story by name — the two standard names every Jira site ships — and every other type the plain task square. The mocks' glyphs, as 14 px
- * outline strokes in the head's ink; `aria-hidden`, because the type name is the wrapper's title and a screen reader gets it from the column and modal.
- */
-function TypeIcon({ type }: { type: JiraIssue['type'] }) {
-  const name = type.name.toLowerCase();
-  const path = type.subtask
-    ? 'M5 4v10h12M13 10l4 4-4 4'
-    : type.level >= 1
-      ? 'M13 2 3 14h7l-1 8 10-12h-7z'
-      : name === 'bug'
-        ? 'M12 7a6 6 0 1 1 0 12a6 6 0 1 1 0-12M12 7V4M8 9 5 7M16 9l3-2M7 14H4M20 14h-3M8 18l-3 2M16 18l3 2'
-        : name === 'story'
-          ? 'M6 3h12v18l-6-4-6 4z'
-          : 'M5 5h14v14H5zM9 12l2 2 4-4';
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d={path} />
-    </svg>
   );
 }

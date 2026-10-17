@@ -43,10 +43,12 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   `jira-write.controller.ts`, → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three —
   `orchestrator/` (a read-only view of the run-state directory, plus the
   in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (#249 — three read-only
-  Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, no actions), `registry/`, `static.ts` (serves `client/dist` only when built),
+  Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's
+  version chip — read-only, git only — not an outbound-calling module), `registry/`, `static.ts` (serves `client/dist` only when built),
   `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
-- `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings), one run chip in the board's band, and the three-step
+- `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings) that ends in a version chip opening the What's new
+  drawer ([releases](docs/subsystems/releases.md)), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
 
