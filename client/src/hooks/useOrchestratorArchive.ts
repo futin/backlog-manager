@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { fetchOrchestratorArchive } from '../lib/agents';
+import { useMountedRef } from './useMountedRef';
+import { useRefreshing } from './useRefreshing';
 import type { OrchestratorArchiveRun } from '../../../shared/types';
 
 /**
@@ -23,10 +25,9 @@ import type { OrchestratorArchiveRun } from '../../../shared/types';
  * RunsView's live row is expected to read that hook's poll directly rather
  * than ask this one to grow a redundant interval of its own.
  *
- * Fetches on mount and on window focus, the exact cadence `useAgents` and
- * `useOrchestratorRuns` both use for the same reason: most of what changes
- * this list happens in a terminal you have alt-tabbed away from, which is
- * exactly when a focus event fires.
+ * Fetches on mount and on window focus (`useRefreshing`, the cadence every
+ * board poller shares): most of what changes this list happens in a terminal
+ * you have alt-tabbed away from, which is exactly when a focus event fires.
  *
  * `runs` starts `[]` for the same reason `useOrchestratorRuns`' does: it is
  * exactly what `GET /api/orchestrator/archive` itself answers for a project
@@ -39,56 +40,32 @@ import type { OrchestratorArchiveRun } from '../../../shared/types';
 export function useOrchestratorArchive(): { runs: OrchestratorArchiveRun[]; refresh: () => void } {
   const [runs, setRuns] = useState<OrchestratorArchiveRun[]>([]);
 
-  // Flipped false on unmount, checked before every setRuns below — same
-  // guard, same StrictMode rationale as `useOrchestratorRuns`' own
-  // `mountedRef` (see that hook's comment for the full mechanics). Briefly
-  // restated here because it is easy to "simplify" away on a read that only
-  // sees a hook with no polling effect and assumes there is nothing left
-  // that could land a `setState` after unmount: there is — the mount-time
-  // fetch itself, exactly as for the live hook. client/src/main.tsx wraps
-  // the whole app in `<StrictMode>`, which in development mounts every
-  // component TWICE on purpose (mount, run every effect's cleanup, mount
-  // again) specifically to surface effects that misbehave across that
-  // cycle. `useRef`'s initial value is computed exactly once for the life of
-  // the fiber, never again on a later effect run — so if this ref were only
-  // ever set `true` by `useRef(true)`'s initializer, StrictMode's first
-  // (throwaway) cleanup would flip it `false` and nothing would ever flip it
-  // back, leaving every future `refresh()` silently skipping its `setRuns`
-  // for the rest of the component's real, on-screen life. Re-asserting
-  // `true` here, in the effect body, means the remount that actually stays
-  // on screen re-arms the guard correctly.
-  const mountedRef = useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  // Checked before every setRuns: the mount-time fetch itself can land after unmount, polling or not — see `useMountedRef`.
+  const mountedRef = useMountedRef();
 
+  const load = useCallback(
+    () =>
+      fetchOrchestratorArchive()
+        .then((payload) => {
+          if (mountedRef.current) setRuns(payload.runs);
+        })
+        // A failed fetch (the API hiccups, the box is mid-restart) keeps
+        // whatever is already in state — the same fallback
+        // `useOrchestratorRuns`' own refresh makes, for the same reason: there
+        // is no error field on this hook's return value for a caller to render
+        // one from, so the only sane behaviour is to leave the last good list
+        // on screen and let the next mount, focus, or manual `refresh()` try
+        // again rather than blank out history that is still perfectly valid.
+        .catch(() => {}),
+    [mountedRef]
+  );
+
+  // No `armed`: this hook never polls (above). #285: a focus or `refresh()` that lands mid-flight folds into one follow-up rather than starting a second
+  // request.
+  const request = useRefreshing(load);
   const refresh = useCallback(() => {
-    fetchOrchestratorArchive()
-      .then((payload) => {
-        if (mountedRef.current) setRuns(payload.runs);
-      })
-      // A failed fetch (the API hiccups, the box is mid-restart) keeps
-      // whatever is already in state — the same fallback
-      // `useOrchestratorRuns`' own refresh makes, for the same reason: there
-      // is no error field on this hook's return value for a caller to render
-      // one from, so the only sane behaviour is to leave the last good list
-      // on screen and let the next mount, focus, or manual `refresh()` try
-      // again rather than blank out history that is still perfectly valid.
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const onFocus = (): void => refresh();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [refresh]);
+    void request();
+  }, [request]);
 
   return { runs, refresh };
 }

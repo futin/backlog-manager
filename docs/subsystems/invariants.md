@@ -3802,8 +3802,10 @@ nothing there serves requests.
 The other half of the same incident. While the server was stalled, the client's `setInterval` pollers kept ticking on the wall clock whether or not the last
 request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
 them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
-shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog` and `useAgents`; none of them
-holds a `setInterval`.
+shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents` and — since
+#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those five enters through `hooks/useRefreshing.ts` (#285), which owns the
+board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
+`useJiraBoard`, which triggers on its board id rather than on mount and focus.
 
 **The timer is armed by an answer.** The next tick is a `setTimeout` set when the current request settles, `intervalMs` later, so a slow answer slows the poll
 instead of piling onto it and at most one timer is ever pending. Each hook keeps its own `armed` condition for "something is moving worth polling" exactly as

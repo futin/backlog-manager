@@ -3,13 +3,14 @@ import { useEffect, useState } from 'react';
 import { dispatchAgent, fetchAgentPlan, sessionUrl } from '../../lib/agents';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { useAction } from '../../hooks/useAction';
+import { useFetched } from '../../hooks/useFetched';
 import { useSettings } from '../../hooks/useSettings';
 import { staleTakeover } from '../../lib/tracker';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
-import type { AgentPlan, BacklogItem, PermissionMode } from '../../../../shared/types';
+import type { BacklogItem, PermissionMode } from '../../../../shared/types';
 
 /**
  * LaunchSheet — the one extra tap between a card and a running Claude.
@@ -26,8 +27,10 @@ import type { AgentPlan, BacklogItem, PermissionMode } from '../../../../shared/
  */
 export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () => void }) {
   const { settings } = useSettings();
-  const [plan, setPlan] = useState<AgentPlan | null>(null);
-  const [planError, setPlanError] = useState<string | null>(null);
+  const fetchedPlan = useFetched(() => fetchAgentPlan(item.path), [item.path]);
+  const plan = fetchedPlan.value;
+  const planError =
+    fetchedPlan.status === 'failed' ? (fetchedPlan.error instanceof Error ? fetchedPlan.error.message : String(fetchedPlan.error)) : null;
   const [prompt, setPrompt] = useState('');
   const [mode, setMode] = useState<PermissionMode>('plan');
   // '' is the "default" option: no flag, so the CLI's own default stands.
@@ -46,22 +49,13 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const { busy, error, run } = useAction();
   const [sessionId, setSessionId] = useState<string | null>(null);
 
+  // `prompt` and `mode` are editable, so they are state seeded from the plan rather than read off it: once per fetched plan, keyed on the plan object
+  // itself, so a re-render of the parent never overwrites what was typed. The stale-answer guard is `useFetched`'s.
   useEffect(() => {
-    let alive = true;
-    fetchAgentPlan(item.path)
-      .then((p) => {
-        if (!alive) return;
-        setPlan(p);
-        setPrompt(p.prompt);
-        setMode(p.defaultMode);
-      })
-      .catch((e: unknown) => {
-        if (alive) setPlanError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [item.path]);
+    if (plan === null) return;
+    setPrompt(plan.prompt);
+    setMode(plan.defaultMode);
+  }, [plan]);
 
   // Escape is `FormSheet`'s now (task-40), not this file's: one stack, one
   // window listener, topmost dialog only — see hooks/useDialogEscape.ts. The

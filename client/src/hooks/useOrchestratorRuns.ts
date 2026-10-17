@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { fetchOrchestratorRuns } from '../lib/agents';
-import { useCoalescedFetch } from './useCoalescedFetch';
+import { useRefreshing } from './useRefreshing';
 import { useMountedRef } from './useMountedRef';
 import type { OrchestratorRunsPayload } from '../../../shared/types';
 
@@ -254,7 +254,7 @@ export function useOrchestratorRuns(): {
    * `aborted`, or `failed` — not merely gone stale) the render that shows it
    * clears the timer again. A poll that was already in flight at that moment
    * still lands and updates state, and nothing re-arms after it. Mount and
-   * window focus (both effects below) are untouched by any of this and keep
+   * window focus (`useRefreshing`'s two triggers) are untouched by any of this and keep
    * refreshing in both worlds — which is what lets a quiet board still notice
    * a brand new run the instant you switch back to the tab, instead of
    * waiting up to 5s for a poll that, by definition, was not running yet.
@@ -265,20 +265,10 @@ export function useOrchestratorRuns(): {
    * one follow-up behind the request already out instead of racing it. It
    * returns nothing: callers fire a refresh, they never wait on one.
    */
-  const request = useCoalescedFetch(load, { armed: anyLive, intervalMs: POLL_MS });
+  const request = useRefreshing(load, { armed: anyLive, intervalMs: POLL_MS });
   const refresh = useCallback(() => {
     void request();
   }, [request]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const onFocus = (): void => refresh();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [refresh]);
 
   /**
    * "A resume was just asked for on this project" (task-17) — records a

@@ -525,8 +525,8 @@ export interface MergeCheckResult {
  * FACT that this project's settings lack a rule they may well have. That is
  * a worse failure than the network error the `.catch` below already
  * handles cleanly, not a better one, so it gets routed into the identical
- * path: `isMergeCheckResult` throws, and the caller's existing
- * `.catch(() => setMergeCoverage(null))` treats a malformed 200 exactly
+ * path: `isMergeCheckResult` throws, and the caller's `useFetched` read
+ * lands as `failed`, which renders as no coverage — a malformed 200 exactly
  * like a rejected request, which is the only value this hint is allowed to
  * ever assert an absence from.
  */

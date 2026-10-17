@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
-
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useFetched } from '../../hooks/useFetched';
 import { JIRA_COLUMNS, displayPath, initialsOf, issueDatesLine, modalTree, progressLine, type JiraChildrenIndex } from '../../lib/jira';
 import { renderMarkdown } from '../../lib/markdown';
 import type { JiraIssue, JiraIssueDetail } from '../../../../shared/types';
@@ -48,11 +47,11 @@ import { SpreadBar } from '../ui/SpreadBar';
  * while the direct children never are. `null` (no board behind the modal) draws the direct children only. The head row counts the DIRECT children in its
  * pill and says `N in all` only when the tree draws more rows than that; the spread bar counts the rows as drawn. No filter marking inside the tree — the
  * filter ring is the card's (spec §8 non-goal). A row click hands the row's issue and the SAME snapshot to `onOpenIssue`, which is the very setter the board
- * calls, so `JiraView` swaps the one modal's issue and the key-stamped read below fetches the new detail. Never a second `Modal`: Escape has one owner, and a
+ * calls, so `JiraView` swaps the one modal's issue and the keyed read below fetches the new detail. Never a second `Modal`: Escape has one owner, and a
  * stack of issue modals would make it close one layer of a walk the reader thinks of as one dialog.
  */
 
-type Held = { key: string; detail: JiraIssueDetail } | { key: string; failure: string };
+type Held = { detail: JiraIssueDetail } | { failure: string };
 
 /** What a status category reads as in a fact — `JIRA_COLUMNS`' own labels, lower-cased, so the column and the modal never name one category two ways. */
 function categoryWord(category: JiraIssue['status']['category']): string {
@@ -92,28 +91,19 @@ export function JiraIssueModal({
   onClose: () => void;
 }) {
   const { data } = useJiraContext();
-  const [held, setHeld] = useState<Held | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    const key = issue.key;
-    setHeld(null);
-    fetch(`/api/jira/issue/${encodeURIComponent(key)}`)
-      .then(async (res) => {
-        if (!res.ok) return { key, failure: await failureOf(res) } as Held;
-        const body: unknown = await res.json();
-        return isIssueDetail(body) ? ({ key, detail: body } as Held) : ({ key, failure: 'malformed response' } as Held);
-      })
-      .catch((e: unknown) => ({ key, failure: e instanceof Error ? e.message : String(e) }) as Held)
-      .then((next) => {
-        if (alive) setHeld(next);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [issue.key]);
-
-  const mine = held !== null && held.key === issue.key ? held : null;
+  // Keyed on the issue: swapping to a child reads nothing held on the very render that carries the new key, and a superseded answer never lands
+  // (`useFetched`, #285). Every failure — a non-OK answer, a malformed body, a dropped request — resolves to a `failure`, so the read itself never rejects.
+  const { value: mine } = useFetched(
+    () =>
+      fetch(`/api/jira/issue/${encodeURIComponent(issue.key)}`)
+        .then(async (res): Promise<Held> => {
+          if (!res.ok) return { failure: await failureOf(res) };
+          const body: unknown = await res.json();
+          return isIssueDetail(body) ? { detail: body } : { failure: 'malformed response' };
+        })
+        .catch((e: unknown): Held => ({ failure: e instanceof Error ? e.message : String(e) })),
+    [issue.key]
+  );
   const detail = mine !== null && 'detail' in mine ? mine.detail : null;
   const failure = mine !== null && 'failure' in mine ? mine.failure : null;
   // The detail's copy is the fresher one; the card's is what the column draws until it lands (or for good, when the read fails).

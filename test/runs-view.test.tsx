@@ -2689,5 +2689,16 @@ describe('RunsView · a remote run (task-48)', () => {
       await act(async () => {});
       expect(screen.queryByTestId('run-detail-invisible')).toBeNull();
     });
+
+    // #285: `useProjectSources` is a `useFetched` read — a failed one reads as the empty map, so the page loses that one line and nothing else.
+    it('still renders, with no note, when /api/projects answers 500', async () => {
+      global.fetch = jest.fn(() => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) } as Response)) as jest.Mock;
+      await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+      await userEvent.click(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`));
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/projects'));
+      await act(async () => {});
+      expect(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`)).toBeInTheDocument();
+      expect(screen.queryByTestId('run-detail-invisible')).toBeNull();
+    });
   });
 });
