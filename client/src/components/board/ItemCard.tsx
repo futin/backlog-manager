@@ -1,36 +1,13 @@
 import { elapsedSince, formatCreated } from '../../lib/item-age';
 import { isInProgress, progressLabel } from '../../lib/item-progress';
+import { ACTIVE_RUN_STAGES } from '../../lib/run-stage';
 import { claimReading } from '../../lib/tracker';
 import type { ProjectHues } from '../../lib/project-hue';
 import { Dot } from '../ui/Dot';
 import { Marker, type MarkerTone } from '../ui/Marker';
 import { DispatchButton, dispatchAvailable } from './DispatchButton';
 import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
-import type { AgentsStatus, BacklogItem, RunQueueItem, RunStage } from '../../../../shared/types';
-
-/**
- * The `RunStage` values that mean the orchestrator is working this item right
- * now — a literal list rather than "everything not terminal and not pending",
- * because that broader formula would also catch `preflight`, and Task 11's own
- * brief enumerates exactly these six as "shown" without it. Preflight is a real
- * pipeline stage (it sits between `pending` and `dispatched` in RunStage's
- * own documented order — see shared/types.ts) but a usually-instant one for
- * an already-groomed item, and a card that flickered a marker on for the
- * fraction of a poll cycle preflight actually takes would read as noise
- * rather than as a state anyone could act on.
- *
- * Task 9 turned what these six earn from a footer chip into the card's own
- * live strip: "which of these twelve is being worked" is a question asked of a
- * whole column at once, and a 9.5px chip in a card's foot could no more answer
- * it than the 3px amber inset the hand-run bar replaced could.
- * The two stages below are the same claim's other half.
- *
- * Exported for the same reason REFACTOR_KINDS above is: so a test can
- * assert against the exact list the card renders from, not a restatement
- * of it. Also read by BoardView (the column rank) — one list, two readers,
- * neither restating the other.
- */
-export const ACTIVE_RUN_STAGES: readonly RunStage[] = ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
+import type { AgentsStatus, BacklogItem, RunQueueItem } from '../../../../shared/types';
 
 /*
  * `ATTENTION_RUN_STAGES` — the two stages that mean the run has STOPPED and
@@ -177,7 +154,7 @@ export type QueuedStrip = {
 
 /**
  * The `orchestrator:queued` strip, or null for none. A SIBLING of `liveBarFor` and deliberately not a fifth row of its precedence, though it paints in the
- * same 24 px band: `liveBarFor`'s set of cards is, by construction, `liveRank`'s `< 2` half in BoardView — the column order, the Status filter's "In
+ * same 24 px band: `liveBarFor`'s set of cards is, by construction, `liveRank`'s `< 2` half (lib/board-sort.ts) — the column order, the Status filter's "In
  * progress" and the board clock all at once — and a queued item is none of those. Nobody is on it; the label is a plan, never a claim (invariants.md).
  *
  * So the one precedence rule between the two lives here, in the `bar` argument: any live bar wins. That is what makes the claim beat the label. A claim
@@ -293,7 +270,7 @@ export function ItemCard({
    * Deliberately a SECOND prop rather than something derived from `run`
    * beside it: the two answer different questions off the same payload.
    * `run` decides whether this card shows a live strip and reads
-   * `ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES` above, which correctly exclude
+   * `ACTIVE_RUN_STAGES`/`ATTENTION_RUN_STAGES` (lib/run-stage.ts, shared/types.ts), which correctly exclude
    * `pending` and `preflight`; the block reads `RUN_CLAIMED_STAGES`
    * (shared/types.ts),
    * which must INCLUDE them — a pending item is already claimed even though

@@ -62,8 +62,9 @@ paths: ["client/src/**"]
   "improve" that into disabled buttons. Three per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
   local session's `started:` stamp (`progressBlock`, `client/src/lib/item-progress.ts` — ANY stamp, fresh or stale, for a files item; a tracker claim past
   `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an orchestrator claim (`runClaimBlock`).
-  Exactly one lets the click through: the visibility block re-asks the status through `useReverify` (`client/src/hooks/useReverify.ts`), which the toolbar
-  Orchestrate control shares (bug-13, bug-16); the other two keep swallowing it. Why:
+  Exactly one lets the click through, and only when it speaks alone: the visibility block re-asks the status through `useReverify`
+  (`client/src/hooks/useReverify.ts`), whose one caller is `GatedChip` (`components/ui/GatedChip.tsx`, rule in `lib/gate-view.ts`), which `DispatchButton` and
+  the toolbar Orchestrate control both compose (bug-13, bug-16, #272); the other blocks keep swallowing it. Why:
   [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
 - **A crashed run renders as crashed, never as nothing.** The Board counts it in `RunChip`'s own line (`1 run · crashed ›`) and says nothing the payload does
   not carry; badges, card live strips and `runClaimBlock` stay freshness-based. The Runs page reads the same payload (bug-29): `MergedRun.live` is the data

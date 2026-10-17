@@ -123,7 +123,7 @@ export interface MonthGroup {
  *    under the reader for no visible reason.
  *
  * Onto copies, never in place — the array belongs to the fetched index, the
- * same discipline `sortItems` keeps in BoardView.
+ * same discipline `sortItems` keeps in lib/board-sort.ts.
  */
 export function groupByMonth(items: BacklogItem[]): MonthGroup[] {
   const byKey = new Map<string, BacklogItem[]>();

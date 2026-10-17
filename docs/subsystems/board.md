@@ -70,7 +70,8 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Band`                 | `.ui-band`        | `title`, `sub?`, `children` (right slot), `className?` (the page's layout class)                 | every page: Board, Runs History, Runs Watchdog, Archive, Settings               |
 | `Sheet`, `SheetHead`   | `.ui-sheet`       | `Sheet{children, as?, className?}`; `SheetHead{title, sub?, right?}`                             | Runs (Live, History, detail), Watchdog (Watching, Activity), `SettingsRow`'s card |
 | `FigureStrip`, `Figure`| `.ui-figure`      | `FigureStrip{children, cols?: 3\|5, testId?, className?}`; `Figure{label, value?, unit?, line?, tone?, wide?, title?, testId?, children?}` | Runs History (six cells, the sixth `wide`), Watchdog (three)                     |
-| `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `DispatchButton`, both sheets, load-more |
+| `Chip`                 | `.ui-chip`        | `variant?: outline\|ink\|flat\|danger`, `size?: 32\|28`, `pressed?`, `as?: button\|label`, `icon?`, `onClick?`, `disabled?`, `title?`, `type?` | every band and control row, `RunControls`, `GatedChip`, both sheets, load-more |
+| `GatedChip`            | none (draws `.ui-chip`) | `gateBlock`, `otherBlock`, `idleTitle`, `reverify?`, `recheck`, `onActivate`, `variant?`, `size?`, `children` (a node, or a function of `blocked`) — the disabled half is `gateView` (`lib/gate-view.ts`) | `DispatchButton` (card and modal), the Board band's Orchestrate chip |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
@@ -234,6 +235,8 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   for this run alone comes after the items, and the attention entries last of all — an empty attention list is the common case and the chip row already carries
   its count, so the section earns the screen only when it has something in it. Selection is one run across both sheets: the first live run is selected on
   arrival, and with nothing live the newest History row is, so the Board's run chip lands a reader on the current item's stage track with no second click.
+  Every reading in the head, the facts strip, the notes and the chip row is `runDetailModel` (`lib/run-detail.ts`, #271) — a pure function of the three
+  tiers and one `now`, unit-tested without a render; the component keeps the fetch, the clock, the rows' own JSX and the machine-time rollup.
   For a remote run the sheet is read-only: `Remote run: its controls are on the machine that ran it.` stands where `RunControls` would, nothing fetches
   `archive/run`, and a line under the items says the ones the run has not claimed yet are not visible from here. A LOCAL run of a tracker project that has
   claimed nothing yet says `Not visible from other machines: this run has not claimed an issue yet.` — `lib/remote-run.ts` holds all three derivations, and
@@ -328,7 +331,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   row — one `trackerState`, an access reason still winning over it. Because the server refuses every write and spawn for it, the card's and modal's dispatch
   control is DISABLED with the server's sentence (`syncOffReason`, byte-equal to `syncOffBlock`, pinned on both sides) — carried on `DispatchButton`'s
   `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
-  whose click re-asks nothing for this reason because no status refetch could clear it.
+  whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
+  on `GatedChip`'s one rule.
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
@@ -376,10 +380,14 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Interfaces
 
 - `lib/agents.ts` — same-origin fetches against `/api`.
+- `lib/board-sort.ts` (#258) — the Board's sort pipeline, pure: `SortKey`/`SortDir`, `NATURAL_DIR`, `COMPARATORS`, `resolveSortKey`, `liveRank` and
+  `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns` and
   `useWatchdog`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
+- `hooks/useAction.ts` — the one home of a click-fired mutation's in-flight guard, `busy`, `error` and message mapping (#286, bug-19's layer 1): `RunControls`,
+  `LaunchSheet`, `OrchestrateSheet` and `ClaimRelease` keep only their own success and refusal branches.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` entry is present, plus a grace window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.

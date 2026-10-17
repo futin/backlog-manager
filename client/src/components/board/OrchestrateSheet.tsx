@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { useAction } from '../../hooks/useAction';
 import {
   ApiError,
   fetchBranches,
@@ -267,8 +268,7 @@ export function OrchestrateSheet({
    * separate condition rather than an empty list.
    */
   const [uncommitted, setUncommitted] = useState<UncommittedItems | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, run } = useAction();
   /**
    * Which previewed rows are selected, by item id, or `null` for "the whole
    * queue" — the state this sheet opens in and the state it must be able to
@@ -640,102 +640,104 @@ export function OrchestrateSheet({
   };
 
   const start = (): void => {
-    setBusy(true);
-    setError(null);
-    startOrchestrate({
-      project,
-      // Same absent-not-empty convention LaunchSheet's own spread uses:
-      // JSON.stringify drops an undefined key outright, which is what lets
-      // the server's `pickFrom` and the dashboard's argv builder both read
-      // "no flag" from a genuinely missing key rather than an empty string.
-      ...(model === '' ? {} : { model }),
-      ...(effort === '' ? {} : { effort }),
-      // Unlike model/effort above and ids below, this is NEVER wrapped in a
-      // conditional spread — see `mergeMode`'s own state comment. It is the
-      // sheet's explicit answer to "what should this run do", sent even
-      // when it equals the untouched Settings default, because inferring it
-      // server-side from an absent field would put that one decision in two
-      // places (design §2.2).
-      mergeMode,
-      // Unconditional for exactly `mergeMode`'s reason, restated in this
-      // field's terms: absent means `park` server-side, so an omitted field
-      // would resolve to the same value the untouched sheet is showing — but
-      // that value is written verbatim into `run.json` and read out of the
-      // archive months later, and "the runner was told to park" is a
-      // different claim from "nobody said". The sheet always knows which of
-      // the two it is, so it always says.
-      questionMode,
-      // Unconditional for the same reason as its two neighbours above, with
-      // one extra consequence of its own: which branch a run wrote to is not
-      // recoverable from anything afterwards, so a launch that stayed silent
-      // about it would leave the archive unable to answer where that work
-      // landed. `'main'` is sent explicitly and the server appends no flag
-      // for it, so the prompt is byte-identical to a pre-task-44 one.
-      base,
-      // The same absent-not-empty convention, for the field it matters most
-      // on: `ids` rides along ONLY for a strict subset. A full list would be
-      // a different instruction from no list at all (see `selected` and
-      // `narrowed` above), and an EMPTY list is refused outright by the
-      // server — `parseIdsArg` in orchestrate.mjs keeps "no flag" and "an
-      // explicit empty selection" apart precisely so that `--ids ''` cannot
-      // silently mean "everything", and `emptySelection` above is what stops
-      // this sheet from ever posing that question.
-      //
-      // `|| order !== null` is task-20's one wire-visible change, and
-      // `narrowed`'s own comment above carries the reasoning: an order is a
-      // membership decision, so a run that was arranged sends its list even
-      // when nothing was deselected. `arranged` rather than `selectedIds`
-      // because the two are the same list in a different sequence, and the
-      // sequence is the point — `resolveIds` and `buildGatedQueue` both run
-      // `--ids` in the order given, which is why this step needed no server,
-      // tool or wire change at all.
-      ...(narrowed || order !== null ? { ids: arranged } : {}),
-      permissionMode: mode
-    })
-      .then(() => {
-        // No session link to show (see this file's own header comment) —
-        // the band's run chip is what takes over from here, and `refresh()`
-        // fetches it ahead of the next scheduled poll so it is already
-        // there the instant this sheet closes rather than up to 5s later.
-        refresh();
-        onClose();
-      })
-      .catch((e: unknown) => {
-        const message = e instanceof Error ? e.message : String(e);
-        setBusy(false);
-        setError(message);
-        // The ONE failure this sheet cannot offer a useful retry for: the
-        // activeRun lock — a DIFFERENT run already exists for this project
-        // (agents.service.ts's `orchestrate()`, "a run is already in
-        // progress for this project (<runId>)"). Retrying from this sheet
-        // cannot fix that; `refresh()` pulls the winning run in and
-        // `onClose()` hands the screen to the chip that already counts it.
-        //
-        // Fix round 1 tried `e.status === 409` alone — an improvement over
-        // matching the message's own prose, but still wrong, because this
-        // endpoint answers 409 for THREE OTHER reasons too (project just
-        // lost visibility, no CLAUDE_BIN, remote answers off — all folded
-        // into `gate.control === 'hidden'`/`'disabled'` server-side, plus
-        // the dirName race). Status alone cannot tell those apart from the
-        // lock, and reporting "already running" for a capability or
-        // visibility problem is not a milder version of the bug the
-        // message-substring check had — it is a confidently WRONG answer,
-        // worse than the brittle one it replaced. Fix round 2: the server
-        // sends a `code` field (RUN_IN_PROGRESS_CODE, shared/types.ts) on a
-        // refusal that means "a run for this project is alive right now",
-        // so this checks status AND that exact code — every other 409
-        // (uncoded) falls through to the generic path below and shows the
-        // server's own, accurate error text instead.
-        //
-        // Both of that endpoint's locks answer with it, and closing is right
-        // for both: the activeRun lock means a run file is already there to
-        // count, and bug-21's starting lock means the chip is already counting
-        // the spawn this sheet is trying to duplicate. It does not care which.
-        if (e instanceof ApiError && e.status === 409 && e.code === RUN_IN_PROGRESS_CODE) {
+    run(
+      () =>
+        startOrchestrate({
+          project,
+          // Same absent-not-empty convention LaunchSheet's own spread uses:
+          // JSON.stringify drops an undefined key outright, which is what lets
+          // the server's `pickFrom` and the dashboard's argv builder both read
+          // "no flag" from a genuinely missing key rather than an empty string.
+          ...(model === '' ? {} : { model }),
+          ...(effort === '' ? {} : { effort }),
+          // Unlike model/effort above and ids below, this is NEVER wrapped in a
+          // conditional spread — see `mergeMode`'s own state comment. It is the
+          // sheet's explicit answer to "what should this run do", sent even
+          // when it equals the untouched Settings default, because inferring it
+          // server-side from an absent field would put that one decision in two
+          // places (design §2.2).
+          mergeMode,
+          // Unconditional for exactly `mergeMode`'s reason, restated in this
+          // field's terms: absent means `park` server-side, so an omitted field
+          // would resolve to the same value the untouched sheet is showing — but
+          // that value is written verbatim into `run.json` and read out of the
+          // archive months later, and "the runner was told to park" is a
+          // different claim from "nobody said". The sheet always knows which of
+          // the two it is, so it always says.
+          questionMode,
+          // Unconditional for the same reason as its two neighbours above, with
+          // one extra consequence of its own: which branch a run wrote to is not
+          // recoverable from anything afterwards, so a launch that stayed silent
+          // about it would leave the archive unable to answer where that work
+          // landed. `'main'` is sent explicitly and the server appends no flag
+          // for it, so the prompt is byte-identical to a pre-task-44 one.
+          base,
+          // The same absent-not-empty convention, for the field it matters most
+          // on: `ids` rides along ONLY for a strict subset. A full list would be
+          // a different instruction from no list at all (see `selected` and
+          // `narrowed` above), and an EMPTY list is refused outright by the
+          // server — `parseIdsArg` in orchestrate.mjs keeps "no flag" and "an
+          // explicit empty selection" apart precisely so that `--ids ''` cannot
+          // silently mean "everything", and `emptySelection` above is what stops
+          // this sheet from ever posing that question.
+          //
+          // `|| order !== null` is task-20's one wire-visible change, and
+          // `narrowed`'s own comment above carries the reasoning: an order is a
+          // membership decision, so a run that was arranged sends its list even
+          // when nothing was deselected. `arranged` rather than `selectedIds`
+          // because the two are the same list in a different sequence, and the
+          // sequence is the point — `resolveIds` and `buildGatedQueue` both run
+          // `--ids` in the order given, which is why this step needed no server,
+          // tool or wire change at all.
+          ...(narrowed || order !== null ? { ids: arranged } : {}),
+          permissionMode: mode
+        }),
+      {
+        onSuccess: () => {
+          // No session link to show (see this file's own header comment) —
+          // the band's run chip is what takes over from here, and `refresh()`
+          // fetches it ahead of the next scheduled poll so it is already
+          // there the instant this sheet closes rather than up to 5s later.
           refresh();
           onClose();
+        },
+        onError: (e) => {
+          // `useAction` sets the message after this returns — this returns nothing, so the message is still shown, the same order as before (#286).
+          //
+          // The ONE failure this sheet cannot offer a useful retry for: the
+          // activeRun lock — a DIFFERENT run already exists for this project
+          // (agents.service.ts's `orchestrate()`, "a run is already in
+          // progress for this project (<runId>)"). Retrying from this sheet
+          // cannot fix that; `refresh()` pulls the winning run in and
+          // `onClose()` hands the screen to the chip that already counts it.
+          //
+          // Fix round 1 tried `e.status === 409` alone — an improvement over
+          // matching the message's own prose, but still wrong, because this
+          // endpoint answers 409 for THREE OTHER reasons too (project just
+          // lost visibility, no CLAUDE_BIN, remote answers off — all folded
+          // into `gate.control === 'hidden'`/`'disabled'` server-side, plus
+          // the dirName race). Status alone cannot tell those apart from the
+          // lock, and reporting "already running" for a capability or
+          // visibility problem is not a milder version of the bug the
+          // message-substring check had — it is a confidently WRONG answer,
+          // worse than the brittle one it replaced. Fix round 2: the server
+          // sends a `code` field (RUN_IN_PROGRESS_CODE, shared/types.ts) on a
+          // refusal that means "a run for this project is alive right now",
+          // so this checks status AND that exact code — every other 409
+          // (uncoded) falls through to `useAction`'s generic path and shows the
+          // server's own, accurate error text instead.
+          //
+          // Both of that endpoint's locks answer with it, and closing is right
+          // for both: the activeRun lock means a run file is already there to
+          // count, and bug-21's starting lock means the chip is already counting
+          // the spawn this sheet is trying to duplicate. It does not care which.
+          if (e instanceof ApiError && e.status === 409 && e.code === RUN_IN_PROGRESS_CODE) {
+            refresh();
+            onClose();
+          }
         }
-      });
+      }
+    );
   };
 
   /*

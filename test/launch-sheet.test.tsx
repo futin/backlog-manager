@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -60,6 +60,16 @@ function stub(handlers: { plan?: unknown; dispatch?: { ok: boolean; body: unknow
 }
 
 const realFetch = global.fetch;
+
+/** Two clicks that both land before React re-renders — `test/run-controls.test.tsx`'s `doubleClick`, for the same reason: `userEvent.click` awaits between
+ *  clicks, so the second lands on a re-rendered (disabled) control and the case would pass with the guard deleted. Only a raw dispatch pair inside one `act`
+ *  reaches `useAction`'s ref guard (#286). */
+function doubleClick(el: HTMLElement): void {
+  act(() => {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
 
 beforeEach(() => {
   localStorage.clear();
@@ -138,6 +148,21 @@ describe('LaunchSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'launch' }));
     expect(await screen.findByText('too many launches in flight')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'launch' })).toBeEnabled();
+  });
+
+  // #286 — before useAction, `launch` had no ref guard: both clicks of one tick read `busy` as false and both POSTed.
+  it('sends one dispatch for a double-click on launch', async () => {
+    const calls = stub({});
+    await openSheet();
+    // The dispatch never answers, so the in-flight window stays open for the whole case and nothing settles after it ends.
+    const answered = global.fetch as jest.Mock;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).endsWith('/plan') ? answered(input, init) : (calls.push({ url: String(input), body: undefined }), new Promise(() => {}))
+    ) as jest.Mock;
+
+    doubleClick(screen.getByRole('button', { name: 'launch' }));
+
+    expect(calls.filter((c) => !c.url.endsWith('/plan'))).toHaveLength(1);
   });
 
   it('offers no launch at all when the plan comes back blocked', async () => {

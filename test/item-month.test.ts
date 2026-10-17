@@ -143,7 +143,7 @@ describe('groupByMonth', () => {
 
   it('never mutates the array it was handed', () => {
     // The array belongs to the fetched index — the same discipline sortItems
-    // keeps in BoardView.
+    // keeps in lib/board-sort.ts.
     const items = [fakeItem({ id: 'bug-1', updated: '2026-06-10' }), fakeItem({ id: 'bug-2', updated: '2026-08-10' })];
     groupByMonth(items);
     expect(items.map((i) => i.id)).toEqual(['bug-1', 'bug-2']);

@@ -7,13 +7,12 @@ import type { RunQueueItem, RunStage } from '../../../../shared/types';
  * (`RunDetail.tsx`, Task 6) can render the identical thing instead of
  * deriving its own.
  *
- * Lives in `board/` rather than `runs/` for the same reason `ItemCard.tsx`'s
- * `ACTIVE_RUN_STAGES` does, and the precedent is not hypothetical:
- * `RunDetail.tsx` already imports `ACTIVE_RUN_STAGES` from
- * `../board/ItemCard`, so `runs/` reading a run-stage vocabulary out of
- * `board/` is an established direction of dependency here, not a new one
- * this move invents. The drawer got here first; that is reason enough for
- * this to stay beside it rather than move to where its newer reader lives.
+ * Lives in `board/` rather than `runs/` because the drawer got here first,
+ * and that is reason enough for this to stay beside it rather than move to
+ * where its newer reader lives. (This paragraph used to cite `RunDetail.tsx`
+ * importing `ACTIVE_RUN_STAGES` from `../board/ItemCard` as precedent for
+ * `runs/` reading out of `board/`; #271 moved that list to `lib/run-stage.ts`,
+ * so the precedent is gone and the drawer's priority is the whole reason.)
  *
  * Shared because there has to be exactly ONE reading of "how long did this
  * item take" for the drawer and the detail pane to ever agree with each
