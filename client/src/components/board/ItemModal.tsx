@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react';
-
 import { elapsedSince, formatSeconds } from '../../lib/item-age';
 import { isInProgress, isLiveWork } from '../../lib/item-progress';
 import { renderMarkdown } from '../../lib/markdown';
@@ -10,6 +8,7 @@ import { Fact } from '../ui/Fact';
 import { Modal } from '../ui/Modal';
 import { ClaimRelease } from './ClaimRelease';
 import { DispatchButton } from './DispatchButton';
+import { useFetched } from '../../hooks/useFetched';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 
 /**
@@ -99,8 +98,18 @@ export function ItemModal({
    *  site with no payload to re-read (a test, a future read-only view) offers no write. */
   onReleased?: () => void;
 }) {
-  const [body, setBody] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  // Keyed on the path: opening another item reads pending — no body — on the very render that carries it, never the previous item's text
+  // (`useFetched`). A non-OK answer throws, so it lands as failed.
+  const fetchedBody = useFetched(
+    () =>
+      fetch(`/api/items/body?path=${encodeURIComponent(item.path)}`).then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.text();
+      }),
+    [item.path]
+  );
+  const body = fetchedBody.value;
+  const failed = fetchedBody.status === 'failed';
 
   /* The shared predicate, not a local copy of its two conditions — see
      item-progress.ts for why it is two and not one. This modal and the card
@@ -120,26 +129,6 @@ export function ItemModal({
   const elapsed = inProgress ? elapsedSince(item.started, at) : null;
   const staleHolder = isInProgress(item) && claimReading(item, at) === 'stale' ? item.holder : undefined;
   const staleAge = staleHolder === undefined ? null : elapsedSince(staleHolder.heartbeat, at);
-
-  useEffect(() => {
-    let alive = true;
-    setBody(null);
-    setFailed(false);
-    fetch(`/api/items/body?path=${encodeURIComponent(item.path)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.text();
-      })
-      .then((text) => {
-        if (alive) setBody(text);
-      })
-      .catch(() => {
-        if (alive) setFailed(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [item.path]);
 
   /* `renderMarkdown` (`lib/markdown.ts`) is the sanitising renderer: the HTML goes in via dangerouslySetInnerHTML below, and that is safe because the
      renderer drops raw HTML outright and hand-builds every link/image tag with its href/src escaped — see its header. */

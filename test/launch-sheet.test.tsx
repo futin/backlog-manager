@@ -113,6 +113,28 @@ describe('LaunchSheet', () => {
     expect(modes.value).toBe('acceptEdits');
   });
 
+  // #285: `prompt` is state seeded from the `useFetched` plan once per fetched plan — a re-render of the parent must not re-seed it over an edit.
+  it('keeps a typed prompt when the parent re-renders', async () => {
+    stub({});
+    const onClose = (): void => {};
+    const { rerender } = render(
+      <SettingsProvider>
+        <LaunchSheet item={ITEM} onClose={onClose} />
+      </SettingsProvider>
+    );
+    await waitFor(() => expect(screen.getByLabelText('Prompt')).toHaveValue(PLAN.prompt));
+    const prompt = screen.getByLabelText('Prompt');
+    await userEvent.clear(prompt);
+    await userEvent.type(prompt, 'my own words');
+
+    rerender(
+      <SettingsProvider>
+        <LaunchSheet item={{ ...ITEM }} onClose={() => {}} />
+      </SettingsProvider>
+    );
+    expect(screen.getByLabelText('Prompt')).toHaveValue('my own words');
+  });
+
   it('dispatches the edited prompt with the derived action', async () => {
     const calls = stub({});
     await openSheet();

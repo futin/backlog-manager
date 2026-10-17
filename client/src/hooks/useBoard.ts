@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { hasSyncingTracker } from '../lib/tracker';
-import { useCoalescedFetch } from './useCoalescedFetch';
 import { useMountedRef } from './useMountedRef';
+import { useRefreshing } from './useRefreshing';
 import type { ItemsIndex, ProjectSummary } from '../../../shared/types';
 
 /**
@@ -42,9 +42,8 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 /**
- * One fetch pair per mount, plus a refetch on window focus: a FILES project's
- * items change when a skill runs in some terminal, which is exactly when you
- * alt-tab back to the board — polling would answer the same question worse.
+ * One fetch pair per mount, plus a refetch on window focus (`useRefreshing`,
+ * whose header carries why that is the board's cadence).
  *
  * A TRACKER project is the case that argument does not cover, and task-45 adds
  * the one poll this hook has: its items move when someone edits an issue
@@ -59,7 +58,7 @@ async function fetchJson<T>(url: string): Promise<T> {
  * wall-clock interval timer, which kept firing into a server that had stopped answering
  * and stacked a pending pair per tick; now a focus, a `refetch` or a tick that
  * lands mid-flight queues exactly ONE follow-up behind it
- * (`useCoalescedFetch`).
+ * (`useRefreshing` → `useCoalescedFetch`).
  *
  * A failed refetch keeps whatever is already in state and raises `error`.
  * Nothing renders a staleness cue, so the board goes on showing the last good
@@ -76,7 +75,7 @@ export function useBoard(): BoardState {
 
   const mounted = useMountedRef();
 
-  // The ONE way a request pair leaves this hook — mount, focus, `refetch` and the tracker poll all go through `useCoalescedFetch` below, so the pair is
+  // The ONE way a request pair leaves this hook — mount, focus, `refetch` and the tracker poll all go through `useRefreshing` below, so the pair is
   // never in flight twice. `items` and `projects` are one request for that purpose: the follow-up re-reads both, together, once.
   // That is also what keeps an older answer from landing over a newer one (#270): with one pair in the air, the last to settle is always the newest
   // asked, so a read started before a claim was released can no longer paint it back after the read started after it.
@@ -104,20 +103,10 @@ export function useBoard(): BoardState {
   // bytes — and turning it back on refetches through the Trackers card's own
   // answer, then this board's next mount or focus.
   const tracked = hasSyncingTracker(state.projects);
-  const request = useCoalescedFetch(load, { armed: tracked, intervalMs: BOARD_TRACKER_POLL_MS });
+  const request = useRefreshing(load, { armed: tracked, intervalMs: BOARD_TRACKER_POLL_MS });
   const refetch = useCallback(() => {
     void request();
   }, [request]);
-
-  useEffect(() => {
-    refetch();
-  }, [refetch]);
-
-  useEffect(() => {
-    const onFocus = (): void => refetch();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [refetch]);
 
   return { ...state, refetch };
 }
