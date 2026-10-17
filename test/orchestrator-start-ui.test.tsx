@@ -609,7 +609,8 @@ describe('OrchestrateSheet', () => {
     mergeCheck: { covered: boolean; source: string | null } | 'fail' = { covered: true, source: null },
     // task-44. Defaulted to 'ok' so every case above is untouched; 'fail'
     // is what lets one case prove a failed branch read still launches.
-    branches: 'ok' | 'fail' = 'ok'
+    // 'nomain' (#285) answers a list without `main`, for the union-in-front case.
+    branches: 'ok' | 'fail' | 'nomain' = 'ok'
   ): { url: string; body: unknown }[] {
     const calls: { url: string; body: unknown }[] = [];
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -641,7 +642,11 @@ describe('OrchestrateSheet', () => {
       if (url.includes('/api/agents/branches')) {
         return branches === 'fail'
           ? Promise.reject(new Error('network down'))
-          : Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ branches: ['main', 'feature/x'] }) } as Response);
+          : Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve({ branches: branches === 'nomain' ? ['trunk', 'feature/x'] : ['main', 'feature/x'] })
+            } as Response);
       }
       calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       return Promise.resolve({ ok: res.ok, status: res.status, json: () => Promise.resolve(res.body) } as Response);
@@ -1826,6 +1831,24 @@ describe('OrchestrateSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: 'start' }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect((calls[0].body as { base: string }).base).toBe('main');
+  });
+
+  // #285: the branch list is a `useFetched` read — anything but `ok` reads as `['main']`, and an `ok` lacking `main` gets it unioned in front.
+  it('offers exactly one base, main, when the branch read fails', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: true, source: null }, 'fail');
+    renderSheet();
+    await toModes();
+    const options = [...(screen.getByLabelText('Base branch') as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).toEqual(['main']);
+  });
+
+  it('puts main first when the branch read lacks it', async () => {
+    stubOrchestrate({ ok: true, status: 201, body: { sessionId: 'sess-9' } }, { covered: true, source: null }, 'nomain');
+    renderSheet();
+    await toModes();
+    await waitFor(() => expect((screen.getByLabelText('Base branch') as HTMLSelectElement).options).toHaveLength(3));
+    const options = [...(screen.getByLabelText('Base branch') as HTMLSelectElement).options].map((o) => o.value);
+    expect(options).toEqual(['main', 'trunk', 'feature/x']);
   });
 
   it('says what a non-main base means, and says nothing at all for main', async () => {

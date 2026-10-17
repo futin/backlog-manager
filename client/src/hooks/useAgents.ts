@@ -1,22 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { fetchAgentsStatus } from '../lib/agents';
-import { useCoalescedFetch } from './useCoalescedFetch';
 import { useMountedRef } from './useMountedRef';
+import { useRefreshing } from './useRefreshing';
 import type { AgentsStatus } from '../../../shared/types';
 
 /**
- * The dispatch status, on mount and on window focus — the same cadence
- * `useBoard` uses, and for the same reason: what changes it (a dashboard
- * started, a session opened in another repo) happens outside this tab, and you
- * come back to the tab afterwards. A timer would ask the same question worse,
- * and the server's project-map cache means a focus refetch is nearly free.
+ * The dispatch status, on mount and on window focus (`useRefreshing`, whose
+ * header carries why): what changes it — a dashboard started, a session opened
+ * in another repo — happens outside this tab, and the server's project-map
+ * cache means a focus refetch is nearly free.
  *
  * #277: never two requests in flight FROM ONE HOOK INSTANCE. Focus storms and
  * explicit `reload`s each used to start their own `/api/agents/status` (the
  * duplicate pending requests seen when the server stalled); now a trigger that
  * lands mid-flight queues exactly ONE follow-up behind it
- * (`useCoalescedFetch`), so the answer a late caller gets was requested after
+ * (`useRefreshing` → `useCoalescedFetch`), so the answer a late caller gets was requested after
  * it asked. The coalescing is per instance, not per page: two components that
  * each call `useAgents` still each hold their own poller.
  *
@@ -70,22 +69,9 @@ export function useAgents(): { status: AgentsStatus | null; reload: () => Promis
     [mounted]
   );
 
-  const reload = useCoalescedFetch(load);
-
-  useEffect(() => {
-    // `void`: the promise is the return of an explicit re-ask (bug-13), and
-    // neither of these two triggers has anything to do with the answer beyond
-    // the setState `reload` performs itself.
-    void reload();
-  }, [reload]);
-
-  useEffect(() => {
-    const onFocus = (): void => {
-      void reload();
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [reload]);
+  // Mount and focus discard the promise (`useRefreshing`); it is the return of an explicit re-ask (bug-13), and neither of those two triggers has anything
+  // to do with the answer beyond the setState `load` performs itself.
+  const reload = useRefreshing(load);
 
   return { status, reload };
 }

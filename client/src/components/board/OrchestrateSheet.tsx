@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { useAction } from '../../hooks/useAction';
+import { useFetched } from '../../hooks/useFetched';
 import {
   ApiError,
   fetchBranches,
@@ -228,9 +229,34 @@ export function OrchestrateSheet({
   const [base, setBase] = useState<string>('main');
   /**
    * The picker's options. `['main']` until the fetch lands, and `['main']`
-   * forever if it never does — see the effect below.
+   * forever if it never does.
+   *
+   * The base picker's options (task-44) — `GET /api/agents/branches`, a
+   * `useFetched` read like the merge-check hint and uncommitted flag below,
+   * keyed on `[project]` so it runs once per sheet open and never again as
+   * modes are picked or steps walked.
+   *
+   * **A failure here leaves the picker holding `'main'` alone and never
+   * blocks a launch.** That is the strongest form of the silent-failure rule
+   * this file already follows twice: the other two reads exist to warn, so
+   * losing one costs a warning, while this one exists to offer alternatives
+   * to the default — so losing it costs the alternatives and leaves the
+   * default, which is exactly what a run that asked for nothing else wants.
+   * A sheet that refused to start because it could not list branches would
+   * fail every ordinary `main` run over a feature nobody in that run used.
+   *
+   * `'main'` is unioned in rather than assumed present, because a repository
+   * whose trunk is named something else has no `main` branch at all — the
+   * picker still has to offer the value the run will default to, and the
+   * server still refuses it if it does not exist, which is the honest answer.
    */
-  const [branches, setBranches] = useState<string[]>(['main']);
+  const fetchedBranches = useFetched(() => fetchBranches(project), [project]);
+  const branches: string[] =
+    fetchedBranches.status === 'ok'
+      ? fetchedBranches.value!.includes('main')
+        ? fetchedBranches.value!
+        : ['main', ...fetchedBranches.value!]
+      : ['main'];
   /**
    * Which of the three steps is on screen (design §7). Held here rather than
    * derived from anything, because it is the one piece of this sheet's state
@@ -250,10 +276,35 @@ export function OrchestrateSheet({
    * states at once: not asked yet, still in flight, and "the request failed
    * outright" — all three render no hint at all (brief case 7), because a
    * hint is not worth a loading spinner or an error banner bolted onto a
-   * control that launches a run just fine without it. See the effect below
-   * for exactly when this is fetched.
+   * control that launches a run just fine without it.
+   *
+   * The data source — fetched while `mergeMode` is anything
+   * but `'branch'` (brief case 6: branch mode fetches nothing at all). `pr`
+   * counts with `merge`: a pr run asks the classifier for the same `git merge`
+   * at every item, only into its run branch, so the allow rule matters to it
+   * just as much. Branch mode never touches the base, so this project's `git
+   * merge` coverage is none of its business — asking anyway would spend a request
+   * nobody reads the answer to, and risk a hint flashing into view for the
+   * one instant between picking 'merge' and picking 'branch' right back.
+   *
+   * The stale-answer guard is `useFetched`'s (#285), shared with
+   * `LaunchSheet`'s plan read and the two reads below. It matters for two
+   * reasons at once: a slow response landing after the mode has flipped back
+   * to `branch`, or after this sheet has closed, must not land on a render
+   * that no longer wants the answer. A change of mode or project drops the
+   * previous coverage while the new answer is pending — the rule the
+   * uncommitted flag below already follows.
+   *
+   * A failure is deliberately silent (brief case 7) — anything but `ok` reads
+   * as `null`: this hint exists to
+   * make a merge more likely to succeed, not to gate one, and a network
+   * hiccup here must cost the user nothing more than a hint that never shows
+   * up. `error`/`busy` stay `start`'s own state below, untouched either way
+   * — a failed merge-check must never block or blemish a launch that
+   * otherwise works.
    */
-  const [mergeCoverage, setMergeCoverage] = useState<MergeCheckResult | null>(null);
+  const fetchedCoverage = useFetched(mergeMode === 'branch' ? null : () => fetchMergeCheck(project), [mergeMode, project]);
+  const mergeCoverage: MergeCheckResult | null = fetchedCoverage.status === 'ok' ? fetchedCoverage.value : null;
   /**
    * Which of this project's item files differ from the picked `base` (task-32; `main` by default, #254) — the
    * rows whose bytes on disk are not the bytes the run will act on, which is
@@ -266,8 +317,36 @@ export function OrchestrateSheet({
    * anyone a launch. `known: false` (the server could not make the read)
    * renders nothing either; see `uncommittedPaths` below for why that is a
    * separate condition rather than an empty list.
+   *
+   * The uncommitted flag's data source (task-32) — `GET
+   * /api/items/uncommitted`, the same `useFetched` read the merge-check hint
+   * above is, silent failure included.
+   *
+   * Keyed on `[project, base]`, and that is the whole cadence: once per
+   * sheet open plus once per base picked, never again when a mode is picked
+   * or a step is walked. The base is the one thing on this sheet that
+   * changes the answer (#254): a run gates at its base, so "differs from the
+   * run's copy" is a question about THAT ref, and asked about `main` it
+   * flagged the wrong rows for every other base — and the `deselect
+   * uncommitted` chip then dropped items the run would have executed.
+   * Nothing else here can change it, since the rest of the answer is about
+   * someone's working tree and this screen has no writers. Three git reads
+   * per ask is the budget this feature was accepted at (see
+   * uncommitted.util.ts on why it is not memoised server-side); making it
+   * per-step would multiply that by however many times someone walks back
+   * and forth.
+   *
+   * The previous answer is dropped the moment the base changes, before the
+   * new one lands: it is an answer about a different ref, and drawn under the
+   * new base's name it would be exactly the mislabelling this keying fixes.
+   *
+   * A failure is silent for the merge-check hint's reason exactly: this
+   * exists to stop a run wasting a slot, not to gate one, and a network
+   * hiccup here must cost nothing more than a warning that never shows up.
+   * `error`/`busy` stay `start`'s own state, untouched.
    */
-  const [uncommitted, setUncommitted] = useState<UncommittedItems | null>(null);
+  const fetchedUncommitted = useFetched(() => fetchUncommitted(project, base), [project, base]);
+  const uncommitted: UncommittedItems | null = fetchedUncommitted.status === 'ok' ? fetchedUncommitted.value : null;
   const { busy, error, run } = useAction();
   /**
    * Which previewed rows are selected, by item id, or `null` for "the whole
@@ -313,130 +392,6 @@ export function OrchestrateSheet({
 
   // Escape is `FormSheet`'s, not this file's — see its header, and
   // hooks/useDialogEscape.ts for the stack it registers with.
-
-  /**
-   * The setup hint's data source (§6) — fetched while `mergeMode` is anything
-   * but `'branch'` (brief case 6: branch mode fetches nothing at all). `pr`
-   * counts with `merge`: a pr run asks the classifier for the same `git merge`
-   * at every item, only into its run branch, so the allow rule matters to it
-   * just as much. Branch mode never touches the base, so this project's `git
-   * merge` coverage is none of its business — asking anyway would spend a request
-   * nobody reads the answer to, and risk a hint flashing into view for the
-   * one instant between picking 'merge' and picking 'branch' right back.
-   *
-   * `alive` is `LaunchSheet`'s own `fetchAgentPlan` effect's guard (see that
-   * file), restated here rather than shared — this file's own header
-   * comment already explains why a sibling component repeats small idioms
-   * like this instead of factoring them out. It matters for two reasons at
-   * once: a slow response landing after the mode has flipped back to
-   * `branch`, or after this sheet has closed, must not call
-   * `setMergeCoverage` on a render that no longer wants the answer — which
-   * would otherwise be either a stale hint or React's own "cannot update
-   * state on an unmounted component" warning.
-   *
-   * The `.catch` is deliberately silent (brief case 7): this hint exists to
-   * make a merge more likely to succeed, not to gate one, and a network
-   * hiccup here must cost the user nothing more than a hint that never shows
-   * up. `error`/`busy` stay `start`'s own state below, untouched either way
-   * — a failed merge-check must never block or blemish a launch that
-   * otherwise works.
-   */
-  useEffect(() => {
-    if (mergeMode === 'branch') {
-      setMergeCoverage(null);
-      return;
-    }
-    let alive = true;
-    fetchMergeCheck(project)
-      .then((result) => {
-        if (alive) setMergeCoverage(result);
-      })
-      .catch(() => {
-        if (alive) setMergeCoverage(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [mergeMode, project]);
-
-  /**
-   * The uncommitted flag's data source (task-32) — `GET
-   * /api/items/uncommitted`, the same shape the merge-check effect above
-   * takes, `alive` guard and silent `.catch` included, and restated here
-   * rather than factored out for the reason this file's header already gives
-   * about small idioms.
-   *
-   * Keyed on `[project, base]`, and that is the whole cadence: once per
-   * sheet open plus once per base picked, never again when a mode is picked
-   * or a step is walked. The base is the one thing on this sheet that
-   * changes the answer (#254): a run gates at its base, so "differs from the
-   * run's copy" is a question about THAT ref, and asked about `main` it
-   * flagged the wrong rows for every other base — and the `deselect
-   * uncommitted` chip then dropped items the run would have executed.
-   * Nothing else here can change it, since the rest of the answer is about
-   * someone's working tree and this screen has no writers. Three git reads
-   * per ask is the budget this feature was accepted at (see
-   * uncommitted.util.ts on why it is not memoised server-side); making it
-   * per-step would multiply that by however many times someone walks back
-   * and forth.
-   *
-   * The previous answer is dropped the moment the base changes, before the
-   * new one lands: it is an answer about a different ref, and drawn under the
-   * new base's name it would be exactly the mislabelling this keying fixes.
-   *
-   * The `.catch` is silent for the merge-check hint's reason exactly: this
-   * exists to stop a run wasting a slot, not to gate one, and a network
-   * hiccup here must cost nothing more than a warning that never shows up.
-   * `error`/`busy` stay `start`'s own state, untouched.
-   */
-  useEffect(() => {
-    let alive = true;
-    setUncommitted(null);
-    fetchUncommitted(project, base)
-      .then((result) => {
-        if (alive) setUncommitted(result);
-      })
-      .catch(() => {
-        if (alive) setUncommitted(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [project, base]);
-
-  /**
-   * The base picker's options (task-44) — `GET /api/agents/branches`, the
-   * same shape the two effects above take, `alive` guard and silent `.catch`
-   * included, keyed on `[project]` so it runs once per sheet open and never
-   * again as modes are picked or steps walked.
-   *
-   * **A failure here leaves the picker holding `'main'` alone and never
-   * blocks a launch.** That is the strongest form of the silent-`.catch` rule
-   * this file already follows twice: the other two reads exist to warn, so
-   * losing one costs a warning, while this one exists to offer alternatives
-   * to the default — so losing it costs the alternatives and leaves the
-   * default, which is exactly what a run that asked for nothing else wants.
-   * A sheet that refused to start because it could not list branches would
-   * fail every ordinary `main` run over a feature nobody in that run used.
-   *
-   * `'main'` is unioned in rather than assumed present, because a repository
-   * whose trunk is named something else has no `main` branch at all — the
-   * picker still has to offer the value the run will default to, and the
-   * server still refuses it if it does not exist, which is the honest answer.
-   */
-  useEffect(() => {
-    let alive = true;
-    fetchBranches(project)
-      .then((list) => {
-        if (alive) setBranches(list.includes('main') ? list : ['main', ...list]);
-      })
-      .catch(() => {
-        if (alive) setBranches(['main']);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [project]);
 
   /**
    * The queue preview — deliberately client-side and deliberately only an

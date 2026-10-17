@@ -94,8 +94,9 @@ paths: ["client/src/**"]
   [invariants.md](docs/subsystems/invariants.md#queue-wait-is-not-work)
 - **A client poller built on `useCoalescedFetch` never has two of its own requests in flight: its timer is armed by an answer, and a trigger that lands
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
-  of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; no board poller is a `setInterval` (`useNow`'s clock tick is
-  a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
+  of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
+  poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog` and `useOrchestratorArchive` (no `armed`: it never polls) — owning the
+  mount + window-focus triggers once; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
   by every trigger that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout`
   re-armed `intervalMs` after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes;
   nothing re-arms after it) and on unmount, which also drops a queued follow-up. `armed`

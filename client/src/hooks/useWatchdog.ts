@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { fetchWatchdog, updateWatchdogConfig } from '../lib/agents';
-import { useCoalescedFetch } from './useCoalescedFetch';
+import { useRefreshing } from './useRefreshing';
 import { useMountedRef } from './useMountedRef';
 import type { WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
@@ -59,13 +59,13 @@ export type WatchdogSaveError = { field: keyof WatchdogConfig | null; message: s
 /**
  * The watchdog's own status (design §4.2, §6.4) — the one hook both
  * `WatchdogMonitor` (Runs › Watchdog) and `WatchdogGroup` (Settings) read,
- * mount + focus like `useAgents`, plus a live poll — fast while `armed`, slow
+ * mount + focus (`useRefreshing`), plus a live poll — fast while `armed`, slow
  * (`WATCHDOG_IDLE_POLL_MS`) otherwise, since #270: armed-only, the shape
  * `useOrchestratorRuns` established, left an idle monitor blind to a run
  * starting, because nothing on this page fires an event when one does.
  * #277: never two reads of its own in flight — a mount, focus, `reload` or
  * tick that lands mid-flight queues one follow-up behind it
- * (`useCoalescedFetch`); `save` is a write and stays outside that.
+ * (`useRefreshing` → `useCoalescedFetch`); `save` is a write and stays outside that.
  *
  * `live` (task-18) is the second half of that same "only poll when there is
  * something to poll FOR" argument, moved from the hook's own knowledge to
@@ -153,14 +153,14 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
   // reads `'armed'` and `WATCHDOG_IDLE_POLL_MS` after it otherwise (#270 — it used to be armed-ONLY, and an idle monitor never noticed a run starting until
   // a focus event). `useOrchestratorRuns`' own polling makes the related trade — a surface left open and unattended must not spend that whole stretch
   // polling fast for a state that is not moving — but this one cannot go fully quiet, because the phase change it is waiting for has no event on this page.
-  // So `live` alone is this hook's `armed` input to `useCoalescedFetch` (#277), and the phase picks only the period: the render that lands `'armed'`
+  // So `live` alone is this hook's `armed` input to `useRefreshing` (#277), and the phase picks only the period: the render that lands `'armed'`
   // re-arms the pending timer on the fast one, and the render that finds `'idle'`/`'off'` again re-arms it on the slow one. Before the first answer
   // (`status` null, or a failed first read) the slow period applies too, so a monitor whose first GET failed retries rather than sitting on its error until
   // focus. A read already in flight when the phase flips still lands; the timer it arms is the one the next render re-arms.
   //
   // `live` sits in the call rather than wrapping the hook, so a caller that ever flips the flag gets the timer armed or cleared on that render like any
   // other input. `live: false` still means NO timer at either period.
-  const reload = useCoalescedFetch(load, { armed: live, intervalMs: status?.phase === 'armed' ? WATCHDOG_POLL_MS : WATCHDOG_IDLE_POLL_MS });
+  const reload = useRefreshing(load, { armed: live, intervalMs: status?.phase === 'armed' ? WATCHDOG_POLL_MS : WATCHDOG_IDLE_POLL_MS });
 
   const save = useCallback(async (patch: Partial<WatchdogConfig>) => {
     // Cleared synchronously, BEFORE the await: a retry must not sit there
@@ -195,18 +195,6 @@ export function useWatchdog(opts: { live?: boolean } = {}): {
       }
     }
   }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  useEffect(() => {
-    const onFocus = (): void => {
-      void reload();
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [reload]);
 
   return { status, error, saveError, reload, save };
 }

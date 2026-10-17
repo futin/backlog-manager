@@ -200,6 +200,28 @@ describe('ItemModal', () => {
     await waitFor(() => expect(screen.getByText('item file unavailable')).toBeInTheDocument());
   });
 
+  // #285: the body is a `useFetched` read keyed on the path. Opening another item must drop the first body on the render that carries the new path —
+  // not keep drawing it until the second answer happens to land.
+  it('opening a second item clears the first body before the second one lands', async () => {
+    let releaseSecond: (text: string) => void = () => {};
+    (global.fetch as jest.Mock).mockImplementation((url: string) =>
+      url.includes(encodeURIComponent(ITEM.path))
+        ? Promise.resolve({ ok: true, text: () => Promise.resolve('first body') } as Response)
+        : new Promise<Response>((resolve) => {
+            releaseSecond = (text) => resolve({ ok: true, text: () => Promise.resolve(text) } as Response);
+          })
+    );
+    const { rerender } = render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
+    await screen.findByText('first body');
+
+    rerender(<ItemModal item={{ ...ITEM, id: 'bug-3', path: '/abs/other/backlog/bugs/open/bug-3.md' }} hues={HUES} onClose={() => {}} />);
+    expect(screen.queryByText('first body')).not.toBeInTheDocument();
+    expect(screen.getByText('loading…')).toBeInTheDocument();
+
+    await act(async () => releaseSecond('second body'));
+    expect(screen.getByText('second body')).toBeInTheDocument();
+  });
+
   it('drops raw HTML instead of passing it to dangerouslySetInnerHTML', async () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({

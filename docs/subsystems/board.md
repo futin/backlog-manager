@@ -382,15 +382,20 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `lib/agents.ts` — same-origin fetches against `/api`.
 - `lib/board-sort.ts` (#258) — the Board's sort pipeline, pure: `SortKey`/`SortDir`, `NATURAL_DIR`, `COMPARATORS`, `resolveSortKey`, `liveRank` and
   `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
-- `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns` and
-  `useWatchdog`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
+- `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns`,
+  `useWatchdog` and `useOrchestratorArchive`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
+- `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those five pollers go through.
+- `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
+  superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan, `OrchestrateSheet`'s merge-check,
+  uncommitted flag and branch list, `RunDetail`'s archived run and `JiraIssueModal`'s detail all read through it.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
 - `hooks/useAction.ts` — the one home of a click-fired mutation's in-flight guard, `busy`, `error` and message mapping (#286, bug-19's layer 1): `RunControls`,
   `LaunchSheet`, `OrchestrateSheet` and `ClaimRelease` keep only their own success and refusal branches.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` entry is present, plus a grace window after a Resume click.
-- `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat.
+- `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat. Coalesced since #285: a focus or
+  `refresh()` mid-flight folds into one follow-up.
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop. Mount and window focus, plus a 5s poll
   while the sweeper reads `armed` and a 15s one otherwise (#270 — armed-only left an idle page blind to a run starting); Settings' `live: false` polls at
   neither.

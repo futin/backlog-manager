@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react';
-
+import { useFetched } from './useFetched';
 import type { ProjectSummary } from '../../../shared/types';
+
+type Sources = ReadonlyMap<string, ProjectSummary['source']>;
+
+/** One frozen empty map, so "nothing known" has a stable identity across renders. */
+const EMPTY_MAP: Sources = Object.freeze(new Map<string, ProjectSummary['source']>());
 
 /**
  * project path → its `ProjectSummary.source` (task-48), read once on mount.
@@ -15,21 +19,18 @@ import type { ProjectSummary } from '../../../shared/types';
  * and a page that could not load it must not lose anything else. Plain `fetch`
  * rather than a `lib/agents` helper because this is not an agents call.
  */
-export function useProjectSources(): ReadonlyMap<string, ProjectSummary['source']> {
-  const [sources, setSources] = useState<ReadonlyMap<string, ProjectSummary['source']>>(new Map());
-  useEffect(() => {
-    let cancelled = false;
-    Promise.resolve()
-      .then(() => fetch('/api/projects'))
-      .then((res) => (res.ok ? (res.json() as Promise<unknown>) : []))
-      .then((body) => {
-        if (cancelled || !Array.isArray(body)) return;
-        setSources(new Map((body as ProjectSummary[]).filter((p) => p && typeof p.path === 'string').map((p) => [p.path, p.source])));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return sources;
+export function useProjectSources(): Sources {
+  // A non-OK response or a non-array body reads as nothing known, which is the empty map below.
+  const { value } = useFetched(
+    () =>
+      fetch('/api/projects')
+        .then((res) => (res.ok ? (res.json() as Promise<unknown>) : []))
+        .then((body): Sources | null =>
+          Array.isArray(body)
+            ? new Map((body as ProjectSummary[]).filter((p) => p && typeof p.path === 'string').map((p) => [p.path, p.source]))
+            : null
+        ),
+    []
+  );
+  return value ?? EMPTY_MAP;
 }

@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment } from 'react';
 
+import { useFetched } from '../../hooks/useFetched';
 import { useNow } from '../../hooks/useNow';
 import { fetchArchivedRun } from '../../lib/agents';
 import { projectLabel } from '../../lib/project-label';
@@ -54,7 +55,7 @@ import type { OrchestratorArchiveRun, OrchestratorRun } from '../../../../shared
  * run object — the live poll's own entry for this exact runId, strictly
  * fresher than `summary` because `useOrchestratorRuns` polls every five
  * seconds while `useOrchestratorArchive` (the source of `summary`) fetches
- * only on mount and window focus. `fetchedRun` (state, below) is a third
+ * only on mount and window focus. `fetchedRun` (`useFetched`, below) is a third
  * view: the full run file this pane fetches on demand for an ARCHIVED
  * selection, which lands strictly after `summary` was read and is therefore
  * at least as fresh — and which is the ONLY thing that can ever correct a
@@ -130,58 +131,24 @@ export function RunDetail({
   resuming: boolean;
   onChanged: (kind: RunControlsChange) => void;
 }): JSX.Element {
-  // Holds the tail-bearing run this pane fetched for an ARCHIVED selection —
-  // null before the fetch lands (or when this selection is live-backed and
-  // never needs one at all). Never holds anything for the live-backed case:
-  // `live` itself already carries tails, so there is nothing this state
-  // needs to remember for that path.
-  const [fetchedRun, setFetchedRun] = useState<OrchestratorRun | null>(null);
-  const [fetchFailed, setFetchFailed] = useState(false);
-
-  useEffect(() => {
-    // A new selection lands here as new `summary`/`live` props on the SAME
-    // component instance (RunsView does not remount RunDetail per row — see
-    // the stale-guard note below for why that matters), so any tail state
-    // left over from the PREVIOUS selection has to be cleared immediately,
-    // not just overwritten once a new fetch happens to resolve.
-    setFetchedRun(null);
-    setFetchFailed(false);
-
-    // Live-backed: `live` already carries tails, so there is nothing to
-    // fetch. Depending on `live !== null` rather than on `live` itself keeps
-    // this effect from re-running on every 5s poll tick while a live run
-    // stays live-backed (a new object arrives each time, but the FACT this
-    // effect cares about — is there a fetch to do at all — has not changed)
-    // while still re-arming correctly the moment a run's liveness actually
-    // flips (it goes stale, or finishes) with the same runId still selected.
-    if (live !== null) return;
-    // task-48: a remote row always carries its entry as `live`, so the line
-    // above already returns for one; this states the rule rather than leaning
-    // on that — there is no run file on this machine to ask for.
-    if (remote) return;
-
-    // The stale-response guard the brief calls for: the selection can move
-    // on to a different run before this fetch resolves (a person clicking
-    // quickly down the list), and a belated resolution for a runId that is
-    // no longer what `summary` names must never land in state. A plain
-    // boolean closed over by this effect run — flipped in its own cleanup —
-    // is enough: React calls that cleanup before running the effect again
-    // for a new [project, runId] pair, or on unmount, either of which is
-    // exactly the moment a resolution for the OLD pair should be discarded.
-    let cancelled = false;
-    fetchArchivedRun(summary.project, summary.runId)
-      .then((run) => {
-        if (cancelled) return;
-        setFetchedRun(run);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setFetchFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [summary.project, summary.runId, live !== null, remote]);
+  // The tail-bearing run this pane fetched for an ARCHIVED selection — null before the fetch lands, and never anything for a live-backed selection:
+  // `live` itself already carries tails, so there is nothing to fetch (`load` is null, `useFetched`'s skip case).
+  //
+  // A new selection lands here as new `summary`/`live` props on the SAME component instance (RunsView does not remount RunDetail per row), so the
+  // previous selection's tails must be gone on the very render that carries the new key — not overwritten once the new fetch happens to resolve — and a
+  // belated answer for a runId the selection has already moved past (a person clicking quickly down the list) must never land. Both are `useFetched`'s
+  // (#285): the key change reads pending with no value in the same commit, and a superseded answer sets nothing.
+  //
+  // Keyed on `live !== null` rather than on `live` itself, so this read does not re-run on every 5s poll tick while a run stays live-backed (a new object
+  // arrives each time, but the FACT this read cares about — is there a fetch to do at all — has not changed), while still re-arming the moment a run's
+  // liveness actually flips (it goes stale, or finishes) with the same runId still selected. task-48: a remote row always carries its entry as `live`, so
+  // that already skips one; `remote` states the rule rather than leaning on it — there is no run file on this machine to ask for.
+  const archived = useFetched(
+    live !== null || remote ? null : () => fetchArchivedRun(summary.project, summary.runId),
+    [summary.project, summary.runId, live !== null, remote]
+  );
+  const fetchedRun: OrchestratorRun | null = archived.value;
+  const fetchFailed = archived.status === 'failed';
 
   // One clock reading for this render, matching RunDrawer.tsx's own rule
   // (restated there in full): every derivation below that needs "now"

@@ -5,7 +5,9 @@ import { act, renderHook } from '@testing-library/react';
 
 import { useAgents } from '../client/src/hooks/useAgents';
 import { BOARD_TRACKER_POLL_MS, useBoard } from '../client/src/hooks/useBoard';
+import { useOrchestratorArchive } from '../client/src/hooks/useOrchestratorArchive';
 import { POLL_MS, useOrchestratorRuns } from '../client/src/hooks/useOrchestratorRuns';
+import { useRefreshing } from '../client/src/hooks/useRefreshing';
 import { useWatchdog, WATCHDOG_IDLE_POLL_MS, WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
@@ -29,7 +31,7 @@ type Kind = 'live' | 'quiet';
 
 interface Subject {
   name: string;
-  /** null: no clock at all (`useAgents`) — mount and focus only. */
+  /** null: no clock at all (`useAgents`, `useOrchestratorArchive`) — mount and focus only. */
   periodMs: number | null;
   /** How many `fetch` calls one request makes (`useBoard` reads `items` and `projects` as a pair). */
   perRequest: number;
@@ -106,6 +108,14 @@ const SUBJECTS: Subject[] = [
     perRequest: 1,
     mount: () => renderHook(() => useAgents()),
     body: () => AGENTS
+  },
+  {
+    // #285: on the coalesced poller since `useRefreshing`. Never polls — it must stay out of POLLERS and GATED.
+    name: 'useOrchestratorArchive',
+    periodMs: null,
+    perRequest: 1,
+    mount: () => renderHook(() => useOrchestratorArchive()),
+    body: () => ({ runs: [] })
   }
 ];
 const POLLERS = SUBJECTS.filter((s) => s.periodMs !== null);
@@ -114,12 +124,12 @@ const POLLERS = SUBJECTS.filter((s) => s.periodMs !== null);
 const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog');
 
 /** A `fetch` whose every call hangs until the test answers it. `answer` settles everything outstanding with the subject's body for `kind`. */
-function controlledFetch(subject: Subject): { fn: jest.Mock; answer: (kind: Kind) => Promise<void> } {
-  const outstanding: { url: string; settle: (body: unknown) => void }[] = [];
+function controlledFetch(subject: Subject): { fn: jest.Mock; answer: (kind: Kind) => Promise<void>; fail: () => Promise<void> } {
+  const outstanding: { url: string; settle: (body: unknown) => void; reject: (e: Error) => void }[] = [];
   const fn = jest.fn(
     (url: string) =>
-      new Promise<Response>((resolve) => {
-        outstanding.push({ url, settle: (body) => resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response) });
+      new Promise<Response>((resolve, reject) => {
+        outstanding.push({ url, settle: (body) => resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response), reject });
       })
   );
   global.fetch = fn as unknown as typeof fetch;
@@ -128,6 +138,12 @@ function controlledFetch(subject: Subject): { fn: jest.Mock; answer: (kind: Kind
     async answer(kind) {
       const batch = outstanding.splice(0);
       for (const call of batch) call.settle(subject.body(call.url, kind));
+      await flush();
+    },
+    /** Rejects everything outstanding, as a dropped connection would. */
+    async fail() {
+      const batch = outstanding.splice(0);
+      for (const call of batch) call.reject(new Error('network down'));
       await flush();
     }
   };
@@ -259,6 +275,58 @@ describe('useOrchestratorRuns — the resume-click refresh coalesces too (#277 c
 
     await f.answer('quiet');
     expect(f.fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('useOrchestratorRuns — a failed poll keeps the last good runs and re-arms (#260)', () => {
+  it('a rejected tick leaves `runs` as they were, and exactly one further request follows POLL_MS after the rejection settled', async () => {
+    const subject = SUBJECTS[0];
+    const f = controlledFetch(subject);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await f.answer('live');
+    const good = result.current.runs;
+    expect(good).toHaveLength(1);
+
+    await advance(POLL_MS);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    await f.fail();
+    expect(result.current.runs).toBe(good);
+
+    // The chain re-arms on a failure, not only on success — measured from the rejection, not from the tick that started it.
+    await advance(POLL_MS - 1);
+    expect(f.fn).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(f.fn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('useOrchestratorArchive — never polls (#285)', () => {
+  it('after its first answer settles, a minute of fake time asks nothing further', async () => {
+    const subject = SUBJECTS.find((s) => s.name === 'useOrchestratorArchive')!;
+    const f = controlledFetch(subject);
+    subject.mount();
+    await f.answer('live');
+    expect(f.fn).toHaveBeenCalledTimes(1);
+    await advance(60_000);
+    expect(f.fn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useRefreshing — mount and focus are its two triggers (#285)', () => {
+  it('calls the task once on mount, once per focus, and never after unmount', async () => {
+    const task = jest.fn(() => Promise.resolve());
+    const { unmount } = renderHook(() => useRefreshing(task));
+    expect(task).toHaveBeenCalledTimes(1);
+    await flush();
+
+    focus();
+    expect(task).toHaveBeenCalledTimes(2);
+    await flush();
+
+    unmount();
+    focus();
+    await flush();
+    expect(task).toHaveBeenCalledTimes(2);
   });
 });
 
