@@ -342,8 +342,15 @@ export function deriveRemoteRuns(input: DeriveRemoteRunsInput): RemoteRun[] {
 
     let updated = -Infinity;
     let updatedAt = run.startedAt;
+    // A `stale` release is NOT this run's stamp: `GithubSource.claim` writes it
+    // when ANOTHER session retires a claim it judged dead, and a person's
+    // release route writes it for the same judgement. Counting it made a run
+    // that died 19s after its claim read, a day later, as last heard from the
+    // minute some other driver reaped it — "last heartbeat" and elapsed both
+    // stretched to the reaper's clock (2026-10-17, run-20261016-163408).
     for (const { record } of all) {
-      for (const stamp of [record.heartbeat, record.released?.at, record.finished?.at]) {
+      const released = record.released?.reason === 'stale' ? undefined : record.released?.at;
+      for (const stamp of [record.heartbeat, released, record.finished?.at]) {
         const t = ms(stamp);
         if (t !== null && t > updated) {
           updated = t;
