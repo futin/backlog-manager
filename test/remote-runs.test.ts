@@ -148,13 +148,25 @@ describe('deriveRemoteRuns', () => {
     expect(runs[0].attention).toEqual([{ id: '5', kind: 'parked', detail: 'merge conflict in a.ts' }]);
   });
 
-  it('R-11: updatedAt is the latest of every heartbeat, released.at and finished.at', () => {
+  it('R-11: updatedAt is the latest of every heartbeat, non-stale released.at and finished.at', () => {
     const latest = ago(0.5);
     const runs = derive([
       claimComment(3, { heartbeat: ago(8), released: { at: ago(4), reason: 'merged', by: 'd' } }),
       claimComment(5, { heartbeat: ago(6), released: { at: ago(5), reason: 'skipped', by: 'd' }, finished: { at: latest, status: 'done' } })
     ]);
     expect(runs[0].updatedAt).toBe(latest);
+  });
+
+  it('R-11b: a stale release is the retirer\'s stamp, not the run\'s, and never moves updatedAt', () => {
+    // The 2026-10-17 shape: a run on another machine died 19s after its claim,
+    // and a day later this machine's driver retired that claim as stale. The
+    // card read the retirement as the dead run's last heartbeat.
+    const runs = derive([
+      claimComment(3, { heartbeat: ago(1590), released: { at: ago(1), reason: 'stale', by: 'other-driver' }, state: { stage: 'dispatched' } })
+    ]);
+    expect(runs[0].updatedAt).toBe(ago(1590));
+    expect(runs[0].status).toBe('running');
+    expect(runs[0].fresh).toBe(false);
   });
 
   it('R-12: project is the local path passed in, never anything from a claim', () => {
