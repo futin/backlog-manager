@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<!-- tutor-deck -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Release Process</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1d1f; --muted: #5f6368; --line: #d9d7d0;
+    --accent: #2f6f4f; --accent-soft: #e3efe8; --code-bg: #f1efe8; --good: #2f6f4f; --bad: #a33a2a;
+    --good-soft: #e3efe8; --bad-soft: #f6e4e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141516; --card: #1d1f21; --ink: #ebeae6; --muted: #a3a6aa; --line: #34373a;
+      --accent: #7cc4a0; --accent-soft: #22342b; --code-bg: #26292b; --good: #7cc4a0; --bad: #e58a7a;
+      --good-soft: #22342b; --bad-soft: #3a2522;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px; line-height: 1.55;
+  }
+  .wrap { max-width: 100%; padding: 12px 16px 96px; }
+  .progress { position: sticky; top: 0; height: 4px; background: var(--line); z-index: 2; }
+  .progress-fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .card { display: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 18px; margin-top: 12px; }
+  .card.on { display: block; }
+  .eyebrow { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1, h2 { margin: 0 0 12px; line-height: 1.25; }
+  h1 { font-size: 24px; } h2 { font-size: 20px; }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 22px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+  pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; background: var(--code-bg); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; white-space: pre; }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 12px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  details { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details[open] summary { margin-bottom: 8px; }
+  .diagram { margin: 4px 0 14px; color: var(--ink); }
+  .diagram svg { width: 100%; height: auto; display: block; }
+  .quiz-prompt { font-weight: 600; }
+  .quiz-option { margin: 0 0 8px; }
+  .quiz-option-btn {
+    width: 100%; min-height: 48px; text-align: left; font: inherit; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; cursor: pointer;
+  }
+  .quiz-option-btn:disabled { cursor: default; }
+  .quiz-feedback { display: none; margin: 6px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 15px; }
+  .quiz-option.revealed .quiz-feedback { display: block; }
+  .quiz-option.revealed[data-correct="true"] .quiz-feedback { background: var(--good-soft); border-left: 3px solid var(--good); }
+  .quiz-option.revealed[data-correct="false"] .quiz-feedback { background: var(--bad-soft); border-left: 3px solid var(--bad); }
+  .quiz-option.revealed .quiz-option-btn { border-color: var(--accent); }
+  .card-divider { text-align: center; padding: 40px 18px; }
+  .card-divider .from { color: var(--muted); }
+  .recap-list { list-style: none; padding: 0; }
+  .recap-list li { margin: 0 0 8px; }
+  .recap-btn { width: 100%; min-height: 44px; text-align: left; font: inherit; color: var(--ink); background: var(--accent-soft); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  .score { font-size: 28px; font-weight: 700; color: var(--accent); }
+  .muted { color: var(--muted); font-size: 14px; }
+  .nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 12px; padding: 12px 16px; background: var(--bg); border-top: 1px solid var(--line); z-index: 2; }
+  .nav button { flex: 1; min-height: 48px; font: inherit; font-weight: 600; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  .nav button#next { background: var(--accent); color: var(--card); border-color: var(--accent); }
+  .nav button:disabled { opacity: .4; cursor: default; }
+  @media (min-width: 760px) {
+    .wrap { max-width: 760px; margin: 0 auto; }
+    .card { padding: 28px 32px; }
+    pre { font-size: 13px; }
+    .nav { max-width: 760px; margin: 0 auto; }
+  }
+</style>
+</head>
+<body>
+<div class="progress"><div class="progress-fill" id="bar"></div></div>
+<div class="wrap">
+
+<!-- ───────────── Mental model ───────────── -->
+<div class="card card-mental">
+  <p class="eyebrow">The mental model</p>
+  <h1>One baton: the PR title</h1>
+  <p>The pipeline is a relay with one baton, <strong>the PR title</strong>. You write it once, for example <code>fix(orchestrator): …</code>. CI checks that it has
+    the right shape. The merge carries it onto <code>main</code>. The release run reads it to decide whether there's a new version and how big the bump is. The annotated git tag
+    then stores it permanently, and the board reads it back out of your checkout's tags. No file stores "the current version": nothing bumps <code>package.json</code>
+    and there's no CHANGELOG. <strong>The tag is the record.</strong> That's how #295 became <code>v0.3.1</code> without anyone typing "0.3.1".</p>
+  <div class="diagram" aria-label="The release pipeline from PR to board">
+    <svg viewBox="0 0 340 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="20" y="10" width="300" height="56" rx="8"/>
+        <rect x="20" y="96" width="300" height="70" rx="8"/>
+        <rect x="20" y="196" width="300" height="56" rx="8"/>
+        <rect x="20" y="282" width="300" height="70" rx="8"/>
+        <rect x="20" y="382" width="300" height="56" rx="8"/>
+        <rect x="20" y="468" width="300" height="80" rx="8"/>
+        <line x1="170" y1="66" x2="170" y2="94" marker-end="url(#ar)"/>
+        <line x1="170" y1="166" x2="170" y2="194" marker-end="url(#ar)"/>
+        <line x1="170" y1="252" x2="170" y2="280" marker-end="url(#ar)"/>
+        <line x1="170" y1="352" x2="170" y2="380" marker-end="url(#ar)"/>
+        <line x1="170" y1="438" x2="170" y2="466" marker-end="url(#ar)"/>
+      </g>
+      <g fill="currentColor" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="12.5" text-anchor="middle">
+        <text x="170" y="34" font-weight="700">1 · PR opened / pushed / title edited</text>
+        <text x="170" y="53">title: fix(orchestrator): … (#295)</text>
+        <text x="170" y="120" font-weight="700">2 · ci.yml → release-kit ci-node.yml@v1</text>
+        <text x="170" y="139">ci / checks · ci / pr-title · ci / skills</text>
+        <text x="170" y="156">(the gate — required once the ruleset is on)</text>
+        <text x="170" y="220" font-weight="700">3 · squash-merge</text>
+        <text x="170" y="239">one commit on main, merge commit = 8efdc26</text>
+        <text x="170" y="306" font-weight="700">4 · push to main → release.yml</text>
+        <text x="170" y="325">→ release-kit release.yml@v1 → release-cli.js</text>
+        <text x="170" y="342">every first-parent commit since the last tag</text>
+        <text x="170" y="406" font-weight="700">5 · annotated tag v0.3.1, then GitHub Release</text>
+        <text x="170" y="425">subject · notes · Release-* trailers</text>
+        <text x="170" y="492" font-weight="700">6 · this machine: git fetch / pull</text>
+        <text x="170" y="511">GET /api/releases runs git on the checkout</text>
+        <text x="170" y="530">→ rail chip (describe HEAD) + What's new drawer</text>
+      </g>
+    </svg>
+  </div>
+</div>
+
+<!-- ───────────── Section 1 ───────────── -->
+<section id="s1">
+  <div class="card card-concept">
+    <p class="eyebrow">Section 1 · The gate</p>
+    <h2>Thin callers and reusable workflows</h2>
+    <pre>// .github/workflows/ci.yml:19-28 (compacted here)
+jobs:
+  ci:
+    uses: futin/release-kit/.github/workflows/ci-node.yml@v1
+    with:
+      check-commands: |
+        pnpm typecheck
+        pnpm build
+        pnpm test</pre>
+    <p>A job whose <code>uses:</code> points at another repo's workflow calls a <strong>reusable workflow</strong>, meaning one declared with <code>on: workflow_call</code>. It runs as if it
+      lived here, using this repo's code and permissions. release-kit's <code>ci-node.yml</code> defines three jobs: <code>checks</code> (install, then each of your commands),
+      <code>pr-title</code> (runs <code>scripts/pr-title.mjs</code> on the title, on PRs only) and <code>skills</code> (a no-op here, since <code>pnpm test</code> already runs
+      that suite). GitHub reports each job as <code>&lt;caller job id&gt; / &lt;called job id&gt;</code>, which is where <code>ci / checks</code>, <code>ci / pr-title</code> and <code>ci / skills</code> come from.</p>
+    <p><strong>Why do it this way?</strong> The dashboard and backlog-manager share one gate. A fix in release-kit, re-tagged as <code>v1</code>, reaches both repos. The obvious beginner move is
+      to copy the YAML into each repo, and the copies would slowly drift apart.</p>
+    <p><strong>The trade-off.</strong> Those three strings are now a contract. The <code>main-pr-only</code> ruleset requires them by exact name. A required check that never reports
+      leaves every PR pending, and the ruleset allows no bypass.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">Someone renames the caller job in <code>ci.yml</code> from <code>ci:</code> to <code>gate:</code> while the <code>main-pr-only</code> ruleset is active. What happens to the next PR?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">The ruleset follows the rename to <code>gate / checks</code></button>
+        <p class="quiz-feedback">Tempting, but a ruleset matches check names as plain strings. It has no idea which workflow file produced a check, so nothing tells it that
+          <code>gate / checks</code> now stands where <code>ci / checks</code> used to.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">CI fails red with a call error</button>
+        <p class="quiz-feedback"><code>ci-node.yml</code> never sees what the caller's job is called. It runs the same three jobs for any job id, so the checks would run and pass,
+          just under different names that nobody requires.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">The PR stays pending forever</button>
+        <p class="quiz-feedback">Correct. The checks now report as <code>gate / …</code>. The ruleset keeps waiting for <code>ci / …</code>, which never arrives, and with an empty bypass
+          list nobody can merge past it.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">The PR merges with no checks at all</button>
+        <p class="quiz-feedback">A required check that never reports isn't treated as skipped. Only a job that ran and was skipped reports success. A check that never appears
+          keeps the PR waiting.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 1 · The gate</p>
+    <h2>The title rule, and why the title rather than the commits</h2>
+    <pre>// release-kit src/conventional.ts:4-6 (@v1)
+const RELEASING = /^(feat|fix|perf)(?:\(([a-z0-9-]+)\))?(!)?: (.+)$/;
+const SILENT = /^(docs|chore|test|refactor|ci|build)(?:\(([a-z0-9-]+)\))?: (.+)$/;
+const SILENT_BREAKING = /^(docs|chore|test|refactor|ci|build)(?:\([a-z0-9-]+\))?!: /;</pre>
+    <p>The <strong>releasing</strong> types are <code>feat</code>, <code>fix</code> and <code>perf</code>, and they can carry <code>!</code> for breaking. The <strong>silent</strong> types are
+      <code>docs</code>, <code>chore</code>, <code>test</code>, <code>refactor</code>, <code>ci</code> and <code>build</code>. They're legal but cut nothing, so <code>chore!:</code> is rejected:
+      a breaking change that never ships has no version for anyone to see. The scope is optional and must be lowercase <code>[a-z0-9-]</code>, and an empty description fails.</p>
+    <p><strong>Why the title?</strong> A branch carries "wip" and "address review" commits. A squash merge collapses them into one commit whose subject is the PR title, so the title is the one
+      sentence that survives. Linting every commit message would nag you about history that's about to be thrown away.</p>
+    <p><strong>The <code>edited</code> trigger</strong> (<code>ci.yml:7</code>). Fixing a title re-runs the whole workflow, <code>checks</code> included. If <code>checks</code> were skipped on edits,
+      the skipped job would report success for the same commit, and a red PR would turn green just because it was retitled.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">Which title does <code>ci / pr-title</code> reject?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn"><code>perf(board)!: virtualise the card list</code></button>
+        <p class="quiz-feedback">Accepted: <code>perf</code> is a releasing type, so it may carry <code>!</code>. Once merged it cuts a breaking release, which bumps the minor, not the
+          major, while the version is still 0.x.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn"><code>chore!: drop node 20 support</code></button>
+        <p class="quiz-feedback">Correct. <code>!</code> is allowed only on feat, fix and perf. A breaking chore would be a breaking change that never gets a version, so
+          <code>SILENT_BREAKING</code> rejects it.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn"><code>refactor(jira): split the poller</code></button>
+        <p class="quiz-feedback">Accepted: <code>refactor</code> is a silent type with a lowercase scope. It passes the gate, and when it merges the release run logs that it
+          does not cut a release.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn"><code>fix: handle an empty PR body</code></button>
+        <p class="quiz-feedback">Accepted: the scope is optional, and the description after <code>": "</code> isn't empty. Merged, this one would cut a patch release from
+          the newest tag.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-qa">
+    <p class="eyebrow">Questions you might ask</p>
+    <details class="qa-item">
+      <summary>Why does <code>ci / pr-title</code> show green on a push to main?</summary>
+      <p>A push has no PR, so there's no title to check. The job carries <code>if: github.event_name == 'pull_request'</code> (release-kit <code>ci-node.yml:82</code>), and a skipped
+        job reports success. The kit's comment calls this "right here and only here". On a PR, the same skip trick would be the hole the <code>edited</code> trigger exists to close.</p>
+    </details>
+    <details class="qa-item">
+      <summary>Why does <code>ci / skills</code> exist if it does nothing here?</summary>
+      <p>The ruleset in release-kit is shared, so it requires all three checks in every app. This repo passes no <code>skills-command</code>, because <code>pnpm test</code> already runs the
+        node skills suite (<code>scripts/test-all.mjs</code>). The job's <code>Decide</code> step runs and reports green, rather than being absent, which would leave PRs pending
+        (<code>docs/workflows/ci.md:15-16</code>).</p>
+    </details>
+  </div>
+</section>
+
+<!-- ───────────── Section 2 ───────────── -->
+<section id="s2">
+  <div class="card card-divider">
+    <p class="from">Finished: The gate</p>
+    <h2>Next: The merge</h2>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 2 · The merge</p>
+    <h2>How a commit on main finds its PR</h2>
+    <pre>// release-kit src/release.ts:60-66 (@v1, compacted here)
+async function findPull(github, cwd, sha) {
+  const listed = (await github.pullsForCommit(sha)).find((p) =&gt; p.merged &amp;&amp; p.mergeCommitSha === sha);
+  if (listed) return listed;
+  const n = /\(#(\d+)\)$/.exec(await git(cwd, ['log', '-1', '--format=%s', sha]));
+  const pull = n ? await github.getPull(Number(n[1])) : null;
+  return pull?.merged &amp;&amp; pull.mergeCommitSha === sha ? pull : null;
+}</pre>
+    <p>After the merge, the engine looks at <em>commits</em> on <code>main</code>, not PRs. For each commit it asks GitHub which PRs contain it, and accepts one only if GitHub recorded this very sha
+      as that PR's merge commit. #295 was squash-merged and landed as one commit, <code>8efdc26</code>. #291 used "Create a merge commit" and produced <code>f42d720 Merge pull request #291…</code>.
+      Both are their PR's recorded merge commit, so both work. The title comes from the API, not the commit subject: <code>8efdc26</code>'s subject got shortened, yet the tag carries the full title.</p>
+    <p><strong>What fails:</strong> <code>c94807d Merge branch 'main' of …</code>, a local <code>git pull</code> merge pushed straight to <code>main</code>. No PR claims it, so the run logged
+      <code>::warning::no PR for c94807d…</code> and skipped it. Failing the run instead would let one stray push freeze every later release.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">An orchestrator run in <code>merge</code> mode merges item 300, a <code>fix</code>, locally as <code>Merge backlog/300: …</code> and pushes <code>main</code>. What does the next release run do with that commit?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Releases it as a patch, from the subject's <code>fix</code></button>
+        <p class="quiz-feedback">The engine never reads a type from a commit subject, only from the title of the PR it found for that commit. With no PR, there's no title to
+          read, whatever the subject says.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Fails the whole run</button>
+        <p class="quiz-feedback">Failing would let one stray push freeze every later release. <code>release.ts:96-100</code> deliberately warns and moves on, so the commits after it
+          still get released as usual.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Finds #300 through the <code>(#N)</code> fallback</button>
+        <p class="quiz-feedback">The fallback fires only for a subject ending in <code>(#N)</code>, and even then the PR must have been merged as this exact sha.
+          <code>Merge backlog/300: …</code> meets neither condition.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">Warns <code>no PR for &lt;sha&gt;</code> and skips it</button>
+        <p class="quiz-feedback">Correct. No PR claims the commit, so it gets the warning and is skipped. Its code still ships inside the next tag. It just never gets a version
+          entry or notes of its own.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 2 · The merge</p>
+    <h2>The ruleset, and why it isn't on yet</h2>
+    <pre>// release-kit rulesets/main.json (@v1, compacted here)
+"bypass_actors": [],
+"rules": [
+  { "type": "pull_request" },              // no direct pushes, 0 approvals needed
+  { "type": "required_status_checks",      // the three ci / … contexts,
+    "parameters": { "strict_required_status_checks_policy": true } },  // branch up to date
+  { "type": "required_linear_history" },   // no merge commits on main
+  { "type": "non_fast_forward" }, { "type": "deletion" }
+]</pre>
+    <p><code>scripts/apply-repo-settings.sh futin/backlog-manager</code> applies the ruleset and switches the repo to <strong>squash-only</strong> merges. Today the repo allows all three merge styles,
+      which is how #291 landed as a merge commit. Squash plus linear history means one PR becomes exactly one commit on <code>main</code>, its subject is the PR title, and <code>findPull</code>
+      always finds a match. A rebase merge would put several commits on <code>main</code>, and all but the last would hit <code>no PR for &lt;sha&gt;</code>.</p>
+    <p><strong>Why it waits</strong> (<code>docs/workflows/ci.md:46-60</code>). In <code>merge</code> mode, the current default, <code>backlog-orchestrate</code> pushes <code>main</code> after every item.
+      Under the ruleset that push is refused and the run parks. So the order is: switch the default to <code>pr</code> mode, prove one PR-mode run, and only then apply the ruleset.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">The ruleset is on, and you <code>git push origin main</code> with a docs fix. What happens?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Accepted, because docs cut no release</button>
+        <p class="quiz-feedback">The ruleset guards the branch, not release types. The <code>pull_request</code> rule covers every change to <code>main</code>, whatever its title
+          would have been.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Accepted, then the release run fails</button>
+        <p class="quiz-feedback">It never gets that far, because the server refuses the push. Even a commit with no PR earns only a warning from the release run, never a
+          failure.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">Refused, even for the repo owner</button>
+        <p class="quiz-feedback">Correct. <code>pull_request</code> means changes reach <code>main</code> only through a PR, and <code>bypass_actors: []</code> exempts nobody, not even
+          the owner or an admin.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Accepted if its checks passed elsewhere</button>
+        <p class="quiz-feedback">Required checks gate a PR's merge, not a push. With the <code>pull_request</code> rule on, there's no direct-push path for green checks to
+          unlock.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-qa">
+    <p class="eyebrow">Questions you might ask</p>
+    <details class="qa-item">
+      <summary>Is there any way to push a small docs change straight to main?</summary>
+      <p>Under the shared ruleset, no. The intended route is a quick PR: <code>gh pr create --fill</code> then <code>gh pr merge --squash --auto</code>. Zero approvals are required, so it
+        merges itself once the checks pass (auto-merge has to be enabled for the repo). Adding yourself to <code>bypass_actors</code> works, but it drifts from release-kit's
+        <code>rulesets/main.json</code>, and the orchestrator pushes with your credentials, so it would bypass too. <code>paths-ignore</code> for docs is a trap: the required check never reports.</p>
+    </details>
+    <details class="qa-item">
+      <summary>Why squash-only rather than rebase merges, which also keep history linear?</summary>
+      <p>Both are linear, but a rebase merge puts every branch commit on <code>main</code>. GitHub records only one of them as the PR's merge commit, so <code>findPull</code>
+        (<code>release.ts:60-66</code>) matches that one and logs <code>no PR for &lt;sha&gt;</code> for the rest. Squash gives exactly one commit per PR, whose subject is the title CI already checked.</p>
+    </details>
+  </div>
+</section>
+
+<!-- ───────────── Section 3 ───────────── -->
+<section id="s3">
+  <div class="card card-divider">
+    <p class="from">Finished: The merge</p>
+    <h2>Next: The release run</h2>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 3 · The release run</p>
+    <h2>What runs, where, and with which token</h2>
+    <pre>// .github/workflows/release.yml:7-31 (compacted here)
+on: { push: { branches: [main] }, workflow_dispatch: { inputs: { sha: … } } }
+permissions: { contents: write, pull-requests: read }
+concurrency: { group: release, cancel-in-progress: false }
+jobs:
+  release:
+    uses: futin/release-kit/.github/workflows/release.yml@v1
+    with: { sha: ${{ inputs.sha }}, kit-ref: v1 }</pre>
+    <p>The reusable job (release-kit <code>release.yml:31-55</code>) checks out this repo with <code>fetch-depth: 0</code> (full history and every tag), checks release-kit out into
+      <code>.release-kit/</code> at <code>kit-ref</code>, sets up Node, sets the tagger to <code>github-actions[bot]</code>, and runs <code>node .release-kit/dist/esm/release-cli.js</code>.
+      There's no install step: <code>dist/</code> is committed to release-kit precisely so that step needs nothing installed.</p>
+    <p><strong>The token.</strong> Every run gets a short-lived <code>GITHUB_TOKEN</code>, passed to the CLI as <code>GH_TOKEN</code>. Listing any permission drops every unlisted one to
+      <code>none</code>. <code>contents: write</code> pushes the tag and creates the Release. <code>pull-requests: read</code> reads PRs. On a public repo like this one PRs are readable anyway.
+      On a private repo the lookup is refused without it.</p>
+    <p><strong>The order.</strong> For each commit: find the PR (<code>release.ts:97</code>), check the title, compute the version, push the tag (<code>:119</code>), create the Release
+      (<code>:120</code>). Cancelling mid-run could leave a tag without its Release, which is why <code>cancel-in-progress</code> is false.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">Someone trims <code>release.yml</code>'s permissions to <code>contents: write</code> only, on a <strong>private</strong> repo. A <code>feat</code> PR merges. What does the release run do?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Tags <code>v0.4.0</code>, then fails on the Release</button>
+        <p class="quiz-feedback">That half-state needs the lookup to succeed first. The lookup runs before the tag push (<code>release.ts:97</code> vs <code>:119</code>), so the run
+          never gets as far as tagging.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Ends green with <code>no PR</code> warnings</button>
+        <p class="quiz-feedback">A refused API call isn't "no PR". <code>release-cli.ts:46</code> throws on any non-zero <code>gh</code> exit, so the run goes red instead of
+          quietly warning and moving on.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">Fails red at the lookup, nothing tagged</button>
+        <p class="quiz-feedback">Correct. Without <code>pull-requests: read</code> the private repo refuses the PR read, <code>gh</code> exits non-zero, and the run fails before anything
+          has been written.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Releases normally</button>
+        <p class="quiz-feedback"><code>pull-requests: read</code> is exactly what the PR lookup needs. On a public repo it works by accident, because anyone can read PRs. On a
+          private one the read is refused.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 3 · The release run</p>
+    <h2>The range, and the bump</h2>
+    <pre>// release-kit src/release.ts:142-153 (@v1, compacted here)
+const base = await describeBase(cwd, target);   // newest vX.Y.Z reachable
+const range = await git(cwd, ['rev-list', '--first-parent', '--reverse', `${base}..${target}`]);
+const commits = [baseCommit, ...range.split('\n')];   // oldest first
+for (const sha of commits) outcomes.push(await releaseCommit(cwd, github, log, sha));</pre>
+    <p>A run releases <strong>everything since the last tag</strong>, one outcome per commit, and <strong>one tag per releasing PR</strong>. The <code>release</code> group keeps one running
+      run plus one pending run, and a newer push drops the older pending one. That's harmless, because the surviving run sweeps every unreleased commit. Each commit is bumped from the newest tag
+      <em>at that commit</em> (<code>release.ts:113</code>), so a tag made earlier in the same run becomes the next commit's base. The dispatch run after the baseline logged
+      <code>3553ac7: release-repaired v0.1.0</code>, <code>c7f2d72: released v0.2.0</code>, <code>f42d720: released v0.3.0</code>, <code>559735f: not-releasing</code>: two new versions, three seconds apart.</p>
+    <table>
+      <tr><th>Title</th><th>Bump (<code>conventional.ts:49-55</code>)</th></tr>
+      <tr><td><code>feat</code></td><td>minor</td></tr>
+      <tr><td><code>fix</code>, <code>perf</code></td><td>patch</td></tr>
+      <tr><td><code>!</code> or a <code>BREAKING CHANGE: </code> body line</td><td>major, or minor while major = 0</td></tr>
+      <tr><td>silent types</td><td>nothing</td></tr>
+    </table>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">Starting from <code>v0.3.1</code>, three PRs squash-merge in order: <code>fix: a</code>, <code>docs: b</code>, <code>feat(board): c</code>. One release run covers all three. What tags exist afterwards?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Only <code>v0.3.2</code>, for the trigger commit</button>
+        <p class="quiz-feedback">A run doesn't release only its own trigger. It walks every first-parent commit since the newest tag, which is how it covers pushes whose pending runs
+          were dropped from the queue.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn"><code>v0.3.2</code> on the fix, <code>v0.4.0</code> on the feat</button>
+        <p class="quiz-feedback">Correct. One tag per releasing PR, each bumped from the tag the previous iteration just pushed. The <code>docs</code> commit logs
+          <code>not-releasing</code> and gets no tag.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn"><code>v0.3.2</code>, <code>v0.3.3</code>, <code>v0.4.0</code>, one per commit</button>
+        <p class="quiz-feedback">Silent types never get a number. <code>releaseCommit</code> returns <code>not-releasing</code> for <code>docs</code> before any version is computed, so
+          nothing is tagged for it.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">One tag, <code>v0.4.0</code>, for the highest type</button>
+        <p class="quiz-feedback">That's how semantic-release and similar tools work, but release-kit tags each releasing PR separately: the tag message <em>is</em> the PR. You picked this one
+          in your session, and the dispatch run that cut <code>v0.2.0</code> and <code>v0.3.0</code> seconds apart is the counter-example.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-qa">
+    <p class="eyebrow">Questions you might ask</p>
+    <details class="qa-item">
+      <summary>Why <code>fetch-depth: 0</code>, and not the last tag plus N commits?</summary>
+      <p><code>git describe</code> walks back from the target to the newest tag, and the distance is unbounded: weeks of silent PRs cut no tag. If the tag falls outside a shallow clone, describe
+        finds no names, which <code>release.ts:27</code> reads as "no baseline", and the run ends <em>green</em> having released nothing. A wrong N fails silently. Measured here: 982 commits,
+        a 6.3 MiB pack, about 1.4 s to fetch. If that ever grew large, <code>filter: blob:none</code> keeps the whole commit graph and skips file contents.</p>
+    </details>
+    <details class="qa-item">
+      <summary>Why must <code>kit-ref</code> equal the <code>@v1</code> on <code>uses:</code>?</summary>
+      <p>The workflow file comes from the <code>uses:</code> ref, but the CLI is a second checkout at <code>kit-ref</code> (release-kit <code>release.yml:35-39</code>). If they differed, a
+        workflow from one kit version would run an engine from another, with inputs or env vars they don't agree on. Keeping both at <code>v1</code> moves them together.</p>
+    </details>
+  </div>
+</section>
+
+<!-- ───────────── Section 4 ───────────── -->
+<section id="s4">
+  <div class="card card-divider">
+    <p class="from">Finished: The release run</p>
+    <h2>Next: The record</h2>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 4 · The record</p>
+    <h2>What's inside a tag</h2>
+    <pre>// git for-each-ref --format='%(contents)' refs/tags/v0.2.0
+feat(releases): version chip and What's new drawer (#290)
+
+- The side rail shows the board's running version; tap it for every release, newest first.
+
+Release-Type: feat
+Release-Scope: releases
+Release-PR: 290</pre>
+    <p>An <strong>annotated</strong> tag is a real git object with its own message, author and date. release-kit writes the message in a fixed shape (<code>conventional.ts:75-81</code>):
+      a <strong>subject</strong> (the PR title plus <code>(#N)</code>), optional <strong>notes</strong>, and a final paragraph of <code>Release-*</code> <strong>trailers</strong>, which
+      <code>parseTagMessage</code> (<code>:86-115</code>) reads back. A tag with no <code>Release-Type</code> trailer is the baseline.</p>
+    <p><strong>The notes</strong> are the PR body's <code>## What's new</code> section, up to the next <code>## </code> heading, with HTML comments stripped first (<code>extractWhatsNew</code>,
+      <code>:61-69</code>). #290 had that section. #295 had <code>## Problem</code> and <code>## Fix</code> but no <code>## What's new</code>, so <code>v0.3.1</code> has no notes and its Release page is empty.</p>
+    <p><strong>Why trailers?</strong> They're a git convention a person can read with <code>git show v0.3.1</code>, and the tag can't drift from a second file because there is none. The trade-off: notes
+      are frozen when the tag is cut.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <pre>// example PR body (constructed)
+Adds a filter box.
+&lt;!-- ## What's new
+- Filter the Jira board with your own JQL. --&gt;
+## Why this shape
+…</pre>
+    <p class="quiz-prompt">You merge <code>feat(jira): add a JQL filter</code> with the body above. What notes does the tag get?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">The commented line about JQL</button>
+        <p class="quiz-feedback">The heading and the line are in the body, but inside an HTML comment. Comments are stripped before the search runs, so the section counts as
+          missing.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">The lead line, <code>Adds a filter box.</code></button>
+        <p class="quiz-feedback">There's no fallback to the lead paragraph or any other part of the body. A missing section means no notes, and the PR title alone becomes the release
+          entry on GitHub.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Everything above <code>## Why this shape</code></button>
+        <p class="quiz-feedback">Notes start only after a <code>## What's new</code> heading line, and once the comment is stripped that heading no longer exists. Nothing above
+          it is ever collected.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">No notes at all</button>
+        <p class="quiz-feedback">Correct. Stripping comments removes the heading and its line before the search, so the section is absent. That's how the template's placeholder
+          text never ends up in a release.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 4 · The record</p>
+    <h2>The GitHub Release, and re-runs</h2>
+    <div class="diagram" aria-label="Per-commit decision path of a release run">
+      <svg viewBox="0 0 370 470" xmlns="http://www.w3.org/2000/svg" role="img">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="10" y="10" width="190" height="40" rx="6"/>
+          <rect x="10" y="90" width="190" height="40" rx="6"/>
+          <rect x="10" y="170" width="190" height="40" rx="6"/>
+          <rect x="10" y="250" width="190" height="40" rx="6"/>
+          <rect x="10" y="330" width="190" height="40" rx="6"/>
+          <rect x="10" y="410" width="190" height="40" rx="6"/>
+          <rect x="222" y="10" width="140" height="40" rx="6" stroke-dasharray="4 3"/>
+          <rect x="222" y="90" width="140" height="40" rx="6" stroke-dasharray="4 3"/>
+          <rect x="222" y="170" width="140" height="40" rx="6" stroke-dasharray="4 3"/>
+          <rect x="222" y="250" width="140" height="40" rx="6" stroke-dasharray="4 3"/>
+          <line x1="105" y1="50" x2="105" y2="88" marker-end="url(#ar2)"/>
+          <line x1="105" y1="130" x2="105" y2="168" marker-end="url(#ar2)"/>
+          <line x1="105" y1="210" x2="105" y2="248" marker-end="url(#ar2)"/>
+          <line x1="105" y1="290" x2="105" y2="328" marker-end="url(#ar2)"/>
+          <line x1="105" y1="370" x2="105" y2="408" marker-end="url(#ar2)"/>
+          <line x1="200" y1="30" x2="220" y2="30" marker-end="url(#ar2)"/>
+          <line x1="200" y1="110" x2="220" y2="110" marker-end="url(#ar2)"/>
+          <line x1="200" y1="190" x2="220" y2="190" marker-end="url(#ar2)"/>
+          <line x1="200" y1="270" x2="220" y2="270" marker-end="url(#ar2)"/>
+        </g>
+        <g fill="currentColor" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="11.5">
+          <text x="105" y="34" text-anchor="middle">version tag on this commit?</text>
+          <text x="105" y="114" text-anchor="middle">merged PR for this exact sha?</text>
+          <text x="105" y="194" text-anchor="middle">title is feat | fix | perf?</text>
+          <text x="105" y="274" text-anchor="middle">bump from describe @ this sha</text>
+          <text x="105" y="354" text-anchor="middle">push annotated tag to origin</text>
+          <text x="105" y="434" text-anchor="middle">gh release create --verify-tag</text>
+          <text x="292" y="27" text-anchor="middle">yes: Release?</text>
+          <text x="292" y="42" text-anchor="middle" font-size="10">already · repaired</text>
+          <text x="292" y="114" text-anchor="middle">no → no-pr</text>
+          <text x="292" y="194" text-anchor="middle">no → not-releasing</text>
+          <text x="292" y="274" text-anchor="middle">no base → error</text>
+          <text x="112" y="72" font-size="10">no</text>
+          <text x="112" y="152" font-size="10">yes</text>
+          <text x="112" y="232" font-size="10">yes</text>
+          <text x="202" y="24" font-size="9">yes</text>
+          <text x="202" y="104" font-size="9">no</text>
+          <text x="202" y="184" font-size="9">no</text>
+        </g>
+      </svg>
+    </div>
+    <p>The Release is <strong>derived from the tag</strong>: <code>createRelease</code> (<code>release.ts:81-85</code>) reads the tag message and passes its subject and notes to
+      <code>gh release create --verify-tag</code>. The tag is pushed first, because <code>--verify-tag</code> refuses a tag that origin doesn't have.</p>
+    <p><strong>Idempotent by construction.</strong> Step 1 (<code>:89-94</code>): a commit with its tag and its Release is <code>already-released</code>. A tag with no Release is
+      <code>release-repaired</code>, getting its Release built from the tag and no new tag. Your hand-pushed baseline got its Release exactly that way.</p>
+    <p><strong>Re-runs:</strong> <code>gh workflow run release.yml -f sha=&lt;sha&gt;</code>. The sha must be on <code>main</code>. If a later commit already carries a tag, a dispatch
+      fails with <code>a newer release exists</code>, while a push run ends green: versions are never handed out of order. Tag-first means the only possible half-state is one that step 1 repairs.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">A push run pushes <code>v0.4.0</code>, then <code>gh release create</code> hits a GitHub outage and the run goes red. Nothing else merges. You run <code>gh workflow run release.yml</code>. What happens?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Fails with <code>a newer release exists</code></button>
+        <p class="quiz-feedback">That guard looks for tags on a <em>strict descendant</em> of the target. <code>newerRelease</code> skips a tag sitting on the target itself, so
+          <code>v0.4.0</code> doesn't trip it.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">Builds only the missing Release</button>
+        <p class="quiz-feedback">Correct. Step 1 finds <code>v0.4.0</code> on the commit and no Release. It creates the Release from the tag's own message and pushes no new
+          tag: <code>release-repaired</code>.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Cuts <code>v0.4.1</code> from the new base</button>
+        <p class="quiz-feedback">Step 1 runs before any bump. A commit that already carries a version tag never reaches the version computation again, so no second number is
+          handed out.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Refuses until you delete <code>v0.4.0</code></button>
+        <p class="quiz-feedback">A tag without its Release is the one half-state the design expects, and it's handled automatically. Deleting a pushed version tag is never part of
+          the recovery path.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-qa">
+    <p class="eyebrow">Questions you might ask</p>
+    <details class="qa-item">
+      <summary>Can I add notes to <code>v0.3.1</code> after the fact?</summary>
+      <p>On GitHub, yes: edit the Release body by hand. The engine never overwrites an existing Release (<code>createRelease</code> returns early when <code>releaseExists</code>).
+        The board reads the <em>tag</em> message, though (<code>releases.service.ts:124</code>), so the drawer still shows no notes. Changing what the board shows means re-cutting the
+        tag, which rewrites a published ref.</p>
+    </details>
+    <details class="qa-item">
+      <summary>Why are notes written to a temp file, and never passed with <code>-m</code>?</summary>
+      <p>A title or note can hold anything, including backticks or <code>$(…)</code>. The engine passes text only as argv elements or files (<code>git tag -F</code>, <code>gh --notes-file</code>,
+        <code>release.ts:68-79</code>), and the workflow never interpolates it into <code>run:</code> through <code>${{ }}</code> (release-kit <code>release.yml:3-4</code>), so PR text can't
+        become shell code.</p>
+    </details>
+  </div>
+</section>
+
+<!-- ───────────── Section 5 ───────────── -->
+<section id="s5">
+  <div class="card card-divider">
+    <p class="from">Finished: The record</p>
+    <h2>Next: The board</h2>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 5 · The board</p>
+    <h2>The board reads your checkout, not GitHub</h2>
+    <div class="diagram" aria-label="The board's three read paths">
+      <svg viewBox="0 0 340 250" xmlns="http://www.w3.org/2000/svg" role="img">
+        <defs>
+          <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="10" y="10" width="140" height="70" rx="6"/>
+          <rect x="190" y="10" width="140" height="32" rx="6"/>
+          <rect x="190" y="52" width="140" height="32" rx="6"/>
+          <rect x="10" y="140" width="140" height="60" rx="6"/>
+          <rect x="190" y="150" width="140" height="44" rx="6"/>
+          <line x1="150" y1="30" x2="188" y2="26" marker-end="url(#ar3)"/>
+          <line x1="150" y1="60" x2="188" y2="68" marker-end="url(#ar3)"/>
+          <line x1="150" y1="170" x2="188" y2="172" marker-end="url(#ar3)"/>
+          <line x1="260" y1="84" x2="260" y2="148" marker-end="url(#ar3)" stroke-dasharray="4 3"/>
+        </g>
+        <g fill="currentColor" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="11.5" text-anchor="middle">
+          <text x="80" y="32" font-weight="700">server checkout</text>
+          <text x="80" y="50">refs/tags/v*  ·  HEAD</text>
+          <text x="80" y="68" font-size="10">(runGit, 10 s bound)</text>
+          <text x="260" y="30">for-each-ref → drawer</text>
+          <text x="260" y="72">describe --long → chip</text>
+          <text x="80" y="164" font-weight="700">browser</text>
+          <text x="80" y="182">localStorage last-seen</text>
+          <text x="260" y="168">dotState(newest,</text>
+          <text x="260" y="184">stored, open) → dot</text>
+          <text x="272" y="122" font-size="10" text-anchor="start">newest</text>
+        </g>
+      </svg>
+    </div>
+    <pre>// server/src/releases/releases.service.ts:105-108, 131-134 (compacted here)
+runGit(['for-each-ref', '--sort=-creatordate', TAG_FORMAT, 'refs/tags/v*'], …)   // every local tag
+const described = await runGit(['describe', '--long', ...DESCRIBE_FILTER], …);   // where HEAD sits
+const current = m ? { version: m[1], ahead: Number(m[2]) } : null;               // v0.3.0-13-g… → { 0.3.0, 13 }</pre>
+    <p><code>GET /api/releases</code> makes no network call. Each tag message goes through release-kit's own <code>parseTagMessage</code>, so the board and the release run can't disagree about the
+      format. <code>chipLabel</code> (<code>client/src/lib/releases.ts:27-29</code>) renders <code>v0.3.0</code> on a tag, or <code>v0.3.0+13</code> 13 commits past one. At the time of this lesson the
+      local <code>main</code> sat at the unpulled <code>c94807d</code>, so the chip read <code>v0.3.0+13</code> while the drawer already listed the fetched <code>v0.3.1</code>.</p>
+    <p><strong>Why local git?</strong> The chip answers "what is <em>this board</em> running?", and only the checkout knows that. There's no token and no rate limit. <strong>The trade-off:</strong>
+      a release reaches the board only after this machine fetches. The memo key includes the mtimes of <code>packed-refs</code> and <code>refs/tags</code>, so a fetch alone refreshes it.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">On another machine, someone runs <code>git fetch --tags</code> but doesn't pull. <code>HEAD</code> stays on <code>v0.3.0</code>'s commit, and the fetch brings in <code>v0.3.1</code>. They reload the board. What do they see?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Chip <code>v0.3.1</code>, and the drawer lists it</button>
+        <p class="quiz-feedback">The chip isn't "the newest local tag". It's <code>git describe</code> of <code>HEAD</code>, and <code>v0.3.1</code>'s commit isn't an ancestor of
+          that <code>HEAD</code> yet.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Chip <code>v0.3.0+1</code></button>
+        <p class="quiz-feedback"><code>+N</code> counts commits between the nearest tag and <code>HEAD</code>. A fetch adds no commits to <code>HEAD</code>'s history, so the count stays
+          at zero.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">Chip <code>v0.3.0</code>, drawer lists <code>v0.3.1</code></button>
+        <p class="quiz-feedback">Correct. The drawer lists every local <code>v*</code> tag, while the chip describes <code>HEAD</code>. A fetch without a pull moves the first and leaves
+          the second where it was.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">No change until the server restarts</button>
+        <p class="quiz-feedback">The memo key includes the mtimes of <code>refs/tags</code> and <code>packed-refs</code> under the common git dir, so a newly fetched tag
+          invalidates the memo on the very next request, no restart needed.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-concept">
+    <p class="eyebrow">Section 5 · The board</p>
+    <h2>The drawer and the unseen dot</h2>
+    <pre>// client/src/lib/releases.ts:47-53
+export function dotState(newest, stored, open) {
+  if (!isVersion(newest)) return { dot: false, seed: null };
+  if (!isVersion(stored)) return { dot: false, seed: newest };   // first visit
+  const above = compareVersions(newest, stored) &gt; 0;
+  if (open) return { dot: false, seed: above ? newest : null };  // never lower
+  return { dot: above, seed: null };
+}</pre>
+    <p>The chip opens the <strong>What's new</strong> drawer (<code>ReleasesDrawer.tsx</code>). Each entry shows its version, a type badge, a date, the title with its <code>type(scope):</code>
+      prefix removed, the notes as sanitised markdown, and a <code>PR #N</code> link. The baseline is a divider reading "Versioning starts here". The chip carries a <strong>dot</strong> while
+      there's a release you haven't opened. <code>newest</code> is the drawer's first entry (<code>App.tsx:176</code>), and <code>stored</code> lives in <code>localStorage</code> under
+      <code>backlog-manager.releases-last-seen</code>.</p>
+    <p><strong>Why <code>localStorage</code>?</strong> "Have I seen it" is a per-viewer convenience, not a record. If storage throws, the only effect is no dot. A first visit seeds the stored value
+      silently, so a fresh install doesn't flag every release ever made. <strong>Why "never lower"</strong> (fix <code>1908979</code>)? Two checkouts can serve the board at one address. An older board
+      writing its lower version back would flag the releases in between as new all over again.</p>
+  </div>
+
+  <div class="card card-quiz">
+    <p class="quiz-prompt">You open the drawer on <code>main</code>'s board, so <code>stored</code> becomes <code>0.3.1</code>. Later, a worktree board served at the same address, whose newest tag is <code>v0.3.0</code>, has its drawer opened. You go back to <code>main</code>'s board. Is there a dot?</p>
+    <div class="quiz-options">
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Yes, <code>0.3.0</code> was stored</button>
+        <p class="quiz-feedback">That was the behaviour before fix <code>1908979</code>. Now an open drawer stores the newest version only when it's above the stored one, and
+          <code>0.3.0</code> isn't above <code>0.3.1</code>.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">Yes, the mismatch clears storage</button>
+        <p class="quiz-feedback">Nothing in <code>dotState</code> ever clears storage. A missing or junk value is re-seeded as a first visit, and that never shows a dot
+          anyway.</p>
+      </div>
+      <div class="quiz-option" data-correct="false">
+        <button class="quiz-option-btn">No, <code>main</code> re-seeds on every load</button>
+        <p class="quiz-feedback">Seeding happens only when the stored value is missing or not a version. A valid stored value is left alone on load, and only an open drawer
+          can raise it.</p>
+      </div>
+      <div class="quiz-option" data-correct="true">
+        <button class="quiz-option-btn">No, nothing lower was stored</button>
+        <p class="quiz-feedback">Correct. The worktree's open asked to store nothing, because <code>0.3.0</code> isn't above <code>0.3.1</code>. <code>stored</code> stays at
+          <code>0.3.1</code>, which matches <code>main</code>'s newest.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-qa">
+    <p class="eyebrow">Questions you might ask</p>
+    <details class="qa-item">
+      <summary>Why doesn't the board poll for new releases?</summary>
+      <p>A version changes only when the server's checkout moves (a merge, then a pull). <code>useReleases</code> (<code>client/src/hooks/useReleases.ts:6-16</code>) reads on mount and each time
+        the drawer opens, never on a timer. A poll would keep asking a question whose answer can't change under an open tab.</p>
+    </details>
+    <details class="qa-item">
+      <summary>Why doesn't the server call release-kit's own <code>readReleases</code>?</summary>
+      <p><code>readReleases</code> runs git with no timeout, and this server's rule is that every git read goes through <code>runGit</code>, async and bounded at 10 s
+        (<code>releases.service.ts:13-16</code>). So it copies the kit's filters and imports only the pure <code>parseTagMessage</code>. <code>test/api-releases.test.ts</code> checks that both give
+        the same output.</p>
+    </details>
+  </div>
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<div class="card card-recap">
+  <p class="eyebrow">Recap</p>
+  <h2>Score</h2>
+  <p class="score"><span id="score-correct">0</span> / <span id="score-total">0</span></p>
+  <p class="muted">In the live session: 10 of 11 answered right. The one miss was the bump question in Release run (one tag per releasing PR, not one per run), and you answered the
+    variant correctly.</p>
+  <h2>Sections</h2>
+  <ul class="recap-list">
+    <li><button class="recap-btn" data-target="s1">1 · The gate: ci.yml, the three checks, the title rule</button></li>
+    <li><button class="recap-btn" data-target="s2">2 · The merge: finding the PR, the ruleset, squash-only</button></li>
+    <li><button class="recap-btn" data-target="s3">3 · The release run: token, range, bump</button></li>
+    <li><button class="recap-btn" data-target="s4">4 · The record: tag message, notes, Release, re-runs</button></li>
+    <li><button class="recap-btn" data-target="s5">5 · The board: chip, drawer, unseen dot</button></li>
+  </ul>
+  <p>A written, step-by-step reference guide to this pipeline doesn't exist yet. It could be generated as a follow-up. Until then, the closest reference doc is
+    <code>docs/workflows/ci.md</code>, §The ruleset and §Releases.</p>
+  <p class="muted">Built at <code>c94807d</code>. release-kit excerpts are quoted at tag <code>v1</code> (<code>18af40f</code>, release <code>v1.1.0</code>).</p>
+</div>
+
+</div>
+
+<div class="nav">
+  <button id="back" type="button">Back</button>
+  <button id="next" type="button">Next</button>
+</div>
+
+<script type="application/json" id="provenance">
+{
+  "commit": "c94807d7c2fe03aac08fe0b770efb11148668801",
+  "generated": "2026-10-17T21:13:42Z",
+  "sources": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/pull_request_template.md",
+    "docs/workflows/ci.md",
+    "server/src/releases/releases.service.ts",
+    "client/src/lib/releases.ts",
+    "client/src/hooks/useReleases.ts",
+    "client/src/components/ReleasesDrawer.tsx",
+    "client/src/App.tsx"
+  ],
+  "sections": [
+    { "id": "s1", "title": "The gate", "sources": [".github/workflows/ci.yml", "docs/workflows/ci.md"] },
+    { "id": "s2", "title": "The merge", "sources": ["docs/workflows/ci.md"] },
+    { "id": "s3", "title": "The release run", "sources": [".github/workflows/release.yml", "docs/workflows/ci.md"] },
+    { "id": "s4", "title": "The record", "sources": [".github/pull_request_template.md", "docs/workflows/ci.md", "server/src/releases/releases.service.ts"] },
+    { "id": "s5", "title": "The board", "sources": ["server/src/releases/releases.service.ts", "client/src/lib/releases.ts", "client/src/hooks/useReleases.ts", "client/src/components/ReleasesDrawer.tsx", "client/src/App.tsx"] }
+  ]
+}
+</script>
+<script>
+(function () {
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+  var idx = 0;
+  var score = { correct: 0, total: 0 };
+  var back = document.getElementById('back');
+  var next = document.getElementById('next');
+  var bar = document.getElementById('bar');
+
+  function unansweredQuiz(card) {
+    return card.classList.contains('card-quiz') && !card.hasAttribute('data-answered');
+  }
+  function show(i) {
+    if (i < 0 || i >= cards.length) return;
+    cards[idx].classList.remove('on');
+    idx = i;
+    cards[idx].classList.add('on');
+    back.disabled = idx === 0;
+    next.disabled = idx === cards.length - 1 || unansweredQuiz(cards[idx]);
+    bar.style.width = (cards.length > 1 ? (idx / (cards.length - 1)) * 100 : 100) + '%';
+    window.scrollTo(0, 0);
+  }
+  function go(d) { show(idx + d); }
+
+  back.addEventListener('click', function () { go(-1); });
+  next.addEventListener('click', function () { if (!next.disabled) go(1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' && !next.disabled) go(1);
+    if (e.key === 'ArrowLeft' && !back.disabled) go(-1);
+  });
+
+  document.querySelectorAll('.card-quiz').forEach(function (card) {
+    card.querySelectorAll('.quiz-option-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (card.hasAttribute('data-answered')) return;
+        card.setAttribute('data-answered', '');
+        var opt = btn.closest('.quiz-option');
+        opt.classList.add('revealed');
+        card.querySelectorAll('.quiz-option-btn').forEach(function (b) { b.disabled = true; });
+        score.total += 1;
+        if (opt.getAttribute('data-correct') === 'true') score.correct += 1;
+        document.getElementById('score-correct').textContent = score.correct;
+        document.getElementById('score-total').textContent = score.total;
+        if (cards[idx] === card) next.disabled = idx === cards.length - 1;
+      });
+    });
+  });
+
+  document.querySelectorAll('.recap-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var sec = document.getElementById(b.getAttribute('data-target'));
+      var first = sec && sec.querySelector('.card');
+      var i = cards.indexOf(first);
+      if (i >= 0) show(i);
+    });
+  });
+
+  cards[0].classList.add('on');
+  show(0);
+})();
+</script>
+</body>
+</html>
