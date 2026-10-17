@@ -192,18 +192,23 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   (`hooks/useJiraBoard.ts`) IS on `useCoalescedFetch`: it polls `boards/:id/issues` every `BOARD_TRACKER_POLL_MS` while the board syncs, once and then only on
   `reload` for an `off` one, and only an answer for the current id may write.
 - **`lib/jira.ts`** is the one home of every derivation the five surfaces print — the columns (`JIRA_COLUMNS`, `columnOf`, `sortForBoard`), the card's crumb
-  (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`) and subtasks marker, the band line (`bandSub`), a Setup row's sentence (`boardRowLine`), the
+  (`crumbOf`/`crumbText`), initials, age (`cardAgeStamp`), the fold (`foldBoard` — the one walk of the parent chain, into `tops`, `under` and the
+  `childrenOf` index — `sortTops`, `foldProgress`, `cardFold`, `foldMatches`, the modal's `modalTree`) and its sentences (`progressLine`, `childrenLine`,
+  `matchMarker`), the band line (`bandSub`, whose issue and card counts come from the fold once the list has loaded), a Setup row's sentence (`boardRowLine`), the
   failure phrase, the chip's CALLS reading (`callsReading`, against `JIRA_SWEEP_CALL_CEILING` = 100, red inside `JIRA_429_RED_MS` = 15 min of the last 429),
   the Connection card's `sweepLine` and `accessPhrase`, the board pick (`JIRA_BOARD_KEY`, `pickBoard`, `boardsByName`), the filters, `JIRA_QUERY_PRESETS`,
   `unmappedProjects` and `displayPath`. Nothing in it reads a clock: `now` is a required parameter, and every poll or check age goes through `pollAge` (a card's age is `elapsedSince`'s own reading).
 - **Jira › Board** (`components/jira/JiraBoardView.tsx`, `JiraCard.tsx`). The stored pick is a preference: `pickBoard` resolves it against the status's live
   list on every render, and `useJiraBoard` is handed only the id that resolution returns — a deleted or hand-edited pick falls to the first board by name and
   never becomes a request for `/boards/<that id>/issues`. Filters (type, assignee, sprint, the summary search) are read off the loaded list, per mount.
-  `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. A card click lands in `JiraView`'s open-issue slot.
+  `configUnreadable` draws `jira.json cannot be read — <reason>`, never `No boards yet`. The board draws the fold's tops only, each column sorted by
+  `sortTops` and counting cards, and a filter that matches only a folded issue still shows its top, ringed. A card click lands in `JiraView`'s open-issue
+  slot with the fold's `childrenOf` beside the issue.
 - **The issue modal** (`components/jira/JiraIssueModal.tsx`) composes `ui/Modal` and `ui/Fact` as `ItemModal` does, draws every fact the card carried at
   once, and reads `GET /api/jira/issue/:key` fresh on open for the description (through `renderMarkdown`, `lib/markdown.ts`, the sanitising `marked` config
   `ItemModal` also uses), the children and the boards holding it. The held answer is stamped with its key, so a late answer for an issue the modal has left
-  is dropped. No controls in phase 2.
+  is dropped. The children draw as a tree: the detail's direct children with their descendants from the `childrenOf` snapshot the card click carried, each
+  key once; a row click swaps the one modal's issue through the same `JiraView` setter, never a second `Modal`. No controls in phase 2.
 - **Jira › Setup** (`components/jira/JiraSetupView.tsx`) makes the page's ONE `/api/jira/projects` read per mount and hands it to the board sheet and the
   Repositories card. The Boards card's `Open board` writes the pick straight to `localStorage` (the page unmounts in the commit that navigates, so a
   `usePersistedState` effect would never run) and calls `onOpenJiraPage('board')`. `JiraBoardSheet` composes `ui/FormSheet`, seeds its fields once at

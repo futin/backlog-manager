@@ -28,7 +28,7 @@ tracked set is small (tens to a few hundred issues per board), so the server can
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | where Jira lives in the code       | **A** — a parallel `server/src/jira/` module with its own shapes, routes and rail section; `BacklogItem`, `SourceKind`, the Board page untouched | **B** Jira as a third `SourceKind` on the existing Board (Jira's hierarchy, statuses and keys do not fit `BacklogItem`'s sections); **C** extract a generic tracker platform first (right later, too much now — noted in §15) |
 | what is tracked                    | **named boards**, each a set of **roots** (an epic/story/task whose descendants are fetched, depth 3) plus **JQL queries**; columns are Jira's three `statusCategory`s | whole-project mirroring; Jira's own agile boards (their API is a different, heavier surface) |
-| board layout                       | **B** — flat cards sorted by `updated`, parent as a crumb on the card                                                | **A** — roots as groups with subtasks nested (`Main.dc.html`): hierarchy stole the column's job |
+| board layout                       | **B** — flat cards sorted by `updated`, parent as a crumb on the card. **Amended 2026-10-16:** children fold into their top on-board ancestor — [grouped-board design](2026-10-16-jira-grouped-board-design.md) | **A** — roots as groups with subtasks nested (`Main.dc.html`): hierarchy stole the column's job |
 | the Setup page                     | rail sub-page `Jira › Setup`: Boards as rows (Open board + Edit), Repositories, Connection, Skills; ONE edit sheet   | tiles with the query editor at the bottom ("nothing is clear"); a separate rail entry for Setup |
 | the board picker on the board page | picks a board, nothing else                                                                                          | picker with Edit / New (those belong to Setup) |
 | comments                           | **none in v1** — not read, not written; the modal says so and links out                                            | the first modal draft's comment list and composer |
@@ -211,6 +211,9 @@ The `/api/trackers` payload and the nine item write routes are untouched.
 
 ### 6.2 Jira › Board — `BoardB.html`
 
+> **Amended 2026-10-16** by the [grouped-board design](2026-10-16-jira-grouped-board-design.md): the cards are the board's top issues, each child folded into
+> its top on-board ancestor; the `N subtasks` marker becomes a fold block (count + progress bar); filters ring a top whose folded issue matched.
+
 - `Band`: title = board name; sub = `<site> · N issues from R roots and Q queries · polled Xs ago`, red with Jira's message when a query or root failed in the
   last sweep, and `first 500 shown` when truncated; counts read `1 query` / `2 queries` and a zero is omitted. Right slot: the picker `Chip` (a `Popover` listing boards — pick only) and the summary search.
 - `FilterBar` with three `FilterSection`s: type, assignee (anyone / me / unassigned), sprint — derived from the loaded list, per browser, not persisted.
@@ -222,6 +225,9 @@ The `/api/trackers` payload and the nine item write routes are untouched.
 - Below 700 px the columns stack as the Board's do; the chip moves into the rail bar as the tracker chip does.
 
 ### 6.3 The issue modal — `IssueModal.html`
+
+> **Amended 2026-10-16** by the [grouped-board design](2026-10-16-jira-grouped-board-design.md) §6: the Subtasks list becomes a Children tree; a row opens
+> that issue in the same modal.
 
 `JiraIssueModal` on `ui/Modal` (the §8.7 sidecar: facts column, body). Facts: key with `open in Jira ↗`, type · parent, status with its category, priority ·
 sprint, assignee · reporter, labels, created · updated, on boards, repository (from the project map, or the no-repo hint), session. Controls under the facts:
