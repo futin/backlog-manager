@@ -238,8 +238,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    end, as the dashboard's is, so the rule stops short of the rows' fills. */
 .rail-rule { border-top: 1px solid var(--hairline); margin: 24px 4px }
 
-/* The version chip (DESIGN.md §8.10), the dashboard's `.rel-chip`: the rail's last element, sunk to its foot by `margin-top: auto` in the rail's column,
-   and in the phone menu its last row. A pill on the recessed well in the board's own ink — status lives in the dot alone, cyan for a release not opened
+/* The version chip (DESIGN.md §8.10): ui-kit's `VersionChip`, placed and drawn by this class, which beats `.uk-chip` by source order (this file is imported
+   after ui-kit's); its dot is ui-kit's `.uk-chip-dot`, cyan through the `--uk-accent` mapping below. The look is the dashboard's `.rel-chip`: the rail's
+   last element, sunk to its foot by `margin-top: auto` in the rail's column, and in the phone menu its last row. A pill on the recessed well in the board's own ink — status lives in the dot alone, cyan for a release not opened
    yet. 28 px tall, the rail's quiet size, not a 36 px control: it is a reading you can tap, not a section. */
 .rail-release {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
@@ -249,7 +250,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   cursor: pointer; transition: color .15s, border-color .15s;
 }
 .rail-release:hover { color: var(--ink); border-color: var(--hairline2) }
-.rail-release-dot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--cyan) }
 
 /* The phone's ☰, and the wordmark row it sits in — both render only under
    useNarrow, so neither is ever in the desktop tree. */
@@ -2711,34 +2711,40 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   .run-track-dot-current { animation: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--fill-live) 30%, transparent) }
 }
 
-/* What's new — the releases drawer's content (DESIGN.md §8.10), inside `ui/Drawer`. The dashboard's look: a head with the running version, then one entry
-   per release on a hairline, the baseline as a rule with its words in the gap. Badges are the type in its status colour on its own tint, Breaking always
-   a badge of its own on the red one — one distinct token per badge, mixed from the tokens so each theme's hue carries through. */
-.releases-head { display: flex; align-items: baseline; gap: 10px; padding: 18px 48px 12px 20px; border-bottom: 1px solid var(--hairline); flex: none; min-width: 0 }
-.releases-head-t { margin: 0; font-size: 19px; font-weight: 500; color: var(--ink); white-space: nowrap }
-.releases-head-s { min-width: 0; font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
-.releases-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; display: flex; flex-direction: column }
-.releases-entry { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-top: 1px solid var(--hairline); min-width: 0 }
-.releases-entry:first-child { border-top: 0 }
-.releases-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
-.releases-ver { font-size: 14px; font-weight: 600; color: var(--ink) }
-.releases-date { margin-left: auto; font-size: 12px; color: var(--ink3) }
-.releases-title { font-size: 14px; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere }
-.releases-notes { font-size: 13px; color: var(--ink2); line-height: 1.5; overflow-wrap: anywhere }
-.releases-notes > :first-child { margin-top: 0 }
-.releases-notes > :last-child { margin-bottom: 0 }
-.releases-notes h3 { font-size: 13px; font-weight: 600; color: var(--ink); margin: 10px 0 4px }
-.releases-notes ul { margin: 0; padding-left: 18px }
-.releases-badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; white-space: nowrap }
-.releases-badge-feat { color: var(--green); background: color-mix(in srgb, var(--green-solid) 14%, var(--strip)) }
-.releases-badge-fix { color: var(--amber-ink); background: color-mix(in srgb, var(--amber-solid) 14%, var(--strip)) }
-.releases-badge-perf { color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, var(--strip)) }
-.releases-badge-breaking { color: var(--red); background: color-mix(in srgb, var(--red) 14%, var(--strip)) }
-.releases-pr { align-self: flex-start; font-size: 12px; color: var(--cyan); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--cyan) 40%, transparent) }
-.releases-pr:hover { border-bottom-color: var(--cyan) }
-.releases-base { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink3) }
-.releases-base::before, .releases-base::after { content: ""; flex: 1; height: 1px; background: var(--hairline) }
-.releases-base .releases-date { margin-left: 0 }
+/* What's new — the version chip and the releases drawer (DESIGN.md §8.10, §8.7), both ui-kit's since #298: its markup, its `uk-*` classes and its
+   structure, from `ui-kit/styles.css`, which `main.tsx` imports before this file. What stays here is the theming, and ui-kit's README says how: map its
+   `--uk-*` tokens onto this board's own, once. Each mapping points at a theme variable rather than a value, so all five palettes carry through with no
+   per-theme block — `:root` resolves them against `<html>`, which is where `data-theme` is stamped.
+
+   `--uk-z` is 80, over the modal's 60 and the form sheet's 70: the drawer opens from the rail with either still open, and the Escape stack already ranks it
+   last. The badges keep this board's look — each type's status word on a 14 % tint of its own token over `--strip`. */
+:root {
+  --uk-panel-bg: var(--strip);
+  --uk-ink: var(--ink);
+  --uk-ink-muted: var(--ink3);
+  --uk-hairline: var(--hairline);
+  --uk-scrim: var(--scrim);
+  --uk-shadow: var(--shadow2);
+  --uk-accent: var(--cyan);
+  --uk-hover-bg: var(--strip-hi);
+  --uk-font: var(--font);
+  --uk-font-size-lg: 19px;
+  --uk-z: 80;
+  --uk-feat-ink: var(--green);
+  --uk-feat-tint: color-mix(in srgb, var(--green-solid) 14%, var(--strip));
+  --uk-fix-ink: var(--amber-ink);
+  --uk-fix-tint: color-mix(in srgb, var(--amber-solid) 14%, var(--strip));
+  --uk-perf-ink: var(--cyan);
+  --uk-perf-tint: color-mix(in srgb, var(--cyan) 14%, var(--strip));
+  --uk-breaking-ink: var(--red);
+  --uk-breaking-tint: color-mix(in srgb, var(--red) 14%, var(--strip));
+}
+/* Two things ui-kit cannot know. The drawer renders inside `.shell`, whose `zoom` leaves `100dvh` meaning the unzoomed screen, so its height carries the same
+   `/ --font-scale` division every viewport unit in this file does — undivided, the panel overhangs the screen by the text scale. And the notes are this
+   board's `renderMarkdown` output, which emits `h3` for a `###` line: ui-kit styles only `p`, `ul` and `code` inside them, so the heading is sized here. */
+.uk-drawer { height: calc(100dvh / var(--font-scale, 1)) }
+.uk-releases-notes h3 { font-size: 13px; font-weight: 600; color: var(--ink); margin: 10px 0 4px }
+.uk-releases-notes > :first-child { margin-top: 0 }
 
 /* ── ui primitives ────────────────────────────────────────────────────────────
    Every class family owned by a component in client/src/components/ui/, and
@@ -3208,26 +3214,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-form-sheet-steps { padding: 0 20px 10px; border-bottom: 1px solid var(--hairline) }
 .ui-form-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px }
 .ui-form-sheet-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--hairline) }
-
-/* Drawer — the third overlay shape (§8.7): a 400 px panel against the window's right edge over the scrim, the dashboard's releases drawer. Above the modal
-   and the sheet (80 over their 60 and 70) because it opens from the rail with either of them still open, and the Escape stack already ranks it last. The
-   same `/ --font-scale` division every fixed dimension here carries, and the same one shell lift, laid leftward because the panel's only open edge is its
-   left. Under 700 px it is the screen. */
-.ui-drawer-scrim { position: fixed; inset: 0; z-index: 80; display: flex; justify-content: flex-end; background: var(--scrim) }
-.ui-drawer {
-  position: relative; width: min(400px, calc(100vw / var(--font-scale, 1)));
-  height: calc(100dvh / var(--font-scale, 1));
-  display: flex; flex-direction: column; min-width: 0;
-  background: var(--strip); border-left: 1px solid var(--hairline);
-  box-shadow: -24px 0 64px var(--shadow2);
-}
-.ui-drawer-narrow { width: calc(100vw / var(--font-scale, 1)); border-left: none; box-shadow: none }
-.ui-drawer-close {
-  position: absolute; top: 14px; right: 14px; z-index: 1;
-  font-family: inherit; font-size: 13px; line-height: 1; color: var(--ink3);
-  background: none; border: none; padding: 6px; cursor: pointer;
-}
-.ui-drawer-close:hover { color: var(--ink) }
 
 /* Popover — the panel under a control (§8.7). Absolute against the caller's `position: relative` wrapper, which also holds the opening control, so it hangs
    8 px below it with the right edges together and nothing is measured in JS. A hairline border and the SMALL lift (`0 8px 24px`) rather than the dialogs'

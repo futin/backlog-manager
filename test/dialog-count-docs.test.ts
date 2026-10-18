@@ -8,7 +8,7 @@ import { join } from 'node:path';
  *
  * Jira phase 2 moved the count from three to five — `JiraIssueModal` composes `ui/Modal` and `JiraBoardSheet` composes `ui/FormSheet`, so both joined the
  * stack through the shells, by construction, with no line of `useDialogEscape` changed — which is exactly the edit this suite exists to catch half-made.
-The What's new drawer moved it to six the same way: `ReleasesDrawer` composes `ui/Drawer`, the third shell.
+ * The What's new drawer moved it to six: `ReleasesDrawer` composed `ui/Drawer`, a third shell, and since #298 calls the hook itself over ui-kit's drawer.
  *
  * Read as text, the way `test/claude-rules.test.ts` reads the rule files: these are prose, there is nothing to import, and the point is that the sentences a
  * reader arrives at say what the stack actually does.
