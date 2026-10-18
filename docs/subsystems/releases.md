@@ -5,7 +5,7 @@ first. The record is the checkout's annotated `vX.Y.Z` tags, which the release w
 ([ci](../workflows/ci.md) §Releases). Design: [the release versioning spec](../superpowers/specs/2026-10-16-release-versioning-design.md), which adopts the
 dashboard's release pipeline and its chip and drawer; the look is `.claude/DESIGN.md` §8.7 (the drawer shell) and §8.10.
 
-Code: `server/src/releases/` (the route, the memo, the reads), `client/src/lib/releases.ts` (every decision the chip and drawer make, no React),
+Code: `server/src/releases/` (the route, and the service wiring release-kit's reader to `runGit`), `client/src/lib/releases.ts` (every decision the chip and drawer make, no React),
 `client/src/hooks/useReleases.ts`, `client/src/components/ui/Drawer.tsx` (the shell), `client/src/components/ReleasesDrawer.tsx`, the chip in
 `SideRail.tsx`, the wiring in `AppShell` (`App.tsx`).
 
@@ -15,11 +15,11 @@ Answers `ReleasesResponse` (`shared/types.ts`): `current` is the newest release 
 every release tag, newest first. Read-only and git only — not one of the outbound-calling modules. A tag with no `Release-Type` trailer is the
 **baseline**: where numbering starts, not a release of anything. Lightweight tags and names that are not exactly `vX.Y.Z` are ignored.
 
-**Why not `readReleases`.** [release-kit](https://github.com/futin/release-kit)'s `readReleases` (pinned to `v1.1.0`) does exactly this, but it spawns git
-through its own `execFile` with no timeout, and this server's rule is that every git read is `runGit` — async, bounded at 10 s
-([invariants](invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path)). So the service runs the same four reads through `runGit` and imports
-only the pure `parseTagMessage` for the tag messages. The filters and the GitHub-remote pattern are reproduced, and `test/api-releases.test.ts` holds the
-route to deep-equality with `readReleases` on the same repo, so they cannot drift.
+**The reader is release-kit's.** [release-kit](https://github.com/futin/release-kit)'s `createReleasesReader` (since `v1.2.0`) owns the filters, the
+ordering, the GitHub-remote pattern and the memo below; `findRepoRoot` is its too. The service hands it one thing, `runGit` as the git port, because this
+server's rule is that every git read is `runGit` — async, bounded at 10 s ([invariants](invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path))
+— and release-kit's default port is its own `execFile`. The memo key's `rev-parse` goes through the same port, so all four reads do, and
+`test/api-releases.test.ts` pins it.
 
 **The root.** `BM_RELEASES_ROOT` when set (the test seam), else the first ancestor of the server's own files holding a `.git` entry — a directory in a main
 checkout, a file in a linked worktree. Never `process.cwd()`. In the compose stack that is `/app`, the bind-mounted checkout.
