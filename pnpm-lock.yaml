@@ -143,8 +143,8 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
       release-kit:
-        specifier: github:futin/release-kit#v1.1.0
-        version: https://codeload.github.com/futin/release-kit/tar.gz/18af40f5d32264726963604574f41c3e8f373fb3
+        specifier: github:futin/release-kit#v1.2.0
+        version: https://codeload.github.com/futin/release-kit/tar.gz/574d3f148a3783d0549e8a7c85395b79b94ec631
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -2717,8 +2717,8 @@ packages:
   reflect-metadata@0.2.2:
     resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
 
-  release-kit@https://codeload.github.com/futin/release-kit/tar.gz/18af40f5d32264726963604574f41c3e8f373fb3:
-    resolution: {gitHosted: true, integrity: sha512-RUML+T1LFtuHx/4tp0niRziJpdXb3XwSH+7ka8UVxdeNX3vcgTcOGDZNulVx9Pi1Oh8Y4DpYtlHZkSIp+0i4Ww==, tarball: https://codeload.github.com/futin/release-kit/tar.gz/18af40f5d32264726963604574f41c3e8f373fb3}
+  release-kit@https://codeload.github.com/futin/release-kit/tar.gz/574d3f148a3783d0549e8a7c85395b79b94ec631:
+    resolution: {gitHosted: true, integrity: sha512-alKK4lenhDJAE4fjLtEhKbig4rGWvQus+zrS6ktvyMQkZN+3WZkjA+sAQsBJOzKTHJuY3mg3//1WCSMrCNatnQ==, tarball: https://codeload.github.com/futin/release-kit/tar.gz/574d3f148a3783d0549e8a7c85395b79b94ec631}
     version: 0.0.0
     engines: {node: '>=22'}
 
@@ -6088,7 +6088,7 @@ snapshots:
 
   reflect-metadata@0.2.2: {}
 
-  release-kit@https://codeload.github.com/futin/release-kit/tar.gz/18af40f5d32264726963604574f41c3e8f373fb3: {}
+  release-kit@https://codeload.github.com/futin/release-kit/tar.gz/574d3f148a3783d0549e8a7c85395b79b94ec631: {}
 
   require-directory@2.1.1: {}
 
