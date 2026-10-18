@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { formatTagMessage, readReleases } from 'release-kit';
+import { formatTagMessage } from 'release-kit';
 
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
@@ -19,8 +19,8 @@ import { makeRegistry } from './helpers/store';
  * read per request), and the memo key includes the root, so cases never see each other's answer — but a fixture is never reused across cases that need a
  * fresh read, because changing `origin` does not move the key (only HEAD and the tag refs do).
  *
- * The parity case is the reason the server can run git itself (spec R4) without drifting: for the same repo, the route must answer exactly what
- * release-kit's own `readReleases` does.
+ * The read itself is release-kit's `createReleasesReader` (spec D3), so these cases pin the route's answers rather than parity with a copy; the one thing the
+ * service adds — every git launch through `runGit` — has a case of its own under `ReleasesService`.
  */
 
 jest.setTimeout(20_000);
@@ -200,12 +200,6 @@ describe('GET /api/releases — a populated checkout', () => {
     release(root, 'v0.3.0', { ...FEAT, pr: 14 });
     expect(versions(await releasesAt(tree))).toContain('0.3.0');
   });
-
-  it('parity: the route answers exactly what release-kit readReleases answers for the same repo', async () => {
-    const root = populated('https://github.com/futin/backlog-manager.git');
-    const body = (await releasesAt(root)).body;
-    expect(body).toEqual(JSON.parse(JSON.stringify(await readReleases(root))));
-  });
 });
 
 describe('GET /api/releases — failure is a value, and is never memoised', () => {
@@ -276,6 +270,21 @@ describe('ReleasesService', () => {
       const [a, b] = await Promise.all([service.read(), service.read()]);
       expect(a).toEqual(b);
       expect(spy.mock.calls.filter(([args]) => args.includes('for-each-ref'))).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('every git launch in the route goes through runGit', async () => {
+    const root = populated('https://github.com/futin/backlog-manager.git');
+    const spy = jest.spyOn(gitRun, 'runGit');
+    try {
+      const body = (await releasesAt(root)).body;
+      expect(body.current).toEqual({ version: '0.2.1', ahead: 0 });
+      expect(body.releases[1].url).toBe('https://github.com/futin/backlog-manager/pull/12');
+      // The memo key, the tag read, the origin and describe — the reader's four git commands. A fresh root, so nothing is answered from the memo: a command
+      // missing here was launched some other way (release-kit's default port, which spawns git with no timeout), yet the answer above still came back whole.
+      expect(new Set(spy.mock.calls.map(([args]) => args[0]))).toEqual(new Set(['rev-parse', 'for-each-ref', 'remote', 'describe']));
     } finally {
       spy.mockRestore();
     }
