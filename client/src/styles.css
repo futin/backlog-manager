@@ -2717,7 +2717,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    per-theme block — `:root` resolves them against `<html>`, which is where `data-theme` is stamped.
 
    `--uk-z` is 80, over the modal's 60 and the form sheet's 70: the drawer opens from the rail with either still open, and the Escape stack already ranks it
-   last. The badges keep this board's look — each type's status word on a 14 % tint of its own token over `--strip`. */
+   last. The badges keep this board's look — each type's status word on a 14 % tint of its own token over `--strip`. A code span in the notes is marked the
+   way the item body marks one, by its `--steel` fill alone: `--uk-font-mono` maps to the board's one face, because the kit's `.uk-releases-notes code` names
+   a monospace stack and outranks the bare `code { font-family: inherit }` that keeps a second face out everywhere else (§8.1), and `--uk-code-bg` replaces
+   the kit's 6 % black, which is all but invisible on the four dark themes. */
 :root {
   --uk-panel-bg: var(--strip);
   --uk-ink: var(--ink);
@@ -2728,6 +2731,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   --uk-accent: var(--cyan);
   --uk-hover-bg: var(--strip-hi);
   --uk-font: var(--font);
+  --uk-font-mono: var(--font);
+  --uk-code-bg: var(--steel);
   --uk-font-size-lg: 19px;
   --uk-z: 80;
   --uk-feat-ink: var(--green);
