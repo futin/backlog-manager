@@ -148,6 +148,9 @@ importers:
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
+      ui-kit:
+        specifier: github:futin/ui-kit#v0.2.0
+        version: https://codeload.github.com/futin/ui-kit/tar.gz/39511c4541a69536c2b30dda0aa9d5d193d7ccf1(react@18.3.1)
     devDependencies:
       '@nestjs/cli':
         specifier: ^11.0.24
@@ -3114,6 +3117,13 @@ packages:
     resolution: {integrity: sha512-v3Xu+yuwBXisp6QYTcH4UbH+xYJXqnq2m/LtQVWKWzYc1iehYnLixoQDN9FH6/j9/oybfd6W9Ghwkl8+UMKTKQ==}
     engines: {node: '>=0.8.0'}
     hasBin: true
+
+  ui-kit@https://codeload.github.com/futin/ui-kit/tar.gz/39511c4541a69536c2b30dda0aa9d5d193d7ccf1:
+    resolution: {gitHosted: true, integrity: sha512-nLMX9nFO/ZkOq/hvc4Huc4TjhzjM5BkcuLcv2U4k+UZOZxlJdrbzDOwXziD89bD7hyPzlsoQEeEyx5nSA+2nMQ==, tarball: https://codeload.github.com/futin/ui-kit/tar.gz/39511c4541a69536c2b30dda0aa9d5d193d7ccf1}
+    version: 0.0.0
+    engines: {node: '>=22'}
+    peerDependencies:
+      react: ^18.3 || ^19
 
   uid@2.0.2:
     resolution: {integrity: sha512-u3xV3X7uzvi5b1MncmZo3i2Aw222Zk1keqLA1YkHldREkAhAqi65wuPfe7lHx8H/Wzy+8CE7S7uS3jekIM5s8g==}
@@ -6492,6 +6502,10 @@ snapshots:
 
   uglify-js@3.19.3:
     optional: true
+
+  ui-kit@https://codeload.github.com/futin/ui-kit/tar.gz/39511c4541a69536c2b30dda0aa9d5d193d7ccf1(react@18.3.1):
+    dependencies:
+      react: 18.3.1
 
   uid@2.0.2:
     dependencies:

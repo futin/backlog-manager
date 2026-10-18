@@ -156,8 +156,8 @@ queue:
    none. Settings is pre-project, so it lists `pr` for every project and leaves the refusal to the sheet and to the server's 400.
 
 Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, and since the release chip the What's new drawer — are the six
-dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal`, `FormSheet` and `Drawer` call
-`useDialogEscape` for whatever they wrap. Two further entries join the same stack
+dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
+whatever they wrap, and `ReleasesDrawer` calls it itself, since its shell is ui-kit's (#298) and is handed `closeOnEscape={false}`. Two further entries join the same stack
 while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
 Filters and Sort, and Jira's chip, board picker and roots search — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
 owns the key and not the pointer.

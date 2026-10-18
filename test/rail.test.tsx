@@ -338,7 +338,8 @@ describe('SideRail · the prompt-cursor wordmark', () => {
 
 /*
   The version chip (DESIGN.md §8.10): the rail's last element, drawn only when the shell hands it a `releases` reading. What the reading is — the label,
-  the dot, the seed — is the shell's (`test/releases-app.test.tsx`); what is here is where the rail puts it and what a click does.
+  the dot, the seed — is the shell's (`test/releases-app.test.tsx`); what is here is where the rail puts it and what a click does. The chip itself is
+  ui-kit's `VersionChip`, so its name is `What's new — <label>` and its dot `.uk-chip-dot`.
 */
 describe('SideRail · the version chip', () => {
   const chip = (): HTMLElement | null => screen.queryByRole('button', { name: /v0\.2\.0\+3/ });
@@ -353,7 +354,7 @@ describe('SideRail · the version chip', () => {
 
   it('draws no chip without a releases reading', () => {
     renderWithReleases();
-    expect(screen.queryByRole('button', { name: /^v\d/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /What's new/ })).toBeNull();
   });
 
   it("is the rail's last element at desktop width, with no dot unless asked", () => {
@@ -361,12 +362,12 @@ describe('SideRail · the version chip', () => {
     const nav = screen.getByRole('navigation', { name: 'Sections' });
     expect(chip()).toBeInTheDocument();
     expect(nav.lastElementChild).toBe(chip());
-    expect(nav.querySelector('.rail-release-dot')).toBeNull();
+    expect(nav.querySelector('.uk-chip-dot')).toBeNull();
   });
 
   it('draws the dot when a release has not been opened yet', () => {
     renderWithReleases({ label: 'v0.2.0+3', dot: true, onOpen: jest.fn() });
-    expect(chip()?.querySelector('.rail-release-dot')).not.toBeNull();
+    expect(chip()?.querySelector('.uk-chip-dot')).not.toBeNull();
   });
 
   it('calls onOpen on a click', async () => {

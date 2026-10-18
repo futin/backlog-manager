@@ -324,7 +324,6 @@ describe('guard 7 — one home per primitive', () => {
     '.ui-sheet',
     '.ui-modal',
     '.ui-form-sheet',
-    '.ui-drawer',
     '.ui-popover',
     '.ui-figure',
     '.ui-chip',

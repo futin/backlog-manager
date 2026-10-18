@@ -1712,9 +1712,11 @@ three run through, and a sixth composer of either shell would join the same way.
 was one: the issue modal is the same sidecar reading — a facts column and a body — of a ticket instead of an item, and it holds no run state, so the reason
 the run's detail is an always-visible sheet rather than a modal (a modal has no standing place for Pause and Resume) does not reach it.
 
-The What's new drawer made it six through a THIRD shell. `ReleasesDrawer` composes `ui/Drawer.tsx` — a scrim and a right-edge panel, the dashboard's
-releases drawer — and `Drawer` calls `useDialogEscape` once, as `Modal` and `FormSheet` do, so the drawer joined by the same construction with no line of the
-hook changed. It is the one dialog that opens from the rail, so it can land over any of the other five (an item modal left open, then the chip), and that is
+The What's new drawer made it six through a THIRD shell. `ReleasesDrawer` composed `ui/Drawer.tsx` — a scrim and a right-edge panel, the dashboard's
+releases drawer — and `Drawer` called `useDialogEscape` once, as `Modal` and `FormSheet` do, so the drawer joined by the same construction with no line of the
+hook changed. Since #298 that shell is ui-kit's (`ReleasesDrawer` from release-kit's shared releases UI, spec D15), which owns no stack and by default binds a
+`keydown` listener of its own — the exact two-listeners defect of bug-23. So the shape inverted for this one surface: the wrapper,
+`components/ReleasesDrawer.tsx`, calls `useDialogEscape(onClose)` itself and passes `closeOnEscape={false}`, and ui-kit's drawer handles no key at all. It is the one dialog that opens from the rail, so it can land over any of the other five (an item modal left open, then the chip), and that is
 the case the stack exists for: `test/dialog-escape.test.tsx` mounts the item modal and then the drawer and proves one Escape closes only the drawer, and its
 stack case now mounts all six in order and hands the key down them one at a time.
 

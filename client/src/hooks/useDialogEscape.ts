@@ -25,8 +25,9 @@ import { useEffect, useRef } from 'react';
  * (`components/jira/JiraBoardSheet.tsx`) composes `ui/FormSheet`, so both joined the stack through the two shells, by construction — the item modal,
  * `LaunchSheet`, `OrchestrateSheet` and those two. Nothing here changed for that either, which is what moving the call into the shells (task-40) bought.
  *
- * Six since the What's new drawer: `ReleasesDrawer` (`components/ReleasesDrawer.tsx`) composes `ui/Drawer`, a third shell that calls this hook once the way
- * the other two do, so it joined by the same construction — and it can open from the rail over any of the other five, which the stack already ranks.
+ * Six since the What's new drawer: `ReleasesDrawer` (`components/ReleasesDrawer.tsx`) — and it can open from the rail over any of the other five, which the
+ * stack already ranks. It joined through a third shell, `ui/Drawer`, until #298 moved the drawer into ui-kit; ui-kit's drawer binds its own `keydown` unless
+ * told not to, so the wrapper is the one exception to "the shells call this": it calls the hook itself and passes `closeOnEscape={false}`.
  *
  * One entry is not a dialog at all, and it is not one of the six: bug-53's
  * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens. It paints no
