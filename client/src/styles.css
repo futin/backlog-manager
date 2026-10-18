@@ -2739,12 +2739,30 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   --uk-breaking-ink: var(--red);
   --uk-breaking-tint: color-mix(in srgb, var(--red) 14%, var(--strip));
 }
-/* Two things ui-kit cannot know. The drawer renders inside `.shell`, whose `zoom` leaves `100dvh` meaning the unzoomed screen, so its height carries the same
-   `/ --font-scale` division every viewport unit in this file does — undivided, the panel overhangs the screen by the text scale. And the notes are this
-   board's `renderMarkdown` output, which emits `h3` for a `###` line: ui-kit styles only `p`, `ul` and `code` inside them, so the heading is sized here. */
-.uk-drawer { height: calc(100dvh / var(--font-scale, 1)) }
+/* Two things ui-kit cannot know. The drawer renders inside `.shell`, whose `zoom` leaves `100dvh` and `100vw` meaning the unzoomed screen, so its height and
+   width carry the same `/ --font-scale` division every viewport unit in this file does — undivided, the panel overhangs the screen by the text scale. And the
+   notes are this board's `renderMarkdown` output, which emits `h3` for a `###` line: ui-kit styles only `p`, `ul` and `code` inside them, so the heading is
+   sized here. The notes sit inside the `renderNotes` wrapper div, so the first-child reset reaches through it.
+
+   The rest restores the look §8.7 and §8.10 record, where ui-kit's own defaults differ and spec D16 did not accept the difference (#298's fix loop): the
+   panel's hairline on its one open edge and the shell lift laid leftward at the design's `-24px 0 64px` (the kit draws `-12px 0 24px` and no edge), neither
+   on the full-screen phone shape; notes at 13 px, below the 14 px title, rather than the kit's shared `--uk-font-size` — not mapped, because the title and
+   the ✕ read it too; 11/500 badges, not the kit's 600; and the baseline as a hairline rule with its text and date in the gap, which the kit draws as a plain
+   line with the date pushed right. */
+.uk-drawer {
+  width: min(400px, calc(100vw / var(--font-scale, 1)));
+  height: calc(100dvh / var(--font-scale, 1));
+  border-left: 1px solid var(--hairline);
+  box-shadow: -24px 0 64px var(--shadow2);
+}
+.uk-drawer.uk-drawer--narrow { width: calc(100vw / var(--font-scale, 1)); border-left: none; box-shadow: none }
+.uk-releases-notes { font-size: 13px }
 .uk-releases-notes h3 { font-size: 13px; font-weight: 600; color: var(--ink); margin: 10px 0 4px }
-.uk-releases-notes > :first-child { margin-top: 0 }
+.uk-releases-notes > div > :first-child { margin-top: 0 }
+.uk-releases-badge { font-weight: 500 }
+.uk-releases-base { gap: 10px }
+.uk-releases-base::before, .uk-releases-base::after { content: ""; flex: 1; height: 1px; background: var(--hairline) }
+.uk-releases-base .uk-releases-date { margin-left: 0 }
 
 /* ── ui primitives ────────────────────────────────────────────────────────────
    Every class family owned by a component in client/src/components/ui/, and
