@@ -84,7 +84,7 @@ export function JiraSkillsGroup() {
   }
 
   return (
-    <SettingsGroup title="Skills" scope="this machine · the prompts a card's Run ▾ can start a session with">
+    <SettingsGroup title="Skills" scope="this machine · the prompts a card's Run menu can start a session with">
       {(['execute', 'context'] as const).map((id) => (
         <SettingsRow key={id} name={JIRA_BUILTIN_LABELS[id]}>
           <Pill>built-in</Pill>
@@ -101,7 +101,7 @@ export function JiraSkillsGroup() {
               onAccept={() => void remove(skill)}
               onDismiss={() => setAsking(null)}
             >
-              Remove {skill.name}? A card's Run ▾ stops offering it.
+              Remove {skill.name}? A card's Run menu stops offering it.
             </Confirm>
           ) : (
             <button type="button" className="jira-setup-x" aria-label={`Remove ${skill.name}`} disabled={busy} onClick={() => setAsking(skill.id)}>
