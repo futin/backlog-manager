@@ -522,6 +522,18 @@ describe('isJiraStatusPayload', () => {
     expect(isJiraStatusPayload(noArmed)).toBe(false);
   });
 
+  it('rejects a payload without skills (the Dispatch row maps it) and one whose live is not a plain object (runChipState reads it)', () => {
+    const { skills: _skills, ...noSkills } = payload();
+    const { live: _live, ...noLive } = payload();
+    expect(isJiraStatusPayload(noSkills)).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), skills: null })).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), skills: {} })).toBe(false);
+    expect(isJiraStatusPayload(noLive)).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), live: null })).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), live: [] })).toBe(false);
+    expect(isJiraStatusPayload(payload({ skills: [{ id: 's_0123abcd', name: 'Groom', prompt: '/g' }] }))).toBe(true);
+  });
+
   it('rejects what is not an object', () => {
     expect(isJiraStatusPayload(null)).toBe(false);
     expect(isJiraStatusPayload('x')).toBe(false);

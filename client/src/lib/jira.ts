@@ -697,7 +697,8 @@ export function defaultModeFor(action: JiraAction): PermissionMode {
 /**
  * The shape guard `useJira` reads `GET /api/jira` through (`isTrackersPayload`'s role and reason). It checks what a render MAPS or READS without a
  * null-safe expression — the three collections and `armed`, the field phase 2 added (it proves a phase-2 server, so `home` is read null-safely after
- * it) — because a body missing one throws a `TypeError` inside a render, and React unmounts the page when it does. A wrong-shaped ROW degrades to a
+ * it), and the two phase 5 added: `skills` (Settings' Dispatch row maps it, and `resolveJiraAction` reads it) and `live` (`runChipState` indexes it) —
+ * because a body missing one throws a `TypeError` inside a render, and React unmounts the page when it does. A wrong-shaped ROW degrades to a
  * row that says less instead.
  */
 export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload {
@@ -709,7 +710,9 @@ export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload 
     typeof p.armed === 'boolean' &&
     Array.isArray(p.boards) &&
     Array.isArray(p.projects) &&
+    Array.isArray(p.skills) &&
     isRecord(p.repos) &&
+    isRecord(p.live) &&
     isRecord(p.calls)
   );
 }

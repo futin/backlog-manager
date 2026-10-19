@@ -547,7 +547,7 @@ function DispatchGroup() {
       {jiraSkills !== null && (
         <SettingsRow
           name="Jira default action"
-          hint="What a Jira card's Start does, and what Run ▾ marks as the default. A skill that has since been deleted reads as Work it end to end."
+          hint="Preselected as the Action in a Jira card's launch sheet. Overridable per launch. A skill that has since been deleted reads as Work it end to end."
         >
           <Select
             label="Jira default action"
