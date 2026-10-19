@@ -309,6 +309,30 @@ describe('daylight status tokens hold AA', () => {
     }
     expect(fails).toEqual([]);
   });
+  /**
+   * The release badges are ui-kit's (#298), so their rule is not in this stylesheet and `tintSites` never sees them: the kit sets each badge in
+   * `--uk-<type>-ink` on `--uk-<type>-tint`, and the board decides only what those tokens are, in the `:root` mapping block. So the pairs are read off that
+   * block — both halves, resolved through daylight's cascade — rather than off a rule. A tint is already opaque (it mixes into `--strip`), so it is the
+   * ground as written; `over` the drawer's `--uk-panel-bg` is there for a mapping that someday mixes into `transparent`.
+   */
+  it('every release badge ui-kit draws clears 4.5:1, its mapped ink over its mapped tint', () => {
+    const mapping = blocks(STYLES).find((b) => b.selectors.length === 1 && b.selectors[0] === ':root' && '--uk-feat-ink' in b.decls);
+    expect(mapping).toBeDefined();
+    const tokens = { ...DAY, ...(mapping as Block).decls };
+    const panel = color('var(--uk-panel-bg)', tokens);
+    const fails: string[] = [];
+    for (const type of ['feat', 'fix', 'perf', 'breaking']) {
+      const ink = (mapping as Block).decls[`--uk-${type}-ink`];
+      const tint = (mapping as Block).decls[`--uk-${type}-tint`];
+      if (ink === undefined || tint === undefined) {
+        fails.push(`--uk-${type}-ink / --uk-${type}-tint is not mapped`);
+        continue;
+      }
+      const r = ratio(color(ink, tokens), over(color(tint, tokens), panel));
+      if (r < AA) fails.push(`${type}: ${ink} on ${tint}: ${r.toFixed(2)}:1`);
+    }
+    expect(fails).toEqual([]);
+  });
 });
 
 describe('the four dark themes do not move', () => {

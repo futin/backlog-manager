@@ -1,21 +1,25 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { App } from '../client/src/App';
-import { useReleases } from '../client/src/hooks/useReleases';
-import { LAST_SEEN_KEY } from '../client/src/lib/releases';
 import type { ReleasesResponse } from '../shared/types';
 
 /*
-  The version chip and the What's new drawer as the SHELL wires them (docs/subsystems/releases.md): `AppShell` owns `useReleases`, the unseen dot over
-  `localStorage`, and the drawer, which it renders outside the rail. Through `<App />` because `AppShell` is unexported, with `nav.test.tsx`'s stubs for the
-  two sections that would otherwise fetch, and a `fetch` routed by URL: `/api/releases` answers the fixture, every other route the empty answer `nav.test.tsx`
-  gives Archive. The landing section is Board, stubbed, so nothing else on screen fetches anything that matters.
+  The version chip and the What's new drawer as the SHELL wires them (docs/subsystems/releases.md): `AppShell` owns ui-kit's `useWhatsNew` under this
+  board's own storage key, and the drawer, which it renders outside the rail. The hook's own behaviour — no timer, a failed or malformed read keeping the
+  last answer — is ui-kit's suite's; what is here is that the shell passes the key this board always used and wires the chip and the drawer to it.
+  Through `<App />` because `AppShell` is unexported, with `nav.test.tsx`'s stubs for the two sections that would otherwise fetch, and a `fetch` routed by
+  URL: `/api/releases` answers the fixture, every other route the empty answer `nav.test.tsx` gives Archive. The landing section is Board, stubbed, so
+  nothing else on screen fetches anything that matters.
 */
+
+/* The key as a literal, not `App`'s constant: what must not change is the string every existing browser already holds (spec D17), and a test reading the
+   constant back would follow a rename and stay green while every viewer's dot reset. */
+const LAST_SEEN_KEY = 'backlog-manager.releases-last-seen';
 
 jest.mock('../client/src/components/board/BoardView', () => ({
   __esModule: true,
@@ -75,7 +79,7 @@ afterEach(() => {
 });
 
 const chip = (): HTMLElement | null => screen.queryByRole('button', { name: /v0\.2\.1/ });
-const dot = (): Element | null => document.querySelector('.rail-release-dot');
+const dot = (): Element | null => document.querySelector('.uk-chip-dot');
 
 describe('the version chip in the shell', () => {
   it('dots a release newer than the one stored, opens the drawer on a click, re-reads, and marks the newest seen', async () => {
@@ -138,33 +142,6 @@ describe('the version chip in the shell', () => {
     render(<App />);
     await waitFor(() => expect(releaseCalls).toBe(1));
     await act(async () => {});
-    expect(screen.queryByRole('button', { name: /^v\d/ })).toBeNull();
-  });
-});
-
-describe('useReleases', () => {
-  it('fetches once on mount and once per refresh, with no timer', async () => {
-    const { result } = renderHook(() => useReleases());
-    await waitFor(() => expect(result.current.data).toEqual(FIXTURE));
-    expect(releaseCalls).toBe(1);
-    act(() => result.current.refresh());
-    await waitFor(() => expect(releaseCalls).toBe(2));
-  });
-
-  it('keeps the previous data when a fetch fails', async () => {
-    const { result } = renderHook(() => useReleases());
-    await waitFor(() => expect(result.current.data).toEqual(FIXTURE));
-    global.fetch = jest.fn(() => Promise.reject(new Error('down'))) as jest.Mock;
-    await act(async () => {
-      result.current.refresh();
-    });
-    expect(result.current.data).toEqual(FIXTURE);
-  });
-
-  it('reads an answer that is not the releases shape as nothing', async () => {
-    global.fetch = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ items: [] }) } as Response)) as jest.Mock;
-    const { result } = renderHook(() => useReleases());
-    await act(async () => {});
-    expect(result.current.data).toBeNull();
+    expect(screen.queryByRole('button', { name: /What's new/ })).toBeNull();
   });
 });

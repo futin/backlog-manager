@@ -5,9 +5,10 @@ first. The record is the checkout's annotated `vX.Y.Z` tags, which the release w
 ([ci](../workflows/ci.md) §Releases). Design: [the release versioning spec](../superpowers/specs/2026-10-16-release-versioning-design.md), which adopts the
 dashboard's release pipeline and its chip and drawer; the look is `.claude/DESIGN.md` §8.7 (the drawer shell) and §8.10.
 
-Code: `server/src/releases/` (the route, and the service wiring release-kit's reader to `runGit`), `client/src/lib/releases.ts` (every decision the chip and drawer make, no React),
-`client/src/hooks/useReleases.ts`, `client/src/components/ui/Drawer.tsx` (the shell), `client/src/components/ReleasesDrawer.tsx`, the chip in
-`SideRail.tsx`, the wiring in `AppShell` (`App.tsx`).
+Code: `server/src/releases/` (the route, and the service wiring release-kit's reader to `runGit`), `client/src/components/ReleasesDrawer.tsx` (the wrapper
+over ui-kit's drawer), the chip in `SideRail.tsx`, the wiring in `AppShell` (`App.tsx`). Since #298 every decision the chip and drawer make — the label, the
+dot, the fetch, the drawer's shell and markup — is `ui-kit`'s (`github:futin/ui-kit`, `useWhatsNew`, `VersionChip`, `ReleasesDrawer`); this repo keeps the
+Escape stack, the phone reading and the notes renderer, and themes the kit through the `--uk-*` block in `styles.css`.
 
 ## `GET /api/releases`
 
@@ -15,7 +16,7 @@ Answers `ReleasesResponse` (`shared/types.ts`): `current` is the newest release 
 every release tag, newest first. Read-only and git only — not one of the outbound-calling modules. A tag with no `Release-Type` trailer is the
 **baseline**: where numbering starts, not a release of anything. Lightweight tags and names that are not exactly `vX.Y.Z` are ignored.
 
-**The reader is release-kit's.** [release-kit](https://github.com/futin/release-kit)'s `createReleasesReader` (since `v1.2.0`) owns the filters, the
+**The git port.** The reader is [release-kit](https://github.com/futin/release-kit)'s `createReleasesReader` (since `v1.2.0`) owns the filters, the
 ordering, the GitHub-remote pattern and the memo below; `findRepoRoot` is its too. The service hands it one thing, `runGit` as the git port, because this
 server's rule is that every git read is `runGit` — async, bounded at 10 s ([invariants](invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path))
 — and release-kit's default port is its own `execFile`. The memo key's `rev-parse` goes through the same port, so all four reads do, and
@@ -41,13 +42,13 @@ HEAD or a tag next moves. Concurrent requests under one key share one read. The 
 
 ## The chip
 
-`v0.3.0`, or `v0.3.0+2` when HEAD is two commits past the tag (`chipLabel`). No chip at all when `current` is null — which is what a checkout without the
-baseline tag shows. It is the rail's last element, sunk to its foot, and the last row of the phone menu, where tapping it closes the menu as every rail entry
-does.
+`v0.3.0`, or `v0.3.0+2` when HEAD is two commits past the tag (ui-kit's `chipLabel`). No chip at all when `current` is null — which is what a checkout without
+the baseline tag shows. It is the rail's last element, sunk to its foot, and the last row of the phone menu, where tapping it closes the menu as every rail
+entry does.
 
 **The dot.** A cyan dot sits in the chip while the newest release (the baseline counts) is above the version stored under `localStorage`
 `backlog-manager.releases-last-seen` — a raw version string, not JSON. Opening the drawer stores the newest, and keeps storing whatever is newest while it is
-open — but never a version below the stored one, so opening the drawer on an older checkout does not re-flag the releases it has not got. A first visit, or a stored value that is not a version, seeds the newest without showing the dot (`dotState`), so a fresh browser never flags the whole
+open — but never a version below the stored one, so opening the drawer on an older checkout does not re-flag the releases it has not got. A first visit, or a stored value that is not a version, seeds the newest without showing the dot (ui-kit's `dotState`), so a fresh browser never flags the whole
 history as new. Storage that throws (a private window, blocked site data) means no dot, never a crash: `AppShell` mirrors the value in memory, so the seed it
 could not write still settles the dot. A per-browser convenience, not a record.
 
@@ -59,12 +60,18 @@ last good answer. Each entry: version, type badge (Feature / Fix / Performance),
 prefix (the badge already says it), the notes through the sanitising Markdown renderer when there are any, and `PR #N` when the origin is on GitHub. The
 baseline renders as a divider: `Versioning starts here · v0.1.0` and its date.
 
-`ui/Drawer` is the shell: a 400 px right-hand panel over the scrim, full screen under 700 px. Escape, the ✕ and a scrim click close it. It is the sixth
-dialog on the Escape stack ([invariants](invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)) and stacks above the modal
-and the sheet, because it can open over either. It is rendered in `AppShell`, outside the rail: the phone rail hides itself with a `transform`, which makes it
-the containing block of any `position: fixed` child, so a drawer inside it would be clipped to the rail.
+ui-kit's `Drawer` is the shell: a 400 px right-hand panel over the scrim, full screen under 700 px (`narrow`, which the wrapper sets from `useNarrow()` — the
+kit's CSS has no media queries). Escape, the ✕ and a scrim click close it; Escape through `useDialogEscape`, never the kit's own listener, which the wrapper
+turns off with `closeOnEscape={false}`. It is the sixth dialog on the Escape stack
+([invariants](invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)) and stacks above the modal and the sheet, because it can
+open over either. It is rendered in `AppShell`, outside the rail: the phone rail hides itself with a `transform`, which makes it the containing block of any
+`position: fixed` child, so a drawer inside it would be clipped to the rail.
 
-Badge colours are each status token on a 14 % tint of its own over `--strip`; `test/daylight-contrast.test.ts` reads those pairs out of `styles.css`.
+Badge colours are each status token on a 14 % tint of its own over `--strip`, mapped onto ui-kit's `--uk-feat-*`, `--uk-fix-*`, `--uk-perf-*` and
+`--uk-breaking-*` in `styles.css`; `test/daylight-contrast.test.ts` holds each mapped pair to 4.5:1 in daylight, and `test/ui-kit-tokens.test.ts` holds
+every `--uk-*` token the kit's stylesheet reads to being mapped there or named as left to its fallback on purpose. A code span in the notes is the item
+body's — `--steel` fill, the board's one face — through `--uk-code-bg` and `--uk-font-mono`. The notes go through this repo's sanitising `renderMarkdown`, passed as `renderNotes`, not the kit's escape-first default —
+so `###` headings still render.
 
 ## What is not here
 
@@ -75,12 +82,10 @@ bumped by hand, separately, for the plugin. The GitHub Release pages are written
   sources:
     - server/src/releases
     - shared/types.ts
-    - client/src/lib/releases.ts
-    - client/src/hooks/useReleases.ts
-    - client/src/components/ui/Drawer.tsx
     - client/src/components/ReleasesDrawer.tsx
     - client/src/components/SideRail.tsx
     - client/src/App.tsx
+    - client/src/styles.css
   kind: subsystem
   verified: ce41a287e78746f99d78dc8f5758ac2036064f20
 -->

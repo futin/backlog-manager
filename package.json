@@ -37,7 +37,8 @@
     "react-dom": "^18.3.1",
     "reflect-metadata": "^0.2.2",
     "release-kit": "github:futin/release-kit#v1.2.0",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "ui-kit": "github:futin/ui-kit#v0.2.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",

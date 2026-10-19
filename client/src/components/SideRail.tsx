@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { VersionChip } from 'ui-kit';
 
 import { useJiraContext } from '../hooks/JiraContext';
 import { useJiraPage } from '../hooks/useJiraPage';
@@ -211,19 +212,18 @@ export function SideRail({ section, onChange, chipSlot, working, releases }: Pro
         ))}
 
       {/* The rail's last element, sunk to its foot at desktop width; in the phone menu its last row, drawn only while the menu is open like every row.
-          Status lives in the dot alone (§8.10). A click closes the menu as a section row's does, so the drawer is not opened behind it. */}
+          Status lives in the dot alone (§8.10); the chip is ui-kit's `VersionChip`, placed and styled by `.rail-release`. A click closes the menu as a
+          section row's does, so the drawer is not opened behind it. */}
       {releases && (!narrow || menuOpen) && (
-        <button
-          type="button"
+        <VersionChip
           className="rail-release"
+          label={releases.label}
+          dot={releases.dot}
           onClick={() => {
             releases.onOpen();
             setMenuOpen(false);
           }}
-        >
-          {releases.dot && <span className="rail-release-dot" role="img" aria-label="new release" />}
-          {releases.label}
-        </button>
+        />
       )}
     </nav>
   );

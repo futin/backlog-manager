@@ -4,16 +4,16 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
+import { formatReleaseDate } from 'ui-kit';
 
 import { ReleasesDrawer } from '../client/src/components/ReleasesDrawer';
-import { Drawer } from '../client/src/components/ui/Drawer';
-import { formatReleaseDate } from '../client/src/lib/releases';
 import type { ReleasesResponse } from '../shared/types';
 
 /*
-  The What's new drawer (DESIGN.md §8.10) over `ui/Drawer` (§8.7's third overlay shape). The data is `test/api-releases.test.ts`'s populated fixture as the
-  route answers it, with `0.2.0`'s notes given a `### Sub` line so the markdown path is visible, and `0.2.1` without a `url` — what an origin that is not
-  GitHub gives.
+  The What's new drawer (DESIGN.md §8.10): this app's wrapper over ui-kit's `ReleasesDrawer`. ui-kit's own suite owns the drawer's markup; the cases
+  after the wrapper's are the ones this board's look and notes depend on, kept so a ui-kit bump that changed them goes red here. The data is
+  `test/api-releases.test.ts`'s populated fixture as the route answers it, with `0.2.0`'s notes given a `### Sub` line so the markdown path is visible,
+  and `0.2.1` without a `url` — what an origin that is not GitHub gives.
 */
 
 const DATA: ReleasesResponse = {
@@ -39,34 +39,45 @@ function entry(version: string): HTMLElement {
   return screen.getByTestId(`release-${version}`);
 }
 
-describe('Drawer', () => {
-  it('is a named dialog, and the scrim, the ✕ and Escape each call onClose', async () => {
+/*
+  The three things the wrapper adds over ui-kit's drawer, each pinned because the default would undo it: Escape through the app's one stack rather than a
+  listener of the drawer's own (one press, one close — the stack case itself is `test/dialog-escape.test.tsx`'s), the phone shape from `useNarrow`, and
+  the notes through `renderMarkdown`, whose `### ` heading ui-kit's escape-first default would print as literal text.
+*/
+describe('ReleasesDrawer · the wrapper', () => {
+  it('closes once per Escape, through the stack, and on the ✕ and the scrim', async () => {
     const onClose = jest.fn();
-    render(
-      <Drawer label="Panel" onClose={onClose}>
-        <p>inside</p>
-      </Drawer>
-    );
-    const dialog = screen.getByRole('dialog', { name: 'Panel' });
-    expect(within(dialog).getByText('inside')).toBeInTheDocument();
-
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    await userEvent.click(document.querySelector('.ui-drawer-scrim') as HTMLElement);
-    expect(onClose).toHaveBeenCalledTimes(2);
+    render(<ReleasesDrawer data={DATA} onClose={onClose} />);
     await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await userEvent.click(within(screen.getByRole('dialog', { name: "What's new" })).getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledTimes(2);
+    await userEvent.click(document.querySelector('.uk-drawer-scrim') as HTMLElement);
     expect(onClose).toHaveBeenCalledTimes(3);
   });
 
   it('does not close on a click inside the panel', async () => {
     const onClose = jest.fn();
-    render(
-      <Drawer label="Panel" onClose={onClose}>
-        <p>inside</p>
-      </Drawer>
-    );
-    await userEvent.click(screen.getByText('inside'));
+    render(<ReleasesDrawer data={DATA} onClose={onClose} />);
+    await userEvent.click(screen.getByText('version chip'));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('takes the full-screen shape exactly when useNarrow says the screen is narrow', () => {
+    const { unmount } = render(<ReleasesDrawer data={DATA} onClose={() => {}} />);
+    expect(screen.getByRole('dialog', { name: "What's new" })).not.toHaveClass('uk-drawer--narrow');
+    unmount();
+    Object.defineProperty(window, 'matchMedia', {
+      value: jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }),
+      configurable: true,
+      writable: true
+    });
+    try {
+      render(<ReleasesDrawer data={DATA} onClose={() => {}} />);
+      expect(screen.getByRole('dialog', { name: "What's new" })).toHaveClass('uk-drawer--narrow');
+    } finally {
+      delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+    }
   });
 });
 
@@ -98,7 +109,7 @@ describe('ReleasesDrawer', () => {
     expect(within(e).getByText('Fix')).toBeInTheDocument();
     expect(within(e).getByText('Breaking')).toBeInTheDocument();
     expect(within(e).getByText('Fix')).not.toBe(within(e).getByText('Breaking'));
-    expect(e.querySelector('.releases-notes')).toBeNull();
+    expect(e.querySelector('.uk-releases-notes')).toBeNull();
     expect(within(e).queryByRole('link')).not.toBeInTheDocument();
   });
 
@@ -106,6 +117,6 @@ describe('ReleasesDrawer', () => {
     render(<ReleasesDrawer data={DATA} onClose={() => {}} />);
     const e = entry('0.1.0');
     expect(within(e).getByText('Versioning starts here · v0.1.0')).toBeInTheDocument();
-    expect(e.querySelector('.releases-badge')).toBeNull();
+    expect(e.querySelector('.uk-releases-badge')).toBeNull();
   });
 });
