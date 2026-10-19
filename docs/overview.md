@@ -78,8 +78,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   Settings. The token is read per call from the environment and reaches no payload.
 - **`jira/`** — the third outbound-calling module, and only while `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are all set: a Jira Cloud client on
   Atlassian's gateway, a poller that sweeps the boards in `~/.backlog-manager/settings/jira.json` into in-memory caches (the second cache whose age is
-  rendered), and six read routes under `/api/jira`, plus five guarded POSTs — three config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`) and, since phase 3, two
-  writes to Jira itself (`/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }`), the only writes this server makes to Jira — part of the
+  rendered), and seven read routes under `/api/jira` (the seventh, `/prompt`, composes a Run session's prompt), plus seven guarded POSTs — five config writes to `jira.json`
+  (`/boards`, `/boards/delete`, `/repos`, and since phase 5a `/skills`, `/skills/delete`) and, since phase 3, two writes to Jira itself (`/issue/assign` `{ key }`
+  and `/issue/transition` `{ key, transitionId }`), the only writes this server makes to Jira. An in-memory live map of Jira sessions sits here too, driven from
+  `agents/` by `POST /api/agents/dispatch-jira` and `/jira-stop` — part of the
   [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md); [full doc](subsystems/jira.md).
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
