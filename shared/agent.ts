@@ -783,3 +783,48 @@ export function watchdogFailing(consecutiveFailures: number, maxAttempts: number
 export function watchdogStoodDown(w: { enabled: boolean; exhausted: boolean; failing: boolean }): boolean {
   return w.exhausted || w.failing || !w.enabled;
 }
+
+/**
+ * Moved here from agents/prompt.util.ts so jira/prompt.util.ts can share it: `server/src/jira/` must never import `server/src/agents/` (the module
+ * dependency runs agents → jira), and a second copy of a prompt-safety rule is the copy that drifts. A Jira summary is the same kind of input.
+ *
+ * Titles come from item frontmatter, which is a `key: value` line — so a
+ * newline cannot legally be in one. Collapsed anyway: this string is piped to
+ * a child process as a prompt, and a hand-edited file is exactly the input
+ * that would otherwise turn one instruction into two.
+ */
+export function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The last sentence of every item-dispatch prompt, whatever the action — and of the Jira `execute` built-in's (Jira phase 5). One copy, here, because
+ * `server/src/jira/` must not import `server/src/agents/`; a second wording would be the one that loses the narrow-staging clause.
+ *
+ * Every action writes something — groom rewrites an item file, capture creates
+ * one, execute writes the fix itself — and before this line all of it was left
+ * loose in the working tree, so a dispatch's output existed only until someone
+ * noticed it. Asking for the commit is what makes a dispatched session's work
+ * survive on its own.
+ *
+ * The narrow staging IS the rule, not a nicety around it. Unlike
+ * `backlog-orchestrate`, which commits inside a per-item worktree built to hold
+ * exactly one item's diff, a dispatched session runs in the user's MAIN tree —
+ * which may hold whatever else they had in flight. `git add -A` there sweeps
+ * that up into a commit nobody asked for, and that exact risk is why
+ * `backlog-execute` banned committing outright in the first place. So the
+ * blanket ban becomes a scoped instruction, and the scope is the part that must
+ * not be trimmed. Pushing stays banned: nothing here is reviewed.
+ *
+ * Known seam, deliberately one-sided: `skills/backlog-execute/SKILL.md` still
+ * says "Never commits, never pushes", and CLAUDE.md's invariant still names
+ * `backlog-orchestrate` as the only skill that commits. Only this prompt
+ * changed — it is the most specific instruction the spawned session receives,
+ * and `skills/` is a publishing boundary (an install is a copy of the pushed
+ * HEAD, so a skill edit reaches nothing until `pnpm run plugin:sync`). If the
+ * two sides are ever reconciled, this sentence is where it starts.
+ */
+export const COMMIT_RULE =
+  'When the job is done, commit the work: stage only the files this session ' +
+  'changed, never `git add -A` or `git add .` — the tree may hold unrelated ' +
+  "uncommitted work of the user's. Do not push.";

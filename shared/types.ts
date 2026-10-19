@@ -533,7 +533,8 @@ export function isSyncInterval(value: unknown): value is SyncInterval {
 // ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 is the server's READ half, so two fields are typed at their phase-1 value and
 // widen later without a rename: `JiraIssueDetail.session` is `null` (phase 5 makes it the live-session record) and `JiraStatusPayload.live` is always `{}`
-// (phase 5 makes it a map of key → live session). `JiraAction`, `JiraDispatchRequest` and its result are phase-5 shapes and are deliberately absent.
+// (phase 5 makes it a map of key → live session). `JiraAction` arrived with phase 5's prompt composer (below, after `JiraSkill`); `JiraDispatchRequest` and its
+// result are still absent — the dispatch route's own task adds them.
 // `JiraStatusPayload.tokenKind` is not in §4's list: it is the one extra boot probe's answer (§3, P14) and the Connection card needs it; §4 is amended to
 // match.
 
@@ -600,6 +601,49 @@ export interface JiraSkill {
   id: string;
   name: string;
   prompt: string;
+}
+
+/**
+ * What Run ▾ starts: one of the two built-ins, or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
+ * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 404 for an id `jira.json` lacks).
+ */
+export type JiraAction = 'execute' | 'context' | { skill: string };
+
+/** The built-ins' menu words (spec §7), one home so the menu, the launch sheet's Action select and a test read the same two strings. */
+export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context', string> = {
+  execute: 'Work it end to end',
+  context: 'Open with the ticket loaded'
+};
+
+/** A skill id, as the server mints it: `s_` and eight lower-case hex digits. Anchored both ends, so `'s_0123abcd\n'` is not one. */
+const JIRA_SKILL_ID_RE = /^s_[0-9a-f]{8}$/;
+
+/**
+ * `?action=` on `GET /api/jira/prompt`: `execute`, `context` or `skill:<s_ id>`. Anything else — including a `skill:` with no id or a `b_` id — is `null`. Shape
+ * checks only; see `JiraAction`. The inverse is `jiraActionParam`.
+ */
+export function parseJiraActionParam(raw: unknown): JiraAction | null {
+  if (raw === 'execute' || raw === 'context') return raw;
+  if (typeof raw !== 'string' || !raw.startsWith('skill:')) return null;
+  const id = raw.slice('skill:'.length);
+  return JIRA_SKILL_ID_RE.test(id) ? { skill: id } : null;
+}
+
+/** `JiraAction` as a query-string value; `parseJiraActionParam`'s inverse. */
+export function jiraActionParam(action: JiraAction): string {
+  return typeof action === 'string' ? action : `skill:${action.skill}`;
+}
+
+/**
+ * `action` in a JSON body: `'execute'`, `'context'`, or `{ skill: '<s_ id>' }` with no other key. The body shape and the query shape differ on purpose — a body
+ * has structure, a query string does not — and neither accepts the other's spelling.
+ */
+export function parseJiraAction(raw: unknown): JiraAction | null {
+  if (raw === 'execute' || raw === 'context') return raw;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const keys = Object.keys(raw);
+  const skill = (raw as { skill?: unknown }).skill;
+  return keys.length === 1 && keys[0] === 'skill' && typeof skill === 'string' && JIRA_SKILL_ID_RE.test(skill) ? { skill } : null;
 }
 
 /** One root or query that the last sweep could not read, kept beside the board so a partial list is never mistaken for a whole one. */

@@ -163,6 +163,38 @@ describe('renderTicketBlock', () => {
     });
   });
 
+  describe('the description option', () => {
+    it("'omitted' drops the description and every note about it, and keeps the facts and the subtasks", () => {
+      const withPlaceholder = detail({ description: 'Layout.\n[table omitted]' });
+      const text = renderTicketBlock(withPlaceholder, { description: 'omitted' });
+      expect(text).toBe(
+        [...HEAD, '', 'Subtasks (2):', '- PAY-132 Ledger migration · In Progress · Ada Lovelace', '- PAY-133 Ledger writer · In Review · —', ''].join('\n')
+      );
+      expect(text).not.toContain('(no description)');
+      expect(text).not.toContain('omitted');
+      expect(renderTicketBlock(detail({ description: '', children: [] }), { description: 'omitted' })).toBe([...HEAD, ''].join('\n'));
+    });
+
+    it("'as-is' and no option are the same bytes", () => {
+      expect(renderTicketBlock(detail(), { description: 'as-is' })).toBe(renderTicketBlock(detail()));
+    });
+
+    it('{ fence } wraps a description between two fence lines and leaves the rest alone', () => {
+      const text = renderTicketBlock(detail({ children: [] }), { description: { fence: '````' } });
+      expect(text).toBe([...HEAD, '', '````', 'Write one ledger row per refund.', '', '- partial refunds', '- full refunds', '````', ''].join('\n'));
+    });
+
+    it('{ fence } leaves the empty-description line unfenced, and puts the omitted-content note after the closing fence', () => {
+      expect(renderTicketBlock(detail({ description: ' ', children: [] }), { description: { fence: '```' } })).toBe(
+        [...HEAD, '', '(no description)', ''].join('\n')
+      );
+      const note = `(something was omitted — open in Jira: ${URL_131})`;
+      expect(renderTicketBlock(detail({ description: '[table omitted]', children: [] }), { description: { fence: '```' } })).toBe(
+        [...HEAD, '', '```', '[table omitted]', '```', note, ''].join('\n')
+      );
+    });
+  });
+
   describe('the omitted-content note', () => {
     const note = `(something was omitted — open in Jira: ${URL_131})`;
 
