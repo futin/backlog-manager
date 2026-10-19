@@ -300,8 +300,10 @@ one caller (spec §10), and a source guard in `jira.test.mjs` holds all three.
 - **`transition`'s argument** is every word after the key, matched against the offered transitions in three steps, stopping at the first that matches
   anything: the exact id, then the transition's name, then its target status (case-insensitive). Ambiguous or not offered is exit `2`, naming what is
   offered, and nothing is posted; the server re-checks the id against a fresh read of its own, and a workflow that moved between the two reads is its 400.
-- **`status` exits `0` only when `access` is `ok`**, and `3` otherwise — the code every issue command would meet in that state — so `jira.mjs status && …`
-  reads as "the next call can work". Not configured is stderr and `3`.
+- **`status` exits `0` only when `access` is `ok` and `me` is set**, and `3` otherwise — the code every issue command would meet in that state — so
+  `jira.mjs status && …` reads as "the next call can work". `access: ok` with no identity is a boot still connecting, whose every issue call is the server's
+  `connecting` 502 until `me` lands. Not configured is stderr and `3`. An answer the tool cannot read — a body cut off mid-read, a transition with no target —
+  is `3` too, never `1`: a request may already have landed.
 - **Exit codes:** `0` success, `1` usage, `2` a 4xx (the server's `error` printed verbatim), `3` a 5xx or a 2xx whose body cannot be read, `5` the stack is
   down — a sentence naming the backlog-manager checkout, because the CLI runs in a mapped repository where `pnpm run dev` means something else.
 

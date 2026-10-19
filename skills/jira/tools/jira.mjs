@@ -25,7 +25,7 @@ commands:
   jira.mjs transitions <KEY>             list the transitions the issue offers: <id>\\t<label>\\t<category>, one per line
   jira.mjs transition <KEY> <id|name>    apply one transition, matched by id, then transition name, then target status
   jira.mjs assign <KEY>                  assign the issue to the signed-in user
-  jira.mjs status                        is Jira connected, and can the next call work (exit 0 only when access is ok)
+  jira.mjs status                        is Jira connected, and can the next call work (exit 0 only when access is ok and someone is signed in)
 
 every command needs the backlog-manager API running on 127.0.0.1 (BM_API_PORT, default 4322)`
 
@@ -43,13 +43,17 @@ class JiraCliError extends Error {
 
 // A copy of backlog.mjs's `apiBase`, not an import: an installed skill's `tools/` is a standalone copy of the pushed HEAD with no path back to a sibling
 // skill. `||`, so an empty `BM_API_PORT` is the default rather than `127.0.0.1:`.
+function apiPort() {
+  return process.env.BM_API_PORT || '4322'
+}
+
+// The scheme and host spelled out literally, so the source guard can read the one place this file dials.
 function apiBase() {
-  const port = process.env.BM_API_PORT || '4322'
-  return `http://127.0.0.1:${port}`
+  return `http://127.0.0.1:${apiPort()}`
 }
 
 function apiDownMessage() {
-  return `the backlog-manager API is not running on ${apiBase().replace('http://', '')} — start it with \`pnpm run dev\` or \`pnpm run docker:up\` in the backlog-manager checkout; every jira.mjs command needs it`
+  return `the backlog-manager API is not running on 127.0.0.1:${apiPort()} — start it with \`pnpm run dev\` or \`pnpm run docker:up\` in the backlog-manager checkout; every jira.mjs command needs it`
 }
 
 // A copy of backlog.mjs's `apiRequest`. One request, and the only place this file touches the network.
@@ -73,7 +77,13 @@ async function apiRequest(method, route, body) {
     // ECONNREFUSED, EHOSTUNREACH, a malformed base — all mean "there is no API here", which has one fix.
     throw new JiraCliError(apiDownMessage(), API_DOWN_CODE)
   }
-  const text = await res.text()
+  let text
+  try {
+    text = await res.text()
+  } catch {
+    // The connection died mid-body. The request reached the server — a POST may already have landed — so this is `3`, never `5` ("not running") or `1`.
+    throw unreadable(res)
+  }
   let payload = null
   try {
     payload = text === '' ? null : JSON.parse(text)
@@ -121,7 +131,8 @@ function keyOrFail(raw) {
 }
 
 /**
- * R7: `status` answers "can the next call work". Not configured is stderr and `3`; otherwise one `key: value` line each, and `0` only when access is `ok` —
+ * R7: `status` answers "can the next call work". Not configured is stderr and `3`; otherwise one `key: value` line each, and `0` only when access is `ok`
+ * and there is an identity —
  * the same `3` every issue command would meet in that state, so `jira.mjs status && …` reads true. Strings carry no trailing newline; `main` adds it.
  */
 export function formatStatus(payload) {
@@ -135,7 +146,8 @@ export function formatStatus(payload) {
     `boards: ${Array.isArray(payload.boards) ? payload.boards.length : 0}`,
   ]
   if (payload.configUnreadable) lines.push(`jira.json: cannot be read — ${payload.configUnreadable}`)
-  return { stdout: lines.join('\n'), stderr: '', code: payload.access === 'ok' ? 0 : 3 }
+  // `me` too: `access: ok` with no identity is a boot still connecting, whose every issue call is the server's `connecting` 502 until `me` lands.
+  return { stdout: lines.join('\n'), stderr: '', code: payload.access === 'ok' && payload.me ? 0 : 3 }
 }
 
 /** Each command's own usage line, for a wrong argument count (R8). */
@@ -226,10 +238,11 @@ async function transitions(args) {
 // Read, resolve, then post — and never post on a failed read or a failed resolution. The server re-checks the id against a fresh read of its own (§8), so a
 // workflow that moved between the two reads is its 400, printed like any other.
 async function transition(args) {
-  if (args.length < 2) throw new JiraCliError(commandUsage('transition'), 1)
-  const key = keyOrFail(args[0])
-  // Every word after the key, joined by one space, so `transition PAY-1 In Progress` needs no quotes.
+  // Every word after the key, joined by one space, so `transition PAY-1 In Progress` needs no quotes. Words that are all blank (an empty shell variable) are
+  // the same usage error as no words: R4's "empty is usage".
   const arg = args.slice(1).join(' ')
+  if (args.length < 2 || arg.trim() === '') throw new JiraCliError(commandUsage('transition'), 1)
+  const key = keyOrFail(args[0])
   const resolved = resolveTransition(await readTransitions(key), arg, key)
   if (!resolved.ok) throw new JiraCliError(resolved.message, resolved.code)
   const res = await apiRequest('POST', '/api/jira/issue/transition', { key, transitionId: resolved.transition.id })
@@ -267,9 +280,14 @@ export async function main(argv) {
     if (args.some((a) => a.startsWith('--'))) throw new JiraCliError(commandUsage(cmd), 1)
     return await run(args)
   } catch (err) {
-    if (!(err instanceof JiraCliError)) throw err
-    console.error(err.message)
-    return err.code
+    if (err instanceof JiraCliError) {
+      console.error(err.message)
+      return err.code
+    }
+    // Anything else is an answer this tool could not read (a transition with no `to`, say) — `3`, the server's side, never `1`, which SKILL.md documents
+    // as "nothing was sent" when a request may already have landed.
+    console.error(`jira.mjs could not read the API's answer: ${err instanceof Error ? err.message : String(err)}`)
+    return 3
   }
 }
 

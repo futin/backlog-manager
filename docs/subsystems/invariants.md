@@ -3742,9 +3742,9 @@ it names the backlog-manager checkout the two commands belong to.
 
 **`main` is async, and the entry guard awaits it.** The "every skill CLI exits through `process.exitCode`" rule is about `process.exit()` truncating a
 pipe, which asynchrony has nothing to do with; what it actually requires is that nothing hold the event loop open when `main` returns. Every `fetch` here is
-awaited to completion and each carries `connection: close`, so no pooled socket outlives the call. The source guard accepts `= await main(` for this file, `api-call.mjs`
-and `jira.mjs` — the three whose work is a `fetch` — and still requires the synchronous form of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous
-work at all.
+awaited to completion and each carries `connection: close`, so no pooled socket outlives the call. The source guard accepts `= await main(` for this file,
+`api-call.mjs` and `jira.mjs` — the three whose work is a `fetch` — and still requires the synchronous form of `orchestrate.mjs` and `retro.mjs`, which hold no
+asynchronous work at all.
 
 **Three spellings, one issue.** `31`, `#31` and this project's own URN all name the same item, because three different callers arrive with three different
 handles — a person types the number, a skill's prose says `#31`, and the board posts `BacklogItem.path`. A file-shaped id (`task-31`) and a URN naming another

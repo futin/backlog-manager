@@ -3354,11 +3354,11 @@ const CLI_SOURCES = {
 const codeLines = (file) =>
   fs.readFileSync(file, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('//'))
 
-// `= await main(` is accepted for the CLIs whose work is a `fetch` — backlog.mjs (task-46), api-call.mjs and jira.mjs — and for no other. The invariant is about `process.exit()` truncating a pipe, which asynchrony has nothing to do
-// with; what it actually requires is that nothing be left holding the event loop open when main returns. API mode keeps that — every `fetch` is awaited to
-// completion and each one sends `connection: close`, so no pooled socket outlives the call — and the API-mode cases assert it behaviourally, by expecting each
-// child process to EXIT rather than hang. The other two CLIs hold no asynchronous work at all and stay on the synchronous form, so a stray `await` appearing
-// in either of them still goes red here.
+// `= await main(` is accepted for the CLIs whose work is a `fetch` — backlog.mjs (task-46), api-call.mjs and jira.mjs — and for no other. The invariant is
+// about `process.exit()` truncating a pipe, which asynchrony has nothing to do with; what it actually requires is that nothing be left holding the event loop
+// open when main returns. API mode keeps that — every `fetch` is awaited to completion and each one sends `connection: close`, so no pooled socket outlives the
+// call — and the API-mode cases assert it behaviourally, by expecting each child process to EXIT rather than hang. The other two CLIs hold no asynchronous work
+// at all and stay on the synchronous form, so a stray `await` appearing in either of them still goes red here.
 //
 // `api-call.mjs` takes the awaited shape too (task-47), and its safety argument is its own rather than a copy of backlog.mjs's: it makes exactly ONE `fetch`,
 // awaits it to completion, sends `connection: close`, and holds no timer, server or child of its own. A-1 asserts it behaviourally from the other side — the

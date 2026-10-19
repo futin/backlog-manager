@@ -19,10 +19,10 @@ skill root — never duplicated under `.claude/skills/`, which would load the sa
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
 | `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`                                                                                       |
 
-`backlog-orchestrate` is the largest of the seven and the only one that touches git. Told to drain a queue, it works every ready bug and task one at a time — each
-in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's base
-branch before the next one starts. The base is `main` unless the run was started with `--base <ref>`, and it is the ref items are gated at, worktrees are cut
-from and merges land in. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
+`backlog-orchestrate` is the largest of the seven and the only one that touches git. Told to drain a queue, it works every ready bug and task one at a time —
+each in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's
+base branch before the next one starts. The base is `main` unless the run was started with `--base <ref>`, and it is the ref items are gated at, worktrees are
+cut from and merges land in. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
 
 Told `--merge-mode pr` — tracker projects only; `init` refuses any other with exit `1` and nothing written — it merges the same way, but onto a run branch of
 its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch `--base` named. The run file's `base` is then the run branch and the new
@@ -100,11 +100,11 @@ holds the event loop open: all reads are synchronous `fs`, every child is `spawn
 than on a timer. Whoever adds a timer, a server or an async child closes its handle — restoring `process.exit()` would restore the truncation. One rule, one
 comment per file; `retro.mjs`'s is the long-form copy the others point at, and `backlog.test.mjs`'s source guard reads every one of them.
 
-`backlog.mjs` (task-46), `api-call.mjs` (task-47) and `jira.mjs` (Jira phase 4) end `process.exitCode = await main(...)`, and the rule is untouched by the `await`: it is
-`process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. Each awaits every
-`fetch` to completion and sends `connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for those three files and
-still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s `CLI_SOURCES` is where
-the list of files lives, never a count in prose.
+`backlog.mjs` (task-46), `api-call.mjs` (task-47) and `jira.mjs` (Jira phase 4) end `process.exitCode = await main(...)`, and the rule is untouched by the
+`await`: it is `process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. Each
+awaits every `fetch` to completion and sends `connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for those
+three files and still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s
+`CLI_SOURCES` is where the list of files lives, never a count in prose.
 
 #### `orchestrate.mjs`'s two modes (task-47, spec §7)
 

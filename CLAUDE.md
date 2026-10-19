@@ -66,11 +66,12 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate` and the run/watchdog predicates both sides must agree on), `theme.css`
   (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`, `skills/backlog-execute/`, `skills/backlog-orchestrate/`, `skills/backlog-retro/`,
-  `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer; `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run
-  file's only writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state directory, the registry and — by recorded lease id — each run's driver
-  transcript, and owns `~/.backlog-manager/retro/` ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/jira/tools/jira.mjs` is
-  API-only and writes no file: it reads and moves one Jira ticket through `/api/jira`. **Start orchestrator runs from the board, not by typing the trigger
-  into a terminal.** → [docs/subsystems/skills.md](docs/subsystems/skills.md)
+  `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer;
+  `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state directory, the
+  registry and — by recorded lease id — each run's driver transcript, and owns `~/.backlog-manager/retro/`
+  ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/jira/tools/jira.mjs` is API-only and writes no file: it reads and moves one Jira
+  ticket through `/api/jira`. **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
+  [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge.
 - `.claude/rules/` — ten path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the

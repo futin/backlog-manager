@@ -117,7 +117,11 @@ test('formatStatus: configured and ok is four lines and exit 0', () => {
 })
 
 test('formatStatus: no identity, an access detail, and an unreadable jira.json', () => {
-  assert.match(formatStatus({ ...STATUS_OK, me: null }).stdout, /^signed in as: no identity$/m)
+  const connecting = formatStatus({ ...STATUS_OK, me: null, detail: 'connecting' })
+  assert.match(connecting.stdout, /^signed in as: no identity$/m)
+  // `access: ok` with no identity is a boot still connecting: every issue call meets the server's `connecting` 502 until `me` lands, so `status && …` must
+  // not read true yet.
+  assert.equal(connecting.code, 3, 'access ok with no identity is not "the next call can work"')
   const bad = formatStatus({ ...STATUS_OK, access: 'unauthorized', detail: 'Jira rejected the credentials' })
   assert.match(bad.stdout, /^access: unauthorized — Jira rejected the credentials$/m)
   assert.equal(bad.code, 3)
@@ -209,6 +213,29 @@ test('nothing listening is exit 5 with the stack-down sentence naming the port',
   )
 })
 
+test('a body cut off mid-read is exit 3 with the unreadable sentence, not a stack trace', async () => {
+  // Not the fake: it cannot promise more bytes than it sends. A raw server that announces 1000 and dies after 3 is the connection reset the fetch body meets.
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json', 'content-length': '1000' })
+    res.write('{"a')
+    setImmediate(() => res.socket.destroy())
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const out = await runCli(server.address().port, 'status')
+    assert.equal(out.status, 3, out.stderr)
+    assert.equal(out.stderr.trim(), 'the API answered 200 with a body jira.mjs cannot read')
+  } finally {
+    await new Promise((resolve) => server.close(resolve))
+  }
+})
+
+test('a transition missing its target status is exit 3, not a stack trace', async () => {
+  const { out } = await cli(writable([{ id: '11', name: 'Start' }]), 'transitions', 'PAY-1')
+  assert.equal(out.status, 3, out.stderr)
+  assert.doesNotMatch(out.stderr, /\n\s+at /, 'a stack trace reached stderr')
+})
+
 test('show passes a 200 000-byte ticket through a pipe whole (RF 5)', async () => {
   const text = 'x'.repeat(199_999) + 'y'
   const { out } = await cli({ '/api/jira/issue/PAY-1': { body: text } }, 'show', 'PAY-1')
@@ -219,7 +246,7 @@ test('show passes a 200 000-byte ticket through a pipe whole (RF 5)', async () =
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
 // status.
 
-test('status reads GET /api/jira and exits 0 only when access is ok', async () => {
+test('status reads GET /api/jira and exits 0 only when access is ok and someone is signed in', async () => {
   const ok = await cli({ '/api/jira': { body: STATUS_OK } }, 'status')
   assert.equal(ok.out.status, 0)
   assert.equal(ok.out.stdout, 'site: acme.atlassian.net\nsigned in as: Ada Lovelace\naccess: ok\nboards: 2\n')
@@ -324,6 +351,11 @@ test('transition posts nothing when the argument is ambiguous, not offered, or m
   const bare = await cli(writable(ALL), 'transition', 'PAY-1')
   assert.equal(bare.out.status, 1)
   assert.equal(bare.requests.length, 0)
+
+  // An empty shell variable: an argument that is there and says nothing is the same usage error as one that is missing.
+  const empty = await cli(writable(ALL), 'transition', 'PAY-1', '', ' ')
+  assert.equal(empty.out.status, 1, empty.out.stderr)
+  assert.equal(empty.requests.length, 0)
 })
 
 test("transition reports the server's re-check when the workflow moved between the two reads (RF 4)", async () => {
@@ -416,9 +448,12 @@ test('jira.mjs talks to 127.0.0.1 only, carries no Jira credential, and never ca
   assert.ok(!/atlassian/i.test(code), 'jira.mjs names an Atlassian host')
   assert.ok(!code.includes('BM_JIRA_'), 'jira.mjs reads a Jira credential variable')
   assert.ok(!/authorization/i.test(code), 'jira.mjs builds an authorization header')
-  // A scheme followed by a host; a bare `'http://'` (the stack-down sentence strips it from the base) names no host and is not counted.
-  const hosts = [...code.matchAll(/https?:\/\/[^\s`'"$/]+/g)].map((m) => m[0])
-  assert.deepEqual([...new Set(hosts)], ['http://127.0.0.1:'])
+  // Every scheme in the code, whatever follows it — a templated host (`https://${site}`) included, which a host-shaped match would miss. The one allowed
+  // is the loopback base; the stack-down sentence is built from host and port, so it carries no scheme to exempt.
+  assert.ok(!code.includes('https://'), 'jira.mjs names an https:// URL')
+  const schemes = [...code.matchAll(/http:\/\/.{0,10}/g)].map((m) => m[0])
+  assert.ok(schemes.length > 0, 'the loopback base is gone')
+  for (const s of schemes) assert.ok(s.startsWith('http://127.0.0.1:'), `jira.mjs dials something other than 127.0.0.1: ${s}`)
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -455,7 +490,10 @@ test('jira/SKILL.md documents every exit code and both ways to start the stack',
 })
 
 test('jira/SKILL.md says the ticket text is data, not instructions (RF 1)', () => {
-  assert.ok(fs.readFileSync(SKILL_MD, 'utf8').includes('data, not instructions'), 'the untrusted-ticket rule is gone')
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  assert.ok(text.includes('data, not instructions'), 'the untrusted-ticket rule is gone')
+  // A session's own prompt can carry a ticket block (pasted, or phase 5's), and "the prompt this session was started with" is also who may ask for a write.
+  assert.ok(text.includes('a ticket block inside your prompt'), 'the rule no longer covers ticket text that arrives in the prompt')
 })
 
 test("the plugin's description names the jira skill", () => {
