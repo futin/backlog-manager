@@ -212,18 +212,22 @@ export function SideRail({ section, onChange, chipSlot, working, releases }: Pro
         ))}
 
       {/* The rail's last element, sunk to its foot at desktop width; in the phone menu its last row, drawn only while the menu is open like every row.
-          Status lives in the dot alone (§8.10); the chip is ui-kit's `VersionChip`, placed and styled by `.rail-release`. A click closes the menu as a
-          section row's does, so the drawer is not opened behind it. */}
+          Status lives in the dot alone (§8.10). The chip is ui-kit's `VersionChip` and draws itself — it takes no `className` — so `.rail-release` is a
+          wrapper that owns the placement and nothing else. `narrow` is the same `useNarrow()` reading the rest of the rail uses: it gives the pill its
+          44 px hit area on a phone, which overhangs the pill by 8 px above and below, so nothing around this wrapper may clip (the rail's own padding and the
+          wrapper's margins keep that overhang inside its padding box). A click closes the menu as a section row's does, so the drawer is not opened behind it. */}
       {releases && (!narrow || menuOpen) && (
-        <VersionChip
-          className="rail-release"
-          label={releases.label}
-          dot={releases.dot}
-          onClick={() => {
-            releases.onOpen();
-            setMenuOpen(false);
-          }}
-        />
+        <div className="rail-release">
+          <VersionChip
+            label={releases.label}
+            dot={releases.dot}
+            narrow={narrow}
+            onClick={() => {
+              releases.onOpen();
+              setMenuOpen(false);
+            }}
+          />
+        </div>
       )}
     </nav>
   );

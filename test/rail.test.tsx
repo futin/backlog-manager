@@ -361,7 +361,9 @@ describe('SideRail · the version chip', () => {
     renderWithReleases({ label: 'v0.2.0+3', dot: false, onOpen: jest.fn() });
     const nav = screen.getByRole('navigation', { name: 'Sections' });
     expect(chip()).toBeInTheDocument();
-    expect(nav.lastElementChild).toBe(chip());
+    // The chip draws itself (ui-kit takes no className), so the nav's last child is the `.rail-release` wrapper that places it.
+    expect(nav.lastElementChild).toHaveClass('rail-release');
+    expect(nav.lastElementChild).toContainElement(chip());
     expect(nav.querySelector('.uk-chip-dot')).toBeNull();
   });
 
@@ -384,7 +386,10 @@ describe('SideRail · the version chip', () => {
       expect(chip()).toBeNull();
       await userEvent.click(screen.getByRole('button', { name: 'Menu' }));
       const nav = screen.getByRole('navigation', { name: 'Sections' });
-      expect(nav.lastElementChild).toBe(chip());
+      expect(nav.lastElementChild).toHaveClass('rail-release');
+      expect(nav.lastElementChild).toContainElement(chip());
+      // The phone shape is ui-kit's: `narrow` is what gives the pill its 44 px hit area.
+      expect(chip()).toHaveClass('uk-chip--narrow');
       await userEvent.click(chip() as HTMLElement);
       expect(onOpen).toHaveBeenCalledTimes(1);
       expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false');
