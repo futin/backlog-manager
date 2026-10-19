@@ -411,7 +411,7 @@ section (seven dialogs). The browser still never talks to Jira or the dashboard:
   `useAgents()` is read only then). It posts `stopJira` (`POST /api/agents/jira-stop`) through the same `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
 - **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an
-  add row and a `×` that asks through `ui/Confirm`; every write is one of the five config routes and reloads the shell's status. Settings › Shared › Dispatch
+  add row and a `×` that asks through `ui/Confirm`; every write is one of the five config routes and reloads the shell's status. Settings › Local › Dispatch
   gains `Jira default action`, drawn only while Jira is configured; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` without
   rewriting the stored value.
 
