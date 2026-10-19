@@ -435,7 +435,7 @@ describe('configured, the credentials are rejected', () => {
  * exactly that way AND in every later way, so a route that checked them in another order would answer a different sentence.
  */
 describe('GET /api/jira/prompt', () => {
-  const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} ({summary}) in {repo}, then stop.' };
+  const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} in {repo}, then stop.' };
   const REPO = '/work/pay';
   const q = (params: Record<string, string>) => `/prompt?${new URLSearchParams(params).toString()}`;
   const ok = { key: 'PAY-131', action: 'execute', repo: REPO };
@@ -522,10 +522,9 @@ describe('GET /api/jira/prompt', () => {
     expect(res.text.startsWith('Read Jira ticket PAY-131 below, then wait')).toBe(true);
   });
 
-  it("skill:<id> answers the template's text with its placeholders filled", async () => {
+  it("skill:<id> answers the template's text with its placeholders filled, and no ticket block", async () => {
     const res = await get(q({ ...ok, action: `skill:${SKILL.id}` })).expect(200);
-    expect(res.text.split('\n\n')[1]).toBe(`Review PAY-131 (Summary of PAY-131) in ${REPO}, then stop.`);
-    expect(res.text).toContain('BEGIN TICKET');
+    expect(res.text).toBe(`Review PAY-131 in ${REPO}, then stop.`);
   });
 
   it.each([
@@ -554,9 +553,8 @@ describe('GET /api/jira/prompt', () => {
 
   it('400 prompt too long when the template and the facts alone are over the cap, with nothing left to trim', async () => {
     const file = process.env.BM_JIRA_FILE!;
-    // A template at the writer's 2 000-character cap whose every placeholder is a long summary: the instruction alone is far past 4 000, so no cut of the
-    // description can fit and the answer is the 400, never a prompt that says `(no description)`.
-    const tpl = { ...SKILL, prompt: '{summary}'.repeat(200) };
+    // A template whose every placeholder is the ticket's url: filled, it is far past 4 000, and a skill's prompt has nothing to trim.
+    const tpl = { ...SKILL, prompt: '{url}'.repeat(300) };
     fake.issues.set('PAY-600', makeRawIssue({ key: 'PAY-600', fields: { summary: 'S'.repeat(300) } }));
     writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [tpl] }));
     try {

@@ -1257,6 +1257,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-run { position: relative; flex: none }
 .board-card-markers .jira-run { margin-left: auto }
 .jira-run[data-state='no-repo'] > button { border-style: dashed }
+/* In the modal the facts column is a scroll container 290 px wide, and a 320 px panel right-aligned under a mid-row chip ran out past its left edge and was
+   cut there. So the ROW is the positioning parent: the panel hangs under the whole row, its right edge the row's, at the column's width (`JiraRunMenu`'s
+   `MODAL_PANEL_WIDTH`) — inside the details view. A tall menu lengthens the column's scroll rather than spilling out of it. */
+.jira-modal-controls { position: relative }
+.jira-modal-controls .jira-run { position: static }
 /* The card clips its content for the radius, which would clip the absolute panel with it: while the panel is open the card overflows, and the live
    strip, which no longer has the card's clip to round it, takes the top radius itself. */
 .board-card:has(.jira-run-open) { overflow: visible }

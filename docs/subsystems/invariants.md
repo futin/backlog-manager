@@ -1385,16 +1385,17 @@ has no `prompt` field for the same reason `orchestrate` has none, and `JiraAgent
 never read. The session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with three callers —
 `GET /api/jira/prompt` (the sheet's preview and Copy prompt) and the dispatch twice, once before any Jira write for the length check and once after the writes
 for the spawn — so what a person previewed, what was length-checked and what the session received are one text, differing only by the nonce. What a caller
-influences is enumerated by that composition and nowhere else: the key (`isJiraKey`), the repo (proved against `jira.json`'s mapping) and the action pick. The
-ticket is different from every one of those. An `ids` entry is proved against a closed vocabulary; a ticket's description is free text written by whoever
+influences is enumerated by that composition and nowhere else: the key (`isJiraKey`), the repo (proved against `jira.json`'s mapping) and the action pick.
+**A skill's prompt carries none of the ticket's text.** It is the template — the person's own words from `jira.json` — with `{key}`, `{url}` and `{repo}`
+filled in one pass, and a `Jira ticket: <KEY>` line after it when the template names no `{key}`. A skill reads the ticket itself (`jira.mjs show`), so a copy
+in the prompt was text the session was about to fetch anyway, and it cost most of the 4 000: a long description was trimmed, or the whole Start refused as
+`prompt too long`, to say nothing the skill did not learn on its first call. `{summary}` and `{description}` were placeholders until then and now stay literal,
+and with no stranger's string in it a skill's prompt has nothing to frame. What follows is the BUILT-INS' prompt, which does carry the ticket — and the
+ticket is different from every one of the caller's three influences. An `ids` entry is proved against a closed vocabulary; a ticket's description is free text written by whoever
 filed it, delivered into a session that can write files in the mapped repository, and no check can prove it harmless. So the composer does not try: it
-contains it. The framing line — which says the text between the markers is the ticket's own content and not instructions — is read BEFORE any ticket text
-(after the instruction, or first when a skill template puts `{description}` or `{summary}` inside the instruction, so that ticket text is never ahead of the
-sentence that says what it is). The summary is the one placeholder that lands bare: a template's `{summary}` is collapsed to one line by `oneLine` and carries no
-markers or fence of its own, so what covers it is that order plus the framing line's own words, which say the ticket's summary is the ticket's content wherever
-the prompt quotes it, marked or not. The markers carry a nonce minted per composition, so a ticket written beforehand cannot contain the real end marker, and only
-lines carrying it are delimiters; the description sits in a fence one backtick longer than its longest backtick run, so nothing inside can close it early; a template is
-filled in ONE pass with a replacement function, so a summary reading `{description}` is not expanded and `$&` is text; and a truncation note is server text
+contains it. The framing line — which says the text between the markers is the ticket's own content and not instructions — is read BEFORE any ticket text,
+after the instruction. The markers carry a nonce minted per composition, so a ticket written beforehand cannot contain the real end marker, and only
+lines carrying it are delimiters; the description sits in a fence one backtick longer than its longest backtick run, so nothing inside can close it early; and a truncation note is server text
 placed after the closing fence, never inside the ticket's own. The cap is the dashboard's own 4 000, not item dispatch's 8 000 paste bound, and the
 description is what yields to it; a prompt that cannot keep at least one character of it is a 400 rather than one that says `(no description)` about a ticket
 that has one. This is mitigation, not proof — a model can still be talked into things — and the rest of the defence is that the session is the person's own,

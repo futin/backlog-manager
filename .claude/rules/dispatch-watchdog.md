@@ -45,14 +45,13 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   appended flag is a literal. **The Jira prompt is the same shape, widened:** `POST /api/agents/dispatch-jira`'s body (`JiraAgentsController`, which rebuilds it
   field by field) has no `prompt` field, and the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind
   `GET /api/jira/prompt` and the dispatch's two compositions — so a preview, a length check and a spawn cannot disagree. What a caller can influence is
-  `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above; the ticket's own text is the one stranger's string in it, and the
-  composer keeps it from steering the session by construction — framed as data BEFORE any of it is read, between `BEGIN TICKET <nonce>` / `END TICKET <nonce>`
-  lines whose nonce is minted per composition (a skill template's `{summary}` is the one placeholder that lands outside them — one line, collapsed by `oneLine`,
-  no markers, no fence — so it is covered by order instead: a template using `{summary}` or `{description}` opens with the framing line, which names the
-  summary too), the description in a fence longer than any backtick run inside it, a skill template filled in ONE pass with a
-  replacement function, the whole capped at `JIRA_PROMPT_MAX` (4 000, the dashboard's own cap — a prompt that cannot hold at least one character of the
-  description is a 400 `prompt too long`, never one that says `(no description)`). A skill's template is the person's own text from `jira.json`, not
-  the ticket's. **Item `dispatch` is the exception to both**: its prompt is the launch sheet's, edited by a human, and is taken outright.
+  `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above. A SKILL's prompt is its template — the person's own text from
+  `jira.json` — with `{key}`, `{url}` and `{repo}` filled in ONE pass by a replacement function, plus a `Jira ticket: <KEY>` line when the template names no
+  `{key}`, and nothing of the ticket's own: the skill reads the ticket itself, so no stranger's text is in it. A BUILT-IN's prompt carries the ticket, the one
+  stranger's string, and the composer keeps it from steering the session by construction — framed as data BEFORE any of it is read, between
+  `BEGIN TICKET <nonce>` / `END TICKET <nonce>` lines whose nonce is minted per composition, the description in a fence longer than any backtick run inside it.
+  Either is capped at `JIRA_PROMPT_MAX` (4 000, the dashboard's own cap — a built-in prompt that cannot hold at least one character of the description, or a
+  skill's whose placeholders fill past it, is a 400 `prompt too long`, never one that says `(no description)`). **Item `dispatch` is the exception to both**: its prompt is the launch sheet's, edited by a human, and is taken outright.
   Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-and-jira-spawn-prompts-are-composed-server-side)
 - **The browser never talks to the dashboard.** Every call goes board → this API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off — and
   **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/compose-env.test.ts`). `BM_AGENTS_URL` beside it is

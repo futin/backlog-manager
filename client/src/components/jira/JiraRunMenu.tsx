@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useSettings } from '../../hooks/useSettings';
@@ -45,12 +45,30 @@ interface MenuRow {
  *
  * `jira-run-open` is a page class, not a look: the card clips its content (`overflow: hidden`, for the radius), and an absolute panel under the chip would be
  * clipped with it, so the stylesheet lets the card overflow while this class is on a descendant.
+ *
+ * **In the modal the panel hangs from the controls row, not the chip.** The facts column is 290 px and a scroll container (`overflow-y: auto` computes
+ * `overflow-x` to auto too), so a 320 px panel right-aligned under a chip that sits mid-row ran out past the column's left edge and was cut off there — the
+ * labels clipped to their last few letters. The stylesheet makes `.jira-modal-controls` the positioning parent instead, so the panel's right edge is the row's,
+ * and `MODAL_PANEL_WIDTH` is the row's width, so the panel opens inside the details view. The row sits at the foot of the column, so the panel opens below
+ * the column's visible bottom more often than not; it is scrolled into view (`block: 'nearest'`, which moves the column only as far as it must) on open.
  */
-export function JiraRunMenu({ issue, onPick }: { issue: JiraIssue; onPick: (action: JiraAction) => void }) {
+/**
+ * The modal panel's width: the controls row it hangs from, at its narrowest. The facts column is 290 px (DESIGN.md §8.7) less 20 px padding a side and its 1 px
+ * rule, so the row is 249 — and 234 when the platform draws a classic 15 px scrollbar inside the column (measured). Sized to the narrower, the panel never
+ * leaves the row; with overlay scrollbars it sits 15 px in from the row's left edge, right edges together.
+ */
+const MODAL_PANEL_WIDTH = 234;
+
+export function JiraRunMenu({ issue, onPick, home = 'card' }: { issue: JiraIssue; onPick: (action: JiraAction) => void; home?: 'card' | 'modal' }) {
   const { data } = useJiraContext();
   const { settings } = useSettings();
   const [open, setOpen] = useState(false);
   const chip = useRef<HTMLButtonElement>(null);
+  const wrapper = useRef<HTMLDivElement>(null);
+  // The modal's panel, brought into the facts column's view once it is drawn (header). Optional-called: jsdom implements no `scrollIntoView`.
+  useEffect(() => {
+    if (open && home === 'modal') wrapper.current?.querySelector('[role="dialog"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, home]);
   if (data === null) return null;
 
   const state = runChipState(issue, data);
@@ -83,6 +101,7 @@ export function JiraRunMenu({ issue, onPick }: { issue: JiraIssue; onPick: (acti
 
   return (
     <div
+      ref={wrapper}
       className={open ? 'jira-run jira-run-open' : 'jira-run'}
       data-state={state}
       onClick={(e) => e.stopPropagation()}
@@ -105,13 +124,14 @@ export function JiraRunMenu({ issue, onPick }: { issue: JiraIssue; onPick: (acti
         Run <Chevron dir={open ? 'up' : 'down'} />
       </Chip>
       {open && state === 'ready' && (
-        <Popover label="Run menu" width={320} anchor={chip} onClose={() => setOpen(false)}>
+        <Popover label="Run menu" width={home === 'modal' ? MODAL_PANEL_WIDTH : 320} anchor={chip} onClose={() => setOpen(false)}>
           {/* The right-hand hint is decorative and `aria-hidden`: a button's name is the words a person picks by; `built-in` or `default` is a category. */}
           {rows.map((row, i) => (
             <Fragment key={row.id}>
               {/* The rule sits between the last built-in and the first skill, wherever the promoted row left them. */}
               {i > 0 && row.skill && !rows[i - 1].skill && <hr className="jira-run-rule" />}
-              <button type="button" className="jira-run-opt" onClick={() => pick(row.action)}>
+              {/* The title is the whole label, which the row ellipsises — at the modal's narrower width (header) a long skill name always does. */}
+              <button type="button" className="jira-run-opt" title={row.label} onClick={() => pick(row.action)}>
                 <span>{row.label}</span>
                 <span className="jira-run-hint" aria-hidden="true">
                   {row.hint}
