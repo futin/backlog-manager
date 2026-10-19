@@ -461,9 +461,9 @@ describe('watchdog sweeper', () => {
   // grace defaults to 10m: a sweeper retry at t+11m is REFUSED, because the
   // resume session it spawned at t+0 is still alive by this app's own
   // definition of alive. That is correct — a second `--resume` into a run
-  // somebody is already resuming is the whole bug — and it is a visible change
-  // in Activity, so it is pinned here rather than left to be discovered and
-  // "fixed" by shortening the lock. Attempt 2 lands near t+20m instead: the
+  // somebody is already resuming is the whole bug — and it delays attempt 2,
+  // so it is pinned here rather than left to be discovered and "fixed" by
+  // shortening the lock. Since #268 the refusal is silent and uncounted. Attempt 2 lands near t+20m instead: the
   // refusal re-stamps grace, so the next tick past the lock is the one that
   // spawns.
 
@@ -480,8 +480,11 @@ describe('watchdog sweeper', () => {
 
     expect(dash.spawns()).toHaveLength(1);
     expect(entry.attempts).toBe(1);
-    expect(kinds('failed')).toHaveLength(1);
-    expect(kinds('failed')[0].detail).toContain('already started');
+    // #268 — the lock's refusal is "not yet", not a failure: the session the
+    // sweeper spawned itself is what holds the lock, so counting it would
+    // spend the refusal ceiling on the sweeper's own previous success.
+    expect(kinds('failed')).toHaveLength(0);
+    expect(entry.consecutiveFailures).toBe(0);
 
     // The refusal re-stamped grace (a refused spawn is still an attempt by
     // design §1's definition), so both clocks have to move for the retry.
@@ -490,6 +493,44 @@ describe('watchdog sweeper', () => {
 
     expect(dash.spawns()).toHaveLength(2);
     expect(entry.attempts).toBe(2);
+  });
+
+  // --- 6c (#268): grace at its 5-minute floor never stalls on its own lock ---
+  // With graceMs 300000 and the default cap of 2, the retries at t+5m and
+  // t+10m both land inside the 15-minute resume lock the t+0 spawn took. They
+  // used to count as two consecutive failures, so the run stood down as
+  // "stalled — resume refused 2× in a row" after ONE real attempt. The lock
+  // refusal now carries `RESUME_LOCKED_CODE` and the sweeper does not count it,
+  // so the second real spawn lands once the lock lapses.
+
+  it('does not stand a run down on refusals from its own resume lock when grace is shorter than the lock', async () => {
+    const dash = stubDashboard();
+    writeConfig({ graceMs: 300_000 });
+    await createApp();
+    writeRun(crashedRun(projectPath));
+
+    await svc().tick();
+    const entry = state().entry(fixture.runId)!;
+    expect(dash.spawns()).toHaveLength(1);
+
+    // t+5m and t+10m: each past grace, each inside the lock.
+    rewind(entry, 5 * 60 * 1000 + 1000);
+    await svc().tick();
+    rewind(entry, 5 * 60 * 1000 + 1000);
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(1);
+    expect(entry.consecutiveFailures).toBe(0);
+    expect(kinds('failed')).toHaveLength(0);
+    expect(kinds('stalled')).toHaveLength(0);
+
+    // t+15m: past grace again and past the lock, so the second real attempt lands.
+    rewind(entry, 5 * 60 * 1000 + 1000);
+    await svc().tick();
+
+    expect(dash.spawns()).toHaveLength(2);
+    expect(entry.attempts).toBe(2);
+    expect(kinds('stalled')).toHaveLength(0);
   });
 
   // --- 7: the cap, and the once-only exhausted line -------------------------
@@ -923,7 +964,8 @@ describe('watchdog sweeper', () => {
   // share, so the sweeper obeys it without a second expression of it here.
   // What that refusal must NOT do is spend an attempt: a refused spawn started
   // no session, the same split cases 8 and 9 above already pin for a rejected
-  // one. `lastSpawnAt` is re-stamped regardless, so the sweeper backs off for
+  // one. Since #268 it does not count as a refusal either (`RESUME_LOCKED_CODE`):
+  // a resume is on its way, so this is "not yet", not a failure. `lastSpawnAt` is re-stamped regardless, so the sweeper backs off for
   // a grace window rather than asking again every tick while the resume it was
   // refused for is still on its way.
   //
@@ -931,7 +973,7 @@ describe('watchdog sweeper', () => {
   // stamps grace as well (`noteBoardResume`), which would refuse this tick one
   // step earlier and prove nothing about the lock.
 
-  it('records a failed line and spends no attempt when a resume is already in flight', async () => {
+  it('spends no attempt and counts no failure when a resume is already in flight', async () => {
     const dash = stubDashboard();
     await createApp();
     writeRun(crashedRun(projectPath));
@@ -944,10 +986,11 @@ describe('watchdog sweeper', () => {
     expect(dash.spawns()).toHaveLength(0);
     expect(entry.attempts).toBe(0);
     expect(entry.lastSpawnAt).not.toBeNull();
-    const failed = kinds('failed');
-    expect(failed).toHaveLength(1);
-    expect(failed[0].detail).toContain('already started');
-    expect(failed[0].detail).toContain('the attempt cap is untouched');
+    // #268 — a lock refusal is "not yet": no `failed` line, and the refusal
+    // ceiling is untouched, because nothing failed — a resume is on its way.
+    expect(entry.consecutiveFailures).toBe(0);
+    expect(entry.lastError).toBeNull();
+    expect(kinds('failed')).toHaveLength(0);
   });
 
   // --- 9c (bug-19, review round 1): a sweep must not drop the resume lock ---

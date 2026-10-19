@@ -33,7 +33,7 @@ import {
 import { composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
-import { CLAIM_STALE_MS, MERGE_MODES, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
+import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentDispatchRequest,
   AgentDispatchResult,
@@ -465,8 +465,9 @@ export class AgentsService {
     // time. Same reasoning as the orchestrate lock's own re-check below —
     // "every other path capable of triggering a write re-checks it".
     //
-    // 409 and no `code`: `RUN_IN_PROGRESS_CODE` is the app's one 409 code and
-    // means "a run for this project is alive right now" (see its doc comment
+    // 409 and no `code`: `RUN_IN_PROGRESS_CODE` (one of the app's two 409
+    // codes, beside #268's `RESUME_LOCKED_CODE`) means "a run for this
+    // project is alive right now" (see its doc comment
     // in shared/types.ts for the incident that rule exists to prevent a repeat
     // of, and for why no site here counts where it appears). This refusal is a
     // different fact — a run has CLAIMED this item — and nothing needs to tell
@@ -699,7 +700,7 @@ export class AgentsService {
        the case above enforces, and `OrchestrateSheet` branches on that code
        to `refresh()` + `onClose()` — exactly the right behaviour here, since
        the sheet closes and hands the screen to the board's run chip, which is
-       already counting the starting entry. `RUN_IN_PROGRESS_CODE` stays the app's only coded
+       already counting the starting entry. `RUN_IN_PROGRESS_CODE` stays this route's only coded
        409 — this is a second OCCASION for it, not a second code — and the
        comment on the throw above says so from its side too, since a reader
        who lands there first must not be told a second coded 409 on this
@@ -935,9 +936,9 @@ export class AgentsService {
     // hand-rolled request, or the Watchdog page in another window can all
     // still reach this method with the control gone from their own render.
     //
-    // UNCODED, like the resume lock below and for the same reason:
-    // `RUN_IN_PROGRESS_CODE` means "a run is alive right now", which both
-    // callers treat as a silent success. This one needs a person to read it
+    // UNCODED, and not `RUN_IN_PROGRESS_CODE` for the same reason the resume
+    // lock below is not: that code means "a run is alive right now", which
+    // both callers treat as a silent success. This one needs a person to read it
     // — a stopped run is over, and its work is a new run's — so it must not
     // be swallowed.
     if (run.stopRequested) {
@@ -1007,8 +1008,9 @@ export class AgentsService {
     // board's click and the sweeper's own `spawn()` — so the sweeper obeys
     // the same lock a person does without a second expression of it
     // anywhere. What the sweeper does with the refusal is its own business
-    // (a `failed` line, `attempts` untouched, grace re-stamped): a refused
-    // spawn started no session, which is the split it already makes.
+    // (no `failed` line, neither counter moved, grace re-stamped — #268): a
+    // refused spawn started no session, and this refusal says one is already
+    // on its way, so it is "not yet" rather than a failure.
     //
     // **`RUN_STALE_MS`, not a new number.** The question is "is a resume
     // session believed to be alive in this run", and this app computes
@@ -1016,12 +1018,16 @@ export class AgentsService {
     // fifteen minutes is dead by the app's own definition, and a second
     // resume is then the right answer.
     //
-    // Deliberately UNCODED, unlike the `run.fresh` refusal just above:
-    // `RUN_IN_PROGRESS_CODE` means "a run is alive for this project, right
-    // now", which is false here — the run is crashed (or paused) and a resume
-    // is on its way to it. Both of this endpoint's callers treat that code as
-    // a silent success ("the run recovered under this very click"), which is
-    // exactly the wrong reaction to being told to wait.
+    // Not `RUN_IN_PROGRESS_CODE`, unlike the `run.fresh` refusal just above:
+    // that code means "a run is alive for this project, right now", which is
+    // false here — the run is crashed (or paused) and a resume is on its way
+    // to it. Both of this endpoint's callers treat that code as a silent
+    // success ("the run recovered under this very click"), which is exactly
+    // the wrong reaction to being told to wait. It carries its own code,
+    // `RESUME_LOCKED_CODE` (#268), because the watchdog has to tell "wait"
+    // apart from "refused": its grace is shorter than this lock, so its own
+    // retry lands here, and counting that as a refusal stood runs down after
+    // one real attempt. The board reads no code here and shows the sentence.
     const entry = this.watchdogState.upsert(run.runId, run.project);
     const now = Date.now();
     // `entry.project === run.project` as well as the stamp: entries are keyed
@@ -1038,7 +1044,8 @@ export class AgentsService {
           error:
             `a resume for run ${run.runId} was already started ${ageSec}s ago — a resumed session takes about ` +
             'ninety seconds to reach its first heartbeat, so this run will keep reading crashed for a while yet. ' +
-            'Two --resume sessions on one run.json both stage-write and both end in a merge to main.'
+            'Two --resume sessions on one run.json both stage-write and both end in a merge to main.',
+          code: RESUME_LOCKED_CODE
         },
         409
       );
@@ -1495,8 +1502,8 @@ export class AgentsService {
    * request is malformed (not a list, an empty list, something that is not
    * an id), 409 when the request is well-formed and the FILES disagree with
    * it (no such item, archived, wrong section, another project's item). The
-   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE` is the app's one
-   * 409 code and says "a run for this project is alive right now", which is
+   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE`, this route's one
+   * 409 code, says "a run for this project is alive right now", which is
    * not what an id disagreement means, and nothing here needs to be told
    * apart from the others by a machine.
    */
