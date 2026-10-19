@@ -17,6 +17,7 @@ import type {
   WatchdogConfig,
   WatchdogStatus
 } from '../../../shared/types';
+import { EFFORTS, MODELS } from '../../../shared/agent';
 
 /**
  * agents.ts — the board's seven calls into its own API.
@@ -464,6 +465,22 @@ export async function resumeOrchestrate(project: string): Promise<AgentDispatchR
       body: JSON.stringify({ project })
     })
   );
+}
+
+/**
+ * The Model and Effort selects' options, `default` first. `''` is that option: it means no flag, so the CLI's own default stands. One home because three
+ * launch sheets (the board's, the orchestrator's, Jira's) draw the same two pickers over the same two lists, and a list only one of them learned about
+ * would be a pick the others cannot make.
+ */
+export const MODEL_OPTIONS: { value: string; label: string }[] = [{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))];
+export const EFFORT_OPTIONS: { value: string; label: string }[] = [{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))];
+
+/**
+ * The model and effort a launch body carries, as spreadable fields: the key is ABSENT for the `default` option rather than present-and-empty, which is the
+ * shape the server's `pickFrom` and the dashboard's own parser both read as "no flag".
+ */
+export function modelEffortFlags(model: string, effort: string): { model?: string; effort?: string } {
+  return { ...(model === '' ? {} : { model }), ...(effort === '' ? {} : { effort }) };
 }
 
 /**

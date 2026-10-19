@@ -3,9 +3,20 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
-import { JIRA_COLUMNS, displayPath, initialsOf, issueDatesLine, modalTree, progressLine, type JiraChildrenIndex } from '../../lib/jira';
+import {
+  JIRA_COLUMNS,
+  displayPath,
+  failureOf,
+  fetchJiraDetail,
+  initialsOf,
+  issueDatesLine,
+  modalTree,
+  progressLine,
+  transitionOptions,
+  type JiraChildrenIndex
+} from '../../lib/jira';
 import { renderMarkdown } from '../../lib/markdown';
-import type { JiraIssue, JiraIssueDetail, JiraTransition } from '../../../../shared/types';
+import type { JiraIssue, JiraIssueDetail } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Fact } from '../ui/Fact';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
@@ -94,38 +105,6 @@ function categoryWord(category: JiraIssue['status']['category']): string {
   return (JIRA_COLUMNS.find((c) => c.category === category)?.label ?? 'To Do').toLowerCase();
 }
 
-/** The sentence a failed read or write carries: the server's `{ error }` when it sent one, else the HTTP status, else whatever the network said. */
-async function failureOf(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: unknown };
-    if (typeof body.error === 'string' && body.error !== '') return body.error;
-  } catch {
-    /* not JSON — fall through to the status */
-  }
-  return `HTTP ${res.status}`;
-}
-
-/**
- * The shape guard the detail is read through (`isJiraStatusPayload`'s role and reason): the three fields the body MAPS or READS without a null-safe
- * expression. A body missing one would throw inside a render and React would unmount the whole page under the modal, so it is a failed read instead.
- */
-function isIssueDetail(value: unknown): value is JiraIssueDetail {
-  if (typeof value !== 'object' || value === null) return false;
-  const d = value as Record<string, unknown>;
-  return typeof d.description === 'string' && Array.isArray(d.children) && Array.isArray(d.boards);
-}
-
-/**
- * The `Move to…` options, each named by the STATUS it lands in — the word Jira's own status picker and columns show. A transition's own name is workflow
- * plumbing (`In Review (2)`, `In testing`), and printing both read `In Review (2) → In Review`. Only when two offered transitions land in one status do
- * those two fall back to their own names, because two options reading the same word would be a pick the reader cannot tell apart.
- */
-function transitionOptions(transitions: readonly JiraTransition[]): { value: string; label: string }[] {
-  const landings = new Map<string, number>();
-  for (const t of transitions) landings.set(t.to.name, (landings.get(t.to.name) ?? 0) + 1);
-  return transitions.map((t) => ({ value: t.id, label: (landings.get(t.to.name) ?? 0) > 1 ? t.name : t.to.name }));
-}
-
 /**
  * POSTs one issue write and resolves when it LANDED. A non-OK answer rejects with `failureOf`'s sentence, and a dropped request rejects with the
  * network's own error, so `useAction`'s `errorMessage` renders exactly the three readings the header names. The 200's body (`JiraIssueWriteResult`) is
@@ -174,12 +153,8 @@ export function JiraIssueModal({
   // never rejects.
   const { value: mine } = useFetched(
     () =>
-      fetch(`/api/jira/issue/${encodeURIComponent(issue.key)}`)
-        .then(async (res): Promise<Held> => {
-          if (!res.ok) return { failure: await failureOf(res) };
-          const body: unknown = await res.json();
-          return isIssueDetail(body) ? { detail: body } : { failure: 'malformed response' };
-        })
+      fetchJiraDetail(issue.key)
+        .then((detail): Held => ({ detail }))
         .catch((e: unknown): Held => ({ failure: e instanceof Error ? e.message : String(e) })),
     [issue.key, rev]
   );

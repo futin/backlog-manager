@@ -18,6 +18,7 @@ export function Switch({
   onChange,
   label,
   disabled,
+  title,
   onLabel = 'On',
   offLabel = 'Off'
 }: {
@@ -25,6 +26,8 @@ export function Switch({
   onChange: (v: boolean) => void;
   label?: string;
   disabled?: boolean;
+  /** Why it is disabled, when it is — `Select`'s own `title`, for the same reason: a dead control owes a sentence. */
+  title?: string;
   onLabel?: string;
   offLabel?: string;
 }) {
@@ -35,6 +38,7 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      title={title}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >

@@ -1,16 +1,20 @@
 import { elapsedSince, formatCreated } from './item-age';
 import { pollAge } from './tracker';
-import { SYNC_INTERVALS } from '../../../shared/types';
+import { SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
 import type {
   JiraAccess,
   JiraAction,
   JiraBoard,
   JiraBoardFailure,
   JiraBoardStatus,
+  JiraDispatchRequest,
+  JiraDispatchResult,
   JiraIssue,
+  JiraIssueDetail,
   JiraSkill,
   JiraStatusCategory,
   JiraStatusPayload,
+  JiraTransition,
   PermissionMode
 } from '../../../shared/types';
 
@@ -715,4 +719,80 @@ export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload 
     isRecord(p.live) &&
     isRecord(p.calls)
   );
+}
+
+// ── The wire (Jira phase 5 — the launch sheet and the modal read one issue the same way) ────────────────────────────────────────────────────────────
+
+/** The sentence a failed read or write carries: the server's `{ error }` when it sent one, else the HTTP status, else whatever the network said. */
+export async function failureOf(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    if (typeof body.error === 'string' && body.error !== '') return body.error;
+  } catch {
+    /* not JSON — fall through to the status */
+  }
+  return `HTTP ${res.status}`;
+}
+
+/**
+ * The shape guard the detail is read through (`isJiraStatusPayload`'s role and reason): the three fields a render MAPS or READS without a null-safe
+ * expression. A body missing one would throw inside a render and React would unmount the whole page under the modal or sheet, so it is a failed read.
+ */
+export function isIssueDetail(value: unknown): value is JiraIssueDetail {
+  if (typeof value !== 'object' || value === null) return false;
+  const d = value as Record<string, unknown>;
+  return typeof d.description === 'string' && Array.isArray(d.children) && Array.isArray(d.boards);
+}
+
+/**
+ * `GET /api/jira/issue/:key`, fresh. Resolves to the detail, and rejects with `failureOf`'s sentence — or `malformed response` for a 200 whose body is not an
+ * issue — so the modal and the launch sheet, which both read the same endpoint for the same transitions, word every failure identically.
+ */
+export async function fetchJiraDetail(key: string): Promise<JiraIssueDetail> {
+  const res = await fetch(`/api/jira/issue/${encodeURIComponent(key)}`);
+  if (!res.ok) throw new Error(await failureOf(res));
+  const body: unknown = await res.json();
+  if (!isIssueDetail(body)) throw new Error('malformed response');
+  return body;
+}
+
+/**
+ * The `Move to…` options, each named by the STATUS it lands in — the word Jira's own status picker and columns show. A transition's own name is workflow
+ * plumbing (`In Review (2)`, `In testing`), and printing both read `In Review (2) → In Review`. Only when two offered transitions land in one status do
+ * those two fall back to their own names, because two options reading the same word would be a pick the reader cannot tell apart. Hoisted from the modal
+ * when the launch sheet became its second reader: two sheets naming one transition two ways is the drift `lib/jira.ts` exists to prevent.
+ */
+export function transitionOptions(transitions: readonly JiraTransition[]): { value: string; label: string }[] {
+  const landings = new Map<string, number>();
+  for (const t of transitions) landings.set(t.to.name, (landings.get(t.to.name) ?? 0) + 1);
+  return transitions.map((t) => ({ value: t.id, label: (landings.get(t.to.name) ?? 0) > 1 ? t.name : t.to.name }));
+}
+
+/**
+ * `GET /api/jira/prompt` — exactly what Copy prompt copies and Start sends, as text. `text/plain` on success, so this reads `.text()`, never `.json()`;
+ * a refusal is the usual `{ error }` and rejects with its sentence (`unknown skill s_…`, `prompt too long`). The query is built by `URLSearchParams`, so the
+ * repository's slashes and a skill's colon are escaped exactly once, here.
+ */
+export async function fetchJiraPrompt(key: string, action: JiraAction, repo: string): Promise<string> {
+  const query = new URLSearchParams({ key, action: jiraActionParam(action), repo });
+  const res = await fetch(`/api/jira/prompt?${query.toString()}`);
+  if (!res.ok) throw new Error(await failureOf(res));
+  return res.text();
+}
+
+/** POSTs `body` as JSON to an agents route and resolves to its parsed 200; a refusal rejects with the server's sentence (`failureOf`). */
+async function postAgents<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(await failureOf(res));
+  return (await res.json()) as T;
+}
+
+/** `POST /api/agents/dispatch-jira` — the launch sheet's Start. Rejects with the server's sentence (a 409 for a key that already has a live session, say). */
+export function dispatchJira(req: JiraDispatchRequest): Promise<JiraDispatchResult> {
+  return postAgents<JiraDispatchResult>('/api/agents/dispatch-jira', req);
+}
+
+/** `POST /api/agents/jira-stop` — the live strip's Stop (Task 10 draws it). Resolves when the dashboard accepted it; rejects with the server's sentence. */
+export async function stopJira(key: string): Promise<void> {
+  await postAgents<{ ok: true }>('/api/agents/jira-stop', { key });
 }
