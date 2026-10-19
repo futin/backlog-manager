@@ -205,6 +205,11 @@ first, then the change that makes it pass.
 **Task** → invoke `superpowers:executing-plans` to work through `## Plan` as written. If the plan's own steps are independent of each other — no shared state,
 order doesn't matter — invoke `superpowers:subagent-driven-development` instead and dispatch them in parallel rather than one at a time.
 
+Either way, when a `.codegraph/` index exists at or above this tree, open the code with `codegraph explore "<symbols or files the item names>"` (Bash; or
+`codegraph_explore` when the tool is loaded) before grep and whole-file reads, and pass the same instruction to any subagent you dispatch. Its output is current,
+line-numbered source plus callers: do not re-read those files except around the lines you are about to edit. The index is built from the main checkout, so
+re-check line numbers in files this branch has already changed. Headless executor sessions used CodeGraph in 3% of runs before this line existed (2026-10-19).
+
 ## Write before you move
 
 Write the file first, call `move` only once that write is on disk — same rule `backlog-groom` follows, for the same reason: a failed write leaves the item where

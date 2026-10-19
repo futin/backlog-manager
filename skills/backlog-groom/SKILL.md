@@ -310,7 +310,9 @@ one.
 
 ### Plan the fix — bug stays a bug
 
-1. Invoke `superpowers:brainstorming` only if the fix actually needs design work — a diagnosed one-line fix doesn't.
+1. Invoke `superpowers:brainstorming` only if the fix actually needs design work — a diagnosed one-line fix doesn't. To find the cause, start from
+   `codegraph explore "<symbols the symptom names>"` (Bash; or `codegraph_explore`) when a `.codegraph/` index exists at or above this tree — one call returns
+   the source and its callers, so `## Cause` can cite `file:line` without a grep-and-read loop.
 2. Edit `## Cause` and `## Fix` **in the bug's own file**, replacing `unknown` with the real answer. No new file, no promotion, no id churn — a bug stays a bug
    from capture through to done, so the whole story of one defect lives in one place.
 

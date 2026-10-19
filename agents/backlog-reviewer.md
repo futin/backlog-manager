@@ -100,6 +100,11 @@ Then read the item file at the path you were given. A task states its promise un
 them); a bug states it under `## Cause` and `## Fix`. Either way that section is the contract the diff has to satisfy — you are not reviewing "is this good
 code" in the abstract, you are reviewing "does this change do what the item said it would, correctly."
 
+When a `.codegraph/` index exists at or above the worktree, find a changed symbol's callers with `codegraph explore "<changed symbols>" -p <worktree>` before
+grepping for call sites: one call returns their source, callers and blast radius, which is what "a rename that missed a call site" below needs. The index is
+built from the main checkout, not this branch, so read the changed code itself from the diff and use the graph for who-calls-what. Grep stays the tool for a
+literal string or a non-code file.
+
 ## What you check, in this order
 
 1. **Correctness of the change.** Does it do what the item promised, and is what it actually does right? Off-by-ones, an error path that swallows the error, a
