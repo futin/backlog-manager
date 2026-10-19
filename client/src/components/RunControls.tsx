@@ -217,10 +217,19 @@ export function RunControls({
 
   /**
    * The Stop control (bug-39) — drawn beside Pause on a fresh run and beside
-   * (or instead of) Resume on a crashed one, because `running` fresh or stale
-   * is exactly the set `POST /api/agents/stop` accepts and a STALE running run
-   * is the case this bug was filed about: a driver killed by hand leaves one
-   * for fifteen minutes, during which nothing could end it.
+   * (or instead of) Resume on a crashed or a paused one, because `running`
+   * fresh or stale, plus `paused` (#305), is exactly the set
+   * `POST /api/agents/stop` accepts. A STALE running run is the case bug-39
+   * was filed about: a driver killed by hand leaves one for fifteen minutes,
+   * during which nothing could end it. A paused run's driver has exited too,
+   * but the run still holds claims, queued labels and parked worktrees that
+   * only an abort clears — before #305 its one way out from the board was a
+   * Resume spent only so that a Stop could follow it.
+   *
+   * With nothing in flight, the text names what an abort KEEPS when the run
+   * has parked items — their worktree and branch stay (recovery.md, `--abort`)
+   * — since a person stopping a paused run is usually looking at exactly
+   * those.
    *
    * **The click asks; only the answer acts (bug-53).** A stop abandons the item
    * in flight, removes its worktree and branch, and ends the run for good — and
@@ -259,9 +268,11 @@ export function RunControls({
             });
           }}
         >
-          {inFlight === null
-            ? 'End this run now? It cannot be resumed — the work left is a new run.'
-            : `End this run now? ${inFlight} is abandoned, its worktree and branch are removed, and the run cannot be resumed.`}
+          {inFlight !== null
+            ? `End this run now? ${inFlight} is abandoned, its worktree and branch are removed, and the run cannot be resumed.`
+            : run.queue.some((q) => q.stage === 'parked')
+              ? 'End this run now? It cannot be resumed — the work left is a new run, and parked items keep their worktree and branch.'
+              : 'End this run now? It cannot be resumed — the work left is a new run.'}
         </Confirm>
       );
     }
@@ -391,7 +402,20 @@ export function RunControls({
     );
   }
 
-  if (run.status === 'paused') return resumeControl();
+  // #305: the crashed branch's shape — Resume gated by the environment ladder as before, Stop drawn either way, since the stop route is independent of
+  // `BM_AGENTS` and its `abortRefused` note tells a person on an agents-off machine what to run instead. A paused run with a stop on file never gets
+  // here: the `stopRequested` branch above has already dropped the Resume, which would otherwise cancel the stop.
+  // The error node rides inside `resumeControl`'s own span when a Resume is drawn, so it is added here only when one is not — a failed stop reads once.
+  if (run.status === 'paused') {
+    const resume = resumeControl();
+    return (
+      <span className="run-controls">
+        {resume}
+        {stopControl()}
+        {resume === null ? errorNode : null}
+      </span>
+    );
+  }
 
   return null;
 }

@@ -135,9 +135,10 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
 - **A stop is the control file's SECOND `kind`, and nothing resumes a stopped run** (bug-39). `PauseRequest.kind` is `'pause' | 'stop'` and **absent means
   `'pause'`**; one control fact per project stays one file (a stop overwrites a pause and back, pause's `cancel` deletes either); the two predicates are DISJOINT on
   both sides, `stopRequestEffective` being the pause predicate's two clauses plus `kind === 'stop'`. `POST /api/agents/stop` is `pause`'s sibling — guarded,
-  `cancel: true` refused 409 before the run lookup (bug-53: a stop cannot be withdrawn), independent of `BM_AGENTS`, `running` fresh **or stale** — and then attempts ONE `/backlog-orchestrate --abort` spawn: recording the
-  fact and ending the run are two outcomes and only the first is guaranteed, so a gate refusal is a 200 carrying `abortRefused`, never an error. The spawn is
-  unconditional, because a live driver is evicted by the abort session's own `takeOverRun` write — and the second `--abort` that a live driver's own `watch`
+  `cancel: true` refused 409 before the run lookup (bug-53: a stop cannot be withdrawn), independent of `BM_AGENTS`, `running` fresh **or stale**,
+  or `paused` (#305) — and then attempts ONE `/backlog-orchestrate --abort` spawn: recording the fact and ending the run are two outcomes and only the first
+  is guaranteed, so a gate refusal is a 200 carrying `abortRefused`, never an error. The spawn is unconditional, because a live driver is evicted by the abort
+  session's own `takeOverRun` write — and the second `--abort` that a live driver's own `watch`
   exit `10` produces is refused by the TOOL, not the route (bug-54): `abort` writes `driver.aborting` (equal to `at`) on the lease it takes, and another
   identified session's abort exits `7` on a mark fresher than `RUN_STALE_MS`, before any write, signal or git; on an already-`aborted` run it is a one-line
   no-op `0`. The stop's `force` never overrides an abort's lease; the same session, `me === null` and a stale mark are exempt. `stopRequested` rides the runs payload beside

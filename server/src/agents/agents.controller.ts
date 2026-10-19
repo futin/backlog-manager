@@ -311,6 +311,8 @@ export class AgentsController {
    * `project` trimmed and required, `@HttpCode(200)` because nothing is
    * created in the sense a 201 promises, and independent of `BM_AGENTS`
    * because recording the fact must work on a machine whose launcher is off.
+   * Its run gate is wider than pause's, though: a `paused` run is stoppable
+   * too (#305) — see `AgentsService.stop()`.
    *
    * **Except that a stop has no `cancel` (bug-53).** `cancel: true` is a 409,
    * refused here before the run is even looked up, because "a stop cannot be

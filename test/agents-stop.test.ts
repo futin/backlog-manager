@@ -11,6 +11,7 @@ import { GithubClient } from '../server/src/tracker/github.client';
 import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
+import { stopSessionName } from '../server/src/agents/agents.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { FakeGithub } from './helpers/github';
@@ -149,13 +150,15 @@ describe('POST /api/agents/stop', () => {
 
   it('409s when the project has no run at all', async () => {
     const res = await post({ project: projectPath }).expect(409);
-    expect(res.body).toEqual({ error: 'no running run to stop for this project' });
+    expect(res.body).toEqual({ error: 'no running or paused run to stop for this project' });
   });
 
-  it.each([['done'], ['aborted'], ['failed'], ['paused']] as const)('409s a run whose status is already %s', async (status) => {
+  // `paused` is not in this list since #305: a paused run still holds claims, queued labels and parked worktrees that only an abort clears, so it is
+  // admitted — see the `a paused run` block below.
+  it.each([['done'], ['aborted'], ['failed']] as const)('409s a run whose status is already %s', async (status) => {
     writeRun(runningRun({ status }));
     const res = await post({ project: projectPath }).expect(409);
-    expect(res.body).toEqual({ error: 'no running run to stop for this project' });
+    expect(res.body).toEqual({ error: 'no running or paused run to stop for this project' });
     // Nothing written on a refusal, for pause's reason: a request naming a run
     // that cannot act on it would sit there and be judged against the NEXT
     // run of this project instead.
@@ -373,6 +376,65 @@ describe('POST /api/agents/stop', () => {
   });
 
   /**
+   * #305 — a paused run is the second status the gate admits. Its driver has exited at a dispatch gate, but the run still holds whatever an abort clears
+   * (claims, `orchestrator:queued` labels, parked worktrees), so before this the only ways to end it were Resume-then-Stop — a driver session spent just to
+   * tear the run down — or typing `--abort` by hand. Everything after the gate is the `running` pipeline unchanged.
+   */
+  describe('a paused run', () => {
+    const pausedRun = (over: Partial<OrchestratorRun> = {}): OrchestratorRun =>
+      runningRun({ status: 'paused', updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), ...over });
+
+    it('writes a stop pinned to the run and spawns one --abort session', async () => {
+      writeRun(pausedRun());
+
+      const res = await post({ project: projectPath }).expect(200);
+
+      expect(res.body).toEqual({ stopRequested: true, abortSession: 'sess-abort', abortRefused: null });
+      expect(readPauseRequest(projectPath, controlRoot)).toEqual({ runId: fixture.runId, requestedAt: expect.any(String), kind: 'stop' });
+      expect(spawns()).toHaveLength(1);
+      const call = (global.fetch as jest.Mock).mock.calls.find(([url]: [string]) => String(url).endsWith('/api/spawn'));
+      const body = JSON.parse(String((call?.[1] as RequestInit).body)) as Record<string, unknown>;
+      expect(body.prompt).toBe('/backlog-orchestrate --abort');
+      expect(body.name).toBe(stopSessionName(projectPath));
+    });
+
+    // Paused, resumed, paused again: `unpausedAt` is set, and the stop written now must still post-date it or the payload would read as not stopped.
+    it('reports stopRequested for a run that was unpaused once before', async () => {
+      writeRun(pausedRun({ unpausedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString() }));
+
+      const res = await post({ project: projectPath }).expect(200);
+
+      expect(res.body.stopRequested).toBe(true);
+    });
+
+    it('works with agents off — the stop is recorded and the refusal names --abort', async () => {
+      await app.close();
+      delete process.env.BM_AGENTS;
+      await createApp();
+      writeRun(pausedRun());
+
+      const res = await post({ project: projectPath }).expect(200);
+
+      expect(res.body.stopRequested).toBe(true);
+      expect(res.body.abortSession).toBeNull();
+      expect(res.body.abortRefused).toMatch(/\/backlog-orchestrate --abort/);
+      expect(spawns()).toHaveLength(0);
+    });
+
+    // The fence: a stopped paused run must not be resumable from the board, or its Resume would cancel the stop.
+    it('refuses a resume afterwards and spawns nothing more', async () => {
+      writeRun(pausedRun());
+      await post({ project: projectPath }).expect(200);
+      sent = [];
+
+      const res = await request(app.getHttpServer()).post('/api/agents/resume').send({ project: projectPath }).expect(409);
+
+      expect(res.body.error).toMatch(/has a stop request on file — nothing resumes a stopped run/);
+      expect(spawns()).toHaveLength(0);
+    });
+  });
+
+  /**
    * The queue sweep (the orchestrator:queued spec, §3.1 and §3.2): a Stop
    * takes `orchestrator:queued` off every queue item the run never claimed,
    * server-side and before the abort spawns, so the label stops advertising a
@@ -488,6 +550,16 @@ describe('POST /api/agents/stop', () => {
         { stopOnFile: true, spawnsBefore: 0 }
       ]);
       expect(spawns()).toHaveLength(1);
+    });
+
+    // A paused run keeps `orchestrator:queued` on its never-claimed entries on purpose (finish `paused` leaves them), so its stop sweeps them the same way.
+    it('sweeps the never-claimed entries of a paused run', async () => {
+      writeRun({ ...runningRun({ queue: [entry('31', { stage: 'parked', claim: { commentId: 900 } }), entry('32')] }), status: 'paused' });
+
+      const res = await post({ project: projectPath }).expect(200);
+
+      expect(removals()).toEqual([32]);
+      expect(res.body.stopRequested).toBe(true);
     });
 
     it('409s a project with no running run and sweeps nothing', async () => {
