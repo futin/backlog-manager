@@ -233,16 +233,25 @@ export class JiraConfigUnreadableError extends Error {
   }
 }
 
-/** Thrown by `writeBoard` (an update) and `deleteBoard` when the file holds no board with the id; the routes map it to a 404, and nothing was written. */
+/**
+ * Thrown by `writeBoard` (an update), `deleteBoard`, `writeSkill` (an update) and `deleteSkill` when the file holds no entry of that kind with the id; the
+ * routes map it to a 404, and nothing was written. It carries the entry `kind` it was thrown for, so one `writing()` can answer `unknown board` or
+ * `unknown skill` — the sentence names what the caller asked about, and an id of the other kind is simply an id this kind does not hold.
+ */
 export class JiraUnknownIdError extends Error {
-  constructor(readonly id: string) {
-    super(`no board with id ${id}`);
+  constructor(
+    readonly id: string,
+    readonly kind: 'board' | 'skill' = 'board'
+  ) {
+    super(`no ${kind} with id ${id}`);
     this.name = 'JiraUnknownIdError';
   }
 }
 
 /** Spec §5's write-time bounds. The reader enforces none of them (see the header). */
 const JIRA_NAME_MAX_CHARS = 80;
+const JIRA_SKILL_NAME_MAX_CHARS = 60;
+const JIRA_SKILL_PROMPT_MAX_CHARS = 2000;
 const JIRA_ROOTS_MAX = 20;
 const JIRA_QUERIES_MAX = 10;
 const JIRA_REPO_PATHS_MAX = 10;
@@ -254,6 +263,13 @@ export interface JiraBoardWrite {
   roots: string[];
   queries: { id: string | null; label: string; jql: string }[];
   interval: SyncInterval;
+}
+
+/** What `POST /api/jira/skills` validated: `id` is absent for a create and whatever string the client sent for an update. */
+export interface JiraSkillWrite {
+  id?: string;
+  name: string;
+  prompt: string;
 }
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -296,6 +312,25 @@ export function parseBoardWrite(body: unknown): Parsed<JiraBoardWrite> {
   }
   if (roots.length === 0 && queries.length === 0) return { ok: false, error: 'a board needs at least one of roots or queries' };
   return { ok: true, value: { id, name: body.name.trim(), roots, queries, interval: body.interval } };
+}
+
+/**
+ * Validate a `POST /api/jira/skills` body (spec §5) and return it trimmed: `name` of 1–60 and `prompt` of 1–2 000 characters, measured after trimming, so a
+ * paste with a trailing newline is not charged for it and an all-blank one is empty. The error names the field, as `parseBoardWrite`'s does. As there, whether
+ * an `id` EXISTS is `writeSkill`'s question; only a value that is neither a string nor absent/`null` is a 400 here. A `null` id reads as no id, the create.
+ */
+export function parseSkillWrite(body: unknown): Parsed<JiraSkillWrite> {
+  if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
+  let id: string | undefined;
+  if (typeof body.id === 'string') id = body.id;
+  else if (body.id !== undefined && body.id !== null) return { ok: false, error: 'id must be a string or null' };
+  if (!trimmedLengthWithin(body.name, JIRA_SKILL_NAME_MAX_CHARS)) return { ok: false, error: `name must be 1–${JIRA_SKILL_NAME_MAX_CHARS} characters` };
+  if (!trimmedLengthWithin(body.prompt, JIRA_SKILL_PROMPT_MAX_CHARS)) {
+    return { ok: false, error: `prompt must be 1–${JIRA_SKILL_PROMPT_MAX_CHARS} characters` };
+  }
+  const value: JiraSkillWrite = { name: body.name.trim(), prompt: body.prompt.trim() };
+  if (id !== undefined) value.id = id;
+  return { ok: true, value };
 }
 
 /**
@@ -466,4 +501,38 @@ export function writeRepos(project: string, paths: string[], file: string = jira
   if (paths.length === 0) delete repos[project];
   else repos[project] = paths;
   writeRawAtomic(file, { ...current, repos });
+}
+
+/**
+ * Create a skill (`input.id` absent) or update the one holding `input.id`, and return it as stored. `writeBoard`'s rule exactly: a create mints a fresh `s_` id
+ * (unique across every id the file holds, so it can collide with no board, query or skill); an update keeps the id and the position and replaces `name` and
+ * `prompt` (trimmed again here, so what is stored is trimmed whoever called); every other entry — malformed ones included — and every other top-level key survives untouched. An update whose id the file does not hold, or
+ * holds only as an entry the reader would drop, throws `JiraUnknownIdError('skill')` before anything is written. A skill save never touches the poller.
+ */
+export function writeSkill(input: JiraSkillWrite, file: string = jiraConfigFile()): JiraSkill {
+  const current = readRawForWrite(file);
+  const skills = Array.isArray(current.skills) ? [...current.skills] : [];
+  let index = -1;
+  if (input.id !== undefined) {
+    // Matched on the id first and read second, so a neighbouring malformed entry is not warned about on every update.
+    index = skills.findIndex((entry) => isRecord(entry) && entry.id === input.id);
+    if (index < 0 || readSkill(skills[index], file, `skill "${input.id}"`) === null) throw new JiraUnknownIdError(input.id, 'skill');
+  }
+  const skill: JiraSkill = { id: input.id !== undefined ? input.id : mintUnique('s', idsIn(current)), name: input.name.trim(), prompt: input.prompt.trim() };
+  if (index >= 0) skills[index] = { ...(skills[index] as Record<string, unknown>), ...skill };
+  else skills.push(skill);
+  writeRawAtomic(file, { ...current, skills });
+  return skill;
+}
+
+/**
+ * Remove every raw entry whose `id` is `id`, keeping the rest in order — `deleteBoard`'s contract, for skills: matched on the raw entries, so a half-broken
+ * entry can be removed by its id, and an id the file does not hold throws `JiraUnknownIdError('skill')` with nothing written.
+ */
+export function deleteSkill(id: string, file: string = jiraConfigFile()): void {
+  const current = readRawForWrite(file);
+  const skills = Array.isArray(current.skills) ? current.skills : [];
+  const rest = skills.filter((entry) => !(isRecord(entry) && entry.id === id));
+  if (rest.length === skills.length) throw new JiraUnknownIdError(id, 'skill');
+  writeRawAtomic(file, { ...current, skills: rest });
 }

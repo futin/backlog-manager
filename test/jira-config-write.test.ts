@@ -7,14 +7,17 @@ import {
   JiraConfigUnreadableError,
   JiraUnknownIdError,
   deleteBoard,
+  deleteSkill,
   isJiraId,
   mintJiraId,
   normaliseRepoPath,
   parseBoardWrite,
   parseReposWrite,
+  parseSkillWrite,
   readJiraConfig,
   writeBoard,
   writeRepos,
+  writeSkill,
   type JiraBoardWrite
 } from '../server/src/jira/config.util';
 
@@ -282,6 +285,181 @@ describe('deleteBoard', () => {
     const bad = readFileSync(file, 'utf8');
     expect(() => deleteBoard('b_11111111', file)).toThrow(JiraConfigUnreadableError);
     expect(readFileSync(file, 'utf8')).toBe(bad);
+  });
+});
+
+const sk1 = { id: 's_00000001', name: 'Review', prompt: 'Review {key}' };
+const sk2 = { id: 's_00000002', name: 'Ship', prompt: 'Ship {key}: {summary}' };
+
+describe('parseSkillWrite', () => {
+  it('round-trips a valid body, trimmed, and keeps an id as given', () => {
+    expect(parseSkillWrite({ name: '  Review  ', prompt: '  Review {key}\n' })).toEqual({ ok: true, value: { name: 'Review', prompt: 'Review {key}' } });
+    expect(parseSkillWrite({ id: 's_00000001', name: 'n', prompt: 'p' })).toEqual({ ok: true, value: { id: 's_00000001', name: 'n', prompt: 'p' } });
+    expect(parseSkillWrite({ id: null, name: 'n', prompt: 'p' })).toEqual({ ok: true, value: { name: 'n', prompt: 'p' } });
+  });
+
+  it('refuses a name that is empty, blank or over 60 trimmed characters, naming name, and takes exactly 60', () => {
+    for (const name of ['', '   ', 'x'.repeat(61), 7, undefined]) {
+      const r = parseSkillWrite({ name, prompt: 'p' });
+      expect(r).toEqual({ ok: false, error: expect.stringContaining('name') });
+    }
+    expect(parseSkillWrite({ name: 'x'.repeat(60), prompt: 'p' }).ok).toBe(true);
+    expect(parseSkillWrite({ name: `  ${'x'.repeat(60)}  `, prompt: 'p' }).ok).toBe(true);
+  });
+
+  it('refuses a prompt that is empty, blank or over 2 000 trimmed characters, naming prompt, and takes exactly 2 000', () => {
+    for (const prompt of ['', '   ', 'x'.repeat(2001), 7, undefined]) {
+      const r = parseSkillWrite({ name: 'n', prompt });
+      expect(r).toEqual({ ok: false, error: expect.stringContaining('prompt') });
+    }
+    expect(parseSkillWrite({ name: 'n', prompt: 'x'.repeat(2000) }).ok).toBe(true);
+  });
+
+  it('refuses a body that is not an object, and an id that is not a string or null, naming id', () => {
+    expect(parseSkillWrite([])).toEqual({ ok: false, error: expect.stringContaining('object') });
+    expect(parseSkillWrite(null).ok).toBe(false);
+    expect(parseSkillWrite({ id: 7, name: 'n', prompt: 'p' })).toEqual({ ok: false, error: expect.stringContaining('id') });
+  });
+});
+
+describe('writeSkill', () => {
+  it('creates the file with one skill and a minted s_ id, trimmed, and returns what the reader reads', () => {
+    const skill = writeSkill({ name: 'Review', prompt: 'Review {key}' }, file);
+    expect(skill).toEqual({ id: expect.stringMatching(/^s_[0-9a-f]{8}$/), name: 'Review', prompt: 'Review {key}' });
+    expect(parsed()).toEqual({ skills: [skill] });
+    expect(readJiraConfig(file).skills).toEqual([skill]);
+  });
+
+  it('appends a create after the skills already there', () => {
+    put({ skills: [sk1] });
+    const skill = writeSkill({ name: 'Ship', prompt: 'p' }, file);
+    expect((parsed().skills as unknown[]).length).toBe(2);
+    expect((parsed().skills as unknown[])[0]).toEqual(sk1);
+    expect(skill.id).not.toBe(sk1.id);
+  });
+
+  it('mints an id the file does not already hold, whatever kind of entry holds it', () => {
+    put({ boards: [b1], skills: [sk1] });
+    const ids = new Set<string>();
+    for (let i = 0; i < 20; i++) ids.add(writeSkill({ name: `n${i}`, prompt: 'p' }, file).id);
+    expect(ids.size).toBe(20);
+    expect(ids.has('s_00000001')).toBe(false);
+  });
+
+  it('updates in place: keeps the id and the position, replaces name and prompt, and stores them trimmed', () => {
+    put({ skills: [sk1, sk2] });
+    const skill = writeSkill({ id: 's_00000001', name: ' Renamed ', prompt: ' New {url} ' }, file);
+    expect(skill).toEqual({ id: 's_00000001', name: 'Renamed', prompt: 'New {url}' });
+    expect(parsed().skills).toEqual([skill, sk2]);
+  });
+
+  it('refuses an update naming an id the file does not hold, with the skill kind, leaving the file byte-identical', () => {
+    put({ skills: [sk1] });
+    const before = readFileSync(file, 'utf8');
+    let thrown: unknown;
+    try {
+      writeSkill({ id: 's_12345678', name: 'n', prompt: 'p' }, file);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(JiraUnknownIdError);
+    expect((thrown as JiraUnknownIdError).kind).toBe('skill');
+    expect((thrown as Error).message).toBe('no skill with id s_12345678');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it('refuses a skill id that only a board holds, and an update against a missing file, writing nothing', () => {
+    put({ boards: [b1] });
+    expect(() => writeSkill({ id: 'b_11111111', name: 'n', prompt: 'p' }, file)).toThrow(JiraUnknownIdError);
+    rmSync(file);
+    expect(() => writeSkill({ id: 's_12345678', name: 'n', prompt: 'p' }, file)).toThrow(JiraUnknownIdError);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('preserves a malformed skill entry, boards, repos and an unknown top-level key, in order', () => {
+    const extra = { boards: [b1, { id: 7 }], repos: { PAY: ['/a'] }, note: 'mine' };
+    put({ skills: [sk1, { id: 's_0000000a', name: '' }, 'junk', sk2], ...extra });
+    writeSkill({ id: 's_00000002', name: 'Renamed', prompt: 'p' }, file);
+    const after = parsed();
+    const skills = after.skills as unknown[];
+    expect(skills[0]).toEqual(sk1);
+    expect(skills[1]).toEqual({ id: 's_0000000a', name: '' });
+    expect(skills[2]).toBe('junk');
+    expect(skills[3]).toEqual({ id: 's_00000002', name: 'Renamed', prompt: 'p' });
+    expect(after.boards).toEqual(extra.boards);
+    expect(after.repos).toEqual(extra.repos);
+    expect(after.note).toBe('mine');
+    writeSkill({ name: 'New', prompt: 'p' }, file);
+    expect((parsed().skills as unknown[]).slice(0, 3)).toEqual([sk1, { id: 's_0000000a', name: '' }, 'junk']);
+  });
+
+  it('does not update a malformed entry the reader would drop, even by its id', () => {
+    put({ skills: [{ id: 's_0000000a', name: '' }] });
+    expect(() => writeSkill({ id: 's_0000000a', name: 'n', prompt: 'p' }, file)).toThrow(JiraUnknownIdError);
+  });
+
+  it('replaces a skills key that is an object on create and keeps the other keys', () => {
+    put({ skills: {}, repos: { PAY: ['/a'] } });
+    const skill = writeSkill({ name: 'n', prompt: 'p' }, file);
+    expect(parsed()).toEqual({ skills: [skill], repos: { PAY: ['/a'] } });
+  });
+
+  it('refuses a file that does not parse, byte-identical, create or update', () => {
+    put('{ "skills": [');
+    const before = readFileSync(file, 'utf8');
+    expect(() => writeSkill({ name: 'n', prompt: 'p' }, file)).toThrow(JiraConfigUnreadableError);
+    expect(() => writeSkill({ id: 's_00000001', name: 'n', prompt: 'p' }, file)).toThrow(JiraConfigUnreadableError);
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it('leaves no temp file behind', () => {
+    writeSkill({ name: 'n', prompt: 'p' }, file);
+    expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+  });
+});
+
+describe('deleteSkill', () => {
+  it('removes every entry holding the id, keeping the rest in order and every other key', () => {
+    put({ skills: [sk1, 'junk', sk2, { ...sk2, name: 'dup' }], boards: [b1], note: 'mine' });
+    deleteSkill('s_00000002', file);
+    expect(parsed()).toEqual({ skills: [sk1, 'junk'], boards: [b1], note: 'mine' });
+  });
+
+  it('refuses an unknown id with the skill kind, and an unreadable file, byte-identical', () => {
+    put({ skills: [sk1] });
+    const before = readFileSync(file, 'utf8');
+    let thrown: unknown;
+    try {
+      deleteSkill('s_12345678', file);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(JiraUnknownIdError);
+    expect((thrown as JiraUnknownIdError).kind).toBe('skill');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+    put('{ "skills": [');
+    const bad = readFileSync(file, 'utf8');
+    expect(() => deleteSkill('s_00000001', file)).toThrow(JiraConfigUnreadableError);
+    expect(readFileSync(file, 'utf8')).toBe(bad);
+  });
+
+  it('refuses an id a board holds, and a missing file', () => {
+    put({ boards: [b1] });
+    expect(() => deleteSkill('b_11111111', file)).toThrow(JiraUnknownIdError);
+    rmSync(file);
+    expect(() => deleteSkill('s_00000001', file)).toThrow(JiraUnknownIdError);
+  });
+
+  it('a board error keeps its board kind', () => {
+    put({ boards: [b1] });
+    let thrown: unknown;
+    try {
+      deleteBoard('b_12345678', file);
+    } catch (e) {
+      thrown = e;
+    }
+    expect((thrown as JiraUnknownIdError).kind).toBe('board');
+    expect((thrown as Error).message).toBe('no board with id b_12345678');
   });
 });
 
