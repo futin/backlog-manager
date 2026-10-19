@@ -331,11 +331,13 @@ The server half of the Run action: a Jira ticket becomes a Claude session in a m
 ### The prompt composer
 
 `composeJiraPrompt(detail, action, repo)` (`prompt.util.ts`) is the only place a Run prompt is built, called by `GET /api/jira/prompt` and by the dispatch (twice —
-before any write, for the length check, and after the writes, for the spawn). A prompt is an instruction, one framing line and the ticket block between
-`BEGIN TICKET <nonce>` / `END TICKET <nonce>` lines. The instruction is `execute` (branch, implement, verify, move the issue only when the workflow offers
-exactly one transition to a done category, then `COMMIT_RULE`, imported from `shared/agent.ts`), `context` (read the ticket and wait), or a skill's template with
-`{key}`, `{summary}`, `{url}`, `{repo}` and `{description}` filled in one pass. Over `JIRA_PROMPT_MAX` (4 000) the description is cut from the end with a marker
-line after the closing fence; a prompt that cannot hold one character of it is `prompt too long`. The ticket-as-data framing is the invariant's.
+before any write, for the length check, and after the writes, for the spawn). A skill's prompt is its template with `{key}`, `{url}` and `{repo}` filled in
+one pass, plus a `Jira ticket: <KEY>` line when the template names no `{key}`, and nothing else — no ticket block, since the skill reads the ticket itself;
+`{summary}` and `{description}` stay literal. A built-in's prompt is an instruction, one framing line and the ticket block between `BEGIN TICKET <nonce>` /
+`END TICKET <nonce>` lines; the instruction is `execute` (branch, implement, verify, move the issue only when the workflow offers exactly one transition to a
+done category, then `COMMIT_RULE`, imported from `shared/agent.ts`) or `context` (read the ticket and wait). Over `JIRA_PROMPT_MAX` (4 000) a built-in's
+description is cut from the end with a marker line after the closing fence; a built-in prompt that cannot hold one character of it, or a skill's whose
+placeholders fill past the cap, is `prompt too long`. The ticket-as-data framing is the invariant's.
 
 `GET /api/jira/prompt?key=&action=&repo=` answers `text/plain`. Its refusals, in order: 400 `invalid issue key`; 400 `action must be execute, context or
 skill:<id>`; 400 `repo is required`; 503 not configured; 409 for an unreadable `jira.json`; 400 `unknown skill <id>`; the issue read through §8's mapping; 400

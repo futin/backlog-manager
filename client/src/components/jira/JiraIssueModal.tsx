@@ -267,7 +267,7 @@ export function JiraIssueModal({
           options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
           onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
         />
-        <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />
+        <JiraRunMenu issue={issue} home="modal" onPick={(action) => onRun(issue, action)} />
         {live !== null && !live.starting && <StopSession key={issue.key} busy={busy} onStop={stop} />}
       </div>
       {writeError !== null && (

@@ -71,23 +71,13 @@ function descriptionLines(detail: JiraIssueDetail, fence: string | null, truncat
 }
 
 /**
- * Just the description section, joined: what the prompt composer puts at a template's `{description}`, so that placeholder carries exactly the lines the
- * block would have carried at its own place — one rule for what a description looks like, with or without a fence.
- */
-export function renderDescription(detail: JiraIssueDetail, fence: string, truncated = false): string {
-  return descriptionLines(detail, fence, truncated).join('\n');
-}
-
-/**
  * How the description is drawn. `'as-is'` (the default) is the only thing `?format=text` and `jira.mjs show` ever ask for, and its output is byte-identical to
- * what this renderer produced before the option existed. `'omitted'` drops the description AND every line about it — `(no description)` and the omitted-content
- * note — for a prompt whose template already carries the description at a place of its own (spec §3: the text appears once in the whole prompt).
- * `{ fence }` wraps a non-empty description between two lines of that fence, for the prompt composer, which has measured the description's backtick runs and
- * knows how long a fence it needs; `truncated` adds the trim marker. The omitted-content note and the marker stay OUTSIDE the closing fence, since they are this
+ * what this renderer produced before the option existed. `{ fence }` wraps a non-empty description between two lines of that fence, for the prompt composer,
+ * which has measured the description's backtick runs and knows how long a fence it needs; `truncated` adds the trim marker. The omitted-content note and the marker stay OUTSIDE the closing fence, since they are this
  * server's text, not the ticket's.
  */
 export interface TicketBlockOptions {
-  description?: 'as-is' | 'omitted' | { fence: string; truncated?: boolean };
+  description?: 'as-is' | { fence: string; truncated?: boolean };
 }
 
 export function renderTicketBlock(detail: JiraIssueDetail, opts: TicketBlockOptions = {}): string {
@@ -103,8 +93,7 @@ export function renderTicketBlock(detail: JiraIssueDetail, opts: TicketBlockOpti
     `url: ${detail.url}`
   ];
 
-  if (mode !== 'omitted')
-    lines.push('', ...descriptionLines(detail, typeof mode === 'object' ? mode.fence : null, typeof mode === 'object' && mode.truncated === true));
+  lines.push('', ...descriptionLines(detail, typeof mode === 'object' ? mode.fence : null, typeof mode === 'object' && mode.truncated === true));
 
   if (detail.children.length > 0) {
     lines.push('', `Subtasks (${detail.children.length}):`);

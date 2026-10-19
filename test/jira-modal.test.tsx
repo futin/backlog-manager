@@ -495,6 +495,25 @@ describe('JiraIssueModal — Run ▾ (Jira phase 5)', () => {
     expect(onRun).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'PAY-131' }), { skill: 's_0a1b2c3d' });
   });
 
+  it('opens its panel inside the facts column: the row-wide width, every label as a title, and scrolled into view', async () => {
+    // jsdom has no layout and no `scrollIntoView`, so the call is stubbed onto the prototype and the width is read off the custom property `Popover` sets.
+    // The CSS half — the controls row as the positioning parent — is layout, so it was measured on the running board rather than pinned here.
+    const scrolled = jest.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    try {
+      mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'A very long skill name that the narrow panel ellipsises', prompt: '/x {key}' }] } });
+      await screen.findByText('not');
+      await userEvent.click(modalRun());
+      const menu = screen.getByRole('dialog', { name: 'Run menu' });
+      expect(menu.style.getPropertyValue('--ui-popover-width')).toBe('234px');
+      expect(within(menu).getByRole('button', { name: /A very long skill name/ })).toHaveAttribute('title', 'A very long skill name that the narrow panel ellipsises');
+      expect(scrolled).toHaveBeenCalledWith({ block: 'nearest' });
+      expect(scrolled.mock.contexts[0]).toBe(menu);
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
+  });
+
   it('is disabled with the reason while a session runs on the key, and dashed with the hint when the project has no repository', async () => {
     const view = mount({ status: { live: SESSION() } });
     await screen.findByText('not');

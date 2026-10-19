@@ -10,8 +10,8 @@ import { Pill } from '../ui/Pill';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { errorOf, postJson } from './JiraBoardSheet';
 
-/** The five names the server substitutes into a template (spec §6.4), in the order the hint lists them. */
-const PLACEHOLDERS = ['{key}', '{summary}', '{url}', '{repo}', '{description}'];
+/** The three names the server substitutes into a template (spec §6.4), in the order the hint lists them. The ticket's text is not one: a skill reads it. */
+const PLACEHOLDERS = ['{key}', '{url}', '{repo}'];
 
 /**
  * Jira › Setup › Skills (Jira phase 5, spec §6.4; DESIGN.md §8.9.3, and §8.6 for the card language) — the named prompts a Jira card's `Run ▾` can start a
@@ -25,7 +25,7 @@ const PLACEHOLDERS = ['{key}', '{summary}', '{url}', '{repo}', '{description}'];
  *   confirmation says what is lost rather than "are you sure". Only one row asks at a time.
  * - **The add row**: a name field, a template textarea and `Add`, which stays disabled until both hold something after trim. The template is sent trimmed
  *   and otherwise as typed — placeholders are the SERVER's to expand, so this card holds no second parser to drift from it.
- * - **The hint** names the five placeholders and says what the list does NOT do: a skill has to exist in the repo or the Claude install, and this list only
+ * - **The hint** names the three placeholders and says what the list does NOT do: a skill has to exist in the repo or the Claude install, and this list only
  *   names it. A template that points at nothing is refused by Claude when the session starts, not here — the card has no way to see a repo's skills.
  *
  * **Every landed write reloads `GET /api/jira`** and the card draws only what that says is stored, never its own optimistic copy, the rule
@@ -147,7 +147,8 @@ export function JiraSkillsGroup() {
               <code>{p}</code>
             </span>
           ))}
-          {' · '}a skill has to exist in the repo or the Claude install; this list only names it
+          {' · '}a template without <code>{'{key}'}</code> gets the ticket key on a line after it · a skill has to exist in the repo or the Claude install;
+          this list only names it
         </span>
       </div>
     </SettingsGroup>

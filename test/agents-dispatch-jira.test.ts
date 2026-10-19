@@ -30,7 +30,7 @@ import { makeRegistry } from './helpers/store';
 
 const REPO = '/work/pay';
 const KEYS = ['BM_JIRA_SITE', 'BM_JIRA_EMAIL', 'BM_JIRA_TOKEN', 'BM_JIRA_FILE', 'BM_AGENTS', 'BM_AGENTS_URL', 'BM_AGENTS_TOKEN', 'BM_ORCH_HOME'] as const;
-const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} ({summary}) in {repo}, then stop.' };
+const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} in {repo}, then stop.' };
 const START = { id: '31', name: 'Start', to: { name: 'In Progress', statusCategory: { key: 'indeterminate' } } };
 const BODY = { key: 'PAY-1', repo: REPO, action: 'execute', assign: true, transitionId: '31', permissionMode: 'acceptEdits', remoteControl: false };
 
@@ -292,7 +292,7 @@ describe('refusals after the reservation — released, so a retry is not a 409',
   });
 
   it('400 prompt too long before any write when the composed prompt is over the cap', async () => {
-    writeConfig({ skills: [{ ...SKILL, prompt: '{summary}'.repeat(200) }] });
+    writeConfig({ skills: [{ ...SKILL, prompt: '{url}'.repeat(300) }] });
     await build();
     fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1', fields: { summary: 'S'.repeat(300) } }));
     const sent = stubDashboard();
@@ -442,11 +442,11 @@ describe('Start', () => {
     expect(sent.spawns[0]).toMatchObject({ permissionMode: 'acceptEdits' });
   });
 
-  it("a skill action spawns its template's text with the placeholders filled", async () => {
+  it("a skill action spawns its template's text with the placeholders filled, and no ticket block", async () => {
     await build();
     const sent = stubDashboard();
     await post({ ...BODY, action: { skill: SKILL.id }, assign: false, transitionId: null }).expect(200);
-    expect((sent.spawns[0].prompt as string).split('\n\n')[1]).toBe(`Review PAY-1 (Summary of PAY-1) in ${REPO}, then stop.`);
+    expect(sent.spawns[0].prompt).toBe(`Review PAY-1 in ${REPO}, then stop.`);
   });
 
   it('two Starts on one key in the same moment (Review Focus 2): one 200, one 409, one spawn', async () => {

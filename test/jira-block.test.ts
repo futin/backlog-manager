@@ -164,17 +164,6 @@ describe('renderTicketBlock', () => {
   });
 
   describe('the description option', () => {
-    it("'omitted' drops the description and every note about it, and keeps the facts and the subtasks", () => {
-      const withPlaceholder = detail({ description: 'Layout.\n[table omitted]' });
-      const text = renderTicketBlock(withPlaceholder, { description: 'omitted' });
-      expect(text).toBe(
-        [...HEAD, '', 'Subtasks (2):', '- PAY-132 Ledger migration · In Progress · Ada Lovelace', '- PAY-133 Ledger writer · In Review · —', ''].join('\n')
-      );
-      expect(text).not.toContain('(no description)');
-      expect(text).not.toContain('omitted');
-      expect(renderTicketBlock(detail({ description: '', children: [] }), { description: 'omitted' })).toBe([...HEAD, ''].join('\n'));
-    });
-
     it("'as-is' and no option are the same bytes", () => {
       expect(renderTicketBlock(detail(), { description: 'as-is' })).toBe(renderTicketBlock(detail()));
     });

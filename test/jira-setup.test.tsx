@@ -829,10 +829,13 @@ describe('the Skills card', () => {
     expect(within(column).queryByRole('heading', { name: 'Boards' })).toBeNull();
   });
 
-  it('names the five placeholders and says the list only names the skill', async () => {
+  it('names the three placeholders, says how the key is added, and says the list only names the skill', async () => {
     await renderSetup();
     const text = skillsCard().textContent ?? '';
-    for (const placeholder of ['{key}', '{summary}', '{url}', '{repo}', '{description}']) expect(text).toContain(placeholder);
+    for (const placeholder of ['{key}', '{url}', '{repo}']) expect(text).toContain(placeholder);
+    // The ticket's own text is no placeholder any more: a skill reads the ticket itself.
+    for (const gone of ['{summary}', '{description}']) expect(text).not.toContain(gone);
+    expect(text).toContain('a template without {key} gets the ticket key on a line after it');
     expect(text).toContain('a skill has to exist in the repo or the Claude install; this list only names it');
   });
 
