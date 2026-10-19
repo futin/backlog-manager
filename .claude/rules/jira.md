@@ -46,3 +46,20 @@ paths: ["server/src/jira/**"]
   `JIRA_SEARCH_MAX_CHARS` a 400), upper-cases it for the key test, and otherwise searches `summary ~ ` the escaped text plus `*`. A board query's `jql` is sent
   as `jira.json` holds it, and the check route sends the person's text untouched — bounded only by `JIRA_JQL_MAX_CHARS` (`config.util.ts`). Why:
   [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
+- **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.** The two
+  routes are `POST /api/jira/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }` in `jira-write.controller.ts`, each `SameOriginPostGuard` →
+  validate (400: `invalid issue key`, `transitionId must be a non-empty string` — a string of at most `JIRA_TRANSITION_ID_MAX_CHARS`, 64) → configured (503) →
+  `JiraPollerService.assignToMe` / `transitionIssue`, whose failures go through `unwrapJira` (`unwrap.util.ts`, shared with the read controller, so §8's
+  table and `retryAt` mean the same thing on every route) and whose two own refusals are `no identity` (503) and `transition not offered` (400). Both refuse
+  with no Jira call: through `gate()` (unconfigured, a 429 window, `unsupported`, no `cloudId`), then `unauthorizedRefusal()` — the 401 body whenever the
+  boot's `access` is `unauthorized`, `me` still set or not — and, for assign alone, `me === null` → `no identity`. Assign is `PUT issue/{key}/assignee`
+  with `me.accountId` and nothing else — never `{ accountId: null }`, which Jira reads as UNASSIGN, and never an accountId from the request. Transition is a
+  FRESH `GET issue/{key}/transitions`, the id checked against it, the 429 window checked again, then `POST issue/{key}/transitions` `{ transition: { id } }`.
+  After the write lands, `splice` reads `GET issue/{key}` with the sweep's fields, maps it with `now: Date.now()` (the Done window on), and replaces the issue
+  AT ITS INDEX in every `caches` entry already holding the key — it never adds the key to a board, leaves each `polledAt` alone, and leaves every cache
+  untouched when the body does not map to an issue. `sweepBoard` ends in `keepNewer`: a swept issue whose key the cache NOW holds with a strictly newer
+  `Date.parse(updated)` keeps the cached copy; equal or unparseable on either side keeps the sweep's, and a key the sweep did not return is dropped as
+  before. The answer is `200 { ok: true, reread }` (`JiraIssueWriteResult`): `reread` is true when the re-read's 2xx body was an issue — even if the Done
+  window then dropped it — and false when it was not or the call failed (its 401 or 429 still moves the site state through `routeFailed`); a failed re-read
+  never turns the 200 into an error. There is no per-key queue on the server: the modal's `useAction` is the one-at-a-time guard. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)

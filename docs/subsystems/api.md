@@ -3,8 +3,9 @@
 Nest, one process, every route under `/api`. It owns eight things: reading the registry, listing each registered project's items through whichever source owns
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), and — behind a switch that is off
-by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are three files under
-`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, and `tracker-sync.json`.
+by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are four files under
+`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, `tracker-sync.json` and, since Jira phase 2, `jira.json`. Its writes to
+Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
 
@@ -134,8 +135,10 @@ the `error` verbatim and exits `1` through its generic non-2xx path — not `5`:
 The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed only while the three `BM_JIRA_*`
 keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
 `jira.json` reader, the ADF converter and the ticket block. Six read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
-fresh (`?format=text` for the ticket block), the roots search, the project list and the JQL check — and no write route yet. The credentials are read per call
-and reach no payload. → [jira.md](jira.md), the full doc.
+fresh (`?format=text` for the ticket block), the roots search, the project list and the JQL check — and five guarded POSTs: three config writes (since phase 2)
+that touch only `jira.json` (`/boards`, `/boards/delete`, `/repos`) and two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each
+followed by a re-read of the issue that is spliced into every board cache holding it. The credentials are read per call and reach no payload. → [jira.md](jira.md),
+the full doc.
 
 ### `registry/`
 

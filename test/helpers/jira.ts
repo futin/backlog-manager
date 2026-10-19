@@ -1,5 +1,5 @@
 /**
- * jira.ts — an in-memory Jira Cloud over the dozen endpoints this app touches (Jira phase 1; spec §3, §6 and §8).
+ * jira.ts — an in-memory Jira Cloud over the dozen endpoints this app reads and the two it writes (Jira phases 1 and 3; spec §3, §6 and §8).
  *
  * ## Why a whole little server rather than a stub per case
  *
@@ -222,6 +222,33 @@ export class FakeJira {
       // A Jira that claims more pages and names none (`omitNextPageToken`) is answered on EVERY page, last included: the caller must stop on the absent token.
       if (this.omitNextPageToken) return this.json(200, { issues, isLast: false });
       return this.json(200, end >= found.keys.length ? { issues, isLast: true } : { issues, isLast: false, nextPageToken: `p${page + 1}` });
+    }
+
+    // The two writes (Jira phase 3). Each answers 204 and, like a real Jira, bumps the issue's `updated` — the poller's newest-wins cases compare it.
+    const assignPath = /^\/issue\/([^/]+)\/assignee$/.exec(path);
+    if (method === 'PUT' && assignPath) {
+      const issue = this.issues.get(decodeURIComponent(assignPath[1]));
+      if (issue === undefined) return this.refuse(404, 'Issue does not exist');
+      const { accountId } = body as { accountId: string | null };
+      // Only the signed-in user can be assigned: a fake that accepted any id would let a client that sent the wrong one pass.
+      if (accountId !== this.me.accountId) return this.refuse(400, `User '${accountId}' cannot be assigned issues.`);
+      issue.fields.assignee = { accountId: this.me.accountId, displayName: this.me.displayName };
+      issue.fields.updated = new Date().toISOString();
+      return this.json(204, undefined);
+    }
+
+    const transitionWrite = /^\/issue\/([^/]+)\/transitions$/.exec(path);
+    if (method === 'POST' && transitionWrite) {
+      const key = decodeURIComponent(transitionWrite[1]);
+      const issue = this.issues.get(key);
+      if (issue === undefined) return this.refuse(404, 'Issue does not exist');
+      const { transition } = body as { transition: { id: string } };
+      const offered = (this.transitions.get(key) ?? []).find((t) => t.id === transition.id);
+      if (offered === undefined) return this.refuse(400, `Transition id '${transition.id}' is not valid for this issue.`);
+      issue.fields.status = { name: offered.to.name, statusCategory: offered.to.statusCategory };
+      if (offered.to.statusCategory.key === 'done') issue.fields.resolutiondate = new Date().toISOString();
+      issue.fields.updated = new Date().toISOString();
+      return this.json(204, undefined);
     }
 
     const issuePath = /^\/issue\/([^/]+)(\/transitions)?$/.exec(path);

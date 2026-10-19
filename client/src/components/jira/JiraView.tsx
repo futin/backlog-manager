@@ -40,6 +40,11 @@ import { JiraSetupView } from './JiraSetupView';
  * The slot holds the issue AND the board's fold index as it stood at the click (`childrenOf`, grouped-board spec §6), which the modal's Children tree hangs
  * grandchildren from. One setter serves both the board's card click and the modal's tree-row click, so a row swaps the one modal's issue and carries the
  * same snapshot forward — never a second modal.
+ *
+ * **The write counter is held here too** (Jira phase 3, plan ruling R7). The modal's landed write — `Assign to me`, `Move to…` — calls `onWrote`,
+ * which bumps `nudge`; the Board page hands it to `useJiraBoard`, whose list re-reads at once on the change, `off` boards included. The two never reach
+ * into each other: this component is the one place that holds both the modal and the page, so it is the one place a number can pass between them. The
+ * counter is not cleared on a page switch — it is a count of events, not a state, and only its change means anything.
  */
 export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data, error } = useJiraContext();
@@ -49,6 +54,7 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   // The slot is JiraView's, and JiraView does not unmount on a page switch, so leaving the Board must clear it by hand — otherwise returning to Board would
   // redraw the modal for an issue the reader closed the page on.
   useEffect(() => setOpenIssue(null), [page]);
+  const [nudge, setNudge] = useState(0);
 
   if (data === null) return <div className="board-empty">{error ? 'Jira unavailable' : 'loading…'}</div>;
   if (!data.configured) return <div className="board-empty">Jira is not configured</div>;
@@ -56,9 +62,15 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     <JiraSetupView onOpenJiraPage={onOpenJiraPage} />
   ) : (
     <>
-      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} />
+      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} nudge={nudge} />
       {openIssue !== null && (
-        <JiraIssueModal issue={openIssue.issue} childrenOf={openIssue.childrenOf} onOpenIssue={openOne} onClose={() => setOpenIssue(null)} />
+        <JiraIssueModal
+          issue={openIssue.issue}
+          childrenOf={openIssue.childrenOf}
+          onOpenIssue={openOne}
+          onWrote={() => setNudge((n) => n + 1)}
+          onClose={() => setOpenIssue(null)}
+        />
       )}
     </>
   );

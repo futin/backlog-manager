@@ -1250,6 +1250,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-modal-key { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap }
 .jira-modal-keyname { font-size: 13px; font-weight: 500; color: var(--ink2) }
 .jira-modal-key a { font-size: 12px; color: var(--cyan) }
+/* The controls row (Jira phase 3, §8.9.2): under the facts list, inside the facts column — the 28 px `Assign to me` chip beside the `Move to…` select,
+   wrapping rather than overflowing the 290 px column when a transition's name is long. A refusal sits on its own line under the row in --red at 12, the
+   size `.run-controls-error` gives the same reading beside the run's controls. */
+.jira-modal-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+.jira-modal-error { margin: 0; font-size: 12px; line-height: 1.45; color: var(--red) }
 /* The Children tree (§8.9.2): a head row (h3, the direct count's pill, `N in all` pushed right), the spread bar, then one button per row, indented 22 px
    a level by an inline style. A row reads like a one-line card — glyph, key, summary, the card's initials disc, the raw status pill. */
 .jira-tree-head { display: flex; align-items: center; gap: 8px; margin-top: 20px }

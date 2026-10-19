@@ -3099,6 +3099,55 @@ rewritten order, no quoting. Jira parses it and Jira refuses it (`jql/parse?vali
 on the board, never a dropped board). Rewriting it would be guessing at what the person meant, and a filter that silently differs from the one typed is worse
 than one Jira rejects out loud. The only bound is length (`JIRA_JQL_MAX_CHARS`, 2 000), because a query that long is a paste accident, not a filter.
 
+## The board's Jira writes are assign and transition, nothing else
+
+Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](../superpowers/plans/2026-10-19-jira-phase-3-writes.md),
+spec §8, §13) adds the first two calls that change anything on Atlassian's side — **assign the issue to me** and **transition it** — and this rule is what keeps
+the list at two. A third (comment, edit a field, create, unassign, assign someone else) is a new rule and a new section here, never another route that "fits
+the pattern": a credential that can write to a person's tracker is the sharpest thing this server holds, and the size of what it may do with it should be a
+fact a reader can check by counting routes (`POST /api/jira/issue/assign` and `/issue/transition`, in `jira-write.controller.ts`).
+
+**`{ accountId: null }` is never sent.** Jira reads a null assignee as UNASSIGN, so an assign sent while the identity was unknown would not fail — it would
+succeed at the opposite of what was asked. The poller therefore refuses an assign with no call when `me` is null (`503 no identity`, which heals on the next
+successful `myself`), and the body's accountId is always the poller's own `me`: a request cannot name anyone else, and one that tries is ignored. While the
+site's `access` is `unauthorized` the refusal comes first, even when `me` is still set from before the 401, because a credential Jira has just rejected is the
+same 401 whatever else is known. A transition needs no identity, so it is refused only under `unauthorized` — `boot.reset()` leaves `cloudId` set, which means
+the read gate alone would have let it through. Config writes stay open under `unauthorized`; issue writes do not, and that asymmetry is deliberate.
+
+**The offered list is checked fresh, and its refusal is this server's own.** The modal draws its `Move to…` menu from a detail read that is minutes old by the
+time someone picks, and a workflow can move an issue in between. So a transition begins with a fresh `GET issue/{key}/transitions` and checks the id against
+it. Jira's own answer to a stale id is a 400 whose sentence is about Jira's ids, which reads as a failure of the board rather than of the pick; the route's
+`400 transition not offered` says what happened. The id's own shape is not checked beyond a non-empty string of at most 64 characters — the offered list is
+the real validation, and a guess at Jira's id format would one day refuse a valid one.
+
+**A re-read, not a local patch.** After a landed write the poller reads the issue again and replaces its copy in the caches; it never edits the cached copy
+to say "assignee: me" or "status: In Progress". Jira's workflow can run post-functions that change more than the field written — a transition that also
+clears the assignee, sets a resolution or moves the sprint — and a local patch would draw the card as the person expected rather than as Jira now has it,
+until the next sweep quietly corrected it. The re-read is also the one place the rest of the issue (`updated`, `resolved`) is learned, and `updated` is what
+the newest-wins rule below compares.
+
+**In place, never added.** The splice replaces the issue at the SAME index in every board cache that already holds the key, and adds it to none. Membership
+of a board is its queries' and roots' business and nothing else's: a splice that added the key would let a write put an issue on a board whose JQL
+excludes it, and the next sweep would then take it off again. A re-read that does not map to an issue — unreadable, or dropped by the Done window — leaves
+every cache untouched. The mapping uses the sweep's own context, the window on, so a spliced copy is one the sweep itself could have produced.
+
+**Newest `updated` wins, so a sweep cannot undo a splice.** A sweep in flight across the write read the issue before it, and Jira's search index can lag
+the issue itself by a little: either way the sweep's copy is the OLDER one, and putting it back would move the card back until a later sweep moved it
+forward again. At the end of each sweep, for every issue it returned whose key the cache now holds with a strictly newer `updated` (`Date.parse`), the cached
+copy is kept; equal, or unparseable on either side, is the sweep's. The rule only ever replaces. A key the sweep did not return is gone as before, which has
+one accepted consequence: a lagging index can drop a just-assigned issue from an `assignee = currentUser()` board for one sweep. That is named in
+[jira.md](jira.md#the-issue-writes-phase-3) so nobody files it as a bug.
+
+**`reread` is the write's footnote, never its verdict.** Both routes answer `200 { ok: true, reread }`. The write landed, and that is what the 200 says;
+`reread` says whether the re-read afterwards came back as an issue, true even when the Done window then dropped it and false when the 2xx body was not an
+issue or the call failed. A failed re-read after a landed write is still a 200, because an error would invite a retry of something that already stood. The
+re-read's own failure still goes through the same bookkeeping as any read, so a 401 or a 429 there moves the site state.
+
+**No per-key queue.** The tracker's item writes are serialised per item because they are read-modify-write on a body: two interleaved writes lose one. These
+are not — each sends one field's new value and Jira orders them — so two browsers racing are Jira's last-write-wins and the newest-`updated` rule keeps the
+caches on whichever answer is newest. The one-at-a-time guard is the modal's, through the `useAction` hook, which also stops a double click; it is a courtesy
+to the person, not a lock the server relies on.
+
 ## A tracker project has no item files, and that shows up in three places
 
 An issue is not a file, and three separate surfaces would each have got that wrong on their own (task-45, spec §5.3/§5.5). It was FOUR until task-46: dispatch

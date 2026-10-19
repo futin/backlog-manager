@@ -1,25 +1,61 @@
+import { useRef, useState } from 'react';
+
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import { JIRA_COLUMNS, displayPath, initialsOf, issueDatesLine, modalTree, progressLine, type JiraChildrenIndex } from '../../lib/jira';
 import { renderMarkdown } from '../../lib/markdown';
-import type { JiraIssue, JiraIssueDetail } from '../../../../shared/types';
+import type { JiraIssue, JiraIssueDetail, JiraTransition } from '../../../../shared/types';
+import { Chip } from '../ui/Chip';
 import { Fact } from '../ui/Fact';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
 import { Pill } from '../ui/Pill';
+import { Select } from '../ui/Select';
 import { SpreadBar } from '../ui/SpreadBar';
 
 /**
- * JiraIssueModal — one Jira issue's detail, READ-ONLY (Jira phase 2, spec §6.3 minus its controls; DESIGN.md §8.9.2, which applies §8.7's sidecar to a
- * Jira issue).
+ * JiraIssueModal — one Jira issue's detail, and since Jira phase 3 the board's two writes to Jira itself (spec §6.3 minus phase 5's `Run ▾` / `Stop
+ * session`; DESIGN.md §8.9.2, which applies §8.7's sidecar to a Jira issue).
  *
  * **It is the item modal's twin, not a second modal design.** It composes `ui/Modal` exactly as `board/ItemModal.tsx` does — so the scrim, the close
  * control, the Escape key (the LIFO stack in `useDialogEscape`, called by the shell and never here) and the 700 px fold are the shell's — and draws the same
  * facts column through `ui/Fact` and the same body through `.item-body`. `Modal`'s composer list is `[ItemModal, JiraIssueModal]` and a third is a design
  * change.
  *
- * **Phase 2 has no controls.** No `Assign to me`, `Move to…`, `Run ▾` or `Stop session`, and no `session` fact: the controls row is ABSENT, not drawn
- * disabled, because a disabled control is a promise that a later phase has not kept yet. `JiraIssueDetail.session` is still typed `null`, and so is unread.
+ * **The controls row** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sits under the facts list, inside the facts column, and holds two controls:
+ *
+ * - **`Assign to me`**, a 28 px `Chip` → `POST /api/jira/issue/assign` `{ key }`. Disabled, with the reason as its title, while the shell's status knows
+ *   no identity (`data.me` null — which also covers a boot `myself` that has not answered: the server would refuse with 503 `no identity` anyway, and
+ *   §8's reason it must is that Jira reads `{ accountId: null }` as UNASSIGN) and while the issue is already the reader's own (`already assigned to you`).
+ * - **`Move to…`**, the `Select` primitive → `POST /api/jira/issue/transition` `{ key, transitionId }`. Its first option is the placeholder `''`; then one
+ *   per transition the detail offers, named `name → to.name` when the two differ (a `Start` that lands in `In Progress` says so) and `name` alone when they
+ *   are one word. A pick posts AT ONCE — a native select has no confirm step, and the select is controlled at `''`, so it reads `Move to…` again on the
+ *   very next render. Disabled until the detail lands (the transitions are the detail's, and the card carries none), with `transitions unavailable` as the
+ *   title once that read failed, and `no transitions offered` when Jira offers none.
+ *
+ * `Run ▾`, `Stop session` and the `session` fact are phase 5's and stay ABSENT, not drawn disabled: a disabled control is a promise a later phase has not
+ * kept yet. `JiraIssueDetail.session` is still typed `null`, and so is unread.
+ *
+ * **One write at a time, stamped with its key.** Both controls fire through ONE `useAction`, so its ref guard (bug-19's layer 1, the reason DESIGN.md
+ * §8.4.1 gives `RunControls`) holds across both: a double click on Assign, or a Move picked while Assign is out, sends nothing — two clicks inside one tick
+ * both read a `disabled` that has not been painted yet, and only a ref sees the first. Both controls are disabled while a write is out, the rendering half
+ * of that guard; and they stay disabled across a Children-row swap until it settles, because one modal sends one write (plan ruling R6 leaves the
+ * serialisation to this modal). Each write carries the key it was sent for, and its settle compares that against the key the modal shows NOW (`keyRef`):
+ * a refusal for an issue the reader has swapped away from is dropped (`onError` → `true`, "handled"), never drawn under another issue's title, and a
+ * landed write's detail re-read is skipped for the same reason. The status reload and the board nudge are NOT skipped: the write happened, and both of
+ * those describe the board, not the modal's issue.
+ *
+ * **A failure says why, in place.** The server's sentence (`{ error }`), else `HTTP <status>`, else the network's own message — `failureOf`'s rule, the
+ * same one the read uses — in a `role="alert"` line under the row. The modal stays open: a refusal (`Jira refused: …`, `transition not offered`) is
+ * something to read and maybe retry, not a reason to lose the place. The line clears when the next write leaves (`useAction` clears it) and when the key
+ * changes (cleared during render, so the new issue's first frame never carries the old one's refusal).
+ *
+ * **A landed write re-reads three things** (spec §6.1; rulings R7, R8): the shell's status (`useJiraContext().reload()`), the board's list (`onWrote`,
+ * which bumps `JiraView`'s nudge), and this modal's own detail. A 200 with `reread: false` is a success like any other: it says the SERVER's re-read
+ * failed after the write stood, the next sweep catches its cache up, and an error here would invite a retry of a write that already happened (R1). The
+ * detail re-read is a `rev` counter in `useFetched`'s deps — which answers `PENDING` on any dep change — so the last detail that landed for this SAME key
+ * is held here and drawn while the re-read is out (R8): no `loading…` flash, and no controls blinking to disabled-for-no-detail and back.
  *
  * **Two sources, one column.** The card hands over the `JiraIssue` it was drawn from, and every fact the card already carries is drawn from it at once —
  * the modal opens with a full column rather than a spinner. The detail (`GET /api/jira/issue/:key`, read fresh on open) then supplies the three things a
@@ -58,7 +94,7 @@ function categoryWord(category: JiraIssue['status']['category']): string {
   return (JIRA_COLUMNS.find((c) => c.category === category)?.label ?? 'To Do').toLowerCase();
 }
 
-/** The sentence a failed read carries: the server's `{ error }` when it sent one, else the HTTP status, else whatever the network said. */
+/** The sentence a failed read or write carries: the server's `{ error }` when it sent one, else the HTTP status, else whatever the network said. */
 async function failureOf(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { error?: unknown };
@@ -79,20 +115,57 @@ function isIssueDetail(value: unknown): value is JiraIssueDetail {
   return typeof d.description === 'string' && Array.isArray(d.children) && Array.isArray(d.boards);
 }
 
+/** One transition as the `Move to…` select names it: the transition's own name, and where it lands only when that is a different word. */
+function transitionLabel(t: JiraTransition): string {
+  return t.name === t.to.name ? t.name : `${t.name} → ${t.to.name}`;
+}
+
+/**
+ * POSTs one issue write and resolves when it LANDED. A non-OK answer rejects with `failureOf`'s sentence, and a dropped request rejects with the
+ * network's own error, so `useAction`'s `errorMessage` renders exactly the three readings the header names. The 200's body (`JiraIssueWriteResult`) is
+ * not read: `reread` changes nothing here (see the header), and a body that failed to parse after a 200 must not turn a write that stood into an error.
+ */
+async function postWrite(path: 'assign' | 'transition', body: Record<string, string>): Promise<void> {
+  const res = await fetch(`/api/jira/issue/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(await failureOf(res));
+}
+
 export function JiraIssueModal({
   issue,
   childrenOf,
   onOpenIssue,
+  onWrote,
   onClose
 }: {
   issue: JiraIssue;
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
+  onWrote: () => void;
   onClose: () => void;
 }) {
-  const { data } = useJiraContext();
-  // Keyed on the issue: swapping to a child reads nothing held on the very render that carries the new key, and a superseded answer never lands
-  // (`useFetched`, #285). Every failure — a non-OK answer, a malformed body, a dropped request — resolves to a `failure`, so the read itself never rejects.
+  const { data, reload } = useJiraContext();
+  const { busy, error: writeError, run, clearError } = useAction();
+  // The key the modal shows NOW, read by a write's settle (see the header) — a ref, because the settle closure was made on the render that sent it.
+  const keyRef = useRef(issue.key);
+  keyRef.current = issue.key;
+  // Bumped by a landed write for the key still shown: it only TRIGGERS the re-read; the held detail below is what keeps the body up meanwhile (R8).
+  const [rev, setRev] = useState(0);
+  // A refusal belongs to the issue it was sent for. Cleared DURING render on a key change (React's "adjust state when a prop changes"), so the swapped-in
+  // issue's first frame never draws it; a late refusal for the old key is dropped by the settle, so nothing re-raises it.
+  const [shownKey, setShownKey] = useState(issue.key);
+  // The last detail that LANDED — R8's held copy, drawn only while a read for that same key is pending again (a write's re-read). Stored during render on
+  // the frame it lands, for the reason `useFetched` tags its answer: an effect would store it one commit late, and that commit would draw `loading…`.
+  const [kept, setKept] = useState<JiraIssueDetail | null>(null);
+  if (shownKey !== issue.key) {
+    setShownKey(issue.key);
+    clearError();
+    // Dropped on a key change too, so a walk back to an issue (A → B → A) opens on `loading…` like any open, not on A's copy from before the walk.
+    setKept(null);
+  }
+
+  // Keyed on the issue and the write revision: swapping to a child reads nothing held on the very render that carries the new key, and a superseded answer
+  // never lands (`useFetched`, #285). Every failure — a non-OK answer, a malformed body, a dropped request — resolves to a `failure`, so the read itself
+  // never rejects.
   const { value: mine } = useFetched(
     () =>
       fetch(`/api/jira/issue/${encodeURIComponent(issue.key)}`)
@@ -102,9 +175,11 @@ export function JiraIssueModal({
           return isIssueDetail(body) ? { detail: body } : { failure: 'malformed response' };
         })
         .catch((e: unknown): Held => ({ failure: e instanceof Error ? e.message : String(e) })),
-    [issue.key]
+    [issue.key, rev]
   );
-  const detail = mine !== null && 'detail' in mine ? mine.detail : null;
+  const landed = mine !== null && 'detail' in mine ? mine.detail : null;
+  if (landed !== null && landed !== kept) setKept(landed);
+  const detail = landed ?? (mine === null && kept !== null && kept.key === issue.key ? kept : null);
   const failure = mine !== null && 'failure' in mine ? mine.failure : null;
   // The detail's copy is the fresher one; the card's is what the column draws until it lands (or for good, when the read fails).
   const src: JiraIssue = detail ?? issue;
@@ -115,6 +190,25 @@ export function JiraIssueModal({
   const typeLine = [src.type.name, src.parent === null ? null : `${src.parent.key} ${src.parent.summary}`].filter((p) => p !== null).join(' · ');
   const priorityLine = [src.priority, src.sprint].filter((p) => p !== null && p !== '').join(' · ');
   const people = `${src.assignee === null ? 'unassigned' : src.assignee.name}${src.reporter === null ? '' : ` · ${src.reporter}`}`;
+
+  const me = data?.me ?? null;
+  const assignBlock = me === null ? 'no identity' : src.assignee?.accountId === me.accountId ? 'already assigned to you' : null;
+  const moveBlock = failure !== null ? 'transitions unavailable' : detail !== null && detail.transitions.length === 0 ? 'no transitions offered' : null;
+  const moveReady = detail !== null && detail.transitions.length > 0;
+
+  /** The one write path both controls take (see the header): one guard, one error line, one key stamp. */
+  const write = (path: 'assign' | 'transition', body: Record<string, string>): void => {
+    const asked = issue.key;
+    run(() => postWrite(path, body), {
+      onSuccess: () => {
+        reload();
+        onWrote();
+        if (keyRef.current === asked) setRev((r) => r + 1);
+      },
+      // `true` is "handled — draw nothing": the refusal is for an issue this modal no longer shows.
+      onError: () => keyRef.current !== asked
+    });
+  };
 
   const facts = (
     <div className="item-facts">
@@ -140,6 +234,24 @@ export function JiraIssueModal({
           )}
         </Fact>
       </dl>
+      <div className="jira-modal-controls">
+        <Chip size={28} disabled={busy || assignBlock !== null} title={assignBlock ?? undefined} onClick={() => write('assign', { key: issue.key })}>
+          Assign to me
+        </Chip>
+        <Select
+          label="Move to"
+          title={moveBlock ?? undefined}
+          value=""
+          disabled={busy || !moveReady}
+          options={[{ value: '', label: 'Move to…' }, ...(detail?.transitions ?? []).map((t) => ({ value: t.id, label: transitionLabel(t) }))]}
+          onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
+        />
+      </div>
+      {writeError !== null && (
+        <p className="jira-modal-error" role="alert">
+          {writeError}
+        </p>
+      )}
     </div>
   );
 

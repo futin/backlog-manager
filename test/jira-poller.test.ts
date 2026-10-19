@@ -19,7 +19,7 @@ import {
   JIRA_SEARCH_MAX_CHARS,
   JiraPollerService
 } from '../server/src/jira/poller.service';
-import { FakeJira, makeRawIssue, type JiraCall } from './helpers/jira';
+import { FakeJira, makeRawIssue, type FakeTransition, type JiraCall } from './helpers/jira';
 
 /**
  * Jira phase 1 — `identity.ts` and `poller.service.ts` (spec §3, §5 and §8; plan Review Focus 2, 3 and 5; preflight rulings P1–P5, P13).
@@ -1580,6 +1580,241 @@ describe('boardSaved and boardDeleted', () => {
 
     delete process.env.BM_JIRA_TOKEN;
     expect(poller.status()).toMatchObject({ configured: false, armed: false, home: null });
+  });
+});
+
+/**
+ * Jira phase 3 — the two issue writes in the poller (plan Task 2, rulings R1, R2, R4, R5, R6; Review Focus 3 and 5). One board whose saved query answers
+ * `PAY-1`, swept once, is the ground every case stands on. `PAY-1`'s `updated` is the fixture's `created` — two days before `T0`, so well in the past — and
+ * the fake stamps a write with the REAL clock (`new Date()`, which the `Date.now` mock does not reach), so the written copy is always strictly newer than the
+ * swept one and no same-millisecond tie can make a newest-wins case flaky.
+ */
+describe('issue writes', () => {
+  const B3 = 'b_0123abcf';
+  const PAY = 'project = PAY';
+  const START: FakeTransition = { id: '31', name: 'Start', to: { name: 'In Progress', statusCategory: { key: 'indeterminate' } } };
+  let client: JiraClient;
+
+  beforeEach(() => {
+    client = new JiraClient(fake.fetch);
+    poller = new JiraPollerService(client);
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    fake.issues.set('PAY-2', makeRawIssue({ key: 'PAY-2' }));
+    fake.answers.set(PAY, ['PAY-1']);
+    fake.answers.set('project = OTHER', ['PAY-2']);
+    fake.transitions.set('PAY-1', [START]);
+  });
+
+  /** `METHOD path`, the gateway prefix and the query string dropped — the writes and their reads share a path, so the method is what tells them apart. */
+  const sent = () => fake.calls.map((c) => `${c.method} ${new URL(c.url).pathname.replace(/^\/ex\/jira\/[^/]+\/rest\/api\/3/, '')}`);
+  const writes = () => sent().filter((s) => s.startsWith('PUT ') || s.endsWith('/transitions'));
+  const cached = (id = B1) => poller.boardIssues(id)!.issues.find((i) => i.key === 'PAY-1');
+
+  async function swept(boards: JiraBoard[] = [board({ queries: [query(PAY)] })]): Promise<void> {
+    writeConfig(boards);
+    await poller.tick();
+    fake.calls.length = 0;
+  }
+
+  it('assignToMe sends one PUT with my accountId and splices the re-read in place', async () => {
+    fake.answers.set(PAY, ['PAY-2', 'PAY-1']);
+    await swept();
+    expect(keysOf()).toEqual(['PAY-2', 'PAY-1']);
+    expect(await poller.assignToMe('PAY-1')).toEqual({ ok: true, value: { ok: true, reread: true } });
+    expect(fake.calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ accountId: 'acc-1' }]);
+    expect(sent()).toEqual(['PUT /issue/PAY-1/assignee', 'GET /issue/PAY-1']);
+    // The re-read asks the sweep's own field list, so the spliced card is drawn from exactly what a swept one is.
+    expect(new URL(fake.calls[1].url).searchParams.get('fields')!.split(',')).toEqual(SWEEP_FIELDS);
+    expect(keysOf()).toEqual(['PAY-2', 'PAY-1']);
+    expect(cached()!.assignee).toEqual({ accountId: 'acc-1', name: 'Ada Lovelace' });
+    // A splice is not a sweep: the list's age is still the sweep's.
+    expect(poller.boardIssues(B1)!.polledAt).toBe(iso(T0));
+  });
+
+  it('splices into every board holding the key, and adds it to none that does not (R4)', async () => {
+    await swept([
+      board({ queries: [query(PAY)] }),
+      board({ id: B2, name: 'Ops', queries: [query(PAY)] }),
+      board({ id: B3, name: 'Other', queries: [query('project = OTHER')] })
+    ]);
+    expect(await poller.assignToMe('PAY-1')).toEqual({ ok: true, value: { ok: true, reread: true } });
+    expect(cached(B1)!.assignee).toEqual({ accountId: 'acc-1', name: 'Ada Lovelace' });
+    expect(cached(B2)!.assignee).toEqual({ accountId: 'acc-1', name: 'Ada Lovelace' });
+    expect(keysOf(B3)).toEqual(['PAY-2']);
+  });
+
+  it('transitionIssue reads the transitions fresh, then posts, then splices the new status', async () => {
+    await swept();
+    expect(await poller.transitionIssue('PAY-1', '31')).toEqual({ ok: true, value: { ok: true, reread: true } });
+    expect(sent()).toEqual(['GET /issue/PAY-1/transitions', 'POST /issue/PAY-1/transitions', 'GET /issue/PAY-1']);
+    expect(fake.calls[1].body).toEqual({ transition: { id: '31' } });
+    expect(cached()!.status).toEqual({ name: 'In Progress', category: 'indeterminate' });
+  });
+
+  it('a transition the issue does not offer is refused, and nothing is posted', async () => {
+    await swept();
+    expect(await poller.transitionIssue('PAY-1', '99')).toEqual({ ok: false, refusal: 'transition not offered' });
+    expect(sent()).toEqual(['GET /issue/PAY-1/transitions']);
+    expect(cached()!.status).toEqual({ name: 'To Do', category: 'new' });
+  });
+
+  it('a failed transitions read is the read’s failure, and nothing is posted', async () => {
+    await swept();
+    fake.failNext = (c) => (c.url.endsWith('/transitions') ? { status: 404, body: { errorMessages: ['Issue does not exist'] } } : null);
+    expect(await poller.transitionIssue('PAY-1', '31')).toMatchObject({ ok: false, response: { status: 404, message: 'Issue does not exist' } });
+    expect(writes()).toEqual(['GET /issue/PAY-1/transitions']);
+  });
+
+  it('a write Jira refuses is its failure, and splices nothing', async () => {
+    await swept();
+    const before = JSON.stringify(poller.boardIssues(B1));
+    fake.failNext = (c) => (c.method === 'PUT' ? { status: 403, body: { errorMessages: ['You cannot assign issues.'] } } : null);
+    expect(await poller.assignToMe('PAY-1')).toMatchObject({ ok: false, response: { status: 403, message: 'You cannot assign issues.' } });
+    expect(sent()).toEqual(['PUT /issue/PAY-1/assignee']);
+    expect(JSON.stringify(poller.boardIssues(B1))).toBe(before);
+    expect(poller.status().access).toBe('ok');
+  });
+
+  it('identity unknown (myself 403): assign is refused with no call, transition still goes through (R2)', async () => {
+    fake.failNext = (c) => (isGatewayMyself(c.url) ? { status: 403, body: { errorMessages: ['No.'] } } : null);
+    writeConfig([board({ queries: [query(PAY)] })]);
+    await poller.tick();
+    fake.failNext = null;
+    fake.calls.length = 0;
+    expect(poller.status()).toMatchObject({ access: 'forbidden', me: null });
+    expect(await poller.assignToMe('PAY-1')).toEqual({ ok: false, refusal: 'no identity' });
+    expect(fake.calls).toEqual([]);
+    expect(await poller.transitionIssue('PAY-1', '31')).toEqual({ ok: true, value: { ok: true, reread: true } });
+    expect(sent()).toEqual(['GET /issue/PAY-1/transitions', 'POST /issue/PAY-1/transitions', 'GET /issue/PAY-1']);
+  });
+
+  it('after a 401 on a later read, both writes answer the 401 and send nothing (R2)', async () => {
+    await swept();
+    fake.unauthorized = true;
+    expect(await poller.issueDetail('PAY-1')).toMatchObject({ ok: false, response: { status: 401 } });
+    expect(poller.status()).toMatchObject({ access: 'unauthorized', me: null });
+    fake.unauthorized = false;
+    fake.calls.length = 0;
+    expect(await poller.assignToMe('PAY-1')).toMatchObject({ ok: false, response: { status: 401 } });
+    expect(await poller.transitionIssue('PAY-1', '31')).toMatchObject({ ok: false, response: { status: 401 } });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('inside a 429 window both are refused with the stored instant and send nothing', async () => {
+    await swept();
+    fake.rateLimit = { retryAfter: 30 };
+    expect(await poller.issueDetail('PAY-1')).toMatchObject({ ok: false, response: { status: 429 } });
+    fake.rateLimit = null;
+    fake.calls.length = 0;
+    now += 5_000;
+    const until = iso(T0 + 30_000);
+    expect(await poller.assignToMe('PAY-1')).toMatchObject({ ok: false, response: { status: 429 }, retryAt: until });
+    expect(await poller.transitionIssue('PAY-1', '31')).toMatchObject({ ok: false, response: { status: 429 }, retryAt: until });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('a window another read opened while the transitions read was out: the write is never sent', async () => {
+    await swept();
+    // The transitions read answers (offering `31`), and before the poller sees that answer a route meets a 429 — the issueDetail pattern's case.
+    const real = client.transitions.bind(client);
+    jest.spyOn(client, 'transitions').mockImplementation(async (auth, key) => {
+      const res = await real(auth, key);
+      fake.failNext = (c) => (c.url.includes('/project/search') ? { status: 429, headers: { 'retry-after': '30' } } : null);
+      await poller.projects();
+      fake.failNext = null;
+      return res;
+    });
+    expect(await poller.transitionIssue('PAY-1', '31')).toMatchObject({ ok: false, response: { status: 429 }, retryAt: iso(T0 + 30_000) });
+    expect(sent()).toEqual(['GET /issue/PAY-1/transitions', 'GET /project/search']);
+  });
+
+  it('a write that lands but whose re-read fails is still ok, reread false, and the cache is untouched (R1, Review Focus 5)', async () => {
+    await swept();
+    const before = JSON.stringify(poller.boardIssues(B1));
+    let wrote = false;
+    fake.failNext = (c) => {
+      if (c.method === 'PUT') wrote = true;
+      return wrote && c.method === 'GET' && new URL(c.url).pathname.endsWith('/issue/PAY-1') ? { status: 500 } : null;
+    };
+    expect(await poller.assignToMe('PAY-1')).toEqual({ ok: true, value: { ok: true, reread: false } });
+    expect(sent()).toEqual(['PUT /issue/PAY-1/assignee', 'GET /issue/PAY-1']);
+    expect(JSON.stringify(poller.boardIssues(B1))).toBe(before);
+    // The assign itself landed — Jira holds it; the next sweep is what catches the cache up.
+    expect((fake.issues.get('PAY-1')!.fields.assignee as { accountId: string }).accountId).toBe('acc-1');
+  });
+
+  it('a re-read that meets a 401 still answers ok, and moves the site state as any read does (R1)', async () => {
+    await swept();
+    let wrote = false;
+    fake.failNext = (c) => {
+      if (c.method === 'PUT') wrote = true;
+      return wrote && c.method === 'GET' ? { status: 401 } : null;
+    };
+    expect(await poller.assignToMe('PAY-1')).toEqual({ ok: true, value: { ok: true, reread: false } });
+    expect(poller.status()).toMatchObject({ access: 'unauthorized', me: null });
+  });
+
+  describe('newest updated wins in the sweep (R5, Review Focus 3)', () => {
+    it('a lagging index answering the pre-write copy does not undo the splice; a strictly newer copy does', async () => {
+      await swept();
+      const prewrite = structuredClone(fake.issues.get('PAY-1')!);
+      await poller.assignToMe('PAY-1');
+      const spliced = cached()!;
+      expect(spliced.assignee).toEqual({ accountId: 'acc-1', name: 'Ada Lovelace' });
+      expect(Date.parse(spliced.updated)).toBeGreaterThan(Date.parse(prewrite.fields.updated as string));
+
+      fake.issues.set('PAY-1', structuredClone(prewrite));
+      await poller.boardSaved(B1);
+      expect(cached()).toEqual(spliced);
+      // The sweep did run — its age moved — it only kept the newer copy of the one issue.
+      now += 1_000;
+      await poller.boardSaved(B1);
+      expect(poller.boardIssues(B1)!.polledAt).toBe(iso(T0 + 1_000));
+      expect(cached()).toEqual(spliced);
+
+      const newer = iso(Date.parse(spliced.updated) + 60_000);
+      fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1', fields: { summary: 'Renamed in Jira', updated: newer } }));
+      await poller.boardSaved(B1);
+      expect(cached()).toMatchObject({ summary: 'Renamed in Jira', updated: newer, assignee: null });
+    });
+
+    it('a sweep already in flight with the pre-write copy keeps the splice that landed while it was out', async () => {
+      fake.issues.set('OPS-1', makeRawIssue({ key: 'OPS-1' }));
+      await swept([board({ queries: [query(PAY)], roots: ['OPS-1'] })]);
+      // Hold the root's search — sent after the query answered with the pre-write PAY-1 — until the assign and its splice are done.
+      const real = client.search.bind(client);
+      let write: Promise<unknown> | null = null;
+      jest.spyOn(client, 'search').mockImplementation(async (auth, body) => {
+        if (body.jql.startsWith('key = "OPS-1"') && write === null) {
+          write = poller.assignToMe('PAY-1');
+          await write;
+        }
+        return real(auth, body);
+      });
+      now += 60_000;
+      await poller.tick();
+      expect(await write).toEqual({ ok: true, value: { ok: true, reread: true } });
+      expect(poller.boardIssues(B1)!.polledAt).toBe(iso(T0 + 60_000));
+      expect(keysOf()).toEqual(['PAY-1', 'OPS-1']);
+      expect(cached()!.assignee).toEqual({ accountId: 'acc-1', name: 'Ada Lovelace' });
+    });
+
+    it('an equal or unparseable updated on either side: the sweep’s copy wins', async () => {
+      await swept();
+      await poller.assignToMe('PAY-1');
+      const spliced = cached()!;
+      expect(spliced.assignee).toEqual({ accountId: 'acc-1', name: 'Ada Lovelace' });
+
+      fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1', fields: { summary: 'Same instant', updated: spliced.updated } }));
+      await poller.boardSaved(B1);
+      expect(cached()).toMatchObject({ summary: 'Same instant', assignee: null });
+
+      await poller.assignToMe('PAY-1');
+      expect(cached()!.assignee).toEqual({ accountId: 'acc-1', name: 'Ada Lovelace' });
+      fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1', fields: { summary: 'No date', updated: 'not a date' } }));
+      await poller.boardSaved(B1);
+      expect(cached()).toMatchObject({ summary: 'No date', assignee: null });
+    });
   });
 });
 
