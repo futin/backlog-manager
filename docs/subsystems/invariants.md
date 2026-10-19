@@ -284,7 +284,11 @@ the same reason `pauseRequestEffective` was already duplicated). `stopRequestEff
 run would take the cooperative path (`finish --status paused`) for a request whose whole point is that the cooperative path is not reaching it.
 
 **`POST /api/agents/stop`** is `pause`'s sibling — `SameOriginPostGuard`, `@HttpCode(200)`, body rebuilt field by field, independent of `BM_AGENTS` (recording the fact must work on a machine whose launcher is off), and refused unless the project has a `running` run,
-**fresh or stale alike**, because a stale `running` run is the case this bug is about. Where it differs: it then attempts ONE spawn, through the gate
+**fresh or stale alike**, because a stale `running` run is the case this bug is about — **or a `paused` one** (#305). A paused run's driver has exited, but
+the run still holds claims, `orchestrator:queued` labels and parked worktrees that only an abort clears, and refusing it left two exits: a Resume spent only
+so that a Stop could follow it, or a hand-typed `--abort`. Admitting it puts a stop on file for a run nobody is driving, which the board's Resume already
+refused — so `orchestrate.mjs unpause` refuses an effective stop too, with exit `10` and nothing written, because an unpause stamps `unpausedAt` past the
+stop's `requestedAt` and would retire it without a word. Where it differs: it then attempts ONE spawn, through the gate
 `resume()` uses, of `/backlog-orchestrate --abort`.
 
 **Recording the fact and ending the run are two outcomes, and only the first is guaranteed.** The response is

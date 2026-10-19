@@ -4693,6 +4693,13 @@ function cmdUnpause() {
   if (run.status !== 'paused') {
     throw new OrchestrateError(`this run is ${run.status}, not paused — nothing to unpause`, 1);
   }
+  // A stop on file fences the unpause (#305). The board can stop a PAUSED run, whose driver has already exited, and the stop is retired by exactly the
+  // stamp this command is about to write: `unpausedAt` past the request's `requestedAt` makes it untimely, so an unpause that went through would cancel a
+  // person's stop without a word. The server already refuses the board's Resume on it; this is the terminal's `--resume`. Exit `10`, the stop code, and
+  // not `1`: the call is not wrong and must not be retried — the reaction is `--abort` (references/stopping.md).
+  if (stopRequestEffective(readPauseRequest(run.project), run)) {
+    throw new OrchestrateError(`run ${run.runId} has a stop request on file — nothing resumes a stopped run; run \`abort\` instead`, 10);
+  }
 
   const at = nowISO();
   const me = sessionIdentity();
@@ -6620,6 +6627,8 @@ commands:
 //  10  a stop was requested for this run (bug-39) — `stage` refuses EVERY
 //      transition with it, and `watch` returns it after signalling the child
 //      it was given the pid of. Nothing is written by the `stage` refusal.
+//      `unpause` refuses with it too (#305), writing nothing: an unpause would
+//      retire the stop by stamping `unpausedAt` past it.
 //      `6`'s sibling and deliberately not `6` itself: a `6` means "stop at
 //      the next item boundary, then `finish --status paused`", a `10` means
 //      "stop now and go to `--abort`". Those are different commands and
