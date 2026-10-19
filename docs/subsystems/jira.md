@@ -2,14 +2,15 @@
 
 The Jira Cloud integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md)): a parallel subsystem beside the item
 sources, not a third source. A Jira board is a set of issue keys and saved JQL defined in one per-machine file; it has no `backlog/`, no `source.json` and no
-registry entry, and nothing in `items/` knows it exists. This doc describes **phases 1 to 4 and the server half of phase 5 (5a)** (spec §12). Phase 1 is the server's read half — the Jira
+registry entry, and nothing in `items/` knows it exists. This doc describes **phases 1 to 5** (spec §12) — phase 5 as 5a, the server half, and 5b, the client half. Phase 1 is the server's read half — the Jira
 client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and the read routes (six, then seven with phase 5a's `/prompt`). Phase 2 adds `jira.json`'s
 writers behind three guarded write routes (five since 5a's skills) and the whole client section: a rail entry with two pages (Board and Setup), the issue modal, the shell chip and
 the Trackers row. Phase 3 adds the first two writes to Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
 by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them. Phase 4 adds the `jira` skill and its CLI,
 `jira.mjs`, which reach those same routes from any Claude session on this machine — and changes nothing in the server. Phase 5a is the server half of Run: the
 skills writers and their two routes, the prompt composer and `GET /api/jira/prompt`, the in-memory live map, and — in `agents/`, because they call the dashboard —
-`POST /api/agents/dispatch-jira`, `/jira-stop` and the reconciler that keeps the map honest; the client half (the Run menu, the launch sheet, the strip) is 5b.
+`POST /api/agents/dispatch-jira`, `/jira-stop` and the reconciler that keeps the map honest. Phase 5b is the client half: `Run ▾`, the launch sheet, the card's
+live strip, the modal's session fact and `Stop session`, the Skills card and the `Jira default action` setting — [below](#the-client-half-of-run-phase-5b).
 
 `server/src/jira/` is the third outbound-calling module, after `agents/` and `tracker/`, and the only one that talks to Atlassian.
 
@@ -24,7 +25,7 @@ skills writers and their two routes, the prompt composer and `GET /api/jira/prom
   the Run launch sheet offers beside the two built-ins, filled in by the composer (below).
 - **Per project: nothing.** A mapped repository is a path in `jira.json` and never enters `registry.json`.
 - **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | setup`, a module store) since
-  phase 2; `jiraDefaultAction` arrives with phase 5. The Board page's filters and summary search are per mount and never persisted.
+  phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b. The Board page's filters and summary search are per mount and never persisted.
 
 ## The module, file by file
 
@@ -385,6 +386,35 @@ other answer is a 502 ending `— Jira is untouched`, with the entry left in pla
 session is no longer `working` or `question`, except entries younger than `JIRA_LIVE_GRACE_MS` (2 min). One `setTimeout`, armed after `confirm` and pending only
 while some entry holds a session id; an unreadable list or agents off leaves the map as it was. Its comment holds the long form.
 
+### The client half of Run (phase 5b)
+
+The look is DESIGN.md §8.9.1 (`Run ▾` and the strip), §8.9.2 (the modal's row), §8.9.3 (Skills) and §8.9.5 (the launch sheet). The rules are
+[invariants.md](invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) (`Run ▾` is never hidden for the dashboard's sake) and the Escape
+section (seven dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
+
+- **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the issue modal's controls row. It decides nothing:
+  `runChipState(issue, status)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup › Repositories`), `live`
+  (disabled, titled `a session is running on <KEY>`) or `ready` (a `Popover` of the two built-ins, the skills with `skillCommand`'s slash command as a hint,
+  and the note `opens the launch sheet`). It is drawn with agents off. On a card its wrapper stops the click and Enter/Space, the link-out's precedent, and
+  `jira-run-open` lets the card overflow while the panel is open.
+- **The launch sheet** (`components/jira/JiraLaunchSheet.tsx`) composes `ui/FormSheet` and is hosted ONCE, in `JiraView`, after the modal; both homes of `Run ▾`
+  call `onRun(issue, action)`, and the slot is cleared on a page switch like the open issue. It reads the server's prompt (`fetchJiraPrompt`, keyed on action and
+  repository through `useFetched`), the ticket's transitions and assignee (`GET /issue/:key`, on open) and the agents status (`useAgents`, on open — never the
+  Board's copy). `Start` is drawn only for a `disabled` or `enabled` `projectDispatchGate` answer and sends `dispatchJira` (`POST /api/agents/dispatch-jira`);
+  `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action)`, clamped to the host's ceiling —
+  and model and effort seed from Settings. A landed Start calls `onStarted`, which reloads the shell's status (the strip) and nudges the board.
+- **The live strip.** `status.live` (the server's map, folded into the payload) is the one source: `cardSessions` lists a top's own session and every folded
+  issue's, `sessionStrip` words each (`session · <repo basename>` and the elapsed reading or `starting`), and `JiraCard` draws one `ui/LiveStrip` per entry,
+  first in the card. The strip clears when the next status poll — or the reload after a Start or Stop — no longer lists the key.
+- **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a 28 px chip replaced in place by
+  `ui/Confirm`, drawn only while agents are enabled AND the key has a confirmed, non-`starting` entry (`StopSession` is mounted for that case alone, so
+  `useAgents()` is read only then). It posts `stopJira` (`POST /api/agents/jira-stop`) through the same `useAction` as the two writes, so one guard and one
+  error line serve all three; a landed stop reloads the status and nudges the board.
+- **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an
+  add row and a `×` that asks through `ui/Confirm`; every write is one of the five config routes and reloads the shell's status. Settings › Shared › Dispatch
+  gains `Jira default action`, drawn only while Jira is configured; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` without
+  rewriting the stored value.
+
 ## The probe facts the code encodes
 
 Spec §14's phase-0 probe, against a real Cloud site with a scoped token, and where each one landed:
@@ -417,7 +447,9 @@ write, the identity gate) and widens `jira-client` (the two calls), `jira-poller
 in-flight guard, the key stamp, the held detail).
 Phase 5a adds `jira-prompt` (the composer and `GET /prompt`), `jira-live` (the map), and — under `agents-` because the route lives there — `agents-dispatch-jira`,
 `agents-jira-stop` and `agents-jira-live` (the reconciler), widens `jira-config-write` and `jira-write-routes` (the skills writers and routes), `jira-routes` (`live`,
-`session`) and `agents-origin-guard` (the two new POSTs).
+`session`) and `agents-origin-guard` (the two new POSTs). Phase 5b adds the jsdom suite `jira-launch` (the sheet: preview, gates, Start, Copy prompt) and widens
+`jira-lib`, `jira-board` (`Run ▾`, the strip), `jira-modal` (the session fact, Stop), `jira-setup` (the Skills card), `settings-view` and `settings`
+(`jiraDefaultAction`), `use-jira` and `dialog-count-docs`.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the compose passthrough.
 

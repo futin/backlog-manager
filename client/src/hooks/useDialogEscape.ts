@@ -29,16 +29,22 @@ import { useEffect, useRef } from 'react';
  * stack already ranks. It joined through a third shell, `ui/Drawer`, until #298 moved the drawer into ui-kit; ui-kit's drawer binds its own `keydown` unless
  * told not to, so the wrapper is the one exception to "the shells call this": it calls the hook itself and passes `closeOnEscape={false}`.
  *
- * One entry is not a dialog at all, and it is not one of the six: bug-53's
- * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens. It paints no
+ * Seven since Jira phase 5: `JiraLaunchSheet` (`components/jira/JiraLaunchSheet.tsx`) composes `ui/FormSheet`, so it joined by construction like the board sheet
+ * before it, with nothing here changed — `FormSheet`'s composers are now `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet` and it. It is hosted once, in
+ * `JiraView`, after the issue modal, so a sheet opened from the modal's `Run ▾` ranks above it by mount order.
+ *
+ * One entry is not a dialog at all, and it is not one of the seven: bug-53's
+ * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens (as do the claim release, the Jira board sheet's `Delete board`, the Skills card's `×` and the
+ * Jira modal's `Stop session`). It paints no
  * scrim and floats over nothing, but it calls this hook while it is drawn,
  * because the rule is about who owns the key — a listener of its own would run
  * beside this one, and one press would close it and the dialog under it.
  *
  * The second non-dialog entry is `ui/Popover.tsx`, the panel that hangs under a control, in the same shape: mounted only while open, one call to this hook,
- * closing only itself. It has six composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, and since Jira phase 2
+ * closing only itself. It has seven composers — the tracker strip's (`components/TrackerChip.tsx`), the band's Filters and Sort, and since Jira phase 2
  * the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`) and the board sheet's roots search
- * (`components/jira/JiraBoardSheet.tsx`, drawn OVER that sheet, so it is the topmost entry while open) — and each is its own entry while it is open. The Jira
+ * (`components/jira/JiraBoardSheet.tsx`, drawn OVER that sheet, so it is the topmost entry while open) and, since Jira phase 5, `Run ▾`'s panel
+ * (`components/jira/JiraRunMenu.tsx`, on the card and in the modal) — and each is its own entry while it is open. The Jira
  * board's Filters are `FilterBar`'s own panel, already counted. Its click-outside is its own `pointerdown` listener — this module owns the key, not the
  * pointer.
  *

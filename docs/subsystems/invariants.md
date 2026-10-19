@@ -1450,8 +1450,9 @@ path and the registry's do not match byte-for-byte.
 `dispatchGate` (`shared/agent.ts`) answers with `hidden` / `disabled` / `enabled`, and `dispatchBlock` is the flattened string form of the same ladder for the
 two callers that only refuse (the launch sheet's re-check and the server's). Dispatch off, dashboard unreachable, no `CLAUDE_BIN`, remote answers off — none of
 those is about any one card, all four are true of every card at once, and none is fixable from the board, so they render no button. That is what makes the
-promise in the spec and `.env.example` — with `BM_AGENTS` off the board "renders exactly as it does today" and "shows no dispatch buttons" — literally true; do
-not "improve" it into a disabled button on forty cards.
+promise in the spec and `.env.example` — with `BM_AGENTS` off the Board "renders exactly as it does today" and "shows no dispatch buttons" — literally true; do
+not "improve" it into a disabled button on forty cards. "On the Board" is deliberate: the Jira card's `Run ▾` is the one stated exception, drawn with agents
+off for the reason [the next section](#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) gives.
 
 The per-item blocks are the opposite case and keep their button. There are **three** of them, not one, and only the first is anything `dispatchGate` itself can
 answer:
@@ -1550,6 +1551,31 @@ Three differences from the per-item case, each a consequence of the control bein
   argues against re-running the gate's checks client-side; it calls `fetchMergeCheck` on open and nothing else. Its only server re-check is at **Start**, where
   the same gate runs server-side and returns an _uncoded_ 409 the sheet renders as an error and stays open on. That second half is not a defect to fix — it is
   the reason the fix could not be "let the sheet sort it out."
+
+## Run ▾ on a Jira card is never hidden for the dashboard's sake
+
+Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides. The Board's rule just above hides a dispatch
+control whenever the environment makes dispatch impossible, and it is right there because on the Board dispatch is the control's whole job. The Jira card's `Run ▾`
+(`components/jira/JiraRunMenu.tsx`, on every card and again in the issue modal's controls row) has a second job the environment cannot take away: it opens the
+launch sheet (`JiraLaunchSheet`), and the sheet's `Copy prompt` needs the server's prompt composer and a clipboard, not the dashboard. A person with `BM_AGENTS`
+off, or a dashboard that is down, still gets the one half of Run that works without it — the exact prompt a session would be told, framed and size-checked by
+the server, ready to paste into a terminal of their own. Hiding the chip to match the Board would delete that for the sake of a consistency nobody asked for.
+Spec §7 states it; this section is where the next person who "tidies" the two controls into one rule reads why they must not.
+
+So the hiding moves down one level, to the one control that really cannot work. `JiraLaunchSheet` asks `projectDispatchGate(status, repo)` — the Board's own
+ladder, called with the repository and not the item — and draws `Start` only for `enabled` and `disabled` (the latter titled with the gate's reason); a `hidden`
+answer, which is the environment ladder, draws no `Start` at all, and neither does a sheet whose agents status has not landed yet, because a dead `Start`
+enabled a moment later is a worse thing to look at than none. The gate is asked with `repo = ''` while no repository is chosen, on purpose: the environment
+block is read before the path, so a `Start` is never drawn and then withdrawn the moment a repository is picked. `Copy prompt` is gated by nothing but the
+preview: it waits for the prompt to load, and is absent only where the browser has no clipboard API, in which case the preview stays a selectable text.
+
+Everything else about the chip is the per-item ladder in a smaller shape, decided in one place (`runChipState`, `lib/jira.ts`, read from the shell's status):
+**no repository mapped** is a dashed chip that opens nothing and says where to fix it in its `title`; **a session already running on the key** is a disabled
+chip, the live strip beside it being the reading; anything else opens the panel. The same reason that keeps a per-item block's button on a Board card — a block
+you can fix is worth a control that says so — keeps these two on the card.
+
+`JiraRunMenu` is also the seventh `Popover` composer (see the Escape section), and the sheet it opens is the seventh dialog: one component serves the card and
+the modal because two copies would be two places to decide what "no repository" looks like.
 
 ## One run per project, checked twice
 
@@ -1724,9 +1750,9 @@ the one settings key a hand-edited localStorage value could turn into script exe
 ## Escape has one owner, and the topmost dialog is the only one that closes
 
 Escape has one owner, and the topmost dialog is the only one that closes. `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-listener, installed on the first entry and removed with the last; all six dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
-`OrchestrateSheet`, since Jira phase 2 the Jira issue modal (`jira/JiraIssueModal.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), and since the
-release chip the What's new drawer (`ReleasesDrawer.tsx`) — are on it
+listener, installed on the first entry and removed with the last; all seven dialogs — the item modal (`board/ItemModal.tsx`), `LaunchSheet`,
+`OrchestrateSheet`, since Jira phase 2 the Jira issue modal (`jira/JiraIssueModal.tsx`) and the Jira board sheet (`jira/JiraBoardSheet.tsx`), since the
+release chip the What's new drawer (`ReleasesDrawer.tsx`), and since Jira phase 5 the Jira launch sheet (`jira/JiraLaunchSheet.tsx`) — are on it
 and none binds its own listener. There were four until task-37: `RunDrawer` left the Board with the rest of the run's detail, which
 is the Runs page's own sheet — inline, beside the list, never a dialog — so it is off the stack rather than migrated onto it, and `useDialogEscape` itself is
 untouched. They used to bind four, unguarded, and two of them are mounted together by design — Board and Archive both keep the item modal open behind the launch
@@ -1752,20 +1778,29 @@ hook changed. Since #298 that shell is ui-kit's (`ReleasesDrawer` from release-k
 the case the stack exists for: `test/dialog-escape.test.tsx` mounts the item modal and then the drawer and proves one Escape closes only the drawer, and its
 stack case now mounts all six in order and hands the key down them one at a time.
 
+The Jira launch sheet makes it seven, and through the same construction with nothing in the hook changing: `JiraLaunchSheet` composes `FormSheet`, which makes
+`FormSheet`'s composers `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet` and it — a fourth, as `JiraBoardSheet` was the third. It is hosted ONCE, in
+`JiraView`, as a sibling drawn AFTER the issue modal, because `Run ▾` lives in two homes — a card and the modal — and the sheet they both open has to be the
+later mount so that it is the stack's topmost entry by mount order: one Escape closes the sheet and leaves the modal, with no second listener to arrange it. The suite's six-deep case is not extended, for the reason Jira phase 2 gave: what ranks the seventh is the shell
+code the existing cases already run through, and a launch sheet over an open modal is the Board's own `LaunchSheet` over the item modal, which the stack's
+oldest case mounts.
+
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
 the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its two composers and nothing else floating but `Popover`'s
-panels, which hang under their control without a scrim. The Jira board sheet's `Delete board` asks through it too, drawn inside the sheet. It calls
+panels, which hang under their control without a scrim. The Jira board sheet's `Delete board` asks through it too, drawn inside the sheet, as do — since Jira phase 5 — the Skills card's `×` (`JiraSkillsGroup`, in its row) and
+the issue modal's `Stop session` (in place of the chip). It calls
 `useDialogEscape` anyway, because the rule is about who owns the key and not about what paints a scrim: a `window` listener of its own would fire beside the
 stack's, and one press would close the confirmation and whatever dialog sat under it. It mounts when the question is asked, so it is topmost while it is drawn.
 
-The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, six composers since Jira phase 2: the tracker
+The second entry that is not a dialog is the popover, `ui/Popover.tsx` — the panel that hangs under a control, seven composers since Jira phase 5: the tracker
 strip's (`TrackerPopover` in `components/TrackerChip.tsx`), the band's Filters and Sort, the Jira chip's (`JiraPopover` in `components/JiraChip.tsx`), the
-Jira board's picker and the board sheet's roots search, which hangs over that sheet and so is the topmost entry while it is open. It joins for the same reason
+Jira board's picker, the board sheet's roots search, which hangs over that sheet and so is the topmost entry while it is open, and `Run ▾`'s panel
+(`jira/JiraRunMenu.tsx`, one composer drawn on the card and in the modal). It joins for the same reason
 and in the same shape: it MOUNTS only while open, calling `useDialogEscape` once, so a popover opened over the item modal takes the key from the modal and hands
 it back when it closes. What it does not take from the stack is click-outside — the stack owns a key, not the pointer, so `Popover` binds its own `pointerdown`
 on `document` while it is open, ignoring a press on its panel and on the control that opened it (that control's click is what toggles it). The dashboard's
 `useDismiss` bundles the two into one hook with its own `keydown` listener, which is exactly the second Escape owner this section forbids, and is why it was not
-copied. Still six dialogs counted.
+copied. Still seven dialogs counted.
 
 Ranking is by **mount order**, a contract and not an accident: the entry's position is fixed for the dialog's mounted lifetime (registration effect keyed on
 `[]`, `onClose` read through a ref rewritten every render), because every call site passes an inline arrow and an effect keyed on `[onClose]` would re-push the

@@ -226,6 +226,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#a-project-the-dashboard-cannot-see-cannot-be-dispatched-to)
 - **An environment-level block hides the dispatch control; the per-item ones disable it.**
   Why: [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
+- **Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.**
+  Why: [invariants.md](docs/subsystems/invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake)
 - **One run per project, checked twice.** Why: [invariants.md](docs/subsystems/invariants.md#one-run-per-project-checked-twice)
 - **A pause request lives in a server-owned file the tool reads at its two dispatch gates; `paused` is a fifth run status and `unpause` its only exit.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-pause-request-is-a-file-the-server-writes-and-the-tool-reads)
