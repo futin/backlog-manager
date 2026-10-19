@@ -1,15 +1,16 @@
 # backlog-manager
 
-A Claude Code plugin that homes six backlog skills — `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`, `/backlog-orchestrate`, and
-`/backlog-retro`, which sweeps every orchestrator run on the machine into one report of what the pipeline cost, where the time went and how much of it was
-rework — plus a small local web app that collects every registered project's backlog, across every repo the skills have touched, into one kanban-by-type board.
+A Claude Code plugin that homes six backlog skills and a `/jira` skill — `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`,
+`/backlog-orchestrate`, and `/backlog-retro`, which sweeps every orchestrator run on the machine into one report of what the pipeline cost, where the time went
+and how much of it was rework — plus a small local web app that collects every registered project's backlog, across every repo the skills have touched, into one
+kanban-by-type board.
 
 The skills write items into whatever project they were run in, one Markdown file per item under that project's own `backlog/`. Every `init` or `new` call
 registers the project's absolute path in `~/.backlog-manager/registry.json`. This app reads that registry and renders every registered project's items in four
 fixed columns — refactoring, ideas, bugs, tasks. Items that were decided against are not on the board at all: out-of-scope is a record rather than queue work,
 and it lives in Archive.
 
-`/backlog-orchestrate` is the largest of the six and the only one that touches git. Told to drain a project's groomed queue, it works every ready bug and task
+`/backlog-orchestrate` is the largest of the seven and the only one that touches git. Told to drain a project's groomed queue, it works every ready bug and task
 one at a time — each in its own git worktree and its own headless `/backlog-execute` session — then commits that item, has it reviewed and verified, and merges
 it into the run's base branch before the next one starts — `main` unless the run was started with `--base <ref>`, which lets a whole phased feature be drained
 onto a branch with `main` never written. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all. On
@@ -268,7 +269,7 @@ Five seams, one doc each:
   thing here that can spawn a session, and only when `BM_AGENTS` says so.
 - [**The board**](docs/subsystems/board.md) — the React SPA: four lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
-- [**The skills**](docs/subsystems/skills.md) — the six published skills, their three CLIs, and the reviewer agent the orchestrator dispatches before a merge.
+- [**The skills**](docs/subsystems/skills.md) — the seven published skills, their four CLIs, and the reviewer agent the orchestrator dispatches before a merge.
 - [**Jira**](docs/subsystems/jira.md) — the server half of the Jira Cloud integration: a client, a board poller and its caches, and read routes under
   `/api/jira`, plus five guarded POSTs: three config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`) and, since phase 3, two writes to Jira itself
   (`/issue/assign` and `/issue/transition`) — the only writes this server makes to Jira.
@@ -300,7 +301,7 @@ Ports, binds, what the container mounts and the failure modes each of those has 
 
 | Path       | Contents                                                                                                                                                                                                                                 |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skills/`  | The six published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                    |
+| `skills/`  | The seven published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                  |
 | `agents/`  | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md))                                                                                                                                       |
 | `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller ([doc](docs/subsystems/api.md)), the Jira read routes ([doc](docs/subsystems/jira.md))                               |
 | `client/`  | React SPA — side rail, board, run chip, runs, archive, settings ([doc](docs/subsystems/board.md))                                                                                                                                        |

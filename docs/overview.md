@@ -1,8 +1,8 @@
 # backlog-manager
 
-A Claude Code plugin that publishes six backlog skills — capture, groom, execute, orchestrate, retro and a read-only board printer — together with a local web
-app that shows every registered project's backlog on one board. There is no database: the registry file and each project's `backlog/` directory _are_ the data,
-and everything the app displays is derived from them on the way out.
+A Claude Code plugin that publishes six backlog skills — capture, groom, execute, orchestrate, retro and a read-only board printer — and a `jira` skill that
+reads and moves a Jira ticket through the local API, together with a local web app that shows every registered project's backlog on one board. There is no
+database: the registry file and each project's `backlog/` directory _are_ the data, and everything the app displays is derived from them on the way out.
 
 The plugin half and the app half share one rule that explains most of the design: **the skills write, everything else reads.** The server and the client never
 touch an item file, and each file that holds state has exactly one writer. The one place the server writes items is a TRACKER project (task-46), whose items
@@ -19,7 +19,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [subsystems/board.md](subsystems/board.md)           | the client: the four surfaces, and what the browser derives rather than fetches                                         |
 | [subsystems/releases.md](subsystems/releases.md)     | the board's own versions: `GET /api/releases` from the checkout's tags, the rail's version chip and the What's new drawer |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
-| [subsystems/skills.md](subsystems/skills.md)         | the six skills, the CLIs beneath them, and the reviewer agent                                                           |
+| [subsystems/skills.md](subsystems/skills.md)         | the seven skills, the CLIs beneath them, and the reviewer agent                                                         |
 | [subsystems/invariants.md](subsystems/invariants.md) | the rationale behind the rules whose "why" outruns one line — most encode a failure that already happened               |
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes                                 |
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
@@ -98,12 +98,13 @@ rail ends in a version chip that opens a What's new drawer of every release, rea
 
 ### The skills — [full doc](subsystems/skills.md)
 
-Six skills under `skills/`, three CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
-retro home's only writer and the one of the three nothing else reads at runtime), and one agent under `agents/` that the orchestrator dispatches to review an
-item's branch before it merges. `backlog-orchestrate` is the only skill that touches git history at all — it works one item per worktree and merges each into
-the run's base branch (`main` unless the run was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only —
-merges them onto a run branch of its own and opens one pull request into the base, and for a tracker project it is also the only one that pushes — while execute
-does the work and groom writes the plans, neither of them committing anything.
+Seven skills under `skills/`, four CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
+retro home's only writer and the one of the three nothing else reads at runtime; `jira.mjs`, API-only, which writes no file and reaches Jira through
+`/api/jira`), and one agent under `agents/` that the orchestrator dispatches to review an item's branch before it merges. `backlog-orchestrate` is the only
+skill that touches git history at all — it works one item per worktree and merges each into the run's base branch (`main` unless the run was given `--base`), or
+leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and opens one pull request
+into the base, and for a tracker project it is also the only one that pushes — while execute does the work and groom writes the plans, neither of them
+committing anything.
 
 An install is a copy of the pushed `HEAD`, never the working tree; see [workflows/publishing.md](workflows/publishing.md).
 

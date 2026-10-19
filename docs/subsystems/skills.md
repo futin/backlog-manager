@@ -1,12 +1,13 @@
 # The skills
 
-Six skills under `skills/`, one agent under `agents/`, and three CLIs beneath the skills — two of which do all the writing to items, the registry and the run
-file, and a third that only reads them — plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's
+Seven skills under `skills/` — six backlog skills and `jira` — one agent under `agents/`, and four CLIs beneath the skills — two of which do all the writing
+to items, the registry and the run file, a third that only reads them, and `jira.mjs`, which writes no file at all and reaches Jira only through the local API
+— plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's
 skill root — never duplicated under `.claude/skills/`, which would load the same skills twice and drift.
 
 ## Mechanism
 
-### The six
+### The seven
 
 | skill                 | what it does                                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -16,11 +17,12 @@ skill root — never duplicated under `.claude/skills/`, which would load the sa
 | `backlog-execute`     | does the work on a groomed bug or task, then archives it once verification proves it worked                                                                                                                                                 |
 | `backlog-orchestrate` | drains a project's groomed queue unattended, one item per git worktree, each reviewed and verified before it merges                                                                                                                         |
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
+| `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`                                                                                       |
 
-`backlog-orchestrate` is the largest of the six and the only one that touches git. Told to drain a queue, it works every ready bug and task one at a time — each
-in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's base
-branch before the next one starts. The base is `main` unless the run was started with `--base <ref>`, and it is the ref items are gated at, worktrees are cut
-from and merges land in. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
+`backlog-orchestrate` is the largest of the seven and the only one that touches git. Told to drain a queue, it works every ready bug and task one at a time —
+each in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's
+base branch before the next one starts. The base is `main` unless the run was started with `--base <ref>`, and it is the ref items are gated at, worktrees are
+cut from and merges land in. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all.
 
 Told `--merge-mode pr` — tracker projects only; `init` refuses any other with exit `1` and nothing written — it merges the same way, but onto a run branch of
 its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch `--base` named. The run file's `base` is then the run branch and the new
@@ -43,6 +45,9 @@ its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch
   parent can stay synchronous: `fetch` is asynchronous and `orchestrate.mjs`'s entry guard rests on nothing holding the event loop open, so the asynchrony is
   exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
   `8` (the stack is down) and `9` (a refusal this command cannot absorb).
+- `skills/jira/tools/jira.mjs` — the `jira` skill's CLI (Jira phase 4): `show`, `transitions`, `transition`, `assign` and `status`, each one or two requests to
+  `/api/jira` on `127.0.0.1` and nothing else. API-only, so it has no files mode and writes no file; it carries no Jira credential, the server being Jira's
+  one caller. Exit `0` success, `1` usage (a key that is not one included — nothing is sent), `2` a 4xx, `3` a 5xx, `5` the stack is down.
 - `skills/backlog-retro/tools/retro.mjs` — `backlog-retro`'s own CLI, and the only writer of `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`). It is the one of
   the three that writes nothing anybody else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by
   recorded lease id, a run's driver transcript (`$BM_CLAUDE_PROJECTS`), and its `record` command writes a sweep, the session's labels and the report beside
@@ -58,7 +63,7 @@ because the run-state directory is none of its business. Each copy is pinned by 
 #### `backlog.mjs`'s two modes (task-46, spec §6.5)
 
 No marker, or `{"kind":"files"}`, is **files mode** — today's synchronous code, byte for byte, making no HTTP request on any verb. `{"kind":"github"}` with a
-valid repo is **API mode**: the project has no item files, so every command routes through `http://127.0.0.1:${BM_API_PORT ?? 4322}`, where the server holds
+valid repo is **API mode**: the project has no item files, so every command routes through `http://127.0.0.1:${BM_API_PORT || 4322}`, where the server holds
 `BM_GITHUB_TOKEN` and does the writing. Anything else is exit `1` naming the marker — never a fallback to files, which would write item files into a project
 whose items live on GitHub.
 
@@ -95,11 +100,11 @@ holds the event loop open: all reads are synchronous `fs`, every child is `spawn
 than on a timer. Whoever adds a timer, a server or an async child closes its handle — restoring `process.exit()` would restore the truncation. One rule, one
 comment per file; `retro.mjs`'s is the long-form copy the others point at, and `backlog.test.mjs`'s source guard reads every one of them.
 
-`backlog.mjs` (task-46) and `api-call.mjs` (task-47) end `process.exitCode = await main(...)`, and the rule is untouched by the `await`: it is
-`process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. Each awaits every
-`fetch` to completion and sends `connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for those two files and
-still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s `CLI_SOURCES` is where
-the list of files lives, never a count in prose.
+`backlog.mjs` (task-46), `api-call.mjs` (task-47) and `jira.mjs` (Jira phase 4) end `process.exitCode = await main(...)`, and the rule is untouched by the
+`await`: it is `process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. Each
+awaits every `fetch` to completion and sends `connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for those
+three files and still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s
+`CLI_SOURCES` is where the list of files lives, never a count in prose.
 
 #### `orchestrate.mjs`'s two modes (task-47, spec §7)
 

@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/jira/**"]
+paths: ["server/src/jira/**", "skills/jira/**"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -20,18 +20,19 @@ paths: ["server/src/jira/**"]
   bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos re-aim
   nothing, since no sweep reads them. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
-- **The Jira token never leaves the server: the browser goes through `/api/jira`, and the poller is armed only while a board syncs.** `jiraEnv()`
-  (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace is absent,
-  the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem — emptiness first, in site/email/token order, then the hostname
-  shape. Every call is `JiraClient.request`'s: the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` (`GATEWAY_HOST`, not configurable), except
-  the unauthenticated `tenant_info` (no `authorization` header at all) and the one `myselfAtSite` probe, sent once and only after the gateway `myself` answered
-  200 (spec §3).
+- **The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs.**
+  `jiraEnv()` (`env.util.ts`) reads `BM_JIRA_SITE`, `BM_JIRA_EMAIL`, `BM_JIRA_TOKEN` (spelled once, in `JIRA_ENV`) per call, trimmed, never cached; whitespace
+  is absent, the site is lower-cased and must pass `isJiraHostname`, and `detail` names the first problem — emptiness first, in site/email/token order, then the
+  hostname shape. Every call is `JiraClient.request`'s: the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` (`GATEWAY_HOST`, not configurable),
+  except the unauthenticated `tenant_info` (no `authorization` header at all) and the one `myselfAtSite` probe, sent once and only after the gateway `myself`
+  answered 200 (spec §3).
   `authorization: Basic …` is built there and nowhere else, and every `message` is Jira's sentence or the transport error's, never the request.
   `JiraStatusPayload` carries `site`, `me.name`, `me.accountId` and `tokenKind` — never the email or the token. Compose passes all three as
   `'${BM_JIRA_<NAME>:-}'`, pinned through `JIRA_ENV` by `test/compose-env.test.ts`. `JiraPollerService` is a `setTimeout` chain on `JIRA_POLL_MS`, `unref`'d,
   armed at bootstrap while the site is configured AND some board's interval is not `off`, OR some board is still owed its one cold sweep, OR the boot
   (`cloudId`, `serverInfo`, `me`, the sprint field) is unanswered — except `unsupported`, which is final and disarms. The rule is judged at the end of every
-  sweep against `jira.json` read again there. Why:
+  sweep against `jira.json` read again there. `skills/jira/tools/jira.mjs` dials `http://127.0.0.1:${BM_API_PORT || 4322}` and nothing else, reads no
+  `BM_JIRA_*` and sends no `authorization` header; the source guard in `jira.test.mjs` (comment lines stripped) holds all three. Why:
   [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-only-while-a-board-syncs)
 - **Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map
   time.** `JIRA_DONE_WINDOW_DAYS` lives in `map-issue.ts` and nowhere else; `mapJiraIssue` applies it to the `done` category alone, from `resolutiondate`, else

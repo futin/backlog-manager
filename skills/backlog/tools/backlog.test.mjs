@@ -3343,6 +3343,9 @@ const CLI_SOURCES = {
   // parent reads, so the truncation this guard exists for applies to it
   // exactly as it does to the three above.
   'api-call.mjs': fileURLToPath(new URL('../../backlog-orchestrate/tools/api-call.mjs', import.meta.url)),
+  // Jira phase 4's CLI, a skill of its own. Every command is a request to `/api/jira`, so its stdout — a whole ticket for `show` — is a pipe a caller reads
+  // exactly as it reads the others'.
+  'jira.mjs': fileURLToPath(new URL('../../jira/tools/jira.mjs', import.meta.url)),
 }
 
 // Comment lines are stripped before matching because retro.mjs's own note
@@ -3351,20 +3354,24 @@ const CLI_SOURCES = {
 const codeLines = (file) =>
   fs.readFileSync(file, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('//'))
 
-// `= await main(` is accepted for backlog.mjs ALONE (task-46). The invariant is about `process.exit()` truncating a pipe, which asynchrony has nothing to do
-// with; what it actually requires is that nothing be left holding the event loop open when main returns. API mode keeps that — every `fetch` is awaited to
-// completion and each one sends `connection: close`, so no pooled socket outlives the call — and the API-mode cases assert it behaviourally, by expecting each
-// child process to EXIT rather than hang. The other two CLIs hold no asynchronous work at all and stay on the synchronous form, so a stray `await` appearing
-// in either of them still goes red here.
+// `= await main(` is accepted for the CLIs whose work is a `fetch` — backlog.mjs (task-46), api-call.mjs and jira.mjs — and for no other. The invariant is
+// about `process.exit()` truncating a pipe, which asynchrony has nothing to do with; what it actually requires is that nothing be left holding the event loop
+// open when main returns. API mode keeps that — every `fetch` is awaited to completion and each one sends `connection: close`, so no pooled socket outlives the
+// call — and the API-mode cases assert it behaviourally, by expecting each child process to EXIT rather than hang. The other two CLIs hold no asynchronous work
+// at all and stay on the synchronous form, so a stray `await` appearing in either of them still goes red here.
 //
 // `api-call.mjs` takes the awaited shape too (task-47), and its safety argument is its own rather than a copy of backlog.mjs's: it makes exactly ONE `fetch`,
 // awaits it to completion, sends `connection: close`, and holds no timer, server or child of its own. A-1 asserts it behaviourally from the other side — the
 // child is expected to EXIT with a code, not to hang.
+//
+// `jira.mjs` (Jira phase 4) takes it for backlog.mjs's reason: one awaited `fetch` per request, each with `connection: close`, nothing else asynchronous. Its
+// suite's children are expected to exit too, and its RF 5 case pipes a 200 000-byte ticket through stdout whole.
 const ENTRY_SHAPES = {
   'backlog.mjs': ['process.exitCode = main(', 'process.exitCode = await main('],
   'orchestrate.mjs': ['process.exitCode = main('],
   'retro.mjs': ['process.exitCode = main('],
   'api-call.mjs': ['process.exitCode = await main('],
+  'jira.mjs': ['process.exitCode = await main('],
 }
 
 test('every skill CLI ends through process.exitCode, never process.exit', () => {
