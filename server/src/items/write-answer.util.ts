@@ -38,7 +38,7 @@ export function answer<T>(outcome: WriteOutcome<T>): T {
     case 'rate-limited':
       throw new HttpException({ error: r.error, resetAt: r.resetAt ?? null }, 429);
     case 'sync-off':
-      // No `code`: `RUN_IN_PROGRESS_CODE` is the app's one coded 409 and means a different fact. The sentence names the repo and the fix.
+      // No `code`: the app's two coded 409s (`RUN_IN_PROGRESS_CODE`, `RESUME_LOCKED_CODE`) each mean a different fact. The sentence names the repo and the fix.
       throw new HttpException({ error: r.error }, 409);
     default:
       throw new HttpException({ error: r.error, status: r.status ?? null }, 502);

@@ -914,8 +914,10 @@ export interface StopResult {
 }
 
 /**
- * The app's ONE machine-readable 409 discriminator — a `code` field alongside
- * a 409's human-readable `error` string. It means exactly one thing:
+ * The app's machine-readable "a run is alive" 409 discriminator — a `code`
+ * field alongside a 409's human-readable `error` string. One of two 409 codes
+ * since #268 (`RESUME_LOCKED_CODE` below is the other, and states a different
+ * fact). This one means exactly one thing:
  *
  *     a run for this project is alive right now.
  *

@@ -432,7 +432,7 @@ describe('POST /api/agents/orchestrate', () => {
      lock a window earlier, and `OrchestrateSheet` branches on that code to
      `refresh()` + `onClose()` — which is exactly right here: the sheet
      closes and hands the screen to the StartingStrip already rendering.
-     RUN_IN_PROGRESS_CODE stays the app's only 409 code; this is another
+     RUN_IN_PROGRESS_CODE stays this route's only 409 code; this is another
      occasion for it, not a second code. */
   it('carries RUN_IN_PROGRESS_CODE on the starting lock too', async () => {
     stubDashboard();

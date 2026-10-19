@@ -465,8 +465,9 @@ export class AgentsService {
     // time. Same reasoning as the orchestrate lock's own re-check below —
     // "every other path capable of triggering a write re-checks it".
     //
-    // 409 and no `code`: `RUN_IN_PROGRESS_CODE` is the app's one 409 code and
-    // means "a run for this project is alive right now" (see its doc comment
+    // 409 and no `code`: `RUN_IN_PROGRESS_CODE` (one of the app's two 409
+    // codes, beside #268's `RESUME_LOCKED_CODE`) means "a run for this
+    // project is alive right now" (see its doc comment
     // in shared/types.ts for the incident that rule exists to prevent a repeat
     // of, and for why no site here counts where it appears). This refusal is a
     // different fact — a run has CLAIMED this item — and nothing needs to tell
@@ -699,7 +700,7 @@ export class AgentsService {
        the case above enforces, and `OrchestrateSheet` branches on that code
        to `refresh()` + `onClose()` — exactly the right behaviour here, since
        the sheet closes and hands the screen to the board's run chip, which is
-       already counting the starting entry. `RUN_IN_PROGRESS_CODE` stays the app's only coded
+       already counting the starting entry. `RUN_IN_PROGRESS_CODE` stays this route's only coded
        409 — this is a second OCCASION for it, not a second code — and the
        comment on the throw above says so from its side too, since a reader
        who lands there first must not be told a second coded 409 on this
@@ -1501,8 +1502,8 @@ export class AgentsService {
    * request is malformed (not a list, an empty list, something that is not
    * an id), 409 when the request is well-formed and the FILES disagree with
    * it (no such item, archived, wrong section, another project's item). The
-   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE` is the app's one
-   * 409 code and says "a run for this project is alive right now", which is
+   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE`, this route's one
+   * 409 code, says "a run for this project is alive right now", which is
    * not what an id disagreement means, and nothing here needs to be told
    * apart from the others by a machine.
    */
