@@ -358,10 +358,53 @@ test('transition posts nothing when the argument is ambiguous, not offered, or m
   assert.equal(empty.requests.length, 0)
 })
 
-test("transition reports the server's re-check when the workflow moved between the two reads (RF 4)", async () => {
-  const { out } = await cli(writable(ALL, { status: 400, body: { error: 'transition not offered' } }), 'transition', 'PAY-1', 'Done')
+test("transition reports the server's re-check when the workflow moved between the two reads, naming the key and what is offered now (RF 4)", async () => {
+  // The workflow moves between the first read and the POST: the GET after the refusal sees only `Start`.
+  let reads = 0
+  const moved = {
+    '/api/jira/issue/PAY-1': (_b, { method }) => (method === 'GET' ? { body: { key: 'PAY-1', transitions: reads++ === 0 ? ALL : [START] } } : undefined),
+    '/api/jira/issue/transition': (_b, { method }) => (method === 'POST' ? { status: 400, body: { error: 'transition not offered' } } : undefined),
+  }
+  const { out, requests } = await cli(moved, 'transition', 'PAY-1', 'Done')
   assert.equal(out.status, 2)
-  assert.equal(out.stderr.trim(), 'transition not offered')
+  assert.equal(out.stderr.trim(), 'PAY-1: transition not offered — offered: Start (→ In Progress)')
+  assert.deepEqual(
+    requests.map((r) => [r.method, r.path]),
+    [
+      ['GET', '/api/jira/issue/PAY-1'],
+      ['POST', '/api/jira/issue/transition'],
+      ['GET', '/api/jira/issue/PAY-1'],
+    ],
+  )
+
+  // A re-read that fails costs only the list: the key and the server's sentence still print, and the exit is still the POST's `2`.
+  reads = 0
+  const blind = {
+    ...moved,
+    '/api/jira/issue/PAY-1': (_b, { method }) =>
+      method !== 'GET' ? undefined : reads++ === 0 ? { body: { key: 'PAY-1', transitions: ALL } } : { status: 503, body: { error: 'Jira unreachable' } },
+  }
+  const second = await cli(blind, 'transition', 'PAY-1', 'Done')
+  assert.equal(second.out.status, 2)
+  assert.equal(second.out.stderr.trim(), 'PAY-1: transition not offered')
+})
+
+test("a stack older than the Jira routes — Nest's own 404, with `statusCode` — says to rebuild or restart it, not `Not Found`", async () => {
+  const nest404 = (method, route) => ({ status: 404, body: { message: `Cannot ${method} ${route}`, error: 'Not Found', statusCode: 404 } })
+  const cases = [
+    [{ '/api/jira/issue/assign': nest404('POST', '/api/jira/issue/assign') }, ['assign', 'PAY-1'], 'POST /api/jira/issue/assign'],
+    [{ '/api/jira/issue/PAY-1': nest404('GET', '/api/jira/issue/PAY-1') }, ['show', 'PAY-1'], 'GET /api/jira/issue/PAY-1'],
+    [{ '/api/jira': nest404('GET', '/api/jira') }, ['status'], 'GET /api/jira'],
+  ]
+  for (const [routes, args, route] of cases) {
+    const { out } = await cli(routes, ...args)
+    assert.equal(out.status, 2, out.stderr)
+    assert.equal(
+      out.stderr.trim(),
+      `the API has no ${route} — rebuild or restart the backlog-manager stack (\`pnpm run docker:sync\`, or restart \`pnpm run dev\`) ` +
+        'in the backlog-manager checkout',
+    )
+  }
 })
 
 test('transition posts nothing when the read fails, and a 5xx read is exit 3 (RF 2)', async () => {

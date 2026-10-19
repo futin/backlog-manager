@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // jira.mjs — read a Jira ticket and move it, through this machine's backlog-manager API.
 //
-// What this tool is: a thin client of `/api/jira` on 127.0.0.1. Every command is one or two requests to routes the server already serves — `GET /api/jira`,
+// What this tool is: a thin client of `/api/jira` on 127.0.0.1. Every command is one to three requests to routes the server already serves — `GET /api/jira`,
 // `GET /api/jira/issue/:key` (JSON, or `?format=text` for the ticket block), `POST /api/jira/issue/assign` and `POST /api/jira/issue/transition` — and every
-// refusal it prints is the server's own sentence.
+// refusal it prints is the server's own sentence (a refused transition prefixed with its key and followed by what is offered now), except a route a stale
+// stack does not have, which `failure` names along with the fix.
 //
 // What it is not: a Jira client. It never calls Atlassian, reads no `BM_JIRA_*` variable and sends no `authorization` header (spec §10). The server is
 // Jira's ONE caller on this machine, which keeps three things single: one rate-limit budget, one 429 window, one identity. And a token that never reaches a
@@ -90,7 +91,8 @@ async function apiRequest(method, route, body) {
   } catch {
     // Not JSON: left null. `show` reads `text` instead, because the ticket block is `text/plain`; every other caller treats null as unreadable.
   }
-  return { status: res.status, body: payload, text }
+  // `method` and `route` (without its query) ride along for `failure`, which names them when the route turns out not to exist on this build.
+  return { status: res.status, body: payload, text, method, route: route.split('?')[0] }
 }
 
 /** R2's non-2xx half: a 4xx is the caller's to fix (`2`); a 5xx — and any status this tool does not expect, a redirect included — is the server's (`3`). */
@@ -100,7 +102,18 @@ export function exitForStatus(status) {
 
 // The server composes every refusal — it is the only side that knows what Jira said, including the `retry after <instant>` of a 429 window — so its `error`
 // is printed verbatim and nothing else is (`access` and `retryAt` are already in that sentence).
+//
+// One exception: a 404 carrying `statusCode` is Nest's OWN answer for a route it does not have — this API's refusals are `{ error }` and never carry that
+// field — and its `error` is the bare `Not Found`. That is a stack built before the route existed (a `docker:run` image older than the Jira phases), so the
+// sentence names the route and the fix instead. Still `2`: the exit is the status's, and the sentence says what to do.
 function failure(res) {
+  if (res.status === 404 && res.body && typeof res.body === 'object' && 'statusCode' in res.body) {
+    return new JiraCliError(
+      `the API has no ${res.method} ${res.route} — rebuild or restart the backlog-manager stack ` +
+        '(`pnpm run docker:sync`, or restart `pnpm run dev`) in the backlog-manager checkout',
+      2,
+    )
+  }
   const message = res.body && typeof res.body.error === 'string' ? res.body.error : `the API answered ${res.status}`
   return new JiraCliError(message, exitForStatus(res.status))
 }
@@ -236,7 +249,9 @@ async function transitions(args) {
 }
 
 // Read, resolve, then post — and never post on a failed read or a failed resolution. The server re-checks the id against a fresh read of its own (§8), so a
-// workflow that moved between the two reads is its 400, printed like any other.
+// workflow that moved between the two reads is its 400 `transition not offered`. That sentence names neither the issue nor what it offers now, so a 400 is
+// printed after `<KEY>:` and followed by one more read's list. The re-read is best effort: if it fails too, the key and the server's sentence still print,
+// and the exit stays the POST's.
 async function transition(args) {
   // Every word after the key, joined by one space, so `transition PAY-1 In Progress` needs no quotes. Words that are all blank (an empty shell variable) are
   // the same usage error as no words: R4's "empty is usage".
@@ -246,6 +261,16 @@ async function transition(args) {
   const resolved = resolveTransition(await readTransitions(key), arg, key)
   if (!resolved.ok) throw new JiraCliError(resolved.message, resolved.code)
   const res = await apiRequest('POST', '/api/jira/issue/transition', { key, transitionId: resolved.transition.id })
+  if (res.status === 400) {
+    const refused = failure(res)
+    let offered = ''
+    try {
+      offered = ` — offered: ${listed(await readTransitions(key)) || 'nothing'}`
+    } catch {
+      // The list is a courtesy; the refusal is the answer.
+    }
+    throw new JiraCliError(`${key}: ${refused.message}${offered}`, refused.code)
+  }
   if (!ok(res)) throw failure(res)
   // `reread` is not printed: the write landed either way, and the board — not this tool — is the reader of the cache it describes.
   console.log(`${key}: ${label(resolved.transition)}`)

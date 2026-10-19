@@ -10,9 +10,10 @@ trigger: /jira
 
 # /jira — one Jira ticket, through the local API
 
-`jira.mjs` is a thin client of the backlog-manager server running on this machine (`127.0.0.1`, port `BM_API_PORT`, default `4322`). The server holds the
-Jira token and is Jira's only caller; this tool has no credential of its own and needs none. Every command below is one or two requests to `/api/jira`, and
-every refusal it prints is the server's own sentence — report it as it is.
+`jira.mjs` is a thin client of the backlog-manager server running on this machine (`127.0.0.1`, port `BM_API_PORT`, default `4322`). The server holds the Jira
+token and is Jira's only caller; this tool has no credential of its own and needs none. Every command below is one to three requests to `/api/jira`, and every
+refusal the server makes is printed as its own sentence — report it as it is. A `the API has no <route> — rebuild or restart the backlog-manager stack …`
+line means the running stack was built before the Jira routes existed; tell the person that.
 
 ## When to use it
 
@@ -44,8 +45,8 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/jira/tools/jira.mjs" transition PAY-131 In Pr
 
 `jira.mjs transition` applies one transition and prints `PAY-131: <label>`. The words after the key need no quotes. They are matched against the offered
 transitions in three steps, stopping at the first that matches anything: the exact id, then the transition's name, then its target status (the last two
-case-insensitive). When the words match more than one transition, or none, it posts nothing, exits `2` and lists what is offered — run `transitions` and
-pick by id, or ask the person which one they meant.
+case-insensitive). When the words match more than one transition, or none, it posts nothing, exits `2` and lists the candidates (ambiguous) or what is
+offered (no match) — run `transitions` and pick by id, or ask the person which one they meant.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/jira/tools/jira.mjs" assign PAY-131

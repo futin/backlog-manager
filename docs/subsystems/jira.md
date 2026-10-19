@@ -304,8 +304,10 @@ one caller (spec §10), and a source guard in `jira.test.mjs` holds all three.
   `jira.mjs status && …` reads as "the next call can work". `access: ok` with no identity is a boot still connecting, whose every issue call is the server's
   `connecting` 502 until `me` lands. Not configured is stderr and `3`. An answer the tool cannot read — a body cut off mid-read, a transition with no target —
   is `3` too, never `1`: a request may already have landed.
-- **Exit codes:** `0` success, `1` usage, `2` a 4xx (the server's `error` printed verbatim), `3` a 5xx or a 2xx whose body cannot be read, `5` the stack is
-  down — a sentence naming the backlog-manager checkout, because the CLI runs in a mapped repository where `pnpm run dev` means something else.
+- **Exit codes:** `0` success, `1` usage, `2` a 4xx (the server's `error` printed verbatim — a refused transition after `<KEY>:` and before `— offered:` from
+  one more read; Nest's own 404, which carries `statusCode` and means a stack built before the route, as `the API has no <route> — rebuild or restart the
+  backlog-manager stack …`), `3` a 5xx or a 2xx whose body cannot be read, `5` the stack is down — a sentence naming the backlog-manager checkout, because the
+  CLI runs in a mapped repository where `pnpm run dev` means something else.
 
 ## The probe facts the code encodes
 

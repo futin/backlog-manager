@@ -99,7 +99,7 @@ rail ends in a version chip that opens a What's new drawer of every release, rea
 ### The skills — [full doc](subsystems/skills.md)
 
 Seven skills under `skills/`, four CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
-retro home's only writer and the one of the three nothing else reads at runtime; `jira.mjs`, API-only, which writes no file and reaches Jira through
+retro home's only writer and the one of the three writers nothing else reads at runtime; `jira.mjs`, API-only, which writes no file and reaches Jira through
 `/api/jira`), and one agent under `agents/` that the orchestrator dispatches to review an item's branch before it merges. `backlog-orchestrate` is the only
 skill that touches git history at all — it works one item per worktree and merges each into the run's base branch (`main` unless the run was given `--base`), or
 leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and opens one pull request

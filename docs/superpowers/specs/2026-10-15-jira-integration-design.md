@@ -314,8 +314,9 @@ Shared › Trackers gains one read-only Jira row (`<site> · N boards · interva
 - `SKILL.md` + `tools/jira.mjs` with `show <key>` (the ticket block, verbatim from `GET /api/jira/issue/:key?format=text`), `transitions <key>`,
   `transition <key> <name|id>`, `assign <key>`, `status`. Every subcommand goes through `/api/jira` on `http://127.0.0.1:${BM_API_PORT:-4322}` (the one port setting the skills already dial)
   — never Jira directly — so the token stays in the server process and the server stays the one caller. Stack down → exit `5` with the two start commands
-  named, the contract `backlog.mjs` has in a tracker project; a refusal the server answers with a 4xx (not offered, unknown key) → exit `2` with the message;
-  a 5xx (unconfigured, unauthorized, rate-limited, Jira unreachable, a write Jira refused) → exit `3` with the message; usage → exit `1`.
+  named, the contract `backlog.mjs` has in a tracker project; a refusal the server answers with a 4xx (not offered, unknown key, a write Jira refused — the
+  server answers Jira's 400 with a 409, §8) → exit `2` with the message; a 5xx (unconfigured, unauthorized, rate-limited, Jira unreachable, a write Jira
+  forbade — Jira's 403 is a 502) → exit `3` with the message; usage → exit `1`.
 - The built-in `execute` text (`Work it end to end` in the menu) says: branch, implement, verify, then — when `jira.mjs transitions` offers exactly one transition whose target category is `done` — move the
   issue through it, and otherwise leave the status alone and say so in the report; then the same
   commit rule item dispatch carries (stage only what the session changed, never `git add -A`, do not push); `context` (`Open with the ticket loaded`) says:
