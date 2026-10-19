@@ -1,7 +1,18 @@
 import { elapsedSince, formatCreated } from './item-age';
 import { pollAge } from './tracker';
 import { SYNC_INTERVALS } from '../../../shared/types';
-import type { JiraAccess, JiraBoard, JiraBoardFailure, JiraBoardStatus, JiraIssue, JiraStatusCategory, JiraStatusPayload } from '../../../shared/types';
+import type {
+  JiraAccess,
+  JiraAction,
+  JiraBoard,
+  JiraBoardFailure,
+  JiraBoardStatus,
+  JiraIssue,
+  JiraSkill,
+  JiraStatusCategory,
+  JiraStatusPayload,
+  PermissionMode
+} from '../../../shared/types';
 
 /**
  * jira.ts — what the client says about Jira (Jira phase 2, spec §6). The one home of every derivation the Jira board, its modal, Setup and the rail chip
@@ -641,6 +652,46 @@ export function displayPath(path: string, home: string | null): string {
   if (root === '') return path;
   if (path === root) return '~';
   return path.startsWith(`${root}/`) ? `~${path.slice(root.length)}` : path;
+}
+
+/**
+ * The Run chip's three states (spec §6.1, §7), for one issue against the status. Order is the spec's: a project with no mapped path is `no-repo` (dashed, the
+ * title names Setup › Repositories) however the rest reads, so a `live` session on a project whose mapping was removed afterwards draws the dashed chip too —
+ * the live STRIP beside it, which reads `status.live` alone, still carries the session and its Stop. `live` is any entry in the live map, `starting` or not,
+ * because the key is claimed from `reserve` on and a second Start would be refused (409) either way. Otherwise `ready`.
+ *
+ * "Mapped" is the status' own `repos`: at least ONE path for the issue's project. An empty list (a hand-edited `jira.json` the server kept) is unmapped, which
+ * `unmappedProjects` above does not say — it asks only whether the key is present, because the Repositories card's warning is about a key nobody has
+ * touched, and the chip is about whether Start has a place to run.
+ */
+export function runChipState(issue: JiraIssue, status: Pick<JiraStatusPayload, 'repos' | 'live'>): 'no-repo' | 'live' | 'ready' {
+  const paths: unknown = status.repos[issue.project.key];
+  if (!Array.isArray(paths) || paths.length === 0) return 'no-repo';
+  return status.live[issue.key] === undefined ? 'ready' : 'live';
+}
+
+/**
+ * The stored `jiraDefaultAction` as an action: `execute` and `context` as themselves, an id some skill on this machine holds as `{ skill }`, and anything
+ * else — an id a deleted skill left behind, a hand-edited string, the empty list while the status is still loading — as `execute`. Never throws and never
+ * rewrites the setting (spec §2): the clamp in `settings.ts` cannot know which ids exist, and this is the one place that can.
+ */
+export function resolveJiraAction(setting: string, skills: readonly JiraSkill[]): JiraAction {
+  if (setting === 'execute' || setting === 'context') return setting;
+  return skills.some((k) => k.id === setting) ? { skill: setting } : 'execute';
+}
+
+/** `resolveJiraAction`'s inverse: the string `Settings.jiraDefaultAction` stores for an action — a built-in's own name, or a skill's bare id. */
+export function jiraSettingOf(action: JiraAction): string {
+  return typeof action === 'string' ? action : action.skill;
+}
+
+/**
+ * The permission mode the launch sheet's `Permissions` select opens on for an action (spec §7): `plan` for `context`, which opens a session to read and wait,
+ * and `acceptEdits` for `execute` and for a skill, which are there to change things. NOT capped by the dashboard's ceiling — that is the sheet's job
+ * (`clampMode` over `modesUpTo`), because the ceiling is a fact about the host and this is a pure function of the action.
+ */
+export function defaultModeFor(action: JiraAction): PermissionMode {
+  return action === 'context' ? 'plan' : 'acceptEdits';
 }
 
 /**

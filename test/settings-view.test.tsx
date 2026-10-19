@@ -13,8 +13,10 @@ import { readStyles, ruleBlock } from './helpers/css-rule';
 import SettingsView from '../client/src/components/settings/SettingsView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
+import { JiraContext } from '../client/src/hooks/JiraContext';
+import type { JiraState } from '../client/src/hooks/useJira';
 import { SETTINGS_STORAGE_KEY, type SettingsScope } from '../client/src/lib/settings';
-import type { AgentsStatus } from '../shared/types';
+import type { AgentsStatus, JiraSkill, JiraStatusPayload } from '../shared/types';
 
 // A healthy default: `SettingsView` now renders `AgentsGroup`, which calls
 // `useAgents()` on every mount, so every pre-existing test below triggers a
@@ -488,6 +490,83 @@ describe('SettingsView', () => {
    * effort stay: they genuinely are dispatch defaults, and the orchestrate
    * sheet borrowing them is not a reason to move them.
    */
+  // Jira phase 5 (spec §2): `Jira default action` seeds the launch sheet's Action and never the last launch. Drawn only while the status says
+  // configured, like every Jira surface; the options are the two built-ins by label and then the machine's skills.
+  describe('the Jira default action row', () => {
+    const SKILL: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+
+    function jiraData(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
+      return {
+        configured: true,
+        configUnreadable: null,
+        site: 'acme.atlassian.net',
+        me: null,
+        tokenKind: 'classic',
+        access: 'ok',
+        detail: null,
+        boards: [],
+        repos: {},
+        projects: [],
+        skills: [SKILL],
+        calls: { sweep: 0, last429At: null },
+        live: {},
+        armed: false,
+        home: '/home/x',
+        ...over
+      };
+    }
+
+    function renderWithJira(data: JiraStatusPayload | null) {
+      const jira: JiraState = { data, loading: false, error: false, reload: () => {} };
+      render(
+        <JiraContext.Provider value={jira}>
+          <SettingsProvider>
+            <TrackersProvider>
+              <SettingsView />
+            </TrackersProvider>
+          </SettingsProvider>
+        </JiraContext.Provider>
+      );
+    }
+
+    it('is absent while Jira is unconfigured and before the status has answered', () => {
+      renderWithJira(jiraData({ configured: false }));
+      expect(screen.queryByLabelText('Jira default action')).toBeNull();
+      expect(rowNamesIn('Dispatch')).not.toContain('Jira default action');
+      cleanup();
+      renderWithJira(null);
+      expect(screen.queryByLabelText('Jira default action')).toBeNull();
+    });
+
+    it('offers the two built-ins by label and then each skill, starting on Work it end to end', () => {
+      renderWithJira(jiraData());
+      const select = screen.getByLabelText('Jira default action') as HTMLSelectElement;
+      expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+        ['execute', 'Work it end to end'],
+        ['context', 'Open with the ticket loaded'],
+        ['s_0123abcd', 'Groom ticket']
+      ]);
+      expect(select.value).toBe('execute');
+      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Jira default action', 'Dashboard link']);
+    });
+
+    it('persists a pick as the setting string', async () => {
+      renderWithJira(jiraData());
+      await userEvent.selectOptions(screen.getByLabelText('Jira default action'), 's_0123abcd');
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').jiraDefaultAction).toBe('s_0123abcd');
+      await userEvent.selectOptions(screen.getByLabelText('Jira default action'), 'context');
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').jiraDefaultAction).toBe('context');
+    });
+
+    it('reads a stored skill that has since been deleted as Work it end to end, without rewriting the stored value', () => {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ jiraDefaultAction: 's_gone0000' }));
+      renderWithJira(jiraData({ skills: [] }));
+      const select = screen.getByLabelText('Jira default action') as HTMLSelectElement;
+      expect(select.value).toBe('execute');
+      expect(select.options[select.selectedIndex].textContent).toBe('Work it end to end');
+    });
+  });
+
   describe('the Orchestrator group', () => {
     /*
       This case used to read `renders above the watchdog group`, and task-42

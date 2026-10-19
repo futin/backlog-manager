@@ -1311,6 +1311,17 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   font-family: inherit; font-size: 14px; line-height: 1; color: var(--ink3);
 }
 .jira-sheet-x:hover, .jira-setup-x:hover:not(:disabled) { color: var(--ink) }
+/* The Skills card (Jira phase 5, §8.9.3). A skill's template is the row's hint, drawn as a code span (--steel fill, --ink, the card's 4 px radius — §8.1
+   forbids a second face, so "mono" here means the span treatment `.set-hint code` has) and clamped to two lines; the whole text is the `title`, so a long
+   template is read on hover rather than stretching the row. `overflow-wrap: anywhere` because a template is mostly one long slash-command with no spaces. */
+.jira-skill-prompt {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
+  font-size: 12px; color: var(--ink); background: var(--steel); border-radius: 4px; padding: 2px 6px; white-space: pre-wrap;
+}
+/* The add row stacks: name field, template textarea, then `Add` on its own line, left-aligned like the Repositories row's chip. */
+.jira-skill-add { gap: 8px; align-items: flex-start }
+.jira-skill-add-name { width: 100%; max-width: 100% }
+.jira-skill-add-prompt { align-self: stretch; width: 100%; font-size: 12px; min-height: 64px }
 
 /* The roots search is its Popover's positioning parent (the panel hangs under it, right edges together), and the field takes the section's full width. */
 .jira-sheet-search { position: relative; display: flex; flex-direction: column; gap: 6px }

@@ -34,6 +34,10 @@ import {
   initialsOf,
   issueDatesLine,
   isJiraStatusPayload,
+  defaultModeFor,
+  jiraSettingOf,
+  resolveJiraAction,
+  runChipState,
   pickBoard,
   soonestBoard,
   sortForBoard,
@@ -42,7 +46,7 @@ import {
 import type { JiraFold } from '../client/src/lib/jira';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
-import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
+import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
 
 /**
@@ -865,5 +869,58 @@ describe('the fold', () => {
       expect(text).toContain(' · 5 cards · ');
       expect(text.endsWith(' · first 500 shown')).toBe(true);
     });
+  });
+});
+
+describe('resolveJiraAction and jiraSettingOf', () => {
+  const skills: JiraSkill[] = [{ id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' }];
+
+  it('reads the two built-ins as themselves and a present skill id as { skill }', () => {
+    expect(resolveJiraAction('execute', skills)).toBe('execute');
+    expect(resolveJiraAction('context', skills)).toBe('context');
+    expect(resolveJiraAction('s_0123abcd', skills)).toEqual({ skill: 's_0123abcd' });
+  });
+
+  it('falls back to execute for an id no skill holds, an empty list and anything that is not an id', () => {
+    expect(resolveJiraAction('s_gone', [])).toBe('execute');
+    expect(resolveJiraAction('s_ffffffff', skills)).toBe('execute');
+    expect(resolveJiraAction('', skills)).toBe('execute');
+    expect(resolveJiraAction('skill:s_0123abcd', skills)).toBe('execute');
+  });
+
+  it('jiraSettingOf is its inverse', () => {
+    expect(jiraSettingOf('execute')).toBe('execute');
+    expect(jiraSettingOf('context')).toBe('context');
+    expect(jiraSettingOf({ skill: 's_0123abcd' })).toBe('s_0123abcd');
+    for (const setting of ['execute', 'context', 's_0123abcd']) expect(jiraSettingOf(resolveJiraAction(setting, skills))).toBe(setting);
+  });
+});
+
+describe('runChipState', () => {
+  const mapped = { PAY: ['/home/ada/pay'] };
+  const session = { name: 'jira PAY-1', startedAt: '2026-10-19T10:00:00.000Z', repo: '/home/ada/pay', starting: false };
+
+  it('is no-repo while the issue’s project has no mapped path, an empty list included', () => {
+    expect(runChipState(issue(), payload({ repos: {} }))).toBe('no-repo');
+    expect(runChipState(issue(), payload({ repos: { PAY: [] } }))).toBe('no-repo');
+    expect(runChipState(issue(), payload({ repos: { OPS: ['/home/ada/ops'] } }))).toBe('no-repo');
+  });
+
+  it('is live for a mapped project with a session on the key, starting or not', () => {
+    expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }))).toBe('live');
+    expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': { ...session, starting: true } } }))).toBe('live');
+  });
+
+  it('is ready for a mapped project with no session on that key, whatever another key holds', () => {
+    expect(runChipState(issue(), payload({ repos: mapped }))).toBe('ready');
+    expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-2': session } }))).toBe('ready');
+  });
+});
+
+describe('defaultModeFor', () => {
+  it('is plan for context and acceptEdits for execute and for a skill', () => {
+    expect(defaultModeFor('context')).toBe('plan');
+    expect(defaultModeFor('execute')).toBe('acceptEdits');
+    expect(defaultModeFor({ skill: 's_0123abcd' })).toBe('acceptEdits');
   });
 });

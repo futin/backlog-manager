@@ -10,7 +10,7 @@ import { JiraProvider } from '../client/src/hooks/JiraContext';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { JIRA_BOARD_KEY, JIRA_QUERY_PRESETS, accessPhrase, boardRowLine } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
-import type { JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
+import type { JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../shared/types';
 
 /*
   Jira › Setup (Jira phase 2; spec §6.4; DESIGN.md §8.9.3) — the real page over a mocked `fetch`, in `jira-board.test.tsx`'s style: the Boards
@@ -108,6 +108,10 @@ let boardIssuesAnswer: (id: string) => Promise<Response>;
 /* `POST /api/jira/repos`. The default does what the server does — stores the project's list (an empty one removes the key) in the status the next
    `GET /api/jira` answers — so a case can watch the card follow its own save. A case that wants a refusal replaces it. */
 let reposAnswer: (body: { project: string; paths: string[] }) => Promise<Response>;
+/* `POST /api/jira/skills` and `/skills/delete`. The defaults do what the server does — store or drop one skill in the status the next `GET /api/jira`
+   answers — so a case can watch the card follow its own save. A case that wants a refusal replaces them. */
+let skillsAnswer: (body: { id?: string; name: string; prompt: string }) => Promise<Response>;
+let skillsDeleteAnswer: (body: { id: string }) => Promise<Response>;
 let sent: Sent[];
 
 const answer = (body: unknown, code = 200) =>
@@ -128,6 +132,15 @@ beforeEach(() => {
     statusAnswer = { ...statusAnswer, repos };
     return answer(body);
   };
+  skillsAnswer = (body) => {
+    const skill: JiraSkill = { id: body.id ?? 's_00000001', name: body.name, prompt: body.prompt };
+    statusAnswer = { ...statusAnswer, skills: [...statusAnswer.skills.filter((k) => k.id !== skill.id), skill] };
+    return answer(skill);
+  };
+  skillsDeleteAnswer = (body) => {
+    statusAnswer = { ...statusAnswer, skills: statusAnswer.skills.filter((k) => k.id !== body.id) };
+    return answer({ ok: true });
+  };
   sent = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -144,6 +157,8 @@ beforeEach(() => {
     if (url === '/api/jira/boards') return saveAnswer();
     if (url === '/api/jira/boards/delete') return answer({ ok: true });
     if (url === '/api/jira/repos') return reposAnswer(JSON.parse(String(init?.body)));
+    if (url === '/api/jira/skills') return skillsAnswer(JSON.parse(String(init?.body)));
+    if (url === '/api/jira/skills/delete') return skillsDeleteAnswer(JSON.parse(String(init?.body)));
     const issuesOf = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
     if (issuesOf !== null) return boardIssuesAnswer(decodeURIComponent(issuesOf[1]));
     if (url.startsWith('/api/jira/boards/')) return answer({ issues: [], polledAt: null });
@@ -776,5 +791,136 @@ describe('accessPhrase', () => {
     for (const a of ['unconfigured', 'unsupported', 'unauthorized', 'forbidden', 'rate-limited', 'unreachable'] as const) {
       expect(typeof accessPhrase(a)).toBe('string');
     }
+  });
+});
+
+/* ── Skills (Jira phase 5; spec §6.4; DESIGN.md §8.9.3) ──────────────────────────────────────────────────────────────────────────────────────── */
+
+const GROOM: JiraSkill = { id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+const SUMMARISE: JiraSkill = { id: 's_0123abce', name: 'Summarise changes', prompt: '/summarise-jira-ticket-changes {key}' };
+
+const skillsCard = (): HTMLElement => screen.getByRole('heading', { name: 'Skills' }).closest('section') as HTMLElement;
+const skillNames = (): string[] => Array.from(skillsCard().querySelectorAll('.set-row .set-name')).map((n) => n.textContent ?? '');
+const skillPosts = (): { id?: string; name: string; prompt: string }[] => posts('/api/jira/skills').map((p) => JSON.parse(String(p.init?.body)));
+const skillName = (): HTMLInputElement => within(skillsCard()).getByRole('textbox', { name: 'Skill name' }) as HTMLInputElement;
+const skillPrompt = (): HTMLTextAreaElement => within(skillsCard()).getByRole('textbox', { name: 'Skill prompt template' }) as HTMLTextAreaElement;
+const addSkillChip = (): HTMLElement => within(skillsCard()).getByRole('button', { name: 'Add' });
+
+describe('the Skills card', () => {
+  it('draws the two built-ins as locked rows with no ×, then one row per skill with its template and a ×', async () => {
+    statusAnswer = status({ skills: [GROOM, SUMMARISE] });
+    await renderSetup();
+
+    expect(skillNames()).toEqual(['Work it end to end', 'Open with the ticket loaded', 'Groom ticket', 'Summarise changes']);
+    for (const name of ['Work it end to end', 'Open with the ticket loaded']) {
+      const row = within(skillsCard()).getByText(name).closest('.set-row') as HTMLElement;
+      expect(within(row).getByText('built-in')).toBeInTheDocument();
+      expect(within(row).queryByRole('button')).toBeNull();
+    }
+    const groom = within(skillsCard()).getByText('Groom ticket').closest('.set-row') as HTMLElement;
+    expect(within(groom).getByText('/jira-groom {key}')).toBeInTheDocument();
+    expect(within(groom).getByRole('button', { name: 'Remove Groom ticket' })).toBeInTheDocument();
+  });
+
+  it('sits in the right-hand column under Connection', async () => {
+    await renderSetup();
+    const column = skillsCard().closest('.set-col') as HTMLElement;
+    expect(within(column).getByRole('heading', { name: 'Connection' })).toBeInTheDocument();
+    expect(within(column).queryByRole('heading', { name: 'Boards' })).toBeNull();
+  });
+
+  it('names the five placeholders and says the list only names the skill', async () => {
+    await renderSetup();
+    const text = skillsCard().textContent ?? '';
+    for (const placeholder of ['{key}', '{summary}', '{url}', '{repo}', '{description}']) expect(text).toContain(placeholder);
+    expect(text).toContain('a skill has to exist in the repo or the Claude install; this list only names it');
+  });
+
+  it('keeps Add disabled until the name and the template are both non-empty after trim', async () => {
+    await renderSetup();
+    expect(addSkillChip()).toBeDisabled();
+    await userEvent.type(skillName(), '   ');
+    await userEvent.type(skillPrompt(), '/x');
+    expect(addSkillChip()).toBeDisabled();
+    await userEvent.clear(skillName());
+    await userEvent.type(skillName(), 'Plan');
+    expect(addSkillChip()).toBeEnabled();
+    await userEvent.clear(skillPrompt());
+    await userEvent.type(skillPrompt(), '  ');
+    expect(addSkillChip()).toBeDisabled();
+  });
+
+  it('Add POSTs { name, prompt } trimmed, reloads the status, clears both fields and draws the new row', async () => {
+    await renderSetup();
+    const before = statusReads();
+    // `{{` types a literal `{` — a bare `{key}` is user-event's own key descriptor, not text.
+    await userEvent.type(skillName(), '  Draft test plan ');
+    await userEvent.type(skillPrompt(), ' /test-plan {{key} — {{summary}\n');
+    await userEvent.click(addSkillChip());
+
+    await waitFor(() => expect(skillPosts()).toEqual([{ name: 'Draft test plan', prompt: '/test-plan {key} — {summary}' }]));
+    expect(posts('/api/jira/skills')[0].init?.headers).toEqual({ 'content-type': 'application/json' });
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
+    await within(skillsCard()).findByText('Draft test plan');
+    await waitFor(() => expect(skillName().value).toBe(''));
+    expect(skillPrompt().value).toBe('');
+  });
+
+  it('× asks through Confirm first and posts nothing until it is accepted, then POSTs { id } to /skills/delete and reloads', async () => {
+    statusAnswer = status({ skills: [GROOM, SUMMARISE] });
+    await renderSetup();
+    const before = statusReads();
+
+    await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Remove Groom ticket' }));
+    expect(posts('/api/jira/skills/delete')).toHaveLength(0);
+    const confirm = within(skillsCard()).getByRole('group', { name: 'Remove Groom ticket' });
+    expect(confirm).toHaveTextContent('Groom ticket');
+    await userEvent.click(within(confirm).getByTestId('jira-skill-delete-s_0123abcd-accept'));
+
+    await waitFor(() => expect(posts('/api/jira/skills/delete').map((p) => JSON.parse(String(p.init?.body)))).toEqual([{ id: 's_0123abcd' }]));
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
+    await waitFor(() => expect(skillNames()).toEqual(['Work it end to end', 'Open with the ticket loaded', 'Summarise changes']));
+  });
+
+  it('keeping the skill puts the × back and sends nothing', async () => {
+    statusAnswer = status({ skills: [GROOM] });
+    await renderSetup();
+    await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Remove Groom ticket' }));
+    await userEvent.click(within(skillsCard()).getByTestId('jira-skill-delete-s_0123abcd-dismiss'));
+    expect(within(skillsCard()).getByRole('button', { name: 'Remove Groom ticket' })).toBeInTheDocument();
+    expect(posts('/api/jira/skills/delete')).toHaveLength(0);
+  });
+
+  it('renders a 400’s sentence under the add row, keeps the typed fields and reloads nothing', async () => {
+    skillsAnswer = () => answer({ error: 'name must be at most 60 characters' }, 400);
+    await renderSetup();
+    await userEvent.type(skillName(), 'Plan');
+    await userEvent.type(skillPrompt(), '/plan {{key}');
+    await userEvent.click(addSkillChip());
+
+    const message = await within(skillsCard()).findByText('name must be at most 60 characters');
+    expect(message).toHaveClass('set-error');
+    expect(skillName().value).toBe('Plan');
+    expect(skillPrompt().value).toBe('/plan {key}');
+    expect(statusReads()).toBe(1);
+  });
+
+  it('shows a refused delete’s sentence too (a 404 for a skill another tab removed), and falls back to a status line without one', async () => {
+    statusAnswer = status({ skills: [GROOM] });
+    skillsDeleteAnswer = () => answer({ error: 'unknown skill' }, 404);
+    await renderSetup();
+    await userEvent.click(within(skillsCard()).getByRole('button', { name: 'Remove Groom ticket' }));
+    await userEvent.click(within(skillsCard()).getByTestId('jira-skill-delete-s_0123abcd-accept'));
+    expect(await within(skillsCard()).findByText('unknown skill')).toHaveClass('set-error');
+
+    skillsAnswer = () => answer(null, 502);
+    await userEvent.type(skillName(), 'Plan');
+    await userEvent.type(skillPrompt(), '/plan');
+    await userEvent.click(addSkillChip());
+    expect(await within(skillsCard()).findByText('the skill was not saved (HTTP 502)')).toBeInTheDocument();
+
+    skillsAnswer = () => Promise.reject(new Error('down'));
+    await userEvent.click(addSkillChip());
+    expect(await within(skillsCard()).findByText('the skill was not saved — the server did not answer')).toBeInTheDocument();
   });
 });
