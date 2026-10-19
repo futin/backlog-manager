@@ -1,5 +1,5 @@
 ---
-paths: ["server/src/jira/**", "skills/jira/**"]
+paths: ["server/src/jira/**", "server/src/agents/jira-*.ts", "skills/jira/**"]
 ---
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
@@ -10,14 +10,15 @@ paths: ["server/src/jira/**", "skills/jira/**"]
   carries as `configUnreadable` — and the sweep prunes no board cache while it says so. The fallback is per ENTRY, one level finer than spec §2 by design:
   `readBoard`, `readQuery`, `readRepos` and `readSkill` each drop only the entry that fails (a board whose id is not a `b_` id or whose name is empty, a root
   that fails `isJiraKey`, a query, a repos key or path, a skill), with one `console.warn` naming the file and the entry; a missing or unknown `interval` reads
-  `DEFAULT_JIRA_INTERVAL`. The three writers are `writeBoard`, `deleteBoard` and `writeRepos` (same file), called by `POST /api/jira/boards`, `/boards/delete` and `/repos`
-  (`jira-write.controller.ts`) and by nothing else. Each is `writeSyncInterval`'s contract: read the RAW file (ENOENT starts from `{}`; a parsed non-object is
-  replaced), merge ONE entry — a board by id, one project's list by key — keeping every other entry, malformed ones and unknown top-level keys included, then
+  `DEFAULT_JIRA_INTERVAL`. The five writers are `writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill` and `deleteSkill` (same file), called by `POST /api/jira/boards`,
+  `/boards/delete`, `/repos`, `/skills` and `/skills/delete` (`jira-write.controller.ts`) and by nothing else. Each is `writeSyncInterval`'s contract: read the RAW
+  file (ENOENT starts from `{}`; a parsed non-object is replaced), merge ONE entry — a board by id, one project's list by key, a skill by id (`s_` ids, a name of
+  at most 60 characters, a prompt of at most 2 000) — keeping every other entry, malformed ones and unknown top-level keys included, then
   write a temp file in the same directory and `rename` it over. A file that exists and cannot be read or parsed throws `JiraConfigUnreadableError`, which the
   route answers as a 409 carrying its message (`… nothing was written`) with the file byte-identical; an update or delete naming an id the file does not hold
-  throws `JiraUnknownIdError`, a 404 `unknown board`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
+  throws `JiraUnknownIdError`, which carries the entry kind and is a 404 `unknown board` or `unknown skill`. A handler runs guard (`SameOriginPostGuard`) → validate (400) → configured (503) → write → re-aim, and
   config writes stay open under `access: unauthorized`, because they touch only `jira.json`. A saved board then awaits `boardSaved` (sweeps that board,
-  bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos re-aim
+  bounded by `JIRA_SAVE_SWEEP_WAIT_MS`, never rejects, so the route adds no second timer); a deleted one calls `boardDeleted` and `arm()`; repos and skills re-aim
   nothing, since no sweep reads them. Why:
   [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
 - **The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs.**
@@ -50,8 +51,11 @@ paths: ["server/src/jira/**", "skills/jira/**"]
 - **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.** The two
   routes are `POST /api/jira/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }` in `jira-write.controller.ts`, each `SameOriginPostGuard` →
   validate (400: `invalid issue key`, `transitionId must be a non-empty string` — a string of at most `JIRA_TRANSITION_ID_MAX_CHARS`, 64) → configured (503) →
-  `JiraPollerService.assignToMe` / `transitionIssue`, whose failures go through `unwrapJira` (`unwrap.util.ts`, shared with the read controller, so §8's
-  table and `retryAt` mean the same thing on every route) and whose two own refusals are `no identity` (503) and `transition not offered` (400). Both refuse
+  `JiraPollerService.assignToMe` / `transitionIssue`, whose outcomes go through `jiraWriteOrThrow` (`unwrap.util.ts`, hoisted there beside `unwrapJira` so the read
+  controller, these two routes and `dispatch-jira` share one mapping: §8's table and `retryAt` mean the same thing on every route) — its two own refusals are
+  `no identity` (503) and `transition not offered` (400), every other failure `unwrapJira`'s. `POST /api/agents/dispatch-jira` is a SECOND CALLER of those same
+  two poller methods through the same mapping, not a third write: it asks for neither unassign nor anyone else, skips an assign the ticket already carries
+  (`assigned: false`, because a write that changes nothing still bumps `updated`), and prefixes the step's name onto whatever the mapping throws. Both refuse
   with no Jira call: through `gate()` (unconfigured, a 429 window, `unsupported`, no `cloudId`), then `unauthorizedRefusal()` — the 401 body whenever the
   boot's `access` is `unauthorized`, `me` still set or not — and, for assign alone, `me === null` → `no identity`. Assign is `PUT issue/{key}/assignee`
   with `me.accountId` and nothing else — never `{ accountId: null }`, which Jira reads as UNASSIGN, and never an accountId from the request. Transition is a
@@ -64,3 +68,23 @@ paths: ["server/src/jira/**", "skills/jira/**"]
   window then dropped it — and false when it was not or the call failed (its 401 or 429 still moves the site state through `routeFailed`); a failed re-read
   never turns the 200 into an error. There is no per-key queue on the server: the modal's `useAction` is the one-at-a-time guard. Why:
   [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
+- **A Jira session is remembered in server memory only; a restart forgets it, and Stop is the one hand that clears it early.** `JiraLiveService`
+  (`server/src/jira/live.service.ts`, NOT `JiraService`) is a `Map<key, { sessionId, repo, startedAt }>` with no file and no I/O, provided by `JiraModule` and
+  read by `GET /api/jira` (`live`, filled by the controller from `snapshot()` — the poller never sees it, and an unconfigured server keeps `{}`) and
+  `GET /api/jira/issue/:key` (`session`). Capped at `JIRA_LIVE_CAP` (100): one more evicts the oldest CONFIRMED entry by `startedAt`, never a `starting` one
+  (its spawn will `confirm` or `release` it), and when every slot is starting `reserve` refuses, which the dispatch answers as 409 `too many Jira sessions are
+  starting`. An entry older than `JIRA_LIVE_TTL_MS` (8 h, strictly) is dropped lazily at the top of every call — no timer — and time is `Date.now()`. The
+  dispatch RESERVES the key (`sessionId: null`, `starting`) before its first Jira write — `reserve` is a synchronous check-and-set, so of two Starts exactly
+  one passes, the other 409s `<KEY> is starting` / `already has a session` — and every failure after the reservation runs through one `catch` that
+  `release`s it; `release` touches only a `starting` entry, so it can never drop a session that did start, and a refused `reserve` releases nothing (it
+  would drop the other request's entry). `confirm` follows the spawn; a key cleared meanwhile is not resurrected. Stop is `POST /api/agents/jira-stop`
+  (`JiraDispatchService.stop`): agents off 409, no entry 409, `starting` 409, then `stopDashboardSession` (`session-stop.util.ts`, shared with the item
+  abort) — a 200 or the dashboard's `no live session` 404 clears the entry, any other answer is a 502 and the entry STAYS, since the session may still run;
+  Jira is never called. The reconciler (`server/src/agents/jira-live.service.ts`, `JiraLiveReconciler`) is the other early clear, and it clears only what
+  the dashboard has stopped reporting as busy: one `GET /api/sessions` per tick (`JIRA_RECONCILE_MS`, 60 s, a `setTimeout` chain armed by `confirm` and only
+  while some entry holds a session id, `unref`'d, never in a request's path, never throwing), an entry stays only while its session is `working` or
+  `question` (the list keeps an exited session as `idle`), a `starting` entry and one younger than `JIRA_LIVE_GRACE_MS` (2 min) are never judged, an unreadable
+  list or agents off leaves the map as it was, and a verdict clears only if the entry still holds the session id it was judged for. The edge runs agents →
+  jira and never back: `jira/` imports nothing from `agents/` except `SameOriginPostGuard`, which is why the dispatch, the stop and the reconciler live in
+  `agents/` while the map does not. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early)

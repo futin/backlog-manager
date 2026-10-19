@@ -1,19 +1,22 @@
+import { homedir } from 'os';
 import { Controller, Get, HttpException, Param, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
-import { isJiraKey } from '../../../shared/types';
+import { isJiraKey, parseJiraActionParam } from '../../../shared/types';
 import type { JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../../../shared/types';
 import { renderTicketBlock } from './block';
-import { JIRA_JQL_MAX_CHARS, isJiraId } from './config.util';
+import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from './config.util';
 import { jiraEnv } from './env.util';
+import { JiraLiveService } from './live.service';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
+import { composeJiraPrompt, resolveJiraActionOrThrow } from './prompt.util';
 import { unwrapJira } from './unwrap.util';
 
 /**
- * The six read routes under `/api/jira` (Jira phase 1; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
+ * The seven read routes under `/api/jira` (Jira phase 1, and phase 5's `/prompt`; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
  * poller performs for it — never from a call this file makes, so the 429 window, the boot's missing `cloudId` and the 401 bookkeeping have one home
  * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: the board and repository writes live in
- * `jira-write.controller.ts` (phase 2), the dispatch route is phase 5's, and `GET /api/jira/prompt` is a 404 until then (pinned by `test/jira-routes.test.ts`).
+ * `jira-write.controller.ts` (phase 2), and the dispatch route is `AgentsModule`'s (phase 5).
  *
  * The order inside every method is the same, and it is part of the contract: validate the parameter (400, or 404 for a board id that cannot be one of
  * ours), THEN refuse when Jira is not configured (503), THEN ask the poller. A malformed request is wrong whatever the environment, so it must not read as
@@ -26,12 +29,19 @@ import { unwrapJira } from './unwrap.util';
  */
 @Controller('api/jira')
 export class JiraController {
-  constructor(private readonly poller: JiraPollerService) {}
+  constructor(
+    private readonly poller: JiraPollerService,
+    private readonly live: JiraLiveService
+  ) {}
 
-  /** `GET /api/jira` — memory, the environment and `jira.json`, no outbound call. */
+  /**
+   * `GET /api/jira` — memory, the environment and `jira.json`, no outbound call. The controller, not the poller, fills `live` from the live map: the poller
+   * stays unaware of it. An unconfigured server keeps the poller's `{}` — it has no sessions to show, and no run can have started without credentials.
+   */
   @Get()
   status(): JiraStatusPayload {
-    return this.poller.status();
+    const status = this.poller.status();
+    return status.configured ? { ...status, live: this.live.snapshot() } : status;
   }
 
   /**
@@ -68,7 +78,7 @@ export class JiraController {
       res.type('text/plain; charset=utf-8');
       return renderTicketBlock(detail);
     }
-    return detail;
+    return { ...detail, session: this.live.snapshot()[key] ?? null };
   }
 
   /**
@@ -101,6 +111,48 @@ export class JiraController {
     if (jql.length > JIRA_JQL_MAX_CHARS) throw new HttpException({ error: `jql is too long (max ${JIRA_JQL_MAX_CHARS})` }, 400);
     this.requireConfigured();
     return unwrapJira(await this.poller.checkJql(jql));
+  }
+
+  /**
+   * `GET /api/jira/prompt?key&action&repo` — exactly what Copy prompt copies and what Start sends but for the status and assignee lines (spec §5, §7): the launch
+   * sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind the preview, the copy and the spawn. The
+   * refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid issue key`), `action` (400), `repo` present
+   * (400 `repo is required`), configured (503 — after the three parameters, as everywhere in this file), `jira.json` readable (409 — a skill or a mapping read
+   * out of a file we cannot read would be a guess), the skill exists (400 `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8
+   * mapping), the repo mapped for the ISSUE'S project (400), the cap (400 `prompt too long`).
+   *
+   * The mapping is keyed by the detail's `project.key`, not the key's prefix: the detail is read anyway, and it is what Jira says the project is. The repo is
+   * normalised exactly as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped), so a path typed either way finds its entry, while the
+   * sentence quotes the repo AS SENT — the caller recognises its own spelling. A repo that cannot be normalised matches nothing; it is the same 400, not a
+   * second sentence for a case the caller cannot act on differently. The skill's template is read from the same file read as the mapping, so a skill and its
+   * repo can never come from two moments.
+   */
+  @Get('prompt')
+  async prompt(
+    @Query('key') key: unknown,
+    @Query('action') actionParam: unknown,
+    @Query('repo') repo: unknown,
+    @Res({ passthrough: true }) res: Response
+  ): Promise<string> {
+    if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    const action = parseJiraActionParam(actionParam);
+    if (action === null) throw new HttpException({ error: 'action must be execute, context or skill:<id>' }, 400);
+    if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
+    this.requireConfigured();
+    const config = readJiraConfig();
+    if (config.unreadable !== null) {
+      throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
+    }
+    const composeAction = resolveJiraActionOrThrow(action, config.skills);
+    const detail = unwrapJira(await this.poller.issueDetail(key));
+    const normalised = normaliseRepoPath(repo, homedir());
+    if (normalised === null || !(config.repos[detail.project.key] ?? []).includes(normalised)) {
+      throw new HttpException({ error: `${repo} is not mapped to ${detail.project.key}` }, 400);
+    }
+    const composed = composeJiraPrompt(detail, composeAction, normalised);
+    if (!composed.ok) throw new HttpException({ error: composed.error }, 400);
+    res.type('text/plain; charset=utf-8');
+    return composed.prompt;
   }
 
   private requireConfigured(): void {

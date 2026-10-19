@@ -24,6 +24,7 @@ import { makeRegistry } from './helpers/store';
 const EMAIL = 'ada@example.com';
 const TOKEN = 't0k3n-SECRET';
 const KEYS = ['BM_JIRA_SITE', 'BM_JIRA_EMAIL', 'BM_JIRA_TOKEN', 'BM_JIRA_FILE'] as const;
+const SKILL = { name: 'Review', prompt: 'Review {key}: {summary}' };
 const BOARD = { name: 'Payments', roots: ['PAY-120'], queries: [], interval: '1m' };
 
 let saved: Record<string, string | undefined>;
@@ -81,27 +82,33 @@ const post = (path: string, body: unknown) =>
 const status = async (): Promise<JiraStatusPayload> => (await request(app.getHttpServer()).get('/api/jira').expect(200)).body;
 const searches = () => fake.calls.filter((c) => c.url.endsWith('/search/jql')).map((c) => (c.body as { jql: string }).jql);
 
-describe('the guard, on all three routes', () => {
+describe('the guard, on all five routes', () => {
   beforeAll(async () => {
     prepare('guard');
     await build();
   });
   afterAll(() => app.close());
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos']])('POST %s with no content type is 403, and nothing is written', async (path) => {
-    await request(app.getHttpServer()).post(`/api/jira${path}`).send('{}').expect(403);
-    expect(existsSync(file)).toBe(false);
-  });
+  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/skills'], ['/skills/delete']])(
+    'POST %s with no content type is 403, and nothing is written',
+    async (path) => {
+      await request(app.getHttpServer()).post(`/api/jira${path}`).send('{}').expect(403);
+      expect(existsSync(file)).toBe(false);
+    }
+  );
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos']])('POST %s from another origin is 403', async (path) => {
+  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
     await post(path, {}).set('origin', 'http://evil.test').expect(403);
     expect(existsSync(file)).toBe(false);
   });
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos']])('POST %s to a Host the allowlist does not know is 403', async (path) => {
-    await post(path, {}).set('host', 'evil.example:4322').expect(403);
-    expect(existsSync(file)).toBe(false);
-  });
+  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/skills'], ['/skills/delete']])(
+    'POST %s to a Host the allowlist does not know is 403',
+    async (path) => {
+      await post(path, {}).set('host', 'evil.example:4322').expect(403);
+      expect(existsSync(file)).toBe(false);
+    }
+  );
 });
 
 describe('unconfigured', () => {
@@ -114,7 +121,9 @@ describe('unconfigured', () => {
   it.each([
     ['/boards', { name: '' }],
     ['/boards/delete', {}],
-    ['/repos', { project: 'pay', paths: [] }]
+    ['/repos', { project: 'pay', paths: [] }],
+    ['/skills', { name: '', prompt: 'p' }],
+    ['/skills/delete', {}]
   ])('answers a malformed POST %s with its 400 before the 503', async (path, body) => {
     await post(path, body).expect(400);
   });
@@ -122,7 +131,9 @@ describe('unconfigured', () => {
   it.each([
     ['/boards', BOARD],
     ['/boards/delete', { id: 'b_0123abcd' }],
-    ['/repos', { project: 'PAY', paths: ['/a/b'] }]
+    ['/repos', { project: 'PAY', paths: ['/a/b'] }],
+    ['/skills', SKILL],
+    ['/skills/delete', { id: 's_0123abcd' }]
   ])('answers a valid POST %s with 503 Jira is not configured, and creates no file', async (path, body) => {
     expect((await post(path, body).expect(503)).body).toEqual({ error: 'Jira is not configured' });
     expect(existsSync(file)).toBe(false);
@@ -186,6 +197,72 @@ describe('configured, against a healthy Jira', () => {
     expect(res.body.error).toContain('id');
   });
 
+  describe('skills', () => {
+    const skillsOnDisk = (): unknown[] => JSON.parse(readFileSync(file, 'utf8')).skills;
+
+    it('POST /skills creates a skill: 200, a minted s_ id, trimmed, read back by GET /api/jira, and the poller is not asked to sweep', async () => {
+      const before = searches().length;
+      const res = await post('/skills', { name: '  Review  ', prompt: '  Review {key}  ' }).expect(200);
+      expect(res.body).toEqual({ id: expect.stringMatching(/^s_[0-9a-f]{8}$/), name: 'Review', prompt: 'Review {key}' });
+      expect(skillsOnDisk()).toContainEqual(res.body);
+      expect((await status()).skills).toContainEqual(res.body);
+      expect(searches().length).toBe(before);
+    });
+
+    it('updates a skill it holds, keeping its id, and answers the stored skill', async () => {
+      const created = (await post('/skills', SKILL).expect(200)).body;
+      const updated = await post('/skills', { id: created.id, name: 'After', prompt: 'New' }).expect(200);
+      expect(updated.body).toEqual({ id: created.id, name: 'After', prompt: 'New' });
+      expect((await status()).skills.filter((s) => s.id === created.id)).toEqual([updated.body]);
+    });
+
+    it.each([['s_0123abcd'], ['x']])('POST /skills updating the id %s is 404 unknown skill', async (id) => {
+      expect((await post('/skills', { ...SKILL, id }).expect(404)).body).toEqual({ error: 'unknown skill' });
+    });
+
+    it('POST /skills with a non-string id is 400 naming id', async () => {
+      expect((await post('/skills', { ...SKILL, id: 7 }).expect(400)).body.error).toContain('id');
+    });
+
+    it.each([
+      ['empty', ''],
+      ['blank', '   '],
+      ['61 characters', 'x'.repeat(61)]
+    ])('POST /skills with a name that is %s is 400 naming name', async (_label, name) => {
+      expect((await post('/skills', { ...SKILL, name }).expect(400)).body.error).toContain('name');
+    });
+
+    it.each([
+      ['empty', ''],
+      ['2 001 characters', 'x'.repeat(2001)]
+    ])('POST /skills with a prompt that is %s is 400 naming prompt', async (_label, prompt) => {
+      expect((await post('/skills', { ...SKILL, prompt }).expect(400)).body.error).toContain('prompt');
+    });
+
+    it('accepts a name of exactly 60 and a prompt of exactly 2 000', async () => {
+      const res = await post('/skills', { name: 'x'.repeat(60), prompt: 'y'.repeat(2000) }).expect(200);
+      expect(res.body.name).toHaveLength(60);
+      expect(res.body.prompt).toHaveLength(2000);
+    });
+
+    it('POST /skills/delete removes a skill, answers { ok: true }, and a second delete is 404 unknown skill', async () => {
+      const created = (await post('/skills', SKILL).expect(200)).body;
+      expect((await post('/skills/delete', { id: created.id }).expect(200)).body).toEqual({ ok: true });
+      expect((await status()).skills.some((s) => s.id === created.id)).toBe(false);
+      expect((await post('/skills/delete', { id: created.id }).expect(404)).body).toEqual({ error: 'unknown skill' });
+    });
+
+    it('POST /skills/delete with {} is 400 naming id', async () => {
+      expect((await post('/skills/delete', {}).expect(400)).body.error).toContain('id');
+    });
+
+    it('a board id sent to /skills/delete is 404 unknown skill, and the board survives', async () => {
+      const board = (await post('/boards', BOARD).expect(200)).body;
+      expect((await post('/skills/delete', { id: board.id }).expect(404)).body).toEqual({ error: 'unknown skill' });
+      expect((await status()).boards.some((b) => b.id === board.id)).toBe(true);
+    });
+  });
+
   it('POST /repos stores one spelling, and an empty list removes the key', async () => {
     const res = await post('/repos', { project: 'PAY', paths: ['~/x/'] }).expect(200);
     expect(res.body).toEqual({ project: 'PAY', paths: [`${homedir()}/x`] });
@@ -228,6 +305,11 @@ describe('configured, access unauthorized (§8)', () => {
     expect(res.body.id).toMatch(/^b_[0-9a-f]{8}$/);
     expect((await status()).access).toBe('unauthorized');
   });
+
+  it('and so is a skill create', async () => {
+    const res = await post('/skills', SKILL).expect(200);
+    expect(res.body.id).toMatch(/^s_[0-9a-f]{8}$/);
+  });
 });
 
 describe('configured, a jira.json that does not parse (Review Focus 2)', () => {
@@ -242,7 +324,10 @@ describe('configured, a jira.json that does not parse (Review Focus 2)', () => {
   it.each([
     ['/boards', BOARD],
     ['/boards/delete', { id: 'b_0123abcd' }],
-    ['/repos', { project: 'PAY', paths: ['/a/b'] }]
+    ['/repos', { project: 'PAY', paths: ['/a/b'] }],
+    ['/skills', SKILL],
+    ['/skills', { ...SKILL, id: 's_0123abcd' }],
+    ['/skills/delete', { id: 's_0123abcd' }]
   ])('POST %s is 409, names jira.json and says nothing was written, and leaves the file byte-identical', async (path, body) => {
     const res = await post(path, body).expect(409);
     expect(res.body.error).toContain('jira.json');

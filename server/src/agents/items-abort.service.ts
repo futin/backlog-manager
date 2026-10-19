@@ -5,12 +5,10 @@ import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { answer, writable } from '../items/items-write.controller';
 import { isLive } from '../tracker/claim';
 import { TrackerPollerService } from '../tracker/poller.service';
-import { readAgentsConfig, type AgentsConfig } from './config.util';
-import { authHeaders, dashboardError, dashboardSessionStatus, staleClaimProbe } from './agents.service';
+import { readAgentsConfig } from './config.util';
+import { dashboardSessionStatus, staleClaimProbe } from './agents.service';
+import { stopDashboardSession } from './session-stop.util';
 import type { ItemAbortResult } from '../../../shared/types';
-
-/** The dashboard's stop answers at once — it signals a process, it does not wait for one — so the spawn call's budget is plenty. */
-const STOP_TIMEOUT_MS = 10_000;
 
 /**
  * items-abort.service.ts — `POST /api/items/abort` (#225): the board's way to let go of a tracker claim whose session was stopped, or died, without
@@ -93,7 +91,7 @@ export class ItemsAbortService {
 
     let stopped = false;
     if (this.dispatches.get(holder.session) !== null) {
-      stopped = await this.stopSession(cfg, holder.session);
+      stopped = await stopDashboardSession(cfg, holder.session, 'the claim is untouched');
     } else {
       const machine = (process.env.BM_MACHINE_NAME ?? '').trim();
       if (machine === '') {
@@ -115,24 +113,5 @@ export class ItemsAbortService {
     // Forgotten only now: a release GitHub refused leaves the claim live, and the retry must still find the session was ours.
     this.dispatches.forget(holder.session);
     return { id, released: true, stopped };
-  }
-
-  /** `true` for a 200, `false` for the one 404 that means the process is already gone; a 502 for anything else. */
-  private async stopSession(cfg: AgentsConfig, session: string): Promise<boolean> {
-    let res: Response;
-    try {
-      res = await fetch(`${cfg.url}/api/sessions/${encodeURIComponent(session)}/stop`, {
-        method: 'POST',
-        headers: authHeaders(cfg),
-        signal: AbortSignal.timeout(STOP_TIMEOUT_MS)
-      });
-    } catch (e) {
-      throw new HttpException({ error: dashboardError(e, 'the dashboard session stop', STOP_TIMEOUT_MS) }, 502);
-    }
-    const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
-    if (res.ok) return true;
-    if (res.status === 404 && body?.error === 'no live session') return false;
-    const error = typeof body?.error === 'string' ? body.error : `answered ${res.status}`;
-    throw new HttpException({ error: `the dashboard did not stop session ${session}: ${error} — the claim is untouched` }, 502);
   }
 }

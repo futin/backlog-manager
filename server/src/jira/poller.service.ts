@@ -365,6 +365,16 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       .map((b) => b.id);
   }
 
+  /**
+   * Who the credentials resolve to, or `null` while `myself` has not answered (or a 401 undid it) — the very value `assignToMe` reads. `POST
+   * /api/agents/dispatch-jira` asks it twice before writing anything: to refuse an assign with `no identity` before its other writes, and to skip an assign
+   * the ticket already carries. Not `status().me`, which also waits for the rest of the boot: the two would disagree for exactly as long as the sprint
+   * field is unanswered, and the dispatch must refuse the assign exactly when `assignToMe` would.
+   */
+  identity(): { accountId: string; name: string } | null {
+    return this.boot.me;
+  }
+
   /** `GET /api/jira/issue/:key`: the issue, its children and its transitions, read fresh, the Done window off. Any of the three failing fails it (P4). */
   async issueDetail(key: string): Promise<JiraResult<JiraIssueDetail>> {
     const gate = this.gate();

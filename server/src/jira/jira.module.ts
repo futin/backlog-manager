@@ -3,11 +3,13 @@ import { Module } from '@nestjs/common';
 import { JiraClient } from './jira.client';
 import { JiraController } from './jira.controller';
 import { JiraWriteController } from './jira-write.controller';
+import { JiraLiveService } from './live.service';
 import { JiraPollerService } from './poller.service';
 
 /**
- * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the six read routes and — since phase 2 — the three write
- * routes (`JiraWriteController`, which touches `jira.json` and the poller, never Jira itself). It mirrors `TrackerModule`
+ * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the seven read routes (six in phase 1, `GET /prompt` in phase 5) and — since phase 2 — the seven write
+ * routes of `JiraWriteController`: five config writes (three in phase 2, the skills pair in phase 5a) that touch `jira.json` and the poller and never Jira itself, and
+ * the two issue writes of phase 3 that do call Jira. It mirrors `TrackerModule`
  * (`server/src/tracker/tracker.module.ts`), and for the same reasons.
  *
  * `JiraClient` is provided as a factory value rather than a decorated class: it has no Nest decorators on purpose (a test constructs one on a fake `fetch`
@@ -23,11 +25,15 @@ import { JiraPollerService } from './poller.service';
  * never imports `AgentsModule`. A Jira seam that reached back into the dispatcher would make the read side depend on the thing that acts on it, and a
  * cycle between two modules that both own a timer is the one place Nest's forward references would hide a start-up ordering bug.
  *
+ * `JiraLiveService` (phase 5) is the in-memory key → live-session map and is exported for the same one-way reason: `AgentsModule`'s dispatch route and reconciler
+ * reserve, confirm, release and read it. It is pure memory, so providing it here adds no import in either direction; the controller composes it into `live` and
+ * `session`, and the poller never sees it.
+ *
  * No `RegistryModule` import, unlike the tracker's: nothing here resolves a project. `jira.json` is read straight from its own file.
  */
 @Module({
   controllers: [JiraController, JiraWriteController],
-  providers: [JiraPollerService, { provide: JiraClient, useFactory: () => new JiraClient() }],
-  exports: [JiraPollerService, JiraClient]
+  providers: [JiraPollerService, JiraLiveService, { provide: JiraClient, useFactory: () => new JiraClient() }],
+  exports: [JiraPollerService, JiraClient, JiraLiveService]
 })
 export class JiraModule {}

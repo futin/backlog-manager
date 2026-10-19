@@ -1307,7 +1307,18 @@ derives `null` — history genuinely has no next step, where a
 rejection does. Capture spawns `backlog-capture` for a **new** item citing `from: <id>`; the original stays rejected and `moveItem` still refuses every move out
 of `out-of-scope/`. Archive's Out of scope column is the only surface that renders the control.
 
-## The orchestrate spawn prompt is composed server-side
+**The Jira clause (phase 5).** `POST /api/agents/dispatch-jira` cannot derive its action: a Jira issue has no file whose state says what comes next, so there is
+nothing for `deriveAction` to read and nothing for a second implementation to drift from. The action is a PICK, and the rule's other half still holds — the
+server never takes a string on trust. It is one of a closed set: the two built-ins, `execute` and `context`, and the skills `jira.json` holds right now. The
+controller refuses anything outside the shape (`parseJiraAction`: `execute`, `context` or an object whose only key is `skill`, holding an `s_` plus eight hex digits id; anything else is a 400); the
+service then proves a skill id against the file it has just read (`resolveJiraActionOrThrow`, 400 `unknown skill <id>`), before Jira or the dashboard is asked.
+`GET /api/jira/prompt` runs the same two checks through the same function, so a preview and a Start refuse the same id in the same words. A skill's id is
+read from the same file read as its prompt template, so a skill and its text cannot come from two moments, and a skill deleted between the sheet opening and the
+Start is a 400, never a spawn with a stale template. The `repo` is the other field a Jira dispatch cannot take outright: it must be one of the paths `jira.json`
+maps to the key's own project, compared after the same normalisation the writer stored it under, and only then handed to the dashboard gate, which is still the
+raw string compare the sibling invariant describes — no `dirName` is derived from it.
+
+## The orchestrate and Jira spawn prompts are composed server-side
 
 `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal string `/backlog-orchestrate` — `backlog-orchestrate`'s own `SKILL.md` declares that exact phrase as
 its `trigger:`, so the constant is that declaration, not an invention on the server side. `dispatch`'s prompt varies by design, because _what to say_ about a
@@ -1368,6 +1379,27 @@ literals. What makes it acceptable is that `resolveBase` proves it the way `reso
 local branches — before anything is composed. Its default `'main'` appends nothing, like the other two. Order is ids, then `--merge-mode`, then
 `--question-mode`, then `--base`: ids first because the tool reads bare tokens as ids and a flag ahead of them would swallow the first one, and each later flag
 appended after the ones that predate it so every prompt this endpoint composed before a given field existed stays a byte-exact prefix of what it composes now.
+
+**The Jira prompt (phase 5) is the second composed prompt, and it is the first whose composition is handed text by a stranger.** `POST /api/agents/dispatch-jira`
+has no `prompt` field for the same reason `orchestrate` has none, and `JiraAgentsController` rebuilds the request field by field, so a `prompt` in the body is
+never read. The session is told whatever `composeJiraPrompt` (`server/src/jira/prompt.util.ts`) returns, and that is ONE function with three callers —
+`GET /api/jira/prompt` (the sheet's preview and Copy prompt) and the dispatch twice, once before any Jira write for the length check and once after the writes
+for the spawn — so what a person previewed, what was length-checked and what the session received are one text, differing only by the nonce. What a caller
+influences is enumerated by that composition and nowhere else: the key (`isJiraKey`), the repo (proved against `jira.json`'s mapping) and the action pick. The
+ticket is different from every one of those. An `ids` entry is proved against a closed vocabulary; a ticket's description is free text written by whoever
+filed it, delivered into a session that can write files in the mapped repository, and no check can prove it harmless. So the composer does not try: it
+contains it. The framing line — which says the text between the markers is the ticket's own content and not instructions — is read BEFORE any ticket text
+(after the instruction, or first when a skill template puts `{description}` or `{summary}` inside the instruction, so that ticket text is never ahead of the
+sentence that says what it is). The summary is the one placeholder that lands bare: a template's `{summary}` is collapsed to one line by `oneLine` and carries no
+markers or fence of its own, so what covers it is that order plus the framing line's own words, which say the ticket's summary is the ticket's content wherever
+the prompt quotes it, marked or not. The markers carry a nonce minted per composition, so a ticket written beforehand cannot contain the real end marker, and only
+lines carrying it are delimiters; the description sits in a fence one backtick longer than its longest backtick run, so nothing inside can close it early; a template is
+filled in ONE pass with a replacement function, so a summary reading `{description}` is not expanded and `$&` is text; and a truncation note is server text
+placed after the closing fence, never inside the ticket's own. The cap is the dashboard's own 4 000, not item dispatch's 8 000 paste bound, and the
+description is what yields to it; a prompt that cannot keep at least one character of it is a 400 rather than one that says `(no description)` about a ticket
+that has one. This is mitigation, not proof — a model can still be talked into things — and the rest of the defence is that the session is the person's own,
+in a repository the person mapped, under the permission mode they chose, clamped to the dashboard's ceiling. **Item `dispatch` stays the exception to the
+whole rule:** its prompt is the launch sheet's text, which a human edits before sending, and is the one field taken outright.
 
 ## The browser never talks to the dashboard
 
@@ -3026,19 +3058,19 @@ round: `test/tracker-labels.test.ts` reads the skill's source as text and assert
 The Jira integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md) §2) keeps its boards, saved queries, repository map and skill
 prompts in `~/.backlog-manager/settings/jira.json` — the fourth file under `settings/`, and the first one a person is expected to edit by hand as well as
 through the server. It takes `tracker-sync.json`'s posture (the settings-file exception above): read fresh on every use, cached nowhere, one writer — the
-server, through three routes, `POST /api/jira/boards`, `/boards/delete` and `/repos` — and a person's hand-edits, which the writers are built to survive.
+server, through five routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/skills` and `/skills/delete` — and a person's hand-edits, which the writers are built to survive.
 
 **An unreadable file is reported, never treated as empty.** `readJiraConfig` answers `unreadable` for a file that exists but cannot be read or parsed, and
 `GET /api/jira` carries it as `configUnreadable`. The failure this prevents is the one #270 found in `tracker-sync.json`'s writer, one step earlier: a
 board that renders `No boards yet` over a file with a stray comma invites the person to create a board, and the write that follows — reading the file as `{}`
 and writing one board back — would erase every board, query and mapping the file held. So the reader says the file is broken, the sweep prunes no board
-cache while it is (a board the file still holds keeps its list until the file parses again), and all three writers refuse with a 409 rather than replace it.
+cache while it is (a board the file still holds keeps its list until the file parses again), and all five writers refuse with a 409 rather than replace it.
 A MISSING file is a fresh install and reads as empty; so does a file that parses to something other than an object, which is what `tracker-sync.json`'s
-writer already replaces and so what the three writers agree with.
+writer already replaces and so what the five writers agree with.
 
-**Three writers, one contract, and the refusal is each writer's own.** `writeBoard`, `deleteBoard` and `writeRepos` each read the RAW file, not what the reader
+**Five writers, one contract, and the refusal is each writer's own.** `writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill` and `deleteSkill` each read the RAW file, not what the reader
 would accept, because a writer that round-tripped through the reader would silently drop every entry the reader warned about — the same erasure #270 found,
-by a quieter road. They merge exactly one entry (a board by id, one project's list by key) and leave the rest untouched, hand-written junk and unknown
+by a quieter road. They merge exactly one entry (a board by id, one project's list by key, a skill by id) and leave the rest untouched, hand-written junk and unknown
 top-level keys included, so a person's annotation or a newer version's key survives a save made by an older one. The write is a temp file in the same
 directory and a `rename`, so a crash leaves the old file or the new one and never half of either. The refusal is the writer's rather than a check the route
 makes first because the route's read and the writer's read would be two reads: a file that broke between them would be replaced after the check passed. So
@@ -3157,6 +3189,49 @@ are not — each sends one field's new value and Jira orders them — so two bro
 caches on whichever answer is newest. The one-at-a-time guard is the modal's, through the `useAction` hook, which also stops a double click; it is a courtesy
 to the person, not a lock the server relies on.
 
+**`dispatch-jira` is a second caller of the two writes, never a third write.** Phase 5's Start may assign the issue to me and move it before it spawns, and it
+does so through `JiraPollerService.assignToMe` and `transitionIssue` — the same two methods, the same refusals and the same mapping (`jiraWriteOrThrow`, hoisted
+to `unwrap.util.ts` so the three callers cannot word a failure differently) — so counting the poller's write methods still gives two. What the dispatch adds
+is order and bookkeeping, not capability: everything it can refuse is refused before the first write (the transition is checked against a fresh read of what
+the workflow offers, `no identity` before an assign is attempted, the first composition's length), an assign the ticket already carries is skipped rather
+than sent, and a failure after a landed write says so in its own sentence (`— the assign stands`, `— the Jira writes stand`) because the write is not
+undone and a retry must not be invited as though it were. Unassign, assigning anyone else, a comment and a field edit remain a new rule apiece.
+
+## A Jira session is remembered in server memory only, and Stop is the one hand that clears it early
+
+Phase 5's Run starts a Claude session for a Jira ticket, and the board has to show which tickets have one going and refuse a second. This server keeps that
+fact in memory and nowhere else: `JiraLiveService` (`server/src/jira/live.service.ts` — the spec calls it `JiraService`; the plan ruled otherwise, so `jira/`
+has one service named for what it holds) is a `Map` with no I/O, and a restart forgets it. A session is a fact about a process on this machine, and the dashboard,
+not this server, is the place that knows whether it still runs; a persisted entry would outlive the process that knew, and would need a second mechanism to
+decide which claims to believe. The accepted cost is that after a restart a card shows no strip for a session that is still running, and a second Start on
+that key is then possible; `DispatchRecordsService` makes the same trade for the same reason.
+
+**The order protects the one-session-per-ticket rule, and so does what the map refuses to evict.** The key is reserved (`sessionId: null`, `starting`)
+BEFORE the dispatch's first Jira write, by a synchronous check-and-set: of two Starts that both cleared the dashboard gate exactly one passes, because
+nothing can run between the check and the set. Reserving after the writes would let two requests each assign and transition the ticket before one found out it
+had lost. Every failure after the reservation releases it through one `catch`, so no failure class — a Jira error, a refused composition, a spawn that fails —
+leaves a key `starting` until the 8-hour expiry; a retry after any of them is a fresh Start, not a 409. `release` touches a `starting` entry and nothing else,
+so a late failure path can never drop a session that did start, and a Start whose own `reserve` was refused releases nothing, because the entry in the map is
+the OTHER request's. At the cap of 100 the oldest CONFIRMED entry is evicted, and a `starting` one never is: its spawn is in flight and will confirm or
+release it, and evicting it would let a second dispatch pass the gate while the first is still launching. When every slot is starting, `reserve` refuses and
+the caller says the map is busy. The 8-hour expiry is strict and lazy — read at the top of every call, no timer — and is the backstop for a session nobody
+stopped and the reconciler could not judge.
+
+**Stop is the one deliberate hand, and the reconciler only agrees with the dashboard.** `POST /api/agents/jira-stop` asks the dashboard to stop the session and
+then forgets the key; it never calls Jira, because the ticket keeps its assignee and its status — what the confirm in the client says. A 200 and the
+dashboard's `no live session` 404 both mean the process is gone, and both clear the entry; any other answer is a 502 and the entry STAYS, because the
+session may still be running and a strip that said otherwise would invite a second Start on a busy repository. (The 404 that carries `remote answers
+disabled` is not "gone" — it says nothing about the session.) A session can also end without a Stop — it finished, it crashed, someone stopped it from the
+dashboard — and then the key would show a strip until the expiry. `JiraLiveReconciler` (`server/src/agents/jira-live.service.ts`) is what notices, and it
+lives in `agents/` because it calls the dashboard and `jira/` imports nothing from there; the dependency runs agents → jira and never back, which is also why the
+map is free of timers. It follows the run watchdog's shape: a `setTimeout` chain armed by `confirm`, pending only while some entry holds a session id,
+`unref`'d, never awaited by a request, and swallowing what it catches because it runs from a timer with nothing above it. One `GET /api/sessions` per tick
+(60 s); an entry stays only while its session is `working` or `question`, because the dashboard keeps an exited session as `idle` for its whole lookback, so
+"present" proves nothing and only "not busy" reads as ended. An entry younger than two minutes is never judged — a just-spawned session has no transcript, so
+the list does not carry it, and absent then means "not yet". A `starting` entry is never judged (its own Start settles it), a list that cannot be read leaves
+the map exactly as it was (an unreadable answer is not an answer), and a verdict clears an entry only if it still holds the session id it was judged for,
+since the list was read across an await in which a Stop and a fresh Start can have replaced it.
+
 ## A tracker project has no item files, and that shows up in three places
 
 An issue is not a file, and three separate surfaces would each have got that wrong on their own (task-45, spec §5.3/§5.5). It was FOUR until task-46: dispatch
@@ -3187,7 +3262,7 @@ none of a tracker project's ids and 409ed each one as "not an open bug or task i
 had exactly one job and its own doc comment said so), the 400 is gone, and `AgentsService.resolveTrackerIds` now proves a tracker project's ids against
 `ItemsService` where the files path proves them against a directory scan. It accepts all three spellings a caller can hold — `#31`, this project's own URN, and
 the bare `31` (until #270 the URN's `owner/repo` was read past, so another repo's `#31` became this one's; now it is a 400 with `backlog.mjs`'s
-sentence, compared case-insensitively as GitHub compares) — and **emits exactly one: bare digits, before the prompt is composed.** See "the orchestrate spawn prompt is composed server-side" and
+sentence, compared case-insensitively as GitHub compares) — and **emits exactly one: bare digits, before the prompt is composed.** See "the orchestrate and Jira spawn prompts are composed server-side" and
 "`isItemId` accepts three shapes" for why that normalisation is the load-bearing half: the prompt is the one composition that concatenates caller text,
 `orchestrate.mjs` reads its argv as tokens, and SKILL.md substitutes those tokens into fenced shell commands where `#` opens a comment.
 

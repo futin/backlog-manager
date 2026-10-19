@@ -1,5 +1,8 @@
+import { HttpException } from '@nestjs/common';
+
+import type { JiraIssueWriteResult } from '../../../shared/types';
 import { jiraHttpError } from './errors.util';
-import type { JiraResult } from './poller.service';
+import type { JiraIssueWriteOutcome, JiraResult } from './poller.service';
 
 /**
  * The value of a poller outcome, or the §8 error for its failure — `retryAt` handed through verbatim so a refused call never slides the 429 window, and
@@ -10,4 +13,18 @@ import type { JiraResult } from './poller.service';
 export function unwrapJira<T>(result: JiraResult<T>): T {
   if (result.ok) return result.value;
   throw jiraHttpError(result.response, { retryAt: result.retryAt, access: result.access });
+}
+
+/**
+ * An issue write's outcome (`assignToMe` / `transitionIssue`) as a value or an error: the poller's two own refusals first — `no identity` a 503 (a state that
+ * heals on the next successful `myself`), `transition not offered` a 400 (the caller's id is wrong, and Jira was never asked to judge it) — then every other
+ * failure through `unwrapJira`. Hoisted out of `jira-write.controller.ts` so the two write routes and `POST /api/agents/dispatch-jira`, which makes the same two
+ * writes, answer them in the same words and statuses; the dispatch route then prefixes the step's name onto whatever this throws.
+ */
+export function jiraWriteOrThrow(outcome: JiraIssueWriteOutcome): JiraIssueWriteResult {
+  if ('refusal' in outcome) {
+    if (outcome.refusal === 'no identity') throw new HttpException({ error: 'no identity' }, 503);
+    throw new HttpException({ error: 'transition not offered' }, 400);
+  }
+  return unwrapJira(outcome);
 }
