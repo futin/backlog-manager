@@ -40,7 +40,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
   `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the read routes under
   `/api/jira`, and — since Jira phase 2 — `jira.json`'s three guarded write routes, `POST /api/jira/boards`, `/boards/delete` and `/repos`, in
-  `jira-write.controller.ts`, → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three —
+  `jira-write.controller.ts`, beside the two writes to Jira itself that phase 3 added, `POST /api/jira/issue/assign` and `/issue/transition`,
+  → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three —
   `orchestrator/` (a read-only view of the run-state directory, plus the
   in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (#249 — three read-only
   Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's
@@ -107,7 +108,7 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-strips-height-and-the-wells-gap-are-one-token)
 - **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
   the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the nine routes
-  below — never a file, on any path.
+  below — never a file, on any path — **and a Jira issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`.**
 - **The nine `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-nine-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
@@ -136,6 +137,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   time.** Why: [invariants.md](docs/subsystems/invariants.md#jiras-done-column-is-a-window-not-a-store)
 - **Every value the server puts into JQL — a key or the search term — is quoted and escaped, and a person's JQL is passed verbatim for Jira to parse.**
   Why: [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
+- **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,

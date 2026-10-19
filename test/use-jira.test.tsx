@@ -286,8 +286,8 @@ let boardFetch: jest.Mock;
 const boardUrl = (id: string): string => `/api/jira/boards/${id}/issues`;
 const listFor = (id: string) => ({ issues: [issue(`${id.toUpperCase()}-1`)], polledAt: new Date(Date.now() - 2_000).toISOString() });
 
-function BoardProbe({ id, interval }: { id: string | null; interval: SyncInterval | null }) {
-  const { issues, polledAt, loading, error, reload } = useJiraBoard(id, interval);
+function BoardProbe({ id, interval, nudge = 0 }: { id: string | null; interval: SyncInterval | null; nudge?: number }) {
+  const { issues, polledAt, loading, error, reload } = useJiraBoard(id, interval, nudge);
   return (
     <div>
       <span data-testid="b">{`${issues.map((i) => i.key).join(',') || 'empty'}|${polledAt === null ? 'null' : 'stamp'}|${loading}|${error}`}</span>
@@ -370,6 +370,26 @@ describe('useJiraBoard', () => {
     });
     await flush();
     expect(boardFetch).toHaveBeenCalledTimes(2);
+  });
+
+  // Jira phase 3, ruling R7: the modal's landed write bumps a counter `JiraView` owns, and the board re-reads at once — `off` included, because a board
+  // that never polls would otherwise never show the write at all (spec §6.1).
+  it('re-reads at once when nudge changes, even with interval off', async () => {
+    const { rerender } = render(<BoardProbe id="b_1" interval="off" nudge={0} />);
+    await flush();
+    expect(boardFetch).toHaveBeenCalledTimes(1);
+    rerender(<BoardProbe id="b_1" interval="off" nudge={1} />);
+    await flush();
+    expect(boardFetch).toHaveBeenCalledTimes(2);
+    expect(boardFetch).toHaveBeenLastCalledWith(boardUrl('b_1'));
+  });
+
+  it('fetches nothing for a re-render that leaves nudge where it was', async () => {
+    const { rerender } = render(<BoardProbe id="b_1" interval="off" nudge={3} />);
+    await flush();
+    rerender(<BoardProbe id="b_1" interval="off" nudge={3} />);
+    await flush();
+    expect(boardFetch).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the last list and raises error on a failed poll', async () => {

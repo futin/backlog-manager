@@ -107,6 +107,45 @@ describe('what each method puts on the wire', () => {
     expect(fake.calls[4].body).toEqual({ jql: 'project = PAY' });
   });
 
+  it('assign PUTs the accountId to the assignee path as JSON, and a 204 is a null-data success', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    const out = await client.assign(auth, 'PAY-1', 'acc-1');
+    expect(out).toEqual({ status: 204, data: null, message: null, retryAfter: null });
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].method).toBe('PUT');
+    expect(fake.calls[0].url).toBe(`${GATEWAY}/issue/PAY-1/assignee`);
+    expect(fake.calls[0].headers).toMatchObject({ authorization: BASIC, 'content-type': 'application/json' });
+    expect(fake.calls[0].body).toEqual({ accountId: 'acc-1' });
+  });
+
+  it('transition POSTs { transition: { id } } to the transitions path, and a 204 is a null-data success', async () => {
+    const { fake, client } = build();
+    fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
+    fake.transitions.set('PAY-1', [{ id: '31', name: 'Done', to: { name: 'Done', statusCategory: { key: 'done' } } }]);
+    const out = await client.transition(auth, 'PAY-1', '31');
+    expect(out).toEqual({ status: 204, data: null, message: null, retryAfter: null });
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].method).toBe('POST');
+    expect(fake.calls[0].url).toBe(`${GATEWAY}/issue/PAY-1/transitions`);
+    expect(fake.calls[0].headers).toMatchObject({ authorization: BASIC, 'content-type': 'application/json' });
+    expect(fake.calls[0].body).toEqual({ transition: { id: '31' } });
+  });
+
+  it('a 400 on either write reads Jira\'s own sentence as message', async () => {
+    const { fake, client } = build();
+    fake.failNext = () => ({ status: 400, body: { errorMessages: ['User cannot be assigned'], errors: {} } });
+    expect(await client.assign(auth, 'PAY-1', 'acc-1')).toEqual({ status: 400, data: null, message: 'User cannot be assigned', retryAfter: null });
+    expect(await client.transition(auth, 'PAY-1', '31')).toEqual({ status: 400, data: null, message: 'User cannot be assigned', retryAfter: null });
+  });
+
+  it('encodes a key with a character encodeURIComponent changes, on both writes', async () => {
+    const { fake, client } = build();
+    await client.assign(auth, 'A/B 1', 'acc-1');
+    await client.transition(auth, 'A/B 1', '31');
+    expect(fake.calls.map((c) => `${c.method} ${c.url}`)).toEqual([`PUT ${GATEWAY}/issue/A%2FB%201/assignee`, `POST ${GATEWAY}/issue/A%2FB%201/transitions`]);
+  });
+
   it('never leaks the token, its base64 or the email outside an authorization header', async () => {
     const { fake, client } = build();
     fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1' }));
@@ -485,6 +524,69 @@ describe('FakeJira', () => {
     expect((await client.transitions(auth, 'PAY-1')).data).toEqual({
       transitions: [{ id: '31', name: 'Done', to: { name: 'Done', statusCategory: { key: 'done' } } }]
     });
+  });
+
+  it('assignee PUT: 404 for an unseeded key, 400 for an id that is not me, else assigns me, 204, and stamps updated', async () => {
+    const { fake, client } = seeded();
+    expect(await client.assign(auth, 'ZZZ-1', fake.me.accountId)).toMatchObject({ status: 404, message: 'Issue does not exist' });
+    expect(await client.assign(auth, 'PAY-1', 'someone-else')).toMatchObject({ status: 400, message: "User 'someone-else' cannot be assigned issues." });
+    expect(fake.issues.get('PAY-1')!.fields.assignee).toBeNull();
+    const before = fake.issues.get('PAY-1')!.fields.updated;
+    const out = await client.assign(auth, 'PAY-1', fake.me.accountId);
+    expect(out.status).toBe(204);
+    const fields = fake.issues.get('PAY-1')!.fields;
+    expect(fields.assignee).toEqual({ accountId: fake.me.accountId, displayName: fake.me.displayName });
+    // A refused write leaves `updated` alone; the successful one moves it to now, which is what the poller's newest-wins cases rely on.
+    expect(Date.parse(fields.updated as string)).toBeGreaterThan(Date.parse(before as string));
+  });
+
+  it('transitions POST: 404 for an unseeded key, 400 for an id not offered, else moves the status, 204, and stamps updated', async () => {
+    const { fake, client } = seeded();
+    fake.transitions.set('PAY-1', [
+      { id: '21', name: 'Start', to: { name: 'In Progress', statusCategory: { key: 'indeterminate' } } },
+      { id: '31', name: 'Done', to: { name: 'Done', statusCategory: { key: 'done' } } }
+    ]);
+    expect(await client.transition(auth, 'ZZZ-1', '31')).toMatchObject({ status: 404, message: 'Issue does not exist' });
+    expect(await client.transition(auth, 'PAY-1', '99')).toMatchObject({ status: 400, message: "Transition id '99' is not valid for this issue." });
+    expect(await client.transition(auth, 'PAY-2', '31')).toMatchObject({ status: 400, message: "Transition id '31' is not valid for this issue." });
+    expect(fake.issues.get('PAY-1')!.fields.status).toEqual({ name: 'To Do', statusCategory: { key: 'new' } });
+
+    const before = fake.issues.get('PAY-1')!.fields.updated;
+    expect((await client.transition(auth, 'PAY-1', '21')).status).toBe(204);
+    let fields = fake.issues.get('PAY-1')!.fields;
+    expect(fields.status).toEqual({ name: 'In Progress', statusCategory: { key: 'indeterminate' } });
+    expect(fields.resolutiondate).toBeNull();
+    expect(Date.parse(fields.updated as string)).toBeGreaterThan(Date.parse(before as string));
+
+    expect((await client.transition(auth, 'PAY-1', '31')).status).toBe(204);
+    fields = fake.issues.get('PAY-1')!.fields;
+    expect(fields.status).toEqual({ name: 'Done', statusCategory: { key: 'done' } });
+    expect(typeof fields.resolutiondate).toBe('string');
+  });
+
+  it('both writes honour failNext, failWith, unauthorized and rateLimit before they touch an issue', async () => {
+    const { fake, client } = seeded();
+    fake.transitions.set('PAY-1', [{ id: '31', name: 'Done', to: { name: 'Done', statusCategory: { key: 'done' } } }]);
+    const writes = () => [client.assign(auth, 'PAY-1', fake.me.accountId), client.transition(auth, 'PAY-1', '31')];
+
+    fake.failNext = () => ({ status: 502, body: { errorMessages: ['boom'], errors: {} } });
+    for (const w of writes()) expect(await w).toMatchObject({ status: 502, message: 'boom' });
+    fake.failNext = () => 'transport';
+    for (const w of writes()) expect((await w).status).toBe(0);
+    fake.failNext = null;
+    fake.failWith = 503;
+    for (const w of writes()) expect((await w).status).toBe(503);
+    fake.failWith = null;
+    fake.unauthorized = true;
+    for (const w of writes()) expect((await w).status).toBe(401);
+    fake.unauthorized = false;
+    fake.rateLimit = { retryAfter: 30 };
+    for (const w of writes()) expect(await w).toMatchObject({ status: 429, retryAfter: 30 });
+    fake.rateLimit = null;
+
+    // None of the refusals above reached the issue.
+    expect(fake.issues.get('PAY-1')!.fields.assignee).toBeNull();
+    expect(fake.issues.get('PAY-1')!.fields.status).toEqual({ name: 'To Do', statusCategory: { key: 'new' } });
   });
 
   it('pages project/search by startAt', async () => {

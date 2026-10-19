@@ -179,7 +179,7 @@ function renderPage(): void {
   onOpenJiraPage = jest.fn();
   render(
     <JiraProvider>
-      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={onOpenIssue} />
+      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={onOpenIssue} nudge={0} />
     </JiraProvider>
   );
 }
@@ -435,7 +435,7 @@ describe('the shapes that are not a board', () => {
     onOpenIssue = jest.fn();
     render(
       <JiraProvider>
-        <JiraBoardView onOpenJiraPage={setJiraPage} onOpenIssue={onOpenIssue} />
+        <JiraBoardView onOpenJiraPage={setJiraPage} onOpenIssue={onOpenIssue} nudge={0} />
       </JiraProvider>
     );
     await screen.findByText('No boards yet');

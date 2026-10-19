@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -18,8 +18,9 @@ import type { JiraBoardStatus, JiraIssue, JiraIssueDetail, JiraStatusPayload } f
   Jira › the issue modal (Jira phase 2; spec §6.3 minus its controls; DESIGN.md §8.9.2) — the real modal over a mocked `fetch`. It composes `ui/Modal`, so the
   scrim, the close control and the Escape key are the shell's and are asserted here only as far as "this surface still gets them". What it owns: the facts
   column (drawn from the CARD's issue while the detail loads, and kept when the read fails), the description through the sanitising renderer, the Children
-  tree (grouped-board spec §6) and its row swap inside the one modal, and the absence of every control. Fixture stamps are relative to the clock the
-  assertion runs under (`test/helpers/dates.ts`).
+  tree (grouped-board spec §6) and its row swap inside the one modal, and — since Jira phase 3 — the controls row: `Assign to me` and `Move to…`, posting
+  through `/api/jira/issue/*`, one write at a time, re-reading the detail after a landed one (R8) and nudging the board (R7). Fixture stamps are relative
+  to the clock the assertion runs under (`test/helpers/dates.ts`).
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
@@ -83,6 +84,10 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
 
 let urls: string[];
 let answer: () => Response | Promise<Response>;
+/** Every request with its init, POSTs included — `urls` keeps its phase 2 meaning for the reads, and the writes are asserted from here. */
+let calls: { url: string; init?: RequestInit }[];
+/** What a POST answers. The default is the routes' own 200 (`JiraIssueWriteResult`). */
+let post: (url: string) => Response | Promise<Response>;
 
 function json(body: unknown, init: { status?: number } = {}): Response {
   const status = init.status ?? 200;
@@ -91,16 +96,46 @@ function json(body: unknown, init: { status?: number } = {}): Response {
 }
 
 let onOpenIssue: jest.Mock;
+let reload: jest.Mock;
+let onWrote: jest.Mock;
 
 function mount(
   opts: { status?: Partial<JiraStatusPayload>; issue?: JiraIssue; onClose?: () => void; childrenOf?: JiraChildrenIndex | null; onOpenIssue?: jest.Mock } = {}
 ) {
   onOpenIssue = opts.onOpenIssue ?? jest.fn();
+  reload = jest.fn();
+  onWrote = jest.fn();
   return render(
-    <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload: () => {} }}>
-      <JiraIssueModal issue={opts.issue ?? CARD} childrenOf={opts.childrenOf ?? null} onOpenIssue={onOpenIssue} onClose={opts.onClose ?? (() => {})} />
+    <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload }}>
+      <JiraIssueModal
+        issue={opts.issue ?? CARD}
+        childrenOf={opts.childrenOf ?? null}
+        onOpenIssue={onOpenIssue}
+        onWrote={onWrote}
+        onClose={opts.onClose ?? (() => {})}
+      />
     </JiraContext.Provider>
   );
+}
+
+/** The POSTs sent so far, in order. */
+const posts = (): { url: string; init?: RequestInit }[] => calls.filter((c) => c.init?.method === 'POST');
+/** How many times one issue's detail was read. */
+const reads = (key: string, from: readonly string[] = urls): number => from.filter((u) => u === `/api/jira/issue/${key}`).length;
+const assignChip = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Assign to me' });
+const moveSelect = (): HTMLSelectElement => within(screen.getByRole('dialog')).getByRole('combobox', { name: 'Move to' });
+/** Neither assigned to `me` (ADA) nor anyone: the case every Assign click mounts, since the default CARD is ADA's own. */
+const UNASSIGNED: JiraIssue = { ...CARD, assignee: null };
+const TRANSITIONS: JiraIssueDetail['transitions'] = [
+  { id: '31', name: 'Start', to: { name: 'In Progress', category: 'indeterminate' } },
+  { id: '41', name: 'Done', to: { name: 'Done', category: 'done' } }
+];
+
+/** A promise and its resolver, for a request held open across a step. */
+function held(): { promise: Promise<Response>; release: (r: Response) => void } {
+  let release: (r: Response) => void = () => {};
+  const promise = new Promise<Response>((resolve) => (release = resolve));
+  return { promise, release };
 }
 
 /** A child of the open issue: CARD with its own key, summary, status category and parent. */
@@ -127,8 +162,12 @@ function fact(label: string): HTMLElement | null {
 
 beforeEach(() => {
   urls = [];
+  calls = [];
   answer = () => json(detail());
-  global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+  post = () => json({ ok: true, reread: true });
+  global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    if (init?.method === 'POST') return post(String(input));
     urls.push(String(input));
     return answer();
   }) as unknown as typeof fetch;
@@ -329,7 +368,7 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
     const other: JiraIssue = { ...CARD, key: 'PAY-9', summary: 'Another' };
     view.rerender(
       <JiraContext.Provider value={{ data: status(), loading: false, error: false, reload: () => {} }}>
-        <JiraIssueModal issue={other} childrenOf={null} onOpenIssue={jest.fn()} onClose={() => {}} />
+        <JiraIssueModal issue={other} childrenOf={null} onOpenIssue={jest.fn()} onWrote={jest.fn()} onClose={() => {}} />
       </JiraContext.Provider>
     );
 
@@ -340,15 +379,180 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
   });
 });
 
-describe('JiraIssueModal — phase 2 has no controls', () => {
-  it('draws no Assign to me, Move to, Run or Stop session', async () => {
+describe('JiraIssueModal — phase 5 is not here yet', () => {
+  it('draws no Run or Stop session, and no session fact', async () => {
     mount();
     await screen.findByText('not');
     const dialog = screen.getByRole('dialog');
-    for (const name of [/assign to me/i, /move to/i, /^run/i, /stop session/i]) {
+    for (const name of [/^run/i, /stop session/i]) {
       expect(within(dialog).queryByRole('button', { name })).toBeNull();
     }
     expect(fact('session')).toBeNull();
+  });
+});
+
+describe('JiraIssueModal — Assign to me and Move to… (Jira phase 3)', () => {
+  it('posts the assign as JSON with the key alone, then reloads the status, nudges the board and re-reads the detail', async () => {
+    answer = () => json(detail({ assignee: null }));
+    mount({ issue: UNASSIGNED });
+    await screen.findByText('not');
+
+    await userEvent.click(assignChip());
+    await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
+    expect(posts()).toHaveLength(1);
+    const [{ url, init }] = posts();
+    expect(url).toBe('/api/jira/issue/assign');
+    expect(init?.method).toBe('POST');
+    expect((init?.headers as Record<string, string>)['content-type']).toBe('application/json');
+    expect(init?.body).toBe('{"key":"PAY-131"}');
+    expect(reload).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(reads('PAY-131')).toBe(2));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says why Assign is disabled: no identity, or already yours', async () => {
+    const view = mount({ status: { me: null }, issue: UNASSIGNED });
+    answer = () => json(detail({ assignee: null }));
+    await screen.findByText('not');
+    expect(assignChip()).toBeDisabled();
+    expect(assignChip()).toHaveAttribute('title', 'no identity');
+    view.unmount();
+
+    answer = () => json(detail());
+    mount();
+    await screen.findByText('not');
+    expect(assignChip()).toBeDisabled();
+    expect(assignChip()).toHaveAttribute('title', 'already assigned to you');
+  });
+
+  it('lists the offered transitions, naming the target only when it differs, and a pick posts at once and returns to Move to…', async () => {
+    answer = () => json(detail({ transitions: TRANSITIONS }));
+    mount();
+    await screen.findByText('not');
+    const select = moveSelect();
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Move to…', 'Start → In Progress', 'Done']);
+
+    await userEvent.selectOptions(select, '41');
+    await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
+    expect(posts().map((c) => [c.url, c.init?.body])).toEqual([['/api/jira/issue/transition', '{"key":"PAY-131","transitionId":"41"}']]);
+    expect(moveSelect()).toHaveDisplayValue('Move to…');
+  });
+
+  it('disables Move while the detail is in flight, and with transitions unavailable once it failed — Assign stays usable', async () => {
+    const slow = held();
+    answer = () => slow.promise;
+    const view = mount({ issue: UNASSIGNED });
+    expect(moveSelect()).toBeDisabled();
+    expect(moveSelect()).not.toHaveAttribute('title');
+    view.unmount();
+
+    answer = () => json({ error: 'Jira unreachable: timeout' }, { status: 502 });
+    mount({ issue: UNASSIGNED });
+    await screen.findByText('could not read the ticket — Jira unreachable: timeout');
+    expect(moveSelect()).toBeDisabled();
+    expect(moveSelect()).toHaveAttribute('title', 'transitions unavailable');
+    expect(assignChip()).toBeEnabled();
+  });
+
+  it('disables Move for a detail that offers no transition', async () => {
+    mount();
+    await screen.findByText('not');
+    expect(moveSelect()).toBeDisabled();
+  });
+
+  it("draws a refusal's own sentence in an alert, keeps the modal open and both controls usable, and nudges nothing", async () => {
+    answer = () => json(detail({ assignee: null, transitions: TRANSITIONS }));
+    post = () => json({ error: 'Jira refused: User cannot be assigned' }, { status: 409 });
+    mount({ issue: UNASSIGNED });
+    await screen.findByText('not');
+
+    await userEvent.click(assignChip());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Jira refused: User cannot be assigned');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(assignChip()).toBeEnabled();
+    expect(moveSelect()).toBeEnabled();
+    expect(onWrote).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+    expect(reads('PAY-131')).toBe(1);
+  });
+
+  it("falls back to HTTP <status>, then to the network's message, and the next write clears the line", async () => {
+    answer = () => json(detail({ assignee: null }));
+    post = () => ({ ok: false, status: 502, json: () => Promise.reject(new SyntaxError('not JSON')) }) as unknown as Response;
+    mount({ issue: UNASSIGNED });
+    await screen.findByText('not');
+
+    await userEvent.click(assignChip());
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 502');
+
+    const dropped = held();
+    post = () => dropped.promise;
+    await userEvent.click(assignChip());
+    // Cleared the moment the next write leaves, not when it settles: the line describes the last attempt, and that one is still out.
+    expect(screen.queryByRole('alert')).toBeNull();
+    post = () => Promise.reject(new TypeError('Failed to fetch'));
+    await act(async () => dropped.release(json({ ok: true, reread: true })));
+    await userEvent.click(assignChip());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch');
+  });
+
+  // Review Focus 1: the guard is a ref, so two clicks dispatched before React re-renders — both inside one act — cannot both pass a `disabled` that has
+  // not been painted yet. A state-only guard sends three POSTs here.
+  it('sends exactly one POST for a double click and a Move pick while that write is out', async () => {
+    answer = () => json(detail({ assignee: null, transitions: TRANSITIONS }));
+    const out = held();
+    post = () => out.promise;
+    mount({ issue: UNASSIGNED });
+    await screen.findByText('not');
+
+    act(() => {
+      assignChip().click();
+      assignChip().click();
+      fireEvent.change(moveSelect(), { target: { value: '41' } });
+    });
+    expect(posts()).toHaveLength(1);
+    expect(assignChip()).toBeDisabled();
+    expect(moveSelect()).toBeDisabled();
+    fireEvent.change(moveSelect(), { target: { value: '31' } });
+    expect(posts()).toHaveLength(1);
+
+    await act(async () => out.release(json({ ok: true, reread: true })));
+    await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
+    expect(posts()).toHaveLength(1);
+  });
+
+  // Ruling R8: the re-read after a write is a refresh, not a reopen — the last detail of the same key stays on screen while it is out.
+  it('keeps the description on screen, with no loading line, while the re-read after a write is out', async () => {
+    let n = 0;
+    const reread = held();
+    answer = () => (++n === 1 ? json(detail({ assignee: null })) : reread.promise);
+    mount({ issue: UNASSIGNED });
+    await screen.findByText('not');
+
+    await userEvent.click(assignChip());
+    await waitFor(() => expect(reads('PAY-131')).toBe(2));
+    expect(screen.getByText('not')).toBeInTheDocument();
+    expect(screen.queryByText('loading…')).toBeNull();
+
+    await act(async () => reread.release(json(detail({ assignee: ADA, description: 'Now **assigned**.' }))));
+    expect(await screen.findByText('assigned')).toBeInTheDocument();
+    expect(fact('assignee · reporter')).toHaveTextContent('Ada Lovelace · Grace Hopper');
+    expect(assignChip()).toHaveAttribute('title', 'already assigned to you');
+  });
+
+  // Review Focus 5's client half: `reread: false` says the SERVER's re-read failed after the write landed. That is a 200 and the write stood — no alert,
+  // the board still nudged, and the modal's own re-read still goes out.
+  it('treats a landed write whose server re-read failed as a success', async () => {
+    answer = () => json(detail({ assignee: null }));
+    post = () => json({ ok: true, reread: false });
+    mount({ issue: UNASSIGNED });
+    await screen.findByText('not');
+
+    await userEvent.click(assignChip());
+    await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
+    expect(reload).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(reads('PAY-131')).toBe(2));
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 
@@ -411,14 +615,18 @@ describe('JiraView — the open-issue slot draws the modal', () => {
   const G_170 = groupIssue('PAY-170', 'Payout story', 'done', 'PAY-120', STORY, 6);
   const GROUP = [G_120, G_160, G_161, G_162, G_170];
 
-  /** JiraView over GROUP, each issue's detail answered by its URL; returns the URLs requested. */
-  function mountView(details: Record<string, Partial<JiraIssueDetail>>): string[] {
+  /** JiraView over GROUP, each issue's detail answered by its URL; returns the URLs requested. A POST is answered by `onPost`, and is not in the list. */
+  function mountView(
+    details: Record<string, Partial<JiraIssueDetail>>,
+    onPost: () => Promise<Response> = async () => json({ ok: true, reread: true })
+  ): string[] {
     window.localStorage.clear();
     setJiraPage('board');
     const board = status();
     const requested: string[] = [];
-    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+    global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (init?.method === 'POST') return onPost();
       requested.push(url);
       const key = url.match(/^\/api\/jira\/issue\/([^/?]+)/)?.[1];
       if (key !== undefined) {
@@ -469,6 +677,46 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Children' })).toBeNull());
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  // Review Focus 2: the write is stamped with the key it was sent for. Swapped to a child while it is out, the late answer neither draws its refusal on the
+  // child nor re-reads the parent's detail into a modal that no longer shows it.
+  it('drops a late refusal for the issue the modal has since swapped away from', async () => {
+    const out = held();
+    const requested = mountView({ 'PAY-120': { children: [G_160, G_170], assignee: null } }, () => out.promise);
+    await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
+    await screen.findByRole('heading', { name: 'Children' });
+    await waitFor(() => expect(assignChip()).toBeEnabled());
+
+    await userEvent.click(assignChip());
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-160/ }));
+    await screen.findByRole('dialog', { name: 'PAY-160 Ledger story' });
+    const before = reads('PAY-120', requested);
+
+    await act(async () => out.release(json({ error: 'Jira refused: User cannot be assigned' }, { status: 409 })));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(reads('PAY-120', requested)).toBe(before);
+  });
+
+  it("re-reads nothing of the old key after a swap, but a landed write still nudges the board's list", async () => {
+    const out = held();
+    const requested = mountView({ 'PAY-120': { children: [G_160, G_170], assignee: null } }, () => out.promise);
+    await userEvent.click(await screen.findByRole('button', { name: /Payments epic/ }));
+    await screen.findByRole('heading', { name: 'Children' });
+    await waitFor(() => expect(assignChip()).toBeEnabled());
+
+    await userEvent.click(assignChip());
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /PAY-160/ }));
+    await screen.findByRole('dialog', { name: 'PAY-160 Ledger story' });
+    const before = reads('PAY-120', requested);
+    const lists = (): number => requested.filter((u) => u.includes('/issues')).length;
+    const listsBefore = lists();
+
+    await act(async () => out.release(json({ ok: true, reread: true })));
+    await waitFor(() => expect(lists()).toBe(listsBefore + 1));
+    expect(reads('PAY-120', requested)).toBe(before);
+    expect(reads('PAY-160', requested)).toBe(1);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('does not bring the modal back for an issue the reader left on when the page returns to Board', async () => {
