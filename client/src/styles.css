@@ -2719,12 +2719,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    `--uk-chip-bg` is the rail's recessed `--steel` well, mapped so the pill follows each palette rather than showing the kit's light default on a dark rail.
    `--uk-zoom` is `--font-scale`: the drawer renders inside `.shell`, whose `zoom` leaves `100dvh` and `100vw` meaning the unzoomed screen, so the kit divides its
    height and width by it — undivided, the panel overhangs the screen by the text scale. These two, with the rest of this block, are all an app may set: every
-   shape, size and the phone layout are ui-kit's, so the chip and drawer match the other two apps (guarded by `test/ui-kit-guard.test.ts`). `--uk-ink-muted` stays
-   on `--ink3`; whether the pill reads too faint against `--steel` in daylight, and so wants `--ink2`, is a by-eye call. */
+   shape, size and the phone layout are ui-kit's, so the chip and drawer match the other two apps (guarded by `test/ui-kit-guard.test.ts`). `--uk-ink-muted` is
+   `--ink2`, as in the other two apps: the chip draws its 12 px label in it on `--steel`, where `--ink3` measured 3.5–3.9:1 on the four dark themes and
+   `--ink2` 6.7–8.0:1 on all five. */
 :root {
   --uk-panel-bg: var(--strip);
   --uk-ink: var(--ink);
-  --uk-ink-muted: var(--ink3);
+  --uk-ink-muted: var(--ink2);
   --uk-hairline: var(--hairline);
   --uk-scrim: var(--scrim);
   --uk-shadow: var(--shadow2);
