@@ -12,9 +12,10 @@ import { daysAgoStamp } from './helpers/dates';
 import type { AgentsStatus, JiraAction, JiraDispatchResult, JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../shared/types';
 
 /*
-  Jira › the launch sheet (Jira phase 5, Task 9; spec §7, §8; DESIGN.md §8.7 Sheet and §8.9) — the real sheet over a mocked `fetch`, rendered directly: the
-  sheet is not mounted anywhere yet (Task 10 hosts it in `JiraBoardView`). What it owns: the action and the preview that follows it, the repository, the two
-  Jira writes Start may ask for, the launch controls, the gate that decides whether Start is drawn at all, and the two exits — Start and Copy prompt.
+  Jira › the launch sheet (Jira phase 5, Task 9; spec §7, §8; DESIGN.md §8.7 Sheet and §8.9) — the real sheet over a mocked `fetch`, rendered directly:
+  the sheet is not mounted anywhere yet (Task 10 hosts it in `JiraBoardView`). What it owns: the action and the preview that follows it, the repository,
+  the two Jira writes Start may ask for, the launch controls, the gate that decides whether Start is drawn at all, and the two exits — Start and Copy
+  prompt.
 */
 
 const ADA = { accountId: 'acc-ada', name: 'Ada Lovelace' };
@@ -88,12 +89,17 @@ interface Server {
   detail: JiraIssueDetail | { status: number; error: string };
   prompt: (url: URL) => { status: number; body: string };
   dispatch: { status: number; body: unknown };
+  /** When set, the detail read answers only once this settles — a case's way to act before the detail lands. */
+  detailGate?: Promise<void>;
 }
 
 let server: Server;
 let calls: { url: string; init?: RequestInit }[];
 
-const okPrompt = (url: URL): { status: number; body: string } => ({ status: 200, body: `prompt for ${url.searchParams.get('action')} in ${url.searchParams.get('repo')}` });
+const okPrompt = (url: URL): { status: number; body: string } => ({
+  status: 200,
+  body: `prompt for ${url.searchParams.get('action')} in ${url.searchParams.get('repo')}`
+});
 
 function res(status: number, body: unknown, text?: string): Response {
   // A plain object, not `new Response`: jsdom has none (the other jira suites' mocks are this shape too).
@@ -114,7 +120,15 @@ beforeEach(() => {
     agents: agents(),
     detail: detail(),
     prompt: okPrompt,
-    dispatch: { status: 200, body: { sessionId: 'sess-9', assigned: false, transitioned: null, session: { name: 'jira PAY-131', startedAt: daysAgoStamp(0), repo: '/Users/ada/pay' } } satisfies JiraDispatchResult }
+    dispatch: {
+      status: 200,
+      body: {
+        sessionId: 'sess-9',
+        assigned: false,
+        transitioned: null,
+        session: { name: 'jira PAY-131', startedAt: daysAgoStamp(0), repo: '/Users/ada/pay' }
+      } satisfies JiraDispatchResult
+    }
   };
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const raw = String(input);
@@ -127,7 +141,8 @@ beforeEach(() => {
     }
     if (url.pathname.startsWith('/api/jira/issue/')) {
       const d = server.detail;
-      return Promise.resolve('error' in d ? res(d.status, { error: d.error }) : res(200, d));
+      const answer = 'error' in d ? res(d.status, { error: d.error }) : res(200, d);
+      return server.detailGate ? server.detailGate.then(() => answer) : Promise.resolve(answer);
     }
     if (url.pathname === '/api/agents/dispatch-jira') return Promise.resolve(res(server.dispatch.status, server.dispatch.body));
     return Promise.reject(new Error(`unexpected ${raw}`));
@@ -150,13 +165,16 @@ let onStarted: jest.Mock;
 function mount(opts: { initialAction?: JiraAction | null; status?: Partial<JiraStatusPayload>; issue?: JiraIssue } = {}) {
   onClose = jest.fn();
   onStarted = jest.fn();
-  return render(
+  const tree = (status?: Partial<JiraStatusPayload>) => (
     <SettingsProvider>
-      <JiraContext.Provider value={{ data: jiraStatus(opts.status), loading: false, error: false, reload: jest.fn() }}>
+      <JiraContext.Provider value={{ data: jiraStatus(status), loading: false, error: false, reload: jest.fn() }}>
         <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? null} onClose={onClose} onStarted={onStarted} />
       </JiraContext.Provider>
     </SettingsProvider>
   );
+  const view = render(tree(opts.status));
+  /** The shell's status landing after the sheet is open — the same sheet, a new context value. */
+  return { ...view, withStatus: (status: Partial<JiraStatusPayload>) => view.rerender(tree(status)) };
 }
 
 const dialog = (): HTMLElement => screen.getByRole('dialog');
@@ -188,6 +206,22 @@ describe('JiraLaunchSheet — the gate', () => {
     await waitFor(() => expect(startButton()).toBeInTheDocument());
   });
 
+  it('draws no Start with agents off while several paths are mapped and none is picked, and keeps Copy prompt', async () => {
+    server.agents = agents({ enabled: false });
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    mount({ status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } } });
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/status')).toBe(true));
+    await within(dialog()).findByRole('combobox', { name: 'Repository' });
+    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
+    expect(copyButton()).toBeInTheDocument();
+  });
+
+  it('disables Start with the choose-a-repository reason while agents are on, several paths are mapped and none is picked', async () => {
+    mount({ status: { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } } });
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    expect(startButton()).toHaveAttribute('title', expect.stringContaining('choose a repository'));
+  });
+
   it('disables Start with the gate\'s reason as its title when the dashboard does not list the repository', async () => {
     server.agents = agents({ projectPaths: [] });
     await ready();
@@ -202,6 +236,16 @@ describe('JiraLaunchSheet — the repository', () => {
     expect(within(dialog()).getByText('~/pay')).toBeInTheDocument();
     expect(within(dialog()).queryByRole('combobox', { name: 'Repository' })).not.toBeInTheDocument();
     expect(promptReads()[0].searchParams.get('repo')).toBe('/Users/ada/pay');
+  });
+
+  it('preselects a single mapped path whose mapping arrives after the sheet is open', async () => {
+    const view = mount({ status: { repos: {} } });
+    expect(within(dialog()).queryByText('~/pay')).not.toBeInTheDocument();
+    expect(promptReads()).toHaveLength(0);
+    view.withStatus({ repos: { PAY: ['/Users/ada/pay'] } });
+    await waitFor(() => expect(promptBox().value).toBe('prompt for execute in /Users/ada/pay'));
+    expect(promptReads()[0].searchParams.get('repo')).toBe('/Users/ada/pay');
+    await waitFor(() => expect(startButton()).toBeEnabled());
   });
 
   it('offers a select for two paths and previews nothing until one is picked', async () => {
@@ -284,6 +328,21 @@ describe('JiraLaunchSheet — assign and move', () => {
     await ready({ status: { me: null } });
     expect(assign()).toBeDisabled();
     expect(assign()).toHaveAttribute('title', expect.stringMatching(/identity/));
+  });
+
+  it('sends assign false when the detail lands as already mine after the switch was toggled', async () => {
+    let land: () => void = () => undefined;
+    server.detailGate = new Promise<void>((resolve) => (land = resolve));
+    server.detail = detail({ assignee: ADA });
+    await ready();
+    await userEvent.click(assign());
+    expect(assign()).toBeChecked();
+    land();
+    await waitFor(() => expect(assign()).toBeDisabled());
+    expect(assign()).not.toBeChecked();
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody().assign).toBe(false);
   });
 
   it('names Move to like the modal does — by the status landed in — with leave as is first', async () => {

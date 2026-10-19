@@ -6,7 +6,15 @@ import { useAgents } from '../../hooks/useAgents';
 import { useFetched } from '../../hooks/useFetched';
 import { useSettings } from '../../hooks/useSettings';
 import { EFFORT_OPTIONS, MODEL_OPTIONS, modelEffortFlags, sessionUrl } from '../../lib/agents';
-import { defaultModeFor, displayPath, dispatchJira, fetchJiraDetail, fetchJiraPrompt, resolveJiraAction, transitionOptions } from '../../lib/jira';
+import {
+  defaultModeFor,
+  displayPath,
+  dispatchJira,
+  fetchJiraDetail,
+  fetchJiraPrompt,
+  resolveJiraAction,
+  transitionOptions
+} from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, jiraActionParam } from '../../../../shared/types';
 import type { JiraAction, JiraDispatchResult, JiraIssue, PermissionMode } from '../../../../shared/types';
@@ -16,11 +24,11 @@ import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 
 /**
- * JiraLaunchSheet — the one extra tap between a ticket and a running Claude (Jira phase 5, spec §7; DESIGN.md §8.7 Sheet, §8.9 — the board's `LaunchSheet`
- * is its sibling and this mirrors its shape). Dispatch is not a read: an `execute` launch edits code in another repo with no human at a terminal, so the
- * sheet is where the prompt is read before it is sent, where the permission mode is chosen inside the ceiling the host allows, and where "the dashboard
- * cannot see this repository" surfaces before anything spawns. It is composed from `FormSheet`, so Escape and the scrim are the shell's and nothing here
- * binds a key (Escape has one owner).
+ * JiraLaunchSheet — the one extra tap between a ticket and a running Claude (Jira phase 5, spec §7; DESIGN.md §8.7 Sheet, §8.9 — the board's `LaunchSheet` is
+ * its sibling and this mirrors its shape). Dispatch is not a read: an `execute` launch edits code in another repo with no human at a terminal, so the sheet is
+ * where the prompt is read before it is sent, where the permission mode is chosen inside the ceiling the host allows, and where "the dashboard cannot see this
+ * repository" surfaces before anything spawns. It is composed from `FormSheet`, so Escape and the scrim are the shell's and nothing here binds a key (Escape
+ * has one owner).
  *
  * **The preview is the server's prompt, not this file's.** `GET /api/jira/prompt` composes what Start sends (and what Copy prompt copies) — one
  * composition behind three readers — so the sheet never builds a prompt, and a refusal (`unknown skill s_…` for a skill deleted since the menu was drawn,
@@ -63,8 +71,11 @@ export function JiraLaunchSheet({
   const paths = data?.repos[issue.project.key] ?? [];
 
   const [action, setAction] = useState<JiraAction>(() => initialAction ?? resolveJiraAction(settings.jiraDefaultAction, skills));
-  // '' is "not chosen": one mapped path is preselected, several wait for a pick, and the preview waits with them rather than guessing a repository.
-  const [repo, setRepo] = useState(paths.length === 1 ? paths[0] : '');
+  // '' is "not chosen": several mapped paths wait for a pick, and the preview waits with them rather than guessing a repository. A single path is
+  // derived, not seeded — the mapping can arrive after mount (the status is the shell's, and may still be loading when the sheet opens), and a one-shot
+  // `useState` seed would leave a statically shown path unselected with no control to fix it.
+  const [pickedRepo, setRepo] = useState('');
+  const repo = pickedRepo === '' && paths.length === 1 ? paths[0] : pickedRepo;
   const [pickedMode, setPickedMode] = useState<PermissionMode | null>(null);
   const [model, setModel] = useState(settings.dispatchDefaultModel);
   const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
@@ -91,11 +102,21 @@ export function JiraLaunchSheet({
   const transitions = detail.value?.transitions ?? [];
   const detailFailure = detail.status === 'failed' ? (detail.error instanceof Error ? detail.error.message : String(detail.error)) : null;
 
-  const gate = agents === null || repo === '' ? null : projectDispatchGate(agents, repo);
-  const startDrawn = agents !== null && gate?.control !== 'hidden';
+  // Asked with `repo` even when it is `''`: `projectDispatchGate` reads the environment block before it looks at the path, so `hidden` (agents off, dashboard
+  // unreachable) holds whatever has been picked, and Start is never drawn and then withdrawn the moment a repository is chosen.
+  const gate = agents === null ? null : projectDispatchGate(agents, repo);
+  const startDrawn = gate !== null && gate.control !== 'hidden';
   // The first reason that applies, in the order the reader can act on them: the repository, the dashboard's view of it, the prompt itself.
   const startBlock =
-    repo === '' ? 'choose a repository' : gate?.control === 'disabled' ? gate.reason : promptText === null ? (promptRefusal ?? 'the prompt has not loaded') : null;
+    repo === ''
+      ? 'choose a repository'
+      : gate?.control === 'disabled'
+        ? gate.reason
+        : promptText === null
+          ? (promptRefusal ?? 'the prompt has not loaded')
+          : null;
+  // What the Switch DISPLAYS is what Start sends: a ticket that turns out to be the reader's already (the detail lands after a toggle) reads Off.
+  const assignNow = assign && assignBlock === null;
 
   // Copy prompt: the button is absent without a clipboard API (the preview stays selectable text), reads `Copied` for 2 s, and a refused write says so.
   const canCopy = typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function';
@@ -129,7 +150,7 @@ export function JiraLaunchSheet({
           key: issue.key,
           repo,
           action,
-          assign,
+          assign: assignNow,
           // `null` is "leave as is" — the server's own spelling, not an empty string it would have to refuse.
           transitionId: transitionId === '' ? null : transitionId,
           ...modelEffortFlags(model, effort),
@@ -239,7 +260,13 @@ export function JiraLaunchSheet({
           <div className="sheet-row">
             <div className="sheet-field">
               <span className="set-name">Assign to me</span>
-              <Switch checked={assign && assignBlock === null} onChange={setAssign} label="Assign to me" disabled={assignBlock !== null} title={assignBlock ?? undefined} />
+              <Switch
+                checked={assignNow}
+                onChange={setAssign}
+                label="Assign to me"
+                disabled={assignBlock !== null}
+                title={assignBlock ?? undefined}
+              />
             </div>
             <label className="sheet-field">
               <span className="set-name">Move to</span>
