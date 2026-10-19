@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useAction } from '../../hooks/useAction';
@@ -29,8 +29,8 @@ import { SpreadBar } from '../ui/SpreadBar';
  *   no identity (`data.me` null — which also covers a boot `myself` that has not answered: the server would refuse with 503 `no identity` anyway, and
  *   §8's reason it must is that Jira reads `{ accountId: null }` as UNASSIGN) and while the issue is already the reader's own (`already assigned to you`).
  * - **`Move to…`**, the `Select` primitive → `POST /api/jira/issue/transition` `{ key, transitionId }`. Its first option is the placeholder `''`; then one
- *   per transition the detail offers, named `name → to.name` when the two differ (a `Start` that lands in `In Progress` says so) and `name` alone when they
- *   are one word. A pick posts AT ONCE — a native select has no confirm step, and the select is controlled at `''`, so it reads `Move to…` again on the
+ *   per transition the detail offers, named by the status it lands in (`transitionOptions`: `to.name`, or the transition's own name only when two land
+ *   in one status). A pick posts AT ONCE — a native select has no confirm step, and the select is controlled at `''`, so it reads `Move to…` again on the
  *   very next render. Disabled until the detail lands (the transitions are the detail's, and the card carries none), with `transitions unavailable` as the
  *   title once that read failed, and `no transitions offered` when Jira offers none.
  *
@@ -115,9 +115,15 @@ function isIssueDetail(value: unknown): value is JiraIssueDetail {
   return typeof d.description === 'string' && Array.isArray(d.children) && Array.isArray(d.boards);
 }
 
-/** One transition as the `Move to…` select names it: the transition's own name, and where it lands only when that is a different word. */
-function transitionLabel(t: JiraTransition): string {
-  return t.name === t.to.name ? t.name : `${t.name} → ${t.to.name}`;
+/**
+ * The `Move to…` options, each named by the STATUS it lands in — the word Jira's own status picker and columns show. A transition's own name is workflow
+ * plumbing (`In Review (2)`, `In testing`), and printing both read `In Review (2) → In Review`. Only when two offered transitions land in one status do
+ * those two fall back to their own names, because two options reading the same word would be a pick the reader cannot tell apart.
+ */
+function transitionOptions(transitions: readonly JiraTransition[]): { value: string; label: string }[] {
+  const landings = new Map<string, number>();
+  for (const t of transitions) landings.set(t.to.name, (landings.get(t.to.name) ?? 0) + 1);
+  return transitions.map((t) => ({ value: t.id, label: (landings.get(t.to.name) ?? 0) > 1 ? t.name : t.to.name }));
 }
 
 /**
@@ -243,7 +249,7 @@ export function JiraIssueModal({
           title={moveBlock ?? undefined}
           value=""
           disabled={busy || !moveReady}
-          options={[{ value: '', label: 'Move to…' }, ...(detail?.transitions ?? []).map((t) => ({ value: t.id, label: transitionLabel(t) }))]}
+          options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
           onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
         />
       </div>
@@ -268,7 +274,8 @@ export function JiraIssueModal({
             {detail.description.trim() === '' ? (
               <p className="jira-modal-none">no description</p>
             ) : (
-              <div dangerouslySetInnerHTML={{ __html: renderMarkdown(detail.description) }} />
+              // Keyed on the issue, so a Children-row swap opens the next description collapsed rather than inheriting this one's `Show more`.
+              <Description key={detail.key} markdown={detail.description} />
             )}
             {detail.children.length > 0 && <ChildrenTree selfKey={detail.key} direct={detail.children} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />}
           </>
@@ -281,6 +288,49 @@ export function JiraIssueModal({
         </p>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The description, collapsed to its first few lines (`.jira-desc`'s max-height) with a `Show more` under it — a long ticket otherwise pushes the Children
+ * and everything after them a screen down, which is the very thing that makes Jira's own issue view hard to scan. The toggle is drawn only when the text
+ * actually overflows the clamp, measured rather than guessed from a character count, because a short line of Markdown can render as a tall table and a
+ * long one as a single paragraph. The measure re-runs when the content's own box changes (an image arriving, the modal folding under 700 px) where the
+ * browser has a `ResizeObserver`; where it has none, the one measure after the HTML lands is what it gets.
+ */
+function Description({ markdown }: { markdown: string }) {
+  const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const html = renderMarkdown(markdown);
+
+  useLayoutEffect(() => {
+    const box = outer.current;
+    const content = inner.current;
+    if (box === null || content === null) return;
+    // Measured against the clamp only while collapsed: expanded, the box is as tall as its content and would always read as fitting.
+    const measure = (): void => {
+      if (!box.classList.contains('open')) setOverflows(box.scrollHeight > box.clientHeight + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [html]);
+
+  return (
+    <>
+      <div ref={outer} className={expanded ? 'jira-desc open' : overflows ? 'jira-desc clamped' : 'jira-desc'}>
+        <div ref={inner} dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
+      {(overflows || expanded) && (
+        <button type="button" className="jira-desc-more" aria-expanded={expanded} onClick={() => setExpanded((e) => !e)}>
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </>
   );
 }
 
