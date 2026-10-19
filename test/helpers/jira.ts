@@ -1,5 +1,5 @@
 /**
- * jira.ts — an in-memory Jira Cloud over the dozen endpoints this app touches (Jira phase 1; spec §3, §6 and §8).
+ * jira.ts — an in-memory Jira Cloud over the dozen endpoints this app reads and the two it writes (Jira phases 1 and 3; spec §3, §6 and §8).
  *
  * ## Why a whole little server rather than a stub per case
  *

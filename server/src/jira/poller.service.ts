@@ -475,7 +475,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /**
-   * `POST /api/jira/issue/:key/assign` (phase 3, §8): `PUT issue/{key}/assignee` with MY accountId, then the splice. Refused with no call by the read gate
+   * `POST /api/jira/issue/assign` (phase 3, §8): `PUT issue/{key}/assignee` with MY accountId, then the splice. Refused with no call by the read gate
    * (unconfigured, a 429 window, `unsupported`, no `cloudId`), then by R2: under `unauthorized` the 401 that state already is, and with the identity unknown
    * `no identity` — never a PUT carrying anything else, because Jira reads `{ accountId: null }` as UNASSIGN. No second window check before the PUT: nothing
    * is awaited between the gate's and the send, so no window can have opened in between.
@@ -494,7 +494,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /**
-   * `POST /api/jira/issue/:key/transition` (phase 3, §8): a FRESH `GET issue/{key}/transitions`, the id checked against it, then `POST issue/{key}/transitions`
+   * `POST /api/jira/issue/transition` (phase 3, §8): a FRESH `GET issue/{key}/transitions`, the id checked against it, then `POST issue/{key}/transitions`
    * and the splice. The list the modal drew its menu from is minutes old by the time someone picks; the workflow may have moved the issue since, and Jira's
    * 400 for a stale id is a sentence about Jira's ids, not about the issue — so the offered check is here, and its refusal is this server's own
    * (`transition not offered`). Needs no identity (R2): refused only while `unauthorized`, which `gate()` alone would let through, since a 401 keeps the

@@ -636,7 +636,7 @@ export interface JiraIssueDetail extends JiraIssue {
 }
 
 /**
- * `POST /api/jira/issue/:key/assign` and `POST /api/jira/issue/:key/transition` (Jira phase 3, plan ruling R1). The write landed — that is what the 200
+ * `POST /api/jira/issue/assign` `{ key }` and `POST /api/jira/issue/transition` `{ key, transitionId }` — the key travels in the body (Jira phase 3, plan ruling R1). The write landed — that is what the 200
  * says. `reread` is whether the `GET issue/{key}` that follows it came back readable, so the issue could be spliced into every board cache holding it; a
  * `false` is still a 200, because the write cannot be un-happened and an error would invite a retry of a write that already stood. The next sweep catches
  * the cache up either way.

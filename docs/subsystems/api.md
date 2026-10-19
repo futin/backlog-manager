@@ -134,8 +134,10 @@ the `error` verbatim and exits `1` through its generic non-2xx path — not `5`:
 The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed only while the three `BM_JIRA_*`
 keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
 `jira.json` reader, the ADF converter and the ticket block. Six read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
-fresh (`?format=text` for the ticket block), the roots search, the project list and the JQL check — and no write route yet. The credentials are read per call
-and reach no payload. → [jira.md](jira.md), the full doc.
+fresh (`?format=text` for the ticket block), the roots search, the project list and the JQL check — and five guarded POSTs: three config writes (since phase 2)
+that touch only `jira.json` (`/boards`, `/boards/delete`, `/repos`) and two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each
+followed by a re-read of the issue that is spliced into every board cache holding it. The credentials are read per call and reach no payload. → [jira.md](jira.md),
+the full doc.
 
 ### `registry/`
 

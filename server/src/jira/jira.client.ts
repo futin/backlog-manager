@@ -1,5 +1,6 @@
 /**
- * A thin client over `fetch` for the dozen endpoints of Jira Cloud's REST API this app reads (Jira phase 1, spec §3 and §6). Its own file, no Nest decorators
+ * A thin client over `fetch` for the dozen endpoints of Jira Cloud's REST API this app reads and — since Jira phase 3 — the two it writes, `PUT issue/{key}/assignee`
+ * and `POST issue/{key}/transitions` (spec §3, §6 and §8). Its own file, no Nest decorators
  * and no injected dependencies beyond `fetch`, so a test can construct one over `FakeJira.fetch` and drive every branch without standing a module up — the
  * branches that are hard to reach are the failure ones (a 429 window, a 401 mid-sweep, a deadline), and those are exactly the ones a live Jira can never
  * schedule. It is the shape of `tracker/github.client.ts`: nothing here throws on an HTTP status, and every failure is a value the caller branches on.
