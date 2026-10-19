@@ -50,16 +50,22 @@ function childLine(child: JiraIssue): string {
   return `- ${child.key} ${child.summary}${SEP}${child.status.name}${SEP}${orDash(child.assignee?.name)}`;
 }
 
+/** What the prompt composer says after a description it cut. Here, beside the note it is drawn like, so the block is the one place that decides where server text goes. */
+export const JIRA_TRUNCATED_MARKER = '[description truncated — open in Jira]';
+
 /**
  * The description's own lines: `(no description)` for an empty one, else the text — between two `fence` lines when a fence is given — and, when it holds an
- * ADF placeholder, the omitted-content note. The note stays OUTSIDE the closing fence: it and `(no description)` are this server's words, and fencing them would
- * present them as the ticket's. `typeof` rather than a truthiness test: the type says `string`, but a `null` that slips past the mapper must still never print
+ * ADF placeholder, the omitted-content note — and, for a description the prompt composer had to cut, `JIRA_TRUNCATED_MARKER`. The note and the marker stay
+ * OUTSIDE the closing fence: they and `(no description)` are this server's words, and fencing them would present them as the ticket's. `typeof` rather than a truthiness test: the type says `string`, but a `null` that slips past the mapper must still never print
  * as the word.
  */
-function descriptionLines(detail: JiraIssueDetail, fence: string | null): string[] {
+function descriptionLines(detail: JiraIssueDetail, fence: string | null, truncated: boolean): string[] {
   const description = typeof detail.description === 'string' ? detail.description : '';
   if (description.trim() === '') return ['(no description)'];
   const lines = fence === null ? [description] : [fence, description, fence];
+  // The trim marker is server text like the note below it, so it sits after the closing fence: inside, a ticket whose own last line read the same would be
+  // indistinguishable from a real trim.
+  if (truncated) lines.push(JIRA_TRUNCATED_MARKER);
   if (ADF_PLACEHOLDER_RE.test(description)) lines.push(`(something was omitted — open in Jira: ${detail.url})`);
   return lines;
 }
@@ -68,8 +74,8 @@ function descriptionLines(detail: JiraIssueDetail, fence: string | null): string
  * Just the description section, joined: what the prompt composer puts at a template's `{description}`, so that placeholder carries exactly the lines the
  * block would have carried at its own place — one rule for what a description looks like, with or without a fence.
  */
-export function renderDescription(detail: JiraIssueDetail, fence: string): string {
-  return descriptionLines(detail, fence).join('\n');
+export function renderDescription(detail: JiraIssueDetail, fence: string, truncated = false): string {
+  return descriptionLines(detail, fence, truncated).join('\n');
 }
 
 /**
@@ -77,10 +83,11 @@ export function renderDescription(detail: JiraIssueDetail, fence: string): strin
  * what this renderer produced before the option existed. `'omitted'` drops the description AND every line about it — `(no description)` and the omitted-content
  * note — for a prompt whose template already carries the description at a place of its own (spec §3: the text appears once in the whole prompt).
  * `{ fence }` wraps a non-empty description between two lines of that fence, for the prompt composer, which has measured the description's backtick runs and
- * knows how long a fence it needs; the omitted-content note stays OUTSIDE the closing fence, since it is this server's text, not the ticket's.
+ * knows how long a fence it needs; `truncated` adds the trim marker. The omitted-content note and the marker stay OUTSIDE the closing fence, since they are this
+ * server's text, not the ticket's.
  */
 export interface TicketBlockOptions {
-  description?: 'as-is' | 'omitted' | { fence: string };
+  description?: 'as-is' | 'omitted' | { fence: string; truncated?: boolean };
 }
 
 export function renderTicketBlock(detail: JiraIssueDetail, opts: TicketBlockOptions = {}): string {
@@ -96,7 +103,8 @@ export function renderTicketBlock(detail: JiraIssueDetail, opts: TicketBlockOpti
     `url: ${detail.url}`
   ];
 
-  if (mode !== 'omitted') lines.push('', ...descriptionLines(detail, typeof mode === 'object' ? mode.fence : null));
+  if (mode !== 'omitted')
+    lines.push('', ...descriptionLines(detail, typeof mode === 'object' ? mode.fence : null, typeof mode === 'object' && mode.truncated === true));
 
   if (detail.children.length > 0) {
     lines.push('', `Subtasks (${detail.children.length}):`);

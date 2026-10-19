@@ -785,13 +785,13 @@ export function watchdogStoodDown(w: { enabled: boolean; exhausted: boolean; fai
 }
 
 /**
- * Moved here from agents/prompt.util.ts so jira/prompt.util.ts can share it: `server/src/jira/` must never import `server/src/agents/` (the module
- * dependency runs agents → jira), and a second copy of a prompt-safety rule is the copy that drifts. A Jira summary is the same kind of input.
+ * Moved here from agents/prompt.util.ts so jira/prompt.util.ts can share it: `server/src/jira/` imports no `agents/` service or prompt code (the module
+ * dependency runs agents → jira; the one import the other way is the `SameOriginPostGuard`, spec §3), and a second copy of a prompt-safety rule is the copy
+ * that drifts.
  *
- * Titles come from item frontmatter, which is a `key: value` line — so a
- * newline cannot legally be in one. Collapsed anyway: this string is piped to
- * a child process as a prompt, and a hand-edited file is exactly the input
- * that would otherwise turn one instruction into two.
+ * For one-line text that goes into a prompt: an item title (frontmatter is a `key: value` line, so a newline cannot legally be in one) or a Jira summary.
+ * Collapsed anyway: this string is piped to a child process as a prompt, and a hand-edited file is exactly the input that would otherwise turn one
+ * instruction into two.
  */
 export function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -799,7 +799,7 @@ export function oneLine(text: string): string {
 
 /**
  * The last sentence of every item-dispatch prompt, whatever the action — and of the Jira `execute` built-in's (Jira phase 5). One copy, here, because
- * `server/src/jira/` must not import `server/src/agents/`; a second wording would be the one that loses the narrow-staging clause.
+ * `server/src/jira/` imports no `agents/` service or prompt code; a second wording would be the one that loses the narrow-staging clause.
  *
  * Every action writes something — groom rewrites an item file, capture creates
  * one, execute writes the fix itself — and before this line all of it was left
