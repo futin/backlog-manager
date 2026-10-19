@@ -49,8 +49,8 @@ Five artefacts hold everything, and the single-writer column is the load-bearing
 
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
-guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and, until the Jira integration's phase 2 adds its writers, is edited
-by hand ([subsystems/jira.md](subsystems/jira.md)).
+guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through three guarded config routes (`POST /api/jira/boards`, `/boards/delete`
+and `/repos`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)).
 
 ### The API — [full doc](subsystems/api.md)
 
@@ -78,8 +78,9 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   Settings. The token is read per call from the environment and reaches no payload.
 - **`jira/`** — the third outbound-calling module, and only while `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are all set: a Jira Cloud client on
   Atlassian's gateway, a poller that sweeps the boards in `~/.backlog-manager/settings/jira.json` into in-memory caches (the second cache whose age is
-  rendered), and six read routes under `/api/jira` — phase 1 of the [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md), with no
-  write path yet; [full doc](subsystems/jira.md).
+  rendered), and six read routes under `/api/jira`, plus five guarded POSTs — three config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`) and, since phase 3, two
+  writes to Jira itself (`/issue/assign` `{ key }` and `/issue/transition` `{ key, transitionId }`), the only writes this server makes to Jira — part of the
+  [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md); [full doc](subsystems/jira.md).
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
   package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog.

@@ -1,5 +1,6 @@
 /**
- * A thin client over `fetch` for the dozen endpoints of Jira Cloud's REST API this app reads (Jira phase 1, spec §3 and §6). Its own file, no Nest decorators
+ * A thin client over `fetch` for the dozen endpoints of Jira Cloud's REST API this app reads and — since Jira phase 3 — the two it writes, `PUT issue/{key}/assignee`
+ * and `POST issue/{key}/transitions` (spec §3, §6 and §8). Its own file, no Nest decorators
  * and no injected dependencies beyond `fetch`, so a test can construct one over `FakeJira.fetch` and drive every branch without standing a module up — the
  * branches that are hard to reach are the failure ones (a 429 window, a 401 mid-sweep, a deadline), and those are exactly the ones a live Jira can never
  * schedule. It is the shape of `tracker/github.client.ts`: nothing here throws on an HTTP status, and every failure is a value the caller branches on.
@@ -132,9 +133,27 @@ export class JiraClient {
     return this.request('GET', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}?fields=${encodeURIComponent(fields.join(','))}`, auth);
   }
 
-  /** The transitions an issue offers right now — read only in phase 1 (a transition is a later phase's write). */
+  /** The transitions an issue offers right now — a read, and the list `transition` below is checked against by its caller (Jira phase 3, spec §8). */
   async transitions(auth: JiraAuth, key: string): Promise<JiraResponse<{ transitions: unknown[] }>> {
     return this.request('GET', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}/transitions`, auth);
+  }
+
+  /**
+   * Assigns an issue (Jira phase 3, spec §8): `PUT issue/{key}/assignee` with `{ accountId }`, a 204 with no body on success. This is a WRITE — the first
+   * two this client makes, with `transition` — and the caller owns the one rule it cannot enforce from here: never pass an `accountId` that is not known.
+   * Jira reads `{ accountId: null }` as UNASSIGN, so a caller that handed this a missing identity would silently clear the assignee instead of setting it.
+   */
+  async assign(auth: JiraAuth, key: string, accountId: string): Promise<JiraResponse<null>> {
+    return this.request('PUT', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}/assignee`, auth, { accountId });
+  }
+
+  /**
+   * Moves an issue through one of the transitions it offers (Jira phase 3, spec §8): `POST issue/{key}/transitions` with `{ transition: { id } }`, a 204 with
+   * no body on success. Whether `transitionId` is offered right now is the caller's check, made against a fresh `transitions` read — Jira would refuse a
+   * stale id with a 400 anyway, but the caller says so in its own words and without spending the write.
+   */
+  async transition(auth: JiraAuth, key: string, transitionId: string): Promise<JiraResponse<null>> {
+    return this.request('POST', `${gatewayBase(auth.cloudId)}/issue/${encodeURIComponent(key)}/transitions`, auth, { transition: { id: transitionId } });
   }
 
   /** One page of projects, fifty at a time from `startAt`. */

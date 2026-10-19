@@ -26,6 +26,13 @@ import { useMountedRef } from './useMountedRef';
  * A failed read keeps the list already held (for the same id) and raises `error`, as `useBoard` does: one dropped poll is not "this board is empty".
  * A 404 is the one failure that is a fact, not a dropped poll: the board was deleted in another browser. The shell's status is re-read at once, so the page
  * falls to the first board by name now and not at that board's next poll (up to its whole interval, and never for a page of `off` boards).
+ *
+ * **`nudge` is how a write elsewhere reaches this list** (Jira phase 3, plan ruling R7). The issue modal's landed write bumps a counter `JiraView` owns and
+ * hands down; a CHANGE of that number asks at once, through the same coalesced `request` every other trigger uses, whatever the interval — `off` included,
+ * because an `off` board is otherwise read only on mount and a write would never show on it (spec §6.1: every write reloads the board). The server spliced
+ * the re-read issue into every cache holding it before the write's 200, so this one read is what moves the card now rather than at the next 15 s tick. A
+ * counter rather than a callback the modal calls: the modal never reaches into the board's hook, and only the number's change means anything — mount is the
+ * id effect's job, so the value the hook is mounted with asks for nothing of its own.
  */
 export interface JiraBoardState {
   issues: JiraIssue[];
@@ -45,7 +52,7 @@ interface Held {
 
 const NO_ISSUES: JiraIssue[] = [];
 
-export function useJiraBoard(id: string | null, interval: SyncInterval | null): JiraBoardState {
+export function useJiraBoard(id: string | null, interval: SyncInterval | null, nudge: number): JiraBoardState {
   const [held, setHeld] = useState<Held | null>(null);
   const mounted = useMountedRef();
   const idRef = useRef(id);
@@ -82,6 +89,15 @@ export function useJiraBoard(id: string | null, interval: SyncInterval | null): 
   useEffect(() => {
     if (id !== null) void request();
   }, [id, request]);
+
+  // A nudge: ask at once when the number MOVES. The ref remembers the last value acted on, so the mount (which the effect above already covers), an id
+  // change and StrictMode's second effect pass all compare equal and ask nothing twice.
+  const nudgeRef = useRef(nudge);
+  useEffect(() => {
+    if (nudgeRef.current === nudge) return;
+    nudgeRef.current = nudge;
+    if (id !== null) void request();
+  }, [nudge, id, request]);
 
   if (id === null) return { issues: NO_ISSUES, polledAt: null, loading: false, error: false, reload: request };
   if (held === null || held.id !== id) return { issues: NO_ISSUES, polledAt: null, loading: true, error: false, reload: request };

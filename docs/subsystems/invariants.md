@@ -3099,6 +3099,55 @@ rewritten order, no quoting. Jira parses it and Jira refuses it (`jql/parse?vali
 on the board, never a dropped board). Rewriting it would be guessing at what the person meant, and a filter that silently differs from the one typed is worse
 than one Jira rejects out loud. The only bound is length (`JIRA_JQL_MAX_CHARS`, 2 000), because a query that long is a paste accident, not a filter.
 
+## The board's Jira writes are assign and transition, nothing else
+
+Until phase 3 this server wrote to Jira nowhere: every call was a read and the only file it changed was `jira.json`. Phase 3 ([plan](../superpowers/plans/2026-10-19-jira-phase-3-writes.md),
+spec §8, §13) adds the first two calls that change anything on Atlassian's side — **assign the issue to me** and **transition it** — and this rule is what keeps
+the list at two. A third (comment, edit a field, create, unassign, assign someone else) is a new rule and a new section here, never another route that "fits
+the pattern": a credential that can write to a person's tracker is the sharpest thing this server holds, and the size of what it may do with it should be a
+fact a reader can check by counting routes (`POST /api/jira/issue/assign` and `/issue/transition`, in `jira-write.controller.ts`).
+
+**`{ accountId: null }` is never sent.** Jira reads a null assignee as UNASSIGN, so an assign sent while the identity was unknown would not fail — it would
+succeed at the opposite of what was asked. The poller therefore refuses an assign with no call when `me` is null (`503 no identity`, which heals on the next
+successful `myself`), and the body's accountId is always the poller's own `me`: a request cannot name anyone else, and one that tries is ignored. While the
+site's `access` is `unauthorized` the refusal comes first, even when `me` is still set from before the 401, because a credential Jira has just rejected is the
+same 401 whatever else is known. A transition needs no identity, so it is refused only under `unauthorized` — `boot.reset()` leaves `cloudId` set, which means
+the read gate alone would have let it through. Config writes stay open under `unauthorized`; issue writes do not, and that asymmetry is deliberate.
+
+**The offered list is checked fresh, and its refusal is this server's own.** The modal draws its `Move to…` menu from a detail read that is minutes old by the
+time someone picks, and a workflow can move an issue in between. So a transition begins with a fresh `GET issue/{key}/transitions` and checks the id against
+it. Jira's own answer to a stale id is a 400 whose sentence is about Jira's ids, which reads as a failure of the board rather than of the pick; the route's
+`400 transition not offered` says what happened. The id's own shape is not checked beyond a non-empty string of at most 64 characters — the offered list is
+the real validation, and a guess at Jira's id format would one day refuse a valid one.
+
+**A re-read, not a local patch.** After a landed write the poller reads the issue again and replaces its copy in the caches; it never edits the cached copy
+to say "assignee: me" or "status: In Progress". Jira's workflow can run post-functions that change more than the field written — a transition that also
+clears the assignee, sets a resolution or moves the sprint — and a local patch would draw the card as the person expected rather than as Jira now has it,
+until the next sweep quietly corrected it. The re-read is also the one place the rest of the issue (`updated`, `resolved`) is learned, and `updated` is what
+the newest-wins rule below compares.
+
+**In place, never added.** The splice replaces the issue at the SAME index in every board cache that already holds the key, and adds it to none. Membership
+of a board is its queries' and roots' business and nothing else's: a splice that added the key would let a write put an issue on a board whose JQL
+excludes it, and the next sweep would then take it off again. A re-read that does not map to an issue — unreadable, or dropped by the Done window — leaves
+every cache untouched. The mapping uses the sweep's own context, the window on, so a spliced copy is one the sweep itself could have produced.
+
+**Newest `updated` wins, so a sweep cannot undo a splice.** A sweep in flight across the write read the issue before it, and Jira's search index can lag
+the issue itself by a little: either way the sweep's copy is the OLDER one, and putting it back would move the card back until a later sweep moved it
+forward again. At the end of each sweep, for every issue it returned whose key the cache now holds with a strictly newer `updated` (`Date.parse`), the cached
+copy is kept; equal, or unparseable on either side, is the sweep's. The rule only ever replaces. A key the sweep did not return is gone as before, which has
+one accepted consequence: a lagging index can drop a just-assigned issue from an `assignee = currentUser()` board for one sweep. That is named in
+[jira.md](jira.md#the-issue-writes-phase-3) so nobody files it as a bug.
+
+**`reread` is the write's footnote, never its verdict.** Both routes answer `200 { ok: true, reread }`. The write landed, and that is what the 200 says;
+`reread` says whether the re-read afterwards came back as an issue, true even when the Done window then dropped it and false when the 2xx body was not an
+issue or the call failed. A failed re-read after a landed write is still a 200, because an error would invite a retry of something that already stood. The
+re-read's own failure still goes through the same bookkeeping as any read, so a 401 or a 429 there moves the site state.
+
+**No per-key queue.** The tracker's item writes are serialised per item because they are read-modify-write on a body: two interleaved writes lose one. These
+are not — each sends one field's new value and Jira orders them — so two browsers racing are Jira's last-write-wins and the newest-`updated` rule keeps the
+caches on whichever answer is newest. The one-at-a-time guard is the modal's, through the `useAction` hook, which also stops a double click; it is a courtesy
+to the person, not a lock the server relies on.
+
 ## A tracker project has no item files, and that shows up in three places
 
 An issue is not a file, and three separate surfaces would each have got that wrong on their own (task-45, spec §5.3/§5.5). It was FOUR until task-46: dispatch
@@ -3837,6 +3886,29 @@ server's clock (the soonest syncing board's `polledAt` plus its interval plus `u
 timer's read and a Setup save's `reload` can overlap, and it keeps the newest-read-wins sequence counter instead. Unlike `/api/trackers` the route reads no
 git — it answers from memory, the env and `jira.json` — so the overlap costs a cheap read, not a spawn. `useJiraBoard`, the Board page's issue list, has no
 server clock to chase and IS built on `useCoalescedFetch`.
+
+## ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip
+
+The version chip and the What's new drawer used to be two things in this repo: ui-kit's markup, and a block of this board's own rules laid over it — a pill drawn by
+`.rail-release`, a drawer width, an edge, a lift, a notes size and a baseline rule restyled under `.uk-*` selectors. Each override was a small, reasoned departure
+from the kit's defaults, and together they made this board's drawer differ from the other two apps' — the opposite of why the surface moved into a shared package.
+ui-kit v0.3.0 took this board's look as its canonical one and moved every shape into the kit, which leaves the host exactly two jobs: map the public `--uk-*`
+tokens onto the board's own, and place the chip.
+
+**What stays here, and why it is enough.** `styles.css`'s `:root` mapping (each token pointed at a theme variable, so all five palettes carry through) and
+`.rail-release`, a wrapper that sinks the chip to the rail's foot and makes it the phone menu's last row. `--uk-chip-bg` is mapped to `--steel` because the
+kit's default is a light well that would show on a dark rail; `--uk-zoom` is mapped to `--font-scale` because `.shell`'s `zoom` leaves `100vw` and `100dvh`
+meaning the unzoomed screen, and the kit divides its drawer's size by it — undivided, the panel overhangs the screen by the text scale. Notes go through the
+kit's own escape-first `renderNotesHtml`, so a PR body is safe to set as HTML with no sanitiser here and a `###` line reads as a heading in every app.
+
+**How a regression is caught.** `test/ui-kit-guard.test.ts` runs `ui-kit/guard`'s `checkHostCss` over each stylesheet this board ships (listed in the test, so a
+new sheet is a deliberate add) and fails on any rule that restyles a `.uk-*` class or sets a `--uk-*` property that is not a public token. It cannot see a token
+nobody mapped, so the same suite asserts the mapping sets `--uk-chip-bg` and `--uk-zoom`; `test/ui-kit-tokens.test.ts` holds every token the kit reads to being
+mapped. If the board's look needs to differ from the kit, the change is a token or a prop in ui-kit, never a `.uk-*` rule here.
+
+**The phone chip's hit area must not be clipped.** On a narrow layout the chip is passed `narrow`, which gives the 28 px pill a transparent 44 x 44 hit area that
+overhangs it by 8 px above and below. `.rail` is `overflow-x: hidden` on a phone, which makes its y-axis clip as well, so the wrapper's margins and the rail's
+padding keep the overhang inside the rail's padding box; an ancestor that clipped there would shrink the thumb target back to the pill.
 
 <!-- docs-sync:
   sources:

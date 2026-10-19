@@ -3,12 +3,11 @@ import { ReleasesDrawer as KitReleasesDrawer } from 'ui-kit';
 import type { ReleasesResponse } from '../../../shared/types';
 import { useDialogEscape } from '../hooks/useDialogEscape';
 import { useNarrow } from '../hooks/useNarrow';
-import { renderMarkdown } from '../lib/markdown';
 
 /**
  * The What's new drawer (.claude/DESIGN.md §8.10, docs/subsystems/releases.md): every release this checkout carries, newest first, behind the rail's
  * version chip. The drawer itself — the scrim, the panel, the ✕ and every entry's markup — is ui-kit's (`ReleasesDrawer`, spec D15/D16 in futin/release-kit
- * `docs/superpowers/specs/2026-10-18-shared-releases-ui-design.md`); this wrapper is the three things that stay this app's.
+ * `docs/superpowers/specs/2026-10-18-shared-releases-ui-design.md`); this wrapper is the two things that stay this app's: Escape and the phone shape.
  *
  * Escape: `useDialogEscape(onClose)` here and `closeOnEscape={false}` on ui-kit's drawer, so the key keeps one owner and the drawer stays the sixth entry on
  * the stack. Left at ui-kit's default, the drawer would bind a `keydown` listener of its own beside the stack's, and one press would close it AND the item
@@ -16,9 +15,9 @@ import { renderMarkdown } from '../lib/markdown';
  *
  * The phone shape: `narrow` is `useNarrow()`, the 700 px reading every overlay here uses — ui-kit's CSS has no media queries, so the host decides.
  *
- * Notes: `renderMarkdown` is the sanitising renderer the item modal uses (raw HTML dropped, every link hand-built with its href escaped), so the notes — a PR
- * body's `## What's new` section, written by whoever opened the PR — are safe to set as HTML. ui-kit's own escape-first default is not used: notes render
- * here exactly as they did before the move (spec D14).
+ * Notes: ui-kit's own `renderNotesHtml` — escape-first, so a PR body's `## What's new` section, written by whoever opened the PR, is safe to set as HTML with
+ * no sanitiser behind it, and it reads the same in every app (ui-kit v0.3.0 removed the `renderNotes` prop). This board's `renderMarkdown` is no longer
+ * used here; it stays the item modal's.
  *
  * Rendered by `AppShell`, never inside the rail: the phone menu is a transformed ancestor, and a transformed ancestor turns a `position: fixed` panel into
  * one positioned inside it (the dashboard's reason, measured there).
@@ -33,7 +32,6 @@ export function ReleasesDrawer({ data, onClose }: { data: ReleasesResponse; onCl
       onClose={onClose}
       closeOnEscape={false}
       narrow={narrow}
-      renderNotes={(notes) => <div dangerouslySetInnerHTML={{ __html: renderMarkdown(notes) }} />}
     />
   );
 }
