@@ -17,7 +17,7 @@ exit-code source guard, the two widened rules and the docs.
 **Spec:** [docs/superpowers/specs/2026-10-15-jira-integration-design.md](../specs/2026-10-15-jira-integration-design.md) — §9 the skill (the whole of it),
 §10 "`jira.mjs` goes through the server", §11 the node suite, §12 phase 4, §13 the token headline's `jira.mjs` half, the `jira.md` `paths:` widening and the
 exit-5 widening. §8's error table is what the server already answers; this phase only maps its statuses onto exit codes. The phase 3 plan
-([2026-10-19-jira-phase-3-writes.md](2026-10-19-jira-phase-3-writes.md), PR futin/backlog-manager#307) is what the two write routes look like.
+([2026-10-19-jira-phase-3-writes.md](2026-10-19-jira-phase-3-writes.md), merged to `main` as futin/backlog-manager#307) is what the two write routes look like.
 
 **Plan conventions (they override the writing-plans template where the two differ):**
 - Every task states BEHAVIOUR and EXACT TEST CASES — inputs, expected values, edge cases — never literal code. The implementer writes the code and the test
@@ -26,7 +26,7 @@ exit-5 widening. §8's error table is what the server already answers; this phas
 - Signatures in **Interfaces** are the one place a name is fixed; a later task that consumes a name spells it exactly as the producing task does.
 - Size budgets are soft targets, never a reason to drop a rule or a comment. Comments explain WHY at the density `skills/backlog/tools/backlog.mjs` has around
   `apiRequest`; new prose wraps at 160.
-- Branch `feat/jira-phase-4-skill`, cut in a worktree (never switch branches in the shared checkout) from `main` **after #307 has merged** — the user's ruling.
+- Branch `feat/jira-phase-4-skill`, cut in a worktree (never switch branches in the shared checkout) from `main`, which already holds #307 — the user's ruling.
   Commit after every task with the message given; nothing is pushed by this plan. PR title (`ci / pr-title`): `feat(jira): the jira skill and jira.mjs`.
 - Run only the suites a task touches — `node scripts/test-tmpdir.mjs skills/jira/tools/jira.test.mjs` (add `skills/backlog/tools/backlog.test.mjs` where named)
   and the named jest files; CI runs the whole suite.
@@ -47,7 +47,7 @@ exit-5 widening. §8's error table is what the server already answers; this phas
   without it with a 403, which would read as exit `2` and mislead).
 - Exit codes, verbatim from §9: success `0`; usage `1`; a 4xx the server answers `2`; a 5xx `3`; the stack down (no connection) `5`.
 - The entry guard is `process.exitCode = await main(process.argv.slice(2))` — never `process.exit(` anywhere in the file (R1).
-- Skill commands in `SKILL.md` spell the root `${CLAUDE_PLUGIN_ROOT}`, braces included (`test/skill-plugin-root.test.ts` refuses the bare form).
+- Every file under `skills/jira/` spells the plugin root `${CLAUDE_PLUGIN_ROOT}`, braces included (`test/skill-plugin-root.test.ts` refuses the bare form).
 
 ## Rulings this plan makes where the spec is silent
 
@@ -117,7 +117,8 @@ exit-5 widening. §8's error table is what the server already answers; this phas
 
 **Files:**
 - Create: `skills/jira/tools/jira.mjs`, `skills/jira/tools/jira.test.mjs`
-- Modify: `skills/backlog/tools/backlog.test.mjs` (`CLI_SOURCES` and `ENTRY_SHAPES` gain `jira.mjs`, accepted shape `process.exitCode = await main(` only)
+- Modify: `skills/backlog/tools/backlog.test.mjs` (`CLI_SOURCES` and `ENTRY_SHAPES` gain `jira.mjs`, accepted shape `process.exitCode = await main(` only;
+  the comment at `backlog.test.mjs:3356` that says the awaited form is accepted "for backlog.mjs ALONE" is corrected to name every awaited CLI)
 
 **Interfaces:**
 - Produces (exported for the suite; the CLI is the contract): `main(argv: string[]): Promise<number>`; `normaliseKey(raw: string): string | null` (R3);
@@ -129,7 +130,8 @@ exit-5 widening. §8's error table is what the server already answers; this phas
 
 The suite stands a fake API up in-process on `127.0.0.1:0` and runs the CLI with `spawn` (async — `spawnSync` would deadlock against a server in the same
 process; `backlog.test.mjs`'s `runNode` comment), with `BM_API_PORT` set to the fake's port. Copy `backlog.test.mjs`'s `fakeApi` / `runNode` / `withApi`
-shape (recorded requests with method, path, query, headers, body); do not import it.
+shape (recorded requests with method, path, query, headers, body); do not import it. Do not copy the `withApi` docblock at `backlog.test.mjs:3744-3746`
+as is — it says `spawnSync`, which is wrong for the code under it.
 
 - [ ] **Step 1: Failing tests.**
   - Unit: `normaliseKey` — `'PAY-131'` → `'PAY-131'`; `' pay-131 '` → `'PAY-131'`; `'AB_2-7'` → `'AB_2-7'`; `null` for `'PAY'`, `'131'`, `'1PAY-1'`,
@@ -144,10 +146,11 @@ shape (recorded requests with method, path, query, headers, body); do not import
   - CLI `show PAY-131/../../agents/status` → exit `1`, stderr names the raw argument and `PAY-131` as the example, the fake recorded ZERO requests (RF 3).
   - CLI `show PAY-9` with the fake answering 404 `{ error: 'issue not found' }` → exit `2`, stderr `issue not found`. 503 `{ error: 'Jira is not configured' }`
     → exit `3` with that sentence. 503 `{ error: 'Jira rate limit — retry after 2026-10-19T12:00:00.000Z', retryAt: … }` → exit `3`, stderr the `error`
-    verbatim. 502 with a non-JSON body `<html>bad gateway</html>` → exit `3`, `the API answered 502` (RF 2).
+    verbatim. 502 with a non-JSON body `<html>bad gateway</html>` → exit `3`, `the API answered 502` (RF 2). A 200 with a body that does not parse as
+    JSON (`<html>ok</html>`) on a JSON route — `status` — → exit `3`, stderr `the API answered 200 with a body jira.mjs cannot read` (R2's 2xx branch).
   - CLI against a CLOSED port (listen on `127.0.0.1:0`, read the port, close, run) → exit `5`, stderr R9's sentence with that port in it.
   - CLI `status` → `GET /api/jira`; the R7 cases above end to end for `ok` (exit `0`) and `unauthorized` (exit `3`) and `configured: false` (exit `3`).
-  - CLI usage: no args → exit `1`, stderr `unknown command: (none)` then USAGE; `--help` → exit `0`, USAGE on stdout; `show` with no key and `show PAY-1 PAY-2`
+  - CLI usage: no args → exit `1`, stderr `unknown command: (none)` then USAGE; `--help`, `-h` and `help` → exit `0`, USAGE on stdout; `show` with no key and `show PAY-1 PAY-2`
     → exit `1`; `show --json PAY-1` → exit `1` and zero requests (R8); `bogus` → exit `1`.
   - **RF 5:** the fake answers `show` with a 200 000-byte text; stdout read through the child's pipe has exactly 200 001 bytes (the text plus its `\n`).
   - Source guard over `jira.mjs`'s CODE lines (comments stripped, as `backlog.test.mjs`'s `codeLines` does — the header comment may well name Atlassian):
@@ -212,7 +215,10 @@ Fixture transitions for the cases below, in this order: `{ id: '11', name: 'Star
 
 **Files:**
 - Create: `skills/jira/SKILL.md`
-- Modify: `.claude-plugin/plugin.json` (`description` names the jira skill), `skills/jira/tools/jira.test.mjs` (the guards below)
+- Modify: `.claude-plugin/plugin.json` (`description` names the jira skill), `skills/jira/tools/jira.test.mjs` (the guards below),
+  `test/skill-plugin-root.test.ts` (its `SKILL.md` count at line 29 goes `6` → `7`, and it gains `toContain('jira/tools/jira.mjs')` beside the other CLIs —
+  as written it turns CI red the moment a seventh `SKILL.md` exists), `test/skills-plugin-root.test.ts` (the `it.each` list at line 40 gains `'jira'`, so
+  the new skill is in the non-vacuity check too)
 
 **Interfaces:**
 - Consumes: Task 1's `USAGE` (the guard reads it by import) and the exit codes.
@@ -240,7 +246,8 @@ Fixture transitions for the cases below, in this order: `{ id: '11', name: 'Star
   - `.claude-plugin/plugin.json`'s `description` contains `jira`.
 - [ ] **Step 2: Run** `node scripts/test-tmpdir.mjs skills/jira/tools/jira.test.mjs` — FAIL.
 - [ ] **Step 3: Write** `SKILL.md` and the plugin description.
-- [ ] **Step 4: Run** the node suite and `pnpm run test:jest -- test/skill-plugin-root.test.ts` — PASS.
+- [ ] **Step 4: Update** the two jest files named under Files, then **run** the node suite and
+  `pnpm run test:jest -- test/skill-plugin-root.test.ts test/skills-plugin-root.test.ts` — PASS.
 - [ ] **Step 5: Commit** `feat(jira): the jira skill`
 
 ### Task 4: The rules and the docs
@@ -250,8 +257,8 @@ Fixture transitions for the cases below, in this order: `{ id: '11', name: 'Star
   `docs/subsystems/skills.md`, `docs/overview.md`, `README.md`
 - Test: `test/claude-rules.test.ts` (runs as is)
 
-Do this task after Tasks 1–3 are COMMITTED: `test/claude-rules.test.ts` fails a `paths:` glob that matches no tracked file, so `skills/jira/**` can only enter
-`jira.md`'s `paths:` once those files are in git.
+Do this task after Tasks 1–3 are committed: the rules and docs describe code that must exist first. (`test/claude-rules.test.ts` fails a `paths:` glob that
+matches no file — tracked or untracked-not-ignored, `trackedFiles()` at `test/claude-rules.test.ts:185-200` — so `skills/jira/**` needs those files on disk.)
 
 - [ ] **Step 1: The token rule's `jira.mjs` half** (spec §13). The headline becomes, verbatim and byte-equal in CLAUDE.md and `.claude/rules/jira.md`:
   **The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs.**
@@ -263,8 +270,12 @@ Do this task after Tasks 1–3 are COMMITTED: `test/claude-rules.test.ts` fails 
 - [ ] **Step 2: The exit-5 widening** (spec §13: "gains `jira.mjs` (always) in the same bullet"). Headline, byte-equal in CLAUDE.md and
   `.claude/rules/skills.md`: **`backlog.mjs` in a tracker project — and `jira.mjs` always — needs the stack up, and says so with exit `5`.** Anchor unchanged.
   The rules bullet gains: `jira.mjs` has no files mode at all, every command is an API call, its stack-down sentence is R9's, and its other codes are `2`
-  (4xx) and `3` (5xx). `invariants.md`'s section gains the reason it is "always": a Jira ticket has no local store to fall back to, and the token exists
-  only in the server.
+  (4xx) and `3` (5xx). While the bullet is open, its port spelling `${BM_API_PORT ?? 4322}` (`.claude/rules/skills.md:21`) becomes `||`, which is what
+  the code does. `invariants.md`'s section gains the reason it is "always": a Jira ticket has no local store to fall back to, and the token exists only in
+  the server.
+- [ ] **Step 2b: The `process.exitCode` mechanism widening.** The headline is unchanged. The `.claude/rules/skills.md` bullet that says "`backlog.mjs` and
+  `api-call.mjs` may also end `process.exitCode = await main(...)`" names `jira.mjs` as the third, and the `invariants.md` section "Every skill CLI exits
+  through `process.exitCode`, never `process.exit()`" says the same where it lists the awaited CLIs.
 - [ ] **Step 3: CLAUDE.md's other lines.** The opening line's skill count and list name `jira` (seven skills: the six backlog skills and `jira`, which reads and
   moves a Jira ticket through `/api/jira`); the `skills/…` layout bullet names `skills/jira/` and `jira.mjs` beside the other CLIs. Keep every unlinked bullet
   under `UNLINKED_WORD_CAP`.
@@ -273,9 +284,9 @@ Do this task after Tasks 1–3 are COMMITTED: `test/claude-rules.test.ts` fails 
   `docs/subsystems/jira.md`: the opening paragraph says phases 1–4; the "Not there yet, by phase" line drops 4; a short `## The skill (phase 4)` section —
   the five commands, the routes each calls, R4's matching, R7's exit rule, and that nothing in the server changed for it. `docs/overview.md` and
   `README.md`: every "six skills" / "three CLIs" that counts the published skills or their CLIs follows (grep `six\|three CLIs` in both; the spots found at
-  plan time are `README.md:3,271,302` and `docs/overview.md:3,22,100`).
+  plan time are `README.md:3,12,271,302` and `docs/overview.md:3,22,100`).
 - [ ] **Step 5: Run** `pnpm run test:jest -- test/claude-rules.test.ts` — PASS (it compares the two widened headlines across CLAUDE.md and the rule files,
-  and checks the new `paths:` glob matches a tracked file).
+  and checks the new `paths:` glob matches a file).
 - [ ] **Step 6: Commit** `docs(jira): the jira skill in the rules and docs`
 
 ## After the plan
