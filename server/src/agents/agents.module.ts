@@ -6,6 +6,7 @@ import { ItemsAbortController } from './items-abort.controller';
 import { ItemsAbortService } from './items-abort.service';
 import { JiraAgentsController } from './jira-agents.controller';
 import { JiraDispatchService } from './jira-dispatch.service';
+import { JiraLiveReconciler } from './jira-live.service';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { RegistryModule } from '../registry/registry.module';
@@ -56,12 +57,14 @@ import { JiraModule } from '../jira/jira.module';
  * JiraModule arrived with Jira phase 5's `POST /api/agents/dispatch-jira` (`JiraAgentsController` → `JiraDispatchService`): the route reads an issue and
  * writes assign and transition through `JiraPollerService`, and reserves the key in `JiraLiveService`, both exported by that module for exactly this. It is
  * here and not in `jira/` because it calls the dashboard, which this module (and `tracker/`) is for. The edge runs agents → jira and never back —
- * `jira.module.ts` says why — so there is no cycle for Nest to refuse.
+ * `jira.module.ts` says why — so there is no cycle for Nest to refuse. `JiraLiveReconciler` is a provider for the same reason as `WatchdogService`: it is the
+ * 60 s timer that clears a live-map entry whose session ended, armed by a confirmed dispatch and `OnApplicationShutdown`-cleared, so it has to be built by Nest
+ * to have its shutdown hook called; `POST /api/agents/jira-stop` is `JiraDispatchService.stop`, beside the dispatch it undoes.
  */
 @Module({
   // `TrackerModule` for the poller's `syncOffBlock` (#17) — no cycle: it imports only `RegistryModule`.
   imports: [RegistryModule, ItemsModule, OrchestratorModule, TrackerModule, JiraModule],
   controllers: [AgentsController, ItemsAbortController, JiraAgentsController],
-  providers: [AgentsService, ItemsAbortService, JiraDispatchService, SameOriginPostGuard, WatchdogService]
+  providers: [AgentsService, ItemsAbortService, JiraDispatchService, JiraLiveReconciler, SameOriginPostGuard, WatchdogService]
 })
 export class AgentsModule {}

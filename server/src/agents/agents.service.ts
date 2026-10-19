@@ -1986,11 +1986,11 @@ export class AgentsService {
 const SESSIONS_TIMEOUT_MS = 15_000;
 
 /**
- * A session's status in the dashboard's session list — `null` when the list does not carry it, `'unknown'` for an entry with no status string — or a
- * 502 when the list cannot be read. #225's case B asked this first (`ItemsAbortService`); #227's stale probe asks it too, through `staleClaimProbe` below,
- * and there is one copy so the two can never disagree about what the list said.
+ * The dashboard's session list as `id → status` — `'unknown'` for an entry with no status string — or a 502 when it cannot be read. One fetch and one parse
+ * for every reader: #225's case B and #227's stale probe ask for one session's status (`dashboardSessionStatus`), and Jira's live-map reconciler asks for all
+ * of them at once, so none of them can disagree with another about what the list said.
  */
-export async function dashboardSessionStatus(cfg: AgentsConfig, session: string): Promise<string | null> {
+export async function dashboardSessions(cfg: AgentsConfig): Promise<Map<string, string>> {
   let res: Response;
   try {
     res = await fetch(`${cfg.url}/api/sessions`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
@@ -2000,8 +2000,21 @@ export async function dashboardSessionStatus(cfg: AgentsConfig, session: string)
   if (!res.ok) throw new HttpException({ error: `the dashboard session list answered ${res.status}` }, 502);
   const body = (await res.json().catch(() => null)) as { sessions?: unknown } | null;
   if (!Array.isArray(body?.sessions)) throw new HttpException({ error: 'the dashboard session list carried no sessions' }, 502);
-  const found = (body.sessions as { id?: unknown; status?: unknown }[]).find((s) => s?.id === session);
-  return found === undefined ? null : typeof found.status === 'string' ? found.status : 'unknown';
+  const out = new Map<string, string>();
+  for (const s of body.sessions as { id?: unknown; status?: unknown }[]) {
+    // The first entry for an id wins, as `Array.find` did before this was a map.
+    if (typeof s?.id === 'string' && !out.has(s.id)) out.set(s.id, typeof s.status === 'string' ? s.status : 'unknown');
+  }
+  return out;
+}
+
+/**
+ * A session's status in the dashboard's session list — `null` when the list does not carry it, `'unknown'` for an entry with no status string — or a
+ * 502 when the list cannot be read. #225's case B asked this first (`ItemsAbortService`); #227's stale probe asks it too, through `staleClaimProbe` below,
+ * and there is one copy so the two can never disagree about what the list said.
+ */
+export async function dashboardSessionStatus(cfg: AgentsConfig, session: string): Promise<string | null> {
+  return (await dashboardSessions(cfg)).get(session) ?? null;
 }
 
 /**

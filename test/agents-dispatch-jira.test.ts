@@ -5,6 +5,7 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
+import { JiraLiveReconciler } from '../server/src/agents/jira-live.service';
 import { AppModule } from '../server/src/app.module';
 import { JiraClient } from '../server/src/jira/jira.client';
 import { JIRA_LIVE_CAP, JiraLiveService } from '../server/src/jira/live.service';
@@ -397,6 +398,20 @@ describe('Start', () => {
     const status: JiraStatusPayload = (await request(app.getHttpServer()).get('/api/jira').expect(200)).body;
     expect(status.live['PAY-1']).toMatchObject({ name: 'jira PAY-1', repo: REPO, starting: false });
     expect(live.get('PAY-1')).toMatchObject({ sessionId: 'sess-1' });
+  });
+
+  /* The reconciler is armed by a session that exists and by nothing else: a refused or failed Start leaves no confirmed entry for it to watch. */
+  it('arms the live-map reconciler once the session is confirmed — and not for a Start whose spawn failed', async () => {
+    await build();
+    const arm = jest.spyOn(app.get(JiraLiveReconciler), 'arm');
+    stubDashboard({ spawn: { ok: false, status: 500, body: { error: 'boom' } } });
+    await post(BODY).expect(502);
+    expect(arm).not.toHaveBeenCalled();
+
+    stubDashboard();
+    await post(BODY).expect(200);
+    expect(arm).toHaveBeenCalledTimes(1);
+    expect(live.hasConfirmed()).toBe(true);
   });
 
   it('spawns in the normalised repo path, so `~`-free trailing-slash spellings reach the same project', async () => {

@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { HttpException, Injectable } from '@nestjs/common';
 
-import { projectDispatchGate } from '../../../shared/agent';
+import { environmentBlock, projectDispatchGate } from '../../../shared/agent';
 import { jiraSessionName } from '../../../shared/types';
 import type { JiraDispatchRequest, JiraDispatchResult, JiraIssueDetail, PermissionMode } from '../../../shared/types';
 import { normaliseRepoPath, readJiraConfig } from '../jira/config.util';
@@ -13,6 +13,9 @@ import { composeJiraPrompt, resolveJiraActionOrThrow } from '../jira/prompt.util
 import type { JiraComposeAction } from '../jira/prompt.util';
 import { jiraWriteOrThrow, unwrapJira } from '../jira/unwrap.util';
 import { AgentsService } from './agents.service';
+import { readAgentsConfig } from './config.util';
+import { JiraLiveReconciler } from './jira-live.service';
+import { stopDashboardSession } from './session-stop.util';
 
 /** What a failure after a landed write says, appended to its own sentence: the write is not undone (spec §7), and the reader must not retry as if it were. */
 const ASSIGN_STANDS = ' — the assign stands';
@@ -44,7 +47,7 @@ const WRITES_STAND = ' — the Jira writes stand';
  *     nothing and still bumps `updated`.
  *  7. the spawn, with the prompt composed AFTER the writes, so the session reads the status and assignee the ticket now has. Any failure from here — the
  *     re-read, the re-composition, the spawn — keeps its status and gains WRITES_STAND when a write landed.
- *  8. `live.confirm` and the answer.
+ *  8. `live.confirm`, `reconciler.arm()` and the answer.
  *
  * Every failure from step 5 on runs through one `catch` that releases the reservation, so no failure class can leave a key `starting` until the 8-hour expiry
  * — a retry after any of them is a fresh Start, never a 409. `release` only drops a STARTING entry, so the catch cannot take down a session that did start.
@@ -54,7 +57,8 @@ export class JiraDispatchService {
   constructor(
     private readonly agents: AgentsService,
     private readonly poller: JiraPollerService,
-    private readonly live: JiraLiveService
+    private readonly live: JiraLiveService,
+    private readonly reconciler: JiraLiveReconciler
   ) {}
 
   async dispatch(req: JiraDispatchRequest): Promise<JiraDispatchResult> {
@@ -133,12 +137,37 @@ export class JiraDispatchService {
     }
 
     this.live.confirm(req.key, spawned.sessionId);
+    // The map now holds a session the dashboard can end without telling us; the reconciler is what notices. Idempotent, and only a `setTimeout` — nothing here awaits it.
+    this.reconciler.arm();
     return {
       sessionId: spawned.sessionId,
       assigned,
       transitioned: transition?.name ?? null,
       session: { name: jiraSessionName(req.key), startedAt: this.live.get(req.key)?.startedAt ?? new Date().toISOString(), repo }
     };
+  }
+
+  /**
+   * `POST /api/agents/jira-stop` — the strip's Stop (spec §5). Stops the key's session through the dashboard, then forgets the key. Jira is never called: the
+   * ticket keeps its assignee and its status, which is what the confirm in the client says.
+   *
+   * The order is the spec's: agents off (409, `environmentBlock`'s own sentence — a disabled `status()` makes no request), a key the map does not hold (409), a
+   * `starting` entry (409 — it has no session id to stop, and its own Start will confirm or release it). Then the stop: a 200 and the dashboard's `no live
+   * session` 404 both mean the process is gone, and both clear the entry; any other answer is a 502 from `stopDashboardSession` and the entry STAYS, because the
+   * session may still be running and a strip that says otherwise would invite a second Start on a busy repository.
+   */
+  async stop(key: string): Promise<{ ok: true }> {
+    const cfg = readAgentsConfig();
+    if (!cfg.enabled) {
+      throw new HttpException({ error: environmentBlock(await this.agents.status()) ?? 'dispatch is off — set BM_AGENTS=on for the API' }, 409);
+    }
+    const entry = this.live.get(key);
+    if (entry === null) throw new HttpException({ error: `no live session for ${key}` }, 409);
+    if (entry.sessionId === null) throw new HttpException({ error: `${key} is still starting` }, 409);
+    await stopDashboardSession(cfg, entry.sessionId, 'Jira is untouched');
+    // The stop is awaited: a Stop and a fresh Start can interleave, and the new entry (a different session) is not the one this request stopped.
+    if (this.live.get(key)?.sessionId === entry.sessionId) this.live.clear(key);
+    return { ok: true };
   }
 
   /** The second composition, from the re-read detail. Only reached after a write, so its refusal is the caller's to suffix; the sentence is the first's. */

@@ -7,12 +7,12 @@ import { JiraDispatchService } from './jira-dispatch.service';
 import { SameOriginPostGuard } from './origin.guard';
 
 /**
- * The Jira phase-5 agents routes — `POST /api/agents/dispatch-jira` now (spec §5, §7). Its own controller under the same `api/agents` prefix rather than more
+ * The Jira phase-5 agents routes — `POST /api/agents/dispatch-jira` and `POST /api/agents/jira-stop` (spec §5, §7). Its own controller under the same `api/agents` prefix rather than more
  * methods on `AgentsController`, which is already the item dispatcher's, the orchestrator's and the watchdog's: the Jira routes share none of those
  * services, and a fourth constructor dependency there would put a Jira import into every one of them.
  *
  * `SameOriginPostGuard` like every agents POST — this one starts a session that can write files in a mapped repository and writes to Jira on the way, so a
- * page the developer did not write must not be able to drive it (`origin.guard.ts`). The route belongs in `test/agents-origin-guard.test.ts`'s list.
+ * page the developer did not write must not be able to drive it (`origin.guard.ts`). Both routes belong in `test/agents-origin-guard.test.ts`'s list.
  */
 @Controller('api/agents')
 export class JiraAgentsController {
@@ -53,5 +53,19 @@ export class JiraAgentsController {
       effort: body.effort as string | undefined,
       remoteControl: body.remoteControl === true
     });
+  }
+
+  /**
+   * `POST /api/agents/jira-stop` — the strip's Stop. The key's shape is the only thing checked here, with the same sentence `dispatch-jira` uses; whether the key
+   * has a session, and whether agents are on, are the service's. 200 for the same reason `dispatch-jira` answers 200: what this reports is something that
+   * happened on the dashboard, not a resource this server created.
+   */
+  @UseGuards(SameOriginPostGuard)
+  @Post('jira-stop')
+  @HttpCode(200)
+  jiraStop(@Body() raw: unknown): Promise<{ ok: true }> {
+    const key = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).key : undefined;
+    if (!isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    return this.dispatcher.stop(key);
   }
 }
