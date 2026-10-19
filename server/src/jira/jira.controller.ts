@@ -6,6 +6,7 @@ import type { JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../../../sha
 import { renderTicketBlock } from './block';
 import { JIRA_JQL_MAX_CHARS, isJiraId } from './config.util';
 import { jiraEnv } from './env.util';
+import { JiraLiveService } from './live.service';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
 import { unwrapJira } from './unwrap.util';
 
@@ -26,12 +27,19 @@ import { unwrapJira } from './unwrap.util';
  */
 @Controller('api/jira')
 export class JiraController {
-  constructor(private readonly poller: JiraPollerService) {}
+  constructor(
+    private readonly poller: JiraPollerService,
+    private readonly live: JiraLiveService
+  ) {}
 
-  /** `GET /api/jira` — memory, the environment and `jira.json`, no outbound call. */
+  /**
+   * `GET /api/jira` — memory, the environment and `jira.json`, no outbound call. The controller, not the poller, fills `live` from the live map: the poller
+   * stays unaware of it. An unconfigured server keeps the poller's `{}` — it has no sessions to show, and no run can have started without credentials.
+   */
   @Get()
   status(): JiraStatusPayload {
-    return this.poller.status();
+    const status = this.poller.status();
+    return status.configured ? { ...status, live: this.live.snapshot() } : status;
   }
 
   /**
@@ -68,7 +76,7 @@ export class JiraController {
       res.type('text/plain; charset=utf-8');
       return renderTicketBlock(detail);
     }
-    return detail;
+    return { ...detail, session: this.live.snapshot()[key] ?? null };
   }
 
   /**

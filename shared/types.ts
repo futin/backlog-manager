@@ -531,9 +531,9 @@ export function isSyncInterval(value: unknown): value is SyncInterval {
 }
 
 // ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 is the server's READ half, so two fields are typed at their phase-1 value and
-// widen later without a rename: `JiraIssueDetail.session` is `null` (phase 5 makes it the live-session record) and `JiraStatusPayload.live` is always `{}`
-// (phase 5 makes it a map of key → live session). `JiraAction` arrived with phase 5's prompt composer (below, after `JiraSkill`); `JiraDispatchRequest` and its
+// Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 typed two fields at their empty value so phase 5 could widen them without a
+// rename: `JiraIssueDetail.session` is now `JiraLiveSession | null` and `JiraStatusPayload.live` a key → `JiraLiveSession` map, both filled by the controller from
+// `JiraLiveService` (the poller never sees the map). `JiraAction` arrived with phase 5's prompt composer (below, after `JiraSkill`); `JiraDispatchRequest` and its
 // result are still absent — the dispatch route's own task adds them.
 // `JiraStatusPayload.tokenKind` is not in §4's list: it is the one extra boot probe's answer (§3, P14) and the Connection card needs it; §4 is amended to
 // match.
@@ -668,7 +668,20 @@ export interface JiraTransition {
   to: { name: string; category: JiraStatusCategory };
 }
 
-/** `GET /api/jira/issue/:key`, read fresh. `session` is `null` in phase 1; phase 5 widens it to the live-session record. */
+/**
+ * One live Run session on a ticket, as the board draws it (spec §4). `starting` is the window between `reserve` and the dashboard's answer, when the key is
+ * claimed but there is no session id yet; `name` is `jiraSessionName(key)`, the title the dispatch gave the session, so the card and the dashboard agree.
+ */
+export interface JiraLiveSession {
+  name: string;
+  /** ISO instant the key was reserved. */
+  startedAt: string;
+  /** The absolute repo path the session runs in. */
+  repo: string;
+  starting: boolean;
+}
+
+/** `GET /api/jira/issue/:key`, read fresh. `session` is the live Run on this key (memory only), or `null`. */
 export interface JiraIssueDetail extends JiraIssue {
   /** Markdown, converted from Jira's ADF (§8). */
   description: string;
@@ -676,7 +689,7 @@ export interface JiraIssueDetail extends JiraIssue {
   transitions: JiraTransition[];
   /** The ids of the boards whose cache holds this issue. */
   boards: string[];
-  session: null;
+  session: JiraLiveSession | null;
 }
 
 /**
@@ -692,7 +705,7 @@ export interface JiraIssueWriteResult {
 
 /**
  * `GET /api/jira`. `configured: false` is the whole payload's "draw nothing Jira" signal — the other fields then carry their empty values. The credentials
- * never appear here: `site`, `me.name` and `me.accountId` are the only identity facts that leave the server (§10). `live` is always `{}` in phase 1.
+ * never appear here: `site`, `me.name` and `me.accountId` are the only identity facts that leave the server (§10). `live` is the in-memory map of key → live Run session, `{}` while unconfigured.
  */
 export interface JiraStatusPayload {
   configured: boolean;
@@ -711,7 +724,7 @@ export interface JiraStatusPayload {
   skills: JiraSkill[];
   /** `sweep` is every call the last tick made, however many boards it swept; `last429At` is an ISO instant or `null`. */
   calls: { sweep: number; last429At: string | null };
-  live: Record<string, never>;
+  live: Record<string, JiraLiveSession>;
   /** The poller's `armed` getter: a tick is scheduled. The Connection row's `every 15 s` / `idle` has no other source. Always `false` while unconfigured. */
   armed: boolean;
   /**
@@ -732,6 +745,11 @@ export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]+-\d+$/;
 
 export function isJiraKey(value: unknown): value is string {
   return typeof value === 'string' && JIRA_KEY_RE.test(value);
+}
+
+/** The title a Jira Run session carries in the dashboard: `jira <KEY>`, cut to 60 characters. Lives here, not in `agents/`, so `jira/` and `agents/` share it without an import between them. */
+export function jiraSessionName(key: string): string {
+  return `jira ${key}`.slice(0, 60);
 }
 
 /**

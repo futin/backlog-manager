@@ -9,6 +9,7 @@ import { AppModule } from '../server/src/app.module';
 import { renderTicketBlock } from '../server/src/jira/block';
 import { JIRA_JQL_MAX_CHARS } from '../server/src/jira/config.util';
 import { JiraClient } from '../server/src/jira/jira.client';
+import { JiraLiveService } from '../server/src/jira/live.service';
 import { JiraPollerService } from '../server/src/jira/poller.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import type { JiraIssueDetail, JiraStatusPayload } from '../shared/types';
@@ -163,6 +164,21 @@ describe('configured, against a healthy Jira', () => {
       expect(res.text).not.toContain(EMAIL);
     });
 
+    it('carries a reserved key in `live`, starting until confirmed, and is {} once nothing is held', async () => {
+      expect((await get('').expect(200)).body.live).toEqual({});
+      const live = app.get(JiraLiveService);
+      live.reserve('PAY-131', '/work/pay');
+      try {
+        const starting = (await get('').expect(200)).body as JiraStatusPayload;
+        expect(starting.live).toEqual({ 'PAY-131': { name: 'jira PAY-131', startedAt: expect.any(String), repo: '/work/pay', starting: true } });
+        live.confirm('PAY-131', 'sess-1');
+        expect(((await get('').expect(200)).body as JiraStatusPayload).live['PAY-131'].starting).toBe(false);
+      } finally {
+        live.clear('PAY-131');
+      }
+      expect((await get('').expect(200)).body.live).toEqual({});
+    });
+
     it('arms the poller for a 1m board', () => {
       // `armed` reads false mid-tick, so it is asked after `await poller.tick()`, which `build` did.
       expect(poller.armed).toBe(true);
@@ -211,6 +227,30 @@ describe('configured, against a healthy Jira', () => {
     it('200 with boards: [] for a key on no board — the read is fresh, the caches have no say', async () => {
       const res = await get('/issue/PAY-500').expect(200);
       expect(res.body).toMatchObject({ key: 'PAY-500', boards: [] });
+    });
+
+    it('carries `session` for a live key and null for any other', async () => {
+      const live = app.get(JiraLiveService);
+      live.reserve('PAY-131', '/work/pay');
+      try {
+        const body = (await get('/issue/PAY-131').expect(200)).body as JiraIssueDetail;
+        expect(body.session).toEqual({ name: 'jira PAY-131', startedAt: expect.any(String), repo: '/work/pay', starting: true });
+        expect(((await get('/issue/PAY-500').expect(200)).body as JiraIssueDetail).session).toBeNull();
+      } finally {
+        live.clear('PAY-131');
+      }
+      expect(((await get('/issue/PAY-131').expect(200)).body as JiraIssueDetail).session).toBeNull();
+    });
+
+    it('?format=text is unchanged by a live session: the ticket block of the JSON answer minus the session', async () => {
+      const live = app.get(JiraLiveService);
+      const before = (await get('/issue/PAY-131?format=text').expect(200)).text;
+      live.reserve('PAY-131', '/work/pay');
+      try {
+        expect((await get('/issue/PAY-131?format=text').expect(200)).text).toBe(before);
+      } finally {
+        live.clear('PAY-131');
+      }
     });
 
     it('?format=text is text/plain with the ticket block of the JSON answer (P14, P18)', async () => {
