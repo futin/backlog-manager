@@ -48,11 +48,14 @@ import { JiraSetupView } from './JiraSetupView';
  * counter is not cleared on a page switch — it is a count of events, not a state, and only its change means anything.
  *
  * **The launch sheet is held HERE too, ONE for the whole section** (Jira phase 5, spec §7; the task-10 brief put it on the board page and this is the
- * deliberate deviation). `Run ▾` is drawn in two homes, a card and the modal, and both call `onRun(issue, action)`; the sheet they open has to mount AFTER an
- * open modal so that it is the topmost entry of the one dialog stack — Escape then closes the sheet alone and the modal stays, with no second key listener.
- * The modal is this component's child, not the board page's, so this is the one place that can order them. `onStarted` is a landed Start: it reloads the shell's
- * status (the strip is `live`, and the status poll alone runs on the boards' clock — minutes away) and bumps `nudge`, because a Start may have assigned and
- * moved the ticket. Like the open issue, the slot is cleared whenever `page` changes.
+ * deliberate deviation). `Run ▾` is drawn in two homes, a card and the modal, and both call `onRun(issue, action)`; the sheet they open has to rank ABOVE an
+ * open modal on the one dialog stack — Escape then closes the sheet alone and the modal stays, with no second key listener. What ranks it there is MOUNT
+ * ORDER, which is what `useDialogEscape` ranks by: the sheet always opens while the modal is already up (a pick in the modal's own `Run ▾`, or in a card's menu
+ * with the modal open behind it), so it mounts later whatever its place in the JSX. It is drawn after the modal anyway, for the reader of this file, but
+ * reordering the two lines would change nothing; hosting it in the one component that holds both is what guarantees a single sheet and a single slot.
+ * `onStarted` is a landed Start and `onWrote` a Start refused after the server's writes landed: both are `landed` — reload the shell's status (the strip is
+ * `live`, and the status poll alone runs on the boards' clock, minutes away) and bump `nudge`, because the ticket may have been assigned and moved either
+ * way. Like the open issue, the slot is cleared whenever `page` changes.
  */
 export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
   const { data, error, reload } = useJiraContext();
@@ -66,6 +69,11 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
   useEffect(() => setLaunch(null), [page]);
   const [nudge, setNudge] = useState(0);
   const run = (issue: JiraIssue, action: JiraAction): void => setLaunch({ issue, action });
+  // A Start that landed, or a Start refused after the server's writes landed (the ticket moved either way): reload the shell's status and nudge the board.
+  const landed = (): void => {
+    reload();
+    setNudge((n) => n + 1);
+  };
 
   if (data === null) return <div className="board-empty">{error ? 'Jira unavailable' : 'loading…'}</div>;
   if (!data.configured) return <div className="board-empty">Jira is not configured</div>;
@@ -84,17 +92,15 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
           onClose={() => setOpenIssue(null)}
         />
       )}
-      {/* After the modal, so it is the stack's topmost entry — see the header. Keyed by issue so a second launch never inherits the first one's form. */}
+      {/* Drawn after the modal; it ranks above it because it mounts later — see the header. Keyed by issue so a second launch never inherits the first's form. */}
       {launch !== null && (
         <JiraLaunchSheet
           key={launch.issue.key}
           issue={launch.issue}
           initialAction={launch.action}
           onClose={() => setLaunch(null)}
-          onStarted={() => {
-            reload();
-            setNudge((n) => n + 1);
-          }}
+          onStarted={landed}
+          onWrote={landed}
         />
       )}
     </>

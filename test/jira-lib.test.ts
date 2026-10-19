@@ -40,6 +40,7 @@ import {
   isJiraStatusPayload,
   defaultModeFor,
   jiraSettingOf,
+  jiraWritesStand,
   resolveJiraAction,
   runChipState,
   pickBoard,
@@ -1000,5 +1001,18 @@ describe('the launch sheet wire', () => {
     expect(modelEffortFlags('', '')).toEqual({});
     expect(Object.keys(modelEffortFlags('opus', ''))).toEqual(['model']);
     expect(modelEffortFlags('opus', 'high')).toEqual({ model: 'opus', effort: 'high' });
+  });
+});
+
+describe('jiraWritesStand', () => {
+  it('is true for the two sentences the server ends a post-write failure with', () => {
+    expect(jiraWritesStand('dashboard unreachable — the Jira writes stand')).toBe(true);
+    expect(jiraWritesStand('transition: Jira refused it — the assign stands')).toBe(true);
+  });
+
+  it('is false for a refusal before any write, however it is worded', () => {
+    expect(jiraWritesStand('transition not offered')).toBe(false);
+    expect(jiraWritesStand('PAY-131 already has a live Run session')).toBe(false);
+    expect(jiraWritesStand('the assign stands, they said, but this is not that sentence')).toBe(false);
   });
 });

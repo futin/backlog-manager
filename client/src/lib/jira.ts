@@ -735,6 +735,16 @@ export function resolveJiraAction(setting: string, skills: readonly JiraSkill[])
   return skills.some((k) => k.id === setting) ? { skill: setting } : 'execute';
 }
 
+/**
+ * Whether a Start's refusal says a Jira write landed before it failed. The server does assign, then transition, THEN the spawn, and a failure after a landed
+ * write ends its own sentence `— the assign stands` (a transition that failed after the assign) or `— the Jira writes stand` (the re-read, the re-composition
+ * or the spawn) — `ASSIGN_STANDS` and `WRITES_STAND` in `jira-dispatch.service.ts`. A refusal before any write (400, 409, 503) carries neither, so the sentence
+ * is the only signal the client has that the ticket has changed under a sheet that is still showing a refusal.
+ */
+export function jiraWritesStand(message: string): boolean {
+  return /— the (?:assign stands|Jira writes stand)$/.test(message);
+}
+
 /** `resolveJiraAction`'s inverse: the string `Settings.jiraDefaultAction` stores for an action — a built-in's own name, or a skill's bare id. */
 export function jiraSettingOf(action: JiraAction): string {
   return typeof action === 'string' ? action : action.skill;

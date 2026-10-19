@@ -798,6 +798,69 @@ describe('Run ▾ and the live strip', () => {
     expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
   });
 
+  // I1 (final review): `Jira default action` is read HERE — the menu lists the resolved default first and marks it `default` — because every way into the launch
+  // sheet passes the clicked row, so the sheet never seeds from the setting. Rows are read as [label, hint] pairs off the `.jira-run-opt` buttons.
+  describe('the default action', () => {
+    const setDefault = (jiraDefaultAction: string): void =>
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction }));
+    const openMenu = async (): Promise<HTMLElement> => {
+      await renderRun();
+      await userEvent.click(runChip('Refund partial captures'));
+      return screen.getByRole('dialog', { name: 'Run menu' });
+    };
+    const rows = (menu: HTMLElement): [string, string][] =>
+      Array.from(menu.querySelectorAll<HTMLElement>('.jira-run-opt')).map((b) => {
+        const [label, hint] = Array.from(b.querySelectorAll('span')).map((n) => n.textContent ?? '');
+        return [label, hint];
+      });
+
+    it('lists Work it end to end first, marked default, when that is the setting', async () => {
+      setDefault('execute');
+      const menu = await openMenu();
+      expect(rows(menu)).toEqual([
+        [JIRA_BUILTIN_LABELS.execute, 'default'],
+        [JIRA_BUILTIN_LABELS.context, 'built-in'],
+        ['Groom ticket', '/jira-groom']
+      ]);
+    });
+
+    it('lists Open with the ticket loaded first when that is the setting, Work it end to end following as built-in', async () => {
+      setDefault('context');
+      const menu = await openMenu();
+      expect(rows(menu)).toEqual([
+        [JIRA_BUILTIN_LABELS.context, 'default'],
+        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
+        ['Groom ticket', '/jira-groom']
+      ]);
+    });
+
+    it('lists an existing skill first, marked default, and does not repeat it lower down', async () => {
+      setDefault(SKILL.id);
+      const menu = await openMenu();
+      expect(rows(menu)).toEqual([
+        ['Groom ticket', 'default'],
+        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
+        [JIRA_BUILTIN_LABELS.context, 'built-in']
+      ]);
+      expect(within(menu).getAllByRole('button', { name: /Groom ticket/ })).toHaveLength(1);
+    });
+
+    it('reads a deleted skill id as Work it end to end', async () => {
+      setDefault('s_gone0000');
+      const menu = await openMenu();
+      expect(rows(menu)[0]).toEqual([JIRA_BUILTIN_LABELS.execute, 'default']);
+      expect(rows(menu)).toHaveLength(3);
+    });
+
+    it('opens the sheet on the promoted row\'s action', async () => {
+      setDefault('context');
+      const menu = await openMenu();
+      await userEvent.click(within(menu).getAllByRole('button')[0]);
+      const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+      expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
+    });
+  });
+
   // Spec §11: a resolved dispatch-jira reloads the status without waiting for the poll. `use-jira`'s probe re-implements `.then(reload)`, so only THIS case, through
   // the real `JiraView` -> `JiraLaunchSheet`'s `onStarted`, fails when that wiring loses its reload or its board nudge.
   it('Start from a card\'s Run menu reads GET /api/jira once more and the board list once more, with no timer wait', async () => {

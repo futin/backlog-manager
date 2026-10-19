@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useMountedRef } from '../../hooks/useMountedRef';
@@ -39,6 +39,10 @@ export function JiraSkillsGroup() {
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [asking, setAsking] = useState<string | null>(null);
+  // The GUARD is a ref and `busy` is the RENDERING, the split `useAction` makes (bug-19): `setBusy(true)` does not change what `busy` holds in this render's
+  // closure, so a second click dispatched before React re-renders reads `false` and would POST again — and each POST mints its own `s_` id, so the result is
+  // two identical skills. One guard serves Add and `×` alike, as one `busy` does.
+  const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +51,8 @@ export function JiraSkillsGroup() {
 
   /** POST one write. Resolves `true` when the server stored it; the sentence for a refusal goes under the add row. */
   async function write(url: string, body: unknown, fallback: string): Promise<boolean> {
+    if (busyRef.current) return false;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -59,6 +65,7 @@ export function JiraSkillsGroup() {
       if (mounted.current) setError(`${fallback} — the server did not answer`);
       return false;
     } finally {
+      busyRef.current = false;
       if (mounted.current) setBusy(false);
     }
   }

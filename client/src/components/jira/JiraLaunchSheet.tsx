@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
-import { useAction } from '../../hooks/useAction';
+import { errorMessage, useAction } from '../../hooks/useAction';
 import { useAgents } from '../../hooks/useAgents';
 import { useFetched } from '../../hooks/useFetched';
 import { useSettings } from '../../hooks/useSettings';
@@ -12,7 +12,7 @@ import {
   dispatchJira,
   fetchJiraDetail,
   fetchJiraPrompt,
-  resolveJiraAction,
+  jiraWritesStand,
   transitionOptions
 } from '../../lib/jira';
 import { clampMode, modesUpTo, projectDispatchGate } from '../../../../shared/agent';
@@ -48,18 +48,21 @@ import { Switch } from '../ui/Switch';
  * from last week is the failure a per-launch control exists to prevent).
  *
  * **Two writes ride along, both opt-in and both off.** `Assign to me` (disabled with a reason when the ticket is already the reader's, or `me` is not
- * known) and `Move to` (`leave as is` is `transitionId: null`). Neither is applied by this file: the server does it, after the spawn is accepted.
+ * known) and `Move to` (`leave as is` is `transitionId: null`). Neither is applied by this file: the server does it BEFORE the spawn — assign, then
+ * transition, then the session — so a write that landed stands if the spawn then fails, and the refusal says so (`jiraWritesStand`).
  */
 export function JiraLaunchSheet({
   issue,
   initialAction,
   onClose,
-  onStarted
+  onStarted,
+  onWrote
 }: {
   issue: JiraIssue;
-  initialAction: JiraAction | null;
+  initialAction: JiraAction;
   onClose: () => void;
   onStarted: () => void;
+  onWrote: () => void;
 }) {
   const { settings } = useSettings();
   const { data } = useJiraContext();
@@ -70,7 +73,7 @@ export function JiraLaunchSheet({
   const me = data?.me ?? null;
   const paths = data?.repos[issue.project.key] ?? [];
 
-  const [action, setAction] = useState<JiraAction>(() => initialAction ?? resolveJiraAction(settings.jiraDefaultAction, skills));
+  const [action, setAction] = useState<JiraAction>(initialAction);
   // '' is "not chosen": several mapped paths wait for a pick, and the preview waits with them rather than guessing a repository. A single path is
   // derived, not seeded — the mapping can arrive after mount (the status is the shell's, and may still be loading when the sheet opens), and a one-shot
   // `useState` seed would leave a statically shown path unselected with no control to fix it.
@@ -161,6 +164,14 @@ export function JiraLaunchSheet({
         onSuccess: (result) => {
           setStarted(result);
           onStarted();
+        },
+        // Returns nothing, so the refusal still renders. A write that landed before the spawn failed has moved the ticket: the board is told (the same reload and
+        // nudge a landed Start triggers) and `Move to` goes back to `leave as is`, because the fresh read no longer offers that transition and a second Start
+        // sending it would be a 400 `transition not offered` the reader could only clear by hand. A refusal before any write carries no such sentence.
+        onError: (err) => {
+          if (!jiraWritesStand(errorMessage(err))) return;
+          setTransitionId('');
+          onWrote();
         }
       }
     );

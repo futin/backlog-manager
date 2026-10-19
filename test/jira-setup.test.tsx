@@ -866,6 +866,22 @@ describe('the Skills card', () => {
     expect(skillPrompt().value).toBe('');
   });
 
+  // M4 (final review): the guard is a ref, as `useAction`'s is (bug-19) — `busy` state is not yet true for a second click in the same tick, and each POST would
+  // mint its own `s_` id, so two clicks made two identical skills.
+  it('two clicks on Add inside one tick POST once', async () => {
+    await renderSetup();
+    await userEvent.type(skillName(), 'Plan');
+    await userEvent.type(skillPrompt(), '/plan {{key}');
+    const chip = addSkillChip();
+    act(() => {
+      chip.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      chip.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await waitFor(() => expect(skillPosts()).toHaveLength(1));
+    await within(skillsCard()).findByText('Plan');
+    expect(skillPosts()).toHaveLength(1);
+  });
+
   it('× asks through Confirm first and posts nothing until it is accepted, then POSTs { id } to /skills/delete and reloads', async () => {
     statusAnswer = status({ skills: [GROOM, SUMMARISE] });
     await renderSetup();

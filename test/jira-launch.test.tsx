@@ -161,14 +161,16 @@ function setClipboard(value: { writeText: jest.Mock } | undefined): void {
 
 let onClose: jest.Mock;
 let onStarted: jest.Mock;
+let onWrote: jest.Mock;
 
-function mount(opts: { initialAction?: JiraAction | null; status?: Partial<JiraStatusPayload>; issue?: JiraIssue } = {}) {
+function mount(opts: { initialAction?: JiraAction; status?: Partial<JiraStatusPayload>; issue?: JiraIssue } = {}) {
   onClose = jest.fn();
   onStarted = jest.fn();
+  onWrote = jest.fn();
   const tree = (status?: Partial<JiraStatusPayload>) => (
     <SettingsProvider>
       <JiraContext.Provider value={{ data: jiraStatus(status), loading: false, error: false, reload: jest.fn() }}>
-        <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? null} onClose={onClose} onStarted={onStarted} />
+        <JiraLaunchSheet issue={opts.issue ?? CARD} initialAction={opts.initialAction ?? 'execute'} onClose={onClose} onStarted={onStarted} onWrote={onWrote} />
       </JiraContext.Provider>
     </SettingsProvider>
   );
@@ -260,9 +262,9 @@ describe('JiraLaunchSheet — the repository', () => {
 });
 
 describe('JiraLaunchSheet — the action and the preview', () => {
-  it('seeds the action from jiraDefaultAction and refetches the preview, stale answer dropped, when it changes', async () => {
-    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: 'context' }));
-    await ready();
+  it('seeds the action from initialAction and refetches the preview, stale answer dropped, when it changes', async () => {
+    await ready({ initialAction: 'context' });
+    expect((within(dialog()).getByRole('combobox', { name: 'Action' }) as HTMLSelectElement).value).toBe('context');
     expect(promptReads()[0].searchParams.get('action')).toBe('context');
 
     await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), `skill:${SKILL.id}`);
@@ -270,10 +272,11 @@ describe('JiraLaunchSheet — the action and the preview', () => {
     expect(calls.map((c) => c.url)).toContain(`/api/jira/prompt?key=PAY-131&action=skill%3A${SKILL.id}&repo=%2FUsers%2Fada%2Fpay`);
   });
 
-  it('seeds the action from initialAction ahead of the setting', async () => {
-    await ready({ initialAction: 'context' });
-    expect((within(dialog()).getByRole('combobox', { name: 'Action' }) as HTMLSelectElement).value).toBe('context');
-    expect(promptReads()[0].searchParams.get('action')).toBe('context');
+  it('ignores jiraDefaultAction — the menu reads it, and the sheet opens on exactly the action it was handed', async () => {
+    localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction: 'context' }));
+    await ready({ initialAction: 'execute' });
+    expect((within(dialog()).getByRole('combobox', { name: 'Action' }) as HTMLSelectElement).value).toBe('execute');
+    expect(promptReads()[0].searchParams.get('action')).toBe('execute');
   });
 
   it('shows a refusal in the preview\'s place and keeps Start disabled for a skill that is gone', async () => {
@@ -403,6 +406,45 @@ describe('JiraLaunchSheet — Start', () => {
     expect(await within(dialog()).findByRole('alert')).toHaveTextContent('PAY-131 already has a live Run session');
     expect(copyButton()).toBeInTheDocument();
     expect(onStarted).not.toHaveBeenCalled();
+  });
+
+  // M1 (final review): the server does assign, then transition, THEN the spawn (jira-dispatch.service.ts), so a spawn refused after a landed write says the write
+  // stands. The ticket has moved though the sheet shows a refusal: it must tell the board and drop the `Move to` pick (the next Start would be a 400
+  // `transition not offered`, since the fresh read no longer offers it).
+  it('a refusal that says the writes stand reloads the board and puts Move to back to leave as is, the sheet staying open on the refusal', async () => {
+    server.dispatch = { status: 502, body: { error: 'dashboard unreachable — the Jira writes stand' } };
+    await ready();
+    const moveTo = within(dialog()).getByRole('combobox', { name: 'Move to' }) as HTMLSelectElement;
+    await waitFor(() => expect(moveTo).toBeEnabled());
+    await userEvent.selectOptions(moveTo, '31');
+    expect(moveTo.value).toBe('31');
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('dashboard unreachable — the Jira writes stand');
+    expect(onWrote).toHaveBeenCalledTimes(1);
+    expect(onStarted).not.toHaveBeenCalled();
+    expect(moveTo.value).toBe('');
+    expect(startButton()).toBeInTheDocument();
+  });
+
+  it('a failed transition after a landed assign ("the assign stands") counts the same', async () => {
+    server.dispatch = { status: 502, body: { error: 'transition: Jira refused — the assign stands' } };
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await within(dialog()).findByRole('alert');
+    expect(onWrote).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refusal before any write (400) changes nothing: no reload, and Move to keeps its pick', async () => {
+    server.dispatch = { status: 400, body: { error: 'transition not offered' } };
+    await ready();
+    const moveTo = within(dialog()).getByRole('combobox', { name: 'Move to' }) as HTMLSelectElement;
+    await waitFor(() => expect(moveTo).toBeEnabled());
+    await userEvent.selectOptions(moveTo, '31');
+    await userEvent.click(startButton());
+    expect(await within(dialog()).findByRole('alert')).toHaveTextContent('transition not offered');
+    expect(onWrote).not.toHaveBeenCalled();
+    expect(moveTo.value).toBe('31');
   });
 
   it('on success links to the session and calls onStarted once', async () => {
