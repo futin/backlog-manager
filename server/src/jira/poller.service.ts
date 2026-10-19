@@ -11,6 +11,7 @@ import {
   type JiraBoardFailure,
   type JiraIssue,
   type JiraIssueDetail,
+  type JiraIssueWriteResult,
   type JiraStatusPayload,
   type JiraTransition
 } from '../../../shared/types';
@@ -97,6 +98,16 @@ import { JIRA_ISSUE_FIELDS, categoryOf, mapJiraIssue, pickSprintField, type MapC
  * A sweep already in flight is not the answer: it read `jira.json` at its top, before the save. Each sweep notes the generation it read the file under, and
  * spends only a force no newer than that — so a sweep that reaches the board after the save, but on the older copy of it, answers nothing and spends nothing.
  * `boardSaved` waits the in-flight sweep out and then runs one that STARTED after the call.
+ *
+ * ## Why the two issue writes live here, and what follows them (phase 3)
+ *
+ * `assignToMe` and `transitionIssue` are the first calls this server makes that change Jira. They are here and not in a controller because everything they
+ * must honour is private here: the read gate and the 429 window (a write inside one is refused up front with the stored instant, P1), the 401 bookkeeping,
+ * the identity, and the caches. A write that lands is followed by one re-read of the issue, spliced in place into every board cache already holding it, so
+ * the card moves on the client's next poll rather than the next sweep (§8, plan R4). The re-read reads the issue itself, so it already carries the write;
+ * the SWEEP may not — one in flight across the write, or one answered from a search index that has not caught up, carries the pre-write copy. So
+ * `sweepBoard` keeps a cached copy whose `updated` is strictly newer than the sweep's (R5, `keepNewer`). There is no per-key queue (R6): these are not
+ * read-modify-write on a body, two browsers racing are Jira's last-write-wins, and R5 keeps the caches on the newest answer.
  */
 
 /** The base tick, the GitHub poller's. Every `SyncInterval` is a whole number of these, so the tick is the resolution and no board needs its own timer. */
@@ -134,6 +145,9 @@ export interface JiraBoardCache {
  * `unreachable`, while `GET /api/jira` says `unsupported`.
  */
 export type JiraResult<T> = { ok: true; value: T } | { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess };
+
+/** What an issue write answers: a `JiraResult`, or one of the two refusals that are this server's own sentence rather than Jira's (plan R2, §8). */
+export type JiraIssueWriteOutcome = JiraResult<JiraIssueWriteResult> | { ok: false; refusal: 'no identity' | 'transition not offered' };
 
 /** A failed fresh read, as the routes receive it. */
 type JiraRefusal = { ok: false; response: JiraResponse<unknown>; retryAt?: string; access?: JiraAccess };
@@ -460,6 +474,52 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     return { ok: true, value: { ok: true, count: typeof counted.data?.count === 'number' ? counted.data.count : 0 } };
   }
 
+  /**
+   * `POST /api/jira/issue/:key/assign` (phase 3, §8): `PUT issue/{key}/assignee` with MY accountId, then the splice. Refused with no call by the read gate
+   * (unconfigured, a 429 window, `unsupported`, no `cloudId`), then by R2: under `unauthorized` the 401 that state already is, and with the identity unknown
+   * `no identity` — never a PUT carrying anything else, because Jira reads `{ accountId: null }` as UNASSIGN. No second window check before the PUT: nothing
+   * is awaited between the gate's and the send, so no window can have opened in between.
+   */
+  async assignToMe(key: string): Promise<JiraIssueWriteOutcome> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const unauthorized = this.unauthorizedRefusal();
+    if (unauthorized !== null) return unauthorized;
+    const me = this.boot.me;
+    if (me === null) return { ok: false, refusal: 'no identity' };
+
+    const res = await this.client.assign(gate.auth, key, me.accountId);
+    if (!ok(res)) return this.routeFailed(res);
+    return { ok: true, value: { ok: true, reread: await this.splice(gate.auth, key) } };
+  }
+
+  /**
+   * `POST /api/jira/issue/:key/transition` (phase 3, §8): a FRESH `GET issue/{key}/transitions`, the id checked against it, then `POST issue/{key}/transitions`
+   * and the splice. The list the modal drew its menu from is minutes old by the time someone picks; the workflow may have moved the issue since, and Jira's
+   * 400 for a stale id is a sentence about Jira's ids, not about the issue — so the offered check is here, and its refusal is this server's own
+   * (`transition not offered`). Needs no identity (R2): refused only while `unauthorized`, which `gate()` alone would let through, since a 401 keeps the
+   * `cloudId`. The read is the window's to refuse as well: a 429 met while it was out — a sweep's or another route's — makes the POST one Jira has already
+   * said it will refuse (the `issueDetail` pattern).
+   */
+  async transitionIssue(key: string, transitionId: string): Promise<JiraIssueWriteOutcome> {
+    const gate = this.gate();
+    if ('refused' in gate) return gate.refused;
+    const unauthorized = this.unauthorizedRefusal();
+    if (unauthorized !== null) return unauthorized;
+    const { auth } = gate;
+
+    const offered = await this.client.transitions(auth, key);
+    if (!ok(offered)) return this.routeFailed(offered);
+    const list = Array.isArray(offered.data?.transitions) ? offered.data.transitions : [];
+    if (!list.some((t) => isObj(t) && str(t.id) === transitionId)) return { ok: false, refusal: 'transition not offered' };
+
+    const refused = this.windowRefusal();
+    if (refused !== null) return refused;
+    const res = await this.client.transition(auth, key, transitionId);
+    if (!ok(res)) return this.routeFailed(res);
+    return { ok: true, value: { ok: true, reread: await this.splice(auth, key) } };
+  }
+
   // ── the chain ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
   private clearTimer(): void {
@@ -752,12 +812,66 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
     }
 
     this.caches.set(board.id, {
-      issues: list.slice(0, JIRA_BOARD_CAP),
+      issues: this.keepNewer(board.id, list.slice(0, JIRA_BOARD_CAP)),
       // The instant the board's last call answered.
       polledAt: iso(Date.now()),
       truncated: list.length > JIRA_BOARD_CAP,
       failures
     });
+    return true;
+  }
+
+  /**
+   * Newest `updated` wins (plan R5, Review Focus 3): an issue the sweep returned is swapped for the copy this board's cache holds when the cached one's
+   * `updated` is STRICTLY newer. That copy is a splice — a write landed and was re-read — and the sweep's is older for one of two reasons: it was read
+   * before the write (a sweep in flight across it), or Jira's search index had not caught up (the re-read is `GET issue`, which reads the issue itself; the
+   * search lags it). Either way putting it back would undo the card the person just moved, until a later sweep put it right again.
+   *
+   * The cache is read HERE, at the end of the sweep, not when it started: a splice that landed while this sweep awaited is exactly the case. Equal, or
+   * unparseable on either side, is the sweep's copy — the rule needs evidence the cached copy is newer, and the sweep's is otherwise the authority on the
+   * board. It only replaces: membership is the sweep's, so a key the sweep did not return is gone as before — a lagging index can drop a just-assigned issue
+   * from an `assignee = currentUser()` board for one sweep, accepted (R5).
+   */
+  private keepNewer(boardId: string, issues: JiraIssue[]): JiraIssue[] {
+    const held = this.caches.get(boardId)?.issues;
+    if (held === undefined || held.length === 0) return issues;
+    const byKey = new Map(held.map((i) => [i.key, i]));
+    return issues.map((swept) => {
+      const cached = byKey.get(swept.key);
+      if (cached === undefined) return swept;
+      const a = Date.parse(cached.updated);
+      const b = Date.parse(swept.updated);
+      return !Number.isNaN(a) && !Number.isNaN(b) && a > b ? cached : swept;
+    });
+  }
+
+  /**
+   * After a write that LANDED: one `GET issue/{key}` with the sweep's fields, mapped with the sweep's context (`now: Date.now()`, the Done window on — this
+   * copy goes into the board's cache, where the sweep's rule holds), and swapped IN PLACE into every board cache that already holds the key (R4). It never
+   * adds the key to a board: membership is the board's queries' and roots' business, and a splice that added would let a write put an issue on a board
+   * whose JQL excludes it. Each touched cache is replaced whole with its `polledAt` unmoved — a splice is one issue, not a sweep, and the age says how old
+   * the LIST is.
+   *
+   * True when the re-read came back as an issue (whether or not any cache held it, and whether or not the window dropped it); false otherwise, with every
+   * cache untouched (R1, Review Focus 5). A failure still goes through `routeFailed`, so a 401 or a 429 here moves the site state as any read's does — but
+   * the write's answer stays ok: it happened. A window opened while the write was out refuses the re-read up front, like any read.
+   */
+  private async splice(auth: JiraAuth, key: string): Promise<boolean> {
+    if (this.windowRefusal() !== null) return false;
+    const res = await this.client.issue(auth, key, this.sweepFields());
+    if (!ok(res)) {
+      this.routeFailed(res);
+      return false;
+    }
+    const ctx: MapContext = { site: auth.site, sprintField: this.boot.sprintField, now: Date.now() };
+    const issue = mapJiraIssue(res.data, ctx);
+    // Null for two reasons: the body is not an issue (no re-read worth the name), or the Done window dropped it — a good read that this server would not
+    // show on a board, so no cache takes it, and the next sweep drops the old copy the same way.
+    if (issue === null) return mapJiraIssue(res.data, { ...ctx, now: null }) !== null;
+    for (const [id, cache] of this.caches) {
+      if (!cache.issues.some((i) => i.key === key)) continue;
+      this.caches.set(id, { ...cache, issues: cache.issues.map((i) => (i.key === key ? issue : i)) });
+    }
     return true;
   }
 
@@ -842,6 +956,16 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
       return { refused: { ok: false, response: this.boot.access === 'unauthorized' ? synthetic(401, detail) : synthetic(0, detail) } };
     }
     return { auth: { site: env.site, email: env.email, token: env.token, cloudId: this.boot.cloudId } };
+  }
+
+  /**
+   * R2's first half, for both issue writes: while `access` is `unauthorized` the credentials are known bad, so a write is refused with no call, as the 401 it
+   * would meet — synthesised, so `jiraHttpError` answers the 401 body and the boot's back-off is not doubled by a refusal Jira never sent. Checked on
+   * `access`, not on `me`: a 401 on the boot's `field` call leaves `me` set and the credentials just as bad. Config writes do not ask this (§8).
+   */
+  private unauthorizedRefusal(): JiraRefusal | null {
+    if (this.boot.access !== 'unauthorized') return null;
+    return { ok: false, response: synthetic(401, this.boot.detail ?? 'Jira rejected the credentials') };
   }
 
   /** The refusal a read gets inside a 429 window — a synthesised 429 and the STORED instant (P1) — or `null` when none is in force. */
