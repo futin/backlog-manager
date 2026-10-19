@@ -4,14 +4,17 @@ import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import {
   ApiError,
+  EFFORT_OPTIONS,
+  MODEL_OPTIONS,
   fetchBranches,
   fetchMergeCheck,
   fetchUncommitted,
+  modelEffortFlags,
   startOrchestrate,
   type MergeCheckResult,
   type UncommittedItems
 } from '../../lib/agents';
-import { EFFORTS, MODELS, actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
+import { actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
 import { useSettings } from '../../hooks/useSettings';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { Chip } from '../ui/Chip';
@@ -599,12 +602,8 @@ export function OrchestrateSheet({
       () =>
         startOrchestrate({
           project,
-          // Same absent-not-empty convention LaunchSheet's own spread uses:
-          // JSON.stringify drops an undefined key outright, which is what lets
-          // the server's `pickFrom` and the dashboard's argv builder both read
-          // "no flag" from a genuinely missing key rather than an empty string.
-          ...(model === '' ? {} : { model }),
-          ...(effort === '' ? {} : { effort }),
+          // Absent-not-empty, the convention every launch sheet shares — see `modelEffortFlags`.
+          ...modelEffortFlags(model, effort),
           // Unlike model/effort above and ids below, this is NEVER wrapped in a
           // conditional spread — see `mergeMode`'s own state comment. It is the
           // sheet's explicit answer to "what should this run do", sent even
@@ -1054,12 +1053,12 @@ export function OrchestrateSheet({
 
                 <label className="sheet-field">
                   <span className="set-name">Model</span>
-                  <Select label="Model" value={model} onChange={setModel} options={[{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))]} />
+                  <Select label="Model" value={model} onChange={setModel} options={MODEL_OPTIONS} />
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Effort</span>
-                  <Select label="Effort" value={effort} onChange={setEffort} options={[{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))]} />
+                  <Select label="Effort" value={effort} onChange={setEffort} options={EFFORT_OPTIONS} />
                 </label>
 
                 <label className="sheet-field">

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { dispatchAgent, fetchAgentPlan, sessionUrl } from '../../lib/agents';
-import { EFFORTS, MODELS } from '../../../../shared/agent';
+import { EFFORT_OPTIONS, MODEL_OPTIONS, dispatchAgent, fetchAgentPlan, modelEffortFlags, sessionUrl } from '../../lib/agents';
 import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import { useSettings } from '../../hooks/useSettings';
@@ -74,11 +73,8 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           action: plan.action,
           prompt,
           permissionMode: mode,
-          // Spread, not `model: model || undefined`: the key is absent from the
-          // request rather than present-and-empty, which is the shape the server's
-          // `pickFrom` and the dashboard's own parser both read as "no flag".
-          ...(model === '' ? {} : { model }),
-          ...(effort === '' ? {} : { effort }),
+          // Spread, not `model: model || undefined` — see `modelEffortFlags`.
+          ...modelEffortFlags(model, effort),
           remoteControl
         }),
       { onSuccess: (r) => setSessionId(r.sessionId) }
@@ -178,22 +174,12 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 so an unknown name costs the flag, not the launch. */}
             <label className="sheet-field">
               <span className="set-name">Model</span>
-              <Select
-                label="Model"
-                value={model}
-                onChange={setModel}
-                options={[{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))]}
-              />
+              <Select label="Model" value={model} onChange={setModel} options={MODEL_OPTIONS} />
             </label>
 
             <label className="sheet-field">
               <span className="set-name">Effort</span>
-              <Select
-                label="Effort"
-                value={effort}
-                onChange={setEffort}
-                options={[{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))]}
-              />
+              <Select label="Effort" value={effort} onChange={setEffort} options={EFFORT_OPTIONS} />
             </label>
           </div>
 

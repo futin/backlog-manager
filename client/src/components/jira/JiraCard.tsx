@@ -1,9 +1,11 @@
-import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, type cardFold } from '../../lib/jira';
-import type { JiraBoard, JiraIssue } from '../../../../shared/types';
+import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, sessionStrip, type cardFold, type JiraCardSession } from '../../lib/jira';
+import type { JiraAction, JiraBoard, JiraIssue } from '../../../../shared/types';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
+import { LiveStrip } from '../ui/LiveStrip';
 import { Marker } from '../ui/Marker';
 import { Pill } from '../ui/Pill';
 import { SpreadBar } from '../ui/SpreadBar';
+import { JiraRunMenu } from './JiraRunMenu';
 
 /**
  * JiraCard — one issue on the Jira board (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's card to a Jira issue).
@@ -34,8 +36,10 @@ import { SpreadBar } from '../ui/SpreadBar';
  * and neither is drawn; with no filter and no search every top matches itself, so nothing is ever ringed then — no special case. The ring is a page
  * class rather than a `.board-card` variant: it is this board's reading of a filter, not a look the Board's card has.
  *
- * No `Run ▾` and no live strip: both are phase 5 (spec §12). The marker row draws only when it has something to say (a match, a priority), the way the
- * Board's draws only when a marker applies.
+ * **`Run ▾` and the live strip** (Jira phase 5, spec §6.2, §7; DESIGN.md §8.9.1). The marker row is ALWAYS drawn now — `Run ▾` is its last item, pushed to
+ * the right edge (`JiraRunMenu`; it stops the card's click and Enter/Space, as the link out does). A session on this issue, or on any issue folded under
+ * it, draws a `LiveStrip` (`board-card-live hatch`, the Board's look) before the face, one per session, the folded ones naming their key — a folded issue
+ * is not a card, so without that its session would show nowhere on the board. `sessions` is `cardSessions`' list, computed once by the page.
  *
  * The whole card is a `role="button"` that opens the issue (`onOpen`, which the page wires to the issue modal's slot), Enter and Space included, exactly as
  * `ItemCard`; the link out stops both the click and those two keys for the reasons `ItemCard`'s own link spells out at length — without it one click opens
@@ -48,7 +52,9 @@ export function JiraCard({
   now,
   fold,
   matches,
-  onOpen
+  sessions,
+  onOpen,
+  onRun
 }: {
   issue: JiraIssue;
   board: JiraBoard;
@@ -56,7 +62,9 @@ export function JiraCard({
   now: number;
   fold: ReturnType<typeof cardFold>;
   matches: readonly string[];
+  sessions: readonly JiraCardSession[];
   onOpen: (issue: JiraIssue) => void;
+  onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
   const crumb = crumbText(crumbOf(issue, board, me));
   const match = matchMarker(matches);
@@ -75,6 +83,11 @@ export function JiraCard({
         }
       }}
     >
+      {/* The strips sit OUTSIDE the face, as ItemCard's does, so they reach the card's own edges (§8.3). */}
+      {sessions.map((entry) => {
+        const strip = sessionStrip(entry, now);
+        return <LiveStrip key={entry.key} tone="session" label={strip.label} mark={strip.mark} title={strip.title} />;
+      })}
       <div className="board-card-face">
         <div className="jira-card-head">
           {/* The type is the icon's title rather than a word on the row: the key and the crumb need the width, and the type is the reading a person
@@ -117,18 +130,17 @@ export function JiraCard({
             <SpreadBar done={fold.progress.done} doing={fold.progress.doing} todo={fold.progress.todo} caption={fold.caption} />
           </div>
         )}
-        {(match !== null || issue.priority !== null) && (
-          <div className="board-card-markers" data-testid="marker-row">
-            {match !== null && (
-              <Marker tone="match" title={match.title}>
-                {match.word}
-              </Marker>
-            )}
-            {/* `kind`, the marker's quiet `--ink3` word: a priority is a fact about the issue, not a state this board should colour — §8's "marks state
-                by ink, never by accent" — and Jira's own five-colour priority scale would be a second palette on the card. */}
-            {issue.priority !== null && <Marker tone="kind">{issue.priority}</Marker>}
-          </div>
-        )}
+        <div className="board-card-markers" data-testid="marker-row">
+          {match !== null && (
+            <Marker tone="match" title={match.title}>
+              {match.word}
+            </Marker>
+          )}
+          {/* `kind`, the marker's quiet `--ink3` word: a priority is a fact about the issue, not a state this board should colour — §8's "marks state
+              by ink, never by accent" — and Jira's own five-colour priority scale would be a second palette on the card. */}
+          {issue.priority !== null && <Marker tone="kind">{issue.priority}</Marker>}
+          <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />
+        </div>
       </div>
     </div>
   );

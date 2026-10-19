@@ -13,6 +13,7 @@ import {
   boardFilterOptions,
   boardsByName,
   cardFold,
+  cardSessions,
   columnOf,
   effectiveBoardFilters,
   foldBoard,
@@ -25,7 +26,7 @@ import {
   type JiraChildrenIndex
 } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
-import type { JiraBoardStatus, JiraIssue } from '../../../../shared/types';
+import type { JiraAction, JiraBoardStatus, JiraIssue, JiraLiveSession } from '../../../../shared/types';
 import { BoardColumn } from '../board/BoardColumn';
 import { FilterBar, FilterSection } from '../FilterBar';
 import { Band } from '../ui/Band';
@@ -33,6 +34,9 @@ import { Chevron } from '../ui/Chevron';
 import { Chip } from '../ui/Chip';
 import { Popover } from '../ui/Popover';
 import { JiraCard } from './JiraCard';
+
+/** The status while it is unknown: no sessions. One object, so `live` is not a fresh `{}` per render. */
+const NO_LIVE: Readonly<Record<string, JiraLiveSession>> = {};
 
 /**
  * Jira › Board — one tracked board's issues in three status-category columns (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's Board).
@@ -73,8 +77,11 @@ import { JiraCard } from './JiraCard';
  * can never claim cards the columns are not drawing.
  *
  * Clicking a card calls `onOpenIssue(issue, childrenOf)` — the slot the issue modal fills, plus the fold's parent → children index as a snapshot, so the
- * modal's Children tree can reach the grandchildren the detail read does not return without a Jira call of its own (grouped-board spec §6). No `Run ▾` and
- * no live strip: phase 5.
+ * modal's Children tree can reach the grandchildren the detail read does not return without a Jira call of its own (grouped-board spec §6).
+ *
+ * **`Run ▾` and the live strip are the card's, the sheet is the page's** (Jira phase 5, spec §6.2, §7). This page reads `live` off the status and hands each
+ * card its `cardSessions` — its own and every folded issue's — and passes `onRun` straight through; it hosts NO sheet. `JiraView` does, one for the whole
+ * section, because the sheet has to mount above an open modal as well and the modal is not this page's child.
  *
  * `nudge` is `JiraView`'s write counter (Jira phase 3, R7), handed to `useJiraBoard` as given: this page neither reads nor bumps it, so a write in the modal
  * re-reads the list without the modal and the board knowing about each other.
@@ -82,10 +89,12 @@ import { JiraCard } from './JiraCard';
 export function JiraBoardView({
   onOpenJiraPage,
   onOpenIssue,
+  onRun,
   nudge
 }: {
   onOpenJiraPage: (p: JiraPage) => void;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex) => void;
+  onRun: (issue: JiraIssue, action: JiraAction) => void;
   nudge: number;
 }) {
   const { data } = useJiraContext();
@@ -103,6 +112,7 @@ export function JiraBoardView({
   const set = <K extends keyof JiraBoardFilters>(key: K, value: JiraBoardFilters[K]): void => setFilters((f) => ({ ...f, [key]: value }));
 
   const me = data?.me ?? null;
+  const live = data?.live ?? NO_LIVE;
   const options = useMemo(() => boardFilterOptions(list.issues), [list.issues]);
   const applied = useMemo(() => effectiveBoardFilters(filters, options, me), [filters, options, me]);
   const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
@@ -197,7 +207,9 @@ export function JiraBoardView({
                   now={now}
                   fold={c.fold}
                   matches={c.matches}
+                  sessions={cardSessions(c.issue, fold, live)}
                   onOpen={(issue) => onOpenIssue(issue, fold.childrenOf)}
+                  onRun={onRun}
                 />
               ))}
             </BoardColumn>

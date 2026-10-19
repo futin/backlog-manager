@@ -1,7 +1,23 @@
 import { elapsedSince, formatCreated } from './item-age';
 import { pollAge } from './tracker';
-import { SYNC_INTERVALS } from '../../../shared/types';
-import type { JiraAccess, JiraBoard, JiraBoardFailure, JiraBoardStatus, JiraIssue, JiraStatusCategory, JiraStatusPayload } from '../../../shared/types';
+import { SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
+import type {
+  JiraAccess,
+  JiraAction,
+  JiraBoard,
+  JiraBoardFailure,
+  JiraBoardStatus,
+  JiraDispatchRequest,
+  JiraDispatchResult,
+  JiraIssue,
+  JiraIssueDetail,
+  JiraLiveSession,
+  JiraSkill,
+  JiraStatusCategory,
+  JiraStatusPayload,
+  JiraTransition,
+  PermissionMode
+} from '../../../shared/types';
 
 /**
  * jira.ts — what the client says about Jira (Jira phase 2, spec §6). The one home of every derivation the Jira board, its modal, Setup and the rail chip
@@ -644,9 +660,110 @@ export function displayPath(path: string, home: string | null): string {
 }
 
 /**
+ * The Run chip's three states (spec §6.1, §7), for one issue against the status. Order is the spec's: a project with no mapped path is `no-repo` (dashed, the
+ * title names Setup › Repositories) however the rest reads, so a `live` session on a project whose mapping was removed afterwards draws the dashed chip too —
+ * the live STRIP beside it, which reads `status.live` alone, still carries the session and its Stop. `live` is any entry in the live map, `starting` or not,
+ * because the key is claimed from `reserve` on and a second Start would be refused (409) either way. Otherwise `ready`.
+ *
+ * "Mapped" is the status' own `repos`: at least ONE path for the issue's project. An empty list (a hand-edited `jira.json` the server kept) is unmapped, which
+ * `unmappedProjects` above does not say — it asks only whether the key is present, because the Repositories card's warning is about a key nobody has
+ * touched, and the chip is about whether Start has a place to run.
+ */
+export function runChipState(issue: JiraIssue, status: Pick<JiraStatusPayload, 'repos' | 'live'>): 'no-repo' | 'live' | 'ready' {
+  const paths: unknown = status.repos[issue.project.key];
+  if (!Array.isArray(paths) || paths.length === 0) return 'no-repo';
+  return status.live[issue.key] === undefined ? 'ready' : 'live';
+}
+
+/** The last segment of an absolute path, trailing slashes ignored: `/Users/ada/pay` → `pay`. The strip names a session's repo this short way (spec §6.2). */
+export function repoBasename(path: string): string {
+  const segments = path.split('/').filter((seg) => seg !== '');
+  return segments.length === 0 ? path : segments[segments.length - 1];
+}
+
+/** The slash command a skill's prompt opens with (`/jira-groom {key}` → `/jira-groom`) — the menu's quiet right-hand hint — or `null` for a prompt that is prose. */
+export function skillCommand(prompt: string): string | null {
+  const first = prompt.trimStart().split(/\s/, 1)[0];
+  return first.startsWith('/') && first.length > 1 ? first : null;
+}
+
+/** One live session as a card shows it: the issue it runs on, the session, and whether that issue is FOLDED under the card rather than the card's own. */
+export interface JiraCardSession {
+  key: string;
+  session: JiraLiveSession;
+  folded: boolean;
+}
+
+/**
+ * The sessions a card has to say something about: its own first, then every issue folded under it (grouped-board ruling — a folded issue is not a card, so a
+ * session on it would be invisible anywhere on the board without this). Read from `status.live` and never from the issue, so the strip and `runChipState`
+ * agree on what "live" is. `fold.under` is `sortForBoard` order, which makes the order of the folded strips stable between polls.
+ */
+export function cardSessions(top: JiraIssue, fold: Pick<JiraFold, 'under'>, live: Readonly<Record<string, JiraLiveSession>>): JiraCardSession[] {
+  const out: JiraCardSession[] = [];
+  const own = live[top.key];
+  if (own !== undefined) out.push({ key: top.key, session: own, folded: false });
+  for (const under of fold.under.get(top.key) ?? []) {
+    const session = live[under.key];
+    if (session !== undefined) out.push({ key: under.key, session, folded: true });
+  }
+  return out;
+}
+
+/**
+ * What a strip prints for one session (spec §6.2): `session · <repo basename>` — led by the issue's key when it is a folded one, since the card is not that
+ * issue — and, on the right, `starting` for a reserved key, else the elapsed reading from `startedAt` (`null` when the stamp cannot be aged: half a marker
+ * beats `NaNm`, the rule `ItemCard`'s strip follows). The title carries the session's own name and its full path, which the strip has no room for.
+ */
+export function sessionStrip(entry: JiraCardSession, now: number): { label: string; mark: string | null; title: string } {
+  const { session } = entry;
+  const word = `session · ${repoBasename(session.repo)}`;
+  return {
+    label: entry.folded ? `${entry.key} · ${word}` : word,
+    mark: session.starting ? 'starting' : elapsedSince(session.startedAt, now),
+    title: `${session.name} · ${session.repo}`
+  };
+}
+
+/**
+ * The stored `jiraDefaultAction` as an action: `execute` and `context` as themselves, an id some skill on this machine holds as `{ skill }`, and anything
+ * else — an id a deleted skill left behind, a hand-edited string, the empty list while the status is still loading — as `execute`. Never throws and never
+ * rewrites the setting (spec §2): the clamp in `settings.ts` cannot know which ids exist, and this is the one place that can.
+ */
+export function resolveJiraAction(setting: string, skills: readonly JiraSkill[]): JiraAction {
+  if (setting === 'execute' || setting === 'context') return setting;
+  return skills.some((k) => k.id === setting) ? { skill: setting } : 'execute';
+}
+
+/**
+ * Whether a Start's refusal says a Jira write landed before it failed. The server does assign, then transition, THEN the spawn, and a failure after a landed
+ * write ends its own sentence `— the assign stands` (a transition that failed after the assign) or `— the Jira writes stand` (the re-read, the re-composition
+ * or the spawn) — `ASSIGN_STANDS` and `WRITES_STAND` in `jira-dispatch.service.ts`. A refusal before any write (400, 409, 503) carries neither, so the sentence
+ * is the only signal the client has that the ticket has changed under a sheet that is still showing a refusal.
+ */
+export function jiraWritesStand(message: string): boolean {
+  return /— the (?:assign stands|Jira writes stand)$/.test(message);
+}
+
+/** `resolveJiraAction`'s inverse: the string `Settings.jiraDefaultAction` stores for an action — a built-in's own name, or a skill's bare id. */
+export function jiraSettingOf(action: JiraAction): string {
+  return typeof action === 'string' ? action : action.skill;
+}
+
+/**
+ * The permission mode the launch sheet's `Permissions` select opens on for an action (spec §7): `plan` for `context`, which opens a session to read and wait,
+ * and `acceptEdits` for `execute` and for a skill, which are there to change things. NOT capped by the dashboard's ceiling — that is the sheet's job
+ * (`clampMode` over `modesUpTo`), because the ceiling is a fact about the host and this is a pure function of the action.
+ */
+export function defaultModeFor(action: JiraAction): PermissionMode {
+  return action === 'context' ? 'plan' : 'acceptEdits';
+}
+
+/**
  * The shape guard `useJira` reads `GET /api/jira` through (`isTrackersPayload`'s role and reason). It checks what a render MAPS or READS without a
  * null-safe expression — the three collections and `armed`, the field phase 2 added (it proves a phase-2 server, so `home` is read null-safely after
- * it) — because a body missing one throws a `TypeError` inside a render, and React unmounts the page when it does. A wrong-shaped ROW degrades to a
+ * it), and the two phase 5 added: `skills` (Settings' Dispatch row maps it, and `resolveJiraAction` reads it) and `live` (`runChipState` indexes it) —
+ * because a body missing one throws a `TypeError` inside a render, and React unmounts the page when it does. A wrong-shaped ROW degrades to a
  * row that says less instead.
  */
 export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload {
@@ -658,7 +775,85 @@ export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload 
     typeof p.armed === 'boolean' &&
     Array.isArray(p.boards) &&
     Array.isArray(p.projects) &&
+    Array.isArray(p.skills) &&
     isRecord(p.repos) &&
+    isRecord(p.live) &&
     isRecord(p.calls)
   );
+}
+
+// ── The wire (Jira phase 5 — the launch sheet and the modal read one issue the same way) ────────────────────────────────────────────────────────────
+
+/** The sentence a failed read or write carries: the server's `{ error }` when it sent one, else the HTTP status, else whatever the network said. */
+export async function failureOf(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    if (typeof body.error === 'string' && body.error !== '') return body.error;
+  } catch {
+    /* not JSON — fall through to the status */
+  }
+  return `HTTP ${res.status}`;
+}
+
+/**
+ * The shape guard the detail is read through (`isJiraStatusPayload`'s role and reason): the three fields a render MAPS or READS without a null-safe
+ * expression. A body missing one would throw inside a render and React would unmount the whole page under the modal or sheet, so it is a failed read.
+ */
+export function isIssueDetail(value: unknown): value is JiraIssueDetail {
+  if (typeof value !== 'object' || value === null) return false;
+  const d = value as Record<string, unknown>;
+  return typeof d.description === 'string' && Array.isArray(d.children) && Array.isArray(d.boards);
+}
+
+/**
+ * `GET /api/jira/issue/:key`, fresh. Resolves to the detail, and rejects with `failureOf`'s sentence — or `malformed response` for a 200 whose body is not an
+ * issue — so the modal and the launch sheet, which both read the same endpoint for the same transitions, word every failure identically.
+ */
+export async function fetchJiraDetail(key: string): Promise<JiraIssueDetail> {
+  const res = await fetch(`/api/jira/issue/${encodeURIComponent(key)}`);
+  if (!res.ok) throw new Error(await failureOf(res));
+  const body: unknown = await res.json();
+  if (!isIssueDetail(body)) throw new Error('malformed response');
+  return body;
+}
+
+/**
+ * The `Move to…` options, each named by the STATUS it lands in — the word Jira's own status picker and columns show. A transition's own name is workflow
+ * plumbing (`In Review (2)`, `In testing`), and printing both read `In Review (2) → In Review`. Only when two offered transitions land in one status do
+ * those two fall back to their own names, because two options reading the same word would be a pick the reader cannot tell apart. Hoisted from the modal
+ * when the launch sheet became its second reader: two sheets naming one transition two ways is the drift `lib/jira.ts` exists to prevent.
+ */
+export function transitionOptions(transitions: readonly JiraTransition[]): { value: string; label: string }[] {
+  const landings = new Map<string, number>();
+  for (const t of transitions) landings.set(t.to.name, (landings.get(t.to.name) ?? 0) + 1);
+  return transitions.map((t) => ({ value: t.id, label: (landings.get(t.to.name) ?? 0) > 1 ? t.name : t.to.name }));
+}
+
+/**
+ * `GET /api/jira/prompt` — exactly what Copy prompt copies and Start sends, as text. `text/plain` on success, so this reads `.text()`, never `.json()`;
+ * a refusal is the usual `{ error }` and rejects with its sentence (`unknown skill s_…`, `prompt too long`). The query is built by `URLSearchParams`, so the
+ * repository's slashes and a skill's colon are escaped exactly once, here.
+ */
+export async function fetchJiraPrompt(key: string, action: JiraAction, repo: string): Promise<string> {
+  const query = new URLSearchParams({ key, action: jiraActionParam(action), repo });
+  const res = await fetch(`/api/jira/prompt?${query.toString()}`);
+  if (!res.ok) throw new Error(await failureOf(res));
+  return res.text();
+}
+
+/** POSTs `body` as JSON to an agents route and resolves to its parsed 200; a refusal rejects with the server's sentence (`failureOf`). */
+async function postAgents<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(await failureOf(res));
+  return (await res.json()) as T;
+}
+
+/** `POST /api/agents/dispatch-jira` — the launch sheet's Start. Rejects with the server's sentence (a 409 for a key that already has a live session, say). */
+export function dispatchJira(req: JiraDispatchRequest): Promise<JiraDispatchResult> {
+  return postAgents<JiraDispatchResult>('/api/agents/dispatch-jira', req);
+}
+
+/** `POST /api/agents/jira-stop` — the live strip's Stop (Task 10 draws it). Resolves when the dashboard accepted it; rejects with the server's sentence. */
+export async function stopJira(key: string): Promise<void> {
+  await postAgents<{ ok: true }>('/api/agents/jira-stop', { key });
 }

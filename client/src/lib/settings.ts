@@ -145,6 +145,17 @@ export interface Settings {
   settingsScope: SettingsScope;
   /** Whether a section is capped at its drawn measure or spans the window. See `ContentWidth`. */
   contentWidth: ContentWidth;
+  /**
+   * What the Jira launch sheet's Action starts on (Jira phase 5, spec §2): `execute`, `context` or a skill id (`s_` and eight hex digits). Seeds the
+   * sheet and is never the last launch's pick — the same arrangement, and the same rejection of its alternative, as `dispatchDefaultModel` above.
+   *
+   * Per device because the laptop that works tickets end to end and the phone that opens one to read are two different defaults, but a plain string
+   * rather than a union: which skill ids exist is a fact about the MACHINE (`jira.json`) and is known only where `GET /api/jira` has been read, so this
+   * clamp cannot validate membership. `resolveJiraAction(setting, skills)` in `lib/jira.ts` is what reads a stale id as `execute`, at the place that holds
+   * the list — and it reads it without rewriting this value, so a skill that comes back (a re-add cannot, ids are minted, but a second tab's
+   * `jira.json` can) is still the default.
+   */
+  jiraDefaultAction: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -159,7 +170,8 @@ export const DEFAULT_SETTINGS: Settings = {
   orchestrateDefaultQuestionMode: 'park',
   staleDays: 30,
   settingsScope: 'local',
-  contentWidth: 'fixed'
+  contentWidth: 'fixed',
+  jiraDefaultAction: 'execute'
 };
 
 /**
@@ -180,7 +192,9 @@ export const LIMITS = {
    * which "archive on staleness" has been turned off — and a value that
    * large means exactly that, so it is honoured rather than rejected.
    */
-  staleDays: { min: 1, max: 3650 }
+  staleDays: { min: 1, max: 3650 },
+  /** Longer than a skill id (10 characters) by a wide margin; the bound exists so a hand-edited blob cannot park a megabyte string in every settings write. */
+  jiraDefaultAction: { max: 64 }
 } as const;
 
 /** The stops the Text size row offers. A subset of LIMITS, not its definition. */
@@ -243,6 +257,11 @@ function clampOrigin(value: unknown, fallback: string): string {
   } catch {
     return fallback;
   }
+}
+
+/** A non-empty string within `max` characters, or the fallback. A string that is not an id anyone holds is NOT rejected here — see `Settings.jiraDefaultAction`. */
+function clampBoundedString(value: unknown, fallback: string, max: number): string {
+  return typeof value === 'string' && value !== '' && value.length <= max ? value : fallback;
 }
 
 const THEME_IDS = THEMES.map((t) => t.id);
@@ -310,6 +329,7 @@ export function clampSettings(raw: unknown): Settings {
     orchestrateDefaultQuestionMode: pickOne(s.orchestrateDefaultQuestionMode, QUESTION_MODES, DEFAULT_SETTINGS.orchestrateDefaultQuestionMode),
     staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max),
     settingsScope: pickOne(s.settingsScope, SETTINGS_SCOPES, DEFAULT_SETTINGS.settingsScope),
-    contentWidth: pickOne(s.contentWidth, CONTENT_WIDTHS, DEFAULT_SETTINGS.contentWidth)
+    contentWidth: pickOne(s.contentWidth, CONTENT_WIDTHS, DEFAULT_SETTINGS.contentWidth),
+    jiraDefaultAction: clampBoundedString(s.jiraDefaultAction, DEFAULT_SETTINGS.jiraDefaultAction, LIMITS.jiraDefaultAction.max)
   };
 }

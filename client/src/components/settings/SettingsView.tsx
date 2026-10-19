@@ -8,10 +8,11 @@ import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useSettings } from '../../hooks/useSettings';
+import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
-import { MERGE_MODES } from '../../../../shared/types';
+import { JIRA_BUILTIN_LABELS, MERGE_MODES } from '../../../../shared/types';
 import type { AgentsStatus, QuestionMode } from '../../../../shared/types';
 
 /**
@@ -508,6 +509,12 @@ function AgentsGroup() {
  */
 function DispatchGroup() {
   const { settings, update } = useSettings();
+  const jira = useJiraContext().data;
+  /* The row exists only while Jira does (§8.9.2's rule for the rail entry): a default for a menu nobody can open is a setting with no reader. `jira` is
+     null until the status answers, and that is not "configured" either. The shown value goes through `resolveJiraAction` so a stored skill id that has
+     since been deleted reads as `Work it end to end` — the same fall-back the card's own menu applies — while the stored string is left alone: a skill
+     re-added under the same id (a hand-restored `jira.json`) takes the setting back without anyone re-picking it. */
+  const jiraSkills = jira?.configured === true ? jira.skills : null;
 
   return (
     <SettingsGroup title="Dispatch" scope="this device">
@@ -536,6 +543,24 @@ function DispatchGroup() {
           onChange={(dispatchDefaultEffort) => update({ dispatchDefaultEffort })}
         />
       </SettingsRow>
+
+      {jiraSkills !== null && (
+        <SettingsRow
+          name="Jira default action"
+          hint="Listed first in a Jira card's Run menu, marked default. A skill that has since been deleted reads as Work it end to end."
+        >
+          <Select
+            label="Jira default action"
+            value={jiraSettingOf(resolveJiraAction(settings.jiraDefaultAction, jiraSkills))}
+            options={[
+              { value: 'execute', label: JIRA_BUILTIN_LABELS.execute },
+              { value: 'context', label: JIRA_BUILTIN_LABELS.context },
+              ...jiraSkills.map((k) => ({ value: k.id, label: k.name }))
+            ]}
+            onChange={(jiraDefaultAction) => update({ jiraDefaultAction })}
+          />
+        </SettingsRow>
+      )}
 
       {/* The link RIDES this row since task-42, rather than sitting on the
           status row a card away. A link driven by a per-device value had no

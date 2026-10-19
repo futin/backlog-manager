@@ -155,11 +155,11 @@ queue:
    Settings default (or a `pr` pick left over from another project) reads as `merge` on any project whose source is not `github` — `files`, `unsupported` or
    none. Settings is pre-project, so it lists `pr` for every project and leaves the refusal to the sheet and to the server's 400.
 
-Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, and since the release chip the What's new drawer — are the six
-dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
+Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, since the release chip the What's new drawer, and since Jira
+phase 5 the Jira launch sheet — are the seven dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
 whatever they wrap, and `ReleasesDrawer` calls it itself, since its shell is ui-kit's (#298) and is handed `closeOnEscape={false}`. Two further entries join the same stack
 while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
-Filters and Sort, and Jira's chip, board picker and roots search — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
+Filters and Sort, and Jira's chip, board picker, roots search and `Run ▾` panel — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
 owns the key and not the pointer.
 
 ### What leaves the Board
@@ -419,7 +419,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Invariants
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the three per-item dispatch blocks
-and which one lets a click through, the dialog escape stack and its six dialogs, a crashed run rendering as crashed, "queue wait is not work",
+and which one lets a click through, the dialog escape stack and its seven dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
 row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that

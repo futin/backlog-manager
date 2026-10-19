@@ -4,6 +4,7 @@ import { ACTIVE_RUN_STAGES } from '../../lib/run-stage';
 import { claimReading } from '../../lib/tracker';
 import type { ProjectHues } from '../../lib/project-hue';
 import { Dot } from '../ui/Dot';
+import { LiveStrip } from '../ui/LiveStrip';
 import { Marker, type MarkerTone } from '../ui/Marker';
 import { DispatchButton, dispatchAvailable } from './DispatchButton';
 import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
@@ -383,19 +384,17 @@ export function ItemCard({
           (DESIGN.md §5, §8.3) — except `stale` (#227), which is not a live
           state at all: no hatch, and the stylesheet mutes it by that value. */}
       {bar !== null && (
-        <div className={bar.tone === 'stale' ? 'board-card-live' : 'board-card-live hatch'} data-tone={bar.tone} title={bar.title}>
-          {/* Either the run's own stage word (`reviewing`, `needs-answers`)
-              or which skill a hand-run session holds the item with
-              ('grooming' / 'executing') — see `liveBarFor` for the
-              precedence, and item-progress.ts for why an empty phase falls
-              back to the old generic wording instead of rendering nothing. */}
-          <span>{bar.label}</span>
-          {/* Absent rather than blank when the value cannot be aged: the words
-              beside it already carry the fact, and half a marker beats a lie.
-              The exact stored value is in the title above and spelled out in
-              the drawer — the card never has room for it. */}
-          {elapsed !== null && <span className="board-card-live-mark">{elapsed}</span>}
-        </div>
+        <LiveStrip
+          tone={bar.tone}
+          title={bar.title}
+          /* Either the run's own stage word (`reviewing`, `needs-answers`) or which skill a hand-run session holds the item with ('grooming' /
+             'executing') — see `liveBarFor` for the precedence, and item-progress.ts for why an empty phase falls back to the old generic wording
+             instead of rendering nothing. */
+          label={bar.label}
+          /* Absent rather than blank when the value cannot be aged: the words beside it already carry the fact, and half a marker beats a lie. The
+             exact stored value is in the title and spelled out in the drawer — the card never has room for it. */
+          mark={elapsed}
+        />
       )}
       {/* The queued band: the live strip's geometry as a neutral ink band (DESIGN.md §8.3), outside the face for the same reason, and never beside it —
           `queuedStripFor` returns null under any live bar. The word is the whole reading; `data-state` is what the stylesheet dims the stale one by. */}
