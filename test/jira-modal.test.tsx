@@ -211,6 +211,43 @@ describe('JiraIssueModal — the body', () => {
     expect(strong.tagName).toBe('STRONG');
   });
 
+  // jsdom has no layout, so every box measures 0 × 0 and the description always "fits"; the overflow case stubs the two heights the clamp reads.
+  it('draws no Show more when the description fits its clamp', async () => {
+    mount();
+    await screen.findByText('not');
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+  });
+
+  it('clamps an overflowing description behind Show more, which opens and closes it', async () => {
+    const scroll = jest.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('jira-desc') ? 600 : 0;
+    });
+    const client = jest.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('jira-desc') ? 144 : 0;
+    });
+    try {
+      mount();
+      await screen.findByText('not');
+      const box = screen.getByRole('dialog').querySelector('.jira-desc') as HTMLElement;
+      const more = await screen.findByRole('button', { name: 'Show more' });
+      expect(box).toHaveClass('clamped');
+      expect(more).toHaveAttribute('aria-expanded', 'false');
+
+      await userEvent.click(more);
+      expect(box).toHaveClass('open');
+      expect(box).not.toHaveClass('clamped');
+      const less = screen.getByRole('button', { name: 'Show less' });
+      expect(less).toHaveAttribute('aria-expanded', 'true');
+
+      await userEvent.click(less);
+      expect(box).toHaveClass('clamped');
+      expect(screen.getByRole('button', { name: 'Show more' })).toBeInTheDocument();
+    } finally {
+      scroll.mockRestore();
+      client.mockRestore();
+    }
+  });
+
   it('renders no javascript: href for a hostile link', async () => {
     answer = () => json(detail({ description: 'see [x](javascript:alert(1)) here' }));
     mount();
@@ -425,17 +462,34 @@ describe('JiraIssueModal — Assign to me and Move to… (Jira phase 3)', () => 
     expect(assignChip()).toHaveAttribute('title', 'already assigned to you');
   });
 
-  it('lists the offered transitions, naming the target only when it differs, and a pick posts at once and returns to Move to…', async () => {
+  it('lists the offered transitions by the status each lands in, and a pick posts at once and returns to Move to…', async () => {
     answer = () => json(detail({ transitions: TRANSITIONS }));
     mount();
     await screen.findByText('not');
     const select = moveSelect();
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Move to…', 'Start → In Progress', 'Done']);
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(['Move to…', 'In Progress', 'Done']);
 
     await userEvent.selectOptions(select, '41');
     await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
     expect(posts().map((c) => [c.url, c.init?.body])).toEqual([['/api/jira/issue/transition', '{"key":"PAY-131","transitionId":"41"}']]);
     expect(moveSelect()).toHaveDisplayValue('Move to…');
+  });
+
+  // Two transitions landing in one status would read as two identical options, so only those two bring their own name back.
+  it('names a transition only when another offered one lands in the same status', async () => {
+    answer = () =>
+      json(
+        detail({
+          transitions: [
+            { id: '11', name: 'In testing', to: { name: 'In Testing', category: 'indeterminate' } },
+            { id: '21', name: 'In Review', to: { name: 'In Review', category: 'indeterminate' } },
+            { id: '22', name: 'In Review (2)', to: { name: 'In Review', category: 'indeterminate' } }
+          ]
+        })
+      );
+    mount();
+    await screen.findByText('not');
+    expect(Array.from(moveSelect().options).map((o) => o.textContent)).toEqual(['Move to…', 'In Testing', 'In Review', 'In Review (2)']);
   });
 
   it('disables Move while the detail is in flight, and with transitions unavailable once it failed — Assign stays usable', async () => {

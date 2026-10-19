@@ -1263,6 +1263,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-tree-row:hover { background: var(--strip-hi) }
 .jira-tree-key { font-weight: 500; color: var(--ink2); white-space: nowrap }
 .jira-tree-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* The description's clamp (§8.9.2): six lines of `.item-body p` (15 px at 1.6) before `Show more`. The max-height holds whether or not the text overflows
+   it — `clamped` only adds the fade, so a description that fits never draws a fade over its own last line. `open` lifts the clamp outright. */
+.jira-desc { max-height: 144px; overflow: hidden }
+.jira-desc > div > :first-child { margin-top: 0 }
+.jira-desc.clamped { mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent) }
+.jira-desc.open { max-height: none }
+.jira-desc-more { padding: 0; margin-top: 6px; border: 0; background: none; font: inherit; font-size: 13px; color: var(--cyan); cursor: pointer }
+.jira-desc-more:hover { text-decoration: underline }
 .jira-modal-none, .jira-modal-comments { font-size: 12px; color: var(--ink3) }
 .jira-modal-comments { margin-top: 20px }
 .jira-modal-comments a { color: var(--cyan) }
