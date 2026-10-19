@@ -395,25 +395,31 @@ section (seven dialogs). The browser still never talks to Jira or the dashboard:
 - **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the issue modal's controls row. It decides nothing:
   `runChipState(issue, status)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup › Repositories`), `live`
   (disabled, titled `a session is running on <KEY>`) or `ready` (a `Popover` of the two built-ins, the skills with `skillCommand`'s slash command as a hint,
-  and the note `opens the launch sheet`). It is drawn with agents off. On a card its wrapper stops the click and Enter/Space, the link-out's precedent, and
-  `jira-run-open` lets the card overflow while the panel is open.
+  and the note `opens the launch sheet`), the row `Jira default action` resolves to listed first with the hint `default`. It is drawn with agents off. On a card
+  its wrapper stops the click and Enter/Space, the link-out's precedent, and `jira-run-open` lets the card overflow while the panel is open.
 - **The launch sheet** (`components/jira/JiraLaunchSheet.tsx`) composes `ui/FormSheet` and is hosted ONCE, in `JiraView`, after the modal; both homes of `Run ▾`
   call `onRun(issue, action)`, and the slot is cleared on a page switch like the open issue. It reads the server's prompt (`fetchJiraPrompt`, keyed on action and
   repository through `useFetched`), the ticket's transitions and assignee (`GET /issue/:key`, on open) and the agents status (`useAgents`, on open — never the
   Board's copy). `Start` is drawn only for a `disabled` or `enabled` `projectDispatchGate` answer and sends `dispatchJira` (`POST /api/agents/dispatch-jira`);
   `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action)`, clamped to the host's ceiling —
-  and model and effort seed from Settings. A landed Start calls `onStarted`, which reloads the shell's status (the strip) and nudges the board.
+  and model and effort seed from Settings. A landed Start calls `onStarted`, which reloads the shell's status (the strip) and nudges the board. The server
+  applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes
+  stand`; the sheet reads that (`jiraWritesStand`) as `onWrote` — the same reload and nudge — and puts `Move to` back to `leave as is`, the refusal staying on
+  screen. A refusal before any write changes nothing.
 - **The live strip.** `status.live` (the server's map, folded into the payload) is the one source: `cardSessions` lists a top's own session and every folded
   issue's, `sessionStrip` words each (`session · <repo basename>` and the elapsed reading or `starting`), and `JiraCard` draws one `ui/LiveStrip` per entry,
-  first in the card. The strip clears when the next status poll — or the reload after a Start or Stop — no longer lists the key.
+  first in the card. The strip, and the modal's `Stop session` with it, clear on the next status read — the board's timer, a window focus, or the reload after a
+  write — so a session that has ended can linger up to a board interval (at most `5m`, and no timer at all while every board is `off`) although the server's
+  reconciler drops it within about a minute.
 - **The modal's session.** A `session` fact (`<name> · <repo> · <elapsed>`, `starting`, or `—`) and `Stop session`, a 28 px chip replaced in place by
   `ui/Confirm`, drawn only while agents are enabled AND the key has a confirmed, non-`starting` entry (`StopSession` is mounted for that case alone, so
   `useAgents()` is read only then). It posts `stopJira` (`POST /api/agents/jira-stop`) through the same `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
 - **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an
   add row and a `×` that asks through `ui/Confirm`; every write is one of the five config routes and reloads the shell's status. Settings › Local › Dispatch
-  gains `Jira default action`, drawn only while Jira is configured; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` without
-  rewriting the stored value.
+  gains `Jira default action`, drawn only while Jira is configured. It is read by `Run ▾`, not by the sheet — every way into the sheet passes the clicked
+  row — which lists the resolved default first, marked `default`; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` in the select
+  and in the menu alike, without rewriting the stored value.
 
 ## The probe facts the code encodes
 
