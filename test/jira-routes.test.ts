@@ -524,7 +524,7 @@ describe('GET /api/jira/prompt', () => {
 
   it("skill:<id> answers the template's text with its placeholders filled", async () => {
     const res = await get(q({ ...ok, action: `skill:${SKILL.id}` })).expect(200);
-    expect(res.text.startsWith(`Review PAY-131 (Summary of PAY-131) in ${REPO}, then stop.`)).toBe(true);
+    expect(res.text.split('\n\n')[1]).toBe(`Review PAY-131 (Summary of PAY-131) in ${REPO}, then stop.`);
     expect(res.text).toContain('BEGIN TICKET');
   });
 

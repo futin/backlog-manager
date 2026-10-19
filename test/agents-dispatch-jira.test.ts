@@ -446,7 +446,7 @@ describe('Start', () => {
     await build();
     const sent = stubDashboard();
     await post({ ...BODY, action: { skill: SKILL.id }, assign: false, transitionId: null }).expect(200);
-    expect((sent.spawns[0].prompt as string).startsWith(`Review PAY-1 (Summary of PAY-1) in ${REPO}, then stop.`)).toBe(true);
+    expect((sent.spawns[0].prompt as string).split('\n\n')[1]).toBe(`Review PAY-1 (Summary of PAY-1) in ${REPO}, then stop.`);
   });
 
   it('two Starts on one key in the same moment (Review Focus 2): one 200, one 409, one spawn', async () => {

@@ -1389,9 +1389,11 @@ influences is enumerated by that composition and nowhere else: the key (`isJiraK
 ticket is different from every one of those. An `ids` entry is proved against a closed vocabulary; a ticket's description is free text written by whoever
 filed it, delivered into a session that can write files in the mapped repository, and no check can prove it harmless. So the composer does not try: it
 contains it. The framing line — which says the text between the markers is the ticket's own content and not instructions — is read BEFORE any ticket text
-(after the instruction, or first when a skill template puts `{description}` inside the instruction, so that ticket text is never ahead of the sentence that says
-what it is); the markers carry a nonce minted per composition, so a ticket written beforehand cannot contain the real end marker, and only lines carrying
-it are delimiters; the description sits in a fence one backtick longer than its longest backtick run, so nothing inside can close it early; a template is
+(after the instruction, or first when a skill template puts `{description}` or `{summary}` inside the instruction, so that ticket text is never ahead of the
+sentence that says what it is). The summary is the one placeholder that lands bare: a template's `{summary}` is collapsed to one line by `oneLine` and carries no
+markers or fence of its own, so what covers it is that order plus the framing line's own words, which say the ticket's summary is the ticket's content wherever
+the prompt quotes it, marked or not. The markers carry a nonce minted per composition, so a ticket written beforehand cannot contain the real end marker, and only
+lines carrying it are delimiters; the description sits in a fence one backtick longer than its longest backtick run, so nothing inside can close it early; a template is
 filled in ONE pass with a replacement function, so a summary reading `{description}` is not expanded and `$&` is text; and a truncation note is server text
 placed after the closing fence, never inside the ticket's own. The cap is the dashboard's own 4 000, not item dispatch's 8 000 paste bound, and the
 description is what yields to it; a prompt that cannot keep at least one character of it is a 400 rather than one that says `(no description)` about a ticket

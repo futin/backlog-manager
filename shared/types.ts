@@ -605,7 +605,7 @@ export interface JiraSkill {
 
 /**
  * What Run ▾ starts: one of the two built-ins, or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
- * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 404 for an id `jira.json` lacks).
+ * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 400 `unknown skill <id>` for an id `jira.json` lacks).
  */
 export type JiraAction = 'execute' | 'context' | { skill: string };
 

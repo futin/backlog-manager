@@ -221,7 +221,7 @@ export function readJiraConfig(file: string = jiraConfigFile()): JiraConfig {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
-// Writers (phase 2). Called by the three POST routes under `/api/jira` and nothing else.
+// Writers (phase 2). Called by the five config POST routes under `/api/jira` (boards, boards/delete, repos, skills, skills/delete) and nothing else.
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
 /**
