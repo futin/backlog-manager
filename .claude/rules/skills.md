@@ -16,11 +16,14 @@ paths: ["skills/**", "agents/**"]
   evidence, so `record` refuses to overwrite one (exit `2`): the fix for a wrong record is the next sweep, never an edit. `sweep` reads four homes and writes
   none of them — the run-state home, the retro home (for deltas), `registry.json` (for project names) and, by recorded lease id alone, one driver transcript per
   run. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
-- **`backlog.mjs` in a tracker project needs the stack up, and says so with exit `5`.** The marker decides the mode — absent or `{"kind":"files"}` runs today's
+- **`backlog.mjs` in a tracker project — and `jira.mjs` always — needs the stack up, and says so with exit `5`.**
+  The marker decides the mode — absent or `{"kind":"files"}` runs today's
   synchronous code byte for byte and makes no HTTP request on any verb; `{"kind":"github"}` with a valid repo routes every command through
-  `http://127.0.0.1:${BM_API_PORT ?? 4322}`; anything else is exit `1` naming the marker, NEVER a fallback to files. There is no offline queue on purpose: a
+  `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming the marker, NEVER a fallback to files. There is no offline queue on purpose: a
   parked write would be a second source of truth on one laptop. Ids are `31` / `#31` / this project's own URN; a file-shaped id and another repo's URN are each
-  refused with their own sentence. Why: [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
+  refused with their own sentence. `jira.mjs` has no files mode at all: every command is an API call, a refused connection is exit `5` with a sentence
+  naming the backlog-manager checkout (it runs in a mapped repository, where `pnpm run dev` means something else), and its other codes are `2` (a 4xx) and
+  `3` (a 5xx). Why: [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
 - **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.** The nine write routes refuse a `files`
   project, so no request `backlog.mjs import github [owner/repo] [--no-forms]` makes could precede the marker; the deletion is the transaction's commit and runs
   only after pass 2 has rewritten every cross-link. A re-run rebuilds `old id → #n` from the `<!-- bm:imported from=<id> … -->` footer on each indexed issue and
@@ -47,8 +50,9 @@ paths: ["skills/**", "agents/**"]
 - **Every skill CLI ends with `process.exitCode = main(...)`, never `process.exit(main(...))`.** Writing to a pipe is asynchronous, so `process.exit()`
   drops everything past 65,536 bytes of a `--json` payload while a `> file.json` redirect stays fine — which is why the shipped instance passed every hand
   check. Safe only because none of them holds the event loop open (synchronous `fs`, `spawnSync` children, and `watch`'s `Atomics.wait` sleep); whoever
-  adds a timer, server or async child closes the handle rather than restoring `process.exit()`. **`backlog.mjs` and `api-call.mjs` may also end
-  `process.exitCode = await main(...)`** (task-46, task-47): the rule is about `process.exit()` truncating a pipe, which asynchrony has nothing to do with, and
+  adds a timer, server or async child closes the handle rather than restoring `process.exit()`. **`backlog.mjs`, `api-call.mjs` and `jira.mjs` may also end
+  `process.exitCode = await main(...)`** (task-46, task-47, Jira phase 4): the rule is about `process.exit()` truncating a pipe, which asynchrony has nothing to do
+  with, and
   each one's every `fetch` is awaited to completion with `connection: close`, so no pooled socket outlives the call. `orchestrate.mjs` and `retro.mjs` hold no
   asynchronous work and stay on the synchronous form, which the guard enforces per file — and `orchestrate.mjs` can, precisely because `api-call.mjs` is a
   CHILD it `spawnSync`s rather than a `fetch` it awaits. Each tool carries its own note on why _its_ file is safe;

@@ -2,11 +2,12 @@
 
 The Jira Cloud integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md)): a parallel subsystem beside the item
 sources, not a third source. A Jira board is a set of issue keys and saved JQL defined in one per-machine file; it has no `backlog/`, no `source.json` and no
-registry entry, and nothing in `items/` knows it exists. This doc describes **phases 1 to 3** (spec §12). Phase 1 is the server's read half — the Jira
+registry entry, and nothing in `items/` knows it exists. This doc describes **phases 1 to 4** (spec §12). Phase 1 is the server's read half — the Jira
 client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and six read routes. Phase 2 adds `jira.json`'s
 writers behind three guarded write routes and the whole client section: a rail entry with two pages (Board and Setup), the issue modal, the shell chip and
 the Trackers row. Phase 3 adds the first two writes to Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
-by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them.
+by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them. Phase 4 adds the `jira` skill and its CLI,
+`jira.mjs`, which reach those same routes from any Claude session on this machine — and changes nothing in the server.
 
 `server/src/jira/` is the third outbound-calling module, after `agents/` and `tracker/`, and the only one that talks to Atlassian.
 
@@ -40,7 +41,7 @@ by a re-read of the issue that is spliced into the board caches, and the modal's
 | `jira-write.controller.ts` | the five write routes — three config writes (phase 2) and the two issue writes (phase 3), each behind `SameOriginPostGuard`            |
 | `jira.module.ts`     | `JiraModule` — the poller and the client (a factory value, the one place a suite swaps in a fake `fetch`), both exported                       |
 
-Not there yet, by phase: **4** — `skills/jira/` and `jira.mjs`; **5** —
+Not there yet, by phase: **5** —
 `prompt.util.ts`, the skills routes, `GET /api/jira/prompt`, `dispatch-jira`, `jira-stop` and the live-session map (`JiraStatusPayload.live` is always `{}` and
 `JiraIssueDetail.session` always `null` until then).
 
@@ -279,6 +280,30 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
   `Popover` reading with no links or buttons. With both chips in the rail bar neither draws its meters (a CSS rule in the 700 px block). The Settings ›
   Shared › Trackers card (`components/settings/TrackersGroup.tsx`) closes on one read-only Jira row from the same `useJira`.
+
+## The skill (phase 4)
+
+`skills/jira/` is the plugin's seventh skill, and `skills/jira/tools/jira.mjs` its CLI. Every command is a request to the routes above, on
+`127.0.0.1:${BM_API_PORT || 4322}` — the CLI carries no Jira credential, reads no `BM_JIRA_*` and sends no `authorization` header, so the server stays Jira's
+one caller (spec §10), and a source guard in `jira.test.mjs` holds all three.
+
+| command                     | route(s)                                                                      | stdout                                              |
+| --------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------- |
+| `show <KEY>`                | `GET /api/jira/issue/:key?format=text`                                        | the ticket block, verbatim                          |
+| `transitions <KEY>`         | `GET /api/jira/issue/:key`                                                    | `<id>\t<label>\t<category>`, one per transition     |
+| `transition <KEY> <id\|name>` | `GET /api/jira/issue/:key`, then `POST /api/jira/issue/transition`            | `<KEY>: <label>`                                    |
+| `assign <KEY>`              | `POST /api/jira/issue/assign`                                                 | `<KEY> assigned to you`                             |
+| `status`                    | `GET /api/jira`                                                               | `site:`, `signed in as:`, `access:`, `boards:` lines |
+
+- **Keys** are trimmed and upper-cased, then checked against a copy of `JIRA_KEY_RE` before any request — a miss is exit `1` and sends nothing, so no raw
+  argument ever reaches a URL path.
+- **`transition`'s argument** is every word after the key, matched against the offered transitions in three steps, stopping at the first that matches
+  anything: the exact id, then the transition's name, then its target status (case-insensitive). Ambiguous or not offered is exit `2`, naming what is
+  offered, and nothing is posted; the server re-checks the id against a fresh read of its own, and a workflow that moved between the two reads is its 400.
+- **`status` exits `0` only when `access` is `ok`**, and `3` otherwise — the code every issue command would meet in that state — so `jira.mjs status && …`
+  reads as "the next call can work". Not configured is stderr and `3`.
+- **Exit codes:** `0` success, `1` usage, `2` a 4xx (the server's `error` printed verbatim), `3` a 5xx or a 2xx whose body cannot be read, `5` the stack is
+  down — a sentence naming the backlog-manager checkout, because the CLI runs in a mapped repository where `pnpm run dev` means something else.
 
 ## The probe facts the code encodes
 

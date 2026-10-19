@@ -2513,6 +2513,8 @@ What `process.exit()` bought was a forced teardown even if something _were_ hold
   The parent stays synchronous by construction rather than by argument. The child itself takes the awaited entry shape, on its own safety argument: exactly one
   `fetch`, awaited to completion, `connection: close`, no timer, no server and no child of its own. The title of this section says "every" rather than "all
   three" for that reason — the rule was never about a count, and `backlog.test.mjs`'s `CLI_SOURCES` is where the list lives.
+- **`jira.mjs` (Jira phase 4) is the fifth, and takes the awaited shape on `backlog.mjs`'s argument**: one awaited `fetch` per request, each with
+  `connection: close`, and nothing else asynchronous. Its suite pipes a 200 000-byte ticket through `show`'s stdout and expects every byte.
 
 So the trade is real but narrow: a future edit that opens a timer, a server or an async child would hang instead of being killed. **The rule for whoever makes
 that edit is to close the handle — not to bring `process.exit()` back**, which would restore the truncation along with it.
@@ -3070,6 +3072,13 @@ Project listing pages by `startAt` rather than following the `nextPage` URL Jira
 polls, a board owed its one cold sweep, or a boot answer still missing. An unconfigured install, or one whose every board is `off` and already swept, makes no
 call to Atlassian at all — and `unsupported` (a Server/DC site) disarms for good, because no retry will make it Cloud. Compose passes the three keys as
 interpolations with empty defaults, never literals — bug-25's rule, where a literal is an account committed to a public repository.
+
+**`jira.mjs` goes through the server too, though it could call Jira itself** (Jira phase 4, spec §10). A CLI with the three variables in its environment
+could reach the gateway directly, and it deliberately does not: the server is Jira's ONE caller on this machine, so there is one rate-limit budget, one 429
+window and one identity, and a second caller would spend the first, miss the second and could disagree about the third. The other reason is where the CLI
+runs — inside a session in a mapped repository, reading a ticket whose text anyone with Jira access wrote. A token in that session's environment is a token a
+ticket's description could ask the session to print; a token that only the server process holds is not. So `jira.mjs` dials `127.0.0.1` and nothing else,
+reads no `BM_JIRA_*` and builds no `authorization` header, and its source guard fails on any of the three.
 
 ## Jira's Done column is a window, not a store
 
@@ -3726,10 +3735,16 @@ machine — which is the exact failure the tracker-backed direction exists to re
 to start the stack. A new code rather than reusing `1` because "the store said no" and "there is no store reachable at all" are different things to a caller and
 the second has the same fix every time.
 
-**`main` is async, and the entry guard awaits it.** The "all three skill CLIs exit through `process.exitCode`" rule is about `process.exit()` truncating a
+**`jira.mjs` needs the stack ALWAYS** (Jira phase 4), which is why it shares this headline rather than having a "tracker project" qualifier of its own. A Jira
+ticket has no local store to fall back to — there is no files mode to be in — and the token exists only in the server, so there is nothing an offline path
+could do. Its exit-`5` sentence differs from this tool's on purpose: it runs in a MAPPED repository, where `pnpm run dev` starts something else or nothing, so
+it names the backlog-manager checkout the two commands belong to.
+
+**`main` is async, and the entry guard awaits it.** The "every skill CLI exits through `process.exitCode`" rule is about `process.exit()` truncating a
 pipe, which asynchrony has nothing to do with; what it actually requires is that nothing hold the event loop open when `main` returns. Every `fetch` here is
-awaited to completion and each carries `connection: close`, so no pooled socket outlives the call. The source guard accepts `= await main(` for this file alone
-and still requires the synchronous form of the other two, which hold no asynchronous work at all.
+awaited to completion and each carries `connection: close`, so no pooled socket outlives the call. The source guard accepts `= await main(` for this file, `api-call.mjs`
+and `jira.mjs` — the three whose work is a `fetch` — and still requires the synchronous form of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous
+work at all.
 
 **Three spellings, one issue.** `31`, `#31` and this project's own URN all name the same item, because three different callers arrive with three different
 handles — a person types the number, a skill's prose says `#31`, and the board posts `BacklogItem.path`. A file-shaped id (`task-31`) and a URN naming another
