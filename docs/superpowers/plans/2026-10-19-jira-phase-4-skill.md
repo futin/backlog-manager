@@ -270,12 +270,13 @@ matches no file — tracked or untracked-not-ignored, `trackedFiles()` at `test/
 - [ ] **Step 2: The exit-5 widening** (spec §13: "gains `jira.mjs` (always) in the same bullet"). Headline, byte-equal in CLAUDE.md and
   `.claude/rules/skills.md`: **`backlog.mjs` in a tracker project — and `jira.mjs` always — needs the stack up, and says so with exit `5`.** Anchor unchanged.
   The rules bullet gains: `jira.mjs` has no files mode at all, every command is an API call, its stack-down sentence is R9's, and its other codes are `2`
-  (4xx) and `3` (5xx). While the bullet is open, its port spelling `${BM_API_PORT ?? 4322}` (`.claude/rules/skills.md:21`) becomes `||`, which is what
+  (4xx) and `3` (5xx). While the bullet is open, its port spelling `${BM_API_PORT ?? 4322}` (`.claude/rules/skills.md:21`, and the same in `docs/subsystems/skills.md:61`) becomes `||`, which is what
   the code does. `invariants.md`'s section gains the reason it is "always": a Jira ticket has no local store to fall back to, and the token exists only in
   the server.
 - [ ] **Step 2b: The `process.exitCode` mechanism widening.** The headline is unchanged. The `.claude/rules/skills.md` bullet that says "`backlog.mjs` and
   `api-call.mjs` may also end `process.exitCode = await main(...)`" names `jira.mjs` as the third, and the `invariants.md` section "Every skill CLI exits
-  through `process.exitCode`, never `process.exit()`" says the same where it lists the awaited CLIs.
+  through `process.exitCode`, never `process.exit()`" says the same where it lists the awaited CLIs. `invariants.md:3680-3684` ("all three skill CLIs", "`= await main(` for this file alone") is a
+  second, already-stale list: it names the awaited CLIs as `backlog.mjs`, `api-call.mjs` and `jira.mjs` too.
 - [ ] **Step 3: CLAUDE.md's other lines.** The opening line's skill count and list name `jira` (seven skills: the six backlog skills and `jira`, which reads and
   moves a Jira ticket through `/api/jira`); the `skills/…` layout bullet names `skills/jira/` and `jira.mjs` beside the other CLIs. Keep every unlinked bullet
   under `UNLINKED_WORD_CAP`.
