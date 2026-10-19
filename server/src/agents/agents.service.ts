@@ -499,38 +499,62 @@ export class AgentsService {
       if (refusal !== null) throw new HttpException({ error: refusal }, 409);
     }
 
-    const cfg = readAgentsConfig();
-    const dirName = (await this.projectMap(cfg)).get(item.projectPath);
-    if (dirName === undefined) {
-      // dispatchBlock already covers this from the same map, so reaching here
-      // means the cache expired between the two reads. Refuse rather than
-      // guess a dirName from the path — deriving one would route around the
-      // dashboard's membership check, which is the one thing it asks of us.
-      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
-    }
-
-    const spawned = await this.spawn(cfg, {
-      project: dirName,
+    const spawned = await this.spawnInProject(item.projectPath, {
       prompt,
       name: sessionName(item),
-      permissionMode: clampMode(req.permissionMode, status.spawnMaxPermission),
-      // Undefined for "default" and for any name this build does not know,
-      // and `JSON.stringify` drops an undefined value outright — so the key
-      // never reaches the dashboard and its argv carries no `--model` /
-      // `--effort`. Validated here rather than trusted because the sheet is
-      // not the only possible caller; the dashboard would drop a bad value
-      // too, but that is its check, not ours.
-      model: pickFrom(req.model, MODELS) ?? DEFAULT_MODEL,
-      effort: pickFrom(req.effort, EFFORTS),
-      // Strictly `=== true`, matching the dashboard's own parse rule for this
-      // field: anything else means off.
-      remoteControl: req.remoteControl === true
+      permissionMode: req.permissionMode,
+      maxPermission: status.spawnMaxPermission,
+      model: req.model,
+      effort: req.effort,
+      remoteControl: req.remoteControl
     });
     // #225 — remembered, because this id is the one the spawned session claims its issue under (`claude -p --session-id`), and without it nothing on
     // the board can later tell "the board started the session holding this claim" from "somebody at a terminal did". Only after a spawn that came
     // back with an id: a refused spawn started nothing to remember.
     this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, at: Date.now() });
     return spawned;
+  }
+
+  /**
+   * The tail every one-session launch shares: the project path → the dashboard's dirName, the permission mode clamped to the ceiling, model and effort
+   * picked off the mirrored lists, and the spawn itself. Extracted from `dispatch()` unchanged (Jira phase 5) so `POST /api/agents/dispatch-jira` launches
+   * through exactly the same rules — `agents-dispatch.test.ts`, untouched, is the proof the extraction moved nothing. Every check that decides WHETHER to
+   * launch stays with the caller; this only decides HOW.
+   *
+   * `maxPermission` is the caller's `status().spawnMaxPermission`, passed in rather than re-read: each caller has just read the status for its own gate,
+   * and a second read here would be a second `/api/health` call per launch, and a ceiling that could differ from the one the gate was judged against.
+   */
+  async spawnInProject(
+    projectPath: string,
+    opts: { prompt: string; name: string; permissionMode: string; maxPermission: PermissionMode | null; model?: unknown; effort?: unknown; remoteControl: boolean }
+  ): Promise<AgentDispatchResult> {
+    const cfg = readAgentsConfig();
+    const dirName = (await this.projectMap(cfg)).get(projectPath);
+    if (dirName === undefined) {
+      // The caller's gate already covers this from the same map, so reaching
+      // here means the cache expired between the two reads. Refuse rather than
+      // guess a dirName from the path — deriving one would route around the
+      // dashboard's membership check, which is the one thing it asks of us.
+      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+    }
+
+    return this.spawn(cfg, {
+      project: dirName,
+      prompt: opts.prompt,
+      name: opts.name,
+      permissionMode: clampMode(opts.permissionMode, opts.maxPermission),
+      // Undefined for "default" and for any name this build does not know,
+      // and `JSON.stringify` drops an undefined value outright — so the key
+      // never reaches the dashboard and its argv carries no `--model` /
+      // `--effort`. Validated here rather than trusted because the sheet is
+      // not the only possible caller; the dashboard would drop a bad value
+      // too, but that is its check, not ours.
+      model: pickFrom(opts.model, MODELS) ?? DEFAULT_MODEL,
+      effort: pickFrom(opts.effort, EFFORTS),
+      // Strictly `=== true`, matching the dashboard's own parse rule for this
+      // field: anything else means off.
+      remoteControl: opts.remoteControl === true
+    });
   }
 
   /**

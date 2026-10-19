@@ -534,7 +534,7 @@ export function isSyncInterval(value: unknown): value is SyncInterval {
 // Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 typed two fields at their empty value so phase 5 could widen them without a
 // rename: `JiraIssueDetail.session` is now `JiraLiveSession | null` and `JiraStatusPayload.live` a key → `JiraLiveSession` map, both filled by the controller from
 // `JiraLiveService` (the poller never sees the map). `JiraAction` arrived with phase 5's prompt composer (below, after `JiraSkill`); `JiraDispatchRequest` and its
-// result are still absent — the dispatch route's own task adds them.
+// result, the dispatch route's body and answer, sit after `AgentDispatchResult`, which the result extends.
 // `JiraStatusPayload.tokenKind` is not in §4's list: it is the one extra boot probe's answer (§3, P14) and the Connection card needs it; §4 is amended to
 // match.
 
@@ -834,6 +834,35 @@ export interface AgentDispatchRequest {
 export interface AgentDispatchResult {
   sessionId: string;
 }
+
+/**
+ * Body of `POST /api/agents/dispatch-jira` (Jira phase 5; spec §5, §7) — the launch sheet's Start. `repo` is one of the paths `jira.json` maps to the key's
+ * project, in any spelling `normaliseRepoPath` accepts; `transitionId` is `null` for "leave as is", else an id from the transitions the sheet was drawn from,
+ * checked again against a fresh read before anything is written. `permissionMode`, `model` and `effort` are treated exactly as `AgentDispatchRequest`'s: clamped
+ * to the dashboard's ceiling and dropped when off the list, never refused.
+ */
+export interface JiraDispatchRequest {
+  key: string;
+  repo: string;
+  action: JiraAction;
+  assign: boolean;
+  transitionId: string | null;
+  model?: string;
+  effort?: string;
+  permissionMode: PermissionMode;
+  remoteControl: boolean;
+}
+
+/**
+ * 200 body of `POST /api/agents/dispatch-jira`. `assigned` is false when no assign was asked AND when the ticket was already the caller's (no call was sent);
+ * `transitioned` is the NAME of the transition applied, or `null`. `session` is what `JiraStatusPayload.live` will show for the key, so the sheet can draw it
+ * without waiting for the status reload.
+ */
+export type JiraDispatchResult = AgentDispatchResult & {
+  assigned: boolean;
+  transitioned: string | null;
+  session: { name: string; startedAt: string; repo: string };
+};
 
 /**
  * 200 body of `POST /api/agents/pause` (task-17) — whether a pause request

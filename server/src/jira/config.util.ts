@@ -73,6 +73,12 @@ export const JIRA_PROJECT_KEY_RE = /^[A-Z][A-Z0-9_]+$/;
  */
 export const JIRA_JQL_MAX_CHARS = 2000;
 
+/**
+ * R3: the longest `transitionId` a route will pass on. Jira's ids are short integers; this bounds a paste accident, not a format. Here rather than in
+ * `jira-write.controller.ts`, its first consumer, because `POST /api/agents/dispatch-jira` checks the same field and a service never imports a controller.
+ */
+export const JIRA_TRANSITION_ID_MAX_CHARS = 64;
+
 export interface JiraConfig {
   boards: JiraBoard[];
   /** Project key → absolute repository paths, in file order, deduplicated. */

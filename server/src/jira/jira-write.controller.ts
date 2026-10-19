@@ -5,6 +5,7 @@ import { isJiraKey } from '../../../shared/types';
 import type { JiraBoard, JiraIssueWriteResult, JiraSkill } from '../../../shared/types';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import {
+  JIRA_TRANSITION_ID_MAX_CHARS,
   JiraConfigUnreadableError,
   JiraUnknownIdError,
   deleteBoard,
@@ -18,11 +19,7 @@ import {
 } from './config.util';
 import { jiraEnv } from './env.util';
 import { JiraPollerService } from './poller.service';
-import type { JiraIssueWriteOutcome } from './poller.service';
-import { unwrapJira } from './unwrap.util';
-
-/** R3: the longest `transitionId` a route will pass on. Jira's ids are short integers; this bounds a paste accident, not a format. */
-export const JIRA_TRANSITION_ID_MAX_CHARS = 64;
+import { jiraWriteOrThrow } from './unwrap.util';
 
 /**
  * The seven write routes under `/api/jira` — five of them config writes (Jira phase 2, spec §5 and §8; the two skill routes, `POST /skills` and
@@ -48,10 +45,10 @@ export const JIRA_TRANSITION_ID_MAX_CHARS = 64;
  * The two issue writes differ from the config writes in what they are gated on, and the difference is deliberate (§8): they ARE refused while `access` is
  * `unauthorized`, and while the identity is unknown for an assign — those refusals live in the poller (`assignToMe` / `transitionIssue`, R2), which owns the
  * state, and arrive here as a failure to render, so a route cannot forget one. The route's own part is the order — guard → validate (400) → configured (503)
- * → the poller — and the mapping of what comes back: a failure goes through `unwrapJira` (`jiraHttpError`, §8's table, `retryAt` verbatim, so a refusal
- * inside a 429 window answers the stored instant and slides nothing), and the poller's two refusals that are not a Jira response are this file's two
- * sentences — `no identity` is a 503 (a state that heals on the next successful `myself`), `transition not offered` a 400 (the caller's id is wrong, and
- * Jira was never asked to judge it). The answer is `JiraIssueWriteResult` (R1): `reread: false` is still a 200 because the write landed and cannot be
+ * → the poller — and the mapping of what comes back, which is `jiraWriteOrThrow` (`unwrap.util.ts`, shared with `POST /api/agents/dispatch-jira`, whose two
+ * writes are these two): a failure goes through `unwrapJira` (`jiraHttpError`, §8's table, `retryAt` verbatim, so a refusal inside a 429 window answers the
+ * stored instant and slides nothing), and the poller's two refusals that are not a Jira response are its two sentences — `no identity` is a 503 (a state
+ * that heals on the next successful `myself`), `transition not offered` a 400 (the caller's id is wrong, and Jira was never asked to judge it). The answer is `JiraIssueWriteResult` (R1): `reread: false` is still a 200 because the write landed and cannot be
  * un-happened.
  *
  * After a config write, the poller is re-aimed. A saved board awaits `boardSaved`, which sweeps THAT board and resolves when the sweep is done or after its
@@ -138,7 +135,7 @@ export class JiraWriteController {
   async assignIssue(@Body() body: unknown): Promise<JiraIssueWriteResult> {
     const key = this.issueKey(body);
     this.requireConfigured();
-    return this.written(await this.poller.assignToMe(key));
+    return jiraWriteOrThrow(await this.poller.assignToMe(key));
   }
 
   /**
@@ -156,7 +153,7 @@ export class JiraWriteController {
       throw new HttpException({ error: 'transitionId must be a non-empty string' }, 400);
     }
     this.requireConfigured();
-    return this.written(await this.poller.transitionIssue(key, id));
+    return jiraWriteOrThrow(await this.poller.transitionIssue(key, id));
   }
 
   /** The body's `key`, or the 400 every `:key` gets (`isJiraKey`, case-sensitive: the one shape that is safe to put into a path and a JQL). */
@@ -164,15 +161,6 @@ export class JiraWriteController {
     const key = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).key : undefined;
     if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     return key;
-  }
-
-  /** The poller's issue-write outcome as a value or an error: its two own refusals first (see the header), every other failure through `unwrapJira`. */
-  private written(outcome: JiraIssueWriteOutcome): JiraIssueWriteResult {
-    if ('refusal' in outcome) {
-      if (outcome.refusal === 'no identity') throw new HttpException({ error: 'no identity' }, 503);
-      throw new HttpException({ error: 'transition not offered' }, 400);
-    }
-    return unwrapJira(outcome);
   }
 
   private requireConfigured(): void {
