@@ -3,8 +3,9 @@
 Nest, one process, every route under `/api`. It owns eight things: reading the registry, listing each registered project's items through whichever source owns
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), and — behind a switch that is off
-by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are three files under
-`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, and `tracker-sync.json`.
+by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are four files under
+`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, `tracker-sync.json` and, since Jira phase 2, `jira.json`. Its writes to
+Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
 
