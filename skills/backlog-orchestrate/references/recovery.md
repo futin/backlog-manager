@@ -48,7 +48,8 @@ The run is `running` again from this instant, and the request that paused it is 
 the queue will not exit `6` all over again. No separate heartbeat is needed: `unpause` writes `updatedAt` itself, and it takes the driver lease in that same
 write: a paused run carries the lease of whichever session paused it and then exited, and this is a different session. Then `claim` the run exactly as the
 `running` path above does — it is a no-op re-claim by the session that already holds it, and running it keeps this branch identical to the other one — and
-continue, `reconcile` next.
+continue, `reconcile` next. An `unpause` that exits `10` means a stop is on file for this paused run, and it wrote nothing: nothing resumes a stopped run,
+so read `references/stopping.md` and end the run with `abort`.
 
 **Either path, after `claim` and before `reconcile`: if the project's committed `backlog/source.json` says `github`, read `references/tracker.md` in full.**
 A resumed run never executes SKILL.md §1, which is where a fresh tracker run reads it, and the pull-failure park, the claim-refused park and the push's
@@ -201,7 +202,8 @@ No `claim` before it, deliberately: `abort` takes the run over itself, as its fi
 abort is the command whose whole premise is that that session is gone — so the lease may not be allowed to refuse it (a refused abort leaves the run `running`
 forever, and `init` refuses a `running` run file with exit `4`, which locks the project out of the orchestrator entirely). The first thing abort still refuses is
 a run that is `running`, FRESH and led by another session, which is not a crashed run at all but a live one somebody else is driving: pause it from the board
-first — a pause needs no lease — and abort the paused run.
+first — a pause needs no lease — and abort the paused run. The board's Stop on that paused run does exactly that: it records the stop and spawns the
+`--abort` session itself.
 
 **An `abort` that exits `7` saying the run is already being aborted is the other refusal, and the one a board Stop always produces** (bug-54). The Stop spawns an
 `--abort` session and a live driver's `watch` returns `10` into its own, so one stop reaches a live run twice. Whichever `abort` takes the lease first marks

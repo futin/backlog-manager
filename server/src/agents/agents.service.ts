@@ -1185,9 +1185,10 @@ export class AgentsService {
    * one command a person can run instead. Returning a 5xx would tell a
    * caller the stop did not land when the half that matters did.
    *
-   * It is `pause()`'s sibling in every other respect — same refusal (a
-   * `running` run, fresh or stale alike, and a stale one is the case this
-   * whole bug is about), same independence from `BM_AGENTS`: recording the
+   * It is `pause()`'s sibling in every other respect but one — the gate admits
+   * a `running` run, fresh or stale alike (a stale one is the case this whole
+   * bug is about), AND a `paused` one (#305), which pause has nothing to ask
+   * of. Same independence from `BM_AGENTS`: recording the
    * fact must work on a machine whose launcher is off, and the spawn half
    * simply does not happen there. What it does NOT share is the `cancel`
    * direction (bug-53): a stop has already happened by the time this method
@@ -1204,13 +1205,25 @@ export class AgentsService {
     // Read fresh, the same posture `pause()` takes and for the same reason:
     // the runId this request is pinned to has to be the run going right now.
     const run = this.orchestrator.runs().runs.find((r) => r.project === project);
-    if (run === undefined || run.status !== 'running') {
-      // `running` only, fresh or stale alike — a stale `running` run is
-      // exactly the shape bug-39 was filed about (a killed driver leaves one
-      // for fifteen minutes), so `fresh` is deliberately not part of the
-      // gate. Every other status is refused with one uncoded message: a run
-      // that is `done`, `aborted`, `failed` or `paused` has already stopped.
-      throw new HttpException({ error: 'no running run to stop for this project' }, 409);
+    if (run === undefined || (run.status !== 'running' && run.status !== 'paused')) {
+      // `running`, fresh or stale alike — a stale `running` run is exactly the
+      // shape bug-39 was filed about (a killed driver leaves one for fifteen
+      // minutes), so `fresh` is deliberately not part of the gate.
+      //
+      // `paused` too (#305). Its driver has exited, but the run has not
+      // ended: it still holds claims, `orchestrator:queued` labels on the
+      // entries it never reached, and any parked worktrees — exactly what an
+      // abort clears. Refusing it left two exits, Resume-then-Stop (a driver
+      // session spent only to tear the run down) or a hand-typed `--abort`.
+      // The stop written here is also the fence against the paused run's own
+      // Resume: `resume()` refuses on it below, `RunControls` drops Resume on
+      // `stopRequested`, and `orchestrate.mjs unpause` refuses it too — the
+      // one that matters, because an unpause stamps `unpausedAt` past the
+      // stop's `requestedAt` and would silently cancel it.
+      //
+      // Every other status is refused with one uncoded message: a run that is
+      // `done`, `aborted` or `failed` has already ended.
+      throw new HttpException({ error: 'no running or paused run to stop for this project' }, 409);
     }
 
     writePauseRequest(project, run.runId, new Date(), controlHome(), 'stop');

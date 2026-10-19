@@ -224,9 +224,10 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
   two-tone count, wall time and the cost beside it when usage exists, behind a counted `load more` in pages of 25 — a render decision over a corpus the client
   already holds whole, exactly as the staleness window is. A row **selects**; nothing opens, and there is no run modal anywhere in the app.
 - **The detail sheet** shows the selected run whole: a head with the project, the run id and `RunControls` (Pause, Cancel with its `Pausing after <id>` note,
-  Stop beside both — and on a crashed run too, which is the run a person most needs to end — Resume for a paused run, and Resume for a crashed one exactly
-  when `watchdogStoodDown` says the sweeper will not. Stop asks first (bug-53): the chip is replaced in place by `ui/Confirm` naming the item it abandons and
-  saying the run cannot be resumed, and only its `Stop run` sends the request — `Keep running` and Escape send nothing. A run with a stop on file drops to the
+  Stop beside both — and on a crashed run too, which is the run a person most needs to end — Resume for a paused run with Stop beside it (#305, drawn even
+  when the environment ladder hides the Resume), and Resume for a crashed one exactly when `watchdogStoodDown` says the sweeper will not. Stop asks first
+  (bug-53): the chip is replaced in place by `ui/Confirm` naming the item it abandons and saying the run cannot be resumed, and only its `Stop run` sends the
+  request — `Keep running` and Escape send nothing. A run with a stop on file drops to the
   `Stopping` reading and offers no control at all — no withdrawal, because the `--abort` session has already been spawned, and no Resume in any branch) — and,
   when the run file carries a `prUrl` that passes `isPrUrl`, a `PR #<n>` link-out in the head's sub line, opened with `rel="noopener noreferrer"`; then the
   facts strip, the mode and question notes (`mergeModeLabel`'s pill reads `PR mode` for an effective `pr` run and `branch mode (downgraded)` for a degraded

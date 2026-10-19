@@ -1,8 +1,8 @@
 # backlog-orchestrate — pausing and stopping a run
 
 Read this file **in full** when a CLI call exits `6` (a pause was requested) or `10` (a stop was requested). `6` comes only from `stage <id> preflight` and
-`stage <id> dispatched`; `10` from any `stage` transition and from `watch`. The trigger is the exit code, so a fresh run and a `--resume`d or unpaused one reach
-it the same way — both are inside the loop when it arrives. **Neither code is retried, worked around or asked about:** `6` ends the run `paused`, at the item
+`stage <id> dispatched`; `10` from any `stage` transition, from `watch`, and from `unpause` on a paused run the board stopped. The trigger is the exit code,
+so a fresh run and a `--resume`d or unpaused one reach it the same way — both are inside the loop when it arrives. **Neither code is retried, worked around or asked about:** `6` ends the run `paused`, at the item
 boundary; `10` ends it with `abort`, abandoning the item in flight.
 
 Section and step numbers below name sections of `SKILL.md`. A reference file is read with the Read tool and never has `${CLAUDE_PLUGIN_ROOT}` filled in: replace

@@ -123,16 +123,16 @@ describe('RunControls — what renders, by run', () => {
    * noticed either the addition or a later accidental removal.
    *
    * A `running` run carries Stop in both of its rows, fresh or pausing
-   * alike, because `running` fresh-or-stale is exactly the set the stop route
-   * accepts. A `paused` run does not: it has already stopped, and the route
-   * refuses it.
+   * alike, and so does a `paused` one (#305): running fresh-or-stale plus
+   * paused is exactly the set the stop route accepts. A paused run's driver
+   * has exited, but the run still holds what an abort clears.
    */
   const ALL_CONTROLS = ['run-controls-pause', 'run-controls-cancel', 'run-controls-stop', 'run-controls-resume'];
 
   it.each([
     ['a fresh running run', { status: 'running' as const, fresh: true, pauseRequested: false }, ['run-controls-pause', 'run-controls-stop']],
     ['a fresh running run already pausing', { status: 'running' as const, fresh: true, pauseRequested: true }, ['run-controls-cancel', 'run-controls-stop']],
-    ['a paused run', { status: 'paused' as const, fresh: false, pauseRequested: false }, ['run-controls-resume']]
+    ['a paused run', { status: 'paused' as const, fresh: false, pauseRequested: false }, ['run-controls-resume', 'run-controls-stop']]
   ])('offers exactly the right controls for %s', (_label, over, expected) => {
     renderControls(over);
     for (const testid of expected) expect(screen.getByTestId(testid)).toBeInTheDocument();
@@ -188,11 +188,20 @@ describe('RunControls — what renders, by run', () => {
     expect(screen.getByTestId('run-controls-note')).toHaveTextContent('Pausing at the next boundary');
   });
 
-  it('renders no control for a paused run the environment ladder blocks', () => {
-    const { container } = render(
-      <RunControls run={runFor({ status: 'paused', fresh: false })} gate={{ canResume: false, blockedReason: null }} resuming={false} onChanged={jest.fn()} />
-    );
-    expect(container.firstChild).toBeNull();
+  // The ladder gates the Resume alone. The Stop is drawn either way — the stop route is independent of `BM_AGENTS`, and its `abortRefused` note tells a
+  // person on an agents-off machine what to run — the crashed branch's shape (#305).
+  it('offers only Stop for a paused run the environment ladder blocks', () => {
+    render(<RunControls run={runFor({ status: 'paused', fresh: false })} gate={{ canResume: false, blockedReason: null }} resuming={false} onChanged={jest.fn()} />);
+    expect(screen.getByTestId('run-controls-stop')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-controls-resume')).toBeNull();
+  });
+
+  // A stop on file outranks the paused branch exactly as it does the others: no Resume (it would cancel the stop), no second Stop.
+  it('offers neither Resume nor Stop for a paused run with a stop on file', () => {
+    renderControls({ status: 'paused', fresh: false, stopRequested: true });
+    expect(screen.getByTestId('run-controls-stop-note')).toBeInTheDocument();
+    expect(screen.queryByTestId('run-controls-resume')).toBeNull();
+    expect(screen.queryByTestId('run-controls-stop')).toBeNull();
   });
 
   // The project-visibility block keeps its button, disabled with the reason —
@@ -515,6 +524,76 @@ describe('RunControls — the stop', () => {
     await userEvent.click(screen.getByTestId('run-controls-stop-confirm-accept'));
 
     expect(agents.stopOrchestrate).toHaveBeenCalledWith(fixture.project);
+  });
+
+  /**
+   * #305 — a paused run is stoppable through the same confirmation. Nothing is in flight (its driver exited at an item boundary), so the text is the
+   * no-item one; a parked item is named as kept, because an abort leaves a parked item's worktree and branch in place (recovery.md, `--abort`).
+   */
+  describe('on a paused run', () => {
+    const paused = { status: 'paused' as const, fresh: false };
+
+    it('asks first, and a dismissal sends nothing', async () => {
+      const onChanged = renderControls(paused);
+
+      await openConfirm();
+      expect(screen.getByTestId('run-controls-stop-confirm')).toHaveTextContent(/cannot be resumed/);
+      expect(agents.stopOrchestrate).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByTestId('run-controls-stop-confirm-dismiss'));
+
+      expect(screen.queryByTestId('run-controls-stop-confirm')).toBeNull();
+      expect(agents.stopOrchestrate).not.toHaveBeenCalled();
+      expect(onChanged).not.toHaveBeenCalled();
+    });
+
+    it('sends one stop on accept and reports the change', async () => {
+      const onChanged = renderControls(paused);
+
+      await openConfirm();
+      await userEvent.click(screen.getByTestId('run-controls-stop-confirm-accept'));
+
+      expect(agents.stopOrchestrate).toHaveBeenCalledTimes(1);
+      expect(agents.stopOrchestrate).toHaveBeenCalledWith(fixture.project);
+      await waitFor(() => expect(onChanged).toHaveBeenCalledWith('stop'));
+    });
+
+    it('fires exactly one stop for two clicks on the accept', async () => {
+      agents.stopOrchestrate.mockImplementation(() => new Promise<void>(() => {}));
+      renderControls(paused);
+
+      await openConfirm();
+      doubleClick(screen.getByTestId('run-controls-stop-confirm-accept'));
+
+      expect(agents.stopOrchestrate).toHaveBeenCalledTimes(1);
+    });
+
+    // `resumeControl` carries the error node inside its own span, so the row draws it beside the Stop only when no Resume is drawn — once, either way.
+    it('renders a failed stop once, with or without a Resume beside it', async () => {
+      for (const gate of [OPEN_GATE, { canResume: false, blockedReason: null }]) {
+        agents.stopOrchestrate.mockRejectedValueOnce(new Error('dashboard down'));
+        const { unmount } = render(<RunControls run={runFor(paused)} gate={gate} resuming={false} onChanged={jest.fn()} />);
+
+        await openConfirm();
+        await userEvent.click(screen.getByTestId('run-controls-stop-confirm-accept'));
+
+        await waitFor(() => expect(screen.getAllByTestId('run-controls-error')).toHaveLength(1));
+        unmount();
+      }
+    });
+
+    it('says a parked item keeps its worktree and branch', async () => {
+      renderControls({
+        ...paused,
+        queue: [
+          { id: 'a-1', stage: 'parked' },
+          { id: 'a-2', stage: 'pending' }
+        ]
+      });
+
+      await openConfirm();
+
+      expect(screen.getByTestId('run-controls-stop-confirm')).toHaveTextContent(/parked items keep their worktree and branch/);
+    });
   });
 
   /**

@@ -159,8 +159,9 @@ One of the three modules that call outbound, and every POST in it is guarded by 
 - `POST /api/agents/resume` — re-spawns a run that crashed or was paused.
 - `POST /api/agents/pause` — writes the pause request a live run reads back at its dispatch gates.
 - `POST /api/agents/stop` — writes a STOP request to the same one control file (`kind: 'stop'`) and then attempts one `/backlog-orchestrate --abort` spawn.
-  Accepts a `running` run fresh or stale alike; the body says what landed (`stopRequested`) and, separately, what became of the spawn (`abortSession` /
-  `abortRefused`), because only the first of the two is guaranteed. `cancel: true` is a 409 (bug-53): a stop cannot be withdrawn — the spawn has already
+  Accepts a `running` run fresh or stale alike, and a `paused` one (#305) — a paused run still holds what an abort clears; the body says what landed
+  (`stopRequested`) and, separately, what became of the spawn (`abortSession` / `abortRefused`), because only the first of the two is guaranteed. `cancel: true`
+  is a 409 (bug-53): a stop cannot be withdrawn — the spawn has already
   been awaited by the time one could arrive — and ignoring the flag instead would read an old client's `Cancel stop` as a second stop. On a tracker project
   it also sweeps `orchestrator:queued` off every never-claimed queue item, after the stop is on file and before the spawn; a refused removal is listed in an
   optional `unqueueFailed` (ids as `run.json` spells them) and never fails the stop — the spawned `--abort` repeats the sweep.
