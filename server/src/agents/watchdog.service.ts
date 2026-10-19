@@ -8,6 +8,7 @@ import { readWatchdogConfig, watchdogEnvOff } from '../orchestrator/watchdog-con
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import type { WatchdogEntry } from '../orchestrator/watchdog-state.service';
 import { watchdogExhausted, watchdogFailing, watchdogStoodDown } from '../../../shared/agent';
+import { RESUME_LOCKED_CODE } from '../../../shared/types';
 import type { OrchestratorRunsPayload, WatchdogStatus } from '../../../shared/types';
 
 /**
@@ -612,6 +613,15 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
       entry.lastError = null;
       this.push(run, 'spawned', `spawned resume ${entry.attempts}/${maxAttempts} → session ${sessionId}`);
     } catch (e) {
+      // #268 — the resume lock's refusal is "not yet", not a failure. The lock
+      // is RUN_STALE_MS (15 min) and grace is 5–10 min, so the retry after a
+      // resume that died before its first heartbeat lands inside the lock that
+      // resume's own spawn took. Counting it stood a run down as "stalled"
+      // after ONE real attempt at graceMs 300000. Nothing moves and nothing is
+      // logged: `lastSpawnAt` is already re-stamped above, so the next try is
+      // one grace window on — at the five-minute floor the third such window
+      // is the one past the lock.
+      if (resumeErrorCode(e) === RESUME_LOCKED_CODE) return;
       // Catches EVERYTHING, deliberately. This runs inside a timer callback
       // with no caller to reject to: an escaping rejection would be an
       // unhandled promise rejection that takes the whole chain down with it,
@@ -667,6 +677,14 @@ export class WatchdogService implements OnApplicationBootstrap, OnApplicationShu
  * "Http Exception", which is exactly the kind of degradation nobody notices
  * until they need the feed.
  */
+/** The `code` on a refusal `resume()` threw, or `undefined` — the same response-body probe `resumeErrorMessage` makes, for the one code the sweeper
+ *  reads (#268). */
+function resumeErrorCode(e: unknown): unknown {
+  const probe = e as { getResponse?: () => unknown } | null;
+  const body = typeof probe?.getResponse === 'function' ? probe.getResponse() : undefined;
+  return body !== null && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
+}
+
 function resumeErrorMessage(e: unknown): string {
   const probe = e as { getResponse?: () => unknown } | null;
   const body = typeof probe?.getResponse === 'function' ? probe.getResponse() : undefined;

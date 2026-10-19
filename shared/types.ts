@@ -943,9 +943,10 @@ export interface StopResult {
  *
  * Deliberately still not a wider taxonomy. Every other 409 in this app —
  * dispatch's run claim, the environment and visibility refusals, the dirName
- * race, `resume()`'s own resume-spawn lock — is uncoded, because nothing
- * about them needs telling apart by a machine, and none should gain a code
- * without its own reason to exist.
+ * race — is uncoded, because nothing about them needs telling apart by a
+ * machine, and none should gain a code without its own reason to exist.
+ * `resume()`'s resume-spawn lock is the one that found its reason, and has a
+ * code of its own, `RESUME_LOCKED_CODE` below (#268).
  *
  * Exported once here rather than declared as a bare string literal in both
  * agents.service.ts (which sends it) and OrchestrateSheet.tsx (which reads
@@ -955,6 +956,18 @@ export interface StopResult {
  * sides of this app have to agree on.
  */
 export const RUN_IN_PROGRESS_CODE = 'run-in-progress';
+
+/**
+ * The `code` on `resume()`'s resume-lock 409 (bug-19's lock, coded by #268): "a resume for this run was already started and is believed to be on its
+ * way — not yet". A different fact from `RUN_IN_PROGRESS_CODE`, which says the run is alive and which both resume callers read as a silent success; this
+ * one must NOT be swallowed by the board, which still shows its sentence.
+ *
+ * The watchdog is the reader that needed a machine-readable answer. Its grace (5–10 min) is shorter than the lock (`RUN_STALE_MS`, 15 min), so its retry
+ * after a resume that died before its first heartbeat lands inside the lock its own spawn took. Counted as a refusal, that spent the refusal ceiling on the
+ * sweeper's own previous success — at `graceMs` 300000 and the default cap of 2, a run stood down as "stalled" after ONE real attempt. The watchdog reads
+ * this code as "retry after the next grace window" and counts nothing.
+ */
+export const RESUME_LOCKED_CODE = 'resume-locked';
 
 /**
  * What a successful run does with a verified item's work: merge it into the
