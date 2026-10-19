@@ -450,6 +450,21 @@ describe('JiraIssueModal — the session fact (Jira phase 5)', () => {
     expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 3h');
   });
 
+  it('keeps counting while the modal stays open: the elapsed reading follows the clock', async () => {
+    jest.useFakeTimers();
+    try {
+      mount({ status: { live: { 'PAY-131': { ...SESSION()['PAY-131'], startedAt: new Date(Date.now() - 59 * 60_000).toISOString() } } } });
+      await screen.findByText('not');
+      expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 59m');
+      act(() => {
+        jest.advanceTimersByTime(60_000);
+      });
+      expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 1h');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('reads `starting` while the key is only reserved', async () => {
     mount({ status: { live: SESSION({ starting: true }) } });
     await screen.findByText('not');

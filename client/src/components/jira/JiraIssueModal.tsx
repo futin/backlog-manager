@@ -4,6 +4,7 @@ import { useJiraContext } from '../../hooks/JiraContext';
 import { useAction } from '../../hooks/useAction';
 import { useAgents } from '../../hooks/useAgents';
 import { useFetched } from '../../hooks/useFetched';
+import { useNow } from '../../hooks/useNow';
 import {
   JIRA_COLUMNS,
   displayPath,
@@ -62,7 +63,7 @@ import { JiraRunMenu } from './JiraRunMenu';
  *
  * **The `session` fact** reads the shell's `live[key]` (`<name> · <repo basename> · <elapsed>`, `starting`, or `—`) rather than the detail's `session`, which
  * stays typed `null`: the status is already polled, one poll old at worst, and the detail read would add a second source for one fact. The elapsed reading
- * is taken from `Date.now()` once per render, like `created · updated`.
+ * ticks with `useNow` — the card strip's own clock — so it keeps counting while the modal stays open.
  *
  * **One write at a time, stamped with its key.** Both controls fire through ONE `useAction`, so its ref guard (bug-19's layer 1, the reason DESIGN.md
  * §8.4.1 gives `RunControls`) holds across both: a double click on Assign, or a Move picked while Assign is out, sends nothing — two clicks inside one tick
@@ -101,8 +102,7 @@ import { JiraRunMenu } from './JiraRunMenu';
  * the empty fact `Fact`'s own header says never to draw.
  *
  * Repositories are read from the shell's one status (`useJiraContext`): the mapped paths for the issue's PROJECT key through `displayPath` (the same `~`
- * reading the Setup card gives), or the hint that says where to map one. The `created · updated` line (`issueDatesLine`) takes `Date.now()` once per render and ticks nothing — the modal is
- * opened, read and closed, the reasoning `ItemModal` gives for the same choice.
+ * reading the Setup card gives), or the hint that says where to map one. The `created · updated` line (`issueDatesLine`) and the session fact read the one `useNow` clock, a minute's tick.
  *
  * **Children are a tree, and a row swaps THIS modal's issue** (DESIGN.md §8.9.2; grouped-board spec §6). The detail's `children` are the direct children,
  * fresh; under each hang its descendants from `childrenOf`, the board's fold index as it stood when the card was clicked (`modalTree`). That snapshot is not
@@ -184,7 +184,8 @@ export function JiraIssueModal({
   // The detail's copy is the fresher one; the card's is what the column draws until it lands (or for good, when the read fails).
   const src: JiraIssue = detail ?? issue;
 
-  const now = Date.now();
+  // `useNow`, like the card strip's: the session fact's elapsed reading (and `created · updated`) ticks while the modal sits open between status polls.
+  const now = useNow(true);
   const boardNames = detail === null || data === null ? [] : data.boards.filter((b) => detail.boards.includes(b.id)).map((b) => b.name);
   const paths = data?.repos[src.project.key] ?? [];
   const typeLine = [src.type.name, src.parent === null ? null : `${src.parent.key} ${src.parent.summary}`].filter((p) => p !== null).join(' · ');

@@ -798,6 +798,76 @@ describe('Run ▾ and the live strip', () => {
     expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
   });
 
+  // Spec §11: a resolved dispatch-jira reloads the status without waiting for the poll. `use-jira`'s probe re-implements `.then(reload)`, so only THIS case, through
+  // the real `JiraView` -> `JiraLaunchSheet`'s `onStarted`, fails when that wiring loses its reload or its board nudge.
+  it('Start from a card\'s Run menu reads GET /api/jira once more and the board list once more, with no timer wait', async () => {
+    await renderRun();
+    const dispatched = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/agents/dispatch-jira') {
+        requested.push(`POST ${String(input)}`);
+        return ok({ sessionId: 'sess-9', assigned: false, transitioned: null, session: { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay' } });
+      }
+      return (dispatched as jest.Mock)(input, init);
+    }) as unknown as typeof fetch;
+    const statusReads = (): number => requested.filter((u) => u === '/api/jira').length;
+    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute }));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    const start = await within(sheet).findByRole('button', { name: 'Start' });
+    await waitFor(() => expect(start).toBeEnabled());
+    const statusBefore = statusReads();
+    const boardBefore = boardRequests().length;
+
+    await userEvent.click(start);
+    await waitFor(() => expect(requested).toContain('POST /api/agents/dispatch-jira'));
+    await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
+    await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
+    // Settled: nothing else follows (a second read would be the timer or a doubled trigger).
+    await new Promise((r) => setTimeout(r, 50));
+    expect(statusReads()).toBe(statusBefore + 1);
+    expect(boardRequests().length).toBe(boardBefore + 1);
+  });
+
+  // The modal's Stop is the other half: the modal reloads the status itself, and `JiraView`'s `onWrote` is what re-reads the board list. Both are pinned here
+  // through the real page, since `jira-modal`'s cases hand the modal mock callbacks.
+  it('Stop from the modal reads GET /api/jira once more and the board list once more, and the strip is gone', async () => {
+    const live = { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+    await renderRun({ live });
+    const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
+    const answered = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/jira/issue/PAY-131') return ok({ ...refund, description: '', children: [], transitions: [], boards: [ALPHA.id], session: null });
+      if (url === '/api/agents/jira-stop') {
+        requested.push(`POST ${url}`);
+        statusAnswer = status({ repos: MAPPED, skills: [SKILL] });
+        return ok({ ok: true });
+      }
+      return (answered as jest.Mock)(input, init);
+    }) as unknown as typeof fetch;
+    const statusReads = (): number => requested.filter((u) => u === '/api/jira').length;
+    expect(strips('Refund partial captures')).toHaveLength(1);
+    // Held before the modal opens: its title repeats the card's text, so a lookup by summary is ambiguous after.
+    const refundCard = card('Refund partial captures');
+    const stripsOnCard = (): number => refundCard.querySelectorAll('.board-card-live').length;
+
+    await userEvent.click(refundCard);
+    const modal = await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    await userEvent.click(await within(modal).findByRole('button', { name: 'Stop session' }));
+    const statusBefore = statusReads();
+    const boardBefore = boardRequests().length;
+    await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
+
+    await waitFor(() => expect(requested).toContain('POST /api/agents/jira-stop'));
+    await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
+    await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
+    await waitFor(() => expect(stripsOnCard()).toBe(0));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(statusReads()).toBe(statusBefore + 1);
+    expect(boardRequests().length).toBe(boardBefore + 1);
+  });
+
   it('the chip stops the card: a click or Enter on it opens no modal', async () => {
     await renderRun();
     const chip = runChip('Refund partial captures');

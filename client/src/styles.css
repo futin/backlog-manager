@@ -1272,7 +1272,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-run-hint { flex: none; margin-left: auto; font-size: 12px; font-weight: 400; color: var(--ink3) }
 .jira-run-rule { margin: 6px 0; border: 0; border-top: 1px solid var(--hairline2) }
 .jira-run-note { padding: 2px 10px 4px; font-size: 12px; color: var(--ink2) }
-/* A long session label ellipsises inside the strip; the elapsed mark keeps its width. */
+/* A long session label ellipsises inside the strip; the elapsed mark keeps its width. This rule is global, so it applies to the Board's own live strip too
+   (`ItemCard` draws the same `ui/LiveStrip`), not only to the Jira card's. */
 .board-card-live > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The Children tree (§8.9.2): a head row (h3, the direct count's pill, `N in all` pushed right), the spread bar, then one button per row, indented 22 px
    a level by an inline style. A row reads like a one-line card — glyph, key, summary, the card's initials disc, the raw status pill. */

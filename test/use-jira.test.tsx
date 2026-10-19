@@ -494,7 +494,7 @@ describe('reload-after-write', () => {
     global.fetch = fetchMock as unknown as typeof fetch;
   }
 
-  it('a resolved dispatch-jira costs exactly one GET /api/jira, and the strip appears with the poll timer untouched', async () => {
+  it('a resolved dispatch-jira costs exactly one GET /api/jira, and the strip appears', async () => {
     wire({}, { 'PAY-131': LIVE });
     render(
       <JiraProvider>
