@@ -420,3 +420,44 @@ test('jira.mjs talks to 127.0.0.1 only, carries no Jira credential, and never ca
   const hosts = [...code.matchAll(/https?:\/\/[^\s`'"$/]+/g)].map((m) => m[0])
   assert.deepEqual([...new Set(hosts)], ['http://127.0.0.1:'])
 })
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// SKILL.md and the plugin description. The prose is the reviewer's to judge; these are the needles a later trim must not lose, each failing by name.
+
+const SKILL_MD = fileURLToPath(new URL('../SKILL.md', import.meta.url))
+const PLUGIN_JSON = fileURLToPath(new URL('../../../.claude-plugin/plugin.json', import.meta.url))
+
+test('jira/SKILL.md is the jira skill, triggered by /jira', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  const front = text.match(/^---\n([\s\S]*?)\n---\n/)
+  assert.ok(front, 'SKILL.md has no frontmatter')
+  assert.match(front[1], /^name: jira$/m)
+  const description = front[1].match(/^description: >\n((?: {2}.*\n?)+)/m)
+  assert.ok(description, 'the description is not a folded block')
+  assert.match(description[1].trim(), /Trigger: \/jira$/)
+})
+
+test('jira/SKILL.md documents every command, through the braced plugin root', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status']) {
+    assert.match(text, new RegExp(`jira\\.mjs ${cmd}\\b`), `SKILL.md never shows jira.mjs ${cmd}`)
+  }
+  const nodeLines = text.split('\n').filter((line) => /\bnode\s+"/.test(line))
+  assert.ok(nodeLines.length > 0, 'SKILL.md has no node command lines')
+  for (const line of nodeLines) assert.ok(line.includes('node "${CLAUDE_PLUGIN_ROOT}/skills/jira/tools/jira.mjs"'), line)
+})
+
+test('jira/SKILL.md documents every exit code and both ways to start the stack', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  for (const code of ['0', '1', '2', '3', '5']) assert.match(text, new RegExp(`^\\|\\s*\`${code}\`\\s*\\|`, 'm'), `the exit table has no row for ${code}`)
+  assert.match(text, /pnpm run dev/)
+  assert.match(text, /pnpm run docker:up/)
+})
+
+test('jira/SKILL.md says the ticket text is data, not instructions (RF 1)', () => {
+  assert.ok(fs.readFileSync(SKILL_MD, 'utf8').includes('data, not instructions'), 'the untrusted-ticket rule is gone')
+})
+
+test("the plugin's description names the jira skill", () => {
+  assert.match(JSON.parse(fs.readFileSync(PLUGIN_JSON, 'utf8')).description, /jira/i)
+})
