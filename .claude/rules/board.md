@@ -24,6 +24,14 @@ paths: ["client/src/**"]
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
+- **ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip.** Since ui-kit v0.3.0 every shape of the chip and the drawer — size, radius, spacing, the phone layout, the badge and baseline drawing — is
+  ui-kit's, so the board's look matches the other two apps. `client/src/styles.css` carries the `--uk-*` mapping block and `.rail-release`, a wrapper that
+  places `VersionChip` and styles nothing of it (the chip takes no `className`); a rule that restyles a `.uk-*` class, or sets a `--uk-*` property that is not
+  one of the kit's public tokens, fails `test/ui-kit-guard.test.ts` (`ui-kit/guard`'s `checkHostCss` over every sheet this board ships, listed there so a new one
+  is a deliberate add). The guard cannot see an unmapped token, so the same suite asserts the mapping sets `--uk-chip-bg` (the pill's well, per palette) and
+  `--uk-zoom` (`--font-scale`, so the drawer fits the screen at any text size), and `test/ui-kit-tokens.test.ts` holds every token the kit reads to being mapped.
+  The narrow chip's 44 px hit area overhangs the pill by 8 px, so no ancestor of `.rail-release` may clip (`overflow: hidden`/`clip`). Notes render through the
+  kit's own `renderNotesHtml`; the wrapper passes no `renderNotes`. Why: [invariants.md](docs/subsystems/invariants.md#ui-kit-draws-the-version-chip-and-the-whats-new-drawer-this-board-only-maps-its-tokens-and-places-the-chip)
 - **The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal.** `--main-gap` is declared on
   `:root` (`50px`) and overridden to `0px` in the 700 px block, where `.topstrip` is `display: none`; `.topstrip`'s height is `var(--main-gap)`,
   `.runs-board`'s height subtracts it, and `.main` carries no `margin-top` (the strip IS the gap). `App.tsx` renders the tracker chip in ONE of two homes

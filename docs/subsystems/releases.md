@@ -57,7 +57,7 @@ could not write still settles the dot. A per-browser convenience, not a record.
 Opened from the chip, which refetches first; the list is also fetched once on load. There is no poll — a new release reaches the server only when someone
 pulls or fetches tags and restarts it, and the chip is rarely looked at. A fetch that fails, or answers something that is not the releases shape, keeps the
 last good answer. Each entry: version, type badge (Feature / Fix / Performance), a separate Breaking badge, date, the title without its `type(scope)!: `
-prefix (the badge already says it), the notes through the sanitising Markdown renderer when there are any, and `PR #N` when the origin is on GitHub. The
+prefix (the badge already says it), the notes through ui-kit's own renderer when there are any, and `PR #N` when the origin is on GitHub. The
 baseline renders as a divider: `Versioning starts here · v0.1.0` and its date.
 
 ui-kit's `Drawer` is the shell: a 400 px right-hand panel over the scrim, full screen under 700 px (`narrow`, which the wrapper sets from `useNarrow()` — the
@@ -69,9 +69,10 @@ open over either. It is rendered in `AppShell`, outside the rail: the phone rail
 
 Badge colours are each status token on a 14 % tint of its own over `--strip`, mapped onto ui-kit's `--uk-feat-*`, `--uk-fix-*`, `--uk-perf-*` and
 `--uk-breaking-*` in `styles.css`; `test/daylight-contrast.test.ts` holds each mapped pair to 4.5:1 in daylight, and `test/ui-kit-tokens.test.ts` holds
-every `--uk-*` token the kit's stylesheet reads to being mapped there or named as left to its fallback on purpose. A code span in the notes is the item
-body's — `--steel` fill, the board's one face — through `--uk-code-bg` and `--uk-font-mono`. The notes go through this repo's sanitising `renderMarkdown`, passed as `renderNotes`, not the kit's escape-first default —
-so `###` headings still render.
+every `--uk-*` token the kit's stylesheet reads to being mapped there. A code span in the notes is the item
+body's — `--steel` fill, the board's one face — through `--uk-code-bg` and `--uk-font-mono`. The notes go through ui-kit's own escape-first `renderNotesHtml` (v0.3.0
+removed the `renderNotes` prop, so every app's drawer reads the same); `###` headings render as `h3`. The chip and the drawer are drawn entirely by the kit, so this
+board maps tokens and restyles no `.uk-*` class — `test/ui-kit-guard.test.ts` fails on a rule that does, and holds `--uk-chip-bg` and `--uk-zoom` to being mapped.
 
 ## What is not here
 

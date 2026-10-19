@@ -3838,6 +3838,29 @@ timer's read and a Setup save's `reload` can overlap, and it keeps the newest-re
 git — it answers from memory, the env and `jira.json` — so the overlap costs a cheap read, not a spawn. `useJiraBoard`, the Board page's issue list, has no
 server clock to chase and IS built on `useCoalescedFetch`.
 
+## ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip
+
+The version chip and the What's new drawer used to be two things in this repo: ui-kit's markup, and a block of this board's own rules laid over it — a pill drawn by
+`.rail-release`, a drawer width, an edge, a lift, a notes size and a baseline rule restyled under `.uk-*` selectors. Each override was a small, reasoned departure
+from the kit's defaults, and together they made this board's drawer differ from the other two apps' — the opposite of why the surface moved into a shared package.
+ui-kit v0.3.0 took this board's look as its canonical one and moved every shape into the kit, which leaves the host exactly two jobs: map the public `--uk-*`
+tokens onto the board's own, and place the chip.
+
+**What stays here, and why it is enough.** `styles.css`'s `:root` mapping (each token pointed at a theme variable, so all five palettes carry through) and
+`.rail-release`, a wrapper that sinks the chip to the rail's foot and makes it the phone menu's last row. `--uk-chip-bg` is mapped to `--steel` because the
+kit's default is a light well that would show on a dark rail; `--uk-zoom` is mapped to `--font-scale` because `.shell`'s `zoom` leaves `100vw` and `100dvh`
+meaning the unzoomed screen, and the kit divides its drawer's size by it — undivided, the panel overhangs the screen by the text scale. Notes go through the
+kit's own escape-first `renderNotesHtml`, so a PR body is safe to set as HTML with no sanitiser here and a `###` line reads as a heading in every app.
+
+**How a regression is caught.** `test/ui-kit-guard.test.ts` runs `ui-kit/guard`'s `checkHostCss` over each stylesheet this board ships (listed in the test, so a
+new sheet is a deliberate add) and fails on any rule that restyles a `.uk-*` class or sets a `--uk-*` property that is not a public token. It cannot see a token
+nobody mapped, so the same suite asserts the mapping sets `--uk-chip-bg` and `--uk-zoom`; `test/ui-kit-tokens.test.ts` holds every token the kit reads to being
+mapped. If the board's look needs to differ from the kit, the change is a token or a prop in ui-kit, never a `.uk-*` rule here.
+
+**The phone chip's hit area must not be clipped.** On a narrow layout the chip is passed `narrow`, which gives the 28 px pill a transparent 44 x 44 hit area that
+overhangs it by 8 px above and below. `.rail` is `overflow-x: hidden` on a phone, which makes its y-axis clip as well, so the wrapper's margins and the rail's
+padding keep the overhang inside the rail's padding box; an ancestor that clipped there would shrink the thumb target back to the pill.
+
 <!-- docs-sync:
   sources:
     - server/src

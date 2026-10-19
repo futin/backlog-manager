@@ -40,9 +40,9 @@ function entry(version: string): HTMLElement {
 }
 
 /*
-  The three things the wrapper adds over ui-kit's drawer, each pinned because the default would undo it: Escape through the app's one stack rather than a
-  listener of the drawer's own (one press, one close — the stack case itself is `test/dialog-escape.test.tsx`'s), the phone shape from `useNarrow`, and
-  the notes through `renderMarkdown`, whose `### ` heading ui-kit's escape-first default would print as literal text.
+  The two things the wrapper adds over ui-kit's drawer, each pinned because the default would undo it: Escape through the app's one stack rather than a
+  listener of the drawer's own (one press, one close — the stack case itself is `test/dialog-escape.test.tsx`'s), and the phone shape from `useNarrow`. The
+  notes are ui-kit's own renderer's (v0.3.0 dropped `renderNotes`), which turns a `###` line into an `h3`; the `Sub` heading assertion below holds that.
 */
 describe('ReleasesDrawer · the wrapper', () => {
   it('closes once per Escape, through the stack, and on the ✕ and the scrim', async () => {
@@ -99,6 +99,7 @@ describe('ReleasesDrawer', () => {
     expect(within(e).queryByText('feat(releases): version chip')).not.toBeInTheDocument();
     expect(within(e).getByText('Shows the running version').closest('li')).not.toBeNull();
     expect(within(e).getByRole('heading', { level: 3, name: 'Sub' })).toBeInTheDocument();
+    expect(within(e).queryByText(/###/)).toBeNull();
     const link = within(e).getByRole('link', { name: 'PR #12' });
     expect(link).toHaveAttribute('href', 'https://github.com/futin/backlog-manager/pull/12');
   });

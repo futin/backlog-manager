@@ -238,18 +238,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    end, as the dashboard's is, so the rule stops short of the rows' fills. */
 .rail-rule { border-top: 1px solid var(--hairline); margin: 24px 4px }
 
-/* The version chip (DESIGN.md §8.10): ui-kit's `VersionChip`, placed and drawn by this class, which beats `.uk-chip` by source order (this file is imported
-   after ui-kit's); its dot is ui-kit's `.uk-chip-dot`, cyan through the `--uk-accent` mapping below. The look is the dashboard's `.rel-chip`: the rail's
-   last element, sunk to its foot by `margin-top: auto` in the rail's column, and in the phone menu its last row. A pill on the recessed well in the board's own ink — status lives in the dot alone, cyan for a release not opened
-   yet. 28 px tall, the rail's quiet size, not a 36 px control: it is a reading you can tap, not a section. */
-.rail-release {
-  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
-  margin: auto 0 0 8px; min-height: 28px; padding: 4px 10px;
-  font-family: inherit; font-size: 12px; font-weight: 500; color: var(--ink2);
-  background: var(--steel); border: 1px solid var(--hairline); border-radius: 999px;
-  cursor: pointer; transition: color .15s, border-color .15s;
-}
-.rail-release:hover { color: var(--ink); border-color: var(--hairline2) }
+/* The version chip's placement (DESIGN.md §8.10): the wrapper around ui-kit's `VersionChip`, which draws the pill itself (28 px, `--uk-chip-bg` well, hairline,
+   cyan dot for an unopened release) — an app may only map its tokens, never restyle it. The wrapper is the rail's last element, sunk to its foot by
+   `margin-top: auto` in the rail's column, and in the phone menu its last row. `display: flex` makes the chip a flex item, so no line box adds height under it. */
+.rail-release { display: flex; align-self: flex-start; margin: auto 0 0 8px }
 
 /* The phone's ☰, and the wordmark row it sits in — both render only under
    useNarrow, so neither is ever in the desktop tree. */
@@ -329,7 +321,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   /* The mock's full 44 px row, kept for the phone alone: here the row is a
      thumb target rather than a pointer one (§8.0's table). */
   .rail-link { min-height: 44px; border-radius: 12px }
-  /* The phone menu's last row: no foot to sink to, so a fixed gap under the rows instead, and the menu's own bottom padding beneath it. */
+  /* The phone menu's last row: no foot to sink to, so a fixed gap under the rows instead, and the menu's own bottom padding beneath it. The narrow chip's 44 px
+     hit area overhangs its pill by 8 px each way, and `.rail` is `overflow-x: hidden` (which makes its y-axis clip too): 12 px above and 8 px + the rail's 8 px
+     of padding below keep the overhang inside it. */
   .rail-release { margin: 12px 0 8px 8px }
   .rail-sublink { min-height: 40px }
   .main { border-top-left-radius: 0 }
@@ -2720,7 +2714,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    last. The badges keep this board's look — each type's status word on a 14 % tint of its own token over `--strip`. A code span in the notes is marked the
    way the item body marks one, by its `--steel` fill alone: `--uk-font-mono` maps to the board's one face, because the kit's `.uk-releases-notes code` names
    a monospace stack and outranks the bare `code { font-family: inherit }` that keeps a second face out everywhere else (§8.1), and `--uk-code-bg` replaces
-   the kit's 6 % black, which is all but invisible on the four dark themes. */
+   the kit's 6 % black, which is all but invisible on the four dark themes.
+
+   `--uk-chip-bg` is the rail's recessed `--steel` well, mapped so the pill follows each palette rather than showing the kit's light default on a dark rail.
+   `--uk-zoom` is `--font-scale`: the drawer renders inside `.shell`, whose `zoom` leaves `100dvh` and `100vw` meaning the unzoomed screen, so the kit divides its
+   height and width by it — undivided, the panel overhangs the screen by the text scale. These two, with the rest of this block, are all an app may set: every
+   shape, size and the phone layout are ui-kit's, so the chip and drawer match the other two apps (guarded by `test/ui-kit-guard.test.ts`). `--uk-ink-muted` stays
+   on `--ink3`; whether the pill reads too faint against `--steel` in daylight, and so wants `--ink2`, is a by-eye call. */
 :root {
   --uk-panel-bg: var(--strip);
   --uk-ink: var(--ink);
@@ -2733,7 +2733,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   --uk-font: var(--font);
   --uk-font-mono: var(--font);
   --uk-code-bg: var(--steel);
-  --uk-font-size-lg: 19px;
+  --uk-chip-bg: var(--steel);
+  --uk-zoom: var(--font-scale, 1);
   --uk-z: 80;
   --uk-feat-ink: var(--green);
   --uk-feat-tint: color-mix(in srgb, var(--green-solid) 14%, var(--strip));
@@ -2744,30 +2745,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   --uk-breaking-ink: var(--red);
   --uk-breaking-tint: color-mix(in srgb, var(--red) 14%, var(--strip));
 }
-/* Two things ui-kit cannot know. The drawer renders inside `.shell`, whose `zoom` leaves `100dvh` and `100vw` meaning the unzoomed screen, so its height and
-   width carry the same `/ --font-scale` division every viewport unit in this file does — undivided, the panel overhangs the screen by the text scale. And the
-   notes are this board's `renderMarkdown` output, which emits `h3` for a `###` line: ui-kit styles only `p`, `ul` and `code` inside them, so the heading is
-   sized here. The notes sit inside the `renderNotes` wrapper div, so the first-child reset reaches through it.
-
-   The rest restores the look §8.7 and §8.10 record, where ui-kit's own defaults differ and spec D16 did not accept the difference (#298's fix loop): the
-   panel's hairline on its one open edge and the shell lift laid leftward at the design's `-24px 0 64px` (the kit draws `-12px 0 24px` and no edge), neither
-   on the full-screen phone shape; notes at 13 px, below the 14 px title, rather than the kit's shared `--uk-font-size` — not mapped, because the title and
-   the ✕ read it too; 11/500 badges, not the kit's 600; and the baseline as a hairline rule with its text and date in the gap, which the kit draws as a plain
-   line with the date pushed right. */
-.uk-drawer {
-  width: min(400px, calc(100vw / var(--font-scale, 1)));
-  height: calc(100dvh / var(--font-scale, 1));
-  border-left: 1px solid var(--hairline);
-  box-shadow: -24px 0 64px var(--shadow2);
-}
-.uk-drawer.uk-drawer--narrow { width: calc(100vw / var(--font-scale, 1)); border-left: none; box-shadow: none }
-.uk-releases-notes { font-size: 13px }
-.uk-releases-notes h3 { font-size: 13px; font-weight: 600; color: var(--ink); margin: 10px 0 4px }
-.uk-releases-notes > div > :first-child { margin-top: 0 }
-.uk-releases-badge { font-weight: 500 }
-.uk-releases-base { gap: 10px }
-.uk-releases-base::before, .uk-releases-base::after { content: ""; flex: 1; height: 1px; background: var(--hairline) }
-.uk-releases-base .uk-releases-date { margin-left: 0 }
 
 /* ── ui primitives ────────────────────────────────────────────────────────────
    Every class family owned by a component in client/src/components/ui/, and
