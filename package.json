@@ -38,7 +38,7 @@
     "reflect-metadata": "^0.2.2",
     "release-kit": "github:futin/release-kit#v1.3.0",
     "rxjs": "^7.8.2",
-    "ui-kit": "github:futin/ui-kit#v0.3.0"
+    "ui-kit": "github:futin/ui-kit#v0.3.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
