@@ -11,22 +11,34 @@
  * every composer of this control already draws the name beside it — a Settings
  * row's own name, a sheet field's caption — and a second visible label would
  * state it twice.
+ *
+ * `title` is the hover sentence a DISABLED select owes the reader (Jira phase 3's `Move to…` reads `transitions unavailable`) — the same job `Chip`'s
+ * `title` does. Optional and absent by default, so no existing composer grows a tooltip it never asked for.
  */
 export function Select<T extends string>({
   value,
   options,
   onChange,
   disabled,
-  label
+  label,
+  title
 }: {
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
   disabled?: boolean;
   label?: string;
+  title?: string;
 }) {
   return (
-    <select className="ui-select" aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(e.currentTarget.value as T)}>
+    <select
+      className="ui-select"
+      aria-label={label}
+      title={title}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.currentTarget.value as T)}
+    >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}

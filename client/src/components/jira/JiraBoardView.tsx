@@ -75,13 +75,18 @@ import { JiraCard } from './JiraCard';
  * Clicking a card calls `onOpenIssue(issue, childrenOf)` — the slot the issue modal fills, plus the fold's parent → children index as a snapshot, so the
  * modal's Children tree can reach the grandchildren the detail read does not return without a Jira call of its own (grouped-board spec §6). No `Run ▾` and
  * no live strip: phase 5.
+ *
+ * `nudge` is `JiraView`'s write counter (Jira phase 3, R7), handed to `useJiraBoard` as given: this page neither reads nor bumps it, so a write in the modal
+ * re-reads the list without the modal and the board knowing about each other.
  */
 export function JiraBoardView({
   onOpenJiraPage,
-  onOpenIssue
+  onOpenIssue,
+  nudge
 }: {
   onOpenJiraPage: (p: JiraPage) => void;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex) => void;
+  nudge: number;
 }) {
   const { data } = useJiraContext();
   const [stored, setStored] = usePersistedState<unknown>(JIRA_BOARD_KEY, null);
@@ -90,7 +95,7 @@ export function JiraBoardView({
   // Resolved against the live list every render; `null` while unreadable, so nothing is requested from a board list the server could not read.
   const board = unreadable === null ? pickBoard(stored, boards) : null;
   // The ONLY id this page ever asks the server about (Review Focus 3).
-  const list = useJiraBoard(board?.id ?? null, board?.interval ?? null);
+  const list = useJiraBoard(board?.id ?? null, board?.interval ?? null, nudge);
   // Card ages are relative (`now`, `4m`, `2h`, `6d`), so a minute's tick is plenty; the band's seconds have their own clock below.
   const now = useNow(true);
 
