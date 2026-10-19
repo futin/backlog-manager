@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -118,7 +118,8 @@ describe('unconfigured', () => {
     ['/search?q=pay'],
     ['/search?q='],
     ['/projects'],
-    ['/jql/check?jql=assignee%20%3D%20currentUser()']
+    ['/jql/check?jql=assignee%20%3D%20currentUser()'],
+    ['/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay']
   ])('GET /api/jira%s is 503 Jira is not configured', async (path) => {
     const res = await get(path).expect(503);
     expect(res.body).toEqual({ error: 'Jira is not configured' });
@@ -128,6 +129,7 @@ describe('unconfigured', () => {
   it('answers a malformed parameter with its 400 before the 503', async () => {
     expect((await get('/issue/pay-1').expect(400)).body).toEqual({ error: 'invalid issue key' });
     expect((await get('/search').expect(400)).body).toEqual({ error: 'q is required' });
+    expect((await get('/prompt?key=pay-1&action=execute&repo=%2Fwork%2Fpay').expect(400)).body).toEqual({ error: 'invalid issue key' });
   });
 });
 
@@ -343,11 +345,6 @@ describe('configured, against a healthy Jira', () => {
     });
   });
 
-  describe('what this phase does not have', () => {
-    it('GET /api/jira/prompt is 404', async () => {
-      await get('/prompt').expect(404);
-    });
-  });
 });
 
 describe('configured, tenant_info unreachable at boot (P3, Review Focus 2)', () => {
@@ -428,5 +425,145 @@ describe('configured, the credentials are rejected', () => {
     expect(res.body).toEqual({ error: 'Jira rejected the credentials', access: 'unauthorized' });
     expect((await get('/projects').expect(503)).body).toEqual({ error: 'Jira rejected the credentials', access: 'unauthorized' });
     expect((await get('').expect(200)).body).toMatchObject({ access: 'unauthorized', me: null });
+  });
+});
+
+/**
+ * `GET /api/jira/prompt` (Jira phase 5, Task 4; spec §5 and §8) — what the launch sheet previews and Copy prompt copies. Its own app, because the route reads
+ * `repos` and `skills` from `jira.json` and the fixture the other describes use holds neither. The refusals are asserted in the order the route makes them
+ * (key, action, repo, unconfigured, unreadable file, unknown skill, Jira's own answer, the mapping, the cap): each case sends a request that is wrong in
+ * exactly that way AND in every later way, so a route that checked them in another order would answer a different sentence.
+ */
+describe('GET /api/jira/prompt', () => {
+  const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} ({summary}) in {repo}, then stop.' };
+  const REPO = '/work/pay';
+  const q = (params: Record<string, string>) => `/prompt?${new URLSearchParams(params).toString()}`;
+  const ok = { key: 'PAY-131', action: 'execute', repo: REPO };
+
+  beforeAll(async () => {
+    prepare('prompt');
+    writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));
+    await build(false);
+  });
+  afterAll(() => app.close());
+
+  it('400 invalid issue key comes first, whatever else is wrong', async () => {
+    expect((await get(q({ key: 'pay-1', action: 'nope' })).expect(400)).body).toEqual({ error: 'invalid issue key' });
+    expect((await get('/prompt').expect(400)).body).toEqual({ error: 'invalid issue key' });
+  });
+
+  it.each([['absent', undefined], ['unknown', 'nope'], ['a skill: with no id', 'skill:'], ['a board id', 'skill:b_0123abcd']])(
+    '400 on an action that is %s, before the repo is looked at',
+    async (_label, action) => {
+      const params: Record<string, string> = { key: 'PAY-131' };
+      if (action !== undefined) params.action = action;
+      expect((await get(q(params)).expect(400)).body).toEqual({ error: 'action must be execute, context or skill:<id>' });
+    }
+  );
+
+  it.each([['absent', undefined], ['empty', ''], ['blank', '   ']])('400 repo is required when the repo is %s', async (_label, repo) => {
+    const params: Record<string, string> = { key: 'PAY-131', action: 'execute' };
+    if (repo !== undefined) params.repo = repo;
+    expect((await get(q(params)).expect(400)).body).toEqual({ error: 'repo is required' });
+  });
+
+  it('503 while unconfigured comes after the three parameter checks and before any file or Jira read', async () => {
+    configure(false);
+    try {
+      expect((await get(q(ok)).expect(503)).body).toEqual({ error: 'Jira is not configured' });
+      expect((await get(q({ ...ok, repo: '' })).expect(400)).body).toEqual({ error: 'repo is required' });
+    } finally {
+      configure(true);
+    }
+  });
+
+  it('409 when jira.json cannot be read, ahead of an unknown skill and of any Jira call', async () => {
+    const file = process.env.BM_JIRA_FILE!;
+    const good = JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] });
+    writeFileSync(file, '{ not json');
+    const calls = fake.calls.length;
+    try {
+      const res = await get(q({ ...ok, action: 'skill:s_ffffffff' })).expect(409);
+      expect(res.body.error).toMatch(/jira\.json does not parse as JSON/);
+      expect(fake.calls.length).toBe(calls);
+    } finally {
+      writeFileSync(file, good);
+    }
+  });
+
+  it('400 unknown skill <id> for a well-formed id the file does not hold, before Jira is asked', async () => {
+    const calls = fake.calls.length;
+    const res = await get(q({ ...ok, key: 'PAY-999', action: 'skill:s_ffffffff' })).expect(400);
+    expect(res.body).toEqual({ error: 'unknown skill s_ffffffff' });
+    expect(fake.calls.length).toBe(calls);
+  });
+
+  it("404 issue not found passes through unwrapJira's mapping, ahead of the repo check", async () => {
+    expect((await get(q({ ...ok, key: 'PAY-999', repo: '/elsewhere' })).expect(404)).body).toEqual({ error: 'issue not found' });
+  });
+
+  it("400 <repo> is not mapped to <PROJECT>, quoting the repo as sent and using the issue's own project key", async () => {
+    expect((await get(q({ ...ok, repo: '/elsewhere' })).expect(400)).body).toEqual({ error: '/elsewhere is not mapped to PAY' });
+    // A project with no `repos` entry at all is the same refusal.
+    fake.issues.set('ZED-1', makeRawIssue({ key: 'ZED-1', fields: { project: { key: 'ZED', name: 'Zed' } } }));
+    expect((await get(q({ ...ok, key: 'ZED-1' })).expect(400)).body).toEqual({ error: `${REPO} is not mapped to ZED` });
+  });
+
+  it('200 text/plain for a mapped repo: the execute text first, then the framed ticket block', async () => {
+    const res = await get(q(ok)).expect(200);
+    expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
+    expect(res.text.startsWith('Work on Jira ticket PAY-131 in this repository, end to end')).toBe(true);
+    expect(res.text).toContain('BEGIN TICKET');
+    expect(res.text).toContain('END TICKET');
+  });
+
+  it('the context built-in answers its own text', async () => {
+    const res = await get(q({ ...ok, action: 'context' })).expect(200);
+    expect(res.text.startsWith('Read Jira ticket PAY-131 below, then wait')).toBe(true);
+  });
+
+  it("skill:<id> answers the template's text with its placeholders filled", async () => {
+    const res = await get(q({ ...ok, action: `skill:${SKILL.id}` })).expect(200);
+    expect(res.text.startsWith(`Review PAY-131 (Summary of PAY-131) in ${REPO}, then stop.`)).toBe(true);
+    expect(res.text).toContain('BEGIN TICKET');
+  });
+
+  it.each([
+    ['a trailing slash', `${REPO}/`],
+    ['surrounding whitespace', `  ${REPO} `]
+  ])('matches the stored path after normalising %s', async (_label, repo) => {
+    const res = await get(q({ ...ok, repo })).expect(200);
+    expect(res.text).toContain('BEGIN TICKET');
+  });
+
+  it('matches a ~ spelling against the absolute path stored for it, and quotes the caller\'s spelling when it does not match', async () => {
+    const stored = join(homedir(), 'proj');
+    writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [stored] }, skills: [SKILL] }));
+    try {
+      await get(q({ ...ok, repo: '~/proj' })).expect(200);
+      await get(q({ ...ok, repo: stored })).expect(200);
+      expect((await get(q({ ...ok, repo: '~/other' })).expect(400)).body).toEqual({ error: '~/other is not mapped to PAY' });
+    } finally {
+      writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));
+    }
+  });
+
+  it('a repo that cannot be normalised (relative) matches nothing and is quoted as sent', async () => {
+    expect((await get(q({ ...ok, repo: 'work/pay' })).expect(400)).body).toEqual({ error: 'work/pay is not mapped to PAY' });
+  });
+
+  it('400 prompt too long when the template and the facts alone are over the cap, with nothing left to trim', async () => {
+    const file = process.env.BM_JIRA_FILE!;
+    // A template at the writer's 2 000-character cap whose every placeholder is a long summary: the instruction alone is far past 4 000, so no cut of the
+    // description can fit and the answer is the 400, never a prompt that says `(no description)`.
+    const tpl = { ...SKILL, prompt: '{summary}'.repeat(200) };
+    fake.issues.set('PAY-600', makeRawIssue({ key: 'PAY-600', fields: { summary: 'S'.repeat(300) } }));
+    writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [tpl] }));
+    try {
+      const res = await get(q({ key: 'PAY-600', action: `skill:${SKILL.id}`, repo: REPO })).expect(400);
+      expect(res.body).toEqual({ error: 'prompt too long' });
+    } finally {
+      writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));
+    }
   });
 });

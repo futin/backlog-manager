@@ -29,9 +29,10 @@
  * description is the one thing that can be large. A prompt that cannot hold the description cut to at least one character plus the marker is `{ ok: false }`, which
  * both routes turn into a 400 before any write — never a prompt that says `(no description)` about a ticket that has one.
  */
+import { HttpException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { COMMIT_RULE, oneLine } from '../../../shared/agent';
-import type { JiraIssueDetail, JiraSkill } from '../../../shared/types';
+import type { JiraAction, JiraIssueDetail, JiraSkill } from '../../../shared/types';
 import { JIRA_TRUNCATED_MARKER, renderDescription, renderTicketBlock } from './block';
 
 /** The dashboard's `PROMPT_CAP` (`claude-agents-dashboard/server/lib/spawn.ts:66`, which answers a longer prompt with a 400 and does not publish the number). */
@@ -152,4 +153,17 @@ export function composeJiraPrompt(
   const kept = cut(description, low);
   const prompt = kept === '' ? null : fits(kept, true);
   return prompt !== null ? { ok: true, prompt } : { ok: false, error: 'prompt too long' };
+}
+
+/**
+ * A `JiraAction` as the composer takes it: a skill's id becomes the skill itself, read from `skills` (the `jira.json` list the caller just read). A well-formed id
+ * the file does not hold is the 400 `unknown skill <id>` — a 400 and not the writers' 404, because here the id is a PARAMETER of a request to a route that exists,
+ * not the address of the thing being changed. Shared by `GET /api/jira/prompt` and `POST /api/agents/dispatch-jira`, so a preview and a Start refuse the same
+ * id in the same words; it throws (rather than returning a result) because both callers' only answer to it is that status and that sentence.
+ */
+export function resolveJiraActionOrThrow(action: JiraAction, skills: JiraSkill[]): JiraComposeAction {
+  if (typeof action === 'string') return { kind: action };
+  const skill = skills.find((candidate) => candidate.id === action.skill);
+  if (skill === undefined) throw new HttpException({ error: `unknown skill ${action.skill}` }, 400);
+  return { kind: 'skill', skill };
 }

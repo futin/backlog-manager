@@ -37,12 +37,12 @@ by a re-read of the issue that is spliced into the board caches, and the modal's
 | `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30)              |
 | `poller.service.ts`  | `JiraPollerService` — the ticker, the boot sequence, the per-board caches, every fresh read the routes make, and since phase 3 `assignToMe`, `transitionIssue`, the splice and the sweep's newest-wins rule |
 | `unwrap.util.ts`     | `unwrapJira` — a poller outcome as its value or its §8 error, shared by both controllers so a failure means the same on every route (phase 3)   |
-| `jira.controller.ts` | the six read routes                                                                                                                            |
+| `jira.controller.ts` | the seven read routes (six, and phase 5's `GET /prompt`)                                                                                       |
 | `jira-write.controller.ts` | the five write routes — three config writes (phase 2) and the two issue writes (phase 3), each behind `SameOriginPostGuard`            |
 | `jira.module.ts`     | `JiraModule` — the poller and the client (a factory value, the one place a suite swaps in a fake `fetch`), both exported                       |
 
 Not there yet, by phase: **5** —
-`prompt.util.ts`, the skills routes, `GET /api/jira/prompt`, `dispatch-jira`, `jira-stop` and the live-session map (`JiraStatusPayload.live` is always `{}` and
+`prompt.util.ts`, the skills routes, `dispatch-jira`, `jira-stop` and the live-session map (`JiraStatusPayload.live` is always `{}` and
 `JiraIssueDetail.session` always `null` until then).
 
 ## Shapes
@@ -70,8 +70,9 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/search?q=`         | ≤ 20 issues for the roots picker; `q` required (400), trimmed, blank → `[]` with no call, over 100 characters → 400            |
 | `GET /api/jira/projects`          | every project the credentials see, `{ key, name }[]` sorted by key, paged by `startAt`                                          |
 | `GET /api/jira/jql/check?jql=`    | `{ ok: true, count }` or `{ ok: false, message }` (Jira rejected it — still a 200); `jql` required, over 2 000 characters → 400  |
+| `GET /api/jira/prompt?key&action&repo` | `text/plain`: `composeJiraPrompt`'s answer. Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context or skill:<id>`, 400 `repo is required`, 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), 400 `prompt too long` |
 
-Every route but the first answers 503 `Jira is not configured` while unconfigured. `GET /api/jira/prompt` is a 404 until phase 5. A failed Jira call is mapped
+Every route but the first answers 503 `Jira is not configured` while unconfigured. A failed Jira call is mapped
 once, by `jiraHttpError`, to a body `{ error, access?, retryAt? }`:
 
 | Jira                   | HTTP | `error`                                     |

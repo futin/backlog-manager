@@ -1,7 +1,7 @@
 import { COMMIT_RULE, oneLine } from '../shared/agent';
 import { JIRA_BUILTIN_LABELS, jiraActionParam, parseJiraAction, parseJiraActionParam } from '../shared/types';
 import type { JiraAction, JiraIssue, JiraIssueDetail, JiraSkill } from '../shared/types';
-import { JIRA_PROMPT_MAX, composeJiraPrompt } from '../server/src/jira/prompt.util';
+import { JIRA_PROMPT_MAX, composeJiraPrompt, resolveJiraActionOrThrow } from '../server/src/jira/prompt.util';
 
 /**
  * Jira phase 5 (Run), spec §3 `prompt.util.ts` and §9: the composer that every Run prompt, built-in or a person's template, comes out of. The ticket is untrusted
@@ -369,6 +369,26 @@ describe('the shared helpers', () => {
     expect(parseJiraAction({ skill: 's_0123abcd' })).toEqual({ skill: 's_0123abcd' });
     for (const bad of ['skill:s_0123abcd', 'groom', { skill: 'x' }, { skill: 42 }, { skill: 's_0123abcd', extra: 1 }, {}, null, 42, []]) {
       expect(parseJiraAction(bad)).toBeNull();
+    }
+  });
+});
+
+describe('resolveJiraActionOrThrow', () => {
+  const skill: JiraSkill = { id: 's_0123abcd', name: 'Review', prompt: 'Review {key}' };
+
+  it('maps the two built-ins to their kinds and a skill id to the skill itself', () => {
+    expect(resolveJiraActionOrThrow('execute', [])).toEqual({ kind: 'execute' });
+    expect(resolveJiraActionOrThrow('context', [skill])).toEqual({ kind: 'context' });
+    expect(resolveJiraActionOrThrow({ skill: skill.id }, [skill])).toEqual({ kind: 'skill', skill });
+  });
+
+  it('throws the 400 `unknown skill <id>` for an id the list does not hold', () => {
+    expect.assertions(2);
+    try {
+      resolveJiraActionOrThrow({ skill: 's_ffffffff' }, [skill]);
+    } catch (e) {
+      expect((e as { getStatus(): number }).getStatus()).toBe(400);
+      expect((e as { getResponse(): unknown }).getResponse()).toEqual({ error: 'unknown skill s_ffffffff' });
     }
   });
 });

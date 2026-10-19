@@ -7,7 +7,7 @@ import { JiraLiveService } from './live.service';
 import { JiraPollerService } from './poller.service';
 
 /**
- * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the six read routes and — since phase 2 — the three write
+ * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the seven read routes (six in phase 1, `GET /prompt` in phase 5) and — since phase 2 — the three write
  * routes (`JiraWriteController`, which touches `jira.json` and the poller, never Jira itself). It mirrors `TrackerModule`
  * (`server/src/tracker/tracker.module.ts`), and for the same reasons.
  *
