@@ -163,6 +163,27 @@ describe('renderTicketBlock', () => {
     });
   });
 
+  describe('the description option', () => {
+    it("'as-is' and no option are the same bytes", () => {
+      expect(renderTicketBlock(detail(), { description: 'as-is' })).toBe(renderTicketBlock(detail()));
+    });
+
+    it('{ fence } wraps a description between two fence lines and leaves the rest alone', () => {
+      const text = renderTicketBlock(detail({ children: [] }), { description: { fence: '````' } });
+      expect(text).toBe([...HEAD, '', '````', 'Write one ledger row per refund.', '', '- partial refunds', '- full refunds', '````', ''].join('\n'));
+    });
+
+    it('{ fence } leaves the empty-description line unfenced, and puts the omitted-content note after the closing fence', () => {
+      expect(renderTicketBlock(detail({ description: ' ', children: [] }), { description: { fence: '```' } })).toBe(
+        [...HEAD, '', '(no description)', ''].join('\n')
+      );
+      const note = `(something was omitted — open in Jira: ${URL_131})`;
+      expect(renderTicketBlock(detail({ description: '[table omitted]', children: [] }), { description: { fence: '```' } })).toBe(
+        [...HEAD, '', '```', '[table omitted]', '```', note, ''].join('\n')
+      );
+    });
+  });
+
   describe('the omitted-content note', () => {
     const note = `(something was omitted — open in Jira: ${URL_131})`;
 

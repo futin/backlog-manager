@@ -2,9 +2,9 @@
  * block.ts — the ticket block: one Jira issue as a plain-text document (Jira phase 1; spec §3). Pure — no I/O, no module state, no clock — so every reader
  * gets byte-identical text for the same `JiraIssueDetail`.
  *
- * ONE renderer, and its readers arrive in order. Today there is one: `GET /api/jira/issue/:key?format=text`. The modal does NOT use it — it draws the
- * structured payload. A later phase adds two more, `jira.mjs show` (which prints this route's body verbatim) and the dispatch prompt (which ends with it), and
- * the children cap lives here already so that phase does not grow a second list renderer with a second number.
+ * ONE renderer, and three readers: `GET /api/jira/issue/:key?format=text`, `jira.mjs show` (which prints that body verbatim) and the Run prompt
+ * (`prompt.util.ts`, which ends with it). The modal does NOT use it — it draws the structured payload. The children cap lives here so no reader grows a second
+ * list renderer with a second number; only the description's drawing varies by reader (`TicketBlockOptions`).
  *
  * Four decisions carry the design.
  *
@@ -50,7 +50,38 @@ function childLine(child: JiraIssue): string {
   return `- ${child.key} ${child.summary}${SEP}${child.status.name}${SEP}${orDash(child.assignee?.name)}`;
 }
 
-export function renderTicketBlock(detail: JiraIssueDetail): string {
+/** What the prompt composer says after a description it cut. Here, beside the note it is drawn like, so the block is the one place that decides where server text goes. */
+export const JIRA_TRUNCATED_MARKER = '[description truncated — open in Jira]';
+
+/**
+ * The description's own lines: `(no description)` for an empty one, else the text — between two `fence` lines when a fence is given — and, when it holds an
+ * ADF placeholder, the omitted-content note — and, for a description the prompt composer had to cut, `JIRA_TRUNCATED_MARKER`. The note and the marker stay
+ * OUTSIDE the closing fence: they and `(no description)` are this server's words, and fencing them would present them as the ticket's. `typeof` rather than a truthiness test: the type says `string`, but a `null` that slips past the mapper must still never print
+ * as the word.
+ */
+function descriptionLines(detail: JiraIssueDetail, fence: string | null, truncated: boolean): string[] {
+  const description = typeof detail.description === 'string' ? detail.description : '';
+  if (description.trim() === '') return ['(no description)'];
+  const lines = fence === null ? [description] : [fence, description, fence];
+  // The trim marker is server text like the note below it, so it sits after the closing fence: inside, a ticket whose own last line read the same would be
+  // indistinguishable from a real trim.
+  if (truncated) lines.push(JIRA_TRUNCATED_MARKER);
+  if (ADF_PLACEHOLDER_RE.test(description)) lines.push(`(something was omitted — open in Jira: ${detail.url})`);
+  return lines;
+}
+
+/**
+ * How the description is drawn. `'as-is'` (the default) is the only thing `?format=text` and `jira.mjs show` ever ask for, and its output is byte-identical to
+ * what this renderer produced before the option existed. `{ fence }` wraps a non-empty description between two lines of that fence, for the prompt composer,
+ * which has measured the description's backtick runs and knows how long a fence it needs; `truncated` adds the trim marker. The omitted-content note and the marker stay OUTSIDE the closing fence, since they are this
+ * server's text, not the ticket's.
+ */
+export interface TicketBlockOptions {
+  description?: 'as-is' | { fence: string; truncated?: boolean };
+}
+
+export function renderTicketBlock(detail: JiraIssueDetail, opts: TicketBlockOptions = {}): string {
+  const mode = opts.description ?? 'as-is';
   const parent = detail.parent ? `${detail.parent.key} ${detail.parent.summary}` : ABSENT;
   const labels = detail.labels.length > 0 ? detail.labels.join(', ') : ABSENT;
   const lines = [
@@ -59,18 +90,10 @@ export function renderTicketBlock(detail: JiraIssueDetail): string {
     `project: ${detail.project.key}${SEP}${detail.project.name}${SEP}parent: ${parent}${SEP}sprint: ${orDash(detail.sprint)}`,
     `assignee: ${orDash(detail.assignee?.name)}${SEP}reporter: ${orDash(detail.reporter)}${SEP}labels: ${labels}`,
     `created: ${shortDate(detail.created)}${SEP}updated: ${shortDate(detail.updated)}${SEP}resolved: ${detail.resolved ? shortDate(detail.resolved) : ABSENT}`,
-    `url: ${detail.url}`,
-    ''
+    `url: ${detail.url}`
   ];
 
-  // `typeof` rather than a truthiness test: the type says `string`, but a `null` that slips past the mapper must still never print as the word.
-  const description = typeof detail.description === 'string' ? detail.description : '';
-  if (description.trim() === '') {
-    lines.push('(no description)');
-  } else {
-    lines.push(description);
-    if (ADF_PLACEHOLDER_RE.test(description)) lines.push(`(something was omitted — open in Jira: ${detail.url})`);
-  }
+  lines.push('', ...descriptionLines(detail, typeof mode === 'object' ? mode.fence : null, typeof mode === 'object' && mode.truncated === true));
 
   if (detail.children.length > 0) {
     lines.push('', `Subtasks (${detail.children.length}):`);

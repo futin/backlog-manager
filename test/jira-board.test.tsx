@@ -8,11 +8,12 @@ import '@testing-library/jest-dom';
 import { JiraBoardView } from '../client/src/components/jira/JiraBoardView';
 import JiraView from '../client/src/components/jira/JiraView';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
+import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { JIRA_BOARD_KEY, bandSub } from '../client/src/lib/jira';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
 import { daysAgoStamp } from './helpers/dates';
-import type { JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
+import { JIRA_BUILTIN_LABELS, type AgentsStatus, type JiraBoardStatus, type JiraIssue, type JiraStatusPayload } from '../shared/types';
 
 /*
   Jira › Board (Jira phase 2; spec §6.2; DESIGN.md §8.9.1) — the real page over a mocked `fetch`, in the style of `tracker-board.test.tsx`: the band
@@ -147,7 +148,18 @@ let statusAnswer: JiraStatusPayload;
 let lists: Record<string, JiraIssue[]>;
 let requested: string[];
 
-const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
+const ok = (body: unknown) =>
+  Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(typeof body === 'string' ? body : '') } as Response);
+
+/** What `GET /api/agents/status` answers — the launch sheet asks it on open, and the Run cases below open it. */
+const AGENTS: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'acceptEdits',
+  projectPaths: ['/Users/ada/pay']
+};
 
 beforeEach(() => {
   localStorage.clear();
@@ -164,6 +176,8 @@ beforeEach(() => {
       const board = statusAnswer.boards.find((b) => b.id === id);
       return ok({ issues: lists[id] ?? [], polledAt: board?.polledAt ?? null });
     }
+    if (url === '/api/agents/status') return ok(AGENTS);
+    if (url.startsWith('/api/jira/prompt')) return ok('a prompt');
     return ok({});
   }) as unknown as typeof fetch;
 });
@@ -179,7 +193,7 @@ function renderPage(): void {
   onOpenJiraPage = jest.fn();
   render(
     <JiraProvider>
-      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={onOpenIssue} nudge={0} />
+      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
     </JiraProvider>
   );
 }
@@ -435,7 +449,7 @@ describe('the shapes that are not a board', () => {
     onOpenIssue = jest.fn();
     render(
       <JiraProvider>
-        <JiraBoardView onOpenJiraPage={setJiraPage} onOpenIssue={onOpenIssue} nudge={0} />
+        <JiraBoardView onOpenJiraPage={setJiraPage} onOpenIssue={onOpenIssue} onRun={jest.fn()} nudge={0} />
       </JiraProvider>
     );
     await screen.findByText('No boards yet');
@@ -675,5 +689,256 @@ describe('the fold', () => {
       expect(card('Standalone task')).not.toHaveClass('jira-card-match');
       expect(within(card('Standalone task')).queryByText(/match/)).toBeNull();
     });
+  });
+});
+
+/*
+  Run ▾ and the live strip (Jira phase 5, Task 10; spec §6.2, §7; DESIGN.md §8.9.1). Rendered through `JiraView`, because the launch sheet it opens is hosted
+  one level above the page (the modal's own Run reaches the same sheet) — a card's pick and a modal's pick are one code path ending in one sheet.
+*/
+describe('Run ▾ and the live strip', () => {
+  const SKILL = { id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' };
+  const MAPPED = { PAY: ['/Users/ada/pay'] };
+  /** A session started three hours ago: the strip's elapsed reading is `3h` for the whole of a case. */
+  const threeHoursAgo = (): string => new Date(Date.now() - 3 * 3_600_000).toISOString();
+
+  async function renderRun(over: Partial<JiraStatusPayload> = {}, firstCard = 'Refund partial captures'): Promise<void> {
+    setJiraPage('board');
+    statusAnswer = status({ repos: MAPPED, skills: [SKILL], ...over });
+    render(
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraProvider>
+      </SettingsProvider>
+    );
+    await screen.findByText(firstCard);
+  }
+
+  const runChip = (summary: string): HTMLElement => within(card(summary)).getByRole('button', { name: /^Run PAY-/ });
+  const strips = (summary: string): HTMLElement[] => Array.from(card(summary).querySelectorAll<HTMLElement>('.board-card-live'));
+
+  it('an unmapped project draws a dashed chip whose title names Setup, and a click opens no menu and no modal', async () => {
+    await renderRun({ repos: {} });
+    const chip = runChip('Refund partial captures');
+    expect(chip).toHaveAttribute('title', 'no repository mapped for PAY — Jira › Setup › Repositories');
+    expect(chip.closest('.jira-run')).toHaveAttribute('data-state', 'no-repo');
+    await userEvent.click(chip);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('draws the chip on a card with no priority and no match — the marker row is no longer conditional', async () => {
+    await renderRun();
+    expect(within(card('Refund flows')).getByTestId('marker-row')).toBeInTheDocument();
+    expect(runChip('Refund flows')).toBeEnabled();
+  });
+
+  it('a live key draws a disabled chip titled with the key, and a strip naming the repo basename and the elapsed reading', async () => {
+    await renderRun({ live: { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } });
+    const chip = runChip('Refund partial captures');
+    expect(chip).toBeDisabled();
+    expect(chip).toHaveAttribute('title', 'a session is running on PAY-131');
+    const [strip] = strips('Refund partial captures');
+    expect(strip).toHaveClass('hatch');
+    expect(strip).toHaveTextContent('session · pay');
+    expect(strip).toHaveTextContent('3h');
+    // Another card is not the one with a session.
+    expect(strips('Refund flows')).toHaveLength(0);
+  });
+
+  it('a starting entry reads `starting` in the strip, and the chip is disabled just the same', async () => {
+    await renderRun({ live: { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: true } } });
+    const [strip] = strips('Refund partial captures');
+    expect(strip).toHaveTextContent('starting');
+    expect(strip).not.toHaveTextContent('3h');
+    expect(runChip('Refund partial captures')).toBeDisabled();
+  });
+
+  // Grouped-board ruling: a folded issue is not a card, so the session on it would be invisible without this. The strip belongs to the top that holds it and
+  // names the folded key, and the top's own chip is not disabled for a session that is not its own.
+  it('a live issue folded under a top shows a strip on the top naming the folded key', async () => {
+    const top = issue({ key: 'PAY-160', summary: 'Top story', type: { name: 'Story', level: 0, subtask: false } });
+    const under = issue({ key: 'PAY-162', summary: 'Folded sub-task', type: { name: 'Sub-task', level: -1, subtask: true }, parent: { key: 'PAY-160', summary: 'Top story' } });
+    lists[ALPHA.id] = [top, under];
+    await renderRun({ live: { 'PAY-162': { name: 'jira PAY-162', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } } }, 'Top story');
+    const [strip] = strips('Top story');
+    expect(strip).toHaveTextContent('PAY-162');
+    expect(strip).toHaveTextContent('session · pay');
+    expect(runChip('Top story')).toBeEnabled();
+    expect(screen.queryByText('Folded sub-task')).not.toBeInTheDocument();
+  });
+
+  it('a ready chip opens a menu: both built-ins, a rule, the skills by name, and the note', async () => {
+    await renderRun();
+    await userEvent.click(runChip('Refund partial captures'));
+    const menu = screen.getByRole('dialog', { name: 'Run menu' });
+    expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute })).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: JIRA_BUILTIN_LABELS.context })).toBeInTheDocument();
+    expect(within(menu).getByRole('button', { name: /Groom ticket/ })).toBeInTheDocument();
+    expect(within(menu).getByText('opens the launch sheet')).toBeInTheDocument();
+    expect(menu.querySelectorAll('hr')).toHaveLength(2);
+  });
+
+  it('a pick opens the launch sheet on that action, and not the issue modal', async () => {
+    await renderRun();
+    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.context }));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
+    expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
+    // The menu closed behind the pick.
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).not.toBeInTheDocument();
+  });
+
+  it('a skill pick opens the sheet on that skill', async () => {
+    await renderRun();
+    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: /Groom ticket/ }));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue(`skill:${SKILL.id}`);
+  });
+
+  // I1 (final review): `Jira default action` is read HERE — the menu lists the resolved default first and marks it `default` — because every way into the launch
+  // sheet passes the clicked row, so the sheet never seeds from the setting. Rows are read as [label, hint] pairs off the `.jira-run-opt` buttons.
+  describe('the default action', () => {
+    const setDefault = (jiraDefaultAction: string): void =>
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ jiraDefaultAction }));
+    const openMenu = async (): Promise<HTMLElement> => {
+      await renderRun();
+      await userEvent.click(runChip('Refund partial captures'));
+      return screen.getByRole('dialog', { name: 'Run menu' });
+    };
+    const rows = (menu: HTMLElement): [string, string][] =>
+      Array.from(menu.querySelectorAll<HTMLElement>('.jira-run-opt')).map((b) => {
+        const [label, hint] = Array.from(b.querySelectorAll('span')).map((n) => n.textContent ?? '');
+        return [label, hint];
+      });
+
+    it('lists Work it end to end first, marked default, when that is the setting', async () => {
+      setDefault('execute');
+      const menu = await openMenu();
+      expect(rows(menu)).toEqual([
+        [JIRA_BUILTIN_LABELS.execute, 'default'],
+        [JIRA_BUILTIN_LABELS.context, 'built-in'],
+        ['Groom ticket', '/jira-groom']
+      ]);
+    });
+
+    it('lists Open with the ticket loaded first when that is the setting, Work it end to end following as built-in', async () => {
+      setDefault('context');
+      const menu = await openMenu();
+      expect(rows(menu)).toEqual([
+        [JIRA_BUILTIN_LABELS.context, 'default'],
+        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
+        ['Groom ticket', '/jira-groom']
+      ]);
+    });
+
+    it('lists an existing skill first, marked default, and does not repeat it lower down', async () => {
+      setDefault(SKILL.id);
+      const menu = await openMenu();
+      expect(rows(menu)).toEqual([
+        ['Groom ticket', 'default'],
+        [JIRA_BUILTIN_LABELS.execute, 'built-in'],
+        [JIRA_BUILTIN_LABELS.context, 'built-in']
+      ]);
+      expect(within(menu).getAllByRole('button', { name: /Groom ticket/ })).toHaveLength(1);
+    });
+
+    it('reads a deleted skill id as Work it end to end', async () => {
+      setDefault('s_gone0000');
+      const menu = await openMenu();
+      expect(rows(menu)[0]).toEqual([JIRA_BUILTIN_LABELS.execute, 'default']);
+      expect(rows(menu)).toHaveLength(3);
+    });
+
+    it('opens the sheet on the promoted row\'s action', async () => {
+      setDefault('context');
+      const menu = await openMenu();
+      await userEvent.click(within(menu).getAllByRole('button')[0]);
+      const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+      expect(within(sheet).getByRole('combobox', { name: 'Action' })).toHaveValue('context');
+    });
+  });
+
+  // Spec §11: a resolved dispatch-jira reloads the status without waiting for the poll. `use-jira`'s probe re-implements `.then(reload)`, so only THIS case, through
+  // the real `JiraView` -> `JiraLaunchSheet`'s `onStarted`, fails when that wiring loses its reload or its board nudge.
+  it('Start from a card\'s Run menu reads GET /api/jira once more and the board list once more, with no timer wait', async () => {
+    await renderRun();
+    const dispatched = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/agents/dispatch-jira') {
+        requested.push(`POST ${String(input)}`);
+        return ok({ sessionId: 'sess-9', assigned: false, transitioned: null, session: { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay' } });
+      }
+      return (dispatched as jest.Mock)(input, init);
+    }) as unknown as typeof fetch;
+    const statusReads = (): number => requested.filter((u) => u === '/api/jira').length;
+    await userEvent.click(runChip('Refund partial captures'));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: JIRA_BUILTIN_LABELS.execute }));
+    const sheet = await screen.findByRole('dialog', { name: 'run PAY-131' });
+    const start = await within(sheet).findByRole('button', { name: 'Start' });
+    await waitFor(() => expect(start).toBeEnabled());
+    const statusBefore = statusReads();
+    const boardBefore = boardRequests().length;
+
+    await userEvent.click(start);
+    await waitFor(() => expect(requested).toContain('POST /api/agents/dispatch-jira'));
+    await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
+    await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
+    // Settled: nothing else follows (a second read would be the timer or a doubled trigger).
+    await new Promise((r) => setTimeout(r, 50));
+    expect(statusReads()).toBe(statusBefore + 1);
+    expect(boardRequests().length).toBe(boardBefore + 1);
+  });
+
+  // The modal's Stop is the other half: the modal reloads the status itself, and `JiraView`'s `onWrote` is what re-reads the board list. Both are pinned here
+  // through the real page, since `jira-modal`'s cases hand the modal mock callbacks.
+  it('Stop from the modal reads GET /api/jira once more and the board list once more, and the strip is gone', async () => {
+    const live = { 'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false } };
+    await renderRun({ live });
+    const refund = (lists[ALPHA.id] ?? []).find((i) => i.key === 'PAY-131') as JiraIssue;
+    const answered = global.fetch;
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/jira/issue/PAY-131') return ok({ ...refund, description: '', children: [], transitions: [], boards: [ALPHA.id], session: null });
+      if (url === '/api/agents/jira-stop') {
+        requested.push(`POST ${url}`);
+        statusAnswer = status({ repos: MAPPED, skills: [SKILL] });
+        return ok({ ok: true });
+      }
+      return (answered as jest.Mock)(input, init);
+    }) as unknown as typeof fetch;
+    const statusReads = (): number => requested.filter((u) => u === '/api/jira').length;
+    expect(strips('Refund partial captures')).toHaveLength(1);
+    // Held before the modal opens: its title repeats the card's text, so a lookup by summary is ambiguous after.
+    const refundCard = card('Refund partial captures');
+    const stripsOnCard = (): number => refundCard.querySelectorAll('.board-card-live').length;
+
+    await userEvent.click(refundCard);
+    const modal = await screen.findByRole('dialog', { name: /PAY-131 Refund partial captures/ });
+    await userEvent.click(await within(modal).findByRole('button', { name: 'Stop session' }));
+    const statusBefore = statusReads();
+    const boardBefore = boardRequests().length;
+    await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
+
+    await waitFor(() => expect(requested).toContain('POST /api/agents/jira-stop'));
+    await waitFor(() => expect(statusReads()).toBe(statusBefore + 1));
+    await waitFor(() => expect(boardRequests().length).toBe(boardBefore + 1));
+    await waitFor(() => expect(stripsOnCard()).toBe(0));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(statusReads()).toBe(statusBefore + 1);
+    expect(boardRequests().length).toBe(boardBefore + 1);
+  });
+
+  it('the chip stops the card: a click or Enter on it opens no modal', async () => {
+    await renderRun();
+    const chip = runChip('Refund partial captures');
+    await userEvent.click(chip);
+    expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
+    await userEvent.click(chip);
+    chip.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
   });
 });

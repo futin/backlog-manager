@@ -531,9 +531,10 @@ export function isSyncInterval(value: unknown): value is SyncInterval {
 }
 
 // ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-// Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 is the server's READ half, so two fields are typed at their phase-1 value and
-// widen later without a rename: `JiraIssueDetail.session` is `null` (phase 5 makes it the live-session record) and `JiraStatusPayload.live` is always `{}`
-// (phase 5 makes it a map of key → live session). `JiraAction`, `JiraDispatchRequest` and its result are phase-5 shapes and are deliberately absent.
+// Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 typed two fields at their empty value so phase 5 could widen them without a
+// rename: `JiraIssueDetail.session` is now `JiraLiveSession | null` and `JiraStatusPayload.live` a key → `JiraLiveSession` map, both filled by the controller from
+// `JiraLiveService` (the poller never sees the map). `JiraAction` arrived with phase 5's prompt composer (below, after `JiraSkill`); `JiraDispatchRequest` and its
+// result, the dispatch route's body and answer, sit after `AgentDispatchResult`, which the result extends.
 // `JiraStatusPayload.tokenKind` is not in §4's list: it is the one extra boot probe's answer (§3, P14) and the Connection card needs it; §4 is amended to
 // match.
 
@@ -602,6 +603,49 @@ export interface JiraSkill {
   prompt: string;
 }
 
+/**
+ * What Run ▾ starts: one of the two built-ins, or one of this machine's skills by id. Spec §4. A SHAPE, not a lookup — whether the skill exists is the
+ * server's question (`GET /api/jira/prompt` and `dispatch-jira` each answer 400 `unknown skill <id>` for an id `jira.json` lacks).
+ */
+export type JiraAction = 'execute' | 'context' | { skill: string };
+
+/** The built-ins' menu words (spec §7), one home so the menu, the launch sheet's Action select and a test read the same two strings. */
+export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context', string> = {
+  execute: 'Work it end to end',
+  context: 'Open with the ticket loaded'
+};
+
+/** A skill id, as the server mints it: `s_` and eight lower-case hex digits. Anchored both ends, so `'s_0123abcd\n'` is not one. */
+const JIRA_SKILL_ID_RE = /^s_[0-9a-f]{8}$/;
+
+/**
+ * `?action=` on `GET /api/jira/prompt`: `execute`, `context` or `skill:<s_ id>`. Anything else — including a `skill:` with no id or a `b_` id — is `null`. Shape
+ * checks only; see `JiraAction`. The inverse is `jiraActionParam`.
+ */
+export function parseJiraActionParam(raw: unknown): JiraAction | null {
+  if (raw === 'execute' || raw === 'context') return raw;
+  if (typeof raw !== 'string' || !raw.startsWith('skill:')) return null;
+  const id = raw.slice('skill:'.length);
+  return JIRA_SKILL_ID_RE.test(id) ? { skill: id } : null;
+}
+
+/** `JiraAction` as a query-string value; `parseJiraActionParam`'s inverse. */
+export function jiraActionParam(action: JiraAction): string {
+  return typeof action === 'string' ? action : `skill:${action.skill}`;
+}
+
+/**
+ * `action` in a JSON body: `'execute'`, `'context'`, or `{ skill: '<s_ id>' }` with no other key. The body shape and the query shape differ on purpose — a body
+ * has structure, a query string does not — and neither accepts the other's spelling.
+ */
+export function parseJiraAction(raw: unknown): JiraAction | null {
+  if (raw === 'execute' || raw === 'context') return raw;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const keys = Object.keys(raw);
+  const skill = (raw as { skill?: unknown }).skill;
+  return keys.length === 1 && keys[0] === 'skill' && typeof skill === 'string' && JIRA_SKILL_ID_RE.test(skill) ? { skill } : null;
+}
+
 /** One root or query that the last sweep could not read, kept beside the board so a partial list is never mistaken for a whole one. */
 export interface JiraBoardFailure {
   kind: 'root' | 'query';
@@ -624,7 +668,20 @@ export interface JiraTransition {
   to: { name: string; category: JiraStatusCategory };
 }
 
-/** `GET /api/jira/issue/:key`, read fresh. `session` is `null` in phase 1; phase 5 widens it to the live-session record. */
+/**
+ * One live Run session on a ticket, as the board draws it (spec §4). `starting` is the window between `reserve` and the dashboard's answer, when the key is
+ * claimed but there is no session id yet; `name` is `jiraSessionName(key)`, the title the dispatch gave the session, so the card and the dashboard agree.
+ */
+export interface JiraLiveSession {
+  name: string;
+  /** ISO instant the key was reserved. */
+  startedAt: string;
+  /** The absolute repo path the session runs in. */
+  repo: string;
+  starting: boolean;
+}
+
+/** `GET /api/jira/issue/:key`, read fresh. `session` is the live Run on this key (memory only), or `null`. */
 export interface JiraIssueDetail extends JiraIssue {
   /** Markdown, converted from Jira's ADF (§8). */
   description: string;
@@ -632,7 +689,7 @@ export interface JiraIssueDetail extends JiraIssue {
   transitions: JiraTransition[];
   /** The ids of the boards whose cache holds this issue. */
   boards: string[];
-  session: null;
+  session: JiraLiveSession | null;
 }
 
 /**
@@ -648,7 +705,7 @@ export interface JiraIssueWriteResult {
 
 /**
  * `GET /api/jira`. `configured: false` is the whole payload's "draw nothing Jira" signal — the other fields then carry their empty values. The credentials
- * never appear here: `site`, `me.name` and `me.accountId` are the only identity facts that leave the server (§10). `live` is always `{}` in phase 1.
+ * never appear here: `site`, `me.name` and `me.accountId` are the only identity facts that leave the server (§10). `live` is the in-memory map of key → live Run session, `{}` while unconfigured.
  */
 export interface JiraStatusPayload {
   configured: boolean;
@@ -667,7 +724,7 @@ export interface JiraStatusPayload {
   skills: JiraSkill[];
   /** `sweep` is every call the last tick made, however many boards it swept; `last429At` is an ISO instant or `null`. */
   calls: { sweep: number; last429At: string | null };
-  live: Record<string, never>;
+  live: Record<string, JiraLiveSession>;
   /** The poller's `armed` getter: a tick is scheduled. The Connection row's `every 15 s` / `idle` has no other source. Always `false` while unconfigured. */
   armed: boolean;
   /**
@@ -688,6 +745,11 @@ export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]+-\d+$/;
 
 export function isJiraKey(value: unknown): value is string {
   return typeof value === 'string' && JIRA_KEY_RE.test(value);
+}
+
+/** The title a Jira Run session carries in the dashboard: `jira <KEY>`, cut to 60 characters. Lives here, not in `agents/`, so `jira/` and `agents/` share it without an import between them. */
+export function jiraSessionName(key: string): string {
+  return `jira ${key}`.slice(0, 60);
 }
 
 /**
@@ -772,6 +834,35 @@ export interface AgentDispatchRequest {
 export interface AgentDispatchResult {
   sessionId: string;
 }
+
+/**
+ * Body of `POST /api/agents/dispatch-jira` (Jira phase 5; spec §5, §7) — the launch sheet's Start. `repo` is one of the paths `jira.json` maps to the key's
+ * project, in any spelling `normaliseRepoPath` accepts; `transitionId` is `null` for "leave as is", else an id from the transitions the sheet was drawn from,
+ * checked again against a fresh read before anything is written. `permissionMode`, `model` and `effort` are treated exactly as `AgentDispatchRequest`'s: clamped
+ * to the dashboard's ceiling and dropped when off the list, never refused.
+ */
+export interface JiraDispatchRequest {
+  key: string;
+  repo: string;
+  action: JiraAction;
+  assign: boolean;
+  transitionId: string | null;
+  model?: string;
+  effort?: string;
+  permissionMode: PermissionMode;
+  remoteControl: boolean;
+}
+
+/**
+ * 200 body of `POST /api/agents/dispatch-jira`. `assigned` is false when no assign was asked AND when the ticket was already the caller's (no call was sent);
+ * `transitioned` is the NAME of the transition applied, or `null`. `session` is what `JiraStatusPayload.live` will show for the key, so the sheet can draw it
+ * without waiting for the status reload.
+ */
+export type JiraDispatchResult = AgentDispatchResult & {
+  assigned: boolean;
+  transitioned: string | null;
+  session: { name: string; startedAt: string; repo: string };
+};
 
 /**
  * 200 body of `POST /api/agents/pause` (task-17) — whether a pause request

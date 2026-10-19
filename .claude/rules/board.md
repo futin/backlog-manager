@@ -9,18 +9,18 @@ paths: ["client/src/**"]
   refuses a starting project with the same `RUN_IN_PROGRESS_CODE`. `runHoldsItem` deliberately does NOT gain the parameter. Why:
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-  listener; six dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet`, and since the
-  release chip `ReleasesDrawer` — and
+  listener; seven dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet`, since the
+  release chip `ReleasesDrawer`, and since Jira phase 5 `JiraLaunchSheet` — and
   none binds its own (bug-23 — four until task-37 took the run drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog
   again; three from then until Jira phase 2). Since task-40 the hook is called by the overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the
-  surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet` and `JiraBoardSheet`,
-  so the two Jira surfaces joined by construction. `ReleasesDrawer` is the exception: its shell is ui-kit's since #298, so the wrapper calls the hook itself
+  surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet` and `JiraLaunchSheet`,
+  so the three Jira surfaces joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is ui-kit's since #298, so the wrapper calls the hook itself
   and passes `closeOnEscape={false}`, and ui-kit's drawer binds no key of its own. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
-  item modal's claim release (#225) and the board sheet's `Delete board` open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
-  — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with six composers — the tracker's (`components/TrackerChip.tsx`), the band's
-  Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`) and the board sheet's roots
-  search (`components/jira/JiraBoardSheet.tsx`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
-  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still six dialogs counted.
+  item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`) and the Jira modal's `Stop session` open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
+  — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with seven composers — the tracker's (`components/TrackerChip.tsx`), the band's
+  Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`), the board sheet's roots
+  search (`components/jira/JiraBoardSheet.tsx`) and `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
+  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still seven dialogs counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
@@ -67,14 +67,21 @@ paths: ["client/src/**"]
   block releases `.wrap` **and** `.wrap.wide`; the cap goes, the `margin: 0` stays. Editing that script invalidates `THEME_SCRIPT_SHA256`
   (`server/src/security.ts`), and dev has no CSP, so the failure is invisible until the built app is served. Why:
   [invariants.md](docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it)
-- **An environment-level block hides the dispatch control; the per-item ones disable it.** With `BM_AGENTS` off the board shows no dispatch buttons — do not
-  "improve" that into disabled buttons. Three per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
+- **An environment-level block hides the dispatch control; the per-item ones disable it.** With `BM_AGENTS` off the Board shows no dispatch buttons — do not
+  "improve" that into disabled buttons. The stated exception is the Jira card's `Run ▾`, which is not a Board dispatch control (next bullet). Three per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
   local session's `started:` stamp (`progressBlock`, `client/src/lib/item-progress.ts` — ANY stamp, fresh or stale, for a files item; a tracker claim past
   `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an orchestrator claim (`runClaimBlock`).
   Exactly one lets the click through, and only when it speaks alone: the visibility block re-asks the status through `useReverify`
   (`client/src/hooks/useReverify.ts`), whose one caller is `GatedChip` (`components/ui/GatedChip.tsx`, rule in `lib/gate-view.ts`), which `DispatchButton` and
   the toolbar Orchestrate control both compose (bug-13, bug-16, #272); the other blocks keep swallowing it. Why:
   [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
+- **Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.** `JiraRunMenu`
+  (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the issue modal's controls row, and it reads `runChipState` (`lib/jira.ts`)
+  alone: `no-repo` draws a dashed chip that opens nothing, a live key a disabled one, anything else a `Popover` — and with agents off it still draws and still
+  opens, because the launch sheet's `Copy prompt` needs no dashboard. `JiraLaunchSheet` asks `projectDispatchGate` and draws `Start` only on a `disabled` or
+  `enabled` answer, never on `hidden`, and draws none before the agents status has landed; `Copy prompt` waits on the preview and a clipboard and on nothing
+  else. Do not hide `Run ▾` on `BM_AGENTS` off to match the Board's buttons. Why:
+  [invariants.md](docs/subsystems/invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake)
 - **A crashed run renders as crashed, never as nothing.** The Board counts it in `RunChip`'s own line (`1 run · crashed ›`) and says nothing the payload does
   not carry; badges, card live strips and `runClaimBlock` stay freshness-based. The Runs page reads the same payload (bug-29): `MergedRun.live` is the data
   authority, `MergedRun.isLive` the presentation gate; both status badges read `crashed` through `runStatusChip` (`lib/run-stage.ts`), never from `authority`,

@@ -499,38 +499,62 @@ export class AgentsService {
       if (refusal !== null) throw new HttpException({ error: refusal }, 409);
     }
 
-    const cfg = readAgentsConfig();
-    const dirName = (await this.projectMap(cfg)).get(item.projectPath);
-    if (dirName === undefined) {
-      // dispatchBlock already covers this from the same map, so reaching here
-      // means the cache expired between the two reads. Refuse rather than
-      // guess a dirName from the path — deriving one would route around the
-      // dashboard's membership check, which is the one thing it asks of us.
-      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
-    }
-
-    const spawned = await this.spawn(cfg, {
-      project: dirName,
+    const spawned = await this.spawnInProject(item.projectPath, {
       prompt,
       name: sessionName(item),
-      permissionMode: clampMode(req.permissionMode, status.spawnMaxPermission),
-      // Undefined for "default" and for any name this build does not know,
-      // and `JSON.stringify` drops an undefined value outright — so the key
-      // never reaches the dashboard and its argv carries no `--model` /
-      // `--effort`. Validated here rather than trusted because the sheet is
-      // not the only possible caller; the dashboard would drop a bad value
-      // too, but that is its check, not ours.
-      model: pickFrom(req.model, MODELS) ?? DEFAULT_MODEL,
-      effort: pickFrom(req.effort, EFFORTS),
-      // Strictly `=== true`, matching the dashboard's own parse rule for this
-      // field: anything else means off.
-      remoteControl: req.remoteControl === true
+      permissionMode: req.permissionMode,
+      maxPermission: status.spawnMaxPermission,
+      model: req.model,
+      effort: req.effort,
+      remoteControl: req.remoteControl
     });
     // #225 — remembered, because this id is the one the spawned session claims its issue under (`claude -p --session-id`), and without it nothing on
     // the board can later tell "the board started the session holding this claim" from "somebody at a terminal did". Only after a spawn that came
     // back with an id: a refused spawn started nothing to remember.
     this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, at: Date.now() });
     return spawned;
+  }
+
+  /**
+   * The tail every one-session launch shares: the project path → the dashboard's dirName, the permission mode clamped to the ceiling, model and effort
+   * picked off the mirrored lists, and the spawn itself. Extracted from `dispatch()` unchanged (Jira phase 5) so `POST /api/agents/dispatch-jira` launches
+   * through exactly the same rules — `agents-dispatch.test.ts`, untouched, is the proof the extraction moved nothing. Every check that decides WHETHER to
+   * launch stays with the caller; this only decides HOW.
+   *
+   * `maxPermission` is the caller's `status().spawnMaxPermission`, passed in rather than re-read: each caller has just read the status for its own gate,
+   * and a second read here would be a second `/api/health` call per launch, and a ceiling that could differ from the one the gate was judged against.
+   */
+  async spawnInProject(
+    projectPath: string,
+    opts: { prompt: string; name: string; permissionMode: string; maxPermission: PermissionMode | null; model?: unknown; effort?: unknown; remoteControl: boolean }
+  ): Promise<AgentDispatchResult> {
+    const cfg = readAgentsConfig();
+    const dirName = (await this.projectMap(cfg)).get(projectPath);
+    if (dirName === undefined) {
+      // The caller's gate already covers this from the same map, so reaching
+      // here means the cache expired between the two reads. Refuse rather than
+      // guess a dirName from the path — deriving one would route around the
+      // dashboard's membership check, which is the one thing it asks of us.
+      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+    }
+
+    return this.spawn(cfg, {
+      project: dirName,
+      prompt: opts.prompt,
+      name: opts.name,
+      permissionMode: clampMode(opts.permissionMode, opts.maxPermission),
+      // Undefined for "default" and for any name this build does not know,
+      // and `JSON.stringify` drops an undefined value outright — so the key
+      // never reaches the dashboard and its argv carries no `--model` /
+      // `--effort`. Validated here rather than trusted because the sheet is
+      // not the only possible caller; the dashboard would drop a bad value
+      // too, but that is its check, not ours.
+      model: pickFrom(opts.model, MODELS) ?? DEFAULT_MODEL,
+      effort: pickFrom(opts.effort, EFFORTS),
+      // Strictly `=== true`, matching the dashboard's own parse rule for this
+      // field: anything else means off.
+      remoteControl: opts.remoteControl === true
+    });
   }
 
   /**
@@ -1975,11 +1999,11 @@ export class AgentsService {
 const SESSIONS_TIMEOUT_MS = 15_000;
 
 /**
- * A session's status in the dashboard's session list — `null` when the list does not carry it, `'unknown'` for an entry with no status string — or a
- * 502 when the list cannot be read. #225's case B asked this first (`ItemsAbortService`); #227's stale probe asks it too, through `staleClaimProbe` below,
- * and there is one copy so the two can never disagree about what the list said.
+ * The dashboard's session list as `id → status` — `'unknown'` for an entry with no status string — or a 502 when it cannot be read. One fetch and one parse
+ * for every reader: #225's case B and #227's stale probe ask for one session's status (`dashboardSessionStatus`), and Jira's live-map reconciler asks for all
+ * of them at once, so none of them can disagree with another about what the list said.
  */
-export async function dashboardSessionStatus(cfg: AgentsConfig, session: string): Promise<string | null> {
+export async function dashboardSessions(cfg: AgentsConfig): Promise<Map<string, string>> {
   let res: Response;
   try {
     res = await fetch(`${cfg.url}/api/sessions`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
@@ -1989,8 +2013,21 @@ export async function dashboardSessionStatus(cfg: AgentsConfig, session: string)
   if (!res.ok) throw new HttpException({ error: `the dashboard session list answered ${res.status}` }, 502);
   const body = (await res.json().catch(() => null)) as { sessions?: unknown } | null;
   if (!Array.isArray(body?.sessions)) throw new HttpException({ error: 'the dashboard session list carried no sessions' }, 502);
-  const found = (body.sessions as { id?: unknown; status?: unknown }[]).find((s) => s?.id === session);
-  return found === undefined ? null : typeof found.status === 'string' ? found.status : 'unknown';
+  const out = new Map<string, string>();
+  for (const s of body.sessions as { id?: unknown; status?: unknown }[]) {
+    // The first entry for an id wins, as `Array.find` did before this was a map.
+    if (typeof s?.id === 'string' && !out.has(s.id)) out.set(s.id, typeof s.status === 'string' ? s.status : 'unknown');
+  }
+  return out;
+}
+
+/**
+ * A session's status in the dashboard's session list — `null` when the list does not carry it, `'unknown'` for an entry with no status string — or a
+ * 502 when the list cannot be read. #225's case B asked this first (`ItemsAbortService`); #227's stale probe asks it too, through `staleClaimProbe` below,
+ * and there is one copy so the two can never disagree about what the list said.
+ */
+export async function dashboardSessionStatus(cfg: AgentsConfig, session: string): Promise<string | null> {
+  return (await dashboardSessions(cfg)).get(session) ?? null;
 }
 
 /**

@@ -1,15 +1,16 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { JiraContext, JiraProvider, useJiraContext } from '../client/src/hooks/JiraContext';
 import { BOARD_TRACKER_POLL_MS } from '../client/src/hooks/useBoard';
 import { JIRA_STATUS_FLOOR_MS, useJira } from '../client/src/hooks/useJira';
 import { useJiraBoard } from '../client/src/hooks/useJiraBoard';
+import { dispatchJira, stopJira } from '../client/src/lib/jira';
 import { TRACKER_FETCH_SLACK_MS } from '../client/src/hooks/useTrackers';
-import type { JiraBoardStatus, JiraIssue, JiraStatusPayload, SyncInterval } from '../shared/types';
+import type { JiraBoardStatus, JiraIssue, JiraLiveSession, JiraStatusPayload, SyncInterval } from '../shared/types';
 
 /**
  * `useJira` on the boards' own clock (Jira phase 2): one read of `GET /api/jira` on mount and on focus, then exactly one pending timer aimed at
@@ -443,5 +444,93 @@ describe('useJiraBoard', () => {
     await flush();
     // The two clicks folded into ONE follow-up.
     expect(boardFetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+/*
+  Reload-after-write (Jira phase 5, spec §11): a Start and a Stop are the first Jira writes whose result is a row on the BOARD, in `live`, and the status
+  poll alone runs on the boards' own clock — minutes away. So each write's caller reloads the shared status the moment the write resolves: exactly one
+  `GET /api/jira`, no timer waited for. The probe is those two callers' shape (`JiraLaunchSheet`'s `onStarted`, the modal's Stop `onSuccess`) over the real
+  wire helpers and the real provider; the components' own wiring is asserted in their suites.
+*/
+const LIVE: JiraLiveSession = { name: 'jira PAY-131', startedAt: '2026-10-16T09:00:00Z', repo: '/Users/ada/pay', starting: false };
+
+function WriteProbe() {
+  const { data, reload } = useJiraContext();
+  return (
+    <div>
+      <span data-testid="strip">{Object.keys(data?.live ?? {}).join(',') || 'none'}</span>
+      <button
+        onClick={() =>
+          void dispatchJira({
+            key: 'PAY-131',
+            repo: '/Users/ada/pay',
+            action: 'execute',
+            assign: false,
+            transitionId: null,
+            permissionMode: 'plan',
+            remoteControl: false
+          }).then(reload)
+        }
+      >
+        start
+      </button>
+      <button onClick={() => void stopJira('PAY-131').then(reload)}>stop</button>
+    </div>
+  );
+}
+
+describe('reload-after-write', () => {
+  /** `GET /api/jira` answers `live` from whatever the test last set; each POST resolves and flips it. */
+  function wire(initialLive: Record<string, JiraLiveSession>, afterWrite: Record<string, JiraLiveSession>): void {
+    let live = initialLive;
+    fetchMock = jest.fn((url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        live = afterWrite;
+        return answer({ ok: true });
+      }
+      return answer(status([boardPolled(10_000)], { live }));
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+  }
+
+  it('a resolved dispatch-jira costs exactly one GET /api/jira, and the strip appears', async () => {
+    wire({}, { 'PAY-131': LIVE });
+    render(
+      <JiraProvider>
+        <WriteProbe />
+      </JiraProvider>
+    );
+    await flush();
+    expect(jiraCalls()).toBe(1);
+    expect(screen.getByTestId('strip')).toHaveTextContent('none');
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('start'));
+    });
+    await flush();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/agents/dispatch-jira', expect.objectContaining({ method: 'POST' }));
+    expect(jiraCalls()).toBe(2);
+    expect(screen.getByTestId('strip')).toHaveTextContent('PAY-131');
+  });
+
+  it('a resolved jira-stop does the same, and the strip is gone', async () => {
+    wire({ 'PAY-131': LIVE }, {});
+    render(
+      <JiraProvider>
+        <WriteProbe />
+      </JiraProvider>
+    );
+    await flush();
+    expect(screen.getByTestId('strip')).toHaveTextContent('PAY-131');
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('stop'));
+    });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledWith('/api/agents/jira-stop', expect.objectContaining({ method: 'POST', body: '{"key":"PAY-131"}' }));
+    expect(jiraCalls()).toBe(2);
+    expect(screen.getByTestId('strip')).toHaveTextContent('none');
   });
 });

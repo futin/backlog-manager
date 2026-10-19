@@ -38,10 +38,12 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
   adapters, and — since task-46 — the eight guarded write routes in `items-write.controller.ts`, which with the ninth, `abort`, are the ONLY writes this
   server makes to anybody's items), `agents/` (the
-  dashboard calls — #225's item `abort` among them — plus the run watchdog), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
-  `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the read routes under
-  `/api/jira`, and — since Jira phase 2 — `jira.json`'s three guarded write routes, `POST /api/jira/boards`, `/boards/delete` and `/repos`, in
-  `jira-write.controller.ts`, beside the two writes to Jira itself that phase 3 added, `POST /api/jira/issue/assign` and `/issue/transition`,
+  dashboard calls — #225's item `abort` among them — plus the run watchdog, and since Jira phase 5 `POST /api/agents/dispatch-jira` and `/jira-stop` with the
+  60 s reconciler that keeps the Jira live map honest), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
+  `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the seven read routes under
+  `/api/jira` — phase 5's `GET /prompt` among them — and — since Jira phase 2 — `jira.json`'s five guarded write routes, `POST /api/jira/boards`, `/boards/delete`,
+  `/repos`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself that phase 3 added, `POST /api/jira/issue/assign`
+  and `/issue/transition`, and phase 5's in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
   → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three —
   `orchestrator/` (a read-only view of the run-state directory, plus the
   in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (#249 — three read-only
@@ -142,6 +144,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
 - **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
+- **A Jira session is remembered in server memory only; a restart forgets it, and Stop is the one hand that clears it early.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-tracker-project-has-no-item-files-and-that-shows-up-in-three-places)
 - **Groomed is derived** (bug: Cause+Fix filled and not "unknown"; task: Plan non-empty), never stored; status is the directory, never frontmatter. Ideas,
@@ -215,13 +219,15 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **Dispatch derives the action; it never accepts one.** Why: [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
 - **`isItemId` accepts three shapes, and `#` is the one metacharacter among them.**
   Why: [invariants.md](docs/subsystems/invariants.md#isitemid-accepts-three-shapes)
-- **The orchestrate spawn prompt is composed server-side.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-spawn-prompt-is-composed-server-side)
+- **The orchestrate and Jira spawn prompts are composed server-side.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-and-jira-spawn-prompts-are-composed-server-side)
 - **The browser never talks to the dashboard.** Why: [invariants.md](docs/subsystems/invariants.md#the-browser-never-talks-to-the-dashboard)
 - **A project the dashboard cannot see cannot be dispatched to.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-project-the-dashboard-cannot-see-cannot-be-dispatched-to)
 - **An environment-level block hides the dispatch control; the per-item ones disable it.**
   Why: [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
+- **Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.**
+  Why: [invariants.md](docs/subsystems/invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake)
 - **One run per project, checked twice.** Why: [invariants.md](docs/subsystems/invariants.md#one-run-per-project-checked-twice)
 - **A pause request lives in a server-owned file the tool reads at its two dispatch gates; `paused` is a fifth run status and `unpause` its only exit.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-pause-request-is-a-file-the-server-writes-and-the-tool-reads)

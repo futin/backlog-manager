@@ -19,7 +19,13 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   `done/` item still derives `null`; capture spawns `backlog-capture` for a **new** item citing `from: <id>`, and `moveItem` still refuses every move out of
   `out-of-scope/`. **Nothing here asks what an item's `source` is** — task-45's `source !== 'files' → null` first line was removed by task-46's dispatch lift,
   and re-adding it would hide the control for every tracker item again. `findItem` is a one-line delegate to `ItemsService.find`, so a `gh:<owner>/<repo>#<n>`
-  URN resolves to exactly the `BacklogItem` the board drew its button from. Why:
+  URN resolves to exactly the `BacklogItem` the board drew its button from. **`POST /api/agents/dispatch-jira` has no file state to derive from, so its
+  `action` is a PICK, not a derivation** — and still never an accepted string: `parseJiraAction` (`shared/types.ts`) takes `'execute'`, `'context'` or
+  `{ skill: <id> }` and nothing else (the controller's 400 `action must be execute, context or { skill: <id> }`), and `resolveJiraActionOrThrow` then proves a
+  skill id against `jira.json`'s `skills` as read for this request (400 `unknown skill <id>`, before Jira or the dashboard is asked) — a closed set of the two
+  built-ins and whatever the file holds, validated server-side. The `repo` is proved the same way, against `jira.json`'s mapping for the key's own project
+  prefix (400 `<repo> is not mapped to <PROJECT>`), then asked of the dashboard gate as the raw string `projectDispatchGate` compares; no `dirName` is derived
+  from it. Why:
   [invariants.md](docs/subsystems/invariants.md#dispatch-derives-the-action-it-never-accepts-one)
 - **`isItemId` accepts three shapes, and `#` is the one metacharacter among them.** `[a-z]+-\d+` (a files id), `#\d+` and the URN
   `gh:<owner>/<repo>#\d+` — still no whitespace, no newline, no quote, no `;`, no `$`. `#` is safe because nothing this predicate guards reaches a shell: the
@@ -28,7 +34,7 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   outright" guarantee, and it is the more fragile of the two — a closed door became one `replace` — so anything that weakens or routes around it is the thing
   to re-check first. Why:
   [invariants.md](docs/subsystems/invariants.md#isitemid-accepts-three-shapes)
-- **The orchestrate spawn prompt is composed server-side.** `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal `/backlog-orchestrate`; the request body
+- **The orchestrate and Jira spawn prompts are composed server-side.** `ORCHESTRATE_PROMPT` (`agents.service.ts`) is the literal `/backlog-orchestrate`; the request body
   has no `prompt` field, so a caller-supplied one is never read. What a caller can influence is enumerated by the composition in `orchestrate()` and nowhere
   else, in this order: `ids` first (each proven by `isItemId` and a per-project scan; 400 for a malformed list, 409 for a disagreeing one; absent means the whole
   queue, explicitly empty is a 400) — ids must stay first, because bare tokens parse as ids and a flag ahead of them swallows the first one — then the
@@ -36,7 +42,17 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   then ` --base <ref>`. Each is appended only off its guard and each default appends
   nothing. **They are not all the same kind of safe**: the two mode flags append compile-time literals, so no caller character reaches the prompt, while `base`
   is the one member whose caller text is appended verbatim and is therefore *proved* (`resolveBase`) rather than clamped. Do not restore any claim that every
-  appended flag is a literal. Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-spawn-prompt-is-composed-server-side)
+  appended flag is a literal. **The Jira prompt is the same shape, widened:** `POST /api/agents/dispatch-jira`'s body (`JiraAgentsController`, which rebuilds it
+  field by field) has no `prompt` field, and the session is handed `composeJiraPrompt`'s text (`server/src/jira/prompt.util.ts`), the one function behind
+  `GET /api/jira/prompt` and the dispatch's two compositions — so a preview, a length check and a spawn cannot disagree. What a caller can influence is
+  `key` (`isJiraKey`), the `repo` (proved against the mapping) and the action pick above. A SKILL's prompt is its template — the person's own text from
+  `jira.json` — with `{key}`, `{url}` and `{repo}` filled in ONE pass by a replacement function, plus a `Jira ticket: <KEY>` line when the template names no
+  `{key}`, and nothing of the ticket's own: the skill reads the ticket itself, so no stranger's text is in it. A BUILT-IN's prompt carries the ticket, the one
+  stranger's string, and the composer keeps it from steering the session by construction — framed as data BEFORE any of it is read, between
+  `BEGIN TICKET <nonce>` / `END TICKET <nonce>` lines whose nonce is minted per composition, the description in a fence longer than any backtick run inside it.
+  Either is capped at `JIRA_PROMPT_MAX` (4 000, the dashboard's own cap — a built-in prompt that cannot hold at least one character of the description, or a
+  skill's whose placeholders fill past it, is a 400 `prompt too long`, never one that says `(no description)`). **Item `dispatch` is the exception to both**: its prompt is the launch sheet's, edited by a human, and is taken outright.
+  Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-and-jira-spawn-prompts-are-composed-server-side)
 - **The browser never talks to the dashboard.** Every call goes board → this API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off — and
   **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/compose-env.test.ts`). `BM_AGENTS_URL` beside it is
   stack topology, not a policy default, so compose overrides it under a **second key** and never interpolates `BM_AGENTS_URL` itself:

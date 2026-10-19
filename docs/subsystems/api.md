@@ -134,10 +134,12 @@ the `error` verbatim and exits `1` through its generic non-2xx path — not `5`:
 
 The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed only while the three `BM_JIRA_*`
 keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
-`jira.json` reader, the ADF converter and the ticket block. Six read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
-fresh (`?format=text` for the ticket block), the roots search, the project list and the JQL check — and five guarded POSTs: three config writes (since phase 2)
-that touch only `jira.json` (`/boards`, `/boards/delete`, `/repos`) and two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each
-followed by a re-read of the issue that is spliced into every board cache holding it. The credentials are read per call and reach no payload. → [jira.md](jira.md),
+`jira.json` reader, the ADF converter and the ticket block. Seven read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
+fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check and (phase 5a) `/prompt`, the composed Run prompt as `text/plain` — and
+seven guarded POSTs: five config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`) and
+two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
+holding it. Since 5a the module also owns `JiraLiveService`, the in-memory map behind the status payload's `live` and an issue's `session`; the two POSTs that
+fill and clear it live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
 the full doc.
 
 ### `registry/`
@@ -165,6 +167,11 @@ One of the three modules that call outbound, and every POST in it is guarded by 
   been awaited by the time one could arrive — and ignoring the flag instead would read an old client's `Cancel stop` as a second stop. On a tracker project
   it also sweeps `orchestrator:queued` off every never-claimed queue item, after the stop is on file and before the spawn; a refused removal is listed in an
   optional `unqueueFailed` (ids as `run.json` spells them) and never fails the stop — the spawned `--abort` repeats the sweep.
+- `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the live map, optionally
+  assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
+  by `composeJiraPrompt`. A failure after a Jira write says the write stands. → [jira.md](jira.md#run-phase-5a)
+- `POST /api/agents/jira-stop` — stops that key's live session through the dashboard (`session-stop.util.ts`, shared with the item abort) and clears its map entry;
+  never calls Jira. `JiraLiveReconciler` clears entries whose session the dashboard no longer lists as working.
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it
   owns, plus the four server-side knobs behind it.
 - `GET /api/agents/merge-check` — a local, read-only look at whether a project's main tree is in a state that can receive a merge.
@@ -172,7 +179,7 @@ One of the three modules that call outbound, and every POST in it is guarded by 
   deliberately not annotated with which tree holds which branch: the sheet needs names, and where a branch is checked out is a question the run answers at merge
   time.
 
-`BM_AGENTS` off turns away `dispatch`, `orchestrate` and `resume` — the three that spawn something. `status` exists to report that gate, so it answers either
+`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` answers 409 with the same sentence). `status` exists to report that gate, so it answers either
 way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard at all: two read this process's own state, one writes its own
 settings file, one looks at local git. `pause` being independent of the switch is deliberate rather than incidental — a pause is a fact on this machine's own
 disk about a run that is already going, so gating it would mean a run started while dispatch was on could never be stopped after somebody turned it off.

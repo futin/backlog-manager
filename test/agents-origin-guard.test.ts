@@ -118,6 +118,12 @@ describe('the agents POST guard', () => {
       };
     }
     const verb = route.slice('/api/agents/'.length);
+    // dispatch-jira (Jira phase 5) names a ticket and a repo, not an item: a body its controller would accept, so a 403 here is the guard's alone.
+    if (verb === 'dispatch-jira') {
+      return { key: 'PAY-1', repo: projectPath, action: 'execute', assign: false, transitionId: null, permissionMode: 'plan', remoteControl: false };
+    }
+    // jira-stop names a ticket only.
+    if (verb === 'jira-stop') return { key: 'PAY-1' };
     return verb === 'orchestrate' || verb === 'resume' || verb === 'pause' || verb === 'stop' ? { project: projectPath } : verb === 'watchdog/config' ? { enabled: true } : body();
   };
 
@@ -126,6 +132,7 @@ describe('the agents POST guard', () => {
   // bug-39's), the seven item-write routes task-46 added, `queue`, the
   // eighth (the orchestrator:queued spec, §2), and `abort`, the ninth (#225) —
   // the one item write that lives in `agents/`, because it calls the dashboard.
+  // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop.
   const GUARDED = [
     '/api/agents/plan',
     '/api/agents/dispatch',
@@ -134,6 +141,8 @@ describe('the agents POST guard', () => {
     '/api/agents/watchdog/config',
     '/api/agents/pause',
     '/api/agents/stop',
+    '/api/agents/dispatch-jira',
+    '/api/agents/jira-stop',
     '/api/items/create',
     '/api/items/state',
     '/api/items/claim',

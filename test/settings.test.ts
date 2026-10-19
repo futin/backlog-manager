@@ -18,7 +18,8 @@ describe('clampSettings', () => {
       orchestrateDefaultMergeMode: 'branch',
       orchestrateDefaultQuestionMode: 'decide',
       settingsScope: 'shared',
-      contentWidth: 'full'
+      contentWidth: 'full',
+      jiraDefaultAction: 's_0123abcd'
     });
     expect(s).toEqual({
       theme: 'daylight',
@@ -32,7 +33,8 @@ describe('clampSettings', () => {
       orchestrateDefaultMergeMode: 'branch',
       orchestrateDefaultQuestionMode: 'decide',
       settingsScope: 'shared',
-      contentWidth: 'full'
+      contentWidth: 'full',
+      jiraDefaultAction: 's_0123abcd'
     });
   });
 
@@ -49,6 +51,18 @@ describe('clampSettings', () => {
       orchestrateDefaultQuestionMode: 'auto'
     });
     expect(s).toEqual(DEFAULT_SETTINGS);
+  });
+
+  // Spec §2: the clamp is pure and cannot know which skill ids exist (that is `resolveJiraAction`'s job in lib/jira.ts), so it keeps any non-empty string of
+  // at most 64 characters and falls back to `execute` for everything else.
+  it('keeps jiraDefaultAction a non-empty string of at most 64 characters, and falls back to execute otherwise', () => {
+    expect(DEFAULT_SETTINGS.jiraDefaultAction).toBe('execute');
+    expect(clampSettings({ jiraDefaultAction: '' }).jiraDefaultAction).toBe('execute');
+    expect(clampSettings({ jiraDefaultAction: 42 }).jiraDefaultAction).toBe('execute');
+    expect(clampSettings({ jiraDefaultAction: 'x'.repeat(65) }).jiraDefaultAction).toBe('execute');
+    expect(clampSettings({ jiraDefaultAction: 'x'.repeat(64) }).jiraDefaultAction).toBe('x'.repeat(64));
+    expect(clampSettings({ jiraDefaultAction: 's_0123abcd' }).jiraDefaultAction).toBe('s_0123abcd');
+    expect(clampSettings({ jiraDefaultAction: 'context' }).jiraDefaultAction).toBe('context');
   });
 
   it('clamps fontScale into its limits', () => {

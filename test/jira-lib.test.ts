@@ -10,6 +10,10 @@ import {
   JIRA_COLUMNS,
   JIRA_CUSTOM_QUERY,
   JIRA_QUERY_PRESETS,
+  dispatchJira,
+  fetchJiraPrompt,
+  stopJira,
+  transitionOptions,
   JIRA_SWEEP_CALL_CEILING,
   bandSub,
   cardFold,
@@ -34,15 +38,21 @@ import {
   initialsOf,
   issueDatesLine,
   isJiraStatusPayload,
+  defaultModeFor,
+  jiraSettingOf,
+  jiraWritesStand,
+  resolveJiraAction,
+  runChipState,
   pickBoard,
   soonestBoard,
   sortForBoard,
   unmappedProjects
 } from '../client/src/lib/jira';
 import type { JiraFold } from '../client/src/lib/jira';
+import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
-import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraStatusPayload } from '../shared/types';
+import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
 
 /**
@@ -518,6 +528,18 @@ describe('isJiraStatusPayload', () => {
     expect(isJiraStatusPayload(noArmed)).toBe(false);
   });
 
+  it('rejects a payload without skills (the Dispatch row maps it) and one whose live is not a plain object (runChipState reads it)', () => {
+    const { skills: _skills, ...noSkills } = payload();
+    const { live: _live, ...noLive } = payload();
+    expect(isJiraStatusPayload(noSkills)).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), skills: null })).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), skills: {} })).toBe(false);
+    expect(isJiraStatusPayload(noLive)).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), live: null })).toBe(false);
+    expect(isJiraStatusPayload({ ...payload(), live: [] })).toBe(false);
+    expect(isJiraStatusPayload(payload({ skills: [{ id: 's_0123abcd', name: 'Groom', prompt: '/g' }] }))).toBe(true);
+  });
+
   it('rejects what is not an object', () => {
     expect(isJiraStatusPayload(null)).toBe(false);
     expect(isJiraStatusPayload('x')).toBe(false);
@@ -865,5 +887,132 @@ describe('the fold', () => {
       expect(text).toContain(' · 5 cards · ');
       expect(text.endsWith(' · first 500 shown')).toBe(true);
     });
+  });
+});
+
+describe('resolveJiraAction and jiraSettingOf', () => {
+  const skills: JiraSkill[] = [{ id: 's_0123abcd', name: 'Groom ticket', prompt: '/jira-groom {key}' }];
+
+  it('reads the two built-ins as themselves and a present skill id as { skill }', () => {
+    expect(resolveJiraAction('execute', skills)).toBe('execute');
+    expect(resolveJiraAction('context', skills)).toBe('context');
+    expect(resolveJiraAction('s_0123abcd', skills)).toEqual({ skill: 's_0123abcd' });
+  });
+
+  it('falls back to execute for an id no skill holds, an empty list and anything that is not an id', () => {
+    expect(resolveJiraAction('s_gone', [])).toBe('execute');
+    expect(resolveJiraAction('s_ffffffff', skills)).toBe('execute');
+    expect(resolveJiraAction('', skills)).toBe('execute');
+    expect(resolveJiraAction('skill:s_0123abcd', skills)).toBe('execute');
+  });
+
+  it('jiraSettingOf is its inverse', () => {
+    expect(jiraSettingOf('execute')).toBe('execute');
+    expect(jiraSettingOf('context')).toBe('context');
+    expect(jiraSettingOf({ skill: 's_0123abcd' })).toBe('s_0123abcd');
+    for (const setting of ['execute', 'context', 's_0123abcd']) expect(jiraSettingOf(resolveJiraAction(setting, skills))).toBe(setting);
+  });
+});
+
+describe('runChipState', () => {
+  const mapped = { PAY: ['/home/ada/pay'] };
+  const session = { name: 'jira PAY-1', startedAt: '2026-10-19T10:00:00.000Z', repo: '/home/ada/pay', starting: false };
+
+  it('is no-repo while the issue’s project has no mapped path, an empty list included', () => {
+    expect(runChipState(issue(), payload({ repos: {} }))).toBe('no-repo');
+    expect(runChipState(issue(), payload({ repos: { PAY: [] } }))).toBe('no-repo');
+    expect(runChipState(issue(), payload({ repos: { OPS: ['/home/ada/ops'] } }))).toBe('no-repo');
+  });
+
+  it('is live for a mapped project with a session on the key, starting or not', () => {
+    expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': session } }))).toBe('live');
+    expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-1': { ...session, starting: true } } }))).toBe('live');
+  });
+
+  it('is ready for a mapped project with no session on that key, whatever another key holds', () => {
+    expect(runChipState(issue(), payload({ repos: mapped }))).toBe('ready');
+    expect(runChipState(issue(), payload({ repos: mapped, live: { 'PAY-2': session } }))).toBe('ready');
+  });
+});
+
+describe('defaultModeFor', () => {
+  it('is plan for context and acceptEdits for execute and for a skill', () => {
+    expect(defaultModeFor('context')).toBe('plan');
+    expect(defaultModeFor('execute')).toBe('acceptEdits');
+    expect(defaultModeFor({ skill: 's_0123abcd' })).toBe('acceptEdits');
+  });
+});
+
+describe('the launch sheet wire', () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+  const answer = (status: number, body: unknown, text?: string): jest.Mock =>
+    (global.fetch = jest.fn().mockResolvedValue({
+      ok: status < 300,
+      status,
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(text ?? '')
+    })) as jest.Mock;
+
+  it('transitionOptions names by landing status, and falls back to the transition name only where two land in one', () => {
+    const t = (id: string, name: string, to: string) => ({ id, name, to: { name: to, category: 'indeterminate' as const } });
+    expect(transitionOptions([t('1', 'Start', 'In Progress'), t('2', 'Finish', 'Done')])).toEqual([
+      { value: '1', label: 'In Progress' },
+      { value: '2', label: 'Done' }
+    ]);
+    expect(transitionOptions([t('1', 'Review', 'Done'), t('2', 'Close', 'Done')]).map((o) => o.label)).toEqual(['Review', 'Close']);
+  });
+
+  it('fetchJiraPrompt escapes the skill colon and the repo path once, and reads text', async () => {
+    const f = answer(200, null, 'the prompt');
+    await expect(fetchJiraPrompt('PAY-1', { skill: 's_0a1b2c3d' }, '/Users/a/b')).resolves.toBe('the prompt');
+    expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=skill%3As_0a1b2c3d&repo=%2FUsers%2Fa%2Fb');
+  });
+
+  it('fetchJiraPrompt rejects with the server sentence, else HTTP <status>', async () => {
+    answer(400, { error: 'unknown skill s_deadbeef' });
+    await expect(fetchJiraPrompt('PAY-1', 'execute', '/r')).rejects.toThrow('unknown skill s_deadbeef');
+    answer(502, 'not json');
+    await expect(fetchJiraPrompt('PAY-1', 'execute', '/r')).rejects.toThrow('HTTP 502');
+  });
+
+  it('dispatchJira posts the request as JSON and rejects with the 409 sentence', async () => {
+    const req = { key: 'PAY-1', repo: '/r', action: 'execute' as const, assign: false, transitionId: null, permissionMode: 'plan' as const, remoteControl: true };
+    const f = answer(200, { sessionId: 's1' });
+    await expect(dispatchJira(req)).resolves.toEqual({ sessionId: 's1' });
+    expect(f.mock.calls[0][0]).toBe('/api/agents/dispatch-jira');
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual(req);
+    answer(409, { error: 'PAY-1 already has a live Run session' });
+    await expect(dispatchJira(req)).rejects.toThrow('PAY-1 already has a live Run session');
+  });
+
+  it('stopJira posts the key and rejects with the server sentence', async () => {
+    const f = answer(200, { ok: true });
+    await expect(stopJira('PAY-1')).resolves.toBeUndefined();
+    expect(f.mock.calls[0][0]).toBe('/api/agents/jira-stop');
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ key: 'PAY-1' });
+    answer(404, { error: 'no session for PAY-1' });
+    await expect(stopJira('PAY-1')).rejects.toThrow('no session for PAY-1');
+  });
+
+  it('modelEffortFlags leaves the key out for the default option', () => {
+    expect(modelEffortFlags('', '')).toEqual({});
+    expect(Object.keys(modelEffortFlags('opus', ''))).toEqual(['model']);
+    expect(modelEffortFlags('opus', 'high')).toEqual({ model: 'opus', effort: 'high' });
+  });
+});
+
+describe('jiraWritesStand', () => {
+  it('is true for the two sentences the server ends a post-write failure with', () => {
+    expect(jiraWritesStand('dashboard unreachable — the Jira writes stand')).toBe(true);
+    expect(jiraWritesStand('transition: Jira refused it — the assign stands')).toBe(true);
+  });
+
+  it('is false for a refusal before any write, however it is worded', () => {
+    expect(jiraWritesStand('transition not offered')).toBe(false);
+    expect(jiraWritesStand('PAY-131 already has a live Run session')).toBe(false);
+    expect(jiraWritesStand('the assign stands, they said, but this is not that sentence')).toBe(false);
   });
 });

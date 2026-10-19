@@ -1,3 +1,4 @@
+import { COMMIT_RULE, oneLine } from '../../../shared/agent';
 import type { AgentAction } from '../../../shared/agent';
 import type { BacklogItem } from '../../../shared/types';
 
@@ -21,47 +22,6 @@ const SKILL: Record<AgentAction, string> = {
   execute: 'backlog-manager:backlog-execute',
   capture: 'backlog-manager:backlog-capture'
 };
-
-/**
- * Titles come from item frontmatter, which is a `key: value` line — so a
- * newline cannot legally be in one. Collapsed anyway: this string is piped to
- * a child process as a prompt, and a hand-edited file is exactly the input
- * that would otherwise turn one instruction into two.
- */
-function oneLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-/**
- * The last sentence of every prompt, whatever the action.
- *
- * Every action writes something — groom rewrites an item file, capture creates
- * one, execute writes the fix itself — and before this line all of it was left
- * loose in the working tree, so a dispatch's output existed only until someone
- * noticed it. Asking for the commit is what makes a dispatched session's work
- * survive on its own.
- *
- * The narrow staging IS the rule, not a nicety around it. Unlike
- * `backlog-orchestrate`, which commits inside a per-item worktree built to hold
- * exactly one item's diff, a dispatched session runs in the user's MAIN tree —
- * which may hold whatever else they had in flight. `git add -A` there sweeps
- * that up into a commit nobody asked for, and that exact risk is why
- * `backlog-execute` banned committing outright in the first place. So the
- * blanket ban becomes a scoped instruction, and the scope is the part that must
- * not be trimmed. Pushing stays banned: nothing here is reviewed.
- *
- * Known seam, deliberately one-sided: `skills/backlog-execute/SKILL.md` still
- * says "Never commits, never pushes", and CLAUDE.md's invariant still names
- * `backlog-orchestrate` as the only skill that commits. Only this prompt
- * changed — it is the most specific instruction the spawned session receives,
- * and `skills/` is a publishing boundary (an install is a copy of the pushed
- * HEAD, so a skill edit reaches nothing until `pnpm run plugin:sync`). If the
- * two sides are ever reconciled, this sentence is where it starts.
- */
-const COMMIT_RULE =
-  'When the job is done, commit the work: stage only the files this session ' +
-  'changed, never `git add -A` or `git add .` — the tree may hold unrelated ' +
-  "uncommitted work of the user's. Do not push.";
 
 export function composePrompt(item: BacklogItem, action: AgentAction): string {
   const head = `Use the ${SKILL[action]} skill on ${item.id} — "${oneLine(item.title)}" — in this repo's backlog.`;
