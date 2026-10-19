@@ -69,6 +69,11 @@ const PLACEHOLDER_RE = /\{(key|summary|url|repo|description)\}/g;
  * order (instruction, framing, block) would have said what it is, so either one flips the order to framing-first (header, point 1).
  */
 const USES_TICKET_TEXT_RE = /\{(description|summary)\}/;
+/**
+ * The narrower question: does the template carry the DESCRIPTION itself? Only then does the marked description move into the instruction and the block drop it.
+ * A `{summary}`-only template flips the order but leaves the description in the block — the two questions are separate, or the description vanishes.
+ */
+const USES_DESCRIPTION_RE = /\{description\}/;
 
 /**
  * A fence one backtick longer than the longest backtick run in the text, three at least. A run is any maximal string of consecutive backticks, wherever it sits —
@@ -102,9 +107,10 @@ function build(detail: JiraIssueDetail, action: JiraComposeAction, repo: string,
 
   let instruction: string;
   let block: string;
-  let inline = false;
+  let framingFirst = false;
   if (action.kind === 'skill') {
-    inline = USES_TICKET_TEXT_RE.test(action.skill.prompt);
+    framingFirst = USES_TICKET_TEXT_RE.test(action.skill.prompt);
+    const inline = USES_DESCRIPTION_RE.test(action.skill.prompt);
     instruction = fill(action.skill.prompt, detail, repo, inline ? `${begin}\n${renderDescription(withText, fence, truncated)}\n${end}` : '');
     block = renderTicketBlock(withText, inline ? { description: 'omitted' } : { description: { fence, truncated } });
   } else {
@@ -113,7 +119,7 @@ function build(detail: JiraIssueDetail, action: JiraComposeAction, repo: string,
   }
   const ticket = `${begin}\n${block}${end}\n`;
   // Framing first when the instruction itself carries ticket text (header, point 1); otherwise the instruction is ours and reads first.
-  return inline ? `${framingLine(nonce)}\n\n${instruction}\n\n${ticket}` : `${instruction}\n\n${framingLine(nonce)}\n${ticket}`;
+  return framingFirst ? `${framingLine(nonce)}\n\n${instruction}\n\n${ticket}` : `${instruction}\n\n${framingLine(nonce)}\n${ticket}`;
 }
 
 /** A template with its five placeholders filled in one pass (header, point 4). `{description}` is only reached when the caller passed the marked text for it. */
