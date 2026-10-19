@@ -169,7 +169,86 @@ async function status(args) {
   return out.code
 }
 
-const COMMANDS = { show, status }
+// R6's label: the transition's name, plus its target status only when the two differ — `Done` moving to `Done` is said once.
+function label(t) {
+  return t.name.trim().toLowerCase() === t.to.name.trim().toLowerCase() ? t.name : `${t.name} → ${t.to.name}`
+}
+
+// `name (→ to.name)`, comma-separated, in Jira's order: how a refusal lists what was matched or what is offered.
+const listed = (transitions) => transitions.map((t) => `${t.name} (→ ${t.to.name})`).join(', ')
+
+/**
+ * R4: match the argument against the offered transitions in three steps — exact `id`, then `name`, then `to.name` (both case-insensitive, trimmed) — and
+ * stop at the first step that matches anything. One match resolves; several at the deciding step is ambiguous; none anywhere is "not offered". Every
+ * refusal is code `2`: the argument was the caller's, and nothing is posted.
+ */
+export function resolveTransition(transitions, arg, key) {
+  if (transitions.length === 0) return { ok: false, code: 2, message: `${key} offers no transitions` }
+  const wanted = arg.trim()
+  const folded = wanted.toLowerCase()
+  const steps = [
+    (t) => t.id === wanted,
+    (t) => t.name.trim().toLowerCase() === folded,
+    (t) => t.to.name.trim().toLowerCase() === folded,
+  ]
+  for (const matches of steps) {
+    const found = transitions.filter(matches)
+    if (found.length === 1) return { ok: true, transition: found[0] }
+    if (found.length > 1) return { ok: false, code: 2, message: `"${wanted}" is ambiguous for ${key} — ${listed(found)}` }
+  }
+  return { ok: false, code: 2, message: `"${wanted}" is not offered for ${key} — offered: ${listed(transitions)}` }
+}
+
+/**
+ * R6: one `<id>\t<label>\t<category>` line per transition, in Jira's order. Tab-separated so a caller can say "exactly one line whose third field is
+ * `done`" — phase 5's `execute` text does. No trailing newline; `main` adds it.
+ */
+export function formatTransitions(key, transitions) {
+  if (transitions.length === 0) return `${key} offers no transitions`
+  return transitions.map((t) => `${t.id}\t${label(t)}\t${t.to.category}`).join('\n')
+}
+
+// The detail route's `transitions` (R5: there is no transitions-only route, and this phase adds none). The JSON form — no `format` query.
+async function readTransitions(key) {
+  const res = await apiRequest('GET', `/api/jira/issue/${key}`)
+  if (!ok(res)) throw failure(res)
+  if (res.body === null || typeof res.body !== 'object' || !Array.isArray(res.body.transitions)) throw unreadable(res)
+  return res.body.transitions
+}
+
+async function transitions(args) {
+  expectArgs('transitions', args, 1)
+  const key = keyOrFail(args[0])
+  console.log(formatTransitions(key, await readTransitions(key)))
+  return 0
+}
+
+// Read, resolve, then post — and never post on a failed read or a failed resolution. The server re-checks the id against a fresh read of its own (§8), so a
+// workflow that moved between the two reads is its 400, printed like any other.
+async function transition(args) {
+  if (args.length < 2) throw new JiraCliError(commandUsage('transition'), 1)
+  const key = keyOrFail(args[0])
+  // Every word after the key, joined by one space, so `transition PAY-1 In Progress` needs no quotes.
+  const arg = args.slice(1).join(' ')
+  const resolved = resolveTransition(await readTransitions(key), arg, key)
+  if (!resolved.ok) throw new JiraCliError(resolved.message, resolved.code)
+  const res = await apiRequest('POST', '/api/jira/issue/transition', { key, transitionId: resolved.transition.id })
+  if (!ok(res)) throw failure(res)
+  // `reread` is not printed: the write landed either way, and the board — not this tool — is the reader of the cache it describes.
+  console.log(`${key}: ${label(resolved.transition)}`)
+  return 0
+}
+
+async function assign(args) {
+  expectArgs('assign', args, 1)
+  const key = keyOrFail(args[0])
+  const res = await apiRequest('POST', '/api/jira/issue/assign', { key })
+  if (!ok(res)) throw failure(res)
+  console.log(`${key} assigned to you`)
+  return 0
+}
+
+const COMMANDS = { show, transitions, transition, assign, status }
 
 // `main` is async because every command awaits a `fetch`; see the entry guard's note for why that is safe.
 export async function main(argv) {

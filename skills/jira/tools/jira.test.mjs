@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { normaliseKey, exitForStatus, formatStatus, USAGE, API_DOWN_CODE } from './jira.mjs'
+import { normaliseKey, exitForStatus, formatStatus, resolveTransition, formatTransitions, USAGE, API_DOWN_CODE } from './jira.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./jira.mjs', import.meta.url))
 
@@ -236,6 +236,146 @@ test('status reads GET /api/jira and exits 0 only when access is ok', async () =
   assert.equal(unconfigured.out.status, 3)
   assert.equal(unconfigured.out.stdout, '')
   assert.equal(unconfigured.out.stderr.trim(), 'Jira is not configured on this machine — BM_JIRA_TOKEN is not set')
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// transitions, transition, assign.
+
+const START = { id: '11', name: 'Start', to: { name: 'In Progress', category: 'indeterminate' } }
+const DONE = { id: '21', name: 'Done', to: { name: 'Done', category: 'done' } }
+const REVIEW = { id: '31', name: 'Review', to: { name: 'In Progress', category: 'indeterminate' } }
+const ALL = [START, DONE, REVIEW]
+
+const idOf = (r) => (r.ok ? r.transition.id : r)
+
+test('resolveTransition matches id, then transition name, then target status, stopping at the first step that matches', () => {
+  assert.equal(idOf(resolveTransition(ALL, '21', 'PAY-1')), '21')
+  assert.equal(idOf(resolveTransition(ALL, 'start', 'PAY-1')), '11')
+  assert.equal(idOf(resolveTransition(ALL, '  Done ', 'PAY-1')), '21')
+  assert.deepEqual(resolveTransition(ALL, 'In Progress', 'PAY-1'), {
+    ok: false,
+    code: 2,
+    message: '"In Progress" is ambiguous for PAY-1 — Start (→ In Progress), Review (→ In Progress)',
+  })
+  assert.equal(idOf(resolveTransition([START, DONE], 'in progress', 'PAY-1')), '11')
+  const namedEleven = { id: '40', name: '11', to: { name: 'Blocked', category: 'indeterminate' } }
+  assert.equal(idOf(resolveTransition([namedEleven, START], '11', 'PAY-1')), '11', 'an exact id must win over a transition named the same')
+  assert.deepEqual(resolveTransition(ALL, 'Close', 'PAY-1'), {
+    ok: false,
+    code: 2,
+    message: '"Close" is not offered for PAY-1 — offered: Start (→ In Progress), Done (→ Done), Review (→ In Progress)',
+  })
+  assert.deepEqual(resolveTransition([], 'Done', 'PAY-1'), { ok: false, code: 2, message: 'PAY-1 offers no transitions' })
+})
+
+test('formatTransitions prints id, label and category, tab-separated, one per line', () => {
+  assert.equal(formatTransitions('PAY-1', ALL), '11\tStart → In Progress\tindeterminate\n21\tDone\tdone\n31\tReview → In Progress\tindeterminate')
+  assert.equal(formatTransitions('PAY-1', []), 'PAY-1 offers no transitions')
+})
+
+const detail = (transitions) => ({ '/api/jira/issue/PAY-1': (_b, { method }) => (method === 'GET' ? { body: { key: 'PAY-1', transitions } } : undefined) })
+
+test('transitions reads the JSON detail route and lists what it offers', async () => {
+  const { out, requests } = await cli(detail(ALL), 'transitions', 'pay-1')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stdout, '11\tStart → In Progress\tindeterminate\n21\tDone\tdone\n31\tReview → In Progress\tindeterminate\n')
+  assert.deepEqual(
+    requests.map((r) => [r.method, r.path, r.query]),
+    [['GET', '/api/jira/issue/PAY-1', {}]],
+  )
+
+  const none = await cli(detail([]), 'transitions', 'PAY-1')
+  assert.equal(none.out.status, 0, 'asking what is offered is not a refusal')
+  assert.equal(none.out.stdout, 'PAY-1 offers no transitions\n')
+})
+
+const writable = (transitions, post = { body: { ok: true, reread: true } }) => ({
+  ...detail(transitions),
+  '/api/jira/issue/transition': (_b, { method }) => (method === 'POST' ? post : undefined),
+})
+
+test('transition reads, resolves, then posts the id as JSON, with words joined without quotes', async () => {
+  const { out, requests } = await cli(writable([START, DONE]), 'transition', 'PAY-1', 'In', 'Progress')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stdout, 'PAY-1: Start → In Progress\n')
+  assert.deepEqual(
+    requests.map((r) => [r.method, r.path]),
+    [
+      ['GET', '/api/jira/issue/PAY-1'],
+      ['POST', '/api/jira/issue/transition'],
+    ],
+  )
+  const post = requests[1]
+  assert.equal(post.headers['content-type'], 'application/json')
+  assert.equal(post.headers.origin, undefined)
+  assert.deepEqual(post.body, { key: 'PAY-1', transitionId: '11' })
+})
+
+test('transition posts nothing when the argument is ambiguous, not offered, or missing (RF 4)', async () => {
+  const ambiguous = await cli(writable(ALL), 'transition', 'PAY-1', 'In', 'Progress')
+  assert.equal(ambiguous.out.status, 2)
+  assert.equal(ambiguous.out.stderr.trim(), '"In Progress" is ambiguous for PAY-1 — Start (→ In Progress), Review (→ In Progress)')
+  assert.equal(ambiguous.requests.filter((r) => r.method === 'POST').length, 0)
+
+  const close = await cli(writable(ALL), 'transition', 'PAY-1', 'Close')
+  assert.equal(close.out.status, 2)
+  assert.equal(close.requests.filter((r) => r.method === 'POST').length, 0)
+
+  const bare = await cli(writable(ALL), 'transition', 'PAY-1')
+  assert.equal(bare.out.status, 1)
+  assert.equal(bare.requests.length, 0)
+})
+
+test("transition reports the server's re-check when the workflow moved between the two reads (RF 4)", async () => {
+  const { out } = await cli(writable(ALL, { status: 400, body: { error: 'transition not offered' } }), 'transition', 'PAY-1', 'Done')
+  assert.equal(out.status, 2)
+  assert.equal(out.stderr.trim(), 'transition not offered')
+})
+
+test('transition posts nothing when the read fails, and a 5xx read is exit 3 (RF 2)', async () => {
+  const routes = {
+    '/api/jira/issue/PAY-1': { status: 503, body: { error: 'Jira rejected the credentials', access: 'unauthorized' } },
+    '/api/jira/issue/transition': { body: { ok: true, reread: true } },
+  }
+  const { out, requests } = await cli(routes, 'transition', 'PAY-1', 'Done')
+  assert.equal(out.status, 3)
+  assert.equal(out.stderr.trim(), 'Jira rejected the credentials')
+  assert.equal(requests.filter((r) => r.method === 'POST').length, 0)
+})
+
+const assignRoute = (answer) => ({ '/api/jira/issue/assign': (_b, { method }) => (method === 'POST' ? answer : undefined) })
+
+test('assign posts the key as JSON and says so, whether or not the server could re-read', async () => {
+  for (const reread of [true, false]) {
+    const { out, requests } = await cli(assignRoute({ body: { ok: true, reread } }), 'assign', 'pay-1')
+    assert.equal(out.status, 0, out.stderr)
+    assert.equal(out.stdout, 'PAY-1 assigned to you\n')
+    assert.equal(requests.length, 1)
+    const [r] = requests
+    assert.deepEqual([r.method, r.path], ['POST', '/api/jira/issue/assign'])
+    assert.equal(r.headers['content-type'], 'application/json')
+    assert.equal(r.headers.origin, undefined)
+    assert.deepEqual(r.body, { key: 'PAY-1' })
+  }
+})
+
+test("assign maps the server's refusals: no identity is 3, Jira's refusal and the guard's are 2", async () => {
+  const cases = [
+    [{ status: 503, body: { error: 'no identity' } }, 3, 'no identity'],
+    [{ status: 409, body: { error: 'Jira refused: User cannot be assigned' } }, 2, 'Jira refused: User cannot be assigned'],
+    [{ status: 403, body: { error: 'this endpoint accepts application/json only' } }, 2, 'this endpoint accepts application/json only'],
+  ]
+  for (const [answer, code, sentence] of cases) {
+    const { out } = await cli(assignRoute(answer), 'assign', 'PAY-1')
+    assert.equal(out.status, code, String(answer.status))
+    assert.equal(out.stderr.trim(), sentence)
+  }
+})
+
+test('assign with two keys is usage and sends nothing', async () => {
+  const { out, requests } = await cli(assignRoute({ body: { ok: true, reread: true } }), 'assign', 'PAY-1', 'PAY-2')
+  assert.equal(out.status, 1)
+  assert.equal(requests.length, 0)
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
