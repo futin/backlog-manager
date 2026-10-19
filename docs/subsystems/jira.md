@@ -101,7 +101,7 @@ what `GET /api/jira` says — rather than the `unreachable` its synthesised stat
 
 ### The config write routes (phase 2; skills in 5a)
 
-Five POSTs in `jira-write.controller.ts`, the only callers of the writers — POSTs because the app has no PUT or DELETE route anywhere. Each carries
+Five config POSTs in `jira-write.controller.ts`, the only callers of the writers — POSTs because the app has no PUT or DELETE route anywhere. Each carries
 `SameOriginPostGuard` (`application/json` and a same-origin `Origin`, 403 otherwise), and inside each the order is fixed: guard → validate (400, naming the
 field) → configured (503 `Jira is not configured`) → write (404 / 409) → re-aim the poller. Every error body is `{ error }`. They are not gated on `access`:
 a save while the credential is rejected or the site `unsupported` touches only `jira.json`, and the sweep that follows is the poller's to skip.

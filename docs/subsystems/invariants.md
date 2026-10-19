@@ -3056,19 +3056,19 @@ round: `test/tracker-labels.test.ts` reads the skill's source as text and assert
 The Jira integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md) §2) keeps its boards, saved queries, repository map and skill
 prompts in `~/.backlog-manager/settings/jira.json` — the fourth file under `settings/`, and the first one a person is expected to edit by hand as well as
 through the server. It takes `tracker-sync.json`'s posture (the settings-file exception above): read fresh on every use, cached nowhere, one writer — the
-server, through three routes, `POST /api/jira/boards`, `/boards/delete` and `/repos` — and a person's hand-edits, which the writers are built to survive.
+server, through five routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/skills` and `/skills/delete` — and a person's hand-edits, which the writers are built to survive.
 
 **An unreadable file is reported, never treated as empty.** `readJiraConfig` answers `unreadable` for a file that exists but cannot be read or parsed, and
 `GET /api/jira` carries it as `configUnreadable`. The failure this prevents is the one #270 found in `tracker-sync.json`'s writer, one step earlier: a
 board that renders `No boards yet` over a file with a stray comma invites the person to create a board, and the write that follows — reading the file as `{}`
 and writing one board back — would erase every board, query and mapping the file held. So the reader says the file is broken, the sweep prunes no board
-cache while it is (a board the file still holds keeps its list until the file parses again), and all three writers refuse with a 409 rather than replace it.
+cache while it is (a board the file still holds keeps its list until the file parses again), and all five writers refuse with a 409 rather than replace it.
 A MISSING file is a fresh install and reads as empty; so does a file that parses to something other than an object, which is what `tracker-sync.json`'s
-writer already replaces and so what the three writers agree with.
+writer already replaces and so what the five writers agree with.
 
-**Three writers, one contract, and the refusal is each writer's own.** `writeBoard`, `deleteBoard` and `writeRepos` each read the RAW file, not what the reader
+**Five writers, one contract, and the refusal is each writer's own.** `writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill` and `deleteSkill` each read the RAW file, not what the reader
 would accept, because a writer that round-tripped through the reader would silently drop every entry the reader warned about — the same erasure #270 found,
-by a quieter road. They merge exactly one entry (a board by id, one project's list by key) and leave the rest untouched, hand-written junk and unknown
+by a quieter road. They merge exactly one entry (a board by id, one project's list by key, a skill by id) and leave the rest untouched, hand-written junk and unknown
 top-level keys included, so a person's annotation or a newer version's key survives a save made by an older one. The write is a temp file in the same
 directory and a `rename`, so a crash leaves the old file or the new one and never half of either. The refusal is the writer's rather than a check the route
 makes first because the route's read and the writer's read would be two reads: a file that broke between them would be replaced after the check passed. So

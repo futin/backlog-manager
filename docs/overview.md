@@ -49,8 +49,8 @@ Five artefacts hold everything, and the single-writer column is the load-bearing
 
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
-guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through three guarded config routes (`POST /api/jira/boards`, `/boards/delete`
-and `/repos`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)).
+guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through five guarded config routes (`POST /api/jira/boards`, `/boards/delete`,
+`/repos`, `/skills` and `/skills/delete`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)).
 
 ### The API — [full doc](subsystems/api.md)
 

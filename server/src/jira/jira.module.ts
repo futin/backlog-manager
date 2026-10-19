@@ -7,8 +7,9 @@ import { JiraLiveService } from './live.service';
 import { JiraPollerService } from './poller.service';
 
 /**
- * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the seven read routes (six in phase 1, `GET /prompt` in phase 5) and — since phase 2 — the three write
- * routes (`JiraWriteController`, which touches `jira.json` and the poller, never Jira itself). It mirrors `TrackerModule`
+ * The Jira seam's own module (Jira phase 1, spec §12): the poller, the client it calls through, the seven read routes (six in phase 1, `GET /prompt` in phase 5) and — since phase 2 — the seven write
+ * routes of `JiraWriteController`: five config writes (three in phase 2, the skills pair in phase 5a) that touch `jira.json` and the poller and never Jira itself, and
+ * the two issue writes of phase 3 that do call Jira. It mirrors `TrackerModule`
  * (`server/src/tracker/tracker.module.ts`), and for the same reasons.
  *
  * `JiraClient` is provided as a factory value rather than a decorated class: it has no Nest decorators on purpose (a test constructs one on a fake `fetch`
