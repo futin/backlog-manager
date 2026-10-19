@@ -1,15 +1,22 @@
 import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
 import { homedir } from 'node:os';
 
-import type { JiraBoard } from '../../../shared/types';
+import { isJiraKey } from '../../../shared/types';
+import type { JiraBoard, JiraIssueWriteResult } from '../../../shared/types';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import { JiraConfigUnreadableError, JiraUnknownIdError, deleteBoard, parseBoardWrite, parseReposWrite, writeBoard, writeRepos } from './config.util';
 import { jiraEnv } from './env.util';
 import { JiraPollerService } from './poller.service';
+import type { JiraIssueWriteOutcome } from './poller.service';
+import { unwrapJira } from './unwrap.util';
+
+/** R3: the longest `transitionId` a route will pass on. Jira's ids are short integers; this bounds a paste accident, not a format. */
+export const JIRA_TRANSITION_ID_MAX_CHARS = 64;
 
 /**
- * The three write routes under `/api/jira` (Jira phase 2, spec §5 and §8) — `POST /boards`, `POST /boards/delete` and `POST /repos`, the only callers of the
- * writers in `config.util.ts`. They are POSTs (the app has no PUT or DELETE route anywhere) and each carries `SameOriginPostGuard`, the one guard every other
+ * The five write routes under `/api/jira` — three of them config writes (Jira phase 2, spec §5 and §8), `POST /boards`, `POST /boards/delete` and
+ * `POST /repos`, the only callers of the writers in `config.util.ts`, and two of them writes to JIRA itself (phase 3), `POST /issue/assign` and
+ * `POST /issue/transition`, the first calls this server makes that change anything outside `~/.backlog-manager`. They are POSTs (the app has no PUT or DELETE route anywhere) and each carries `SameOriginPostGuard`, the one guard every other
  * state-changing route here carries: `application/json` and a same-origin `Origin`, 403 otherwise. The Host allowlist is global and has already answered
  * before a handler runs.
  *
@@ -26,7 +33,16 @@ import { JiraPollerService } from './poller.service';
  * repair it, and nothing was written — #270's refusal, restated for three writers), and `JiraUnknownIdError` is a 404 `unknown board`, the same sentence and
  * status the read route gives a malformed or absent id. Anything else the writer throws is an I/O failure and stays Nest's 500.
  *
- * After the write, the poller is re-aimed. A saved board awaits `boardSaved`, which sweeps THAT board and resolves when the sweep is done or after its
+ * The two issue writes differ from the config writes in what they are gated on, and the difference is deliberate (§8): they ARE refused while `access` is
+ * `unauthorized`, and while the identity is unknown for an assign — those refusals live in the poller (`assignToMe` / `transitionIssue`, R2), which owns the
+ * state, and arrive here as a failure to render, so a route cannot forget one. The route's own part is the order — guard → validate (400) → configured (503)
+ * → the poller — and the mapping of what comes back: a failure goes through `unwrapJira` (`jiraHttpError`, §8's table, `retryAt` verbatim, so a refusal
+ * inside a 429 window answers the stored instant and slides nothing), and the poller's two refusals that are not a Jira response are this file's two
+ * sentences — `no identity` is a 503 (a state that heals on the next successful `myself`), `transition not offered` a 400 (the caller's id is wrong, and
+ * Jira was never asked to judge it). The answer is `JiraIssueWriteResult` (R1): `reread: false` is still a 200 because the write landed and cannot be
+ * un-happened.
+ *
+ * After a config write, the poller is re-aimed. A saved board awaits `boardSaved`, which sweeps THAT board and resolves when the sweep is done or after its
  * own `JIRA_SAVE_SWEEP_WAIT_MS` cap — it already races itself and never rejects, so this route adds no second timer. A deleted board drops its cache at once
  * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos write re-aims nothing: no sweep reads `repos`.
  */
@@ -71,6 +87,54 @@ export class JiraWriteController {
     this.requireConfigured();
     this.writing(() => writeRepos(parsed.value.project, parsed.value.paths));
     return parsed.value;
+  }
+
+  /**
+   * `POST /api/jira/issue/assign` — `{ key }`. Assigns the issue to the signed-in user; there is no way to name anyone else, because the accountId is the
+   * poller's own `me` and a body carrying one is ignored. The key is validated before the 503 for the reason every handler here does: a malformed request is
+   * wrong whatever the environment.
+   */
+  @Post('issue/assign')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  async assignIssue(@Body() body: unknown): Promise<JiraIssueWriteResult> {
+    const key = this.issueKey(body);
+    this.requireConfigured();
+    return this.written(await this.poller.assignToMe(key));
+  }
+
+  /**
+   * `POST /api/jira/issue/transition` — `{ key, transitionId }`. `transitionId` is a non-empty string of at most 64 characters and nothing more is asked of
+   * its shape (R3): the poller's check against a fresh transitions list is the real validation, and guessing Jira's id format here would one day refuse a
+   * valid id. A number is refused, not coerced — the client sends the id Jira gave it, a string, and a number would be a caller that has not read the list.
+   */
+  @Post('issue/transition')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  async transitionIssue(@Body() body: unknown): Promise<JiraIssueWriteResult> {
+    const key = this.issueKey(body);
+    const id = (body as Record<string, unknown>).transitionId;
+    if (typeof id !== 'string' || id === '' || id.length > JIRA_TRANSITION_ID_MAX_CHARS) {
+      throw new HttpException({ error: 'transitionId must be a non-empty string' }, 400);
+    }
+    this.requireConfigured();
+    return this.written(await this.poller.transitionIssue(key, id));
+  }
+
+  /** The body's `key`, or the 400 every `:key` gets (`isJiraKey`, case-sensitive: the one shape that is safe to put into a path and a JQL). */
+  private issueKey(body: unknown): string {
+    const key = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).key : undefined;
+    if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    return key;
+  }
+
+  /** The poller's issue-write outcome as a value or an error: its two own refusals first (see the header), every other failure through `unwrapJira`. */
+  private written(outcome: JiraIssueWriteOutcome): JiraIssueWriteResult {
+    if ('refusal' in outcome) {
+      if (outcome.refusal === 'no identity') throw new HttpException({ error: 'no identity' }, 503);
+      throw new HttpException({ error: 'transition not offered' }, 400);
+    }
+    return unwrapJira(outcome);
   }
 
   private requireConfigured(): void {

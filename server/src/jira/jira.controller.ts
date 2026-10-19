@@ -6,9 +6,8 @@ import type { JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../../../sha
 import { renderTicketBlock } from './block';
 import { JIRA_JQL_MAX_CHARS, isJiraId } from './config.util';
 import { jiraEnv } from './env.util';
-import { jiraHttpError } from './errors.util';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
-import type { JiraResult } from './poller.service';
+import { unwrapJira } from './unwrap.util';
 
 /**
  * The six read routes under `/api/jira` (Jira phase 1; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
@@ -64,7 +63,7 @@ export class JiraController {
     if (!isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     if (format !== undefined && format !== 'text') throw new HttpException({ error: 'format must be text' }, 400);
     this.requireConfigured();
-    const detail = this.unwrap(await this.poller.issueDetail(key));
+    const detail = unwrapJira(await this.poller.issueDetail(key));
     if (format === 'text') {
       res.type('text/plain; charset=utf-8');
       return renderTicketBlock(detail);
@@ -81,14 +80,14 @@ export class JiraController {
     if (typeof q !== 'string') throw new HttpException({ error: 'q is required' }, 400);
     if (q.trim().length > JIRA_SEARCH_MAX_CHARS) throw new HttpException({ error: `q is too long (max ${JIRA_SEARCH_MAX_CHARS})` }, 400);
     this.requireConfigured();
-    return this.unwrap(await this.poller.search(q));
+    return unwrapJira(await this.poller.search(q));
   }
 
   /** `GET /api/jira/projects` — every project the credentials can see, sorted by key. */
   @Get('projects')
   async projects(): Promise<{ key: string; name: string }[]> {
     this.requireConfigured();
-    return this.unwrap(await this.poller.projects());
+    return unwrapJira(await this.poller.projects());
   }
 
   /**
@@ -101,19 +100,10 @@ export class JiraController {
     if (typeof jql !== 'string' || jql.trim() === '') throw new HttpException({ error: 'jql is required' }, 400);
     if (jql.length > JIRA_JQL_MAX_CHARS) throw new HttpException({ error: `jql is too long (max ${JIRA_JQL_MAX_CHARS})` }, 400);
     this.requireConfigured();
-    return this.unwrap(await this.poller.checkJql(jql));
+    return unwrapJira(await this.poller.checkJql(jql));
   }
 
   private requireConfigured(): void {
     if (!jiraEnv().configured) throw new HttpException({ error: 'Jira is not configured' }, 503);
-  }
-
-  /**
-   * The value of a fresh read, or the §8 error for its failure — `retryAt` handed through verbatim so a refused read never slides the window, and `access`
-   * where the poller knows better than the status (an `unsupported` site).
-   */
-  private unwrap<T>(result: JiraResult<T>): T {
-    if (result.ok) return result.value;
-    throw jiraHttpError(result.response, { retryAt: result.retryAt, access: result.access });
   }
 }
