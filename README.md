@@ -272,7 +272,8 @@ Five seams, one doc each:
 - [**The skills**](docs/subsystems/skills.md) — the seven published skills, their four CLIs, and the reviewer agent the orchestrator dispatches before a merge.
 - [**Jira**](docs/subsystems/jira.md) — the server half of the Jira Cloud integration: a client, a board poller and its caches, and read routes under
   `/api/jira`, plus five guarded POSTs: three config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`) and, since phase 3, two writes to Jira itself
-  (`/issue/assign` and `/issue/transition`) — the only writes this server makes to Jira.
+  (`/issue/assign` and `/issue/transition`) — the only writes this server makes to Jira; and, since phase 4, the `jira` skill (`jira.mjs`) that reaches
+  those routes from any session.
 - [**Invariant rationale**](docs/subsystems/invariants.md) — the rules all four are held to, and the failure each one encodes.
 
 [`docs/overview.md`](docs/overview.md) is the map, and the one place that lists every doc.
