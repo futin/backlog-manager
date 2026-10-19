@@ -5331,6 +5331,43 @@ function effectiveStop(home, project, over = {}) {
   return run;
 }
 
+// #305 — the board can now stop a PAUSED run, so a stop can be on file for a run whose driver has already exited. `unpause` stamps `unpausedAt`, which
+// is exactly what retires a control request: an unpause that went through would move the run's start past the stop's `requestedAt` and silently
+// cancel it. So `unpause` refuses an effective stop with `10`, the stop code — the reaction is `--abort` (references/stopping.md), never a retry.
+function pausedRunWithControl(t, control) {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-5', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  assert.equal(run(project, home, 'finish', '--status', 'paused').status, 0);
+  const body = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  // A second after the start, explicitly: `new Date()` here could tie with `startedAt` at millisecond resolution, and a tie is not timely.
+  writeControl(home, project, { runId: body.runId, requestedAt: new Date(Date.parse(body.startedAt) + 1000).toISOString(), ...control(body) });
+  return { home, project };
+}
+
+test('unpause refuses a paused run with a stop on file, exit 10, writing nothing', (t) => {
+  const { home, project } = pausedRunWithControl(t, () => ({ kind: 'stop' }));
+  const before = fs.readFileSync(runFile(home, project));
+
+  const out = run(project, home, 'unpause');
+
+  assert.equal(out.status, 10, out.stderr);
+  assert.match(out.stderr, /stop request on file — nothing resumes a stopped run/);
+  assert.ok(before.equals(fs.readFileSync(runFile(home, project))), 'run.json was modified by an unpause refused on a stop');
+  assert.equal(JSON.parse(before.toString()).status, 'paused');
+});
+
+test('unpause still resumes a paused run whose control file is a pause, or a stop for another run', (t) => {
+  for (const control of [() => ({}), () => ({ kind: 'pause' }), () => ({ kind: 'stop', runId: 'run-someone-else' })]) {
+    const { home, project } = pausedRunWithControl(t, control);
+
+    const out = run(project, home, 'unpause');
+
+    assert.equal(out.status, 0, `${JSON.stringify(control({}))}: ${out.stderr}`);
+    assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).status, 'running');
+  }
+});
+
 test('stopRequestEffective and pauseRequestEffective are disjoint, and an absent kind reads as pause', () => {
   const run = { runId: 'run-1', startedAt: '2026-09-05T10:00:00Z' };
   const at = { requestedAt: '2026-09-05T11:00:00Z' };
