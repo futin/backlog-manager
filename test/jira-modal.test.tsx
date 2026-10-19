@@ -8,11 +8,12 @@ import '@testing-library/jest-dom';
 import { JiraIssueModal } from '../client/src/components/jira/JiraIssueModal';
 import JiraView from '../client/src/components/jira/JiraView';
 import { JiraContext } from '../client/src/hooks/JiraContext';
+import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { setJiraPage } from '../client/src/hooks/useJiraPage';
 import { formatCreated } from '../client/src/lib/item-age';
 import type { JiraChildrenIndex } from '../client/src/lib/jira';
 import { daysAgoStamp } from './helpers/dates';
-import type { JiraBoardStatus, JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../shared/types';
+import { JIRA_BUILTIN_LABELS, type AgentsStatus, type JiraAction, type JiraBoardStatus, type JiraIssue, type JiraIssueDetail, type JiraStatusPayload } from '../shared/types';
 
 /*
   Jira › the issue modal (Jira phase 2; spec §6.3 minus its controls; DESIGN.md §8.9.2) — the real modal over a mocked `fetch`. It composes `ui/Modal`, so the
@@ -95,9 +96,21 @@ function json(body: unknown, init: { status?: number } = {}): Response {
   return { ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) } as Response;
 }
 
+/** What `GET /api/agents/status` answers. The modal asks it only while a confirmed session is shown (Stop's gate), and never lands in `urls`. */
+let agentsStatus: AgentsStatus;
+const AGENTS_ON: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'acceptEdits',
+  projectPaths: ['/Users/ada/pay']
+};
+
 let onOpenIssue: jest.Mock;
 let reload: jest.Mock;
 let onWrote: jest.Mock;
+let onRun: jest.Mock;
 
 function mount(
   opts: { status?: Partial<JiraStatusPayload>; issue?: JiraIssue; onClose?: () => void; childrenOf?: JiraChildrenIndex | null; onOpenIssue?: jest.Mock } = {}
@@ -105,6 +118,7 @@ function mount(
   onOpenIssue = opts.onOpenIssue ?? jest.fn();
   reload = jest.fn();
   onWrote = jest.fn();
+  onRun = jest.fn();
   return render(
     <JiraContext.Provider value={{ data: status(opts.status), loading: false, error: false, reload }}>
       <JiraIssueModal
@@ -112,6 +126,7 @@ function mount(
         childrenOf={opts.childrenOf ?? null}
         onOpenIssue={onOpenIssue}
         onWrote={onWrote}
+        onRun={onRun}
         onClose={opts.onClose ?? (() => {})}
       />
     </JiraContext.Provider>
@@ -165,9 +180,11 @@ beforeEach(() => {
   calls = [];
   answer = () => json(detail());
   post = () => json({ ok: true, reread: true });
+  agentsStatus = AGENTS_ON;
   global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     if (init?.method === 'POST') return post(String(input));
+    if (String(input) === '/api/agents/status') return json(agentsStatus);
     urls.push(String(input));
     return answer();
   }) as unknown as typeof fetch;
@@ -405,7 +422,7 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
     const other: JiraIssue = { ...CARD, key: 'PAY-9', summary: 'Another' };
     view.rerender(
       <JiraContext.Provider value={{ data: status(), loading: false, error: false, reload: () => {} }}>
-        <JiraIssueModal issue={other} childrenOf={null} onOpenIssue={jest.fn()} onWrote={jest.fn()} onClose={() => {}} />
+        <JiraIssueModal issue={other} childrenOf={null} onOpenIssue={jest.fn()} onWrote={jest.fn()} onRun={jest.fn()} onClose={() => {}} />
       </JiraContext.Provider>
     );
 
@@ -416,15 +433,135 @@ describe('JiraIssueModal — while loading, and when the read fails', () => {
   });
 });
 
-describe('JiraIssueModal — phase 5 is not here yet', () => {
-  it('draws no Run or Stop session, and no session fact', async () => {
-    mount();
+/** A session started three hours ago, so the elapsed reading is `3h` for the whole of a case. */
+const threeHoursAgo = (): string => new Date(Date.now() - 3 * 3_600_000).toISOString();
+const SESSION = (over: Partial<{ starting: boolean }> = {}) => ({
+  'PAY-131': { name: 'jira PAY-131', startedAt: threeHoursAgo(), repo: '/Users/ada/pay', starting: false, ...over }
+});
+const modalRun = (): HTMLElement => within(screen.getByRole('dialog')).getByRole('button', { name: 'Run PAY-131' });
+const stopChip = (): HTMLElement | null => within(screen.getByRole('dialog')).queryByRole('button', { name: 'Stop session' });
+/** Agents-status reads, which the modal mounts only for a confirmed session and which are kept out of `urls`. */
+const agentsReads = (): number => calls.filter((c) => c.url === '/api/agents/status').length;
+
+describe('JiraIssueModal — the session fact (Jira phase 5)', () => {
+  it('reads `<name> · <repo> · <elapsed>` for a confirmed session', async () => {
+    mount({ status: { live: SESSION() } });
+    await screen.findByText('not');
+    expect(fact('session')).toHaveTextContent('jira PAY-131 · pay · 3h');
+  });
+
+  it('reads `starting` while the key is only reserved', async () => {
+    mount({ status: { live: SESSION({ starting: true }) } });
+    await screen.findByText('not');
+    expect(fact('session')).toHaveTextContent(/^starting$/);
+  });
+
+  it('reads `—` with no session on the key, and ignores another key\'s', async () => {
+    mount({ status: { live: { 'PAY-9': SESSION()['PAY-131'] } } });
+    await screen.findByText('not');
+    expect(fact('session')).toHaveTextContent(/^—$/);
+  });
+});
+
+describe('JiraIssueModal — Run ▾ (Jira phase 5)', () => {
+  it('draws the chip in the controls row, beside Assign and Move, and a pick hands the issue and the action up', async () => {
+    mount({ status: { skills: [{ id: 's_0a1b2c3d', name: 'Groom ticket', prompt: '/jira-groom {key}' }] } });
     await screen.findByText('not');
     const dialog = screen.getByRole('dialog');
-    for (const name of [/^run/i, /stop session/i]) {
-      expect(within(dialog).queryByRole('button', { name })).toBeNull();
-    }
-    expect(fact('session')).toBeNull();
+    expect(dialog.querySelector('.jira-modal-controls')).toContainElement(modalRun());
+
+    await userEvent.click(modalRun());
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.context) }));
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ key: 'PAY-131' }), 'context' satisfies JiraAction);
+
+    await userEvent.click(modalRun());
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: /Groom ticket/ }));
+    expect(onRun).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'PAY-131' }), { skill: 's_0a1b2c3d' });
+  });
+
+  it('is disabled with the reason while a session runs on the key, and dashed with the hint when the project has no repository', async () => {
+    const view = mount({ status: { live: SESSION() } });
+    await screen.findByText('not');
+    expect(modalRun()).toBeDisabled();
+    expect(modalRun()).toHaveAttribute('title', 'a session is running on PAY-131');
+    view.unmount();
+
+    mount({ status: { repos: {} } });
+    await screen.findByText('not');
+    expect(modalRun()).toHaveAttribute('title', 'no repository mapped for PAY — Jira › Setup › Repositories');
+    await userEvent.click(modalRun());
+    expect(screen.queryByRole('dialog', { name: 'Run menu' })).toBeNull();
+    expect(onRun).not.toHaveBeenCalled();
+  });
+});
+
+describe('JiraIssueModal — Stop session (Jira phase 5)', () => {
+  it('is drawn for a confirmed session with agents on, and asks before it posts', async () => {
+    mount({ status: { live: SESSION() } });
+    await screen.findByText('not');
+    await waitFor(() => expect(stopChip()).not.toBeNull());
+
+    await userEvent.click(stopChip() as HTMLElement);
+    expect(screen.getByTestId('jira-stop-confirm')).toBeInTheDocument();
+    expect(posts()).toHaveLength(0);
+
+    await userEvent.click(screen.getByTestId('jira-stop-confirm-dismiss'));
+    expect(screen.queryByTestId('jira-stop-confirm')).toBeNull();
+    expect(stopChip()).not.toBeNull();
+    expect(posts()).toHaveLength(0);
+  });
+
+  it('posts `{ key }` to /api/agents/jira-stop on accept, then reloads the status and nudges the board', async () => {
+    mount({ status: { live: SESSION() } });
+    await screen.findByText('not');
+    await waitFor(() => expect(stopChip()).not.toBeNull());
+
+    await userEvent.click(stopChip() as HTMLElement);
+    await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
+    await waitFor(() => expect(onWrote).toHaveBeenCalledTimes(1));
+    expect(posts()).toHaveLength(1);
+    const [{ url, init }] = posts();
+    expect(url).toBe('/api/agents/jira-stop');
+    expect((init?.headers as Record<string, string>)['content-type']).toBe('application/json');
+    expect(init?.body).toBe('{"key":"PAY-131"}');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says the server\'s sentence and reloads nothing when the stop is refused', async () => {
+    post = () => json({ error: 'no live session on PAY-131' }, { status: 409 });
+    mount({ status: { live: SESSION() } });
+    await screen.findByText('not');
+    await waitFor(() => expect(stopChip()).not.toBeNull());
+
+    await userEvent.click(stopChip() as HTMLElement);
+    await userEvent.click(screen.getByTestId('jira-stop-confirm-accept'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('no live session on PAY-131');
+    expect(reload).not.toHaveBeenCalled();
+    expect(onWrote).not.toHaveBeenCalled();
+  });
+
+  it('is not drawn with agents off, for a starting entry, or with no session — and a key with none never asks the agents status', async () => {
+    agentsStatus = { ...AGENTS_ON, enabled: false };
+    const off = mount({ status: { live: SESSION() } });
+    await screen.findByText('not');
+    await waitFor(() => expect(agentsReads()).toBeGreaterThan(0));
+    expect(stopChip()).toBeNull();
+    off.unmount();
+
+    agentsStatus = AGENTS_ON;
+    calls = [];
+    const starting = mount({ status: { live: SESSION({ starting: true }) } });
+    await screen.findByText('not');
+    expect(stopChip()).toBeNull();
+    expect(agentsReads()).toBe(0);
+    starting.unmount();
+
+    mount();
+    await screen.findByText('not');
+    expect(stopChip()).toBeNull();
+    expect(agentsReads()).toBe(0);
   });
 });
 
@@ -642,6 +779,41 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     expect(await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  // The sheet is hosted by JiraView and mounted after the modal, so it is the topmost entry of the one dialog stack: Escape closes it and leaves the modal.
+  it('with the launch sheet open over the modal, Escape closes only the sheet, and the next one closes the modal', async () => {
+    window.localStorage.clear();
+    setJiraPage('board');
+    const board = status();
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents/status') return json(AGENTS_ON);
+      if (url.startsWith('/api/jira/prompt')) return json('a prompt');
+      if (url.startsWith('/api/jira/issue/')) return json(detail());
+      if (url.includes('/issues')) return json({ issues: [CARD], polledAt: daysAgoStamp(0) });
+      return json(board);
+    }) as unknown as typeof fetch;
+    render(
+      <SettingsProvider>
+        <JiraContext.Provider value={{ data: board, loading: false, error: false, reload: () => {} }}>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraContext.Provider>
+      </SettingsProvider>
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: /Refund partial captures/ }));
+    const modal = await screen.findByRole('dialog', { name: 'PAY-131 Refund partial captures' });
+    await userEvent.click(within(modal).getByRole('button', { name: 'Run PAY-131' }));
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'Run menu' })).getByRole('button', { name: new RegExp(JIRA_BUILTIN_LABELS.execute) }));
+    expect(await screen.findByRole('dialog', { name: 'run PAY-131' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'run PAY-131' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 

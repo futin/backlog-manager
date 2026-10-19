@@ -11,6 +11,7 @@ import type {
   JiraDispatchResult,
   JiraIssue,
   JiraIssueDetail,
+  JiraLiveSession,
   JiraSkill,
   JiraStatusCategory,
   JiraStatusPayload,
@@ -672,6 +673,56 @@ export function runChipState(issue: JiraIssue, status: Pick<JiraStatusPayload, '
   const paths: unknown = status.repos[issue.project.key];
   if (!Array.isArray(paths) || paths.length === 0) return 'no-repo';
   return status.live[issue.key] === undefined ? 'ready' : 'live';
+}
+
+/** The last segment of an absolute path, trailing slashes ignored: `/Users/ada/pay` → `pay`. The strip names a session's repo this short way (spec §6.2). */
+export function repoBasename(path: string): string {
+  const segments = path.split('/').filter((seg) => seg !== '');
+  return segments.length === 0 ? path : segments[segments.length - 1];
+}
+
+/** The slash command a skill's prompt opens with (`/jira-groom {key}` → `/jira-groom`) — the menu's quiet right-hand hint — or `null` for a prompt that is prose. */
+export function skillCommand(prompt: string): string | null {
+  const first = prompt.trimStart().split(/\s/, 1)[0];
+  return first.startsWith('/') && first.length > 1 ? first : null;
+}
+
+/** One live session as a card shows it: the issue it runs on, the session, and whether that issue is FOLDED under the card rather than the card's own. */
+export interface JiraCardSession {
+  key: string;
+  session: JiraLiveSession;
+  folded: boolean;
+}
+
+/**
+ * The sessions a card has to say something about: its own first, then every issue folded under it (grouped-board ruling — a folded issue is not a card, so a
+ * session on it would be invisible anywhere on the board without this). Read from `status.live` and never from the issue, so the strip and `runChipState`
+ * agree on what "live" is. `fold.under` is `sortForBoard` order, which makes the order of the folded strips stable between polls.
+ */
+export function cardSessions(top: JiraIssue, fold: Pick<JiraFold, 'under'>, live: Readonly<Record<string, JiraLiveSession>>): JiraCardSession[] {
+  const out: JiraCardSession[] = [];
+  const own = live[top.key];
+  if (own !== undefined) out.push({ key: top.key, session: own, folded: false });
+  for (const under of fold.under.get(top.key) ?? []) {
+    const session = live[under.key];
+    if (session !== undefined) out.push({ key: under.key, session, folded: true });
+  }
+  return out;
+}
+
+/**
+ * What a strip prints for one session (spec §6.2): `session · <repo basename>` — led by the issue's key when it is a folded one, since the card is not that
+ * issue — and, on the right, `starting` for a reserved key, else the elapsed reading from `startedAt` (`null` when the stamp cannot be aged: half a marker
+ * beats `NaNm`, the rule `ItemCard`'s strip follows). The title carries the session's own name and its full path, which the strip has no room for.
+ */
+export function sessionStrip(entry: JiraCardSession, now: number): { label: string; mark: string | null; title: string } {
+  const { session } = entry;
+  const word = `session · ${repoBasename(session.repo)}`;
+  return {
+    label: entry.folded ? `${entry.key} · ${word}` : word,
+    mark: session.starting ? 'starting' : elapsedSince(session.startedAt, now),
+    title: `${session.name} · ${session.repo}`
+  };
 }
 
 /**

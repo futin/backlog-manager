@@ -4,9 +4,10 @@ import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraPage } from '../../hooks/useJiraPage';
 import type { JiraChildrenIndex } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
-import type { JiraIssue } from '../../../../shared/types';
+import type { JiraAction, JiraIssue } from '../../../../shared/types';
 import { JiraBoardView } from './JiraBoardView';
 import { JiraIssueModal } from './JiraIssueModal';
+import { JiraLaunchSheet } from './JiraLaunchSheet';
 import { JiraSetupView } from './JiraSetupView';
 
 /**
@@ -45,16 +46,26 @@ import { JiraSetupView } from './JiraSetupView';
  * which bumps `nudge`; the Board page hands it to `useJiraBoard`, whose list re-reads at once on the change, `off` boards included. The two never reach
  * into each other: this component is the one place that holds both the modal and the page, so it is the one place a number can pass between them. The
  * counter is not cleared on a page switch — it is a count of events, not a state, and only its change means anything.
+ *
+ * **The launch sheet is held HERE too, ONE for the whole section** (Jira phase 5, spec §7; the task-10 brief put it on the board page and this is the
+ * deliberate deviation). `Run ▾` is drawn in two homes, a card and the modal, and both call `onRun(issue, action)`; the sheet they open has to mount AFTER an
+ * open modal so that it is the topmost entry of the one dialog stack — Escape then closes the sheet alone and the modal stays, with no second key listener.
+ * The modal is this component's child, not the board page's, so this is the one place that can order them. `onStarted` is a landed Start: it reloads the shell's
+ * status (the strip is `live`, and the status poll alone runs on the boards' clock — minutes away) and bumps `nudge`, because a Start may have assigned and
+ * moved the ticket. Like the open issue, the slot is cleared whenever `page` changes.
  */
 export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraPage) => void }) {
-  const { data, error } = useJiraContext();
+  const { data, error, reload } = useJiraContext();
   const [page] = useJiraPage();
   const [openIssue, setOpenIssue] = useState<{ issue: JiraIssue; childrenOf: JiraChildrenIndex | null } | null>(null);
   const openOne = (issue: JiraIssue, childrenOf: JiraChildrenIndex | null): void => setOpenIssue({ issue, childrenOf });
   // The slot is JiraView's, and JiraView does not unmount on a page switch, so leaving the Board must clear it by hand — otherwise returning to Board would
   // redraw the modal for an issue the reader closed the page on.
   useEffect(() => setOpenIssue(null), [page]);
+  const [launch, setLaunch] = useState<{ issue: JiraIssue; action: JiraAction } | null>(null);
+  useEffect(() => setLaunch(null), [page]);
   const [nudge, setNudge] = useState(0);
+  const run = (issue: JiraIssue, action: JiraAction): void => setLaunch({ issue, action });
 
   if (data === null) return <div className="board-empty">{error ? 'Jira unavailable' : 'loading…'}</div>;
   if (!data.configured) return <div className="board-empty">Jira is not configured</div>;
@@ -62,14 +73,28 @@ export default function JiraView({ onOpenJiraPage }: { onOpenJiraPage: (p: JiraP
     <JiraSetupView onOpenJiraPage={onOpenJiraPage} />
   ) : (
     <>
-      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} nudge={nudge} />
+      <JiraBoardView onOpenJiraPage={onOpenJiraPage} onOpenIssue={openOne} onRun={run} nudge={nudge} />
       {openIssue !== null && (
         <JiraIssueModal
           issue={openIssue.issue}
           childrenOf={openIssue.childrenOf}
           onOpenIssue={openOne}
           onWrote={() => setNudge((n) => n + 1)}
+          onRun={run}
           onClose={() => setOpenIssue(null)}
+        />
+      )}
+      {/* After the modal, so it is the stack's topmost entry — see the header. Keyed by issue so a second launch never inherits the first one's form. */}
+      {launch !== null && (
+        <JiraLaunchSheet
+          key={launch.issue.key}
+          issue={launch.issue}
+          initialAction={launch.action}
+          onClose={() => setLaunch(null)}
+          onStarted={() => {
+            reload();
+            setNudge((n) => n + 1);
+          }}
         />
       )}
     </>

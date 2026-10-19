@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useAction } from '../../hooks/useAction';
+import { useAgents } from '../../hooks/useAgents';
 import { useFetched } from '../../hooks/useFetched';
 import {
   JIRA_COLUMNS,
@@ -12,29 +13,35 @@ import {
   issueDatesLine,
   modalTree,
   progressLine,
+  repoBasename,
+  stopJira,
   transitionOptions,
   type JiraChildrenIndex
 } from '../../lib/jira';
+import { elapsedSince } from '../../lib/item-age';
 import { renderMarkdown } from '../../lib/markdown';
-import type { JiraIssue, JiraIssueDetail } from '../../../../shared/types';
+import type { JiraAction, JiraIssue, JiraIssueDetail } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
+import { Confirm } from '../ui/Confirm';
 import { Fact } from '../ui/Fact';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { Modal } from '../ui/Modal';
 import { Pill } from '../ui/Pill';
 import { Select } from '../ui/Select';
 import { SpreadBar } from '../ui/SpreadBar';
+import { JiraRunMenu } from './JiraRunMenu';
 
 /**
- * JiraIssueModal — one Jira issue's detail, and since Jira phase 3 the board's two writes to Jira itself (spec §6.3 minus phase 5's `Run ▾` / `Stop
- * session`; DESIGN.md §8.9.2, which applies §8.7's sidecar to a Jira issue).
+ * JiraIssueModal — one Jira issue's detail, the board's two writes to Jira itself (Jira phase 3) and its session controls (Jira phase 5) — spec §6.3, §7;
+ * DESIGN.md §8.9.2, which applies §8.7's sidecar to a Jira issue.
  *
  * **It is the item modal's twin, not a second modal design.** It composes `ui/Modal` exactly as `board/ItemModal.tsx` does — so the scrim, the close
  * control, the Escape key (the LIFO stack in `useDialogEscape`, called by the shell and never here) and the 700 px fold are the shell's — and draws the same
  * facts column through `ui/Fact` and the same body through `.item-body`. `Modal`'s composer list is `[ItemModal, JiraIssueModal]` and a third is a design
  * change.
  *
- * **The controls row** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sits under the facts list, inside the facts column, and holds two controls:
+ * **The controls row** (Jira phase 3; spec §6.3, §8; DESIGN.md §8.9.2) sits under the facts list, inside the facts column, and holds four controls — the two
+ * writes to Jira below, then phase 5's `Run ▾` and `Stop session`:
  *
  * - **`Assign to me`**, a 28 px `Chip` → `POST /api/jira/issue/assign` `{ key }`. Disabled, with the reason as its title, while the shell's status knows
  *   no identity (`data.me` null — which also covers a boot `myself` that has not answered: the server would refuse with 503 `no identity` anyway, and
@@ -45,8 +52,17 @@ import { SpreadBar } from '../ui/SpreadBar';
  *   very next render. Disabled until the detail lands (the transitions are the detail's, and the card carries none), with `transitions unavailable` as the
  *   title once that read failed, and `no transitions offered` when Jira offers none.
  *
- * `Run ▾`, `Stop session` and the `session` fact are phase 5's and stay ABSENT, not drawn disabled: a disabled control is a promise a later phase has not
- * kept yet. `JiraIssueDetail.session` is still typed `null`, and so is unread.
+ * - **`Run ▾`** (`JiraRunMenu`, the card's own chip) → `onRun(issue, action)`; the launch sheet is hosted by `JiraView`, ABOVE this modal, so Escape closes the
+ *   sheet alone and the modal under it on the next press. It reads the shell's status and draws its own disabled / dashed readings; it is never hidden.
+ * - **`Stop session`**, a 28 px `Chip` → `ui/Confirm` → `POST /api/agents/jira-stop` `{ key }`, drawn ONLY while the dashboard has agents enabled AND the shell's
+ *   status holds a CONFIRMED (not `starting`) entry for the key — a starting entry has no process to stop yet, and the server would 409 it. It rides the same
+ *   `useAction` as the two writes above, so one guard and one error line serve all three; a landed stop reloads the status and nudges the board, and that
+ *   reload is the strip going away (spec §11). `StopSession` is mounted only for a confirmed entry, which is also the only time `useAgents()` reads
+ *   `/api/agents/status`: a key with no session never asks.
+ *
+ * **The `session` fact** reads the shell's `live[key]` (`<name> · <repo basename> · <elapsed>`, `starting`, or `—`) rather than the detail's `session`, which
+ * stays typed `null`: the status is already polled, one poll old at worst, and the detail read would add a second source for one fact. The elapsed reading
+ * is taken from `Date.now()` once per render, like `created · updated`.
  *
  * **One write at a time, stamped with its key.** Both controls fire through ONE `useAction`, so its ref guard (bug-19's layer 1, the reason DESIGN.md
  * §8.4.1 gives `RunControls`) holds across both: a double click on Assign, or a Move picked while Assign is out, sends nothing — two clicks inside one tick
@@ -120,12 +136,15 @@ export function JiraIssueModal({
   childrenOf,
   onOpenIssue,
   onWrote,
+  onRun,
   onClose
 }: {
   issue: JiraIssue;
   childrenOf: JiraChildrenIndex | null;
   onOpenIssue: (issue: JiraIssue, childrenOf: JiraChildrenIndex | null) => void;
   onWrote: () => void;
+  /** `Run ▾`'s pick — the page opens the launch sheet over this modal. */
+  onRun: (issue: JiraIssue, action: JiraAction) => void;
   onClose: () => void;
 }) {
   const { data, reload } = useJiraContext();
@@ -191,6 +210,25 @@ export function JiraIssueModal({
     });
   };
 
+  /** Stop, through the one write guard and error line (see the header); a landed stop reloads the status — the strip's way out — and nudges the board. */
+  const stop = (): void => {
+    const asked = issue.key;
+    run(() => stopJira(asked), {
+      onSuccess: () => {
+        reload();
+        onWrote();
+      },
+      onError: () => keyRef.current !== asked
+    });
+  };
+  const live = data?.live[issue.key] ?? null;
+  const sessionLine =
+    live === null
+      ? '—'
+      : live.starting
+        ? 'starting'
+        : [live.name, repoBasename(live.repo), elapsedSince(live.startedAt, now)].filter((p) => p !== null).join(' · ');
+
   const facts = (
     <div className="item-facts">
       <div className="jira-modal-key">
@@ -214,6 +252,7 @@ export function JiraIssueModal({
             <span className="item-facts-path">{paths.map((p) => displayPath(p, data.home)).join(', ')}</span>
           )}
         </Fact>
+        <Fact label="session">{sessionLine}</Fact>
       </dl>
       <div className="jira-modal-controls">
         <Chip size={28} disabled={busy || assignBlock !== null} title={assignBlock ?? undefined} onClick={() => write('assign', { key: issue.key })}>
@@ -227,6 +266,8 @@ export function JiraIssueModal({
           options={[{ value: '', label: 'Move to…' }, ...transitionOptions(detail?.transitions ?? [])]}
           onChange={(id) => id !== '' && write('transition', { key: issue.key, transitionId: id })}
         />
+        <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />
+        {live !== null && !live.starting && <StopSession key={issue.key} busy={busy} onStop={stop} />}
       </div>
       {writeError !== null && (
         <p className="jira-modal-error" role="alert">
@@ -263,6 +304,39 @@ export function JiraIssueModal({
         </p>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * `Stop session` and its confirmation (Jira phase 5, spec §7; DESIGN.md §8.9.2). Mounted by the modal only for a confirmed live entry, so `useAgents()` — the
+ * dashboard's `enabled` flag, the same gate the card's dispatch control reads — asks `/api/agents/status` only then. Nothing is drawn with agents off or
+ * before the answer lands: a Stop the dashboard would refuse is a promise it cannot keep. The question REPLACES the chip in place (`ui/Confirm`, the claim
+ * release's precedent), and the safe answer holds the focus. The POST itself is the modal's, so its refusal draws in the modal's one alert line.
+ */
+function StopSession({ busy, onStop }: { busy: boolean; onStop: () => void }) {
+  const { status } = useAgents();
+  const [asking, setAsking] = useState(false);
+  if (status === null || !status.enabled) return null;
+  if (!asking)
+    return (
+      <Chip size={28} disabled={busy} title="end the session running on this issue" onClick={() => setAsking(true)}>
+        Stop session
+      </Chip>
+    );
+  return (
+    <Confirm
+      label="confirm stop"
+      testId="jira-stop-confirm"
+      acceptLabel="Stop session"
+      dismissLabel="Keep running"
+      onDismiss={() => setAsking(false)}
+      onAccept={() => {
+        setAsking(false);
+        onStop();
+      }}
+    >
+      Stop this session? It ends mid-work; its edits stay where it left them.
+    </Confirm>
   );
 }
 
