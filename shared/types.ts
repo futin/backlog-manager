@@ -615,6 +615,21 @@ export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context', string> = {
   context: 'Open with the ticket loaded'
 };
 
+/**
+ * The workspace a Jira Run is told to work in (spec §5.4, §5.6): `null` where it is carried means mode `none` — no branch, no worktree, no block. `branch`, `base`
+ * and `target` have passed the §6 name checks, so they are shell-safe by construction. `worktree` is the EXPECTED path (5.4: the one 5.2 found holding the branch,
+ * else `<repo>/.worktrees/<branch with / as ->`); the path `jira.mjs worktree` prints is the authoritative one. `base` is `null` for `continue`, which cuts
+ * nothing; `target` is the MR's destination and is only ever set with `openMr` and `continue`.
+ */
+export interface JiraWorkspace {
+  mode: 'new' | 'continue';
+  branch: string;
+  base: string | null;
+  worktree: string;
+  openMr: boolean;
+  target: string | null;
+}
+
 /** A skill id, as the server mints it: `s_` and eight lower-case hex digits. Anchored both ends, so `'s_0123abcd\n'` is not one. */
 const JIRA_SKILL_ID_RE = /^s_[0-9a-f]{8}$/;
 

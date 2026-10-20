@@ -150,7 +150,7 @@ export class JiraController {
     if (normalised === null || !(config.repos[detail.project.key] ?? []).includes(normalised)) {
       throw new HttpException({ error: `${repo} is not mapped to ${detail.project.key}` }, 400);
     }
-    const composed = composeJiraPrompt(detail, composeAction, normalised);
+    const composed = composeJiraPrompt(detail, composeAction, normalised, null);
     if (!composed.ok) throw new HttpException({ error: composed.error }, 400);
     res.type('text/plain; charset=utf-8');
     return composed.prompt;

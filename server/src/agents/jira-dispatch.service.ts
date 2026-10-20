@@ -104,7 +104,7 @@ export class JiraDispatchService {
     const detail = unwrapJira(await this.poller.issueDetail(req.key));
     const transition = req.transitionId === null ? null : detail.transitions.find((t) => t.id === req.transitionId);
     if (transition === undefined) throw new HttpException({ error: 'transition not offered' }, 400);
-    const first = composeJiraPrompt(detail, action, repo);
+    const first = composeJiraPrompt(detail, action, repo, null);
     if (!first.ok) throw new HttpException({ error: first.error }, 400);
 
     let assigned = false;
@@ -172,7 +172,7 @@ export class JiraDispatchService {
 
   /** The second composition, from the re-read detail. Only reached after a write, so its refusal is the caller's to suffix; the sentence is the first's. */
   private composeAfterWrites(detail: JiraIssueDetail, action: JiraComposeAction, repo: string): string {
-    const composed = composeJiraPrompt(detail, action, repo);
+    const composed = composeJiraPrompt(detail, action, repo, null);
     if (!composed.ok) throw new HttpException({ error: composed.error }, 400);
     return composed.prompt;
   }
