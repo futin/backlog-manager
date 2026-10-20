@@ -362,6 +362,24 @@ describe('GET /api/orchestrator/runs', () => {
     expect(res.body.runs[0].pastRuns).toBe(1);
   });
 
+  // #322: `stale-plans.json` is project-level state orchestrate.mjs keeps beside `run.json` and never archives — the one file in a project directory that
+  // outlives every run. The reader must neither list it nor trip over it: the same runs come back with it as without it, and a project directory holding the
+  // marks but no current run file (its last run archived) reads as no run at all.
+  it('returns the same runs with a stale-plans.json beside run.json, and none for a directory holding only the marks', async () => {
+    const run: OrchestratorRun = { ...fixture, updatedAt: new Date().toISOString() };
+    writeRun(run);
+    const without = (await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200)).body;
+
+    const mark = { planHash: 'a'.repeat(64), detail: 'X', runId: run.runId, at: run.updatedAt };
+    writeFileSync(join(projectDir(run.project), 'stale-plans.json'), JSON.stringify({ 'task-1': mark }));
+    const marksOnly = projectDir('/tmp/archived-project');
+    mkdirSync(join(marksOnly, 'runs'), { recursive: true });
+    writeFileSync(join(marksOnly, 'stale-plans.json'), '{garbage');
+
+    const withMarks = (await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200)).body;
+    expect(withMarks).toEqual(without);
+  });
+
   it('attaches a zeroed watchdog record to a crashed running run', async () => {
     // The fixture as-is: its own updatedAt (2026-08-31) is already well past
     // RUN_STALE_MS relative to "now", and its own status is already

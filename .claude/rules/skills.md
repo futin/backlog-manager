@@ -45,7 +45,9 @@ paths: ["skills/**", "agents/**"]
   `groom-elapsed:`/`execute-elapsed:` and `groom-tokens:`/`execute-tokens:` — four permanent, accumulating integer counters behind ONE billable gate — then
   removes `phase:` and, unless `--keep-started`, `started:` too. Cache reads are excluded from the token count; attribution is whole-session-within-the-window;
   an unattributable count writes no key, never `0`. `updated:` is stamped by every `start` and every `stop`, never by `move`. Written only by `start`/`stop`,
-  which round-trip unknown keys and the body byte-for-byte; "in progress" is decided in the client. Why:
+  which round-trip unknown keys and the body byte-for-byte; "in progress" is decided in the client. `groomed-at:` (#322) is an anchor, not a lifecycle key:
+  `new` stamps `HEAD` for a bug or task (a tracker body's one `bm:groomed-at` footer, kept to one by `body`), a groom `stop` re-stamps it, and nothing else
+  writes it — `drift <id>` derives from it and stores nothing. Why:
   [invariants.md](docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status)
 - **Every skill CLI ends with `process.exitCode = main(...)`, never `process.exit(main(...))`.** Writing to a pipe is asynchronous, so `process.exit()`
   drops everything past 65,536 bytes of a `--json` payload while a `> file.json` redirect stays fine — which is why the shipped instance passed every hand

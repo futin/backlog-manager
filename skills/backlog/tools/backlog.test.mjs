@@ -5904,3 +5904,165 @@ test('CLAUDE.md carries the import invariant bullet', () => {
     .filter((bullet) => bullet.includes('marker first') && bullet.includes('bm:imported'))
   assert.equal(bullets.length, 1, 'CLAUDE.md has no single invariant bullet naming both `marker first` and `bm:imported`')
 })
+
+// ── Groom drift (#322): the `groomed-at` anchor and the `drift` verb ──────────────────────────────────────────────────────────────────────────────────────
+//
+// The anchor is written by this tool at the three points a plan can change — a files `new`, a groom `stop` on a bug or a task, a tracker `new`/`body` — and
+// nowhere else. `planDrift` itself is pinned in `drift-lib.test.mjs`; these cases pin who stamps, when, and that `drift` reads the same anchor back.
+
+const headOf = (repo) => spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim()
+
+function commitFile(repo, rel, content, message = rel) {
+  fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true })
+  fs.writeFileSync(path.join(repo, rel), content)
+  assert.equal(spawnSync('git', ['-C', repo, 'add', '-A'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', repo, ...GIT_IDENT, 'commit', '-qm', message], { encoding: 'utf8' }).status, 0)
+  return headOf(repo)
+}
+
+const FOOTER_RE = /<!-- bm:groomed-at ([0-9a-f]+) -->/g
+
+test('files new prints groomed-at: <HEAD> for a task and a bug, none for an idea, and none at all before the first commit', () => {
+  const { dir } = backlogFixture()
+  assert.equal(run(dir, 'init').status, 0)
+
+  const unborn = run(dir, 'new', 'tasks', 'before any commit')
+  assert.equal(unborn.status, 0)
+  assert.doesNotMatch(unborn.stdout, /groomed-at/)
+
+  seedCommit(dir)
+  const head = headOf(dir)
+  for (const section of ['tasks', 'bugs']) {
+    const out = run(dir, 'new', section, 'x')
+    assert.equal(out.status, 0)
+    const block = out.stdout.split('---')[1]
+    assert.match(block, new RegExp(`^groomed-at: ${head}$`, 'm'), `${section}: the stamp sits inside the frontmatter block`)
+  }
+  assert.doesNotMatch(run(dir, 'new', 'ideas', 'x').stdout, /groomed-at/)
+})
+
+test('stop after phase: groom re-stamps groomed-at with the HEAD the plan was written against', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const first = commitFile(dir, 'a.txt', '1\n')
+  const file = writeItemWithBody(backlog, 'tasks/open', 'task-1', 'x', '## Plan\n\nedit `a.txt`\n')
+  withFrontmatter(file, { 'groomed-at': first, started: STAMP, phase: 'groom' })
+  const second = commitFile(dir, 'a.txt', '2\n')
+
+  stopItem(backlog, 'task-1', '2026-08-30T12:20:00Z')
+
+  assert.notEqual(first, second)
+  assert.equal(parseFrontmatter(fs.readFileSync(file, 'utf8')).data['groomed-at'], second)
+})
+
+test('stop --abandon, a stop after phase: execute, and a groom stop on an idea each leave groomed-at as it was', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const first = commitFile(dir, 'a.txt', '1\n')
+  const task = writeItemWithBody(backlog, 'tasks/open', 'task-1', 'x', '## Plan\n\nedit `a.txt`\n')
+  const idea = writeItemWithBody(backlog, 'ideas/open', 'idea-1', 'y', 'an idea\n')
+  commitFile(dir, 'a.txt', '2\n')
+
+  withFrontmatter(task, { 'groomed-at': first, started: STAMP, phase: 'groom' })
+  stopItem(backlog, 'task-1', '2026-08-30T12:20:00Z', { abandon: true })
+  assert.equal(parseFrontmatter(fs.readFileSync(task, 'utf8')).data['groomed-at'], first, '--abandon')
+
+  withFrontmatter(task, { started: STAMP, phase: 'execute' })
+  stopItem(backlog, 'task-1', '2026-08-30T12:20:00Z')
+  assert.equal(parseFrontmatter(fs.readFileSync(task, 'utf8')).data['groomed-at'], first, 'phase: execute')
+
+  withFrontmatter(idea, { started: STAMP, phase: 'groom' })
+  stopItem(backlog, 'idea-1', '2026-08-30T12:20:00Z')
+  assert.equal(parseFrontmatter(fs.readFileSync(idea, 'utf8')).data['groomed-at'], undefined, 'an idea')
+})
+
+test('API mode: body ends in exactly one groomed-at footer naming HEAD, replacing the one the caller copied', async () => {
+  const { dir } = trackerFixture()
+  seedCommit(dir)
+  const head = headOf(dir)
+  const file = path.join(dir, 'b.md')
+  fs.writeFileSync(file, `## Plan\n\nedit \`a.ts\`\n\n<!-- bm:groomed-at ${'d'.repeat(40)} -->\n`)
+  const routes = (section) => ({
+    '/api/items': { body: { items: [apiItem({ id: '#31', section, projectPath: dir })] } },
+    '/api/items/body': { status: 201, body: { id: '#31', updatedAt: '2026-09-18T11:00:00Z' } },
+  })
+
+  const task = await withApi(routes('tasks'), async (port) => await runNode(dir, apiEnv(port), 'body', '31', '--body', file, '--if-updated-at', 'x'))
+  assert.equal(task.out.status, 0, task.out.stderr)
+  const sent = task.requests.find((q) => q.method === 'POST').body.body
+  assert.deepEqual([...sent.matchAll(FOOTER_RE)].map((m) => m[1]), [head])
+  assert.ok(sent.endsWith(`<!-- bm:groomed-at ${head} -->\n`), 'the footer is the last line')
+  assert.match(sent, /^## Plan\n\nedit `a.ts`\n\n<!--/)
+
+  // An idea has no plan to drift, so its body goes out exactly as the caller wrote it — copied footer and all.
+  const idea = await withApi(routes('ideas'), async (port) => await runNode(dir, apiEnv(port), 'body', '31', '--body', file, '--if-updated-at', 'x'))
+  assert.equal(idea.out.status, 0, idea.out.stderr)
+  assert.equal(idea.requests.find((q) => q.method === 'POST').body.body, fs.readFileSync(file, 'utf8'))
+})
+
+test('API mode: new stamps the footer on a task and a bug, and not on an idea', async () => {
+  const { dir } = trackerFixture()
+  seedCommit(dir)
+  const head = headOf(dir)
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Plan\n\nx\n')
+  const created = { '/api/items/create': { status: 201, body: { id: '#77', urn: 'gh:futin/x#77', url: 'https://github.com/futin/x/issues/77', number: 77 } } }
+
+  for (const [section, stamped] of [['tasks', true], ['bugs', true], ['ideas', false]]) {
+    const { out, requests } = await withApi(created, async (port) => await runNode(dir, apiEnv(port), 'new', section, 't', '--body', bodyFile))
+    assert.equal(out.status, 0, out.stderr)
+    const sent = requests[0].body.body
+    assert.equal(sent, stamped ? `## Plan\n\nx\n\n<!-- bm:groomed-at ${head} -->\n` : '## Plan\n\nx\n', section)
+  }
+})
+
+test('drift: files mode prints the drift line, --json carries the result, and an idea or an unknown id is exit 1', () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const c1 = commitFile(dir, 'src/a.ts', '1\n')
+  const file = writeItemWithBody(backlog, 'tasks/open', 'task-1', 'x', '## Plan\n\nedit `src/a.ts:3`\n')
+  writeItemWithBody(backlog, 'ideas/open', 'idea-1', 'y', 'an idea\n')
+  withFrontmatter(file, { 'groomed-at': c1 })
+
+  assert.equal(run(dir, 'drift', 'task-1').stdout.trim(), 'none')
+
+  commitFile(dir, 'src/a.ts', '2\n')
+  const text = run(dir, 'drift', 'task-1')
+  assert.equal(text.status, 0)
+  assert.equal(text.stdout.trim(), `drifted — 1 commit since ${c1.slice(0, 7)} (groomed-at) touch: src/a.ts`)
+
+  const json = JSON.parse(run(dir, 'drift', 'task-1', '--json', '--base', 'HEAD~1').stdout)
+  assert.equal(json.id, 'task-1')
+  assert.equal(json.base, 'HEAD~1')
+  assert.equal(json.status, 'none')
+  assert.equal(json.anchor, c1)
+
+  const idea = run(dir, 'drift', 'idea-1')
+  assert.equal(idea.status, 1)
+  assert.match(idea.stderr, /drift measures a bug's ## Fix or a task's ## Plan/)
+  assert.equal(run(dir, 'drift', 'task-99').status, 1)
+  assert.equal(run(dir, 'drift').status, 1)
+  assert.equal(run(dir, 'drift', 'task-1', '--base').status, 1)
+})
+
+test('API mode: drift reads the body as show does and takes the anchor from its footer', async () => {
+  const { dir } = trackerFixture()
+  const c1 = commitFile(dir, 'src/a.ts', '1\n')
+  commitFile(dir, 'src/a.ts', '2\n')
+  const body = `## Plan\n\nedit \`src/a.ts\`\n\n<!-- bm:groomed-at ${c1} -->\n`
+  const { out, requests } = await withApi(
+    {
+      '/api/items': { body: { items: [apiItem({ id: '#31', section: 'tasks', projectPath: dir })] } },
+      '/api/items/body': { body },
+    },
+    async (port) => await runNode(dir, apiEnv(port), 'drift', '31', '--json'),
+  )
+  assert.equal(out.status, 0, out.stderr)
+  const result = JSON.parse(out.stdout)
+  assert.equal(result.id, '#31')
+  assert.equal(result.status, 'drifted')
+  assert.equal(result.anchorSource, 'groomed-at')
+  assert.equal(result.anchor, c1)
+  assert.equal(result.commits, 1)
+  assert.ok(requests.every((q) => q.method === 'GET'), 'drift writes nothing')
+})

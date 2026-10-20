@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   RUN_STALE_MS,
@@ -3736,7 +3737,9 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['is not a park and changes no finish status', 'a failed or denied gh pr create is not a park'],
     ['the local run branch is kept and nothing deletes it', 'an opened PR leaves the local run branch in place'],
     ['**In a `pr` run that branch is `prTarget`, never the run branch**', "a pr run's merge list names prTarget, never the run branch"],
-    ['PR mode adds no fourth git command', "the push hard limit names gh pr create as PR mode's one extra remote write"]
+    ['PR mode adds no fourth git command', "the push hard limit names gh pr create as PR mode's one extra remote write"],
+    // Groom drift: the one statement §5 gained; the story is references/rationale.md §5.
+    ['`stage <id> ungroomed --plan-stale` — no `--note`, the tool reads that line itself — then skip review, verify, retry and park', 'a plan-stale Outcome is staged ungroomed with its mark, and nothing else runs on it']
   ];
   for (const [needle, rule] of RULES) {
     assert.ok(text.includes(needle), `SKILL.md lost the rule: ${rule} (${needle})`);
@@ -8442,7 +8445,7 @@ test('a tracker run-s outcomes/ and items/ are archived beside its run file by t
     assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
   });
 
-  // The mover is a denylist of two (`run.json`, `runs/`), so a new sidecar
+  // The mover is a denylist of three (`run.json`, `runs/`, `stale-plans.json`), so a new sidecar
   // directory needs no change to it at all — which is exactly what this
   // asserts.
   const stems = fs.readdirSync(runsDir(home, project)).filter((name) => !name.endsWith('.json'));
@@ -10307,10 +10310,14 @@ test('inspect composes the existing internals and runs no git of its own', () =>
   const start = source.indexOf('function cmdInspect(');
   assert.ok(start !== -1, 'cmdInspect is gone');
   const body = source.slice(start, source.indexOf('\nconst ASSUME_USAGE', start)).replace(/\/\/.*$/gm, '');
-  for (const needle of ['cmdStage(', 'applyUsageEntry(', 'readPermissionDenials(', 'findItemFilePath(', 'writeSnapshot(']) {
+  // #322: the Outcome read moved into `readItemOutcome`, shared with `stage --plan-stale`, so the item lookup is asserted there.
+  for (const needle of ['cmdStage(', 'applyUsageEntry(', 'readPermissionDenials(', 'readItemOutcome(', 'writeSnapshot(']) {
     assert.ok(body.includes(needle), `cmdInspect no longer calls ${needle}`);
   }
   assert.doesNotMatch(body, /spawnSync|'merge'|'push'/);
+  const reader = source.slice(source.indexOf('function readItemOutcome('), source.indexOf('\nfunction ', source.indexOf('function readItemOutcome(') + 1));
+  assert.ok(reader.includes('findItemFilePath('), 'readItemOutcome no longer calls findItemFilePath(');
+  assert.doesNotMatch(reader, /spawnSync/);
 });
 
 // --- PR mode, task 3: `init` mints the run branch ------------------------------------------------------------------------
@@ -11128,4 +11135,234 @@ test('pr 5.7: the delete is HEAD-independent — a root on another branch than t
   assert.equal(out.status, 0, out.stderr);
   assert.deepEqual(runBranches(fx.project), []);
   assert.equal(gitOk(fx.project, 'symbolic-ref', '--short', 'HEAD').trim(), 'elsewhere');
+});
+
+/* --- #322: the stale-plan mark ---------------------------------------------------------------------------------------
+   An execute session whose Outcome opens `Plan no longer holds: …` is recognised by `inspect`, staged `ungroomed --plan-stale`,
+   and the mark it files — keyed by the plan's own hash — refuses the item at every later `plan`/`init` until a re-groom changes
+   that plan. The hash is computed here by hand, the way the mark's reader must compute it, so a tool that hashed something else
+   (the working copy, the whole body, the untrimmed text) is a red test rather than a tool agreeing with itself. */
+
+const STALE_ID = 'task-5';
+const STALE_REL = `backlog/tasks/open/${STALE_ID}-fixture.md`;
+const stalePlanHash = (planText) => createHash('sha256').update(planText.replace(/\r\n/g, '\n').trim()).digest('hex');
+const staleMarks = (home, project) => path.join(projStateDir(home, project), 'stale-plans.json');
+
+function writeStaleTask(project, plan, { id = STALE_ID, extra = '' } = {}) {
+  const file = path.join(project, 'backlog', 'tasks', 'open', `${id}-fixture.md`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `---\nid: ${id}\ntitle: Some task\ncreated: 2026-08-01\n${extra}---\n\n## Goal\n\nSomething.\n\n## Plan\n\n${plan}\n## Done when\n`);
+  return file;
+}
+
+// A files run on a real git store whose one queue item is a ready task, committed on `main`.
+function staleRun(t, plan = 'Edit the handler and add a case for it, in enough detail to count as groomed.\n') {
+  const fx = orchFixture(t);
+  writeStaleTask(fx.project, plan);
+  commitEverything(fx.project, 'seed');
+  const init = run(fx.project, fx.home, 'init', '--project', fx.project);
+  assert.equal(init.status, 0, init.stderr);
+  fx.runId = JSON.parse(init.stdout).runId;
+  return fx;
+}
+
+// The session's half: an Outcome in the item's conventional worktree, `.worktrees/<id>`, which is where `inspect` and `stage --plan-stale` both
+// read it when the run recorded no worktree of its own. Excluded from git so a later `commitEverything` never carries it onto `main`.
+function writeStaleOutcome(fx, firstLine, id = STALE_ID) {
+  fs.appendFileSync(path.join(fx.project, '.git', 'info', 'exclude'), '.worktrees/\n');
+  const file = path.join(fx.project, '.worktrees', id, 'backlog', 'tasks', 'open', `${id}-fixture.md`);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `---\nid: ${id}\ntitle: Some task\ncreated: 2026-08-01\n---\n\n## Plan\n\nx\n\n## Outcome\n\n${firstLine}\n\nEvidence: abc1234\n`);
+}
+
+const markStale = (fx, id = STALE_ID) => run(fx.project, fx.home, 'stage', id, 'ungroomed', '--plan-stale');
+
+function planJson(fx, id = STALE_ID) {
+  const out = run(fx.project, fx.home, 'plan', '--project', fx.project, '--json');
+  assert.equal(out.status, 0, out.stderr);
+  return JSON.parse(out.stdout).find((item) => item.id === id);
+}
+
+test('#322 inspect 15: a worktree Outcome whose first line is the marker reports planStale; any other Outcome reports null', (t) => {
+  const stale = inspectFixture(t, { state: 'open', outcome: false });
+  fs.appendFileSync(
+    path.join(stale.worktree, 'backlog', 'tasks', 'open', `${INSPECT_ID}-fixture.md`),
+    '\n## Outcome\n\nPlan no longer holds: the handler it edits was deleted in abc1234\n\nEvidence: git log -p …\n'
+  );
+  assert.equal(inspectOut(inspectCmd(stale, INSPECT_ID)).planStale, 'Plan no longer holds: the handler it edits was deleted in abc1234');
+
+  // The main tree carries an ordinary Outcome in this fixture; a wrong-tree read would answer from it.
+  const fine = inspectFixture(t, { state: 'done', outcome: true });
+  assert.equal(inspectOut(inspectCmd(fine, INSPECT_ID)).planStale, null);
+});
+
+test('#322 inspect 15, tracker: the outcome file is read the same way, a leading ## Outcome heading skipped', async (t) => {
+  const bare = await trackerInspect(t, 'Plan no longer holds: X\n\nevidence\n');
+  assert.equal(bare.out.status, 0, bare.out.stderr);
+  assert.equal(JSON.parse(bare.out.stdout.trim()).planStale, 'Plan no longer holds: X');
+
+  const headed = await trackerInspect(t, '## Outcome\n\n  Plan no longer holds: Y\n');
+  assert.equal(JSON.parse(headed.out.stdout.trim()).planStale, 'Plan no longer holds: Y');
+
+  const ordinary = await trackerInspect(t, 'Verification: pnpm test — 12 passed\n\nPlan no longer holds: not first\n');
+  assert.equal(JSON.parse(ordinary.out.stdout.trim()).planStale, null);
+});
+
+test('#322 stage 16: --plan-stale on any stage but ungroomed, with a --note, or with no marker line to read is exit 1 and writes nothing', (t) => {
+  const fx = staleRun(t);
+  const before = fs.readFileSync(runFile(fx.home, fx.project), 'utf8');
+
+  // No Outcome yet: there is no marker for the tool to read, so there is no mark to file.
+  const noMarker = markStale(fx);
+  assert.equal(noMarker.status, 1);
+  assert.match(noMarker.stderr, /does not open with a `Plan no longer holds:` line/);
+
+  writeStaleOutcome(fx, 'Plan no longer holds: X');
+  const merged = run(fx.project, fx.home, 'stage', STALE_ID, 'merged', '--plan-stale');
+  assert.equal(merged.status, 1);
+  assert.match(merged.stderr, /--plan-stale is only for `stage <id> ungroomed`/);
+
+  // The marker is the session's prose, which never rides a command line: the tool reads it, and refuses to be handed it.
+  const withNote = run(fx.project, fx.home, 'stage', STALE_ID, 'ungroomed', '--plan-stale', '--note', 'Plan no longer holds: X');
+  assert.equal(withNote.status, 1);
+  assert.match(withNote.stderr, /--plan-stale takes no --note/);
+
+  assert.equal(fs.readFileSync(runFile(fx.home, fx.project), 'utf8'), before);
+  assert.equal(fs.existsSync(staleMarks(fx.home, fx.project)), false);
+});
+
+test('#322 stage 17 + plan 18: the mark is the plan hash AT BASE, and plan then reads the task ungroomed with the reason', (t) => {
+  const plan = 'Edit the handler and add a case for it, in enough detail to count as groomed.\n';
+  const fx = staleRun(t, plan);
+  // An uncommitted edit in the main tree: the mark must be filed against what `<base>` holds, which is what the gate reads.
+  writeStaleTask(fx.project, 'A different plan nobody committed.\n');
+
+  // An apostrophe, a backtick and a `$(…)`: everything that would break or run in a shell argument, harmless read from a file.
+  writeStaleOutcome(fx, "Plan no longer holds: the handler's `$(gone)` was deleted");
+  const out = markStale(fx);
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(queueItem(fx.home, fx.project, STALE_ID).stage, 'ungroomed');
+  assert.equal(queueItem(fx.home, fx.project, STALE_ID).note, "Plan no longer holds: the handler's `$(gone)` was deleted");
+
+  const marks = JSON.parse(fs.readFileSync(staleMarks(fx.home, fx.project), 'utf8'));
+  assert.deepEqual(Object.keys(marks), [STALE_ID]);
+  assert.equal(marks[STALE_ID].planHash, stalePlanHash(plan));
+  assert.equal(marks[STALE_ID].detail, "the handler's `$(gone)` was deleted");
+  assert.equal(marks[STALE_ID].runId, fx.runId);
+  assert.match(marks[STALE_ID].at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+
+  const item = planJson(fx);
+  assert.equal(item.gate, 'ungroomed');
+  assert.match(item.reasons[0], new RegExp(`^plan no longer holds \\(run ${fx.runId}, \\d{4}-\\d{2}-\\d{2}\\): `));
+  assert.ok(item.reasons[0].endsWith("): the handler's `$(gone)` was deleted — re-groom it"), item.reasons[0]);
+});
+
+test('#322 plan 19: a re-groom that changes the plan clears the mark; a CRLF-to-LF rewrite of the same words does not', (t) => {
+  const fx = staleRun(t, 'Line one of the plan.\r\nLine two of the plan.\r\n');
+  writeStaleOutcome(fx, 'Plan no longer holds: X');
+  assert.equal(markStale(fx).status, 0);
+  assert.equal(planJson(fx).gate, 'ungroomed');
+
+  writeStaleTask(fx.project, 'Line one of the plan.\nLine two of the plan.\n');
+  commitEverything(fx.project, 'line endings only');
+  assert.equal(planJson(fx).gate, 'ungroomed', 'the same words are the same plan');
+
+  writeStaleTask(fx.project, 'A re-groomed plan that takes a different approach.\n');
+  commitEverything(fx.project, 're-groom');
+  const regroomed = planJson(fx);
+  assert.equal(regroomed.gate, 'ready');
+  assert.deepEqual(regroomed.reasons, []);
+});
+
+test('#322 plan 20: an absent, empty or malformed stale-plans.json is no marks, and plan creates no run-state directory', (t) => {
+  const { home, project } = planGitFixture(t);
+  const ready = () => {
+    const out = plan(project, home, '--ids', 'task-1', '--json');
+    assert.equal(out.status, 0, out.stderr);
+    return JSON.parse(out.stdout)[0].gate;
+  };
+
+  assert.equal(ready(), 'ready');
+  assert.equal(fs.existsSync(projStateDir(home, project)), false, 'plan must not create the project state directory');
+
+  for (const body of ['', '{garbage', '[]', 'null']) {
+    seedSidecar(home, project, 'stale-plans.json', body);
+    assert.equal(ready(), 'ready', `stale-plans.json = ${JSON.stringify(body)}`);
+  }
+});
+
+test('#322 init 21: a new run leaves stale-plans.json in the project directory, and the new queue still reads the mark', (t) => {
+  const fx = staleRun(t);
+  writeStaleOutcome(fx, 'Plan no longer holds: X');
+  assert.equal(markStale(fx).status, 0);
+  const marks = fs.readFileSync(staleMarks(fx.home, fx.project), 'utf8');
+  assert.equal(run(fx.project, fx.home, 'finish', '--status', 'done').status, 0);
+  sleepPastRunIdSecond();
+
+  const second = run(fx.project, fx.home, 'init', '--project', fx.project);
+  assert.equal(second.status, 0, second.stderr);
+
+  assert.equal(fs.readFileSync(staleMarks(fx.home, fx.project), 'utf8'), marks);
+  const archived = path.join(runsDir(fx.home, fx.project), fx.runId);
+  assert.equal(fs.existsSync(path.join(archived, 'stale-plans.json')), false, 'archived away with the previous run');
+  assert.equal(planJson(fx).gate, 'ungroomed');
+});
+
+test('#322 plan 22: --json items carry drift, and the text output prints a ~ line only for a row whose drift is not none', (t) => {
+  const fx = orchFixture(t);
+  fs.mkdirSync(path.join(fx.project, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(fx.project, 'src', 'a.ts'), '1\n');
+  fs.writeFileSync(path.join(fx.project, 'src', 'b.ts'), '1\n');
+  commitEverything(fx.project, 'C1');
+  const c1 = git(fx.project, 'rev-parse', 'HEAD').stdout.trim();
+  writeStaleTask(fx.project, 'Edit `src/a.ts` until it is right.\n', { id: 'task-5', extra: `groomed-at: ${c1}\n` });
+  writeStaleTask(fx.project, 'Edit `src/b.ts` until it is right.\n', { id: 'task-6', extra: `groomed-at: ${c1}\n` });
+  commitEverything(fx.project, 'items');
+  fs.writeFileSync(path.join(fx.project, 'src', 'a.ts'), '2\n');
+  commitEverything(fx.project, 'touch a');
+
+  const json = JSON.parse(run(fx.project, fx.home, 'plan', '--project', fx.project, '--json').stdout);
+  const byId = Object.fromEntries(json.map((item) => [item.id, item]));
+  assert.equal(byId['task-5'].drift.status, 'drifted');
+  assert.equal(byId['task-5'].drift.commits, 1);
+  assert.equal(byId['task-5'].drift.anchor, c1);
+  assert.equal(byId['task-6'].drift.status, 'none');
+  assert.equal(byId['task-5'].gate, 'ready', 'drift is never a verdict');
+
+  const lines = run(fx.project, fx.home, 'plan', '--project', fx.project).stdout.split('\n');
+  const rowOf = (id) => lines.findIndex((line) => line.includes(` ${id}  `));
+  assert.equal(lines[rowOf('task-5') + 1], `    ~ drifted — 1 commit since ${c1.slice(0, 7)} (groomed-at) touch: src/a.ts`);
+  assert.ok(!lines[rowOf('task-6') + 1]?.startsWith('    ~'), `no ~ line under a none row: ${lines.join('\n')}`);
+  assert.equal(fs.existsSync(staleMarks(fx.home, fx.project)), false);
+});
+
+test('#322 tracker: the mark is the API body\'s plan hash, a footer-only re-stamp keeps it, and a re-groomed body clears it', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const groomed = `${GROOMED_TASK_BODY}\n<!-- bm:groomed-at ${'a'.repeat(40)} -->\n`;
+  const bodies = { 3: groomed };
+  const routes = claimRoutes(project, gateRoutes([apiItem(project, 3)], bodies));
+  const gateOf = (out) => {
+    assert.equal(out.status, 0, out.stderr);
+    return JSON.parse(out.stdout).find((item) => item.id === '3');
+  };
+
+  await withApi(routes, async (port) => {
+    assert.equal((await runApi(project, home, port, 'init', '--project', project)).status, 0);
+    fs.mkdirSync(path.join(projStateDir(home, project), 'outcomes'), { recursive: true });
+    fs.writeFileSync(path.join(projStateDir(home, project), 'outcomes', '3.md'), '## Outcome\n\nPlan no longer holds: X\n');
+    const staged = await runApi(project, home, port, 'stage', '3', 'ungroomed', '--plan-stale');
+    assert.equal(staged.status, 0, staged.stderr);
+    const marks = JSON.parse(fs.readFileSync(staleMarks(home, project), 'utf8'));
+    assert.equal(marks['3'].planHash, stalePlanHash('Do the real work, described in enough detail to count as groomed.\n'));
+
+    const marked = gateOf(await runApi(project, home, port, 'plan', '--project', project, '--json'));
+    assert.equal(marked.gate, 'ungroomed');
+    assert.match(marked.reasons[0], /^plan no longer holds \(run .*\): X — re-groom it$/);
+
+    bodies[3] = `${GROOMED_TASK_BODY}\n<!-- bm:groomed-at ${'b'.repeat(40)} -->\n`;
+    assert.equal(gateOf(await runApi(project, home, port, 'plan', '--project', project, '--json')).gate, 'ungroomed', 're-stamp only');
+
+    bodies[3] = GROOMED_TASK_BODY.replace('Do the real work', 'Do different real work');
+    assert.equal(gateOf(await runApi(project, home, port, 'plan', '--project', project, '--json')).gate, 'ready');
+  });
 });

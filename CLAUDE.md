@@ -101,6 +101,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
 - **A run's sidecars are archived beside its run file, under a name derived from the archive path and stored nowhere.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-runs-sidecars-are-archived-beside-its-run-file-task-31)
+- **A stale-plan mark is keyed by the plan's hash, so a re-groom clears it and nothing else does.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-stale-plan-mark-is-keyed-by-the-plans-hash-so-a-re-groom-clears-it-and-nothing-else-does)
 - **A board-started run is visible before its run file exists, from server memory that is never written to disk.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **A starting entry blocks what a run file blocks, on every surface**

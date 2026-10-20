@@ -17,10 +17,19 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   crashed. A remote row is read-only: no `RunControls`, no `archive/run` fetch. Why:
   [invariants.md](docs/subsystems/invariants.md#remote-runs-ride-beside-runs-never-in-it)
 - **A run's sidecars are archived beside its run file, under a name derived from the archive path and stored nowhere.** One `archiveStem` names both
-  `runs/<stem>.json` and `runs/<stem>/`; there is no `sidecarDir` field. The mover is a denylist of two (`run.json`, `runs/`), never an allowlist; sidecars move
-  first, `run.json` renames last; nothing already present is overwritten; the move never fails an `init`; orphaned sidecars are a non-goal. `archivedRunFiles`
+  `runs/<stem>.json` and `runs/<stem>/`; there is no `sidecarDir` field. The mover is a denylist of three (`run.json`, `runs/`, `stale-plans.json` —
+  project-level state, not a sidecar), never an allowlist; sidecars move first, `run.json` renames last; nothing already present is overwritten; the move
+  never fails an `init`; orphaned sidecars are a non-goal. `archivedRunFiles`
   (`orchestrator.service.ts`) is the ONE implementation of "which entries are run files", read by both `countPastRuns` and `archive()`. Why:
   [invariants.md](docs/subsystems/invariants.md#a-runs-sidecars-are-archived-beside-its-run-file-task-31)
+- **A stale-plan mark is keyed by the plan's hash, so a re-groom clears it and nothing else does.** `inspect` reports an Outcome whose first non-empty line
+  (a leading `## Outcome` skipped) starts `Plan no longer holds:` as `planStale`; `stage <id> ungroomed --plan-stale` re-reads that line from the same
+  Outcome through the same `readItemOutcome` — refused with exit `1` on any other stage, with a `--note` (session prose never rides a command line) or with no
+  marker line, nothing written — and files `{ planHash, detail, runId, at }` under the item's id in `<projectDir>/stale-plans.json`, after the run file.
+  `planHash` is the sha256 of the `## Plan`/`## Fix` text, trimmed, CRLF normalised, footer stripped, read at `<base>` (files) or from the API (tracker).
+  `buildGatedQueue` turns a matching item `ungroomed` before the hoist and the cap; a different hash is ignored. `plan` reads the file and never creates the
+  directory; absent or malformed is no marks. No clear verb. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-stale-plan-mark-is-keyed-by-the-plans-hash-so-a-re-groom-clears-it-and-nothing-else-does)
 - **`backlog-orchestrate` is the only skill that commits or merges — and, for a TRACKER project only, the only one that pushes.** Inside a per-item worktree,
   on `backlog/<id>` alone; merged into the run's **base branch** (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base
   is verified to have it actually checked out. No other skill touches git history at all. The push half is task-47's and is exactly three commands, none of
