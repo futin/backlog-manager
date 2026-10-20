@@ -124,7 +124,8 @@ separator after it goes instead). The separators are `-`, `_`, `/`, `.`.
 ### Task 2: `jira.mjs worktree`
 
 **Files:**
-- Modify: `skills/jira/tools/jira.mjs` (USAGE, a new `worktree` command beside `COMMANDS`, its own copies of the Table A/B checks, `ensureExcludeLines`, the
+- Modify: `skills/jira/tools/jira.mjs` (USAGE and its "every command needs the API" footer / `apiDownMessage` wording, a new `worktree` command beside
+  `COMMANDS`, its own copies of the Table A/B checks, `ensureExcludeLines`, the
   lock-retry fetch)
 - Test: `skills/jira/tools/jira.test.mjs`
 
@@ -140,22 +141,27 @@ separator after it goes instead). The separators are `-`, `_`, `/`, `.`.
 Behaviour, in order (spec §5.4):
 1. Usage → exit 1 with the command's usage line: missing `--repo`/`--mode`/`--branch`, `--mode` not `new`/`continue`, `--base` missing with `new` or present
    with `continue`, a key failing `normaliseKey`, a `--branch`/`--base` with a Table A problem (`--branch may not contain ..`).
-2. `--repo` not a git work tree's top level → exit 4 `<repo> is not a git repository`.
+2. `--repo` not a git work tree's top level → exit 4 `<repo> is not a git repository`. Compare realpaths on both sides: `rev-parse --show-toplevel`
+   prints the resolved path (`/var/folders/…` → `/private/var/folders/…` on macOS), so a plain string compare fails every tmp fixture and any symlinked
+   mapped path.
 3. `git -C <repo> fetch origin`; on failure where `isLockFailure` is true, wait the retry pause and try once more; any final failure adds note
    `fetch failed: <git's fatal/error line> — using refs as of last fetch` and continues (exit is unaffected).
 4. Re-checks, each exit 4 with nothing changed: `new` and the branch fails Table B → `branch must carry <KEY>`; `new` and the branch exists locally or as
    `origin/<branch>` → `<branch> exists — Start again with Continue`; `new` and neither `origin/<base>` nor local `<base>` exists → `no base <base> locally or
    on origin`; `continue` and the main worktree holds the branch → `<branch> is checked out in the mapped checkout <repo> — a worktree cannot take it`;
-   `continue` and the branch exists neither locally nor on origin → `no branch <branch> locally or on origin`.
+   `continue` and the branch exists neither locally nor on origin → `no branch <branch> locally or on origin`; `continue`, local and `origin/<branch>` both
+   exist and have diverged (`rev-list --left-right --count <branch>...origin/<branch>`, no tree needed) → `<branch> has diverged from origin/<branch>
+   (A ahead, B behind) — never reset, never merged`. So every exit 4 leaves nothing created.
 5. A linked worktree already holding the branch (`worktree list --porcelain`) → `entered`. Otherwise target `worktreePathFor(repo, branch)`; if that path
    exists (registered to another branch, or a plain directory) → exit 4 `<path> already exists (holds <other branch> | is not a worktree)`.
 6. Create: `new` → `worktree add --no-track -b <branch> <target> <origin/<base> or <base>>` (origin wins when it exists after the fetch — note
    `cut from local <base>: no origin/<base>` otherwise); `continue`, local exists → `attached`; only `origin/<branch>` → `worktree add --track -b <branch>
-   <target> origin/<branch>` → `tracked`. Any `worktree add` failure → exit 4 with git's `fatal:` line.
+   <target> origin/<branch>` → `tracked`. Any `worktree add` failure → exit 4 with git's `fatal:` line; git's `already used by worktree at '<p>'` /
+   `already checked out at '<p>'` (a tree holding the branch detached mid-rebase, which `worktree list` shows as `detached` — see `orchestrate.mjs`'s note
+   on this) becomes `<branch> is held by the worktree at <p> (detached, likely mid-rebase) — finish or abort there first`.
 7. Fast-forward (continue paths and `entered`): compare the branch with `origin/<branch>` when that exists. Strictly behind and the tree clean →
    `merge --ff-only origin/<branch>` inside the worktree, note `fast-forwarded N commits`; strictly behind and dirty → note `behind origin by N, not
-   fast-forwarded: uncommitted changes`; diverged → exit 4 `<branch> has diverged from origin/<branch> (A ahead, B behind) — never reset, never merged`
-   (on a created tree the tree is left in place, the message says so).
+   fast-forwarded: uncommitted changes`. Divergence was already refused in step 4, before any tree was made.
 8. Only for trees this command created: `ensureExcludeLines(<common dir>, ['.worktrees/', 'node_modules'])`; then, when `<repo>/node_modules` exists and
    `<target>/node_modules` does not exist (no file, no dir, no link), symlink it to `<repo>/node_modules`.
 9. `rev-parse --abbrev-ref HEAD` inside the tree must equal the branch, else exit 4 `the worktree is on <other>, not <branch>`.
@@ -179,7 +185,8 @@ Behaviour, in order (spec §5.4):
     `behind origin by 1, not fast-forwarded: uncommitted changes`, HEAD unchanged; same but clean → fast-forwarded.
   - Review Focus 1: `feature/a-TIMIFY-1` exists as a worktree; start `feature-a/TIMIFY-1` new → exit 4 naming `feature/a-TIMIFY-1`.
   - Review Focus 2: clone with its `origin` remote removed → new from local `main` exits 0, notes hold `fetch failed:` and `cut from local main`.
-  - lock: a `<git dir>/refs/remotes/origin/main.lock` file present and `BM_JIRA_FETCH_RETRY_MS=10` → exit 0 with the `fetch failed:` note;
+  - lock: advance `origin/main` one commit (an up-to-date fetch locks nothing and would pass), then place `<git dir>/refs/remotes/origin/main.lock`, with
+    `BM_JIRA_FETCH_RETRY_MS=10` → exit 0 with a `fetch failed:` note containing `cannot lock ref`;
     `isLockFailure` true for `cannot lock ref 'refs/remotes/origin/main'` and `Unable to create '/r/.git/shallow.lock': File exists.`, false for
     `fatal: 'origin' does not appear to be a git repository`.
   - an existing real `node_modules` directory in a reattached worktree is left a directory.
@@ -202,8 +209,10 @@ Behaviour, in order (spec §5.4):
 - Produces (in `shared/types.ts`):
   - `JiraRepoUnavailable = 'not mounted into the board' | 'does not exist' | 'not a git repository'`
   - `JiraRefBranch = { name: string; local: boolean; remote: boolean; sync: 'same' | 'behind' | 'ahead' | 'diverged' | null; committedAt: string;
-    worktree: string | null; ticket: boolean }` — `name` never carries `origin/`; `sync` only when both exist and the local branch's upstream is
-    `origin/<name>` (read from `%(upstream:track)` in one `for-each-ref`), else `null`; `worktree` the absolute path of the tree holding it, the main tree
+    worktree: string | null; ticket: boolean }` — `name` never carries `origin/`; `sync` whenever both `<name>` and `origin/<name>` exist, by name and
+    never by upstream (a board-made branch is cut `--no-track`): for `ticket` branches from `rev-list --left-right --count <name>...origin/<name>`; for the
+    rest from `%(upstream:track)` when the upstream is `origin/<name>`, else `null` (*my call*: one call per ticket branch, not one per branch in the
+    repo); `worktree` the absolute path of the tree holding it, the main tree
     included.
   - `JiraRepoRefs = { repo: string; available: true; fetchedAt: string | null; mainBranch: string | null; defaultBase: string | null; branches:
     JiraRefBranch[] } | { repo: string; available: false; reason: JiraRepoUnavailable }`. Branches sorted: `ticket` first by `committedAt` descending, then
@@ -212,14 +221,16 @@ Behaviour, in order (spec §5.4):
     `JiraWorktreesPayload = { worktrees: JiraWorktree[]; unavailable: { repo: string; reason: JiraRepoUnavailable }[] }`.
   - `readRepoRefs(repo: string, key: string | null, roots: string[] | null, storedBase: string | null): Promise<JiraRepoRefs>` — the route passes `null`
     until Task 4 wires the stored base; `readWorktrees(repo, roots): Promise<JiraWorktree[] |
-    JiraRepoUnavailable>`; `repoRoots(): string[] | null` from env `BM_REPO_ROOTS` (`:`-separated absolute paths, read per call; unset or empty → `null`,
+    JiraRepoUnavailable>`; `repoRoots(): string[] | null` from env `BM_REPO_ROOTS` (the name exported as a constant, as `JIRA_ENV` is, so `compose-env.test.ts`
+    pins it) (`:`-separated absolute paths, read per call; unset or empty → `null`,
     which skips the "not mounted" check — a host-run API).
   - `GET /api/jira/refs?repo=<path>&key=<KEY>` (key optional; `ticket` false everywhere without it) → `JiraRepoRefs`. 400 `repo is required`, 400
     `invalid issue key`, 400 `<repo> is not mapped` when the normalised path is in no project's list, 503/409 as `/prompt` does for unconfigured/unreadable.
   - `GET /api/jira/worktrees` → `JiraWorktreesPayload` over every distinct mapped path.
 
 Checks for unavailability, in spec §4's order: outside every root (only when `repoRoots()` is non-null) → `not mounted into the board`; path missing →
-`does not exist`; `rev-parse --show-toplevel` fails or differs from the path → `not a git repository`. `fetchedAt` is `<common dir>/FETCH_HEAD`'s mtime
+`does not exist`; `rev-parse --show-toplevel` fails or its realpath differs from the path's realpath → `not a git repository` (a plain string compare
+fails every macOS tmp fixture and any symlinked mapped path). `fetchedAt` is `<common dir>/FETCH_HEAD`'s mtime
 as ISO, `null` when the file is absent. No caching (*my call*: per request, each read bounded by `runGit`; revisit only if the sheet feels slow).
 
 Compose: a second read-only mount `${BM_JIRA_REPO_ROOT:-${HOME}/Documents/timify-projects}` at the same path, and on the server service `BM_REPO_ROOTS`
@@ -228,7 +239,8 @@ roots are passed (so Setup can say "not mounted").
 
 - [ ] **Step 1:** `test/jira-refs.test.ts` — real git fixtures in a tmp dir (bare origin + clone + a linked worktree), the function called directly:
   - key `TIMIFY-123`: branches `feature/timify-123-a` (local + origin, local 1 behind, upstream set) and `TIMIFY-123-b` (origin only) come first, newest
-    commit first, `ticket: true`; `feature/timify-1234` is `ticket: false`; `develop` once, not twice; `sync` `behind` / `null` as set up.
+    commit first, `ticket: true`; `feature/timify-1234` is `ticket: false`; `develop` once, not twice; `sync` `behind` / `null` as set up; a ticket
+    branch on both sides with NO upstream, local 1 ahead → `sync: 'ahead'`.
   - `worktree` holds the linked tree's absolute path for its branch and the clone's path for the checked-out branch; `mainBranch` is that branch.
   - `defaultBase` = `develop` when `origin/HEAD` → `origin/develop` and `storedBase` is `null`; = `storedBase` when it is `release/2`.
   - Review Focus 2: no origin, no `FETCH_HEAD` → `fetchedAt: null`, branches all `remote: false`.
@@ -318,7 +330,9 @@ Behaviour:
 **Files:**
 - Create: `server/src/jira/branch-choice.util.ts`
 - Modify: `server/src/jira/jira.controller.ts` (`prompt`), `server/src/agents/jira-agents.controller.ts`, `server/src/agents/jira-dispatch.service.ts`,
-  `shared/types.ts` (`JiraDispatchRequest` gains `choice: JiraBranchChoice`, built by the controller from the body's five flat fields)
+  `shared/types.ts` (the wire shape `JiraDispatchRequest` gains the five flat optional fields `mode`, `branch`, `base`, `openMr`, `target` — what the
+  client's `dispatchJira` posts verbatim and what `test/agents-dispatch-jira.test.ts` sends; the service takes `JiraDispatchRequest & { choice:
+  JiraBranchChoice }`, built by the controller through `parseBranchChoice`)
 - Test: `test/jira-branch-choice.test.ts` (new), `test/agents-dispatch-jira.test.ts`, `test/jira-routes.test.ts`
 
 **Interfaces:**
@@ -364,7 +378,8 @@ prompt gets the workspace. The dispatch service reads refs before reserving the 
   - `fetchJiraRefs(repo: string, key: string | null): Promise<JiraRepoRefs>`; `fetchJiraWorktrees(): Promise<JiraWorktreesPayload>`;
     `saveRepoDefaults(path, base: string | null, namePattern: string | null): Promise<…>` (or via the existing `postJson` the Setup group uses).
   - `fetchJiraPrompt(key, action, repo, branch: JiraBranchChoice)` — query adds `mode`, and `branch`/`base`/`openMr`/`target` only when set.
-  - `fetchAgeLine(fetchedAt: string | null, now: number): string` — `never fetched`; under 1 min `as of last fetch, just now`; `… , 7 min ago` (< 60 min);
+  - `fetchAgeLine(fetchedAt: string | null, now: number): string` (*my call*: these buckets) — `never fetched`; under 1 min `as of last fetch, just now`; `… , 7
+    min ago` (< 60 min);
     `… , 3 h ago` (< 48 h); `… , 4 d ago`.
   - `branchSheetDefaults(action: JiraAction, refs: JiraRepoRefs | null, key: string, summary: string, defaults: JiraRepoDefaults | undefined):
     { mode: 'new' | 'continue' | 'none'; branch: string; base: string }` — `context` → `none`; otherwise the first `ticket` branch → `continue` on it;
@@ -401,7 +416,8 @@ branches, then the rest, with a `behind`/`diverged` marker beside the chosen one
 (names of all listed branches) and an editable Name; unavailable refs: `branches unavailable — <path> <reason>` and plain text fields for branch and base;
 Open MR when done: a switch shown only for `execute` with New or Continue, off by default; with Continue on, a Target select pre-filled with
 `refs.defaultBase`. A `branchRefusal` disables Start and Copy prompt and shows its text; `offerContinue` shows a button that switches to Continue on
-that branch. Defaults recompute from `branchSheetDefaults` when action or repo changes, not on every refs reload.
+that branch. Defaults recompute from `branchSheetDefaults` when the action changes, and once per repo when that repo's refs first arrive (at the moment the repo
+changes its refs are still `null`) — never on a later refs reload, which would overwrite what the person picked.
 
 - [ ] **Step 1:** jsdom cases (fetch mocked): execute + a ticket branch → Continue pre-selected on the newest; execute, none → New with the rendered name and
   `develop`; context → No branch selected; execute → no No-branch option; typing a name without the key → `branch must carry TIMIFY-123`, Start disabled;
@@ -415,7 +431,8 @@ that branch. Defaults recompute from `branchSheetDefaults` when action or repo c
 ### Task 9: Setup row defaults, the modal's worktrees, the card chip
 
 **Files:**
-- Modify: `client/src/components/jira/JiraReposGroup.tsx`, `client/src/components/jira/JiraIssueModal.tsx`, `client/src/components/jira/JiraCard.tsx`,
+- Modify: `client/src/components/jira/JiraReposGroup.tsx`, `client/src/components/jira/JiraSkillsGroup.tsx` (`PLACEHOLDERS` and its hint),
+  `client/src/components/jira/JiraIssueModal.tsx`, `client/src/components/jira/JiraCard.tsx`,
   `client/src/components/jira/JiraBoardView.tsx` (fetches worktrees once for the board)
 - Test: `test/jira-setup.test.tsx`, `test/jira-modal.test.tsx`, `test/jira-board.test.tsx`
 
@@ -434,7 +451,9 @@ Behaviour:
   running on <KEY>` while `live[key]` exists; enabled title `Copies the command. Sessions the board did not start — Copy prompt, a terminal — cannot be seen:
   make sure none is using this tree.`
 
-- [ ] **Step 1:** cases: Setup saves `{ path, base: 'develop', namePattern: null }`; a `{slug}` pattern shows the hint and, on save, the server's sentence;
+- [ ] **Step 1:** cases (`test/jira-setup.test.tsx` for Setup and the skills hint): the skills hint lists `{key}`, `{url}`, `{repo}`, `{branch}`, `{base}`,
+  `{worktree}` and the line that the printed path wins; Setup saves `{ path, base: 'develop', namePattern: null }`; a `{slug}` pattern shows the hint and, on
+  save, the server's sentence;
   an unavailable row shows the warning with `~` display; board fetches worktrees once on mount and once more when a live key appears, not on rerender; card
   chip text for one and two trees; modal Remove copies `git -C '/r' worktree remove '/r/.worktrees/x'` (Review Focus 5 path variant too), is disabled with
   the live title, is absent for the main tree.
