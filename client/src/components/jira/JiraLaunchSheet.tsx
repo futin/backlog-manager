@@ -7,6 +7,7 @@ import { useFetched } from '../../hooks/useFetched';
 import { useSettings } from '../../hooks/useSettings';
 import { EFFORT_OPTIONS, MODEL_OPTIONS, modelEffortFlags, sessionUrl } from '../../lib/agents';
 import {
+  branchDispatchFields,
   defaultModeFor,
   displayPath,
   dispatchJira,
@@ -20,6 +21,7 @@ import { JIRA_BUILTIN_LABELS, jiraActionParam } from '../../../../shared/types';
 import type { JiraAction, JiraDispatchResult, JiraIssue, PermissionMode } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
+import { JiraBranchSection, useBranchState } from './JiraBranchSection';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 
@@ -33,7 +35,12 @@ import { Switch } from '../ui/Switch';
  * **The preview is the server's prompt, not this file's.** `GET /api/jira/prompt` composes what Start sends (and what Copy prompt copies) — one
  * composition behind three readers — so the sheet never builds a prompt, and a refusal (`unknown skill s_…` for a skill deleted since the menu was drawn,
  * `prompt too long`) is drawn where the prompt would be, with Start disabled: a sentence the server refused is not one to launch. It is keyed on the
- * action and the repository through `useFetched`, so a superseded answer never lands over the one the reader is looking at.
+ * action, the repository and the branch choice through `useFetched`, so a superseded answer never lands over the one the reader is looking at.
+ *
+ * **The branch choice is the Branch section's** (`JiraBranchSection`, spec §5.3): this sheet holds its state, because the preview, Copy prompt and Start all
+ * carry it — the preview on its query, Start as the five flat fields. Until the section has seeded from the chosen repository's refs nothing is asked: a
+ * preview of the previous repository's branch is a sentence nobody chose. A choice the section refuses asks for no preview either, so Copy prompt has nothing
+ * to copy and Start carries the refusal as its reason — the server would refuse the same choice with the same sentence.
  *
  * **Two reads, one sheet.** The ticket's transitions and assignee come from one `GET /api/jira/issue/:key` on open — the board card carries neither — and
  * the agents status (`useAgents`) is asked on open too, never inherited from the board, because the board's copy may be minutes old.
@@ -88,7 +95,14 @@ export function JiraLaunchSheet({
   const [started, setStarted] = useState<JiraDispatchResult | null>(null);
 
   const actionKey = jiraActionParam(action);
-  const preview = useFetched(repo === '' ? null : () => fetchJiraPrompt(issue.key, action, repo, { mode: 'none' }), [issue.key, actionKey, repo]);
+  const branch = useBranchState(action, repo, issue.key, issue.summary, data?.repoDefaults[repo]);
+  const branchSent = branch.ready && branch.refusal === null;
+  const preview = useFetched(branchSent ? () => fetchJiraPrompt(issue.key, action, repo, branch.choice) : null, [
+    issue.key,
+    actionKey,
+    repo,
+    JSON.stringify(branch.choice)
+  ]);
   const detail = useFetched(() => fetchJiraDetail(issue.key), [issue.key]);
 
   const promptText = preview.status === 'ok' ? preview.value : null;
@@ -109,15 +123,19 @@ export function JiraLaunchSheet({
   // unreachable) holds whatever has been picked, and Start is never drawn and then withdrawn the moment a repository is chosen.
   const gate = agents === null ? null : projectDispatchGate(agents, repo);
   const startDrawn = gate !== null && gate.control !== 'hidden';
-  // The first reason that applies, in the order the reader can act on them: the repository, the dashboard's view of it, the prompt itself.
+  // The first reason that applies, in the order the reader can act on them: the repository, the dashboard's view of it, the branch, the prompt itself.
   const startBlock =
     repo === ''
       ? 'choose a repository'
       : gate?.control === 'disabled'
         ? gate.reason
-        : promptText === null
-          ? (promptRefusal ?? 'the prompt has not loaded')
-          : null;
+        : !branch.ready
+          ? 'the branches have not loaded'
+          : branch.refusal !== null
+            ? branch.refusal.text
+            : promptText === null
+              ? (promptRefusal ?? 'the prompt has not loaded')
+              : null;
   // What the Switch DISPLAYS is what Start sends: a ticket that turns out to be the reader's already (the detail lands after a toggle) reads Off.
   const assignNow = assign && assignBlock === null;
 
@@ -156,9 +174,7 @@ export function JiraLaunchSheet({
           assign: assignNow,
           // `null` is "leave as is" — the server's own spelling, not an empty string it would have to refuse.
           transitionId: transitionId === '' ? null : transitionId,
-          // The server now requires a branch choice. This sheet has no Branch section yet (a later task adds it), and `none` is the choice that changes
-          // nothing — though the server refuses it for `execute`, so an execute Start is a 400 until the section lands.
-          mode: 'none',
+          ...branchDispatchFields(branch.choice),
           ...modelEffortFlags(model, effort),
           permissionMode: mode,
           remoteControl
@@ -260,6 +276,8 @@ export function JiraLaunchSheet({
             )}
           </div>
 
+          <JiraBranchSection branch={branch} action={action} repo={repo} home={data?.home ?? null} />
+
           <label className="sheet-field">
             <span className="set-name">Prompt</span>
             {promptText !== null ? (
@@ -267,7 +285,9 @@ export function JiraLaunchSheet({
             ) : promptRefusal !== null ? (
               <div className="sheet-blocked">{promptRefusal}</div>
             ) : (
-              <div className="sheet-note">{repo === '' ? 'choose a repository to see the prompt' : 'loading…'}</div>
+              <div className="sheet-note">
+                {repo === '' ? 'choose a repository to see the prompt' : branch.refusal !== null ? 'fix the branch above to see the prompt' : 'loading…'}
+              </div>
             )}
           </label>
 

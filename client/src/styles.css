@@ -1387,6 +1387,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-sheet-note { margin-right: auto; font-size: 12px; color: var(--ink3) }
 .jira-sheet-error { font-size: 13px; line-height: 1.45; color: var(--red) }
 
+/* The launch sheet's Branch section (§8.9.5): a control and the word about it on one line — the Continue select and its `behind` marker, a refusal and its
+   `switch to Continue` chip — wrapping on a phone rather than pushing the sheet wider. */
+.jira-branch-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px }
+
 /* Rendered item Markdown, at §6.1's scale: 15/400 body, 19/500 headings, code
    spans on --steel. The section headings are the store's fixed ## set
    (Symptom, Plan, …), so they carry a hairline rather than sitting on size

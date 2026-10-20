@@ -18,6 +18,10 @@ import {
   fetchAgeLine,
   branchSheetDefaults,
   branchRefusal,
+  branchDraft,
+  branchChoiceOf,
+  branchDispatchFields,
+  draftRefusal,
   ticketWorktrees,
   removeCommand,
   stopJira,
@@ -1163,6 +1167,18 @@ describe('branch choice derivations', () => {
     it('a skill action is treated as execute', () => {
       expect(branchSheetDefaults({ skill: 's_0a1b2c3d' }, refsOf([]), 'TIMIFY-123', 'x', undefined).mode).toBe('new');
     });
+    // Ruling 15: the sheet refuses Continue on the mapped checkout's own branch, so opening on it would be a dead end.
+    it('skips a ticket branch the mapped checkout holds, taking the next one, else New', () => {
+      const held = { mainBranch: 'timify-123-main' };
+      expect(
+        branchSheetDefaults('execute', refsOf([branch('timify-123-main', true), branch('timify-123-y', true)], held), 'TIMIFY-123', 'x', undefined)
+      ).toEqual({ mode: 'continue', branch: 'timify-123-y', base: '' });
+      expect(branchSheetDefaults('execute', refsOf([branch('timify-123-main', true)], held), 'TIMIFY-123', 'Export', undefined)).toEqual({
+        mode: 'new',
+        branch: 'timify-123-export',
+        base: 'develop'
+      });
+    });
   });
 
   describe('branchRefusal', () => {
@@ -1192,6 +1208,89 @@ describe('branch choice derivations', () => {
     it('continue does not require the key, and unavailable refs add no state checks', () => {
       expect(branchRefusal('continue', 'whatever', 'TIMIFY-123', refs)).toBeNull();
       expect(branchRefusal('continue', 'develop', 'TIMIFY-123', { repo: '/r', available: false, reason: 'does not exist' })).toBeNull();
+    });
+    // Ruling 16: the server refuses a new branch with no base, or a malformed one, so the sheet says it before Start rather than sending a sure 400.
+    it('a new branch needs a well-formed base, checked after the branch and before the key, refs or not', () => {
+      const down: JiraRepoRefs = { repo: '/r', available: false, reason: 'does not exist' };
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', refs, '')).toEqual({ text: 'base is required for a new branch', offerContinue: false });
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', down, '')).toEqual({ text: 'base is required for a new branch', offerContinue: false });
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', refs, 'a..b')).toEqual({ text: 'base may not contain ..', offerContinue: false });
+      expect(branchRefusal('new', 'x y', 'TIMIFY-123', refs, '')).toEqual({ text: 'branch may hold only A-Z a-z 0-9 . _ / -', offerContinue: false });
+      expect(branchRefusal('new', 'nokey', 'TIMIFY-123', refs, '')).toEqual({ text: 'base is required for a new branch', offerContinue: false });
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', refs, 'origin/develop')).toBeNull();
+      expect(branchRefusal('continue', 'timify-123-x', 'TIMIFY-123', refs, '')).toBeNull();
+    });
+  });
+
+  describe('the sheet draft', () => {
+    const tickets = refsOf([branch('timify-123-x', true), branch('develop', false)]);
+    it('execute with a ticket branch: Continue on it, and New and the MR target still filled for a switch', () => {
+      expect(branchDraft('execute', tickets, 'TIMIFY-123', 'Export contacts', undefined)).toEqual({
+        mode: 'continue',
+        continueBranch: 'timify-123-x',
+        newBranch: 'timify-123-export-contacts',
+        base: 'develop',
+        openMr: false,
+        target: 'develop'
+      });
+    });
+    it('context: No branch, with the other two modes pre-filled', () => {
+      expect(branchDraft('context', tickets, 'TIMIFY-123', 'Export', { namePattern: 'feature/{key}-{slug}' })).toEqual({
+        mode: 'none',
+        continueBranch: 'timify-123-x',
+        newBranch: 'feature/timify-123-export',
+        base: 'develop',
+        openMr: false,
+        target: 'develop'
+      });
+    });
+    it('unread refs: the stored base fills base and target, and Continue has nothing to offer', () => {
+      expect(branchDraft('execute', null, 'TIMIFY-123', 'Export', { base: 'main' })).toEqual({
+        mode: 'new',
+        continueBranch: '',
+        newBranch: 'timify-123-export',
+        base: 'main',
+        openMr: false,
+        target: 'main'
+      });
+    });
+    it('the choice keeps only the fields its mode and action own', () => {
+      const draft = { mode: 'continue' as const, continueBranch: 'b', newBranch: 'n', base: 'develop', openMr: true, target: 'main' };
+      expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, target: 'main' });
+      expect(branchChoiceOf({ ...draft, target: '' }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, target: null });
+      expect(branchChoiceOf({ ...draft, openMr: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: false, target: null });
+      expect(branchChoiceOf(draft, 'context')).toEqual({ mode: 'continue', branch: 'b', openMr: false, target: null });
+      expect(branchChoiceOf({ ...draft, mode: 'new' }, 'execute')).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: true });
+      expect(branchChoiceOf({ ...draft, mode: 'new' }, { skill: 's_0a1b2c3d' })).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: false });
+      expect(branchChoiceOf({ ...draft, mode: 'none' }, 'context')).toEqual({ mode: 'none' });
+    });
+    it('the dispatch fields are the five flat ones, each only with its mode', () => {
+      expect(branchDispatchFields({ mode: 'none' })).toEqual({ mode: 'none' });
+      expect(branchDispatchFields({ mode: 'new', branch: 'n', base: 'develop', openMr: false })).toEqual({
+        mode: 'new',
+        branch: 'n',
+        base: 'develop',
+        openMr: false
+      });
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: true, target: 'main' })).toEqual({
+        mode: 'continue',
+        branch: 'b',
+        openMr: true,
+        target: 'main'
+      });
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: false, target: null })).toEqual({ mode: 'continue', branch: 'b', openMr: false });
+    });
+    it('the draft refusal reads the mode\'s own fields, then a typed MR target', () => {
+      const draft = { mode: 'new' as const, continueBranch: 'develop', newBranch: 'timify-123-n', base: '', openMr: false, target: '' };
+      expect(draftRefusal(draft, 'execute', 'TIMIFY-123', tickets)?.text).toBe('base is required for a new branch');
+      expect(draftRefusal({ ...draft, mode: 'continue' }, 'execute', 'TIMIFY-123', tickets)?.text).toBe(
+        'develop is checked out in the mapped checkout /repos/app'
+      );
+      const cont = { ...draft, mode: 'continue' as const, continueBranch: 'timify-123-x', openMr: true };
+      expect(draftRefusal({ ...cont, target: 'a..b' }, 'execute', 'TIMIFY-123', null)?.text).toBe('target may not contain ..');
+      expect(draftRefusal(cont, 'execute', 'TIMIFY-123', null)).toBeNull();
+      expect(draftRefusal({ ...cont, target: 'a..b', openMr: false }, 'execute', 'TIMIFY-123', null)).toBeNull();
+      expect(draftRefusal({ ...draft, mode: 'none' }, 'context', 'TIMIFY-123', tickets)).toBeNull();
     });
   });
 

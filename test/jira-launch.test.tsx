@@ -9,7 +9,16 @@ import { JiraLaunchSheet } from '../client/src/components/jira/JiraLaunchSheet';
 import { JiraContext } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoStamp } from './helpers/dates';
-import type { AgentsStatus, JiraAction, JiraDispatchResult, JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../shared/types';
+import type {
+  AgentsStatus,
+  JiraAction,
+  JiraDispatchResult,
+  JiraIssue,
+  JiraIssueDetail,
+  JiraRefBranch,
+  JiraRepoRefs,
+  JiraStatusPayload
+} from '../shared/types';
 
 /*
   Jira › the launch sheet (Jira phase 5, Task 9; spec §7, §8; DESIGN.md §8.7 Sheet and §8.9) — the real sheet over a mocked `fetch`, rendered directly:
@@ -89,6 +98,8 @@ interface Server {
   agents: AgentsStatus;
   detail: JiraIssueDetail | { status: number; error: string };
   prompt: (url: URL) => { status: number; body: string };
+  /** `GET /api/jira/refs`, per repository: refs, or a refusal. */
+  refs: (repo: string) => { status: number; body: unknown };
   dispatch: { status: number; body: unknown };
   /** When set, the detail read answers only once this settles — a case's way to act before the detail lands. */
   detailGate?: Promise<void>;
@@ -96,6 +107,23 @@ interface Server {
 
 let server: Server;
 let calls: { url: string; init?: RequestInit }[];
+
+function refBranch(name: string, over: Partial<JiraRefBranch> = {}): JiraRefBranch {
+  return { name, local: true, remote: true, sync: 'same', committedAt: daysAgoStamp(3), worktree: null, ticket: false, ...over };
+}
+
+/** A readable repository: `develop` checked out in the mapped checkout and the default base, never fetched, plus whatever `branches` a case adds. */
+function refsOf(repo: string, branches: JiraRefBranch[] = [], over: Partial<{ fetchedAt: string | null; defaultBase: string | null }> = {}): JiraRepoRefs {
+  return {
+    repo,
+    available: true,
+    fetchedAt: null,
+    mainBranch: 'develop',
+    defaultBase: 'develop',
+    branches: [...branches, refBranch('develop', { worktree: repo })],
+    ...over
+  };
+}
 
 const okPrompt = (url: URL): { status: number; body: string } => ({
   status: 200,
@@ -121,6 +149,7 @@ beforeEach(() => {
     agents: agents(),
     detail: detail(),
     prompt: okPrompt,
+    refs: (repo) => ({ status: 200, body: refsOf(repo) }),
     dispatch: {
       status: 200,
       body: {
@@ -139,6 +168,10 @@ beforeEach(() => {
     if (url.pathname === '/api/jira/prompt') {
       const p = server.prompt(url);
       return Promise.resolve(p.status === 200 ? res(200, null, p.body) : res(p.status, { error: p.body }));
+    }
+    if (url.pathname === '/api/jira/refs') {
+      const r = server.refs(url.searchParams.get('repo') ?? '');
+      return Promise.resolve(r.status === 200 ? res(200, r.body) : res(r.status, { error: r.body }));
     }
     if (url.pathname.startsWith('/api/jira/issue/')) {
       const d = server.detail;
@@ -270,7 +303,10 @@ describe('JiraLaunchSheet — the action and the preview', () => {
 
     await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), `skill:${SKILL.id}`);
     await waitFor(() => expect(promptBox().value).toBe(`prompt for skill:${SKILL.id} in /Users/ada/pay`));
-    expect(calls.map((c) => c.url)).toContain(`/api/jira/prompt?key=PAY-131&action=skill%3A${SKILL.id}&repo=%2FUsers%2Fada%2Fpay&mode=none`);
+    // The skill is treated as execute by the Branch section: no ticket branch here, so a New one from the default pattern, cut from `develop`.
+    expect(calls.map((c) => c.url)).toContain(
+      `/api/jira/prompt?key=PAY-131&action=skill%3A${SKILL.id}&repo=%2FUsers%2Fada%2Fpay&mode=new&branch=pay-131-refund-partial-captures&base=develop`
+    );
   });
 
   it('ignores jiraDefaultAction — the menu reads it, and the sheet opens on exactly the action it was handed', async () => {
@@ -367,7 +403,10 @@ describe('JiraLaunchSheet — assign and move', () => {
       action: 'execute',
       assign: false,
       transitionId: null,
-      mode: 'none',
+      mode: 'new',
+      branch: 'pay-131-refund-partial-captures',
+      base: 'develop',
+      openMr: false,
       permissionMode: 'acceptEdits',
       remoteControl: true
     });
@@ -390,7 +429,10 @@ describe('JiraLaunchSheet — assign and move', () => {
       action: { skill: SKILL.id },
       assign: true,
       transitionId: '31',
-      mode: 'none',
+      mode: 'new',
+      branch: 'pay-131-refund-partial-captures',
+      base: 'develop',
+      openMr: false,
       model: 'opus',
       effort: 'high',
       permissionMode: 'plan',
@@ -471,6 +513,211 @@ describe('JiraLaunchSheet — Start', () => {
     });
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(calls.filter((c) => c.url === '/api/agents/dispatch-jira')).toHaveLength(1);
+  });
+});
+
+describe('JiraLaunchSheet — the branch', () => {
+  const TWO = { repos: { PAY: ['/Users/ada/pay', '/Users/ada/pay-web'] } };
+  const modeButton = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Branch mode' })).getByRole('button', { name });
+  const pressed = (): string | null =>
+    within(within(dialog()).getByRole('group', { name: 'Branch mode' }))
+      .getAllByRole('button')
+      .find((b) => b.getAttribute('aria-pressed') === 'true')?.textContent ?? null;
+  const field = (name: string): HTMLInputElement | HTMLSelectElement => within(dialog()).getByLabelText(name) as HTMLInputElement | HTMLSelectElement;
+  const mrSwitch = (): HTMLElement | null => within(dialog()).queryByRole('switch', { name: 'Open MR when done' });
+
+  it('puts A\'s defaults back after A → B → A, not B\'s, and asks refs for each repository it lands on', async () => {
+    server.refs = (repo) =>
+      repo === '/Users/ada/pay'
+        ? { status: 200, body: refsOf(repo, [refBranch('pay-131-a', { ticket: true })]) }
+        : { status: 200, body: refsOf(repo, [], { defaultBase: 'main' }) };
+    mount({ status: TWO });
+    const repoSelect = await within(dialog()).findByRole('combobox', { name: 'Repository' });
+    expect(modeButton('New')).toBeDisabled();
+
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('pay-131-a');
+
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay-web');
+    await waitFor(() => expect(pressed()).toBe('New'));
+    expect(field('Name').value).toBe('pay-131-refund-partial-captures');
+    expect(field('Base').value).toBe('main');
+
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('pay-131-a');
+    const asked = calls.filter((c) => c.url.startsWith('/api/jira/refs')).map((c) => new URL(c.url, 'http://x').searchParams.get('repo'));
+    expect(asked).toEqual(['/Users/ada/pay', '/Users/ada/pay-web', '/Users/ada/pay']);
+  });
+
+  it('falls back to the unavailable form, seeded from the stored defaults, when the refs request fails', async () => {
+    server.refs = () => ({ status: 500, body: 'boom' });
+    await ready({ status: { repoDefaults: { '/Users/ada/pay': { base: 'main', namePattern: 'feature/{key}-{slug}' } } } });
+    expect(await within(dialog()).findByText(/branches unavailable/)).toBeInTheDocument();
+    expect(field('Name').value).toBe('feature/pay-131-refund-partial-captures');
+    expect(field('Base')).toHaveAttribute('type', 'text');
+    expect(field('Base').value).toBe('main');
+  });
+
+  it('execute with ticket branches continues on the newest', async () => {
+    server.refs = (repo) => ({
+      status: 200,
+      body: refsOf(repo, [refBranch('feature/pay-131-newest', { ticket: true }), refBranch('pay-131-older', { ticket: true })])
+    });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('feature/pay-131-newest');
+    // Ticket branches first, in their own group, then the rest.
+    const groups = [...(field('Branch') as HTMLSelectElement).querySelectorAll('optgroup')];
+    expect(groups.map((g) => [...g.querySelectorAll('option')].map((o) => o.value))).toEqual([
+      ['feature/pay-131-newest', 'pay-131-older'],
+      ['develop']
+    ]);
+  });
+
+  it('execute with no ticket branch opens New, named from the pattern and cut from develop', async () => {
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('New'));
+    expect(field('Name').value).toBe('pay-131-refund-partial-captures');
+    expect(field('Base').value).toBe('develop');
+  });
+
+  it('context opens on No branch; execute offers no No branch at all', async () => {
+    await ready({ initialAction: 'context' });
+    await waitFor(() => expect(pressed()).toBe('No branch'));
+    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), 'execute');
+    await waitFor(() => expect(pressed()).toBe('New'));
+    expect(within(within(dialog()).getByRole('group', { name: 'Branch mode' })).queryByRole('button', { name: 'No branch' })).not.toBeInTheDocument();
+  });
+
+  it('refuses a typed name without the key, disabling Start and Copy prompt', async () => {
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.clear(field('Name'));
+    await userEvent.type(field('Name'), 'fix-login');
+    expect(await within(dialog()).findByText('branch must carry PAY-131')).toBeInTheDocument();
+    expect(startButton()).toBeDisabled();
+    expect(startButton()).toHaveAttribute('title', 'branch must carry PAY-131');
+    expect(copyButton()).toBeDisabled();
+  });
+
+  it('a name that exists offers the switch to Continue on it', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(modeButton('New'));
+    await userEvent.clear(field('Name'));
+    await userEvent.type(field('Name'), 'pay-131-x');
+    expect(await within(dialog()).findByText('pay-131-x exists')).toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'switch to Continue' }));
+    expect(pressed()).toBe('Continue');
+    expect(field('Branch').value).toBe('pay-131-x');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+
+  it('refuses Continue on the branch the mapped checkout holds', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.selectOptions(field('Branch'), 'develop');
+    expect(await within(dialog()).findByText('develop is checked out in the mapped checkout /Users/ada/pay')).toBeInTheDocument();
+    expect(startButton()).toBeDisabled();
+  });
+
+  it('says where it will work when a linked tree holds the branch, and marks a behind copy', async () => {
+    server.refs = (repo) => ({
+      status: 200,
+      body: refsOf(repo, [refBranch('pay-131-x', { ticket: true, worktree: '/r/.worktrees/x', sync: 'behind' })])
+    });
+    await ready();
+    expect(await within(dialog()).findByText('will work in /r/.worktrees/x')).toBeInTheDocument();
+    expect(within(dialog()).getByText('behind')).toBeInTheDocument();
+  });
+
+  it('unavailable refs: the warning sentence, two text fields, and Start enabled', async () => {
+    server.refs = (repo) => ({ status: 200, body: { repo, available: false, reason: 'not mounted into the board' } });
+    await ready({ status: { repoDefaults: { '/Users/ada/pay': { base: 'develop' } } } });
+    expect(await within(dialog()).findByText('branches unavailable — ~/pay not mounted into the board')).toBeInTheDocument();
+    expect(field('Name')).toHaveAttribute('type', 'text');
+    expect(field('Base')).toHaveAttribute('type', 'text');
+    expect(field('Base').value).toBe('develop');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+  });
+
+  it('an empty base in the unavailable form is refused before Start', async () => {
+    server.refs = (repo) => ({ status: 200, body: { repo, available: false, reason: 'does not exist' } });
+    mount();
+    expect(await within(dialog()).findByText('base is required for a new branch')).toBeInTheDocument();
+    await waitFor(() => expect(startButton()).toBeDisabled());
+    // A refused choice asks for no preview: the server would refuse it with the same sentence.
+    expect(promptReads()).toHaveLength(0);
+    expect(within(dialog()).getByText('fix the branch above to see the prompt')).toBeInTheDocument();
+  });
+
+  it('prints how old the branch list is: never fetched, or the fetch age', async () => {
+    await ready();
+    expect(await within(dialog()).findByText('never fetched')).toBeInTheDocument();
+  });
+
+  it('prints the age of the last fetch', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [], { fetchedAt: new Date(Date.now() - 7 * 60_000).toISOString() }) });
+    await ready();
+    expect(await within(dialog()).findByText('as of last fetch, 7 min ago')).toBeInTheDocument();
+  });
+
+  it('draws Open MR only for execute with a branch, and Target only with Continue', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready({ initialAction: 'context' });
+    await waitFor(() => expect(pressed()).toBe('No branch'));
+    expect(mrSwitch()).not.toBeInTheDocument();
+    await userEvent.click(modeButton('New'));
+    expect(mrSwitch()).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), 'execute');
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(modeButton('New'));
+    expect(mrSwitch()).not.toBeChecked();
+    await userEvent.click(mrSwitch() as HTMLElement);
+    expect(within(dialog()).queryByLabelText('Target')).not.toBeInTheDocument();
+    await userEvent.click(modeButton('Continue'));
+    expect(field('Target').value).toBe('develop');
+  });
+
+  it('Start sends the five flat fields, and the preview asked with the same choice', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(mrSwitch() as HTMLElement);
+    await waitFor(() => expect(promptReads().at(-1)?.searchParams.get('openMr')).toBe('true'));
+    const last = promptReads().at(-1) as URL;
+    expect(Object.fromEntries(last.searchParams)).toEqual({
+      key: 'PAY-131',
+      action: 'execute',
+      repo: '/Users/ada/pay',
+      mode: 'continue',
+      branch: 'pay-131-x',
+      openMr: 'true',
+      target: 'develop'
+    });
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    await userEvent.click(startButton());
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/agents/dispatch-jira')).toBe(true));
+    expect(dispatchBody()).toEqual({
+      key: 'PAY-131',
+      repo: '/Users/ada/pay',
+      action: 'execute',
+      assign: false,
+      transitionId: null,
+      mode: 'continue',
+      branch: 'pay-131-x',
+      openMr: true,
+      target: 'develop',
+      permissionMode: 'acceptEdits',
+      remoteControl: true
+    });
   });
 });
 

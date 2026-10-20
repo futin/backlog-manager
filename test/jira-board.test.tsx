@@ -179,6 +179,12 @@ beforeEach(() => {
     }
     if (url === '/api/agents/status') return ok(AGENTS);
     if (url.startsWith('/api/jira/prompt')) return ok('a prompt');
+    // The launch sheet's Branch section reads the repository's branches before it lets an execute Start: a readable repo with a default base, so the sheet
+    // opens on a New branch it will launch (a `{}` would be a failed read — the unavailable form, with no base and Start refused for it).
+    if (url.startsWith('/api/jira/refs')) {
+      const repo = new URL(url, 'http://x').searchParams.get('repo');
+      return ok({ repo, available: true, fetchedAt: null, mainBranch: 'develop', defaultBase: 'develop', branches: [] });
+    }
     return ok({});
   }) as unknown as typeof fetch;
 });

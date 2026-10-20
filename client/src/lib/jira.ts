@@ -924,6 +924,9 @@ export function fetchAgeLine(fetchedAt: string | null, now: number): string {
  * `ticket` branch — the server sorts the ticket's own branches first, newest commit first, so "first" is "newest" — and only with none of those starts a `new`
  * one, named from the repo's stored pattern (else `DEFAULT_NAME_PATTERN`) and cut from the repo's default base. Unavailable or unread refs leave the stored
  * base as the one hint there is. `base` is `''` for the modes that do not use it, and for a repo whose default base is unknown — the sheet then asks.
+ *
+ * A ticket branch the mapped checkout itself holds (`mainBranch`) is skipped for the next one, and with none left the sheet opens on New: `branchRefusal`
+ * refuses Continue on that branch, so pre-selecting it would open the sheet on a choice it will not launch (Ruling 15).
  */
 export function branchSheetDefaults(
   action: JiraAction,
@@ -933,7 +936,7 @@ export function branchSheetDefaults(
   defaults: JiraRepoDefaults | undefined
 ): { mode: 'new' | 'continue' | 'none'; branch: string; base: string } {
   if (action === 'context') return { mode: 'none', branch: '', base: '' };
-  const existing = refs !== null && refs.available ? refs.branches.find((b) => b.ticket) : undefined;
+  const existing = refs !== null && refs.available ? refs.branches.find((b) => b.ticket && b.name !== refs.mainBranch) : undefined;
   if (existing !== undefined) return { mode: 'continue', branch: existing.name, base: '' };
   const branch = renderBranchPattern(defaults?.namePattern ?? DEFAULT_NAME_PATTERN, key, slugOf(summary));
   const base = refs !== null && refs.available ? (refs.defaultBase ?? '') : (defaults?.base ?? '');
@@ -946,23 +949,118 @@ export function branchSheetDefaults(
  * already listed — which carries `offerContinue`, so the sheet can offer the switch the server's own 409 words as `switch to Continue` — and, for `continue`,
  * whether the mapped checkout holds it (git refuses a second checkout of one branch, and the session must not run in the person's own tree). `continue` does
  * not need the key: continuing a branch someone else named is the point. Unavailable refs make no state checks — there is nothing to compare against.
+ *
+ * `base`, when given, is a `new` branch's base and is checked between the name and the key — the order `parseBranchChoice` checks them in, so the sheet says
+ * the sentence the server would: `''` is the server's own `base is required for a new branch`, a malformed one `base <problem>` (Ruling 16). It is checked
+ * with or without refs, because a typed base in the unavailable form is exactly where a bad one comes from. Omitted, there is no base check at all — a
+ * caller judging only the name keeps working.
  */
 export function branchRefusal(
   mode: 'new' | 'continue' | 'none',
   branch: string,
   key: string,
-  refs: JiraRepoRefs | null
+  refs: JiraRepoRefs | null,
+  base?: string
 ): { text: string; offerContinue: boolean } | null {
   if (mode === 'none') return null;
   const problem = branchNameProblem(branch);
   if (problem !== null) return { text: `branch ${problem}`, offerContinue: false };
   if (mode === 'new') {
+    if (base !== undefined) {
+      if (base === '') return { text: 'base is required for a new branch', offerContinue: false };
+      const baseProblem = branchNameProblem(base);
+      if (baseProblem !== null) return { text: `base ${baseProblem}`, offerContinue: false };
+    }
     if (!branchCarriesKey(branch, key)) return { text: `branch must carry ${key}`, offerContinue: false };
     if (refs !== null && refs.available && refs.branches.some((b) => b.name === branch)) return { text: `${branch} exists`, offerContinue: true };
     return null;
   }
   if (refs !== null && refs.available && refs.mainBranch === branch) {
     return { text: `${branch} is checked out in the mapped checkout ${refs.repo}`, offerContinue: false };
+  }
+  return null;
+}
+
+/**
+ * What the launch sheet's Branch section holds while the person edits it: every mode's fields at once, so flipping New → Continue → New gives back the name
+ * they typed rather than re-rendering the pattern over it. `target` is the MR target as the field shows it, `''` for "the repository's default branch".
+ * `branchChoiceOf` is what leaves the sheet; this never does.
+ */
+export interface BranchDraft {
+  mode: 'new' | 'continue' | 'none';
+  newBranch: string;
+  base: string;
+  continueBranch: string;
+  openMr: boolean;
+  target: string;
+}
+
+/**
+ * The draft the sheet opens with (spec §5.3): `branchSheetDefaults` decides the mode, and the two modes it did not pick are filled anyway, as they would open
+ * if picked — New from the pattern and the default base (the same call with the ticket's branches taken away, so one derivation names both), Continue on the
+ * first ticket branch the mapped checkout does not hold, else nothing. The MR target opens on the repo's default base — the stored one when refs could not be
+ * read — and the switch itself always opens off (spec §5.6).
+ */
+export function branchDraft(
+  action: JiraAction,
+  refs: JiraRepoRefs | null,
+  key: string,
+  summary: string,
+  defaults: JiraRepoDefaults | undefined
+): BranchDraft {
+  const picked = branchSheetDefaults(action, refs, key, summary, defaults);
+  const bare = refs !== null && refs.available ? { ...refs, branches: [] } : refs;
+  const fresh = branchSheetDefaults('execute', bare, key, summary, defaults);
+  const ticket = refs !== null && refs.available ? refs.branches.find((b) => b.ticket && b.name !== refs.mainBranch) : undefined;
+  return {
+    mode: picked.mode,
+    newBranch: fresh.branch,
+    base: fresh.base,
+    continueBranch: picked.mode === 'continue' ? picked.branch : (ticket?.name ?? ''),
+    openMr: false,
+    target: refs !== null && refs.available ? (refs.defaultBase ?? '') : (defaults?.base ?? '')
+  };
+}
+
+/**
+ * The choice the draft stands for. `openMr` is `execute`'s alone (a skill's prompt is its template, with no commit rule to amend — spec §5.6), and `target`
+ * rides only with Continue and the MR on, because the server refuses it anywhere else; a blank target is `null`, "the repository's default branch".
+ */
+export function branchChoiceOf(draft: BranchDraft, action: JiraAction): JiraBranchChoice {
+  const openMr = action === 'execute' && draft.openMr;
+  if (draft.mode === 'none') return { mode: 'none' };
+  if (draft.mode === 'new') return { mode: 'new', branch: draft.newBranch, base: draft.base, openMr };
+  return { mode: 'continue', branch: draft.continueBranch, openMr, target: openMr && draft.target !== '' ? draft.target : null };
+}
+
+/**
+ * The choice as `POST /api/agents/dispatch-jira`'s five flat fields — the same rule `fetchJiraPrompt` follows on its query: each field only with the mode it
+ * belongs to, because the server refuses a stray one (`base is only for a new branch`) rather than ignoring it. `openMr` goes out as the boolean it is.
+ */
+export function branchDispatchFields(choice: JiraBranchChoice): Pick<JiraDispatchRequest, 'mode' | 'branch' | 'base' | 'openMr' | 'target'> {
+  if (choice.mode === 'none') return { mode: 'none' };
+  if (choice.mode === 'new') return { mode: 'new', branch: choice.branch, base: choice.base, openMr: choice.openMr };
+  return { mode: 'continue', branch: choice.branch, openMr: choice.openMr, ...(choice.target !== null ? { target: choice.target } : {}) };
+}
+
+/**
+ * The sheet's one refusal for a draft: `branchRefusal` on the mode's own branch (and, for New, its base), then a TYPED MR target — only the unavailable form
+ * has a text field for it, the select offers listed names only — checked like any name (`target <problem>`), since the server would refuse it with that
+ * sentence. A blank target is not a problem: it means the repository's default.
+ */
+export function draftRefusal(
+  draft: BranchDraft,
+  action: JiraAction,
+  key: string,
+  refs: JiraRepoRefs | null
+): { text: string; offerContinue: boolean } | null {
+  const choice = branchChoiceOf(draft, action);
+  if (choice.mode === 'none') return null;
+  const refused = branchRefusal(choice.mode, choice.branch, key, refs, choice.mode === 'new' ? choice.base : undefined);
+  if (refused !== null) return refused;
+  if (choice.mode === 'continue' && choice.target !== null) {
+    const problem = branchNameProblem(choice.target);
+    if (problem !== null) return { text: `target ${problem}`, offerContinue: false };
   }
   return null;
 }
