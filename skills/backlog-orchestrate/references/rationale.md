@@ -497,3 +497,31 @@ reverts the change under it. Reading the diff harder finds neither.
 
 Dated deliberately. The next cross-run sweep can compare the fix-verdict rate against the 27-of-91 this one measured and say whether the step moved it; if it
 did not, this section is the record of what was tried.
+
+## §5 — Why a plan-stale Outcome is staged `ungroomed`, and why the mark is keyed by the plan's hash
+
+#322, 2026-10-20. A plan is written against one commit and executed against another, sometimes weeks later. Before this, an execute session that found its
+plan contradicted by the code had two options and both were bad: execute it anyway, which produced a diff the reviewer sent back and a fix loop that could not
+converge because the approach itself was gone (the median fix loop costs 22.6 minutes and about $5.60, §4 above), or write a failure Outcome, which the driver
+read as "it tried and failed" and offered to retry — the same session, against the same stale plan, with the same result. Nothing remembered the verdict, so
+the next run's gate read the item `ready` again and dispatched it again.
+
+So the session's verdict gets a fixed first line, `Plan no longer holds: …`, and the driver reads it mechanically (`inspect`'s `planStale`) rather than judging
+an Outcome's prose. `stage --plan-stale` re-reads that same line itself and refuses a `--note`: the line is the session's words, and §4's rule that prose this
+run did not compose never rides a command line holds for it exactly as it does for a review — one apostrophe and the driver's shell call breaks. The item is
+staged `ungroomed`, not `parked` or `failed`: the session did its job and the work is waiting on a groom, which is exactly what `ungroomed` already means to the
+drawer, the finishing summary and the claim release. Review, verify, retry and park are all skipped because each would spend a session on a plan that has
+already been ruled out.
+
+`stage --plan-stale` also files a mark in `stale-plans.json` in the project's run-state directory, and the gate reads it at every later `plan` and `init`. It is
+keyed by the sha256 of the plan's own text, read from the same bytes the gate reads — at `<base>` for a files project, from the API for a tracker one — trimmed,
+CRLF normalised and with the `bm:groomed-at` footer stripped. That key is the whole of how a mark is cleared: a re-groom changes the plan's words, so the hash
+no longer matches and the mark is ignored, while a re-stamp of the anchor, a line-ending rewrite or a heartbeat changes nothing a person decided and leaves it
+standing. There is no "clear" command on purpose — a second way to clear it would be a second way to dispatch the same stale plan.
+
+The file outlives the run that wrote it, so `archiveSidecars` keeps it out of the archive by name: it is project-level state, not a run's sidecar, and archiving
+it with the run that filed it would unmark every item at the very next `init`. `plan` reads it without ever creating the directory, and a missing or malformed
+file reads as no marks — execute's own drift re-check is the backstop, so failing open costs one session at most.
+
+The worktree and branch stay where they are, as a parked item's do. No cleanup path removes a tree for any stage but `merged`/`branched`, and a files worktree
+still holds the uncommitted Outcome, which is the evidence the re-groom needs.

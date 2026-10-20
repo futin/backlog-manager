@@ -32,6 +32,13 @@ import {
   COUNTER_KEYS,
 } from './import-lib.mjs'
 
+// Groom drift (#322): the `groomed-at` anchor and `planDrift`. A module of its own because `orchestrate.mjs` needs the same function and may not import
+// this file — so it imports a byte-identical copy beside itself, and `drift-lib.test.mjs` holds the two together. See that module's header.
+import { headSha, stampGroomedAt, parseGroomedAtFooter, planDrift, driftLine } from './drift-lib.mjs'
+
+// The sections whose plan a `groomed-at` anchor dates: the two `backlog-execute` works. An idea, a refactor or an out-of-scope item has no plan to drift.
+const ANCHORED_SECTIONS = new Set(['bugs', 'tasks'])
+
 // Section name -> id prefix. Fixed and exported so every later command (ids,
 // board, move) keys off this one map instead of re-deriving prefixes.
 export const SECTIONS = {
@@ -1976,7 +1983,13 @@ export function stopItem(backlog, id, stamp = nowISO(), opts = {}) {
   // `started`, so whether `started` survives this stop has no bearing on
   // what was already banked in `execute-elapsed:`/`groom-elapsed:` before it.
   const { started, phase, ...rest } = data
-  const base = keepStarted ? { ...rest, started } : rest
+  const kept = keepStarted ? { ...rest, started } : rest
+  // The re-groom-in-place anchor (#322): a groom session that ends on a bug or a task — plan-the-fix, or an edited task plan — re-stamps `groomed-at:` with
+  // the HEAD the plan was just written against. Not on `--abandon` (no groom work happened), not after an `execute` phase (execute never writes a plan), and
+  // never for an idea or a refactor, whose groom ends in a promotion that `new` already stamped. Put on `base` rather than `next`, so the billing branch
+  // below, which rebuilds `next` from `base`, carries it.
+  const sha = !abandon && phase === 'groom' && ANCHORED_SECTIONS.has(item.section) ? headSha(path.dirname(backlog)) : null
+  const base = sha === null ? kept : { ...kept, 'groomed-at': sha }
   let next = base
 
   // Billable only when the caller isn't abandoning (see stopItem's own
@@ -2159,6 +2172,7 @@ commands:
   move        move an item into done or out-of-scope
   start       mark an open bug or task as in progress
   stop        clear the in-progress marker
+  drift       how far the base has moved under the paths a bug's or task's plan names
   connect     point this project's backlog at a tracker (github)
   import      move this project's item files onto a tracker (github)
   unregister  drop a project from the board registry by path
@@ -2173,6 +2187,8 @@ const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
        backlog.mjs new <section> <title> --body <file> [--from <id>] [--kind chore|debt] [--runner-fix]   (tracker projects)
 
 sections: bugs, ideas, tasks, refactors, out-of-scope`
+
+const DRIFT_USAGE = `usage: backlog.mjs drift <id> [--base <ref>] [--json]`
 
 const BOARD_USAGE = `usage: backlog.mjs board [--section <bugs|ideas|tasks|refactors>] [--json]`
 
@@ -2320,7 +2336,11 @@ export async function main(argv) {
         return 1
       }
       try {
-        const body = readTextFile(bodyFile, '--body')
+        let body = readTextFile(bodyFile, '--body')
+        /* The plan's anchor (#322), as a footer because an issue has no frontmatter. Only for the two sections a plan drifts in, and only when git can name
+           a commit — a repo with none gets no footer rather than an empty one. */
+        const sha = ANCHORED_SECTIONS.has(section) ? headSha(r.resolved.root) : null
+        if (sha !== null) body = stampGroomedAt(body, sha)
         // `--from` accepts whatever `<id>` spelling the caller has; the server prepends `_From #<n>._` to the body.
         const payload = { project: registryRoot(r.resolved.root), section, title, body }
         if (from) payload.from = trackerId(from, mode.repo)
@@ -2378,6 +2398,10 @@ export async function main(argv) {
 
     const data = { id: fullId, title, created: new Date().toISOString().slice(0, 10) }
     if (from) data.from = from
+    /* The commit the plan is about to be written against (#322) — a record like `from:`, not a lifecycle key and not a status. Printed in the block the
+       caller keeps verbatim, so the tool stays the only thing that ever writes it. Omitted, never empty, when git cannot answer. */
+    const groomedAt = ANCHORED_SECTIONS.has(section) ? headSha(r.resolved.root) : null
+    if (groomedAt !== null) data['groomed-at'] = groomedAt
 
     // Rendered before anything is printed, so a title or a --from value
     // carrying a newline — which renderFrontmatter refuses, since it would
@@ -2569,6 +2593,58 @@ export async function main(argv) {
 
     console.log(item.path)
     console.log(frontmatterBlock(fs.readFileSync(item.path, 'utf8')))
+    return 0
+  }
+
+  /* `drift <id>` (#322) — how far `--base` (default `HEAD`: the worktree's under a run, the main tree's by hand) has moved under the paths the item's plan
+     names, since the commit it was groomed against. Derived per call and stored nowhere; `planDrift` in `drift-lib.mjs` is the whole computation, and
+     `orchestrate.mjs plan` calls the same function. A computed answer is exit `0` whatever it says — `unknown` is a reading, not a failure — and only a
+     usage error, an unknown id or a section with no plan is exit `1`. `backlog-execute` runs it before working a task's plan. */
+  if (cmd === 'drift') {
+    const id = argv[1]
+    if (!id || id.startsWith('-')) {
+      console.error(DRIFT_USAGE)
+      return 1
+    }
+    const json = argv.includes('--json')
+    const baseAt = argv.indexOf('--base')
+    if (baseAt !== -1 && (argv[baseAt + 1] === undefined || argv[baseAt + 1].startsWith('-'))) {
+      console.error(DRIFT_USAGE)
+      return 1
+    }
+    const base = baseAt === -1 ? 'HEAD' : argv[baseAt + 1]
+
+    const r = requireStore()
+    if (!r.ok) return r.code
+
+    let input
+    try {
+      if (r.mode.kind === 'api') {
+        // The body exactly as `show` reads it; the footer is the anchor, parsed into the frontmatter shape `planDrift` takes, so it has one anchor input.
+        const project = registryRoot(r.resolved.root)
+        const wanted = trackerId(id, r.mode.repo)
+        const index = await apiGet('/api/items')
+        const item = (index.items ?? []).find((it) => it.projectPath === project && it.id === wanted)
+        if (item === undefined) throw new BacklogError(`no item ${wanted} in ${project}`, 1)
+        const body = await apiGetText(`/api/items/body?path=${encodeURIComponent(item.path)}`)
+        const groomedAt = parseGroomedAtFooter(body)
+        input = { id: wanted, section: item.section, body, frontmatter: { created: item.created, ...(groomedAt === null ? {} : { 'groomed-at': groomedAt }) } }
+      } else {
+        const item = readItem(r.resolved.backlog, id)
+        input = { id, section: item.section, body: item.body, frontmatter: item.data }
+      }
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
+    if (!ANCHORED_SECTIONS.has(input.section)) {
+      console.error(`${input.id} is in ${input.section} — drift measures a bug's ## Fix or a task's ## Plan, and nothing else has one`)
+      return 1
+    }
+
+    const result = planDrift({ projectRoot: r.resolved.root, body: input.body, frontmatter: input.frontmatter, section: input.section, base })
+    console.log(json ? JSON.stringify({ id: input.id, base, ...result }) : driftLine(result))
     return 0
   }
 
@@ -3034,7 +3110,17 @@ export async function main(argv) {
       /* Groom's write, and the ONE route that rewrites a body (§6.4). A 409 means somebody edited the issue between the `show --json` this caller read and
          this call — re-read and re-apply is the only safe answer, and the message says so rather than offering a force. */
       try {
-        const payload = { project, id: wanted, body, ifUpdatedAt }
+        /* The re-groom's anchor (#322): the footer is re-stamped with this tree's HEAD, replacing any the caller's copy carried. Only a bug or a task gets
+           one, and the section is not on the command line, so it costs one index read — made only when there IS a sha to stamp, so a repo with no commits
+           sends exactly the one request it always did. */
+        let stamped = body
+        const sha = headSha(r.resolved.root)
+        if (sha !== null) {
+          const index = await apiGet('/api/items')
+          const found = (index.items ?? []).find((it) => it.projectPath === project && it.id === wanted)
+          if (found !== undefined && ANCHORED_SECTIONS.has(found.section)) stamped = stampGroomedAt(body, sha)
+        }
+        const payload = { project, id: wanted, body: stamped, ifUpdatedAt }
         /* Sent only when a flag said so, so a groom with no opinion leaves the label exactly as it is (task-47). That is the third state
            `ItemBodyRequest.runnerFix` declares, and it is the common one: most body patches are re-grooms and plan rewrites that have nothing to say about
            whether the item repairs the runner. */

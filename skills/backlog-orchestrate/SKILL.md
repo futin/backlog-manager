@@ -716,6 +716,10 @@ It prints one JSON line:
   failure path — it tried, verification failed, and it left the item where it was, the most useful record you have) or `"no-outcome"` (neither: the session died
   — a crash, a usage cap, a dropped connection). **Whether an Outcome carries real verification output is still yours to judge**; `done` with one that does not
   is no success.
+- **`planStale`** — the Outcome's first line when it reads `Plan no longer holds: …`, else `null`. **When it is set, run
+  `stage <id> ungroomed --plan-stale` — no `--note`, the tool reads that line itself — then skip review, verify, retry and park, keep the worktree and branch
+  exactly as a parked item does, and continue with the next item.** The session did its job, and the mark that stage files keeps the gate refusing that plan
+  until a re-groom changes it (`references/rationale.md`, §5).
 
 Exit `1` is an unreadable transcript, not a clean run — look at it before deciding anything. Exit `10` is a stop request, nothing written after it.
 
@@ -1159,7 +1163,8 @@ is no PR, and `finish` itself deletes the empty run branch or keeps it with one 
 
 `--status` takes `done`, `aborted`, `failed` or `paused`; anything else exits `1`. Tracker: `finish` also stamps that status on the last-touched claim and the tool
 keeps `orchestrator:queued` by itself — best-effort, nothing to run (`references/tracker.md` §10). Then summarise for the user from `status --json`: what merged or branched,
-what parked and why, what was skipped as `ungroomed` or `needs-answers` and therefore wants a groom pass before the next run. A clean item — no fix loops, no
+what parked and why, what was skipped as `ungroomed` or `needs-answers` and therefore wants a groom pass before the next run — a plan-stale item among them,
+with its marker line. A clean item — no fix loops, no
 retries, green first try — should have produced no ping at all along the way; the summary is where it finally gets mentioned.
 
 **Any item that finished `branched` owes the user a merge list.** Name those branches in queue order — each was verified against the base its predecessor

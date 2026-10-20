@@ -202,7 +202,24 @@ Read it the three ways `backlog-groom`'s "Already in progress" section reads it 
 grooming may have happened a while ago, and code drifts. Only once that's confirmed, invoke `superpowers:test-driven-development` for the fix: a failing test
 first, then the change that makes it pass.
 
-**Task** → invoke `superpowers:executing-plans` to work through `## Plan` as written. If the plan's own steps are independent of each other — no shared state,
+**Task** → first confirm the plan still holds against the code as it is now, because a plan is written against one commit and executed against a later one:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" drift <id>
+```
+
+It measures from the commit the plan was groomed at (`groomed-at:`, or the last commit before `created:`) to this tree's `HEAD` — the worktree's under an
+orchestrator run, the main tree's interactively — over the paths the plan names, and prints one line:
+
+- **`none`** → proceed exactly as below.
+- **`drifted` / `unknown`** → check every plan step against the code before running any of it: `git log -p <anchor>..HEAD -- <paths>` for what moved, CodeGraph
+  for the symbols the plan names. Then one of two:
+  - **Minor** — a renamed symbol, a moved file, a signature that gained a parameter, a step someone else already did. Adapt, execute, and add a
+    `Plan adapted:` list to `## Outcome` naming each deviation and the commit that forced it.
+  - **No longer holds** — the approach the plan takes was removed, replaced or contradicted, or adapting it would mean re-designing it. Change no code; write
+    the Outcome the "nothing moves" section below describes for this case, and take that path.
+
+Then invoke `superpowers:executing-plans` to work through `## Plan` as written. If the plan's own steps are independent of each other — no shared state,
 order doesn't matter — invoke `superpowers:subagent-driven-development` instead and dispatch them in parallel rather than one at a time.
 
 Either way, when a `.codegraph/` index exists at or above this tree, open the code with `codegraph explore "<symbols or files the item names>"` (Bash; or
@@ -304,6 +321,10 @@ the real output showing the failure. That record is what keeps the next attempt 
 failed and let them decide whether to retry, re-groom, or escalate — **unless an `[orchestrator-run` marker holds**, in which case there is no user to tell and
 no decision to wait for: the `## Outcome` and this session's final message are the whole report, and the run reads both and decides retry, skip or park from
 outside. Say what failed there and exit.
+
+**A plan that no longer holds takes this path too, and its `## Outcome`'s first line is exactly `Plan no longer holds: <one line saying what broke>`**,
+followed by the evidence — the commits, the paths, what the plan assumed against what is there now. That line is a contract with `backlog-orchestrate`, which
+reads it mechanically and marks the plan stale until a re-groom changes it. Interactively, tell the user to re-groom; under `[orchestrator-run`, exit.
 
 Leave the in-progress marker alone if they're retrying now. Clear it if the item is being parked or handed back:
 

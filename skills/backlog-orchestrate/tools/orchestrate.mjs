@@ -33,6 +33,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+// Groom drift (#322): the plan's hash, its section and `planDrift`, from a BYTE-IDENTICAL copy of skills/backlog/tools/drift-lib.mjs that ships beside
+// this file. Beside, not imported from there, for the reason the header above gives — a static import of another skill's tools/ that an install pruned
+// would fail this whole module at load, and a run whose every command dies over a drift preview is far worse than a stale copy. drift-lib.test.mjs (in
+// skills/backlog/tools/) asserts the two files are identical and runs every case against both.
+import { planSection, planHash, planDrift, parseGroomedAtFooter, driftLine } from './drift-lib.mjs';
 
 // --- errors -------------------------------------------------------------
 // Carries the intended process exit code so `main`'s one try/catch (see the
@@ -450,12 +455,16 @@ export function archiveStem(archiveDir, runId) {
 
 // Moves a finished run's SIDECAR artefacts out of the flat, project-scoped
 // state directory and into `destDir` (`runs/<stem>/`, the sibling of that
-// run's archived `<stem>.json`). Everything under `<dir>` moves EXCEPT two
-// names: `run.json`, which cmdInit renames itself moments later, and
-// `runs`, the archive folder this would otherwise bury inside its own
-// newest entry.
+// run's archived `<stem>.json`). Everything under `<dir>` moves EXCEPT three
+// names: `run.json`, which cmdInit renames itself moments later, `runs`, the
+// archive folder this would otherwise bury inside its own newest entry, and
+// `stale-plans.json` (#322), which is not a run's sidecar at all but
+// project-level state that has to OUTLIVE the run that wrote it — its whole
+// job is to refuse the next run's dispatch of the same stale plan, so
+// archiving it with the previous run would erase every mark at the very
+// `init` that was meant to read them.
 //
-// A DENYLIST of two, not an allowlist of the five names known today
+// A DENYLIST of three, not an allowlist of the five names known today
 // (`logs`, `reviews`, `verify`, `questions`, `prompts`). Those directories
 // are created by DRIVERS following SKILL.md prose (`mkdir -p
 // "<dir>/logs"`), never by this tool, so the set is open by construction —
@@ -480,7 +489,7 @@ function archiveSidecars(dir, destDir) {
     return;
   }
 
-  const movable = entries.filter((entry) => entry.name !== 'run.json' && entry.name !== 'runs');
+  const movable = entries.filter((entry) => entry.name !== 'run.json' && entry.name !== 'runs' && entry.name !== STALE_PLANS_FILE);
   // Created only when there is something to put in it. An unconditional
   // mkdir would leave an empty `runs/<stem>/` after every init, and an
   // empty directory claims evidence exists where none does.
@@ -510,6 +519,103 @@ function archiveSidecars(dir, destDir) {
       process.stderr.write(`warning: could not archive ${entry.name} into ${destDir}: ${err.message}\n`);
     }
   }
+}
+
+// --- the stale-plan mark (#322) --------------------------------------------
+//
+// `<dir>/stale-plans.json`, one per project: `{ "<itemId>": { planHash,
+// detail, runId, at } }`. Written ONLY by `stage <id> ungroomed --plan-stale`,
+// which §5 calls when an execute session's Outcome opened with the marker line
+// `Plan no longer holds: …`; read ONLY by `buildGatedQueue`, which turns the
+// item `ungroomed` for as long as its plan still hashes the same. Without it
+// the item stays groomed on disk, so the next run dispatches the same stale
+// plan, the session spends itself discovering the same thing, and the run
+// pays for it again — once per run, forever.
+//
+// Keyed by the PLAN's hash rather than cleared by anybody, and that is the
+// whole of how a mark goes away: a re-groom rewrites `## Plan`, the hash moves,
+// and the entry — still on disk — simply stops matching. There is no "clear"
+// verb and no second writer for one to need. The next `--plan-stale` for the
+// same id replaces the entry, which is the prune.
+//
+// Project-level state rather than a run's sidecar, so `archiveSidecars` leaves
+// it in place — see the denylist there.
+const STALE_PLANS_FILE = 'stale-plans.json';
+
+// The marker line's fixed opening, shared by `inspect` (which recognises it)
+// and `stage --plan-stale` (which re-reads it and strips it to get the detail).
+// backlog-execute's SKILL.md states the same words as its half of the contract.
+const PLAN_STALE_PREFIX = 'Plan no longer holds:';
+
+// Fail-open by design: absent, unreadable, empty or malformed all read as "no
+// marks". A lost mark costs one execute session that re-runs `drift`, finds
+// the same breakage and writes the same marker again — backlog-execute's
+// re-check is the backstop — whereas a read that threw would take `plan` and
+// `init` down over a file that only ever narrows a queue. Creates nothing:
+// `plan` calls this, and `plan` writes nothing anywhere.
+function readStalePlans(dir) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(dir, STALE_PLANS_FILE), 'utf8'));
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// Temp file + rename in the same directory, the shape `writeRunAtomic` gives
+// for the same reason. A malformed file read as `{}` above is replaced here
+// rather than preserved: unlike the registry, nothing in it is anybody's only
+// copy of anything — every mark is re-derivable by the next execute session.
+function writeStalePlanMark(dir, itemId, mark) {
+  const marks = readStalePlans(dir);
+  marks[itemId] = mark;
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${STALE_PLANS_FILE}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(marks, null, 2) + '\n');
+  fs.renameSync(tmp, path.join(dir, STALE_PLANS_FILE));
+}
+
+// The gate's half: the reason a marked item is refused with, or `null` when
+// there is no mark for it or the mark was filed against a different plan.
+function staleMarkReason(marks, itemId, hash) {
+  const mark = Object.hasOwn(marks, itemId) ? marks[itemId] : null;
+  if (mark === null || typeof mark !== 'object' || mark.planHash !== hash) return null;
+  const day = typeof mark.at === 'string' ? mark.at.slice(0, 10) : 'unknown date';
+  return `plan no longer holds (run ${mark.runId}, ${day}): ${mark.detail} — re-groom it`;
+}
+
+// `inspect`'s half: the marker line when it is the Outcome's first non-empty
+// line, else `null`. A tracker outcome file may open with its own
+// `## Outcome` heading, which is skipped; nothing else is. Mechanical on
+// purpose, so the driver never has to judge whether an Outcome "means" stale.
+function planStaleLine(outcome) {
+  if (typeof outcome !== 'string') return null;
+  const lines = outcome
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  const first = lines[0] !== undefined && /^##\s+Outcome$/.test(lines[0]) ? lines[1] : lines[0];
+  return first !== undefined && first.startsWith(PLAN_STALE_PREFIX) ? first : null;
+}
+
+// The Outcome a session left for one item, from where `inspect` reads it:
+// `<dir>/outcomes/<n>.md` in a tracker project, the item file's `## Outcome`
+// IN THE WORKTREE in a files one (the main tree's copy has not changed and
+// will not until the merge; a worktree the run recorded wins over the
+// conventional path). `text` is `undefined` when there is none. One function
+// so `inspect`'s `planStale` and `stage --plan-stale` can never read two
+// different files and disagree about whether a session said its plan broke.
+function readItemOutcome(dir, root, run, item) {
+  if (projectSource(run.project) === 'github') {
+    const outcomePath = outcomeFilePath(dir, item.id);
+    return { text: fs.existsSync(outcomePath) ? fs.readFileSync(outcomePath, 'utf8') : '', path: outcomePath, found: null };
+  }
+  const recorded = item.worktree;
+  const worktree = recorded && fs.existsSync(recorded) ? recorded : path.join(root, '.worktrees', item.id);
+  const found = fs.existsSync(worktree) ? findItemFilePath(worktree, item.id) : null;
+  const text = found === null ? undefined : extractSection(fs.readFileSync(found.path, 'utf8'), 'Outcome');
+  return { text, path: found === null ? null : found.path, found };
 }
 
 // Is `dir` the top of a LINKED GIT WORKTREE? Returns a
@@ -1222,16 +1328,21 @@ function readItemForGate(absPath) {
 // mistake in the direction that actually reorders a run.
 function parseItemForGate(text) {
   const lines = text.split('\n');
-  if (lines[0] !== '---') return { title: '', body: '', runnerFix: false };
+  if (lines[0] !== '---') return { title: '', body: '', runnerFix: false, frontmatter: {} };
   let i = 1;
   let title = '';
   let runnerFix = false;
+  // The two keys `planDrift` anchors on (#322), read by this same narrow
+  // splitter rather than a second parser: `groomed-at:` (written by
+  // backlog.mjs) and `created:`, its fallback. Only `plan` uses them.
+  const frontmatter = {};
   for (; i < lines.length; i++) {
     if (lines[i] === '---') break;
     const sep = lines[i].indexOf(':');
     if (sep === -1) continue;
     const key = lines[i].slice(0, sep).trim();
     if (key === 'title') title = lines[i].slice(sep + 1).trim();
+    else if (key === 'groomed-at' || key === 'created') frontmatter[key] = lines[i].slice(sep + 1).trim();
     else if (key === 'runner-fix')
       runnerFix =
         lines[i]
@@ -1239,8 +1350,8 @@ function parseItemForGate(text) {
           .trim()
           .toLowerCase() !== 'false';
   }
-  if (i === lines.length) return { title, body: '', runnerFix };
-  return { title, body: lines.slice(i + 1).join('\n'), runnerFix };
+  if (i === lines.length) return { title, body: '', runnerFix, frontmatter };
+  return { title, body: lines.slice(i + 1).join('\n'), runnerFix, frontmatter };
 }
 
 // Finds one `## <heading>` section's own content: everything between that
@@ -1513,12 +1624,21 @@ function blobReaderAt(projectRoot, base) {
 // code path." Never throws for "no backlog store" (see listOpenItems) —
 // only for an --ids entry that names nothing this store has, which is a
 // usage error regardless of which caller asked.
-function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DEFAULT } = {}) {
+function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DEFAULT, drift = false } = {}) {
+  // #322: the project's stale-plan marks, read once per queue and only ever
+  // READ here — `readStalePlans` creates nothing, and `orchHome()` is a pure
+  // environment read, so `plan` stays side-effect free. Applied by
+  // `applyStaleMarks` below to BOTH sources, after the per-item gate and
+  // before the hoist and the cap, so a marked item never takes a `--max` slot.
+  const marks = readStalePlans(projectDir(orchHome(), projectRoot));
+
   // task-47. Read per call, never recorded in run.json and never passed down
   // from a caller: a project's source is a COMMITTED marker, so re-deriving it
   // is one `existsSync` and cannot go stale, while a copy on the run would
   // have to be kept true across a `connect` that happened mid-run.
-  if (projectSource(projectRoot) === 'github') return orderGatedQueue(trackerCandidates(projectRoot, { ids }), maxItems);
+  if (projectSource(projectRoot) === 'github') {
+    return orderGatedQueue(applyStaleMarks(trackerCandidates(projectRoot, { ids, drift, base }), marks), maxItems);
+  }
 
   const backlogDir = path.join(projectRoot, 'backlog');
   const bugs = listOpenItems(backlogDir, 'bugs').sort((a, b) => a.num - b.num);
@@ -1575,10 +1695,21 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
   // that exists; for a present one it comes off the blob, so that everything
   // this function reports about an item describes the same bytes.
   const readBlob = blobReaderAt(projectRoot, base);
+  // #322: what the gate adds to a verdict it read the content of — the plan's
+  // hash, for `applyStaleMarks`, and, only when `plan` asked, its drift. Both
+  // off the SAME bytes the verdict came from, so a mark is matched against the
+  // plan the worktree would hold, not a working-copy edit nobody committed.
+  // A store with no git view gets no drift at all rather than an `unknown`
+  // one: there is no history to measure, and that fallback says nothing
+  // about commits by design (its own case pins it).
+  const planFacts = (entry, body, frontmatter) => ({
+    planHash: planHash(planSection(body, entry.section) ?? ''),
+    ...(drift && readBlob !== null ? { drift: planDrift({ projectRoot, body, frontmatter, section: entry.section, base }) } : {})
+  });
   const gateEntry = (entry) => {
     if (readBlob === null) {
-      const { title, body, runnerFix } = readItemForGate(entry.path);
-      return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) };
+      const { title, body, runnerFix, frontmatter } = readItemForGate(entry.path);
+      return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot), ...planFacts(entry, body, frontmatter) };
     }
     const relPath = path.relative(projectRoot, entry.path).split(path.sep).join('/');
     const committed = readBlob(relPath);
@@ -1593,11 +1724,12 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
         hoisted: false,
         gate: 'ungroomed',
         reasons: [`not committed on ${base} — the worktree this run creates from ${base} would not contain ${relPath}`],
-        questions: []
+        questions: [],
+        ...(drift ? { drift: { status: 'unknown', anchor: null, anchorSource: null, commits: 0, paths: [], reason: `not committed on ${base}` } } : {})
       };
     }
-    const { title, body, runnerFix } = parseItemForGate(committed);
-    return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot) };
+    const { title, body, runnerFix, frontmatter } = parseItemForGate(committed);
+    return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot), ...planFacts(entry, body, frontmatter) };
   };
 
   // Gate everything first, THEN reorder, THEN count the cap. The marker is
@@ -1610,7 +1742,23 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
   // The hoist partition and the cap are `orderGatedQueue`'s, shared with the
   // tracker path below — see that function for the rules, which are the
   // queue's rather than either source's.
-  return orderGatedQueue(gated, maxItems);
+  return orderGatedQueue(applyStaleMarks(gated, marks), maxItems);
+}
+
+// #322: a stale-plan mark whose hash still matches the plan turns the verdict
+// `ungroomed`, its reason first. Only a verdict that would otherwise let the
+// item through (`ready`, or `needs-answers` — answering the questions would
+// still dispatch a plan its last session reported broken); an item already
+// `ungroomed` has nothing to gain from a second reason. Drift is never a
+// verdict input — only the mark is, because a mark is a session's finding and
+// a drift count is only a hint. Strips `planHash`, which never leaves this
+// file's queue builder.
+function applyStaleMarks(gated, marks) {
+  return gated.map(({ planHash: hash, ...entry }) => {
+    if (hash === undefined || entry.gate === 'ungroomed') return entry;
+    const reason = staleMarkReason(marks, entry.id, hash);
+    return reason === null ? entry : { ...entry, gate: 'ungroomed', reasons: [reason, ...entry.reasons], questions: [] };
+  });
 }
 
 // The hoist partition and the `--max` count, over an already-gated list —
@@ -1649,10 +1797,12 @@ function orderGatedQueue(gated, maxItems) {
   // `readyCount` is read BEFORE it is possibly incremented for the item
   // currently being examined — see the long comment above `gateEntry`.
   let readyCount = 0;
-  return hoistedOrder.map(({ id, title, gate, reasons, questions, hoisted }) => {
+  return hoistedOrder.map(({ id, title, gate, reasons, questions, hoisted, drift }) => {
     const beyondMax = maxItems !== null && readyCount >= maxItems;
     if (gate === 'ready') readyCount++;
-    return { id, title, gate, reasons, questions, beyondMax, hoisted };
+    // `drift` only when `plan` asked for it (#322), so `init`'s queue — and
+    // the run file it seeds — carries exactly the keys it always did.
+    return { id, title, gate, reasons, questions, beyondMax, hoisted, ...(drift === undefined ? {} : { drift }) };
   });
 }
 
@@ -1765,7 +1915,7 @@ function trackerById(mine) {
 // Ordering is bugs then tasks, oldest ISSUE NUMBER first — the same rule the
 // files walk applies to its own `<prefix>-<n>` numbers, and for the same
 // reason: the oldest open thing has been waiting longest.
-function trackerCandidates(projectRoot, { ids }) {
+function trackerCandidates(projectRoot, { ids, drift = false, base = BASE_REF_DEFAULT }) {
   let mine = trackerIndexItems(projectRoot);
   // The bare issue number is the id INSIDE a run, and `#31` is the id
   // everywhere else. `#` opens a comment in every shell SKILL.md's fenced
@@ -1850,7 +2000,20 @@ function trackerCandidates(projectRoot, { ids }) {
     // The route answers `text/plain`, and `api-call.mjs` carries a non-JSON
     // body through as a string for exactly this read.
     const text = typeof body.data === 'string' ? body.data : '';
-    return { id, title: item.title, hoisted: item.runnerFix === true, ...gateItem(item.section, text, projectRoot) };
+    // #322: the plan's hash (footer stripped by `planSection`, so a re-stamp
+    // alone never moves it) and, for `plan`, its drift — the anchor is the
+    // body's `bm:groomed-at` footer, `created` its fallback, the same two
+    // inputs `backlog.mjs drift` reads for the same issue.
+    const groomedAt = parseGroomedAtFooter(text);
+    const frontmatter = { created: item.created, ...(groomedAt === null ? {} : { 'groomed-at': groomedAt }) };
+    return {
+      id,
+      title: item.title,
+      hoisted: item.runnerFix === true,
+      ...gateItem(item.section, text, projectRoot),
+      planHash: planHash(planSection(text, item.section) ?? ''),
+      ...(drift ? { drift: planDrift({ projectRoot, body: text, frontmatter, section: item.section, base }) } : {})
+    };
   });
 }
 
@@ -2277,7 +2440,7 @@ function trackerClose(run, item, outcome) {
 //   * `items/<n>.md` — the snapshot the reviewer is handed where a files run
 //     hands the item file. Under `<dir>` for the same reason, and so that the
 //     existing archive mover carries both away with the run: `archiveSidecars`
-//     is a DENYLIST of two (`run.json`, `runs/`), so a new sidecar directory
+//     is a DENYLIST of three (`run.json`, `runs/`, `stale-plans.json`), so a new sidecar directory
 //     needs no change to it at all.
 function outcomeFilePath(dir, itemId) {
   return path.join(dir, 'outcomes', `${itemId}.md`);
@@ -3244,12 +3407,16 @@ function cmdPlan(argv) {
 
   // Side-effect free by construction, not just by convention: everything
   // above is argument validation and everything below is buildGatedQueue's
-  // own read-only walk of <project>/backlog — this function never calls
-  // orchHome(), never resolves a run directory, and never opens a file for
-  // writing. That is what lets a caller (a UI's queue preview, or a human
-  // sanity-checking a run before committing to it) call this as many times
-  // as it wants without ever risking a run's own state.
-  const queue = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base });
+  // own read-only walk of <project>/backlog — plus, since #322, ONE read of
+  // the project's `stale-plans.json` under its run-state directory, which is
+  // the only thing this command ever touches there: no `mkdir`, no run file,
+  // nothing opened for writing, and an absent or malformed file reads as "no
+  // marks". `orchHome()` itself is a pure environment read. That is what lets
+  // a caller (a UI's queue preview, or a human sanity-checking a run before
+  // committing to it) call this as many times as it wants without ever
+  // risking a run's own state. `drift: true` is this caller's alone — `init`
+  // builds the same queue without it — and drift never changes a verdict.
+  const queue = buildGatedQueue(project, { ids: parseIdsArg(idsArg), maxItems, base, drift: true });
 
   if (json) {
     console.log(JSON.stringify(queue));
@@ -3264,13 +3431,39 @@ function cmdPlan(argv) {
       console.log(`${item.gate.padEnd(13)} ${item.id}  ${item.title}${hoist}${flag}`);
       for (const reason of item.reasons) console.log(`    - ${reason}`);
       for (const question of item.questions) console.log(`    ? ${question}`);
+      // #322: a hint, never a verdict — printed only when there is something
+      // to look at, so a clean queue reads exactly as it did before.
+      if (item.drift !== undefined && item.drift.status !== 'none') console.log(`    ~ ${driftLine(item.drift)}`);
     }
   }
   return 0;
 }
 
 const STAGE_USAGE =
-  'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--pid P] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop] [--outcome <file>]';
+  'usage: orchestrate.mjs stage <itemId> <stage> [--session S] [--pid P] [--worktree W] [--branch B] [--permission-mode M] [--note S] [--fix-loop] [--outcome <file>] [--plan-stale]';
+
+// #322: the hash of the plan a stale-plan mark is filed against — read from
+// the same bytes the gate will read it from next time, so the mark matches on
+// the very next `plan`/`init` and on nothing a re-groom produces. Files: the
+// item at the run's `<base>` through `blobReaderAt` (the working copy when no
+// git view exists, which is the gate's own fallback). Tracker: the issue body
+// from the API, as `trackerCandidates` reads it. Throws exit `1` (files) or
+// `9` (tracker) for an item it cannot read, BEFORE `cmdStage` writes anything.
+function currentPlanHash(run, itemId) {
+  if (projectSource(run.project) === 'github') {
+    const item = trackerIndexItems(run.project).find((it) => String(it.id).replace(/^#/, '') === itemId);
+    if (item === undefined) throw new OrchestrateError(`--plan-stale: no open item ${itemId} in the tracker cache to hash the plan of`, 1);
+    const body = apiCall('GET', `/api/items/body?path=${encodeURIComponent(item.path)}`);
+    if (!body.ok) throw new OrchestrateError(apiErrorText(body, `GET /api/items/body was refused for ${item.path}`), EXIT_API_REFUSED);
+    return planHash(planSection(typeof body.data === 'string' ? body.data : '', item.section) ?? '');
+  }
+  const found = findItemFilePath(run.project, itemId);
+  if (found === null) throw new OrchestrateError(`--plan-stale: no item file for ${itemId} under ${run.project}/backlog to hash the plan of`, 1);
+  const readBlob = blobReaderAt(run.project, run.base ?? BASE_REF_DEFAULT);
+  const relPath = path.relative(run.project, found.path).split(path.sep).join('/');
+  const text = (readBlob === null ? null : readBlob(relPath)) ?? fs.readFileSync(found.path, 'utf8');
+  return planHash(planSection(parseItemForGate(text).body, found.section) ?? '');
+}
 
 // `out` is where the one-line result goes. `merge-check` composes this command and prints a verdict of its own, so it
 // passes a no-op; every other caller takes the default and the output is byte-identical to what it always was.
@@ -3300,9 +3493,16 @@ function cmdStage(argv, out = console.log) {
   // one — a files item's Outcome is already in the item file the branch
   // carries, and there is no timeline to post it to.
   let outcomeFile;
-  // The one valueless flag on this command: it consumes no argv slot, so it
-  // never does the `argv[++i]` step the five above all take.
+  // The two valueless flags on this command: neither consumes an argv slot,
+  // so neither does the `argv[++i]` step the others all take.
   let fixLoop = false;
+  // #322: also file a stale-plan mark for this item. `ungroomed` only, and it
+  // takes no `--note`: the marker line is the SESSION's prose, and prose this
+  // run did not compose never rides a command line (bug-31's rule — one
+  // apostrophe or backtick in it and the driver's shell call breaks or runs
+  // something). So the tool re-reads the line itself, from the Outcome
+  // `inspect` read, and that line becomes both the note and the mark's detail.
+  let planStale = false;
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--session') session = argv[++i];
     else if (argv[i] === '--pid') pidArg = argv[++i];
@@ -3312,6 +3512,7 @@ function cmdStage(argv, out = console.log) {
     else if (argv[i] === '--note') note = argv[++i];
     else if (argv[i] === '--outcome') outcomeFile = argv[++i];
     else if (argv[i] === '--fix-loop') fixLoop = true;
+    else if (argv[i] === '--plan-stale') planStale = true;
   }
 
   if (!itemId || !stage) {
@@ -3322,6 +3523,15 @@ function cmdStage(argv, out = console.log) {
   // exists at all, so it is refused the same way regardless of run state.
   if (!RUN_STAGES.includes(stage)) {
     throw new OrchestrateError(`unknown stage: ${stage} (expected one of ${RUN_STAGES.join(', ')})`, 1);
+  }
+  // Same place and the same reason: which stage a flag belongs to is a fact
+  // about the command line. Only `ungroomed` — the stage that already means
+  // "this item wants a groom pass" — and never anything a mark would contradict.
+  if (planStale && stage !== 'ungroomed') {
+    throw new OrchestrateError(`--plan-stale is only for \`stage <id> ungroomed\` — got '${stage}'. Nothing was written.`, 1);
+  }
+  if (planStale && note !== undefined) {
+    throw new OrchestrateError("--plan-stale takes no --note — the tool reads the Outcome's `Plan no longer holds:` line itself. Nothing was written.", 1);
   }
   // Validated here, beside the stage name and before the run is read, for the
   // same reason: a malformed `--pid` is a problem with this call. Refused
@@ -3336,7 +3546,8 @@ function cmdStage(argv, out = console.log) {
     }
   }
 
-  const dir = projectDir(orchHome(), resolveProjectRoot());
+  const root = resolveProjectRoot();
+  const dir = projectDir(orchHome(), root);
   const run = readRun(dir);
   assertDriver(run);
 
@@ -3515,10 +3726,30 @@ function cmdStage(argv, out = console.log) {
     trackerClose(run, item, outcome);
   }
 
+  // #322: the marker and the mark's hash are both read BEFORE the run file is
+  // written — an Outcome with no marker line, or an item whose plan cannot be
+  // read, refuses here with nothing written — and the mark itself is filed
+  // right after it, so a stop or pause refusal above never leaves a mark
+  // behind for a stage that was not recorded.
+  let staleMark = null;
+  if (planStale) {
+    const marker = planStaleLine(readItemOutcome(dir, root, run, item).text);
+    if (marker === null) {
+      throw new OrchestrateError(
+        `${itemId}'s Outcome does not open with a \`${PLAN_STALE_PREFIX}\` line — \`inspect ${itemId}\` reports planStale null, ` +
+          'so there is no mark to file. Nothing was written.',
+        1
+      );
+    }
+    note = marker;
+    staleMark = { planHash: currentPlanHash(run, itemId), detail: marker.slice(PLAN_STALE_PREFIX.length).trim() || marker, runId: run.runId, at: nowISO() };
+  }
+
   applyQueueItemFields(item, { stage, session, pid, worktree, branch, note, permissionMode, fixLoop });
 
   run.updatedAt = nowISO();
   writeRunAtomic(dir, run);
+  if (staleMark !== null) writeStalePlanMark(dir, itemId, staleMark);
 
   /* The claim's two ends, after the run file is written so that what is
      published is what this machine actually recorded. A terminal stage
@@ -4301,7 +4532,7 @@ function cmdInspect(argv) {
   const dir = projectDir(orchHome(), root);
   const first = readRun(dir);
   assertDriver(first);
-  const firstItem = findQueueItem(first, itemId);
+  findQueueItem(first, itemId); // an unknown id refuses before anything is staged
   // The first dispatch's transcript is where §4 sent it; a retry or a fix loop names its own.
   const named = jsonlFile !== undefined;
   jsonlFile ??= path.join(dir, 'logs', `${itemId}.jsonl`);
@@ -4352,20 +4583,19 @@ function cmdInspect(argv) {
     // The evidence is `<dir>/outcomes/<n>.md`: non-empty is a success OR a failure (the body reads which), empty or absent is a
     // session that died. The snapshot is written either way — §5's next steps read it, and an empty Outcome in it is accurate.
     result.snapshot = writeSnapshot(dir, run, itemId);
-    const outcomePath = outcomeFilePath(dir, itemId);
-    const hasOutcome = fs.existsSync(outcomePath) && fs.readFileSync(outcomePath, 'utf8').trim() !== '';
+    const outcome = readItemOutcome(dir, root, run, item);
+    const hasOutcome = outcome.text.trim() !== '';
     result.item = hasOutcome ? 'outcome' : 'no-outcome';
-    result.itemPath = hasOutcome ? outcomePath : null;
+    result.itemPath = hasOutcome ? outcome.path : null;
+    result.planStale = planStaleLine(outcome.text);
   } else {
-    // In the WORKTREE: the main tree's copy has not changed and will not until the merge. A worktree the run recorded wins over the
-    // conventional path, and an absent one is the same answer as an item with no Outcome — the session left nothing.
-    const recorded = firstItem.worktree;
-    const worktree = recorded && fs.existsSync(recorded) ? recorded : path.join(root, '.worktrees', itemId);
-    const found = fs.existsSync(worktree) ? findItemFilePath(worktree, itemId) : null;
-    const outcome = found === null ? undefined : extractSection(fs.readFileSync(found.path, 'utf8'), 'Outcome');
-    const hasOutcome = outcome !== undefined && outcome.trim() !== '';
-    result.item = !hasOutcome ? 'no-outcome' : found.state === 'done' ? 'done' : 'open-with-outcome';
-    result.itemPath = found === null ? null : found.path;
+    // In the WORKTREE (`readItemOutcome` says why); an absent worktree is the same answer as an item with no Outcome — the session
+    // left nothing.
+    const outcome = readItemOutcome(dir, root, run, item);
+    const hasOutcome = outcome.text !== undefined && outcome.text.trim() !== '';
+    result.item = !hasOutcome ? 'no-outcome' : outcome.found.state === 'done' ? 'done' : 'open-with-outcome';
+    result.itemPath = outcome.path;
+    result.planStale = planStaleLine(outcome.text);
   }
 
   console.log(JSON.stringify(result));

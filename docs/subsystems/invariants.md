@@ -75,8 +75,9 @@ call, which is why nothing in the run file records where the evidence went: the 
 the archive path exactly the way "Groomed" and "Board-versus-Archive" are derived rather than stored. A `sidecarDir` field would be a second copy of a fact the
 path already carries, and the run file has one writer precisely so there is one authority per fact.
 
-**A denylist of two, not an allowlist of five.** The mover skips `run.json` (renamed by `cmdInit` itself moments later) and `runs` (which it would otherwise
-bury inside its own newest entry), and moves everything else. The sidecar directories are created by _drivers following SKILL.md prose_
+**A denylist of three, not an allowlist of five.** The mover skips `run.json` (renamed by `cmdInit` itself moments later), `runs` (which it would otherwise bury
+inside its own newest entry) and `stale-plans.json` (#322 — project-level state that outlives every run, not a run's sidecar: archiving it with the run that
+filed it would unmark every item at the very next `init`), and moves everything else. The sidecar directories are created by _drivers following SKILL.md prose_
 (`mkdir -p "<dir>/logs"`), never by the tool, so the set of names is open by construction — `prompts/` first existed on exactly one project on this machine
 because one driver invented it unprompted, and bug-31 then made it prescribed — SKILL.md §5 and §7 now name `prompts/<id>-retry-1.txt` and
 `prompts/<id>-fix-<n>.txt` as the way a run-composed prompt reaches a resumed session at all. The denylist carried that change without an edit, which is the
@@ -110,6 +111,27 @@ it became one: `countPastRuns` returned `readdirSync(...).length`, so the drawer
 mount and on every window focus. `archivedRunFiles` is the single implementation of "which entries under `runs/` are run files", read by both, for the reason
 `isStale`/`leavesBoard` are one function: two expressions that merely agree are two chances to disagree later. `archivedRun()` needs no filter at all, because
 it probes the exact path `runs/<runId>.json`, which a sibling directory named `<runId>` can never answer to.
+
+## A stale-plan mark is keyed by the plan's hash, so a re-groom clears it and nothing else does
+
+#322. An execute session that finds its plan contradicted by the code writes an Outcome whose first line is `Plan no longer holds: …`; `inspect` reports that
+line as `planStale`, the driver stages the item `ungroomed --plan-stale`, and that stage files a mark in `stale-plans.json` in the project's run-state
+directory. The stage takes no `--note`: it re-reads the line from the Outcome `inspect` read, through the same function, because the line is the session's prose
+and prose a run did not compose never rides a command line (bug-31) — one apostrophe in it would break the driver's shell call. `orchestrate.mjs` is the file's
+only writer and its only reader — the gate in `buildGatedQueue`, shared by `plan` and `init`, on both the files and the tracker path — the same relationship the
+tool already has with everything else under that directory; the server's run-state reader never opens it.
+
+The key is the sha256 of the plan's own text (`## Plan` for a task, `## Fix` for a bug), trimmed, CRLF normalised and with the `bm:groomed-at` footer stripped,
+read from the bytes the gate reads: at `<base>` in a files project, from the API in a tracker one. A mark whose hash still matches turns a `ready` or
+`needs-answers` verdict `ungroomed` with the reason `plan no longer holds (run <runId>, <date>): <detail> — re-groom it`; a mark whose hash does not match is
+ignored. That is the whole clearing mechanism, deliberately: a re-groom changes the plan's words and so the hash, while a re-stamp of the anchor, a line-ending
+rewrite or a heartbeat changes nothing a person decided. A "clear" verb would be a second way to dispatch the same stale plan, which is the failure this exists
+to stop — before it, the next run's gate read the item `ready` and dispatched it again.
+
+The mark is filed after the run file is written, and its hash is computed before either write, so a refused stage leaves neither. `plan` reads the file without
+ever creating the run-state directory, and an absent, empty or malformed file reads as no marks: failing open costs at most one session, because execute's own
+`drift` re-check is the backstop. `archiveSidecars` names the file in its denylist (above), and nothing in this task removes the worktree or branch an item
+staged this way keeps — `cleanup` still refuses every stage but `merged`/`branched`.
 
 ## `~/.backlog-manager/retro/` has exactly one writer, and the retro never writes run state
 
@@ -872,6 +894,11 @@ of when work began — a `phase:` still naming an activity would misdescribe fin
 `started:` surviving is the whole point. `stop` never takes an `--as` of its own for this reason — it reads `phase:` back off the file instead, the one place
 that can't disagree with itself. Surfaced raw by the scanner; "in progress" is `started !== '' && status === 'open'`, decided in the client, because archiving
 deliberately keeps the value as history (see below).
+
+`groomed-at:` (#322) is the third key the tool writes on its own, and like the other two it is never hand-written. `new` stamps it with `HEAD`'s sha for a bug
+or task (a tracker body carries it as a `<!-- bm:groomed-at <sha> -->` footer line instead, which `body` keeps to exactly one), and a groom `stop` re-stamps it
+— never an abandon, never an execute stop, never an idea or refactor, none of which changed a plan. It is an anchor, not a state: `drift` derives from it how
+far the base has moved under the paths the plan names, and stores nothing.
 
 `start`/`stop` are still the only two commands that rewrite an existing item's content — `move` renames and never opens the file — so both must round-trip
 unknown keys and the body byte-for-byte, and both stamp `updated:` while doing it, inside `writeItemFile`, the one function they both funnel through rather than
@@ -3745,7 +3772,7 @@ fenced blocks use, and the id is substituted into dozens of them. `queueItemIs` 
 directory and never in the worktree, because §6 stages the worktree with `add -A` and an Outcome written there would be committed into the project's history.
 `orchestrate.mjs snapshot <n>` then writes `<dir>/items/<n>.md` — the issue body, `## Outcome`, that file — which is what the reviewer is handed where a files
 run hands the item file, and what `verify` reads `## Done when` out of. Both directories ride the existing archive mover with no change to it: it is a denylist
-of two (`run.json`, `runs/`), which is exactly the property that makes a new sidecar directory free.
+(`run.json`, `runs/` and, since #322, `stale-plans.json`), which is exactly the property that makes a new sidecar directory free.
 
 **That snapshot is re-fetched from the live issue, so `verify` refuses any `## Done when` command the gate never saw (bug-253).** The gate checks a command
 against `backlog/verify.json` and the `package.json` scripts once, at gate time; whoever can edit the issue could otherwise add a fenced line after that and have
