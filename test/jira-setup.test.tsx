@@ -54,6 +54,7 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     detail: null,
     boards: [],
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 0, last429At: null },

@@ -164,7 +164,8 @@ export class JiraController {
    * project from, and the route reads git, not Jira — the mapping check only keeps it from being a way to list any directory the container can see.
    *
    * A repo the server cannot read is still a 200, `available: false` with its reason: the sheet shows the sentence and lets the person type a branch. The
-   * stored base is `null` until the repo's defaults are wired in (Task 4); the roots come from the environment per call.
+   * stored base is the repo's `repoDefaults` entry's, found by the normalised path (`null` when it has none), read from the same file read as the mapping; the
+   * roots come from the environment per call.
    */
   @Get('refs')
   async refs(@Query('repo') repo: unknown, @Query('key') key: unknown): Promise<JiraRepoRefs> {
@@ -175,7 +176,7 @@ export class JiraController {
     const normalised = normaliseRepoPath(repo, homedir());
     const mapped = Object.values(config.repos).some((paths) => paths.includes(normalised ?? ''));
     if (normalised === null || !mapped) throw new HttpException({ error: `${repo} is not mapped` }, 400);
-    return readRepoRefs(normalised, key ?? null, repoRoots(), null);
+    return readRepoRefs(normalised, key ?? null, repoRoots(), config.repoDefaults[normalised]?.base ?? null);
   }
 
   /**

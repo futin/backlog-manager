@@ -61,6 +61,7 @@ function jiraStatus(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     detail: null,
     boards: [],
     repos: { PAY: ['/Users/ada/pay'] },
+    repoDefaults: {},
     projects: [{ key: 'PAY', name: 'Payments' }],
     skills: [SKILL],
     calls: { sweep: 0, last429At: null },

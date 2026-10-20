@@ -134,6 +134,7 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     // Beta listed FIRST, so "the first board by name" (Alpha) is never also "the first board in the payload".
     boards: [BETA, ALPHA],
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 0, last429At: null },

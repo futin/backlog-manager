@@ -593,7 +593,7 @@ describe('GET /api/jira/refs and /api/jira/worktrees', () => {
 
   beforeAll(async () => {
     prepare('refs');
-    writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [PAY, SHARED], OPS: [SHARED, OTHER] } }));
+    writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [PAY, SHARED], OPS: [SHARED, OTHER] }, repoDefaults: { [OTHER]: { base: 'release/9' } } }));
     await build(false);
   });
   afterAll(() => app.close());
@@ -625,6 +625,12 @@ describe('GET /api/jira/refs and /api/jira/worktrees', () => {
     expect((await get(q({ repo: PAY })).expect(200)).body).toEqual(REFS);
     await get(q({ repo: `${OTHER}/` })).expect(200);
     expect(refs.mock.calls[1][0]).toBe(OTHER);
+  });
+
+  it('passes the repo\'s stored default base, found by the normalised path, and null for a repo with none', async () => {
+    await get(q({ repo: `${OTHER}/`, key: 'PAY-1' })).expect(200);
+    await get(q({ repo: SHARED })).expect(200);
+    expect(refs.mock.calls.map((c) => [c[0], c[3]])).toEqual([[OTHER, 'release/9'], [SHARED, null]]);
   });
 
   it('passes the key (null without one), the roots from the environment and a null stored base', async () => {

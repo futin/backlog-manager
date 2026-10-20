@@ -506,6 +506,7 @@ describe('SettingsView', () => {
         detail: null,
         boards: [],
         repos: {},
+        repoDefaults: {},
         projects: [],
         skills: [SKILL],
         calls: { sweep: 0, last429At: null },

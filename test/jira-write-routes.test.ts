@@ -82,14 +82,14 @@ const post = (path: string, body: unknown) =>
 const status = async (): Promise<JiraStatusPayload> => (await request(app.getHttpServer()).get('/api/jira').expect(200)).body;
 const searches = () => fake.calls.filter((c) => c.url.endsWith('/search/jql')).map((c) => (c.body as { jql: string }).jql);
 
-describe('the guard, on all five routes', () => {
+describe('the guard, on all six config routes', () => {
   beforeAll(async () => {
     prepare('guard');
     await build();
   });
   afterAll(() => app.close());
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
     'POST %s with no content type is 403, and nothing is written',
     async (path) => {
       await request(app.getHttpServer()).post(`/api/jira${path}`).send('{}').expect(403);
@@ -97,12 +97,12 @@ describe('the guard, on all five routes', () => {
     }
   );
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
+  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])('POST %s from another origin is 403', async (path) => {
     await post(path, {}).set('origin', 'http://evil.test').expect(403);
     expect(existsSync(file)).toBe(false);
   });
 
-  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/skills'], ['/skills/delete']])(
+  it.each([['/boards'], ['/boards/delete'], ['/repos'], ['/repo-defaults'], ['/skills'], ['/skills/delete']])(
     'POST %s to a Host the allowlist does not know is 403',
     async (path) => {
       await post(path, {}).set('host', 'evil.example:4322').expect(403);
@@ -122,6 +122,7 @@ describe('unconfigured', () => {
     ['/boards', { name: '' }],
     ['/boards/delete', {}],
     ['/repos', { project: 'pay', paths: [] }],
+    ['/repo-defaults', { path: '', base: null, namePattern: null }],
     ['/skills', { name: '', prompt: 'p' }],
     ['/skills/delete', {}]
   ])('answers a malformed POST %s with its 400 before the 503', async (path, body) => {
@@ -132,6 +133,7 @@ describe('unconfigured', () => {
     ['/boards', BOARD],
     ['/boards/delete', { id: 'b_0123abcd' }],
     ['/repos', { project: 'PAY', paths: ['/a/b'] }],
+    ['/repo-defaults', { path: '/a/b', base: 'develop', namePattern: null }],
     ['/skills', SKILL],
     ['/skills/delete', { id: 's_0123abcd' }]
   ])('answers a valid POST %s with 503 Jira is not configured, and creates no file', async (path, body) => {
@@ -271,6 +273,55 @@ describe('configured, against a healthy Jira', () => {
     expect((await status()).repos).not.toHaveProperty('PAY');
   });
 
+  describe('POST /repo-defaults', () => {
+    const MAPPED = '/work/pay';
+    const defaults = (path: string, base: string | null, namePattern: string | null) => post('/repo-defaults', { path, base, namePattern });
+    const stored = () => JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+
+    beforeAll(async () => {
+      await post('/repos', { project: 'PAY', paths: [MAPPED] }).expect(200);
+    });
+
+    it('echoes the path normalised and the values as stored, null for unset, and the status payload carries them', async () => {
+      const res = await defaults(`${MAPPED}/`, 'develop', null).expect(200);
+      expect(res.body).toEqual({ path: MAPPED, base: 'develop', namePattern: null });
+      expect(stored().repoDefaults).toEqual({ [MAPPED]: { base: 'develop' } });
+      expect((await status()).repoDefaults).toEqual({ [MAPPED]: { base: 'develop' } });
+      const both = await defaults(MAPPED, 'release/1', 'feature/{key}-{slug}').expect(200);
+      expect(both.body).toEqual({ path: MAPPED, base: 'release/1', namePattern: 'feature/{key}-{slug}' });
+      expect((await status()).repoDefaults).toEqual({ [MAPPED]: { base: 'release/1', namePattern: 'feature/{key}-{slug}' } });
+    });
+
+    it('both null deletes the path\'s entry, and every other key of the file survives', async () => {
+      await defaults(MAPPED, 'develop', null).expect(200);
+      expect((await defaults(MAPPED, null, null).expect(200)).body).toEqual({ path: MAPPED, base: null, namePattern: null });
+      expect((await status()).repoDefaults).toEqual({});
+      expect((await status()).repos).toEqual({ PAY: [MAPPED] });
+    });
+
+    it.each([
+      ['no path', { base: null, namePattern: null }, 'path is required'],
+      ['a blank path', { path: ' ', base: null, namePattern: null }, 'path is required'],
+      ['a base that is a number', { path: MAPPED, base: 7, namePattern: null }, 'base must be a string or null'],
+      ['a pattern that is a number', { path: MAPPED, base: null, namePattern: 7 }, 'namePattern must be a string or null'],
+      ['a base with a space', { path: MAPPED, base: 'a b', namePattern: null }, 'base may hold only A-Z a-z 0-9 . _ / -'],
+      ['an empty base', { path: MAPPED, base: '', namePattern: null }, 'base is empty'],
+      ['a pattern with no key', { path: MAPPED, base: null, namePattern: '{slug}' }, 'namePattern renders as sample-slug, which does not carry ABC-1']
+    ])('400 for %s: %j', async (_label, body, error) => {
+      expect((await post('/repo-defaults', body).expect(400)).body).toEqual({ error });
+    });
+
+    it('400 <path> is not mapped for a path in no project\'s list, and writes nothing', async () => {
+      const before = readFileSync(file, 'utf8');
+      expect((await defaults('/work/elsewhere', 'develop', null).expect(400)).body).toEqual({ error: '/work/elsewhere is not mapped' });
+      expect(readFileSync(file, 'utf8')).toBe(before);
+    });
+
+    it('does not check that the base exists — it may live only on origin', async () => {
+      await defaults(MAPPED, 'only-on-origin', null).expect(200);
+    });
+  });
+
   it('POST /repos with an unnormalised path is 400', async () => {
     const res = await post('/repos', { project: 'PAY', paths: ['/a/../b'] }).expect(400);
     expect(res.body.error).toContain('/a/../b');
@@ -325,6 +376,7 @@ describe('configured, a jira.json that does not parse (Review Focus 2)', () => {
     ['/boards', BOARD],
     ['/boards/delete', { id: 'b_0123abcd' }],
     ['/repos', { project: 'PAY', paths: ['/a/b'] }],
+    ['/repo-defaults', { path: '/a/b', base: 'develop', namePattern: null }],
     ['/skills', SKILL],
     ['/skills', { ...SKILL, id: 's_0123abcd' }],
     ['/skills/delete', { id: 's_0123abcd' }]
@@ -332,6 +384,12 @@ describe('configured, a jira.json that does not parse (Review Focus 2)', () => {
     const res = await post(path, body).expect(409);
     expect(res.body.error).toContain('jira.json');
     expect(res.body.error).toContain('nothing was written');
+    expect(readFileSync(file, 'utf8')).toBe(BROKEN);
+  });
+
+  it('POST /repo-defaults for an unmapped path is 409 too, not 400 — the file cannot say what is mapped', async () => {
+    const res = await post('/repo-defaults', { path: '/never/mapped', base: null, namePattern: null }).expect(409);
+    expect(res.body.error).toMatch(/^settings\/jira\.json does not parse as JSON .* nothing was written$/);
     expect(readFileSync(file, 'utf8')).toBe(BROKEN);
   });
 });

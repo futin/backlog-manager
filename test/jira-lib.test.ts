@@ -116,6 +116,7 @@ function payload(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     detail: null,
     boards: [board()],
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 3, last429At: null },

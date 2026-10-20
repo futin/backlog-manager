@@ -704,6 +704,16 @@ export interface JiraIssueWriteResult {
 }
 
 /**
+ * One mapped path's defaults (spec §5.1): the base a New worktree is cut from, and the pattern its branch is named by. Each is absent when unset — the base then
+ * falls back to `origin/HEAD` and the checkout's own branch, the pattern to `DEFAULT_NAME_PATTERN`. Stored per PATH, not per project, because one checkout can be
+ * mapped to two Jira projects and has one convention.
+ */
+export interface JiraRepoDefaults {
+  base?: string;
+  namePattern?: string;
+}
+
+/**
  * `GET /api/jira`. `configured: false` is the whole payload's "draw nothing Jira" signal — the other fields then carry their empty values. The credentials
  * never appear here: `site`, `me.name` and `me.accountId` are the only identity facts that leave the server (§10). `live` is the in-memory map of key → live Run session, `{}` while unconfigured.
  */
@@ -719,6 +729,8 @@ export interface JiraStatusPayload {
   boards: JiraBoardStatus[];
   /** Project key → the absolute repo paths mapped to it. */
   repos: Record<string, string[]>;
+  /** Normalised repo path → its defaults; only paths with at least one value are present. `{}` while unconfigured. */
+  repoDefaults: Record<string, JiraRepoDefaults>;
   /** The union of project keys seen on any board cache and the mapped keys — no outbound call. */
   projects: { key: string; name: string }[];
   skills: JiraSkill[];
