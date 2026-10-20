@@ -179,7 +179,10 @@ Behaviour, in order (spec §5.4):
   - new with a name lacking the key → exit 4 `branch must carry TIMIFY-123`.
   - continue, origin-only branch → `created: "tracked"`, upstream `origin/<branch>`.
   - continue, local branch 2 behind origin → `attached`, note `fast-forwarded 2 commits`, HEAD equals origin's.
-  - continue, diverged → exit 4 containing `has diverged`.
+  - continue, diverged → exit 4 containing `has diverged`; `git worktree list` unchanged and `.worktrees/` absent. Variant: a hand-made sibling tree
+    holds the diverged branch → exit 4, that tree's HEAD unchanged.
+  - a sibling worktree on the branch stopped inside a conflicting `git rebase` (a plain `checkout --detach` does not trigger git's refusal), `continue` on
+    it → exit 4 containing `is held by the worktree at <sibling>`; `git worktree list` unchanged.
   - continue on the branch the clone itself has checked out → exit 4 containing `mapped checkout`.
   - continue, branch held by a hand-made sibling worktree outside `.worktrees/`, 1 behind, dirty → `entered`, `worktree` is the sibling's path, note
     `behind origin by 1, not fast-forwarded: uncommitted changes`, HEAD unchanged; same but clean → fast-forwarded.
@@ -330,7 +333,7 @@ Behaviour:
 **Files:**
 - Create: `server/src/jira/branch-choice.util.ts`
 - Modify: `server/src/jira/jira.controller.ts` (`prompt`), `server/src/agents/jira-agents.controller.ts`, `server/src/agents/jira-dispatch.service.ts`,
-  `shared/types.ts` (the wire shape `JiraDispatchRequest` gains the five flat optional fields `mode`, `branch`, `base`, `openMr`, `target` — what the
+  `shared/types.ts` (the wire shape `JiraDispatchRequest` gains `mode` (required, as both routes 400 without it) and four optional flat fields, `branch`, `base`, `openMr`, `target` — what the
   client's `dispatchJira` posts verbatim and what `test/agents-dispatch-jira.test.ts` sends; the service takes `JiraDispatchRequest & { choice:
   JiraBranchChoice }`, built by the controller through `parseBranchChoice`)
 - Test: `test/jira-branch-choice.test.ts` (new), `test/agents-dispatch-jira.test.ts`, `test/jira-routes.test.ts`
@@ -416,10 +419,12 @@ branches, then the rest, with a `behind`/`diverged` marker beside the chosen one
 (names of all listed branches) and an editable Name; unavailable refs: `branches unavailable — <path> <reason>` and plain text fields for branch and base;
 Open MR when done: a switch shown only for `execute` with New or Continue, off by default; with Continue on, a Target select pre-filled with
 `refs.defaultBase`. A `branchRefusal` disables Start and Copy prompt and shows its text; `offerContinue` shows a button that switches to Continue on
-that branch. Defaults recompute from `branchSheetDefaults` when the action changes, and once per repo when that repo's refs first arrive (at the moment the repo
-changes its refs are still `null`) — never on a later refs reload, which would overwrite what the person picked.
+that branch. Defaults recompute from `branchSheetDefaults` when the action changes, and on every `null` → loaded transition of the SELECTED repo's refs after a
+repo change (at the moment the repo changes its refs are still `null`); a failed refs request counts as unavailable refs; never while the repo stays the
+same, so a refs reload does not overwrite what the person picked.
 
-- [ ] **Step 1:** jsdom cases (fetch mocked): execute + a ticket branch → Continue pre-selected on the newest; execute, none → New with the rendered name and
+- [ ] **Step 1:** jsdom cases (fetch mocked): repo A → B → A puts A's defaults back, not B's; a refs request that fails falls back to the unavailable
+  form with stored defaults; execute + a ticket branch → Continue pre-selected on the newest; execute, none → New with the rendered name and
   `develop`; context → No branch selected; execute → no No-branch option; typing a name without the key → `branch must carry TIMIFY-123`, Start disabled;
   an existing name → `exists` + the button switches to Continue; Continue on the main checkout's branch → refusal, Start disabled; a branch in a linked
   tree → `will work in /r/.worktrees/x`; unavailable → the warning sentence and two text fields, Start enabled; never-fetched line; MR switch absent for
@@ -431,7 +436,7 @@ changes its refs are still `null`) — never on a later refs reload, which would
 ### Task 9: Setup row defaults, the modal's worktrees, the card chip
 
 **Files:**
-- Modify: `client/src/components/jira/JiraReposGroup.tsx`, `client/src/components/jira/JiraSkillsGroup.tsx` (`PLACEHOLDERS` and its hint),
+- Modify: `client/src/components/jira/JiraReposGroup.tsx`, `client/src/components/jira/JiraSkillsGroup.tsx` (`PLACEHOLDERS`, its hint, and the comment and test title that say "three"),
   `client/src/components/jira/JiraIssueModal.tsx`, `client/src/components/jira/JiraCard.tsx`,
   `client/src/components/jira/JiraBoardView.tsx` (fetches worktrees once for the board)
 - Test: `test/jira-setup.test.tsx`, `test/jira-modal.test.tsx`, `test/jira-board.test.tsx`
