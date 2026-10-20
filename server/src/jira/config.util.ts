@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { defaultBaseProblem, patternProblem } from '../../../shared/jira-branch';
 import {
   DEFAULT_JIRA_INTERVAL,
   SYNC_INTERVALS,
@@ -10,6 +11,7 @@ import {
   isSyncInterval,
   type JiraBoard,
   type JiraQuery,
+  type JiraRepoDefaults,
   type JiraSkill,
   type SyncInterval
 } from '../../../shared/types';
@@ -83,6 +85,8 @@ export interface JiraConfig {
   boards: JiraBoard[];
   /** Project key → absolute repository paths, in file order, deduplicated. */
   repos: Record<string, string[]>;
+  /** Normalised repo path → its default base and name pattern, each already past Table A / Table E; a path with neither is absent. */
+  repoDefaults: Record<string, JiraRepoDefaults>;
   skills: JiraSkill[];
   /** `null`, or why the file exists but could not be read or parsed — in which case every other field is empty and nothing may replace the file. */
   unreadable: string | null;
@@ -172,6 +176,45 @@ export function readRepos(value: unknown, file: string): Record<string, string[]
   return out;
 }
 
+/**
+ * The per-path defaults (spec §5.1), whole: absolute normalised path → `{ base?, namePattern? }`. The fallback is per VALUE, one level finer than the entry: a
+ * key that is not an absolute, already-normalised path (`normaliseRepoPath` with no home returns it unchanged — a `~` key would expand to something else and a
+ * relative one is refused) costs the entry; a value that is not a string or fails the same check the write route applies — `defaultBaseProblem` for the base,
+ * `patternProblem` for the pattern — costs only itself, so a hand-edited bad pattern leaves that path's good base working; an entry left with neither is
+ * dropped. Each drop is warned once. A `repoDefaults` that is not an object reads as `{}`. `__proto__` is skipped by name, as `readRepos` does, though the
+ * absolute-path test would refuse it anyway.
+ */
+export function readRepoDefaults(value: unknown, file: string): Record<string, JiraRepoDefaults> {
+  const out: Record<string, JiraRepoDefaults> = {};
+  if (!isRecord(value)) return out;
+  for (const [path, entry] of Object.entries(value)) {
+    if (path === '__proto__') continue;
+    const what = `repoDefaults entry "${path}"`;
+    if (!path.startsWith('/') || normaliseRepoPath(path, '') !== path) {
+      drop(file, what, 'not an absolute normalised path');
+      continue;
+    }
+    if (!isRecord(entry)) {
+      drop(file, what, 'not an object');
+      continue;
+    }
+    const defaults: JiraRepoDefaults = {};
+    if (entry.base !== undefined) {
+      const problem = typeof entry.base !== 'string' ? 'is not a string' : defaultBaseProblem(entry.base);
+      if (problem === null) defaults.base = entry.base as string;
+      else drop(file, `${what} base`, problem);
+    }
+    if (entry.namePattern !== undefined) {
+      const problem = typeof entry.namePattern !== 'string' ? 'is not a string' : patternProblem(entry.namePattern);
+      if (problem === null) defaults.namePattern = entry.namePattern as string;
+      else drop(file, `${what} namePattern`, problem);
+    }
+    if (defaults.base === undefined && defaults.namePattern === undefined) drop(file, what, 'no usable value');
+    else out[path] = defaults;
+  }
+  return out;
+}
+
 /** One skill, or `null` (warned) when its id is not an `s_` id or its name or prompt is empty or not a string. */
 export function readSkill(value: unknown, file: string, where: string): JiraSkill | null {
   if (!isRecord(value)) return drop(file, where, 'not an object');
@@ -192,7 +235,7 @@ function readList<T>(raw: unknown, file: string, kind: string, read: (value: unk
 }
 
 export function readJiraConfig(file: string = jiraConfigFile()): JiraConfig {
-  const empty = { boards: [], repos: {}, skills: [] };
+  const empty = { boards: [], repos: {}, repoDefaults: {}, skills: [] };
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
@@ -215,13 +258,15 @@ export function readJiraConfig(file: string = jiraConfigFile()): JiraConfig {
   return {
     boards: readList(raw.boards, file, 'board', readBoard),
     repos: readRepos(raw.repos, file),
+    repoDefaults: readRepoDefaults(raw.repoDefaults, file),
     skills: readList(raw.skills, file, 'skill', readSkill),
     unreadable: null
   };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
-// Writers (phase 2). Called by the five config POST routes under `/api/jira` (boards, boards/delete, repos, skills, skills/delete) and nothing else.
+// Writers (phase 2). Called by the six config POST routes under `/api/jira` (boards, boards/delete, repos, repo-defaults, skills, skills/delete) and nothing
+// else.
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -376,6 +421,35 @@ export function parseReposWrite(body: unknown, home: string): Parsed<{ project: 
   return { ok: true, value: { project: body.project, paths } };
 }
 
+/**
+ * Validate a `POST /api/jira/repo-defaults` body: `{ path, base, namePattern }`, where `null` is "unset". The path is normalised as `parseReposWrite` does; the
+ * 400 sentences are the field's name and the shared rule's own wording (`base <Table A problem>`, `namePattern <Table E problem>`), so the Setup row can put
+ * them under the field. A missing value is refused like a wrong one (`base must be a string or null`): the body replaces the path's whole entry, and a client
+ * that left a field out has not said whether to keep or clear it. Nothing is trimmed — Table A refuses a space, so a padded value is a refusal, not a silent
+ * fix. Whether the path is MAPPED, and whether the base exists, are not decided here: the first needs the file (the route reads it), the second is deliberately
+ * never checked (spec §5.1 — the branch may exist only on `origin`).
+ *
+ * A base is Table A plus one rule of its own (`defaultBaseProblem`, final review M1): `base is a branch name, without origin/`. The tool adds `origin/`
+ * itself, so a stored prefix made every Start exit 4.
+ */
+export function parseRepoDefaultsWrite(body: unknown, home: string): Parsed<{ path: string; base: string | null; namePattern: string | null }> {
+  if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
+  if (typeof body.path !== 'string' || body.path.trim() === '') return { ok: false, error: 'path is required' };
+  const path = normaliseRepoPath(body.path, home);
+  if (path === null) return { ok: false, error: `path must be absolute and normalised: ${body.path}` };
+  if (body.base !== null && typeof body.base !== 'string') return { ok: false, error: 'base must be a string or null' };
+  if (body.namePattern !== null && typeof body.namePattern !== 'string') return { ok: false, error: 'namePattern must be a string or null' };
+  if (body.base !== null) {
+    const problem = defaultBaseProblem(body.base);
+    if (problem !== null) return { ok: false, error: `base ${problem}` };
+  }
+  if (body.namePattern !== null) {
+    const problem = patternProblem(body.namePattern);
+    if (problem !== null) return { ok: false, error: `namePattern ${problem}` };
+  }
+  return { ok: true, value: { path, base: body.base, namePattern: body.namePattern } };
+}
+
 /** A fresh id of one kind: the prefix and eight lower-case hex digits from four random bytes. Uniqueness within a file is `mintUnique`'s job. */
 export function mintJiraId(kind: 'b' | 'q' | 's'): string {
   return `${kind}_${randomBytes(4).toString('hex')}`;
@@ -495,6 +569,24 @@ export function deleteBoard(id: string, file: string = jiraConfigFile()): void {
   const rest = boards.filter((entry) => !(isRecord(entry) && entry.id === id));
   if (rest.length === boards.length) throw new JiraUnknownIdError(id);
   writeRawAtomic(file, { ...current, boards: rest });
+}
+
+/**
+ * Set one path's defaults, or remove its entry when `value` holds neither. The entry is REPLACED whole — the route's body carries both fields, `null` meaning
+ * unset — and every other path's entry survives, a hand-written invalid one included; a `repoDefaults` that is not an object (an array, say) is replaced by one
+ * holding only this path. The key stays, as `{}`, when the last entry goes: `repos` does the same, and nothing reads a present-but-empty map differently.
+ */
+export function writeRepoDefaults(path: string, value: JiraRepoDefaults, file: string = jiraConfigFile()): void {
+  const current = readRawForWrite(file);
+  const repoDefaults: Record<string, unknown> = isRecord(current.repoDefaults) ? { ...current.repoDefaults } : {};
+  if (value.base === undefined && value.namePattern === undefined) delete repoDefaults[path];
+  else {
+    const entry: JiraRepoDefaults = {};
+    if (value.base !== undefined) entry.base = value.base;
+    if (value.namePattern !== undefined) entry.namePattern = value.namePattern;
+    repoDefaults[path] = entry;
+  }
+  writeRawAtomic(file, { ...current, repoDefaults });
 }
 
 /**

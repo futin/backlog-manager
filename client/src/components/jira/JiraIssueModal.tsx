@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useAction } from '../../hooks/useAction';
@@ -10,18 +10,21 @@ import {
   displayPath,
   failureOf,
   fetchJiraDetail,
+  fetchJiraWorktrees,
   initialsOf,
   issueDatesLine,
   modalTree,
   progressLine,
+  removeCommand,
   repoBasename,
   stopJira,
+  ticketWorktrees,
   transitionOptions,
   type JiraChildrenIndex
 } from '../../lib/jira';
 import { elapsedSince } from '../../lib/item-age';
 import { renderMarkdown } from '../../lib/markdown';
-import type { JiraAction, JiraIssue, JiraIssueDetail } from '../../../../shared/types';
+import type { JiraAction, JiraIssue, JiraIssueDetail, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
 import { Fact } from '../ui/Fact';
@@ -60,6 +63,13 @@ import { JiraRunMenu } from './JiraRunMenu';
  *   `useAction` as the two writes above, so one guard and one error line serve all three; a landed stop reloads the status and nudges the board, and that
  *   reload is the strip going away (spec §11). `StopSession` is mounted only for a confirmed entry, which is also the only time `useAgents()` reads
  *   `/api/agents/status`: a key with no session never asks.
+ *
+ * **The Worktrees list** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.2) sits under the body and above the comments note, independent of the detail read: the
+ * trees come from `GET /api/jira/worktrees`, which this modal asks for itself — on open, and again when the key changes or a session on it starts or ends
+ * (the moments a tree is made or becomes safe to remove) — and `ticketWorktrees` narrows to this key's. The main tree never gets a row. A failed read, or
+ * no tree, draws no heading at all; the previous answer for the same key stays drawn while a re-read is out, so the list does not blink on a Stop. Each row's
+ * `Remove` COPIES `removeCommand` — the board never writes git — and is disabled, titled `a session is running on <KEY>`, while the shell knows of one. That
+ * check is the best the board can do: a session it did not start (Copy prompt, a terminal) is invisible to it, which the enabled title says in so many words.
  *
  * **The `session` fact** reads the shell's `live[key]` (`<name> · <repo basename> · <elapsed>`, `starting`, or `—`) rather than the detail's `session`, which
  * stays typed `null`: the status is already polled, one poll old at worst, and the detail read would add a second source for one fact. The elapsed reading
@@ -177,6 +187,14 @@ export function JiraIssueModal({
         .catch((e: unknown): Held => ({ failure: e instanceof Error ? e.message : String(e) })),
     [issue.key, rev]
   );
+  // The Worktrees list's read: keyed on the issue and on WHETHER a session is live on it (not on the session object, which a status poll replaces).
+  const sessionLive = data?.live[issue.key] !== undefined;
+  const trees = useFetched(() => fetchJiraWorktrees(), [issue.key, sessionLive]);
+  const keptTrees = useRef<{ key: string; payload: JiraWorktreesPayload } | null>(null);
+  if (trees.status === 'ok' && trees.value !== null) keptTrees.current = { key: issue.key, payload: trees.value };
+  else if (trees.status === 'failed') keptTrees.current = null;
+  const ticketTrees =
+    keptTrees.current === null || keptTrees.current.key !== issue.key ? [] : ticketWorktrees(issue.key, keptTrees.current.payload);
   const landed = mine !== null && 'detail' in mine ? mine.detail : null;
   if (landed !== null && landed !== kept) setKept(landed);
   const detail = landed ?? (mine === null && kept !== null && kept.key === issue.key ? kept : null);
@@ -297,6 +315,7 @@ export function JiraIssueModal({
             {detail.children.length > 0 && <ChildrenTree selfKey={detail.key} direct={detail.children} childrenOf={childrenOf} onOpenIssue={onOpenIssue} />}
           </>
         )}
+        {ticketTrees.length > 0 && <WorktreesList trees={ticketTrees} issueKey={issue.key} live={live !== null} home={data?.home ?? null} />}
         <p className="jira-modal-comments">
           Comments stay in Jira — v1 neither reads nor writes them.{' '}
           <a href={src.url} target="_blank" rel="noreferrer">
@@ -305,6 +324,81 @@ export function JiraIssueModal({
         </p>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The ticket's worktrees (header, "The Worktrees list"): one row per tree — branch, path and repo through `displayPath` — and a `Remove` that copies the
+ * command and runs nothing. The button reads `Copied` for 2 s; with no clipboard API, or a refused write, the command itself is drawn under the row so it can
+ * be selected by hand. It is disabled while `live` — the shell knows of a session on this key — and its title then names the key.
+ */
+function WorktreesList({ trees, issueKey, live, home }: { trees: readonly JiraWorktree[]; issueKey: string; live: boolean; home: string | null }) {
+  return (
+    <section className="jira-wt">
+      <div className="jira-tree-head">
+        <h3>Worktrees</h3>
+        <Pill tone="neutral">{trees.length}</Pill>
+      </div>
+      <ul className="jira-wt-list">
+        {trees.map((t) => (
+          <WorktreeRow key={t.path} tree={t} issueKey={issueKey} live={live} home={home} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+const REMOVE_TITLE =
+  'Copies the command. Sessions the board did not start — Copy prompt, a terminal — cannot be seen: make sure none is using this tree.';
+
+function WorktreeRow({ tree, issueKey, live, home }: { tree: JiraWorktree; issueKey: string; live: boolean; home: string | null }) {
+  const command = removeCommand(tree);
+  const canCopy = typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function';
+  const [copied, setCopied] = useState(false);
+  const [refused, setRefused] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+    },
+    []
+  );
+  const copy = (): void => {
+    if (!canCopy) {
+      setRefused(true);
+      return;
+    }
+    navigator.clipboard.writeText(command).then(
+      () => {
+        setRefused(false);
+        setCopied(true);
+        if (timer.current !== null) clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), 2000);
+      },
+      () => setRefused(true)
+    );
+  };
+  const branch = tree.branch ?? 'detached';
+  return (
+    <li className="jira-wt-row">
+      <span className="jira-wt-branch">{branch}</span>
+      <span className="jira-wt-path" title={tree.path}>
+        {displayPath(tree.path, home)}
+      </span>
+      <span className="jira-wt-repo" title={tree.repo}>
+        {displayPath(tree.repo, home)}
+      </span>
+      <Chip
+        size={28}
+        disabled={live}
+        title={live ? `a session is running on ${issueKey}` : REMOVE_TITLE}
+        aria-label={`Remove worktree ${branch}`}
+        onClick={copy}
+      >
+        {copied ? 'Copied' : 'Remove'}
+      </Chip>
+      {refused && <code className="jira-wt-cmd">{command}</code>}
+    </li>
   );
 }
 

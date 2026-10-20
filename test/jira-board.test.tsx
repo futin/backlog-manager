@@ -134,6 +134,7 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     // Beta listed FIRST, so "the first board by name" (Alpha) is never also "the first board in the payload".
     boards: [BETA, ALPHA],
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 0, last429At: null },
@@ -147,6 +148,8 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
 let statusAnswer: JiraStatusPayload;
 let lists: Record<string, JiraIssue[]>;
 let requested: string[];
+/* `GET /api/jira/worktrees` — what the board reads once on mount and again when the set of live keys changes. */
+let worktreesAnswer: () => Promise<Response>;
 
 const ok = (body: unknown) =>
   Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(typeof body === 'string' ? body : '') } as Response);
@@ -166,6 +169,7 @@ beforeEach(() => {
   statusAnswer = status();
   lists = { [ALPHA.id]: ALPHA_ISSUES, [BETA.id]: BETA_ISSUES };
   requested = [];
+  worktreesAnswer = () => ok({ worktrees: [], unavailable: [] });
   global.fetch = jest.fn((input: RequestInfo | URL) => {
     const url = String(input);
     requested.push(url);
@@ -177,7 +181,14 @@ beforeEach(() => {
       return ok({ issues: lists[id] ?? [], polledAt: board?.polledAt ?? null });
     }
     if (url === '/api/agents/status') return ok(AGENTS);
+    if (url === '/api/jira/worktrees') return worktreesAnswer();
     if (url.startsWith('/api/jira/prompt')) return ok('a prompt');
+    // The launch sheet's Branch section reads the repository's branches before it lets an execute Start: a readable repo with a default base, so the sheet
+    // opens on a New branch it will launch (a `{}` would be a failed read — the unavailable form, with no base and Start refused for it).
+    if (url.startsWith('/api/jira/refs')) {
+      const repo = new URL(url, 'http://x').searchParams.get('repo');
+      return ok({ repo, available: true, fetchedAt: null, mainBranch: 'develop', defaultBase: 'develop', branches: [] });
+    }
     return ok({});
   }) as unknown as typeof fetch;
 });
@@ -940,5 +951,95 @@ describe('Run ▾ and the live strip', () => {
     chip.focus();
     await userEvent.keyboard('{Enter}');
     expect(screen.queryByRole('dialog', { name: /PAY-131 Refund partial captures/ })).not.toBeInTheDocument();
+  });
+});
+
+/* Worktree chips (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1): the board asks `/api/jira/worktrees` once on mount, and again only when the SET of live keys
+   changes — never on a timer, never because a render handed it a new object — and a failed read draws no chip and no error. */
+describe('worktree chips on the card', () => {
+  const tree = (branch: string | null, over: Partial<{ repo: string; path: string; main: boolean }> = {}) => ({
+    repo: '/home/ada/pay',
+    path: `/home/ada/pay/.worktrees/${(branch ?? 'detached').replaceAll('/', '-')}`,
+    branch,
+    main: false,
+    ...over
+  });
+  const worktreeReads = (): number => requested.filter((u) => u === '/api/jira/worktrees').length;
+  const chipOf = (summary: string): HTMLElement | null => card(summary).querySelector<HTMLElement>('.jira-card-tree');
+  const live = (key: string) => ({ [key]: { name: `jira ${key}`, startedAt: new Date().toISOString(), repo: '/home/ada/pay', starting: false } });
+
+  async function renderBoard(over: Partial<JiraStatusPayload> = {}): Promise<void> {
+    setJiraPage('board');
+    statusAnswer = status({ repos: { PAY: ['/home/ada/pay'] }, ...over });
+    render(
+      <SettingsProvider>
+        <JiraProvider>
+          <JiraView onOpenJiraPage={jest.fn()} />
+        </JiraProvider>
+      </SettingsProvider>
+    );
+    await screen.findByText('Refund partial captures');
+  }
+
+  it('shows the branch name on a card whose key has one tree, and nothing on a card with none or only the main tree', async () => {
+    worktreesAnswer = () =>
+      ok({
+        worktrees: [tree('main', { path: '/home/ada/pay', main: true }), tree('PAY-131-refund-partial'), tree('PAY-999-elsewhere')],
+        unavailable: []
+      });
+    await renderBoard();
+    await waitFor(() => expect(chipOf('Refund partial captures')).not.toBeNull());
+    expect(chipOf('Refund partial captures')).toHaveTextContent('PAY-131-refund-partial');
+    expect(chipOf('Refund partial captures')).toHaveAttribute('title', '/home/ada/pay/.worktrees/PAY-131-refund-partial');
+    expect(chipOf('Refund flows')).toBeNull();
+    expect(chipOf('Rounding wrong on invoices over 1,000')).toBeNull();
+  });
+
+  it('reads `N worktrees` for several trees, with every path in the title', async () => {
+    worktreesAnswer = () =>
+      ok({ worktrees: [tree('PAY-131-a'), tree('PAY-131-b', { repo: '/home/ada/other', path: '/home/ada/other/.worktrees/PAY-131-b' })], unavailable: [] });
+    await renderBoard({ repos: { PAY: ['/home/ada/pay', '/home/ada/other'] } });
+    await waitFor(() => expect(chipOf('Refund partial captures')).not.toBeNull());
+    expect(chipOf('Refund partial captures')).toHaveTextContent('2 worktrees');
+    expect(chipOf('Refund partial captures')?.getAttribute('title')).toContain('/home/ada/other/.worktrees/PAY-131-b');
+    expect(chipOf('Refund partial captures')?.getAttribute('title')).toContain('/home/ada/pay/.worktrees/PAY-131-a');
+  });
+
+  it('asks once on mount, not again when the status reloads with the same live keys, and again when a key joins or leaves', async () => {
+    await renderBoard({ live: live('PAY-131') });
+    await waitFor(() => expect(worktreeReads()).toBe(1));
+
+    // A focus read answers the same set: a new `live` object, the same keys — no second request.
+    statusAnswer = status({ repos: { PAY: ['/home/ada/pay'] }, live: live('PAY-131') });
+    const reads = requested.filter((u) => u === '/api/jira').length;
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(requested.filter((u) => u === '/api/jira').length).toBeGreaterThan(reads));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(worktreeReads()).toBe(1);
+
+    // A second key goes live: the set changed, so the trees are read again.
+    statusAnswer = status({ repos: { PAY: ['/home/ada/pay'] }, live: { ...live('PAY-131'), ...live('PAY-140') } });
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(worktreeReads()).toBe(2));
+
+    // And one leaves.
+    statusAnswer = status({ repos: { PAY: ['/home/ada/pay'] }, live: live('PAY-140') });
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(worktreeReads()).toBe(3));
+  });
+
+  it('a failed read draws no chip and no error', async () => {
+    worktreesAnswer = () => Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ error: 'git down' }) } as Response);
+    await renderBoard();
+    await waitFor(() => expect(worktreeReads()).toBe(1));
+    expect(document.querySelectorAll('.jira-card-tree')).toHaveLength(0);
+    expect(screen.queryByText('git down')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

@@ -651,6 +651,9 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .jira-card-av.none { background: none; border: 1px dashed var(--hairline2) }
 .jira-card-name { font-size: 12px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0 }
+/* The worktree chip on the marker row (DESIGN.md §8.9.1): the branch of the ticket's one tree, or `N worktrees`. Quiet `--ink3`, like a marker, and it
+   ellipsises first — the Run chip beside it keeps its width. */
+.jira-card-tree { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink3) }
 
 /* Project pill: the item's project, in that project's own hue, on its card and
    in the drawer head. Both halves now say the same thing — name in the text,
@@ -1293,6 +1296,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .jira-tree-row:hover { background: var(--strip-hi) }
 .jira-tree-key { font-weight: 500; color: var(--ink2); white-space: nowrap }
+/* The Worktrees list (§8.9.2) borrows the Children head above (`.jira-tree-head`); each row is the branch, the path and the repo — path first to ellipsise, the
+   branch never — then `Remove`. The copied command, when the clipboard refused, takes a row of its own under them. */
+.jira-wt-list { list-style: none; padding-left: 0; margin: 8px 0 0 }
+.jira-wt-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 5px 6px; font-size: 13px }
+.jira-wt-branch { font-weight: 500; color: var(--ink2); white-space: nowrap }
+.jira-wt-path { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink3) }
+.jira-wt-repo { font-size: 12px; color: var(--ink3); white-space: nowrap }
+.jira-wt-cmd { flex: 1 0 100%; font-size: 12px; color: var(--ink2); user-select: all; overflow-wrap: anywhere }
 .jira-tree-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 /* The description's clamp (§8.9.2): six lines of `.item-body p` (15 px at 1.6) before `Show more`. The max-height holds whether or not the text overflows
    it — `clamped` only adds the fade, so a description that fits never draws a fade over its own last line. `open` lifts the clamp outright. */
@@ -1319,6 +1330,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The add row: the project Select and `Add` keep their size, the path field takes what is left (the row wraps at Settings' own narrow widths). */
 .jira-setup-add { justify-content: flex-start; gap: 8px }
 .jira-setup-add-path { flex: 1 1 160px; width: auto; min-width: 0 }
+/* A path's defaults line (§8.9.3): two fields and Save in one wrapping row under the path's first row, the hint (branches unavailable / a pattern that cannot
+   name a branch) on a line of its own. The fields share what is left; the base is the narrower, a branch name being shorter than a pattern. */
+.jira-setup-defaults { justify-content: flex-start; flex-wrap: wrap; gap: 8px }
+.jira-setup-defaults-base { flex: 1 1 140px; width: auto; min-width: 0 }
+.jira-setup-defaults-pattern { flex: 2 1 200px; width: auto; min-width: 0 }
+.jira-setup-defaults-hint { flex: 1 0 100% }
 /* The Connection card's value, in the control slot: 13 px as the mock draws it, `--ink`. */
 .jira-setup-value { font-size: 13px; color: var(--ink) }
 /* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */
@@ -1386,6 +1403,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-sheet-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
 .jira-sheet-note { margin-right: auto; font-size: 12px; color: var(--ink3) }
 .jira-sheet-error { font-size: 13px; line-height: 1.45; color: var(--red) }
+
+/* The launch sheet's Branch section (§8.9.5): a control and the word about it on one line — the Continue select and its `behind` marker, a refusal and its
+   `switch to Continue` chip — wrapping on a phone rather than pushing the sheet wider. */
+.jira-branch-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px }
 
 /* Rendered item Markdown, at §6.1's scale: 15/400 body, 19/500 headings, code
    spans on --steel. The section headings are the store's fixed ## set

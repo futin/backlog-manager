@@ -122,6 +122,10 @@ services:
       # in here would be the container id, so it has to be passed through, and
       # `:-` so an unset one reads as empty — which that release refuses.
       BM_MACHINE_NAME: '${BM_MACHINE_NAME:-}'
+      # Both project roots above, `:`-joined, each with the default its mount uses. Passed so the server can tell a mapped path that is outside every mount
+      # ("not mounted into the board", with the fix named) from one that is merely missing ("does not exist") — from inside the container it cannot see
+      # which directories were left unmounted. Unset on a host-run API, where every path is visible and that check is skipped (jira/env.util.ts).
+      BM_REPO_ROOTS: '${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:${BM_JIRA_REPO_ROOT:-${HOME}/Documents/timify-projects}'
       # Make the server's watch POLL (#15). `nest start --watch` is not
       # chokidar: it runs TypeScript's own createWatchProgram, which watches
       # every source file with one fs.watch bound to that file's inode. On a
@@ -173,6 +177,13 @@ services:
       # ~/.backlog-manager stays covered by the :ro mount above.
       - ${HOME}/.backlog-manager/settings:${HOME}/.backlog-manager/settings
       - ${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}:ro
+      # The second project root, for the repos a Jira ticket's Run is mapped to (Setup → Repositories): the Timify repos live under
+      # ~/Documents/timify-projects, which the container cannot see until it is mounted. Read-only for the same reason the line above is: the server READS
+      # their branches and worktrees (jira/refs.util.ts, always through runGit) and never writes a ref — `jira.mjs worktree` does that, on the host, in the
+      # session. Same path on both sides, because jira.json names repos by absolute host path.
+      # A path that does not exist on the host is CREATED by this bind mount, as an empty directory (root-owned on Linux) — so on a machine without
+      # ~/Documents/timify-projects, set BM_JIRA_REPO_ROOT in .env to a directory that already exists rather than let Docker make one.
+      - ${BM_JIRA_REPO_ROOT:-${HOME}/Documents/timify-projects}:${BM_JIRA_REPO_ROOT:-${HOME}/Documents/timify-projects}:ro
 
   client:
     build: .

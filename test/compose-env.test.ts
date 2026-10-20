@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readAgentsConfig } from '../server/src/agents/config.util';
-import { JIRA_ENV } from '../server/src/jira/env.util';
+import { JIRA_ENV, REPO_ROOTS_ENV } from '../server/src/jira/env.util';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 
 /**
@@ -160,5 +160,34 @@ describe('docker-compose TSC_WATCHFILE / TSC_WATCHDIRECTORY', () => {
     // Not the file variable's spelling: tsc's updateOptionsForWatchDirectory accepts only the two `RecursiveDirectoryUsing…` values and falls back to
     // inotify for anything else without a word, so `'DynamicPriorityPolling'` here read as configured and changed nothing (review of #15, fix loop 1).
     expect(assignments('TSC_WATCHDIRECTORY')).toEqual(['RecursiveDirectoryUsingDynamicPriorityPolling']);
+  });
+});
+
+/**
+ * Jira repo/branch, Task 3 (spec §4) — the second read-only project root, and the variable that tells the server where both roots are. The Timify repos live
+ * under `~/Documents/timify-projects`, which the container cannot see until compose mounts it; `BM_REPO_ROOTS` is how `refs.util.ts` tells "not mounted into
+ * the board" from "does not exist". The mount's source and target are the same interpolation, so the path means the same thing on both sides, and each root in
+ * the variable carries the same default its mount uses — a root that drifted from its mount would name a directory the container does not have.
+ */
+describe('docker-compose BM_JIRA_REPO_ROOT / BM_REPO_ROOTS', () => {
+  const PROJECT_ROOT = '${BM_PROJECT_ROOT:-${HOME}/Documents/custom-projects}';
+  const JIRA_ROOT = '${BM_JIRA_REPO_ROOT:-${HOME}/Documents/timify-projects}';
+
+  /** Every uncommented `- <volume>` list item, quotes stripped. */
+  const mounts = COMPOSE.split('\n')
+    .map((line) => /^\s*-\s+(.*?)\s*$/.exec(line)?.[1])
+    .filter((value): value is string => value !== undefined)
+    .map((value) => value.replace(/^(['"])(.*)\1$/, '$2'));
+
+  it('mounts the Jira repo root read-only at the same path', () => {
+    expect(mounts.filter((m) => m.includes('BM_JIRA_REPO_ROOT'))).toEqual([`${JIRA_ROOT}:${JIRA_ROOT}:ro`]);
+  });
+
+  it('still mounts the project root read-only at the same path', () => {
+    expect(mounts).toContain(`${PROJECT_ROOT}:${PROJECT_ROOT}:ro`);
+  });
+
+  it('names both roots to the server, each with the default its mount uses', () => {
+    expect(assignments(REPO_ROOTS_ENV)).toEqual([`${PROJECT_ROOT}:${JIRA_ROOT}`]);
   });
 });

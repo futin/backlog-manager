@@ -51,3 +51,24 @@ export function jiraEnv(env: NodeJS.ProcessEnv = process.env): JiraEnv {
   }
   return { configured: true, site, email, token };
 }
+
+/**
+ * The one spelling of the variable that names the roots compose mounts into the container (spec §4). Exported, like `JIRA_ENV`, so `compose-env.test.ts`
+ * pins it.
+ */
+export const REPO_ROOTS_ENV = 'BM_REPO_ROOTS';
+
+/**
+ * The directories this server can see repositories under: `BM_REPO_ROOTS`, `:`-separated absolute paths, read per call and never cached (the rule `jiraEnv`
+ * states). Compose sets it to its two read-only mounts, so Setup can say "not mounted into the board" for a mapped path outside both instead of the vaguer
+ * "does not exist". Empty segments are dropped (`/a::` is `['/a']`) and unset or empty is `null` — a host-run API, where every path is visible and the
+ * "not mounted" check does not apply.
+ */
+export function repoRoots(env: NodeJS.ProcessEnv = process.env): string[] | null {
+  const raw = env[REPO_ROOTS_ENV];
+  const roots = (typeof raw === 'string' ? raw : '')
+    .split(':')
+    .map((root) => root.trim())
+    .filter((root) => root !== '');
+  return roots.length === 0 ? null : roots;
+}

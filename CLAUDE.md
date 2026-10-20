@@ -40,9 +40,10 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   server makes to anybody's items), `agents/` (the
   dashboard calls — #225's item `abort` among them — plus the run watchdog, and since Jira phase 5 `POST /api/agents/dispatch-jira` and `/jira-stop` with the
   60 s reconciler that keeps the Jira live map honest), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
-  `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the seven read routes under
-  `/api/jira` — phase 5's `GET /prompt` among them — and — since Jira phase 2 — `jira.json`'s five guarded write routes, `POST /api/jira/boards`, `/boards/delete`,
-  `/repos`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself that phase 3 added, `POST /api/jira/issue/assign`
+  `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read routes under
+  `/api/jira` — phase 5's `GET /prompt` and the repo/branch work's `/refs` and `/worktrees` among them — and — since Jira phase 2 — `jira.json`'s six guarded
+  write routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the
+  two writes to Jira itself that phase 3 added, `POST /api/jira/issue/assign`
   and `/issue/transition`, and phase 5's in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
   → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three —
   `orchestrator/` (a read-only view of the run-state directory, plus the
@@ -71,8 +72,9 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer;
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state directory, the
   registry and — by recorded lease id — each run's driver transcript, and owns `~/.backlog-manager/retro/`
-  ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/jira/tools/jira.mjs` is API-only and writes no file: it reads and moves one Jira
-  ticket through `/api/jira`. **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
+  ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/jira/tools/jira.mjs` reads and moves one Jira ticket
+  through `/api/jira` and writes no file of its own; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.
+  **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
   [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge.
@@ -122,7 +124,7 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
 - **`orchestrator:queued` is a plan, never a claim: the driver adds it, the claim and the Stop remove it, and no reader treats it as exclusion.**
   Why: [invariants.md](docs/subsystems/invariants.md#orchestratorqueued-is-a-plan-never-a-claim)
-- **`backlog.mjs` in a tracker project — and `jira.mjs` always — needs the stack up, and says so with exit `5`.**
+- **`backlog.mjs` in a tracker project — and `jira.mjs` always, save its git-only `worktree` — needs the stack up, and says so with exit `5`.**
   Why: [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
 - **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.**
   Why: [invariants.md](docs/subsystems/invariants.md#import-writes-the-marker-first-and-deletes-the-files-last)
@@ -146,6 +148,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#every-value-the-server-puts-into-jql-is-quoted-and-escaped-and-a-persons-jql-is-passed-verbatim)
 - **The board's Jira writes are assign and transition, nothing else; each re-reads the issue and splices it into every board cache holding the key.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-boards-jira-writes-are-assign-and-transition-nothing-else)
+- **A Jira branch name obeys one rule, in `shared/jira-branch.ts`, and `jira.mjs` carries its one hand-kept copy.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)
 - **A Jira session is remembered in server memory only; a restart forgets it, and Stop is the one hand that clears it early.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-jira-session-is-remembered-in-server-memory-only-and-stop-is-the-one-hand-that-clears-it-early)
 - **A tracker project has no item files, and that shows up in three places — and dispatch is NOT one of them.**
@@ -160,6 +164,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-sheets-uncommitted-flag-is-read-from-git-per-request-and-memoised-nowhere)
 - **The server never spawns git synchronously: every git read is `runGit`, async, bounded at 10 s, and a timeout lands in the failure branch the call site
   already had.** Why: [invariants.md](docs/subsystems/invariants.md#the-server-never-spawns-git-synchronously-in-a-request-path)
+- **The server never writes git: every git call it makes is a read, and fetch, worktree add/remove and checkout are the session's.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-server-never-writes-git)
 - **A client poller built on `useCoalescedFetch` never has two of its own requests in flight: its timer is armed by an answer, and a trigger that lands
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** Why:
   [invariants.md](docs/subsystems/invariants.md#a-client-poller-built-on-usecoalescedfetch-never-has-two-of-its-own-requests-in-flight)
@@ -212,7 +218,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it)
 - **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and
   `test/csp.test.ts` goes red until `THEME_SCRIPT_SHA256` follows.
-- **Container mounts land on host paths, read-only**, because the registry stores absolute host paths.
+- **Container mounts land on host paths, read-only**, because the registry stores absolute host paths — and so does `jira.json`, whose mapped repos get a
+  second root, `BM_JIRA_REPO_ROOT`. Compose passes both roots as `BM_REPO_ROOTS`, so the server can tell a path outside every mount from a missing one.
 - **pnpm only**, pinned by `packageManager`, enforced via corepack in the image.
 - **`pnpm test` is the union of BOTH runners** Why: [invariants.md](docs/subsystems/invariants.md#pnpm-test-is-the-union-of-both-runners)
 - **`allowBuilds` in `pnpm-workspace.yaml` lists `esbuild`**; a skipped build surfaces as Vite failing to start.

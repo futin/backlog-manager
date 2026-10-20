@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -73,6 +73,7 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     detail: null,
     boards: [BOARD, { ...BOARD, id: 'b_ffffffff', name: 'Platform' }],
     repos: { PAY: ['/Users/ada/pay'] },
+    repoDefaults: {},
     projects: [{ key: 'PAY', name: 'Payments' }],
     skills: [],
     calls: { sweep: 0, last429At: null },
@@ -89,6 +90,8 @@ let answer: () => Response | Promise<Response>;
 let calls: { url: string; init?: RequestInit }[];
 /** What a POST answers. The default is the routes' own 200 (`JiraIssueWriteResult`). */
 let post: (url: string) => Response | Promise<Response>;
+/** What `GET /api/jira/worktrees` answers — read by the Worktrees list, and kept out of `urls` (which is the issue reads) like the agents-status one. */
+let worktrees: () => Response | Promise<Response>;
 
 function json(body: unknown, init: { status?: number } = {}): Response {
   const status = init.status ?? 200;
@@ -181,10 +184,12 @@ beforeEach(() => {
   answer = () => json(detail());
   post = () => json({ ok: true, reread: true });
   agentsStatus = AGENTS_ON;
+  worktrees = () => json({ worktrees: [], unavailable: [] });
   global.fetch = jest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     if (init?.method === 'POST') return post(String(input));
     if (String(input) === '/api/agents/status') return json(agentsStatus);
+    if (String(input) === '/api/jira/worktrees') return worktrees();
     urls.push(String(input));
     return answer();
   }) as unknown as typeof fetch;
@@ -1002,5 +1007,100 @@ describe('JiraView — the open-issue slot draws the modal', () => {
     act(() => setJiraPage('board'));
     await screen.findByRole('button', { name: /Refund partial captures/ });
     expect(screen.queryByRole('dialog', { name: 'PAY-131 Refund partial captures' })).toBeNull();
+  });
+});
+
+/* The Worktrees list (Jira repo/branch, spec §5.5; DESIGN.md §8.9.2): the trees this ticket has, each with a Remove that only copies the command — the board
+   never writes git — and is off while the board knows of a session on the key. The main tree never gets a row. */
+describe('JiraIssueModal — Worktrees (Jira repo/branch)', () => {
+  const PAY_TREE = { repo: '/Users/ada/pay', path: '/Users/ada/pay/.worktrees/PAY-131-refund', branch: 'PAY-131-refund', main: false };
+  const worktreeCalls = (): number => calls.filter((c) => c.url === '/api/jira/worktrees').length;
+  const section = async (): Promise<HTMLElement> => {
+    const heading = await screen.findByRole('heading', { name: 'Worktrees' });
+    return heading.closest('section') as HTMLElement;
+  };
+  const setClipboard = (value: { writeText: jest.Mock } | undefined): void => {
+    Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
+  };
+  afterEach(() => setClipboard(undefined));
+
+  it('lists the ticket\'s trees — branch, path and repo through displayPath — and never the main tree or another ticket\'s', async () => {
+    worktrees = () =>
+      json({
+        worktrees: [
+          { ...PAY_TREE, branch: 'main', path: '/Users/ada/pay', main: true },
+          PAY_TREE,
+          { ...PAY_TREE, branch: 'PAY-999-other', path: '/Users/ada/pay/.worktrees/PAY-999-other' }
+        ],
+        unavailable: []
+      });
+    mount();
+    const rows = within(await section()).getAllByRole('listitem');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('PAY-131-refund');
+    expect(rows[0]).toHaveTextContent('~/pay/.worktrees/PAY-131-refund');
+    expect(rows[0]).toHaveTextContent('~/pay');
+    expect(worktreeCalls()).toBe(1);
+  });
+
+  it('draws no Worktrees heading when the ticket has no tree, and none when the read fails', async () => {
+    mount();
+    await screen.findByText('not');
+    expect(screen.queryByRole('heading', { name: 'Worktrees' })).toBeNull();
+    expect(worktreeCalls()).toBe(1);
+
+    cleanup();
+    worktrees = () => json({ error: 'git down' }, { status: 502 });
+    mount();
+    await screen.findByText('not');
+    await waitFor(() => expect(worktreeCalls()).toBe(2));
+    expect(screen.queryByRole('heading', { name: 'Worktrees' })).toBeNull();
+  });
+
+  it('Remove copies the quoted command, with no --force, and runs nothing', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const odd = { ...PAY_TREE, repo: '/Users/ada/my repos/pay', path: "/Users/ada/my repos/pay/.worktrees/it's-PAY-131", branch: "it's-PAY-131" };
+    worktrees = () => json({ worktrees: [odd], unavailable: [] });
+    mount();
+    const remove = within(await section()).getByRole('button', { name: /^Remove/ });
+    expect(remove).toBeEnabled();
+    expect(remove).toHaveAttribute(
+      'title',
+      'Copies the command. Sessions the board did not start — Copy prompt, a terminal — cannot be seen: make sure none is using this tree.'
+    );
+    await userEvent.click(remove);
+    expect(writeText).toHaveBeenCalledWith(
+      "git -C '/Users/ada/my repos/pay' worktree remove '/Users/ada/my repos/pay/.worktrees/it'\\''s-PAY-131'"
+    );
+    expect(writeText.mock.calls[0][0]).not.toContain('--force');
+    expect(await within(await section()).findByText('Copied')).toBeInTheDocument();
+    // Nothing was sent anywhere: no POST, and no other route asked.
+    expect(posts()).toEqual([]);
+  });
+
+  it('shows the command itself when the clipboard refuses or does not exist', async () => {
+    worktrees = () => json({ worktrees: [PAY_TREE], unavailable: [] });
+    setClipboard({ writeText: jest.fn().mockRejectedValue(new Error('denied')) });
+    mount();
+    await userEvent.click(within(await section()).getByRole('button', { name: /^Remove/ }));
+    expect(await within(await section()).findByText("git -C '/Users/ada/pay' worktree remove '/Users/ada/pay/.worktrees/PAY-131-refund'")).toBeInTheDocument();
+  });
+
+  it('disables Remove, titled with the key, while a session is live on it, and enables it again when the session goes', async () => {
+    worktrees = () => json({ worktrees: [PAY_TREE], unavailable: [] });
+    setClipboard({ writeText: jest.fn().mockResolvedValue(undefined) });
+    const view = mount({ status: { live: SESSION() } });
+    const remove = within(await section()).getByRole('button', { name: /^Remove/ });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAttribute('title', 'a session is running on PAY-131');
+    expect(remove.closest('.jira-wt-row')).not.toBeNull();
+
+    view.rerender(
+      <JiraContext.Provider value={{ data: status({ live: {} }), loading: false, error: false, reload }}>
+        <JiraIssueModal issue={CARD} childrenOf={null} onOpenIssue={onOpenIssue} onWrote={onWrote} onRun={onRun} onClose={() => {}} />
+      </JiraContext.Provider>
+    );
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('button', { name: /^Remove/ })).toBeEnabled());
   });
 });

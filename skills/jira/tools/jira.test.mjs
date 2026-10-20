@@ -7,9 +7,23 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import http from 'node:http'
-import { spawn } from 'node:child_process'
+import os from 'node:os'
+import path from 'node:path'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { normaliseKey, exitForStatus, formatStatus, resolveTransition, formatTransitions, USAGE, API_DOWN_CODE } from './jira.mjs'
+import {
+  normaliseKey,
+  exitForStatus,
+  formatStatus,
+  resolveTransition,
+  formatTransitions,
+  USAGE,
+  API_DOWN_CODE,
+  branchNameProblem,
+  branchCarriesKey,
+  isLockFailure,
+  ensureExcludeLines,
+} from './jira.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./jira.mjs', import.meta.url))
 
@@ -140,7 +154,7 @@ test('formatStatus: not configured is stderr only and exit 3, with the dash only
 })
 
 test('USAGE has one line per command, and API_DOWN_CODE is 5', () => {
-  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status']) {
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status', 'worktree']) {
     assert.match(USAGE, new RegExp(`^\\s*jira\\.mjs ${cmd}\\b`, 'm'), `USAGE has no line for ${cmd}`)
   }
   assert.equal(API_DOWN_CODE, 5)
@@ -209,7 +223,7 @@ test('nothing listening is exit 5 with the stack-down sentence naming the port',
   assert.equal(out.status, 5)
   assert.equal(
     out.stderr.trim(),
-    `the backlog-manager API is not running on 127.0.0.1:${port} — start it with \`pnpm run dev\` or \`pnpm run docker:up\` in the backlog-manager checkout; every jira.mjs command needs it`,
+    `the backlog-manager API is not running on 127.0.0.1:${port} — start it with \`pnpm run dev\` or \`pnpm run docker:up\` in the backlog-manager checkout; every jira.mjs command but worktree needs it`,
   )
 })
 
@@ -477,6 +491,530 @@ test('usage: a wrong argument count, a flag, or an unknown command is exit 1 and
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// worktree — the one git command (spec §5.4). Tables A and B are re-implemented in jira.mjs rather than imported from shared/jira-branch.ts (no skill's
+// `tools/` imports `shared/`), so the same rows are pinned here against the tool's own copies: a rule changed on one side and not the other goes red here.
+
+test('Table A: branchNameProblem — first hit wins, the exact sentences', () => {
+  for (const ok of ['feature/timify-123-x', 'TIMIFY-123', 'release/1.2', 'a_b.c']) assert.equal(branchNameProblem(ok), null, ok)
+  const rows = [
+    ['', 'is empty'],
+    ['a'.repeat(201), 'is longer than 200 characters'],
+    ['feat ure', 'may hold only A-Z a-z 0-9 . _ / -'],
+    ['feat~1', 'may hold only A-Z a-z 0-9 . _ / -'],
+    ['a:b', 'may hold only A-Z a-z 0-9 . _ / -'],
+    ['a@b', 'may hold only A-Z a-z 0-9 . _ / -'],
+    ['ä', 'may hold only A-Z a-z 0-9 . _ / -'],
+    ['-x', 'may not start with -'],
+    ['a..b', 'may not contain ..'],
+    ['/a', 'may not start or end with /, or contain //'],
+    ['a/', 'may not start or end with /, or contain //'],
+    ['a//b', 'may not start or end with /, or contain //'],
+    ['a/.b', 'may not have a part starting with .'],
+    ['.a', 'may not have a part starting with .'],
+    ['a.lock', 'may not have a part ending in .lock'],
+    ['a.lock/b', 'may not have a part ending in .lock'],
+    ['a.', 'may not end with .'],
+  ]
+  for (const [name, problem] of rows) assert.equal(branchNameProblem(name), problem, JSON.stringify(name))
+  assert.equal(branchNameProblem('a'.repeat(200)), null, 'exactly 200 is allowed')
+})
+
+test('Table B: branchCarriesKey — case-insensitive, bounded on both sides by a non-alphanumeric or the end', () => {
+  for (const yes of ['TIMIFY-123-fix-login', 'feature/timify-123-x', 'hotfix/timify-123', 'TIMIFY-123', 'feature/timify-123_x']) {
+    assert.equal(branchCarriesKey(yes, 'TIMIFY-123'), true, yes)
+  }
+  for (const no of ['timify-1234-x', 'xtimify-123', '1timify-123', 'feature/timify-12-x', 'develop']) {
+    assert.equal(branchCarriesKey(no, 'TIMIFY-123'), false, no)
+  }
+  // Every occurrence is tried: an unbounded hit earlier must not hide a bounded one later.
+  assert.equal(branchCarriesKey('xtimify-123/timify-123', 'TIMIFY-123'), true)
+})
+
+test('isLockFailure is true only for a lock git could not take', () => {
+  assert.equal(isLockFailure("error: cannot lock ref 'refs/remotes/origin/main': is at 1 but expected 2"), true)
+  assert.equal(isLockFailure("cannot lock ref 'refs/remotes/origin/main'"), true)
+  assert.equal(isLockFailure("Unable to create '/r/.git/shallow.lock': File exists."), true)
+  assert.equal(isLockFailure("fatal: 'origin' does not appear to be a git repository"), false)
+  assert.equal(isLockFailure(''), false)
+})
+
+test('ensureExcludeLines appends only the whole lines missing, newline-safe, and says what it appended', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jira-exclude-'))
+  const file = path.join(dir, 'info', 'exclude')
+  assert.deepEqual(ensureExcludeLines(dir, ['.worktrees/', 'node_modules']), ['.worktrees/', 'node_modules'])
+  assert.equal(fs.readFileSync(file, 'utf8'), '.worktrees/\nnode_modules\n')
+  assert.deepEqual(ensureExcludeLines(dir, ['.worktrees/', 'node_modules']), [])
+  // A substring is not a line, and a last line without its newline gets one before the append.
+  fs.writeFileSync(file, '# mine\nnode_modules_old')
+  assert.deepEqual(ensureExcludeLines(dir, ['node_modules']), ['node_modules'])
+  assert.equal(fs.readFileSync(file, 'utf8'), '# mine\nnode_modules_old\nnode_modules\n')
+})
+
+// The fixtures are real git: a bare `origin` with `main` and `develop`, a `seed` clone that plays everybody else pushing, and a `repo` clone that is the
+// mapped repository, with a `node_modules/` of its own. Every git here and every CLI child sees no global or system config, so the machine's hooks, commit
+// signing and default branch cannot decide what a fixture commit does. Tmp roots come from `os.tmpdir()`, which `test:skills` points at its own run root.
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' }
+
+function gitTry(cwd, ...args) {
+  return spawnSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], { cwd, env: GIT_ENV, encoding: 'utf8' })
+}
+
+function git(cwd, ...args) {
+  const r = gitTry(cwd, ...args)
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} in ${cwd} failed: ${r.stderr}`)
+  return r.stdout.trim()
+}
+
+function configUser(dir) {
+  git(dir, 'config', 'user.name', 'Fixture')
+  git(dir, 'config', 'user.email', 'fixture@example.invalid')
+}
+
+let fixtureCommit = 0
+
+function commitFile(dir, file, text) {
+  fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+  fs.writeFileSync(path.join(dir, file), text)
+  git(dir, 'add', '--', file)
+  git(dir, 'commit', '-q', '-m', `${file}: ${text.trim()}`)
+  return git(dir, 'rev-parse', 'HEAD')
+}
+
+function wtFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jira-wt-'))
+  const origin = path.join(root, 'origin.git')
+  git(root, 'init', '-q', '--bare', '-b', 'main', origin)
+  const seed = path.join(root, 'seed')
+  git(root, 'clone', '-q', origin, seed)
+  configUser(seed)
+  git(seed, 'symbolic-ref', 'HEAD', 'refs/heads/main')
+  commitFile(seed, 'README.md', 'seed\n')
+  git(seed, 'push', '-q', 'origin', 'main', 'main:develop')
+  const repo = path.join(root, 'repo')
+  git(root, 'clone', '-q', origin, repo)
+  configUser(repo)
+  fs.mkdirSync(path.join(repo, 'node_modules'))
+  fs.writeFileSync(path.join(repo, 'node_modules', 'marker'), '')
+  return { root, origin, seed, repo }
+}
+
+/** Somebody else pushes `n` commits to `origin/<branch>`, starting from `origin/<from>` (the branch itself by default). Returns the new tip. */
+function pushCommits(fx, branch, n, from = branch) {
+  git(fx.seed, 'fetch', '-q', 'origin')
+  git(fx.seed, 'checkout', '-q', '-B', branch, `origin/${from}`)
+  let tip = ''
+  for (let i = 0; i < n; i++) tip = commitFile(fx.seed, `pushed-${++fixtureCommit}.txt`, `${branch} ${i}\n`)
+  git(fx.seed, 'push', '-q', 'origin', `${branch}:${branch}`)
+  return tip
+}
+
+/** The mapped repo learns about `origin/<branch>` and makes a local branch of it, with no checkout. */
+function localFromOrigin(fx, branch) {
+  git(fx.repo, 'fetch', '-q', 'origin')
+  git(fx.repo, 'branch', '-q', '--no-track', branch, `origin/${branch}`)
+}
+
+function runWorktree(args, env = {}) {
+  const r = spawnSync('node', [SCRIPT, 'worktree', ...args], { env: { ...GIT_ENV, ...env }, encoding: 'utf8' })
+  let json = null
+  try {
+    json = r.status === 0 ? JSON.parse(r.stdout) : null
+  } catch {
+    // Left null; the case's own assertion names what came back.
+  }
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, json }
+}
+
+const wtArgs = (fx, mode, branch, base, key = 'TIMIFY-123') => [
+  key,
+  '--repo',
+  fx.repo,
+  '--mode',
+  mode,
+  '--branch',
+  branch,
+  ...(base === undefined ? [] : ['--base', base]),
+]
+
+const worktreeList = (fx) => git(fx.repo, 'worktree', 'list', '--porcelain')
+const excludeCount = (fx, line) =>
+  fs
+    .readFileSync(path.join(fx.repo, '.git', 'info', 'exclude'), 'utf8')
+    .split('\n')
+    .filter((l) => l === line).length
+
+test('worktree usage: missing or malformed arguments are exit 1 with the usage line, before git is asked anything', () => {
+  const fx = wtFixture()
+  const before = worktreeList(fx)
+  const usageLine = /usage: jira\.mjs worktree <KEY> --repo <path> --mode new\|continue --branch <name> \[--base <name>\]/
+  const cases = [
+    [[], usageLine],
+    [wtArgs(fx, 'new', 'TIMIFY-123-x'), /--base is required with --mode new/],
+    [wtArgs(fx, 'continue', 'TIMIFY-123-x', 'main'), /--base is not taken with --mode continue/],
+    [wtArgs(fx, 'sideways', 'TIMIFY-123-x', 'main'), /--mode must be new or continue/],
+    [['TIMIFY-123', '--mode', 'new', '--branch', 'TIMIFY-123-x', '--base', 'main'], /--repo is required/],
+    [['TIMIFY-123', '--repo', fx.repo, '--branch', 'TIMIFY-123-x', '--base', 'main'], /--mode is required/],
+    [['TIMIFY-123', '--repo', fx.repo, '--mode', 'new', '--base', 'main'], /--branch is required/],
+    [wtArgs(fx, 'new', 'TIMIFY-123-x', 'main', 'not a key'), /not a Jira issue key: not a key/],
+    [wtArgs(fx, 'new', 'a..b', 'main'), /--branch may not contain \.\./],
+    [wtArgs(fx, 'new', 'TIMIFY-123-x', 'ma in'), /--base may hold only A-Z a-z 0-9 \. _ \/ -/],
+    [[...wtArgs(fx, 'new', 'TIMIFY-123-x', 'main'), '--force'], /unknown option --force/],
+    [[...wtArgs(fx, 'new', 'TIMIFY-123-x', 'main'), '--branch', 'TIMIFY-123-y'], /--branch given twice/],
+    [['TIMIFY-123', '--repo'], /--repo needs a value/],
+  ]
+  for (const [args, said] of cases) {
+    const out = runWorktree(args)
+    assert.equal(out.status, 1, `${args.join(' ')}: ${out.stderr}`)
+    assert.match(out.stderr, said, args.join(' '))
+    assert.match(out.stderr, usageLine, args.join(' '))
+    assert.equal(out.stdout, '', args.join(' '))
+  }
+  assert.equal(worktreeList(fx), before)
+  assert.equal(fs.existsSync(path.join(fx.repo, '.worktrees')), false)
+})
+
+test('worktree makes no HTTP request, and a path that is not a git top level is exit 4', async () => {
+  const fx = wtFixture()
+  const plain = path.join(fx.root, 'plain')
+  fs.mkdirSync(plain)
+  const { out, requests } = await cli({}, 'worktree', 'TIMIFY-123', '--repo', plain, '--mode', 'new', '--branch', 'TIMIFY-123-x', '--base', 'main')
+  assert.equal(out.status, 4, out.stderr)
+  assert.equal(out.stderr.trim(), `${plain} is not a git repository`)
+  assert.equal(requests.length, 0)
+  // Inside a repository but not its top level is not the mapped checkout either; nor is a path that does not exist.
+  for (const repo of [path.join(fx.repo, 'node_modules'), path.join(fx.root, 'missing')]) {
+    const sub = runWorktree(['TIMIFY-123', '--repo', repo, '--mode', 'new', '--branch', 'TIMIFY-123-x', '--base', 'main'])
+    assert.equal(sub.status, 4, repo)
+    assert.match(sub.stderr, /is not a git repository/)
+  }
+})
+
+test('worktree new cuts the branch from origin/<base> after the fetch, with no upstream, and wires exclude and node_modules', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'branch', '-q', 'develop', 'origin/develop')
+  const ahead = pushCommits(fx, 'develop', 1)
+  const out = runWorktree(wtArgs(fx, 'new', 'feature/TIMIFY-123-x', 'develop'))
+  assert.equal(out.status, 0, out.stderr)
+  // The printed path is git's form, the realpath (fx.repo sits under /var/folders, which is /private/var/folders on macOS), for every `created`.
+  const tree = fs.realpathSync(path.join(fx.repo, '.worktrees', 'feature-TIMIFY-123-x'))
+  assert.deepEqual(out.json, { worktree: tree, branch: 'feature/TIMIFY-123-x', created: 'new', notes: [] })
+  assert.equal(git(tree, 'rev-parse', 'HEAD'), ahead, 'cut from the fetched origin/develop, not the stale local develop')
+  assert.equal(git(tree, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature/TIMIFY-123-x')
+  assert.notEqual(gitTry(tree, 'rev-parse', '--abbrev-ref', 'feature/TIMIFY-123-x@{upstream}').status, 0, 'a new branch has no upstream')
+  assert.equal(excludeCount(fx, '.worktrees/'), 1)
+  assert.equal(excludeCount(fx, 'node_modules'), 1)
+  const link = path.join(tree, 'node_modules')
+  assert.ok(fs.lstatSync(link).isSymbolicLink())
+  assert.equal(fs.realpathSync(link), fs.realpathSync(path.join(fx.repo, 'node_modules')))
+  assert.equal(git(fx.repo, 'status', '--porcelain'), '', 'the mapped checkout stays clean')
+})
+
+test('worktree new twice, two branches: each exclude line is still there once', () => {
+  const fx = wtFixture()
+  for (const branch of ['TIMIFY-123-a', 'TIMIFY-123-b']) {
+    const out = runWorktree(wtArgs(fx, 'new', branch, 'main'))
+    assert.equal(out.status, 0, out.stderr)
+    assert.equal(out.json.created, 'new')
+  }
+  assert.equal(excludeCount(fx, '.worktrees/'), 1)
+  assert.equal(excludeCount(fx, 'node_modules'), 1)
+})
+
+test('worktree new refuses a name that exists, a name without the key, and a base that does not exist — creating nothing', () => {
+  const fx = wtFixture()
+  pushCommits(fx, 'TIMIFY-123-taken', 1, 'main')
+  git(fx.repo, 'branch', '-q', 'TIMIFY-123-local', 'main')
+  const before = worktreeList(fx)
+  const refusals = [
+    [wtArgs(fx, 'new', 'TIMIFY-123-taken', 'main'), 'TIMIFY-123-taken exists — Start again with Continue'],
+    [wtArgs(fx, 'new', 'TIMIFY-123-local', 'main'), 'TIMIFY-123-local exists — Start again with Continue'],
+    [wtArgs(fx, 'new', 'fix-login', 'main'), 'branch must carry TIMIFY-123'],
+    [wtArgs(fx, 'new', 'TIMIFY-123-x', 'nope'), 'no base nope locally or on origin'],
+  ]
+  for (const [args, said] of refusals) {
+    const out = runWorktree(args)
+    assert.equal(out.status, 4, out.stderr)
+    assert.equal(out.stderr.trim(), said)
+  }
+  assert.equal(worktreeList(fx), before)
+  assert.equal(fs.existsSync(path.join(fx.repo, '.worktrees')), false)
+  assert.notEqual(gitTry(fx.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/TIMIFY-123-taken').status, 0, 'no local branch was made')
+})
+
+test('worktree continue on a branch only origin has makes a local branch tracking it', () => {
+  const fx = wtFixture()
+  const tip = pushCommits(fx, 'TIMIFY-123-remote', 1, 'main')
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-remote'))
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.json.created, 'tracked')
+  assert.equal(out.json.worktree, fs.realpathSync(path.join(fx.repo, '.worktrees', 'TIMIFY-123-remote')))
+  assert.equal(git(out.json.worktree, 'rev-parse', 'HEAD'), tip)
+  assert.equal(git(out.json.worktree, 'rev-parse', '--abbrev-ref', 'TIMIFY-123-remote@{upstream}'), 'origin/TIMIFY-123-remote')
+})
+
+test('worktree continue on a local branch 2 behind origin attaches it and fast-forwards', () => {
+  const fx = wtFixture()
+  pushCommits(fx, 'TIMIFY-123-behind', 1, 'main')
+  localFromOrigin(fx, 'TIMIFY-123-behind')
+  const tip = pushCommits(fx, 'TIMIFY-123-behind', 2)
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-behind'))
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.json.created, 'attached')
+  assert.equal(out.json.worktree, fs.realpathSync(path.join(fx.repo, '.worktrees', 'TIMIFY-123-behind')), 'the realpath form, as for every created')
+  assert.deepEqual(out.json.notes, ['fast-forwarded 2 commits'])
+  assert.equal(git(out.json.worktree, 'rev-parse', 'HEAD'), tip)
+  assert.ok(fs.lstatSync(path.join(out.json.worktree, 'node_modules')).isSymbolicLink())
+})
+
+test('worktree continue on a branch that exists nowhere is exit 4', () => {
+  const fx = wtFixture()
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-none'))
+  assert.equal(out.status, 4)
+  assert.equal(out.stderr.trim(), 'no branch TIMIFY-123-none locally or on origin')
+})
+
+test('worktree continue on a diverged branch is exit 4 before any tree is made — also when a tree of its own holds it', () => {
+  const fx = wtFixture()
+  pushCommits(fx, 'TIMIFY-123-d', 1, 'main')
+  localFromOrigin(fx, 'TIMIFY-123-d')
+  // One local commit with no checkout at all, then one on origin: 1 ahead, 1 behind.
+  const tree = git(fx.repo, 'rev-parse', 'TIMIFY-123-d^{tree}')
+  const local = git(fx.repo, 'commit-tree', tree, '-p', 'TIMIFY-123-d', '-m', 'local')
+  git(fx.repo, 'update-ref', 'refs/heads/TIMIFY-123-d', local)
+  pushCommits(fx, 'TIMIFY-123-d', 1)
+  const before = worktreeList(fx)
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-d'))
+  assert.equal(out.status, 4)
+  assert.equal(out.stderr.trim(), 'TIMIFY-123-d has diverged from origin/TIMIFY-123-d (1 ahead, 1 behind) — never reset, never merged')
+  assert.equal(worktreeList(fx), before)
+  assert.equal(fs.existsSync(path.join(fx.repo, '.worktrees')), false)
+  assert.equal(git(fx.repo, 'rev-parse', 'TIMIFY-123-d'), local, 'the branch is where it was')
+
+  // The variant: a hand-made sibling tree holds the diverged branch. Still refused, and that tree is not moved.
+  const fy = wtFixture()
+  pushCommits(fy, 'TIMIFY-123-d', 1, 'main')
+  localFromOrigin(fy, 'TIMIFY-123-d')
+  const sibling = path.join(fy.root, 'hand-made')
+  git(fy.repo, 'worktree', 'add', '-q', sibling, 'TIMIFY-123-d')
+  const mine = commitFile(sibling, 'mine.txt', 'mine\n')
+  pushCommits(fy, 'TIMIFY-123-d', 1)
+  const held = runWorktree(wtArgs(fy, 'continue', 'TIMIFY-123-d'))
+  assert.equal(held.status, 4)
+  assert.match(held.stderr, /has diverged/)
+  assert.equal(git(sibling, 'rev-parse', 'HEAD'), mine)
+})
+
+test('worktree continue on a branch a tree holds detached mid-rebase is exit 4 naming that tree', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'branch', '-q', 'TIMIFY-123-r', 'main')
+  const sibling = path.join(fx.root, 'rebasing')
+  git(fx.repo, 'worktree', 'add', '-q', sibling, 'TIMIFY-123-r')
+  commitFile(sibling, 'README.md', 'theirs\n')
+  commitFile(fx.repo, 'README.md', 'ours\n')
+  assert.notEqual(gitTry(sibling, 'rebase', 'main').status, 0, 'the fixture rebase must stop on its conflict')
+  assert.match(worktreeList(fx), /\ndetached$/m, 'git lists the rebasing tree as detached')
+  const before = worktreeList(fx)
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-r'))
+  assert.equal(out.status, 4, out.stderr)
+  assert.match(out.stderr, /^TIMIFY-123-r is held by the worktree at .+ \(detached, likely mid-rebase\) — finish or abort there first$/m)
+  assert.ok(out.stderr.includes(sibling) || out.stderr.includes(fs.realpathSync(sibling)), out.stderr)
+  assert.equal(worktreeList(fx), before)
+  assert.equal(fs.existsSync(path.join(fx.repo, '.worktrees')), false, 'the refused add left no directory behind')
+})
+
+test('worktree continue on the branch the mapped checkout holds is exit 4 naming the checkout', () => {
+  const fx = wtFixture()
+  const out = runWorktree(wtArgs(fx, 'continue', 'main'))
+  assert.equal(out.status, 4)
+  assert.equal(out.stderr.trim(), `main is checked out in the mapped checkout ${fx.repo} — a worktree cannot take it`)
+})
+
+test('worktree continue enters a tree that already holds the branch: dirty is left behind, clean is fast-forwarded', () => {
+  const fx = wtFixture()
+  pushCommits(fx, 'TIMIFY-123-e', 1, 'main')
+  localFromOrigin(fx, 'TIMIFY-123-e')
+  const sibling = path.join(fx.root, 'by-hand')
+  git(fx.repo, 'worktree', 'add', '-q', sibling, 'TIMIFY-123-e')
+  const head = git(sibling, 'rev-parse', 'HEAD')
+  const tip = pushCommits(fx, 'TIMIFY-123-e', 1)
+  fs.writeFileSync(path.join(sibling, 'README.md'), 'dirty\n')
+
+  const dirty = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-e'))
+  assert.equal(dirty.status, 0, dirty.stderr)
+  assert.equal(dirty.json.created, 'entered')
+  assert.equal(dirty.json.worktree, fs.realpathSync(sibling), 'the same realpath form a created tree is printed in')
+  assert.deepEqual(dirty.json.notes, ['behind origin by 1, not fast-forwarded: uncommitted changes'])
+  assert.equal(git(sibling, 'rev-parse', 'HEAD'), head)
+  assert.equal(fs.existsSync(path.join(sibling, 'node_modules')), false, 'a tree it did not create gets no link')
+
+  git(sibling, 'checkout', '-q', '--', 'README.md')
+  const clean = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-e'))
+  assert.equal(clean.status, 0, clean.stderr)
+  assert.equal(clean.json.created, 'entered')
+  assert.deepEqual(clean.json.notes, ['fast-forwarded 1 commit'])
+  assert.equal(git(sibling, 'rev-parse', 'HEAD'), tip)
+})
+
+test('worktree refuses a target path another branch or a plain directory already holds (Review Focus 1)', () => {
+  const fx = wtFixture()
+  const first = runWorktree(wtArgs(fx, 'new', 'feature/a-TIMIFY-1', 'main', 'TIMIFY-1'))
+  assert.equal(first.status, 0, first.stderr)
+  const target = path.join(fx.repo, '.worktrees', 'feature-a-TIMIFY-1')
+  const out = runWorktree(wtArgs(fx, 'new', 'feature-a/TIMIFY-1', 'main', 'TIMIFY-1'))
+  assert.equal(out.status, 4)
+  assert.equal(out.stderr.trim(), `${target} already exists (holds feature/a-TIMIFY-1)`)
+  assert.notEqual(gitTry(fx.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/feature-a/TIMIFY-1').status, 0)
+
+  fs.mkdirSync(path.join(fx.repo, '.worktrees', 'TIMIFY-123-p'))
+  const plain = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-p', 'main'))
+  assert.equal(plain.status, 4)
+  assert.equal(plain.stderr.trim(), `${path.join(fx.repo, '.worktrees', 'TIMIFY-123-p')} already exists (is not a worktree)`)
+})
+
+test('worktree refuses a target git still has registered after its directory was deleted, leaving no branch behind (new and tracked)', () => {
+  // `worktree add -b` makes the branch before it looks at the path, and keeps it when git then refuses the path — so this must be refused first.
+  const fx = wtFixture()
+  pushCommits(fx, 'TIMIFY-123-gone2', 1, 'main')
+  git(fx.repo, 'fetch', '-q', 'origin')
+  for (const [mode, branch, base] of [
+    ['new', 'TIMIFY-123-gone', 'main'],
+    ['continue', 'TIMIFY-123-gone2', undefined],
+  ]) {
+    const target = path.join(fx.repo, '.worktrees', branch)
+    git(fx.repo, 'worktree', 'add', '-q', '-b', `other-${branch}`, target, 'main')
+    fs.rmSync(target, { recursive: true, force: true })
+    const before = worktreeList(fx)
+    const out = runWorktree(wtArgs(fx, mode, branch, base))
+    assert.equal(out.status, 4, `${mode}: ${out.stderr}`)
+    assert.equal(
+      out.stderr.trim(),
+      `${target} is a registered worktree (holds other-${branch}) whose directory is gone — \`git worktree remove ${target}\` clears that record`,
+    )
+    assert.notEqual(gitTry(fx.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).status, 0, `${mode}: no branch was left behind`)
+    assert.equal(worktreeList(fx), before)
+  }
+})
+
+test('worktree finds a stale record at the target through a symlinked --repo even when .worktrees/ itself is gone', () => {
+  // git records the realpath; the target is built from --repo as given. With the parent gone too, only the nearest EXISTING ancestor can be realpathed —
+  // here the symlinked repo itself — and the comparison must still land on git's spelling, or the add goes ahead and the path gets a second record.
+  const fx = wtFixture()
+  const link = path.join(fx.root, 'repo-link')
+  fs.symlinkSync(fx.repo, link)
+  git(fx.repo, 'worktree', 'add', '-q', '-b', 'other-s', path.join(fx.repo, '.worktrees', 'TIMIFY-123-s'), 'main')
+  fs.rmSync(path.join(fx.repo, '.worktrees'), { recursive: true, force: true })
+  const before = worktreeList(fx)
+  const out = runWorktree(['TIMIFY-123', '--repo', link, '--mode', 'new', '--branch', 'TIMIFY-123-s', '--base', 'main'])
+  assert.equal(out.status, 4, out.stdout + out.stderr)
+  assert.match(out.stderr, /TIMIFY-123-s is a registered worktree \(holds other-s\) whose directory is gone — `git worktree remove /)
+  assert.notEqual(gitTry(fx.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/TIMIFY-123-s').status, 0, 'no branch was left behind')
+  assert.equal(worktreeList(fx), before, 'no second record at that path')
+})
+
+test('worktree refuses a branch held by a tree whose directory is gone, naming the one record to remove — and that remedy works', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'branch', '-q', 'TIMIFY-123-h', 'main')
+  const sibling = path.join(fx.root, 'deleted')
+  git(fx.repo, 'worktree', 'add', '-q', sibling, 'TIMIFY-123-h')
+  const recorded = fs.realpathSync(sibling)
+  fs.rmSync(sibling, { recursive: true, force: true })
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-h'))
+  assert.equal(out.status, 4, out.stderr)
+  assert.equal(
+    out.stderr.trim(),
+    `TIMIFY-123-h is held by the worktree at ${recorded}, which no longer exists — \`git worktree remove ${recorded}\` clears that record`,
+  )
+  assert.equal(fs.existsSync(path.join(fx.repo, '.worktrees')), false)
+  // The remedy the sentence names clears that one record, and the same command then attaches the branch.
+  git(fx.repo, 'worktree', 'remove', recorded)
+  const again = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-h'))
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.json.created, 'attached')
+})
+
+test('worktree with no origin at all goes on from local refs and says so (Review Focus 2)', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'remote', 'remove', 'origin')
+  const out = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-off', 'main'))
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.json.created, 'new')
+  assert.ok(out.json.notes.some((n) => n.startsWith('fetch failed: ') && n.endsWith(' — using refs as of last fetch')), out.json.notes.join(' | '))
+  assert.ok(out.json.notes.includes('cut from local main: no origin/main'), out.json.notes.join(' | '))
+})
+
+test('worktree: a fetch that cannot take its ref lock is retried, then reported, and the run goes on', () => {
+  const fx = wtFixture()
+  const stale = git(fx.repo, 'rev-parse', 'origin/main')
+  // An up-to-date fetch locks nothing and would pass, so origin/main moves first.
+  pushCommits(fx, 'main', 1)
+  const lock = path.join(fx.repo, '.git', 'refs', 'remotes', 'origin', 'main.lock')
+  fs.mkdirSync(path.dirname(lock), { recursive: true })
+  fs.writeFileSync(lock, '')
+  const out = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-lock', 'main'), { BM_JIRA_FETCH_RETRY_MS: '10' })
+  assert.equal(out.status, 0, out.stderr)
+  assert.ok(out.json.notes.some((n) => n.startsWith('fetch failed: ') && n.includes('cannot lock ref')), out.json.notes.join(' | '))
+  assert.equal(git(out.json.worktree, 'rev-parse', 'HEAD'), stale, 'cut from the refs as of the last fetch')
+})
+
+// M4 (final review): a fetch that never answers — a dead remote, an SSH host-key or passphrase prompt nobody can see — used to hang the headless session.
+// It is now bounded (`BM_JIRA_FETCH_TIMEOUT_MS` shortens the 60 s default here) and lands in the same `fetch failed:` note. The remote is an `ssh://` URL
+// whose "ssh" is a script: one that sleeps, or one that records its arguments and fails at once.
+function fakeSsh(fx, name, body) {
+  const file = path.join(fx.root, name)
+  fs.writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+  return file
+}
+
+test('worktree: a fetch that hangs is cut off by the timeout, reported as a note, and the run goes on', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'remote', 'set-url', 'origin', 'ssh://example.invalid/origin.git')
+  // stderr goes to /dev/null so the orphaned sleep holds no pipe the tool waits on once git is killed.
+  const hang = fakeSsh(fx, 'hang-ssh', 'exec 2>/dev/null\nexec sleep 5')
+  const started = Date.now()
+  // GIT_SSH_COMMAND already set is the person's own, and is used as it is: the sleeping script runs, not `ssh -o BatchMode=yes`.
+  const out = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-hang', 'main'), { GIT_SSH_COMMAND: hang, BM_JIRA_FETCH_TIMEOUT_MS: '300' })
+  assert.equal(out.status, 0, out.stderr)
+  assert.ok(Date.now() - started < 4000, `took ${Date.now() - started} ms`)
+  assert.ok(out.json.notes.includes('fetch failed: git fetch timed out after 300 ms — using refs as of last fetch'), out.json.notes.join(' | '))
+})
+
+test('worktree: the fetch runs ssh with BatchMode=yes unless GIT_SSH_COMMAND, GIT_SSH or core.sshCommand already says how', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'remote', 'set-url', 'origin', 'ssh://example.invalid/origin.git')
+  const bin = path.join(fx.root, 'bin')
+  fs.mkdirSync(bin)
+  const said = path.join(fx.root, 'ssh-args')
+  fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh\necho "$@" >> '${said}'\nexit 255\n`, { mode: 0o755 })
+  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}`, GIT_SSH_COMMAND: undefined, GIT_SSH: undefined }
+
+  const batch = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-b1', 'main'), env)
+  assert.equal(batch.status, 0, batch.stderr)
+  assert.match(fs.readFileSync(said, 'utf8'), /-o BatchMode=yes/)
+
+  // The repo's own core.sshCommand wins over the default — the env variable would override it, so the tool sets none.
+  fs.rmSync(said)
+  git(fx.repo, 'config', 'core.sshCommand', path.join(bin, 'ssh'))
+  const own = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-b2', 'main'), env)
+  assert.equal(own.status, 0, own.stderr)
+  assert.doesNotMatch(fs.readFileSync(said, 'utf8'), /BatchMode/)
+})
+
+test('worktree leaves a real node_modules directory in an attached tree a directory', () => {
+  const fx = wtFixture()
+  git(fx.seed, 'fetch', '-q', 'origin')
+  git(fx.seed, 'checkout', '-q', '-B', 'TIMIFY-123-nm', 'origin/main')
+  commitFile(fx.seed, 'node_modules/keep.txt', 'kept\n')
+  git(fx.seed, 'push', '-q', 'origin', 'TIMIFY-123-nm')
+  localFromOrigin(fx, 'TIMIFY-123-nm')
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-nm'))
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.json.created, 'attached')
+  const nm = fs.lstatSync(path.join(out.json.worktree, 'node_modules'))
+  assert.ok(nm.isDirectory() && !nm.isSymbolicLink())
+  assert.ok(fs.existsSync(path.join(out.json.worktree, 'node_modules', 'keep.txt')))
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
 // The source guard (spec §10's half a test can hold). Comment lines are stripped first: the header may well name Atlassian while saying it is never called.
 
 const codeLines = () =>
@@ -489,7 +1027,11 @@ test('jira.mjs talks to 127.0.0.1 only, carries no Jira credential, and never ca
   const code = codeLines().join('\n')
   assert.ok(!code.includes('process.exit('), 'process.exit( truncates a pipe')
   assert.ok(!/atlassian/i.test(code), 'jira.mjs names an Atlassian host')
-  assert.ok(!code.includes('BM_JIRA_'), 'jira.mjs reads a Jira credential variable')
+  // `BM_JIRA_FETCH_RETRY_MS` and `BM_JIRA_FETCH_TIMEOUT_MS` are the two `BM_JIRA_` names allowed: the worktree command's fetch-retry pause and its fetch's
+  // bound, test knobs that carry nothing of Jira's. Removed by exact name before the check, so any other `BM_JIRA_` spelling — the credentials above all —
+  // is still refused.
+  const knobsGone = code.replaceAll('BM_JIRA_FETCH_RETRY_MS', '').replaceAll('BM_JIRA_FETCH_TIMEOUT_MS', '')
+  assert.ok(!knobsGone.includes('BM_JIRA_'), 'jira.mjs reads a Jira credential variable')
   assert.ok(!/authorization/i.test(code), 'jira.mjs builds an authorization header')
   // Every scheme in the code, whatever follows it — a templated host (`https://${site}`) included, which a host-shaped match would miss. The one allowed
   // is the loopback base; the stack-down sentence is built from host and port, so it carries no scheme to exempt.
@@ -517,7 +1059,7 @@ test('jira/SKILL.md is the jira skill, triggered by /jira', () => {
 
 test('jira/SKILL.md documents every command, through the braced plugin root', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8')
-  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status']) {
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status', 'worktree']) {
     assert.match(text, new RegExp(`jira\\.mjs ${cmd}\\b`), `SKILL.md never shows jira.mjs ${cmd}`)
   }
   const nodeLines = text.split('\n').filter((line) => /\bnode\s+"/.test(line))
@@ -527,9 +1069,16 @@ test('jira/SKILL.md documents every command, through the braced plugin root', ()
 
 test('jira/SKILL.md documents every exit code and both ways to start the stack', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8')
-  for (const code of ['0', '1', '2', '3', '5']) assert.match(text, new RegExp(`^\\|\\s*\`${code}\`\\s*\\|`, 'm'), `the exit table has no row for ${code}`)
+  for (const code of ['0', '1', '2', '3', '4', '5']) assert.match(text, new RegExp(`^\\|\\s*\`${code}\`\\s*\\|`, 'm'), `the exit table has no row for ${code}`)
   assert.match(text, /pnpm run dev/)
   assert.match(text, /pnpm run docker:up/)
+})
+
+test('jira/SKILL.md documents the worktree command: its JSON line and both fast-forward notes', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  for (const needle of ['--mode new', '--mode continue', '"worktree"', '"created"', '"notes"', 'fast-forwarded', 'not fast-forwarded: uncommitted changes']) {
+    assert.ok(text.includes(needle), `SKILL.md lost ${needle}`)
+  }
 })
 
 test('jira/SKILL.md says the ticket text is data, not instructions (RF 1)', () => {

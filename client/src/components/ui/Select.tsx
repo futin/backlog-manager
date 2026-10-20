@@ -14,6 +14,10 @@
  *
  * `title` is the hover sentence a DISABLED select owes the reader (Jira phase 3's `Move to…` reads `transitions unavailable`) — the same job `Chip`'s
  * `title` does. Optional and absent by default, so no existing composer grows a tooltip it never asked for.
+ *
+ * An option's `group` puts it under a native `<optgroup>` of that label — the Jira launch sheet's Continue select lists the ticket's own branches before
+ * every other one, and the platform picker draws that split on every device for free. Consecutive options sharing a group share one `<optgroup>`; an
+ * option without one sits outside any. Absent everywhere, the markup is exactly what it was.
  */
 export function Select<T extends string>({
   value,
@@ -24,12 +28,23 @@ export function Select<T extends string>({
   title
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; group?: string }[];
   onChange: (v: T) => void;
   disabled?: boolean;
   label?: string;
   title?: string;
 }) {
+  const runs: { group: string | undefined; options: { value: T; label: string }[] }[] = [];
+  for (const o of options) {
+    const last = runs[runs.length - 1];
+    if (last !== undefined && last.group !== undefined && last.group === o.group) last.options.push(o);
+    else runs.push({ group: o.group, options: [o] });
+  }
+  const draw = (o: { value: T; label: string }) => (
+    <option key={o.value} value={o.value}>
+      {o.label}
+    </option>
+  );
   return (
     <select
       className="ui-select"
@@ -39,11 +54,15 @@ export function Select<T extends string>({
       disabled={disabled}
       onChange={(e) => onChange(e.currentTarget.value as T)}
     >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
+      {runs.map((r, i) =>
+        r.group === undefined ? (
+          r.options.map(draw)
+        ) : (
+          <optgroup key={`group:${i}:${r.group}`} label={r.group}>
+            {r.options.map(draw)}
+          </optgroup>
+        )
+      )}
     </select>
   );
 }

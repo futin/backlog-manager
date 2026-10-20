@@ -16,13 +16,15 @@ paths: ["skills/**", "agents/**"]
   evidence, so `record` refuses to overwrite one (exit `2`): the fix for a wrong record is the next sweep, never an edit. `sweep` reads four homes and writes
   none of them — the run-state home, the retro home (for deltas), `registry.json` (for project names) and, by recorded lease id alone, one driver transcript per
   run. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
-- **`backlog.mjs` in a tracker project — and `jira.mjs` always — needs the stack up, and says so with exit `5`.**
+- **`backlog.mjs` in a tracker project — and `jira.mjs` always, save its git-only `worktree` — needs the stack up, and says so with exit `5`.**
   The marker decides the mode — absent or `{"kind":"files"}` runs today's synchronous code byte for byte and makes no HTTP request on any verb;
   `{"kind":"github"}` with a valid repo routes every command through `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming the marker,
   NEVER a fallback to files. There is no offline queue on purpose: a parked write would be a second source of truth on one laptop. Ids are `31` / `#31` / this
-  project's own URN; a file-shaped id and another repo's URN are each refused with their own sentence. `jira.mjs` has no files mode at all: every command is an
+  project's own URN; a file-shaped id and another repo's URN are each refused with their own sentence. `jira.mjs` has no files mode at all: every command but
+  `worktree` is an
   API call, a refused connection is exit `5` with a sentence naming the backlog-manager checkout (it runs in a mapped repository, where `pnpm run dev` means
-  something else), and its other codes are `2` (a 4xx) and `3` (a 5xx). Why:
+  something else), and its other codes are `2` (a 4xx) and `3` (a 5xx). `worktree` makes no request — git only, so it works with the stack down — and exits `0`,
+  `1` or `4` (git refused, or a re-check stopped the Run; nothing changed), never `2`, `3` or `5`. Why:
   [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
 - **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.** The nine write routes refuse a `files`
   project, so no request `backlog.mjs import github [owner/repo] [--no-forms]` makes could precede the marker; the deletion is the transaction's commit and runs

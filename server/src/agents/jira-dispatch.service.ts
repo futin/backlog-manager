@@ -3,14 +3,17 @@ import { HttpException, Injectable } from '@nestjs/common';
 
 import { environmentBlock, projectDispatchGate } from '../../../shared/agent';
 import { jiraSessionName } from '../../../shared/types';
-import type { JiraDispatchRequest, JiraDispatchResult, JiraIssueDetail, PermissionMode } from '../../../shared/types';
+import type { JiraDispatchRequest, JiraDispatchResult, JiraIssueDetail, JiraWorkspace, PermissionMode } from '../../../shared/types';
+import { resolveWorkspace } from '../jira/branch-choice.util';
+import type { JiraBranchChoice } from '../jira/branch-choice.util';
 import { normaliseRepoPath, readJiraConfig } from '../jira/config.util';
-import { jiraEnv } from '../jira/env.util';
+import { jiraEnv, repoRoots } from '../jira/env.util';
 import { JiraLiveService } from '../jira/live.service';
 import { JiraPollerService } from '../jira/poller.service';
 import type { JiraIssueWriteOutcome } from '../jira/poller.service';
 import { composeJiraPrompt, resolveJiraActionOrThrow } from '../jira/prompt.util';
 import type { JiraComposeAction } from '../jira/prompt.util';
+import { readRepoRefs } from '../jira/refs.util';
 import { jiraWriteOrThrow, unwrapJira } from '../jira/unwrap.util';
 import { AgentsService } from './agents.service';
 import { readAgentsConfig } from './config.util';
@@ -37,6 +40,11 @@ const WRITES_STAND = ' — the Jira writes stand';
  *     key Jira has not moved between projects. Same sentences as that route, so a preview and a Start refuse a request in the same words.
  *  3. the dashboard gate, `projectDispatchGate(status, repo)` — 409 with its reason, or 502 when dispatch is on and the dashboard is unreachable, which is
  *     `dispatch()`'s exact mapping.
+ *  3b. the branch choice against the repo's refs (spec §5.3), for every mode but `none`: a new branch whose name is already listed, or a continued one the
+ *     mapped checkout holds, is a 409 — and so is the whole read, because it runs BEFORE the reservation: a refusal here has reserved nothing, assigned
+ *     nothing, transitioned nothing and spawned nothing, and leaves the live map exactly as it found it. Refs the server cannot read (`available: false`) make
+ *     no refusal; `jira.mjs worktree` re-checks both on the host. The resolved workspace is what both compositions carry, so the spawned prompt names the
+ *     same worktree the preview did.
  *  4. `live.reserve` — the one-session-per-ticket gate, synchronous, so of two Starts that both cleared step 3 exactly one passes it. A refusal here reserved
  *     nothing and so releases nothing: releasing would drop the OTHER request's starting entry.
  *  5. after the reservation, still before any write: `no identity` (503) when an assign is asked and the poller has no `me`; a fresh detail read (§8's mapping);
@@ -61,7 +69,7 @@ export class JiraDispatchService {
     private readonly reconciler: JiraLiveReconciler
   ) {}
 
-  async dispatch(req: JiraDispatchRequest): Promise<JiraDispatchResult> {
+  async dispatch(req: JiraDispatchRequest & { choice: JiraBranchChoice }): Promise<JiraDispatchResult> {
     if (!jiraEnv().configured) throw new HttpException({ error: 'Jira is not configured' }, 503);
     const config = readJiraConfig();
     if (config.unreadable !== null) {
@@ -83,13 +91,27 @@ export class JiraDispatchService {
       throw new HttpException({ error: gate.reason }, status.enabled && !status.reachable ? 502 : 409);
     }
 
+    // `none` names no branch and so has nothing to compare: it makes no git read at all.
+    const workspace = await this.workspaceFor(req, repo, config.repoDefaults[repo]?.base ?? null);
+
     if (!this.live.reserve(req.key, repo)) throw this.busy(req.key);
     try {
-      return await this.launch(req, action, repo, status.spawnMaxPermission);
+      return await this.launch(req, action, repo, workspace, status.spawnMaxPermission);
     } catch (err) {
       this.live.release(req.key);
       throw err;
     }
+  }
+
+  /**
+   * Step 3b: the workspace the choice names in `repo`, or the 409 the refs make of it. The stored base is the repo's `repoDefaults` entry's, found by the
+   * normalised path exactly as `GET /api/jira/refs` finds it — the refs' `defaultBase` is not read here, but the read must be the one the sheet's picker saw.
+   */
+  private async workspaceFor(req: JiraDispatchRequest & { choice: JiraBranchChoice }, repo: string, storedBase: string | null): Promise<JiraWorkspace | null> {
+    if (req.choice.mode === 'none') return null;
+    const resolved = resolveWorkspace(req.choice, req.key, repo, await readRepoRefs(repo, req.key, repoRoots(), storedBase));
+    if (!resolved.ok) throw new HttpException({ error: resolved.error }, resolved.status);
+    return resolved.workspace;
   }
 
   /** Steps 5–8, under the reservation `dispatch` holds and releases on any throw. */
@@ -97,6 +119,7 @@ export class JiraDispatchService {
     req: JiraDispatchRequest,
     action: JiraComposeAction,
     repo: string,
+    workspace: JiraWorkspace | null,
     maxPermission: PermissionMode | null
   ): Promise<JiraDispatchResult> {
     const me = this.poller.identity();
@@ -104,7 +127,7 @@ export class JiraDispatchService {
     const detail = unwrapJira(await this.poller.issueDetail(req.key));
     const transition = req.transitionId === null ? null : detail.transitions.find((t) => t.id === req.transitionId);
     if (transition === undefined) throw new HttpException({ error: 'transition not offered' }, 400);
-    const first = composeJiraPrompt(detail, action, repo);
+    const first = composeJiraPrompt(detail, action, repo, workspace);
     if (!first.ok) throw new HttpException({ error: first.error }, 400);
 
     let assigned = false;
@@ -122,7 +145,7 @@ export class JiraDispatchService {
     try {
       // Nothing written, nothing changed by us: the first composition already holds the ticket as it is, and re-reading it would spend three more Jira
       // calls of the 429 budget to learn nothing.
-      if (wrote) prompt = this.composeAfterWrites(unwrapJira(await this.poller.issueDetail(req.key)), action, repo);
+      if (wrote) prompt = this.composeAfterWrites(unwrapJira(await this.poller.issueDetail(req.key)), action, repo, workspace);
       spawned = await this.agents.spawnInProject(repo, {
         prompt,
         name: jiraSessionName(req.key),
@@ -171,8 +194,8 @@ export class JiraDispatchService {
   }
 
   /** The second composition, from the re-read detail. Only reached after a write, so its refusal is the caller's to suffix; the sentence is the first's. */
-  private composeAfterWrites(detail: JiraIssueDetail, action: JiraComposeAction, repo: string): string {
-    const composed = composeJiraPrompt(detail, action, repo);
+  private composeAfterWrites(detail: JiraIssueDetail, action: JiraComposeAction, repo: string, workspace: JiraWorkspace | null): string {
+    const composed = composeJiraPrompt(detail, action, repo, workspace);
     if (!composed.ok) throw new HttpException({ error: composed.error }, 400);
     return composed.prompt;
   }

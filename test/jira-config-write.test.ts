@@ -12,10 +12,12 @@ import {
   mintJiraId,
   normaliseRepoPath,
   parseBoardWrite,
+  parseRepoDefaultsWrite,
   parseReposWrite,
   parseSkillWrite,
   readJiraConfig,
   writeBoard,
+  writeRepoDefaults,
   writeRepos,
   writeSkill,
   type JiraBoardWrite
@@ -553,5 +555,112 @@ describe('mintJiraId', () => {
     expect(isJiraId('b', mintJiraId('b'))).toBe(true);
     expect(isJiraId('s', mintJiraId('s'))).toBe(true);
     expect(new Set(Array.from({ length: 1000 }, () => mintJiraId('q'))).size).toBe(1000);
+  });
+});
+
+describe('parseRepoDefaultsWrite', () => {
+  const home = '/Users/ada';
+  const refuse = (body: unknown): string => {
+    const r = parseRepoDefaultsWrite(body, home);
+    expect(r.ok).toBe(false);
+    return r.ok ? '' : r.error;
+  };
+
+  it('normalises the path and keeps both values, null for unset', () => {
+    expect(parseRepoDefaultsWrite({ path: '~/x/', base: 'develop', namePattern: 'feature/{key}-{slug}' }, home)).toEqual({
+      ok: true,
+      value: { path: '/Users/ada/x', base: 'develop', namePattern: 'feature/{key}-{slug}' }
+    });
+    expect(parseRepoDefaultsWrite({ path: '/a', base: null, namePattern: null }, home)).toEqual({ ok: true, value: { path: '/a', base: null, namePattern: null } });
+  });
+
+  it('refuses a body that is not an object, and a path that is missing, blank, not a string or not normalisable', () => {
+    expect(refuse([])).toBe('body must be a JSON object');
+    for (const path of [undefined, '', '   ', 7, null]) expect(refuse({ path, base: null, namePattern: null })).toBe('path is required');
+    expect(refuse({ path: '/a/../b', base: null, namePattern: null })).toContain('/a/../b');
+  });
+
+  it('refuses a base by Table A, naming base', () => {
+    expect(refuse({ path: '/a', base: '', namePattern: null })).toBe('base is empty');
+    expect(refuse({ path: '/a', base: 'a b', namePattern: null })).toBe('base may hold only A-Z a-z 0-9 . _ / -');
+    expect(refuse({ path: '/a', base: '-x', namePattern: null })).toBe('base may not start with -');
+    expect(refuse({ path: '/a', base: 'a'.repeat(201), namePattern: null })).toBe('base is longer than 200 characters');
+  });
+
+  // M1 (final review): the tool adds `origin/` itself, so a stored `origin/develop` made every Start exit 4.
+  it('refuses a base with an origin/ prefix', () => {
+    expect(refuse({ path: '/a', base: 'origin/develop', namePattern: null })).toBe('base is a branch name, without origin/');
+  });
+
+  it('refuses a pattern by Table E, naming namePattern', () => {
+    expect(refuse({ path: '/a', base: null, namePattern: '{slug}' })).toBe('namePattern renders as sample-slug, which does not carry ABC-1');
+    expect(refuse({ path: '/a', base: null, namePattern: '{foo}-{key}' })).toBe(
+      'namePattern renders as {foo}-abc-1, which may hold only A-Z a-z 0-9 . _ / -'
+    );
+  });
+
+  it('refuses a value that is neither a string nor null, a missing one included', () => {
+    expect(refuse({ path: '/a', base: 7, namePattern: null })).toBe('base must be a string or null');
+    expect(refuse({ path: '/a', namePattern: null })).toBe('base must be a string or null');
+    expect(refuse({ path: '/a', base: null, namePattern: false })).toBe('namePattern must be a string or null');
+    expect(refuse({ path: '/a', base: null })).toBe('namePattern must be a string or null');
+  });
+});
+
+describe('writeRepoDefaults', () => {
+  const others = { boards: [b1], repos: { PAY: ['/r'] }, skills: [{ id: 's_0123abcd', name: 'S', prompt: 'p' }], mystery: { keep: true } };
+
+  it('creates the file with one entry, and the reader reads it back', () => {
+    writeRepoDefaults('/r', { base: 'develop', namePattern: '{KEY}-{slug}' }, file);
+    expect(parsed()).toEqual({ repoDefaults: { '/r': { base: 'develop', namePattern: '{KEY}-{slug}' } } });
+    expect(readJiraConfig(file).repoDefaults).toEqual({ '/r': { base: 'develop', namePattern: '{KEY}-{slug}' } });
+  });
+
+  it('adds a path beside the others, and replaces one it holds whole', () => {
+    put({ ...others, repoDefaults: { '/a': { base: 'a' } } });
+    writeRepoDefaults('/r', { base: 'develop' }, file);
+    expect(parsed().repoDefaults).toEqual({ '/a': { base: 'a' }, '/r': { base: 'develop' } });
+    writeRepoDefaults('/r', { namePattern: '{key}-{slug}' }, file);
+    expect(parsed().repoDefaults).toEqual({ '/a': { base: 'a' }, '/r': { namePattern: '{key}-{slug}' } });
+  });
+
+  it('leaves repos, boards, skills and unknown keys as they were', () => {
+    put(others);
+    writeRepoDefaults('/r', { base: 'develop' }, file);
+    const { repoDefaults, ...rest } = parsed();
+    expect(rest).toEqual(others);
+    expect(repoDefaults).toEqual({ '/r': { base: 'develop' } });
+  });
+
+  it('deletes the path\'s entry when nothing is set, and keeps the others — the key stays, empty, when it was the last', () => {
+    put({ ...others, repoDefaults: { '/a': { base: 'a' }, '/r': { base: 'x', namePattern: '{key}-{slug}' } } });
+    writeRepoDefaults('/r', {}, file);
+    expect(parsed().repoDefaults).toEqual({ '/a': { base: 'a' } });
+    writeRepoDefaults('/a', {}, file);
+    expect(parsed()).toEqual({ ...others, repoDefaults: {} });
+    writeRepoDefaults('/never-there', {}, file);
+    expect(parsed()).toEqual({ ...others, repoDefaults: {} });
+  });
+
+  it('keeps a hand-written invalid entry of another path, and replaces a repoDefaults that is not an object', () => {
+    put({ repoDefaults: { relative: { base: 'x y' }, '/a': 'junk' } });
+    writeRepoDefaults('/r', { base: 'develop' }, file);
+    expect(parsed().repoDefaults).toEqual({ relative: { base: 'x y' }, '/a': 'junk', '/r': { base: 'develop' } });
+    put({ repoDefaults: [1, 2] });
+    writeRepoDefaults('/r', { base: 'develop' }, file);
+    expect(parsed().repoDefaults).toEqual({ '/r': { base: 'develop' } });
+  });
+
+  it('refuses a file that does not parse, byte-identical, and a delete of it too', () => {
+    const BROKEN = '{ "repoDefaults": {';
+    put(BROKEN);
+    expect(() => writeRepoDefaults('/r', { base: 'develop' }, file)).toThrow(JiraConfigUnreadableError);
+    expect(() => writeRepoDefaults('/r', {}, file)).toThrow(JiraConfigUnreadableError);
+    expect(readFileSync(file, 'utf8')).toBe(BROKEN);
+  });
+
+  it('leaves no temp file behind', () => {
+    writeRepoDefaults('/r', { base: 'develop' }, file);
+    expect(readdirSync(dir)).toEqual(['jira.json']);
   });
 });

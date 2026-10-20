@@ -615,6 +615,21 @@ export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context', string> = {
   context: 'Open with the ticket loaded'
 };
 
+/**
+ * The workspace a Jira Run is told to work in (spec §5.4, §5.6): `null` where it is carried means mode `none` — no branch, no worktree, no block. `branch`,
+ * `base` and `target` have passed the §6 name checks, so they are shell-safe by construction. `worktree` is the EXPECTED path (5.4: the one 5.2 found holding
+ * the branch, else `<repo>/.worktrees/<branch with / as ->`); the path `jira.mjs worktree` prints is the authoritative one. `base` is `null` for `continue`,
+ * which cuts nothing; `target` is the MR's destination and is only ever set with `openMr` and `continue`.
+ */
+export interface JiraWorkspace {
+  mode: 'new' | 'continue';
+  branch: string;
+  base: string | null;
+  worktree: string;
+  openMr: boolean;
+  target: string | null;
+}
+
 /** A skill id, as the server mints it: `s_` and eight lower-case hex digits. Anchored both ends, so `'s_0123abcd\n'` is not one. */
 const JIRA_SKILL_ID_RE = /^s_[0-9a-f]{8}$/;
 
@@ -704,6 +719,16 @@ export interface JiraIssueWriteResult {
 }
 
 /**
+ * One mapped path's defaults (spec §5.1): the base a New worktree is cut from, and the pattern its branch is named by. Each is absent when unset — the base
+ * then falls back to `origin/HEAD` and the checkout's own branch, the pattern to `DEFAULT_NAME_PATTERN`. Stored per PATH, not per project, because one checkout
+ * can be mapped to two Jira projects and has one convention.
+ */
+export interface JiraRepoDefaults {
+  base?: string;
+  namePattern?: string;
+}
+
+/**
  * `GET /api/jira`. `configured: false` is the whole payload's "draw nothing Jira" signal — the other fields then carry their empty values. The credentials
  * never appear here: `site`, `me.name` and `me.accountId` are the only identity facts that leave the server (§10). `live` is the in-memory map of key → live Run session, `{}` while unconfigured.
  */
@@ -719,6 +744,8 @@ export interface JiraStatusPayload {
   boards: JiraBoardStatus[];
   /** Project key → the absolute repo paths mapped to it. */
   repos: Record<string, string[]>;
+  /** Normalised repo path → its defaults; only paths with at least one value are present. `{}` while unconfigured. */
+  repoDefaults: Record<string, JiraRepoDefaults>;
   /** The union of project keys seen on any board cache and the mapped keys — no outbound call. */
   projects: { key: string; name: string }[];
   skills: JiraSkill[];
@@ -746,6 +773,59 @@ export const JIRA_KEY_RE = /^[A-Z][A-Z0-9_]+-\d+$/;
 export function isJiraKey(value: unknown): value is string {
   return typeof value === 'string' && JIRA_KEY_RE.test(value);
 }
+
+/**
+ * Why the server cannot list a mapped repo's branches, in the order the checks run (spec §4): the path is outside every root compose mounts (only when the
+ * server knows its roots), then it does not exist, then it is not the top of a git repository. Setup and the launch sheet say the sentence verbatim.
+ */
+export type JiraRepoUnavailable = 'not mounted into the board' | 'does not exist' | 'not a git repository';
+
+/**
+ * One branch of a mapped repo, local and `origin/` twin folded into one entry. `name` never carries `origin/`. `sync` is set whenever both sides exist — by
+ * NAME, never by upstream, because a branch the board cuts is `--no-track` — and says where the LOCAL copy stands against `origin/<name>` as of the last fetch;
+ * `null` when only one side exists or the comparison could not be made. `committedAt` is the newer tip's committer date, ISO. `worktree` is the absolute path
+ * of the tree that has the branch checked out (the main tree included), `ticket` whether the branch carries the requested issue key (spec §5.2).
+ */
+export interface JiraRefBranch {
+  name: string;
+  local: boolean;
+  remote: boolean;
+  sync: 'same' | 'behind' | 'ahead' | 'diverged' | null;
+  committedAt: string;
+  worktree: string | null;
+  ticket: boolean;
+}
+
+/**
+ * `GET /api/jira/refs`. `fetchedAt` is `FETCH_HEAD`'s mtime (ISO), `null` when the repo was never fetched; `mainBranch` the branch the main working tree has
+ * checked out (`null` on a detached HEAD); `defaultBase` the branch a New worktree is cut from unless the person says otherwise.
+ */
+export type JiraRepoRefs =
+  | { repo: string; available: true; fetchedAt: string | null; mainBranch: string | null; defaultBase: string | null; branches: JiraRefBranch[] }
+  | { repo: string; available: false; reason: JiraRepoUnavailable };
+
+/** One working tree of a mapped repo (`git worktree list`). `main` is the first one git lists — the repo's own working tree. */
+export interface JiraWorktree {
+  repo: string;
+  path: string;
+  branch: string | null;
+  main: boolean;
+}
+
+/** `GET /api/jira/worktrees`: every tree of every distinct mapped repo, and the repos that could not be read, each with its reason. */
+export interface JiraWorktreesPayload {
+  worktrees: JiraWorktree[];
+  unavailable: { repo: string; reason: JiraRepoUnavailable }[];
+}
+
+/**
+ * The choice, with the fields that do not belong to a mode absent from its type rather than carried as `null`s. `target` is `null` for "the MR goes to the
+ * base".
+ */
+export type JiraBranchChoice =
+  | { mode: 'none' }
+  | { mode: 'new'; branch: string; base: string; openMr: boolean }
+  | { mode: 'continue'; branch: string; openMr: boolean; target: string | null };
 
 /** The title a Jira Run session carries in the dashboard: `jira <KEY>`, cut to 60 characters. Lives here, not in `agents/`, so `jira/` and `agents/` share it without an import between them. */
 export function jiraSessionName(key: string): string {
@@ -840,6 +920,10 @@ export interface AgentDispatchResult {
  * project, in any spelling `normaliseRepoPath` accepts; `transitionId` is `null` for "leave as is", else an id from the transitions the sheet was drawn from,
  * checked again against a fresh read before anything is written. `permissionMode`, `model` and `effort` are treated exactly as `AgentDispatchRequest`'s: clamped
  * to the dashboard's ceiling and dropped when off the list, never refused.
+ *
+ * `mode` and the four fields after it are the branch choice (Jira repo/branch, spec §5.3), the same five `GET /api/jira/prompt` takes on its query: `mode` is
+ * required — both routes 400 without it — and the rest ride only with the modes they belong to (`base` with `new`; `target` with `openMr` and `continue`;
+ * `openMr` absent means `false`). The server checks the combinations; this is the wire shape.
  */
 export interface JiraDispatchRequest {
   key: string;
@@ -847,6 +931,11 @@ export interface JiraDispatchRequest {
   action: JiraAction;
   assign: boolean;
   transitionId: string | null;
+  mode: 'new' | 'continue' | 'none';
+  branch?: string;
+  base?: string;
+  openMr?: boolean;
+  target?: string;
   model?: string;
   effort?: string;
   permissionMode: PermissionMode;

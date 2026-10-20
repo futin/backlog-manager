@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 
+import { useFetched } from '../../hooks/useFetched';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useJiraBoard } from '../../hooks/useJiraBoard';
 import { useNow } from '../../hooks/useNow';
@@ -16,17 +17,19 @@ import {
   cardSessions,
   columnOf,
   effectiveBoardFilters,
+  fetchJiraWorktrees,
   foldBoard,
   foldMatches,
   matchesBoardFilters,
   pickBoard,
   sortTops,
+  ticketWorktrees,
   type JiraAssigneeFilter,
   type JiraBoardFilters,
   type JiraChildrenIndex
 } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
-import type { JiraAction, JiraBoardStatus, JiraIssue, JiraLiveSession } from '../../../../shared/types';
+import type { JiraAction, JiraBoardStatus, JiraIssue, JiraLiveSession, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { BoardColumn } from '../board/BoardColumn';
 import { FilterBar, FilterSection } from '../FilterBar';
 import { Band } from '../ui/Band';
@@ -37,6 +40,7 @@ import { JiraCard } from './JiraCard';
 
 /** The status while it is unknown: no sessions. One object, so `live` is not a fresh `{}` per render. */
 const NO_LIVE: Readonly<Record<string, JiraLiveSession>> = {};
+const NO_TREES: readonly JiraWorktree[] = [];
 
 /**
  * Jira › Board — one tracked board's issues in three status-category columns (Jira phase 2, spec §6.2; DESIGN.md §8.9.1, which applies §8.3's Board).
@@ -83,6 +87,14 @@ const NO_LIVE: Readonly<Record<string, JiraLiveSession>> = {};
  * card its `cardSessions` — its own and every folded issue's — and passes `onRun` straight through; it hosts NO sheet. `JiraView` does, one for the whole
  * section, because the sheet has to mount above an open modal as well and the modal is not this page's child.
  *
+ * **Worktree chips** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). The page reads `GET /api/jira/worktrees` ONCE on mount and again only when the SET of
+ * live keys changes — a Start or a Stop landing — compared as a sorted, joined key list, so a status reload that hands back a
+ * new `live` object with the same keys, or a render, asks for nothing. It is not a poller: nothing runs on a clock, and a tree made in a terminal shows up at
+ * the next mount or live change. That includes a Start's own tree (final review, M5): the session cuts it with `jira.mjs worktree` some time after the key
+ * goes live, so the re-read that Start triggers usually lands before the tree exists, and its chip appears on the next change of live keys or a remount.
+ * A failed read is not an error state — no chip is drawn and nothing is said, because the chip is a convenience and Setup is
+ * where the trees' health is. While a re-read is out the previous answer stays drawn, so a chip does not blink off between a Start and its answer.
+ *
  * `nudge` is `JiraView`'s write counter (Jira phase 3, R7), handed to `useJiraBoard` as given: this page neither reads nor bumps it, so a write in the modal
  * re-reads the list without the modal and the board knowing about each other.
  */
@@ -113,6 +125,13 @@ export function JiraBoardView({
 
   const me = data?.me ?? null;
   const live = data?.live ?? NO_LIVE;
+  // The set of live keys as a string, so the worktrees read below is keyed on WHICH keys are live and not on the `live` object's identity.
+  const liveKeys = Object.keys(live).sort().join(',');
+  const worktrees = useFetched(board === null ? null : () => fetchJiraWorktrees(), [liveKeys]);
+  const lastTrees = useRef<JiraWorktreesPayload | null>(null);
+  if (worktrees.status === 'ok') lastTrees.current = worktrees.value;
+  else if (worktrees.status === 'failed') lastTrees.current = null;
+  const treesOf = (key: string): readonly JiraWorktree[] => (lastTrees.current === null ? NO_TREES : ticketWorktrees(key, lastTrees.current));
   const options = useMemo(() => boardFilterOptions(list.issues), [list.issues]);
   const applied = useMemo(() => effectiveBoardFilters(filters, options, me), [filters, options, me]);
   const fold = useMemo(() => foldBoard(list.issues), [list.issues]);
@@ -208,6 +227,7 @@ export function JiraBoardView({
                   fold={c.fold}
                   matches={c.matches}
                   sessions={cardSessions(c.issue, fold, live)}
+                  trees={treesOf(c.issue.key)}
                   onOpen={(issue) => onOpenIssue(issue, fold.childrenOf)}
                   onRun={onRun}
                 />

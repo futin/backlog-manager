@@ -1,5 +1,5 @@
 import { cardAgeStamp, crumbOf, crumbText, initialsOf, matchMarker, sessionStrip, type cardFold, type JiraCardSession } from '../../lib/jira';
-import type { JiraAction, JiraBoard, JiraIssue } from '../../../../shared/types';
+import type { JiraAction, JiraBoard, JiraIssue, JiraWorktree } from '../../../../shared/types';
 import { JiraTypeIcon } from '../ui/JiraTypeIcon';
 import { LiveStrip } from '../ui/LiveStrip';
 import { Marker } from '../ui/Marker';
@@ -41,6 +41,11 @@ import { JiraRunMenu } from './JiraRunMenu';
  * it, draws a `LiveStrip` (`board-card-live hatch`, the Board's look) before the face, one per session, the folded ones naming their key — a folded issue
  * is not a card, so without that its session would show nowhere on the board. `sessions` is `cardSessions`' list, computed once by the page.
  *
+ * **The worktree chip** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). `trees` is `ticketWorktrees`' answer for THIS card's own key, computed once by the
+ * page from its one `GET /api/jira/worktrees`: the branch name when the ticket has one tree, `N worktrees` when it has several, the paths in the title. A card
+ * with none draws nothing — and so does one whose read failed, which is why this is a prop and not a request: the card has no error state to draw. Only the
+ * card's own key counts; a folded issue's tree shows in its own modal, as a folded issue's session shows only in the strip's key.
+ *
  * The whole card is a `role="button"` that opens the issue (`onOpen`, which the page wires to the issue modal's slot), Enter and Space included, exactly as
  * `ItemCard`; the link out stops both the click and those two keys for the reasons `ItemCard`'s own link spells out at length — without it one click opens
  * Jira AND the modal, and the card's `preventDefault()` on Enter would cancel the anchor's own activation.
@@ -53,6 +58,7 @@ export function JiraCard({
   fold,
   matches,
   sessions,
+  trees,
   onOpen,
   onRun
 }: {
@@ -63,6 +69,7 @@ export function JiraCard({
   fold: ReturnType<typeof cardFold>;
   matches: readonly string[];
   sessions: readonly JiraCardSession[];
+  trees: readonly JiraWorktree[];
   onOpen: (issue: JiraIssue) => void;
   onRun: (issue: JiraIssue, action: JiraAction) => void;
 }) {
@@ -139,6 +146,11 @@ export function JiraCard({
           {/* `kind`, the marker's quiet `--ink3` word: a priority is a fact about the issue, not a state this board should colour — §8's "marks state
               by ink, never by accent" — and Jira's own five-colour priority scale would be a second palette on the card. */}
           {issue.priority !== null && <Marker tone="kind">{issue.priority}</Marker>}
+          {trees.length > 0 && (
+            <span className="jira-card-tree" title={trees.map((t) => t.path).join('\n')}>
+              {trees.length === 1 ? (trees[0].branch ?? '') : `${trees.length} worktrees`}
+            </span>
+          )}
           <JiraRunMenu issue={issue} onPick={(action) => onRun(issue, action)} />
         </div>
       </div>

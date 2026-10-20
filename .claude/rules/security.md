@@ -13,3 +13,10 @@ paths: ["server/src/*.ts", "vite.config.ts", "docker-compose.yml"]
   by the **same applier as the CSP** (`applySecurityMiddleware`, host gate first), so no app built here can carry one without the other, and it is global rather
   than scoped to the agents POSTs because the read routes are exposed to the same page. The origin guard is deliberately unchanged — it inherits the allowlist
   transitively. Why: [invariants.md](docs/subsystems/invariants.md#every-route-is-gated-by-a-host-allowlist)
+- **The server never writes git: every git call it makes is a read, and fetch, worktree add/remove and checkout are the session's.** `runGit`
+  (`git-run.util.ts`) is the one way the server runs git, and every verb it is handed is a read: `rev-parse`, `for-each-ref`, `rev-list`, `symbolic-ref`,
+  `show-ref`, `check-ref-format`, `log`, `diff`, `ls-files`, `remote get-url`, `describe`, `worktree list`. Nothing under `server/src` fetches, adds or removes
+  a worktree, checks out, commits, merges or pushes — `jira.mjs worktree` does that on a Jira Run, in the session, and the modal's Remove only COPIES
+  `git -C <repo> worktree remove <path>`. The foreign repos `jira/refs.util.ts` reads are listed as of their last fetch, and say so. Under compose both
+  project roots are mounted `:ro`; a host-run API has no such net, so a new git call under `server/src` is a read or it belongs to a session. Why:
+  [invariants.md](docs/subsystems/invariants.md#the-server-never-writes-git)

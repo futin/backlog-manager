@@ -3,17 +3,20 @@ import { Controller, Get, HttpException, Param, Query, Res } from '@nestjs/commo
 import type { Response } from 'express';
 
 import { isJiraKey, parseJiraActionParam } from '../../../shared/types';
-import type { JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../../../shared/types';
+import type { JiraIssue, JiraIssueDetail, JiraRepoRefs, JiraStatusPayload, JiraWorkspace, JiraWorktreesPayload } from '../../../shared/types';
 import { renderTicketBlock } from './block';
+import { parseBranchChoice, resolveWorkspace } from './branch-choice.util';
 import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from './config.util';
-import { jiraEnv } from './env.util';
+import { jiraEnv, repoRoots } from './env.util';
 import { JiraLiveService } from './live.service';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
 import { composeJiraPrompt, resolveJiraActionOrThrow } from './prompt.util';
+import { readRepoRefs, readWorktrees } from './refs.util';
 import { unwrapJira } from './unwrap.util';
 
 /**
- * The seven read routes under `/api/jira` (Jira phase 1, and phase 5's `/prompt`; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
+ * The nine read routes under `/api/jira` (Jira phase 1, phase 5's `/prompt`, and the repo/branch work's `/refs` and `/worktrees`; spec §5, errors per §8).
+ * Every one answers from the poller's cache or status, or from ONE fresh read the
  * poller performs for it — never from a call this file makes, so the 429 window, the boot's missing `cloudId` and the 401 bookkeeping have one home
  * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: the board and repository writes live in
  * `jira-write.controller.ts` (phase 2), and the dispatch route is `AgentsModule`'s (phase 5).
@@ -114,12 +117,16 @@ export class JiraController {
   }
 
   /**
-   * `GET /api/jira/prompt?key&action&repo` — exactly what Copy prompt copies and what Start sends but for the status and assignee lines (spec §5, §7): the launch
-   * sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind the preview, the copy and the spawn. The
-   * refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid issue key`), `action` (400), `repo` present
-   * (400 `repo is required`), configured (503 — after the three parameters, as everywhere in this file), `jira.json` readable (409 — a skill or a mapping read
-   * out of a file we cannot read would be a guess), the skill exists (400 `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8
-   * mapping), the repo mapped for the ISSUE'S project (400), the cap (400 `prompt too long`).
+   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&target` — exactly what Copy prompt copies and what Start sends but for the status and
+   * assignee lines (spec §5, §7): the launch sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind
+   * the preview, the copy and the spawn. The refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid
+   * issue key`), `action` (400), `repo` present (400 `repo is required`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
+   * `dispatch-jira` answers; `mode` is required, so a caller that sends none is refused rather than guessed at), configured (503 — after the three parameters,
+   * as everywhere in this file), `jira.json` readable (409 — a skill or a mapping read out of a file we cannot read would be a guess), the skill exists (400
+   * `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8 mapping), the repo mapped for the ISSUE'S project (400), the choice against
+   * the repo's refs (409, `resolveWorkspace` — a new branch that exists, a continued one the mapped checkout holds), the cap (400 `prompt too long`). The refs
+   * are read only for a mode that names a branch, after the mapping check, so a repo that is not this project's is never handed to git; the repo's stored base
+   * is looked up as `/refs` looks it up.
    *
    * The mapping is keyed by the detail's `project.key`, not the key's prefix: the detail is read anyway, and it is what Jira says the project is. The repo is
    * normalised exactly as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped), so a path typed either way finds its entry, while the
@@ -132,12 +139,19 @@ export class JiraController {
     @Query('key') key: unknown,
     @Query('action') actionParam: unknown,
     @Query('repo') repo: unknown,
+    @Query('mode') mode: unknown,
+    @Query('branch') branch: unknown,
+    @Query('base') base: unknown,
+    @Query('openMr') openMr: unknown,
+    @Query('target') target: unknown,
     @Res({ passthrough: true }) res: Response
   ): Promise<string> {
     if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     const action = parseJiraActionParam(actionParam);
     if (action === null) throw new HttpException({ error: 'action must be execute, context or skill:<id>' }, 400);
     if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
+    const choice = parseBranchChoice({ mode, branch, base, openMr, target }, key, action);
+    if (!choice.ok) throw new HttpException({ error: choice.error }, 400);
     this.requireConfigured();
     const config = readJiraConfig();
     if (config.unreadable !== null) {
@@ -149,10 +163,69 @@ export class JiraController {
     if (normalised === null || !(config.repos[detail.project.key] ?? []).includes(normalised)) {
       throw new HttpException({ error: `${repo} is not mapped to ${detail.project.key}` }, 400);
     }
-    const composed = composeJiraPrompt(detail, composeAction, normalised);
+    let workspace: JiraWorkspace | null = null;
+    if (choice.value.mode !== 'none') {
+      const refs = await readRepoRefs(normalised, key, repoRoots(), config.repoDefaults[normalised]?.base ?? null);
+      const resolved = resolveWorkspace(choice.value, key, normalised, refs);
+      if (!resolved.ok) throw new HttpException({ error: resolved.error }, resolved.status);
+      workspace = resolved.workspace;
+    }
+    const composed = composeJiraPrompt(detail, composeAction, normalised, workspace);
     if (!composed.ok) throw new HttpException({ error: composed.error }, 400);
     res.type('text/plain; charset=utf-8');
     return composed.prompt;
+  }
+
+  /**
+   * `GET /api/jira/refs?repo&key` — one mapped repo's branches, local and `origin/` folded, for the launch sheet's picker (spec §4 and §5.2). The order of the
+   * refusals is the prompt's: `repo` (400 `repo is required`), `key` when sent (400 `invalid issue key` — absent is fine and leaves `ticket` false everywhere;
+   * an empty value is NOT absent), configured (503), `jira.json` readable (409 — a mapping read out of a file we cannot read would be a guess), then the repo
+   * mapped to SOME project (400 `<repo> is not mapped`, quoting the repo as sent). Any project, not the key's: there is no Jira read here to learn the key's
+   * project from, and the route reads git, not Jira — the mapping check only keeps it from being a way to list any directory the container can see.
+   *
+   * A repo the server cannot read is still a 200, `available: false` with its reason: the sheet shows the sentence and lets the person type a branch. The
+   * stored base is the repo's `repoDefaults` entry's, found by the normalised path (`null` when it has none), read from the same file read as the mapping; the
+   * roots come from the environment per call.
+   */
+  @Get('refs')
+  async refs(@Query('repo') repo: unknown, @Query('key') key: unknown): Promise<JiraRepoRefs> {
+    if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
+    if (key !== undefined && !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    this.requireConfigured();
+    const config = this.requireReadableConfig();
+    const normalised = normaliseRepoPath(repo, homedir());
+    const mapped = Object.values(config.repos).some((paths) => paths.includes(normalised ?? ''));
+    if (normalised === null || !mapped) throw new HttpException({ error: `${repo} is not mapped` }, 400);
+    return readRepoRefs(normalised, key ?? null, repoRoots(), config.repoDefaults[normalised]?.base ?? null);
+  }
+
+  /**
+   * `GET /api/jira/worktrees` — every working tree of every DISTINCT mapped path, for Setup → Repositories and the board's worktree readings (spec §5.5). A
+   * path two projects map is read once. A repo that cannot be read is reported under `unavailable` with its reason, never dropped and never an error, so the
+   * Setup row can carry the warning before a Start. The reads run in parallel — each is bounded by `runGit` — and the result keeps the order of `jira.json`.
+   */
+  @Get('worktrees')
+  async worktrees(): Promise<JiraWorktreesPayload> {
+    this.requireConfigured();
+    const config = this.requireReadableConfig();
+    const paths = [...new Set(Object.values(config.repos).flat())];
+    const roots = repoRoots();
+    const read = await Promise.all(paths.map(async (path) => ({ path, result: await readWorktrees(path, roots) })));
+    const payload: JiraWorktreesPayload = { worktrees: [], unavailable: [] };
+    for (const { path, result } of read) {
+      if (typeof result === 'string') payload.unavailable.push({ repo: path, reason: result });
+      else payload.worktrees.push(...result);
+    }
+    return payload;
+  }
+
+  /** `jira.json` as the routes read it, or the 409 every route that depends on a mapping or a skill answers when the file cannot be read. */
+  private requireReadableConfig(): ReturnType<typeof readJiraConfig> {
+    const config = readJiraConfig();
+    if (config.unreadable !== null) {
+      throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
+    }
+    return config;
   }
 
   private requireConfigured(): void {

@@ -10,9 +10,10 @@ import { AppModule } from '../server/src/app.module';
 import { JiraClient } from '../server/src/jira/jira.client';
 import { JIRA_LIVE_CAP, JiraLiveService } from '../server/src/jira/live.service';
 import { JiraPollerService } from '../server/src/jira/poller.service';
+import * as refsUtil from '../server/src/jira/refs.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { DEFAULT_MODEL } from '../shared/agent';
-import type { JiraStatusPayload } from '../shared/types';
+import type { JiraRefBranch, JiraRepoRefs, JiraStatusPayload } from '../shared/types';
 import { listenLoopback } from './helpers/app';
 import { FakeJira, makeRawIssue } from './helpers/jira';
 import type { FailNext } from './helpers/jira';
@@ -32,7 +33,22 @@ const REPO = '/work/pay';
 const KEYS = ['BM_JIRA_SITE', 'BM_JIRA_EMAIL', 'BM_JIRA_TOKEN', 'BM_JIRA_FILE', 'BM_AGENTS', 'BM_AGENTS_URL', 'BM_AGENTS_TOKEN', 'BM_ORCH_HOME'] as const;
 const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} in {repo}, then stop.' };
 const START = { id: '31', name: 'Start', to: { name: 'In Progress', statusCategory: { key: 'indeterminate' } } };
-const BODY = { key: 'PAY-1', repo: REPO, action: 'execute', assign: true, transitionId: '31', permissionMode: 'acceptEdits', remoteControl: false };
+// `execute` needs a branch (spec §5.3): a new one, cut from `develop`. `/work/pay` is no directory, so the refs read finds it `available: false` and makes no
+// refusal — the cases that want refs stub `readRepoRefs`.
+const BODY = {
+  key: 'PAY-1',
+  repo: REPO,
+  action: 'execute',
+  assign: true,
+  transitionId: '31',
+  mode: 'new',
+  branch: 'pay-1-export',
+  base: 'develop',
+  permissionMode: 'acceptEdits',
+  remoteControl: false
+};
+/** The choice for an action that may work in the mapped checkout: `context` and skills, whose prompt carries no workspace block. */
+const NONE = { mode: 'none', branch: undefined, base: undefined } as const;
 
 let saved: Record<string, string | undefined>;
 let dir: string;
@@ -174,7 +190,14 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
     ['a string assign', { assign: 'yes' }, 'assign must be true or false'],
     ['a numeric transitionId', { transitionId: 31 }, 'transitionId must be null or a non-empty string'],
     ['an empty transitionId', { transitionId: '' }, 'transitionId must be null or a non-empty string'],
-    ['a 65-character transitionId', { transitionId: '1'.repeat(65) }, 'transitionId must be null or a non-empty string']
+    ['a 65-character transitionId', { transitionId: '1'.repeat(65) }, 'transitionId must be null or a non-empty string'],
+    ['no mode', { mode: undefined }, 'mode must be new, continue or none'],
+    ['an unknown mode', { mode: 'old' }, 'mode must be new, continue or none'],
+    ['none for execute', { ...NONE }, 'execute needs a branch (mode new or continue)'],
+    ['a new branch with no base', { base: undefined }, 'base is required for a new branch'],
+    ['a new branch that does not carry the key', { branch: 'export' }, 'branch must carry PAY-1'],
+    ['a base with continue', { mode: 'continue' }, 'base is only for a new branch'],
+    ['an MR for context', { action: 'context', openMr: true }, 'openMr is only for execute with a branch']
   ])('400 for %s', async (_label, over, error) => {
     expect((await post({ ...BODY, ...over }).expect(400)).body).toEqual({ error });
     untouched();
@@ -191,28 +214,29 @@ describe('refusals before the reservation — no Jira write, no spawn, nothing r
     untouched();
   });
 
-  it('503 while Jira is unconfigured, after the shape check', async () => {
+  it('503 while Jira is unconfigured, after the shape check — the branch choice\'s included', async () => {
     process.env.BM_JIRA_TOKEN = '';
     expect((await post(BODY).expect(503)).body).toEqual({ error: 'Jira is not configured' });
     expect((await post({ ...BODY, key: 'nope' }).expect(400)).body).toEqual({ error: 'invalid issue key' });
+    expect((await post({ ...BODY, mode: undefined }).expect(400)).body).toEqual({ error: 'mode must be new, continue or none' });
     untouched();
   });
 
   it('409 when jira.json cannot be read, ahead of an unknown skill', async () => {
     writeFileSync(process.env.BM_JIRA_FILE!, '{ not json');
-    const res = await post({ ...BODY, action: { skill: 's_ffffffff' } }).expect(409);
+    const res = await post({ ...BODY, ...NONE, action: { skill: 's_ffffffff' } }).expect(409);
     expect(res.body.error).toMatch(/jira\.json does not parse as JSON — fix or delete it by hand/);
     untouched();
   });
 
   it('400 unknown skill <id> for a skill deleted while the sheet was open (Review Focus 3), nothing reserved', async () => {
-    expect((await post({ ...BODY, action: { skill: 's_ffffffff' } }).expect(400)).body).toEqual({ error: 'unknown skill s_ffffffff' });
+    expect((await post({ ...BODY, ...NONE, action: { skill: 's_ffffffff' } }).expect(400)).body).toEqual({ error: 'unknown skill s_ffffffff' });
     untouched();
   });
 
   it("400 <repo> is not mapped to <PROJECT>, the project being the key's prefix, the repo quoted as sent", async () => {
     expect((await post({ ...BODY, repo: '/elsewhere' }).expect(400)).body).toEqual({ error: '/elsewhere is not mapped to PAY' });
-    expect((await post({ ...BODY, key: 'ZED-1' }).expect(400)).body).toEqual({ error: `${REPO} is not mapped to ZED` });
+    expect((await post({ ...BODY, key: 'ZED-1', branch: 'zed-1-export' }).expect(400)).body).toEqual({ error: `${REPO} is not mapped to ZED` });
     untouched();
   });
 
@@ -296,7 +320,7 @@ describe('refusals after the reservation — released, so a retry is not a 409',
     await build();
     fake.issues.set('PAY-1', makeRawIssue({ key: 'PAY-1', fields: { summary: 'S'.repeat(300) } }));
     const sent = stubDashboard();
-    expect((await post({ ...BODY, action: { skill: SKILL.id } }).expect(400)).body).toEqual({ error: 'prompt too long' });
+    expect((await post({ ...BODY, ...NONE, action: { skill: SKILL.id } }).expect(400)).body).toEqual({ error: 'prompt too long' });
     expect(writes()).toEqual([]);
     expect(sent.spawns).toEqual([]);
     expect(live.get('PAY-1')).toBeNull();
@@ -371,6 +395,107 @@ describe('refusals after the reservation — released, so a retry is not a 409',
   });
 });
 
+/**
+ * The branch choice against the repo's refs (Jira repo/branch, Task 6; spec §5.3). The git read is stubbed — `jira-refs.test.ts` runs it against real git; what
+ * this owns is that a refusal comes BEFORE the reservation and every write, and that the workspace the refs resolve is the one the spawned prompt carries.
+ */
+describe('the branch choice', () => {
+  const branch = (name: string, worktree: string | null = null): JiraRefBranch => ({
+    name,
+    local: true,
+    remote: true,
+    sync: 'same',
+    committedAt: '2026-01-01T00:00:00.000Z',
+    worktree,
+    ticket: name.includes('pay-1')
+  });
+  const refs = (branches: JiraRefBranch[], mainBranch: string | null = 'develop'): JiraRepoRefs => ({
+    repo: REPO,
+    available: true,
+    fetchedAt: null,
+    mainBranch,
+    defaultBase: 'develop',
+    branches
+  });
+  let readRefs: jest.SpyInstance;
+
+  beforeEach(() => {
+    readRefs = jest.spyOn(refsUtil, 'readRepoRefs').mockResolvedValue(refs([branch('develop', REPO)]));
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  /** A refusal made from the refs: no Jira call beyond the boot's, no spawn, no assign, no transition, and the live map exactly as empty as it was. */
+  async function refused(body: Record<string, unknown>, error: string): Promise<void> {
+    await build();
+    const sent = stubDashboard();
+    const callsAtStart = fake.calls.length;
+    expect((await post(body).expect(409)).body).toEqual({ error });
+    expect(fake.calls.length).toBe(callsAtStart);
+    expect(writes()).toEqual([]);
+    expect(sent.spawns).toEqual([]);
+    expect(live.get('PAY-1')).toBeNull();
+    expect(live.hasConfirmed()).toBe(false);
+    // Nothing was reserved, so the very next Start is not a "starting" 409.
+    readRefs.mockResolvedValue(refs([branch('develop', REPO)]));
+    await post({ ...BODY, branch: 'pay-1-other' }).expect(200);
+  }
+
+  it('409 <branch> exists — switch to Continue for a new branch whose name is listed, before anything is reserved or written', async () => {
+    readRefs.mockResolvedValue(refs([branch('develop', REPO), branch('pay-1-export')]));
+    await refused(BODY, 'pay-1-export exists — switch to Continue');
+  });
+
+  it('409 for a continued branch the mapped checkout holds, naming the checkout', async () => {
+    readRefs.mockResolvedValue(refs([branch('pay-1-export', REPO)], 'pay-1-export'));
+    await refused({ ...BODY, mode: 'continue', base: undefined }, `pay-1-export is checked out in the mapped checkout ${REPO}`);
+  });
+
+  it('reads the refs once, for this repo and key, with the roots from the environment and the repo\'s stored base', async () => {
+    writeConfig({ repoDefaults: { [REPO]: { base: 'release/9' } } });
+    await build();
+    stubDashboard();
+    await post(BODY).expect(200);
+    expect(readRefs.mock.calls).toEqual([[REPO, 'PAY-1', null, 'release/9']]);
+  });
+
+  it('a continued branch held by a linked worktree starts in that worktree: the spawned prompt names it', async () => {
+    readRefs.mockResolvedValue(refs([branch('develop', REPO), branch('pay-1-export', '/work/pay-hand-made')]));
+    await build();
+    const sent = stubDashboard();
+    await post({ ...BODY, mode: 'continue', base: undefined, openMr: true, target: 'release/9' }).expect(200);
+    const prompt = sent.spawns[0].prompt as string;
+    expect(prompt.startsWith(`Workspace: repository ${REPO}, mode continue, branch pay-1-export, expected worktree /work/pay-hand-made. `)).toBe(true);
+    expect(prompt).toContain('open one merge request from it into release/9');
+  });
+
+  it('none makes no git read at all', async () => {
+    await build();
+    stubDashboard();
+    await post({ ...BODY, ...NONE, action: 'context' }).expect(200);
+    expect(readRefs).not.toHaveBeenCalled();
+  });
+
+  it('refs the server cannot read make no refusal, and the worktree is the conventional path', async () => {
+    readRefs.mockResolvedValue({ repo: REPO, available: false, reason: 'not mounted into the board' });
+    await build();
+    const sent = stubDashboard();
+    await post(BODY).expect(200);
+    expect(sent.spawns[0].prompt).toContain(`expected worktree ${REPO}/.worktrees/pay-1-export. `);
+  });
+
+  it('the spawned prompt is the preview for the same choice, but for the nonce', async () => {
+    await build();
+    const sent = stubDashboard();
+    const choice = { ...BODY, assign: false, transitionId: null };
+    await post(choice).expect(200);
+    const query = new URLSearchParams({ key: 'PAY-1', action: 'execute', repo: REPO, mode: 'new', branch: 'pay-1-export', base: 'develop' });
+    const preview = (await request(app.getHttpServer()).get(`/api/jira/prompt?${query.toString()}`).expect(200)).text;
+    const nonce = (text: string) => text.replace(/\b[0-9a-f]{12}\b/g, 'NONCE');
+    expect(nonce(sent.spawns[0].prompt as string)).toBe(nonce(preview));
+    expect(preview).toContain('Workspace: repository');
+  });
+});
+
 describe('Start', () => {
   it('assign → transition → spawn, in that order, then the key is live and confirmed', async () => {
     await build();
@@ -391,7 +516,10 @@ describe('Start', () => {
     expect(spawn).toMatchObject({ project: '-dir-0', name: 'jira PAY-1', permissionMode: 'acceptEdits', model: DEFAULT_MODEL, remoteControl: false });
     // Composed AFTER the writes: the ticket block shows the new status and assignee, not the ones the sheet was opened on.
     const prompt = spawn.prompt as string;
-    expect(prompt.startsWith('Work on Jira ticket PAY-1 in this repository, end to end')).toBe(true);
+    expect(
+      prompt.startsWith(`Workspace: repository ${REPO}, mode new, branch pay-1-export cut from develop, expected worktree ${REPO}/.worktrees/pay-1-export. `)
+    ).toBe(true);
+    expect(prompt).toContain('Work on Jira ticket PAY-1 in this repository, end to end');
     expect(prompt).toContain('status: In Progress (in progress)');
     expect(prompt).toContain('assignee: Ada Lovelace');
 
@@ -417,7 +545,8 @@ describe('Start', () => {
   it('spawns in the normalised repo path, so `~`-free trailing-slash spellings reach the same project', async () => {
     await build();
     const sent = stubDashboard();
-    const res = await post({ ...BODY, repo: `${REPO}/`, assign: false, transitionId: null }).expect(200);
+    // `context` and no branch: an `execute` prompt names its worktree, `${REPO}/.worktrees/…`, which would be a trailing-slash spelling of the repo by itself.
+    const res = await post({ ...BODY, ...NONE, action: 'context', repo: `${REPO}/`, assign: false, transitionId: null }).expect(200);
     expect(res.body.session.repo).toBe(REPO);
     expect(sent.spawns[0]).toMatchObject({ project: '-dir-0' });
     expect((sent.spawns[0].prompt as string).includes(`${REPO}/`)).toBe(false);
@@ -445,7 +574,7 @@ describe('Start', () => {
   it("a skill action spawns its template's text with the placeholders filled, and no ticket block", async () => {
     await build();
     const sent = stubDashboard();
-    await post({ ...BODY, action: { skill: SKILL.id }, assign: false, transitionId: null }).expect(200);
+    await post({ ...BODY, ...NONE, action: { skill: SKILL.id }, assign: false, transitionId: null }).expect(200);
     expect(sent.spawns[0].prompt).toBe(`Review PAY-1 in ${REPO}, then stop.`);
   });
 

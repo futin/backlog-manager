@@ -189,6 +189,7 @@ function jiraStatus(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     detail: null,
     boards: [jiraBoard('b_00000001'), jiraBoard('b_00000002')],
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 0, last429At: null },

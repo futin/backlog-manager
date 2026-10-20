@@ -23,7 +23,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const EMPTY = { boards: [], repos: {}, skills: [], unreadable: null };
+const EMPTY = { boards: [], repos: {}, repoDefaults: {}, skills: [], unreadable: null };
 
 function put(value: unknown): void {
   writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
@@ -55,7 +55,7 @@ describe('readJiraConfig — the file as a whole', () => {
     const repos = { PAY: ['/w/payments-api', '/w/payments-web'] };
     const skills = [{ id: 's_0123abcd', name: 'Groom', prompt: '/jira-groom {key}' }];
     put({ boards: [validBoard], repos, skills });
-    expect(readJiraConfig(file)).toEqual({ boards: [validBoard], repos, skills, unreadable: null });
+    expect(readJiraConfig(file)).toEqual({ boards: [validBoard], repos, repoDefaults: {}, skills, unreadable: null });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -172,6 +172,67 @@ describe('readJiraConfig — repos', () => {
   it('reads an array "repos" as none', () => {
     put({ repos: [] });
     expect(readJiraConfig(file).repos).toEqual({});
+  });
+});
+
+describe('readJiraConfig — repoDefaults', () => {
+  it('keeps a path with a base and a pattern, and one with only one of them', () => {
+    const repoDefaults = {
+      '/r': { base: 'develop', namePattern: 'feature/{key}-{slug}' },
+      '/only-base': { base: 'release/1.2' },
+      '/only-pattern': { namePattern: '{KEY}_{slug}' }
+    };
+    put({ repoDefaults });
+    expect(readJiraConfig(file).repoDefaults).toEqual(repoDefaults);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('drops an entry whose key is not an absolute normalised path, warning once each', () => {
+    put({
+      repoDefaults: {
+        relative: { base: 'develop' },
+        '~/home': { base: 'develop' },
+        '/a/': { base: 'develop' },
+        '/a//b': { base: 'develop' },
+        '/a/../b': { base: 'develop' },
+        '/keep': { base: 'develop' }
+      }
+    });
+    expect(readJiraConfig(file).repoDefaults).toEqual({ '/keep': { base: 'develop' } });
+    expect(warn).toHaveBeenCalledTimes(5);
+  });
+
+  it('drops a pattern that fails Table E but keeps that entry\'s valid base, and the reverse', () => {
+    put({ repoDefaults: { '/a': { base: 'develop', namePattern: '{slug}' }, '/b': { base: '-x', namePattern: '{key}-{slug}' } } });
+    expect(readJiraConfig(file).repoDefaults).toEqual({ '/a': { base: 'develop' }, '/b': { namePattern: '{key}-{slug}' } });
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops a hand-written origin/ base the write route would refuse, keeping that entry\'s pattern', () => {
+    put({ repoDefaults: { '/a': { base: 'origin/develop', namePattern: '{key}-{slug}' } } });
+    expect(readJiraConfig(file).repoDefaults).toEqual({ '/a': { namePattern: '{key}-{slug}' } });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an entry left with no value, and one that is not an object, and a non-string value', () => {
+    put({ repoDefaults: { '/a': { base: 'a b' }, '/b': 'develop', '/c': [], '/d': { base: 7, namePattern: null }, '/e': {}, '/f': { base: 'ok' } } });
+    expect(readJiraConfig(file).repoDefaults).toEqual({ '/f': { base: 'ok' } });
+  });
+
+  it('skips __proto__ without touching the result prototype, and reads a non-object repoDefaults as none', () => {
+    put('{ "repoDefaults": { "__proto__": { "base": "x" }, "/a": { "base": "develop" } } }');
+    const { repoDefaults } = readJiraConfig(file);
+    expect(repoDefaults).toEqual({ '/a': { base: 'develop' } });
+    expect(Object.getPrototypeOf(repoDefaults)).toBe(Object.prototype);
+    put({ repoDefaults: [] });
+    expect(readJiraConfig(file).repoDefaults).toEqual({});
+    put({ repoDefaults: 'x' });
+    expect(readJiraConfig(file).repoDefaults).toEqual({});
+  });
+
+  it('is empty, not an error, for an unreadable file', () => {
+    put('{ nope');
+    expect(readJiraConfig(file)).toMatchObject({ repoDefaults: {}, unreadable: 'does not parse as JSON' });
   });
 });
 

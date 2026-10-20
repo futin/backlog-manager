@@ -54,6 +54,7 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     detail: null,
     boards: [],
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 0, last429At: null },
@@ -112,6 +113,12 @@ let reposAnswer: (body: { project: string; paths: string[] }) => Promise<Respons
    answers — so a case can watch the card follow its own save. A case that wants a refusal replaces them. */
 let skillsAnswer: (body: { id?: string; name: string; prompt: string }) => Promise<Response>;
 let skillsDeleteAnswer: (body: { id: string }) => Promise<Response>;
+/* `POST /api/jira/repo-defaults`. The default does what the server does — stores the path's two values in the status the next `GET /api/jira` answers (a
+   `null` drops its key) — so a case can watch the row follow its own save. A case that wants a refusal replaces it. */
+let defaultsAnswer: (body: { path: string; base: string | null; namePattern: string | null }) => Promise<Response>;
+/* `GET /api/jira/refs?repo=…` — what each defaults row reads once on mount. The default is a readable repo; a case that wants the unavailable form
+   replaces it. */
+let refsAnswer: (repo: string) => Promise<Response>;
 let sent: Sent[];
 
 const answer = (body: unknown, code = 200) =>
@@ -141,6 +148,26 @@ beforeEach(() => {
     statusAnswer = { ...statusAnswer, skills: statusAnswer.skills.filter((k) => k.id !== body.id) };
     return answer({ ok: true });
   };
+  defaultsAnswer = (body) => {
+    const repoDefaults = { ...statusAnswer.repoDefaults };
+    const entry = { ...(body.base !== null && { base: body.base }), ...(body.namePattern !== null && { namePattern: body.namePattern }) };
+    if (Object.keys(entry).length === 0) delete repoDefaults[body.path];
+    else repoDefaults[body.path] = entry;
+    statusAnswer = { ...statusAnswer, repoDefaults };
+    return answer(body);
+  };
+  refsAnswer = (repo) =>
+    answer({
+      repo,
+      available: true,
+      fetchedAt: null,
+      mainBranch: 'main',
+      defaultBase: 'main',
+      branches: [
+        { name: 'main', local: true, remote: true, sync: 'same', committedAt: '2026-10-01T00:00:00Z', worktree: repo, ticket: false },
+        { name: 'develop', local: true, remote: true, sync: 'same', committedAt: '2026-10-02T00:00:00Z', worktree: null, ticket: false }
+      ]
+    });
   sent = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -157,6 +184,8 @@ beforeEach(() => {
     if (url === '/api/jira/boards') return saveAnswer();
     if (url === '/api/jira/boards/delete') return answer({ ok: true });
     if (url === '/api/jira/repos') return reposAnswer(JSON.parse(String(init?.body)));
+    if (url === '/api/jira/repo-defaults') return defaultsAnswer(JSON.parse(String(init?.body)));
+    if (url.startsWith('/api/jira/refs?')) return refsAnswer(new URLSearchParams(url.split('?')[1]).get('repo') ?? '');
     if (url === '/api/jira/skills') return skillsAnswer(JSON.parse(String(init?.body)));
     if (url === '/api/jira/skills/delete') return skillsDeleteAnswer(JSON.parse(String(init?.body)));
     const issuesOf = /^\/api\/jira\/boards\/([^/]+)\/issues$/.exec(url);
@@ -724,6 +753,142 @@ describe('the Repositories card', () => {
   });
 });
 
+/* Per-path defaults (Jira repo/branch, spec §5.1; DESIGN.md §8.9.3): one defaults line under a path's first row, saved through `/api/jira/repo-defaults`. */
+describe('the Repositories card — a path\'s defaults', () => {
+  const defaultsPosts = (): { path: string; base: string | null; namePattern: string | null }[] =>
+    posts('/api/jira/repo-defaults').map((p) => JSON.parse(String(p.init?.body)));
+  const baseField = (shown = '~/pay'): HTMLInputElement => within(reposCard()).getByLabelText(`Default base for ${shown}`) as HTMLInputElement; // a `list`ed input is a combobox, not a textbox
+  const patternField = (shown = '~/pay'): HTMLInputElement =>
+    within(reposCard()).getByRole('textbox', { name: `Branch name pattern for ${shown}` }) as HTMLInputElement;
+  const saveButton = (shown = '~/pay'): HTMLElement => within(reposCard()).getByRole('button', { name: `Save defaults for ${shown}` });
+  const mapPay = (extra: Partial<JiraStatusPayload> = {}): void => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] }, ...extra });
+  };
+
+  it('draws a base and a pattern field with their placeholders, seeded from the stored defaults, and Save stays off until one changes', async () => {
+    mapPay({ repoDefaults: { '/home/ada/pay': { base: 'develop' } } });
+    await renderSetup();
+    expect(baseField().value).toBe('develop');
+    expect(baseField().placeholder).toBe('e.g. develop');
+    expect(patternField().value).toBe('');
+    expect(patternField().placeholder).toBe('{key}-{slug}');
+    expect(saveButton()).toBeDisabled();
+    fireEvent.change(patternField(), { target: { value: '{key}/{slug}' } });
+    expect(saveButton()).toBeEnabled();
+  });
+
+  it('saves both values for the PATH — an empty field as null — then reloads the status and reads as saved again', async () => {
+    mapPay();
+    await renderSetup();
+    const before = statusReads();
+    fireEvent.change(baseField(), { target: { value: ' develop ' } });
+    await userEvent.click(saveButton());
+    await waitFor(() => expect(defaultsPosts()).toEqual([{ path: '/home/ada/pay', base: 'develop', namePattern: null }]));
+    expect(posts('/api/jira/repo-defaults')[0].init?.headers).toEqual({ 'content-type': 'application/json' });
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
+    await waitFor(() => expect(saveButton()).toBeDisabled());
+    expect(baseField().value).toBe('develop');
+
+    // Clearing a stored value sends null for it, and the other one stays.
+    fireEvent.change(patternField(), { target: { value: '{key}-{slug}' } });
+    fireEvent.change(baseField(), { target: { value: '' } });
+    await userEvent.click(saveButton());
+    await waitFor(() => expect(defaultsPosts()[1]).toEqual({ path: '/home/ada/pay', base: null, namePattern: '{key}-{slug}' }));
+  });
+
+  it('hints at a pattern that cannot name a branch while it is typed, and still lets Save go — the server\'s sentence wins and is shown in the group\'s slot', async () => {
+    mapPay();
+    defaultsAnswer = () => answer({ error: 'namePattern renders as sample-slug, which does not carry ABC-1' }, 400);
+    await renderSetup();
+    fireEvent.change(patternField(), { target: { value: '{slug}' } });
+    const hint = within(reposCard()).getByText('renders as sample-slug, which does not carry ABC-1');
+    expect(hint).toHaveClass('jira-setup-warn');
+    expect(saveButton()).toBeEnabled();
+
+    await userEvent.click(saveButton());
+    const message = await within(reposCard()).findByText('namePattern renders as sample-slug, which does not carry ABC-1');
+    expect(message).toHaveClass('set-error');
+    // A refusal changes nothing: the typed value stays, and no status reload was asked for beyond the mount's own.
+    expect(patternField().value).toBe('{slug}');
+    expect(statusReads()).toBe(1);
+
+    fireEvent.change(patternField(), { target: { value: '{key}-{slug}' } });
+    expect(within(reposCard()).queryByText(/^renders as/)).toBeNull();
+  });
+
+  // M1 (final review): the old `origin/HEAD` placeholder invited a value the tool refuses at every Start. The hint is instant; Save still goes, and the
+  // server's sentence is the one shown in the group's error slot.
+  it('hints at an origin/ base while it is typed, and still lets Save go — the server\'s sentence wins', async () => {
+    mapPay();
+    defaultsAnswer = () => answer({ error: 'base is a branch name, without origin/' }, 400);
+    await renderSetup();
+    fireEvent.change(baseField(), { target: { value: 'origin/develop' } });
+    const hint = within(reposCard()).getByText('base is a branch name, without origin/');
+    expect(hint).toHaveClass('jira-setup-warn');
+    expect(saveButton()).toBeEnabled();
+
+    await userEvent.click(saveButton());
+    const shown = (): HTMLElement[] => within(reposCard()).queryAllByText('base is a branch name, without origin/');
+    await waitFor(() => expect(shown().some((e) => e.classList.contains('set-error'))).toBe(true));
+    expect(baseField().value).toBe('origin/develop');
+
+    fireEvent.change(baseField(), { target: { value: 'develop' } });
+    expect(shown().filter((e) => e.classList.contains('jira-setup-warn'))).toHaveLength(0);
+  });
+
+  it('says the server did not answer, or answered without a sentence, under the same slot', async () => {
+    mapPay();
+    defaultsAnswer = () => answer(null, 502);
+    await renderSetup();
+    fireEvent.change(baseField(), { target: { value: 'develop' } });
+    await userEvent.click(saveButton());
+    expect(await within(reposCard()).findByText('the defaults were not saved (HTTP 502)')).toHaveClass('set-error');
+
+    defaultsAnswer = () => Promise.reject(new TypeError('Failed to fetch'));
+    await userEvent.click(saveButton());
+    expect(await within(reposCard()).findByText('the defaults were not saved — the server did not answer')).toBeInTheDocument();
+  });
+
+  it('reads the path\'s refs once on mount, not again when the status reloads, and offers the branch names on the base field', async () => {
+    mapPay();
+    await renderSetup();
+    await waitFor(() => expect(urls('/api/jira/refs')).toEqual(['/api/jira/refs?repo=%2Fhome%2Fada%2Fpay']));
+    const list = document.getElementById(baseField().getAttribute('list') ?? 'none');
+    await waitFor(() => expect(Array.from(list?.querySelectorAll('option') ?? []).map((o) => o.getAttribute('value'))).toEqual(['main', 'develop']));
+    expect(within(reposCard()).queryByText(/^branches unavailable/)).toBeNull();
+
+    await addRepo('OPS', '/home/ada/ops');
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(1));
+    expect(urls('/api/jira/refs').filter((u) => u.includes('pay'))).toHaveLength(1);
+  });
+
+  it('says why the branches cannot be listed, with the path as displayPath shows it, and keeps both fields usable', async () => {
+    mapPay();
+    refsAnswer = (repo) => answer({ repo, available: false, reason: 'does not exist' });
+    await renderSetup();
+    expect(await within(reposCard()).findByText('branches unavailable — ~/pay does not exist')).toBeInTheDocument();
+    fireEvent.change(baseField(), { target: { value: 'develop' } });
+    expect(saveButton()).toBeEnabled();
+  });
+
+  it('says so too when the refs request itself fails', async () => {
+    mapPay();
+    refsAnswer = () => answer({ error: 'down for lunch' }, 502);
+    await renderSetup();
+    expect(await within(reposCard()).findByText('branches unavailable — ~/pay: down for lunch')).toBeInTheDocument();
+  });
+
+  it('draws ONE defaults line for a path mapped to two projects — the defaults belong to the path', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/shared'], OPS: ['/home/ada/shared'] } });
+    await renderSetup();
+    expect(within(reposCard()).getAllByRole('textbox', { name: 'Default base for ~/shared' })).toHaveLength(1);
+    expect(urls('/api/jira/refs')).toHaveLength(1);
+    fireEvent.change(baseField('~/shared'), { target: { value: 'develop' } });
+    await userEvent.click(saveButton('~/shared'));
+    await waitFor(() => expect(defaultsPosts()).toEqual([{ path: '/home/ada/shared', base: 'develop', namePattern: null }]));
+  });
+});
+
 describe('the Connection card', () => {
   const rowText = (name: string): string => (within(connectionCard()).getByText(name).closest('.set-row') as HTMLElement).textContent ?? '';
 
@@ -829,14 +994,19 @@ describe('the Skills card', () => {
     expect(within(column).queryByRole('heading', { name: 'Boards' })).toBeNull();
   });
 
-  it('names the three placeholders, says how the key is added, and says the list only names the skill', async () => {
+  it('names the six placeholders, says how the key is added, and says the list only names the skill', async () => {
     await renderSetup();
     const text = skillsCard().textContent ?? '';
-    for (const placeholder of ['{key}', '{url}', '{repo}']) expect(text).toContain(placeholder);
+    for (const placeholder of ['{key}', '{url}', '{repo}', '{branch}', '{base}', '{worktree}']) expect(text).toContain(placeholder);
     // The ticket's own text is no placeholder any more: a skill reads the ticket itself.
     for (const gone of ['{summary}', '{description}']) expect(text).not.toContain(gone);
     expect(text).toContain('a template without {key} gets the ticket key on a line after it');
     expect(text).toContain('a skill has to exist in the repo or the Claude install; this list only names it');
+  });
+
+  it('says the {worktree} is the expected path and that the one `jira.mjs worktree` prints wins', async () => {
+    await renderSetup();
+    expect(skillsCard().textContent).toContain('{worktree} is the expected path; the one jira.mjs worktree prints wins');
   });
 
   it('keeps Add disabled until the name and the template are both non-empty after trim', async () => {

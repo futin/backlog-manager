@@ -1,5 +1,6 @@
 import { elapsedSince, formatCreated } from './item-age';
 import { pollAge } from './tracker';
+import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
 import { SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
 import type {
   JiraAccess,
@@ -7,15 +8,20 @@ import type {
   JiraBoard,
   JiraBoardFailure,
   JiraBoardStatus,
+  JiraBranchChoice,
   JiraDispatchRequest,
   JiraDispatchResult,
   JiraIssue,
   JiraIssueDetail,
   JiraLiveSession,
+  JiraRepoDefaults,
+  JiraRepoRefs,
   JiraSkill,
   JiraStatusCategory,
   JiraStatusPayload,
   JiraTransition,
+  JiraWorktree,
+  JiraWorktreesPayload,
   PermissionMode
 } from '../../../shared/types';
 
@@ -831,14 +837,251 @@ export function transitionOptions(transitions: readonly JiraTransition[]): { val
 
 /**
  * `GET /api/jira/prompt` — exactly what Copy prompt copies and Start sends, as text. `text/plain` on success, so this reads `.text()`, never `.json()`;
- * a refusal is the usual `{ error }` and rejects with its sentence (`unknown skill s_…`, `prompt too long`). The query is built by `URLSearchParams`, so the
- * repository's slashes and a skill's colon are escaped exactly once, here.
+ * a refusal is the usual `{ error }` and rejects with its sentence (`unknown skill s_…`, `prompt too long`, `<branch> exists — switch to Continue`). The query
+ * is built by `URLSearchParams`, so the repository's slashes and a skill's colon are escaped exactly once, here.
+ *
+ * `branch` is the sheet's choice and `mode` always rides (the route 400s without it). The other four go out only with the modes they belong to — `base` with
+ * `new`, `target` with `continue` and only when set, `openMr` only when true — because the server refuses a field that does not belong (`base is only for a new
+ * branch`) rather than ignoring it, so a client that sent every field blank would be refused for the ones it did not mean.
  */
-export async function fetchJiraPrompt(key: string, action: JiraAction, repo: string): Promise<string> {
-  const query = new URLSearchParams({ key, action: jiraActionParam(action), repo });
+export async function fetchJiraPrompt(key: string, action: JiraAction, repo: string, branch: JiraBranchChoice): Promise<string> {
+  const query = new URLSearchParams({ key, action: jiraActionParam(action), repo, mode: branch.mode });
+  if (branch.mode !== 'none') {
+    query.set('branch', branch.branch);
+    if (branch.mode === 'new') query.set('base', branch.base);
+    if (branch.openMr) query.set('openMr', 'true');
+    if (branch.mode === 'continue' && branch.target !== null) query.set('target', branch.target);
+  }
   const res = await fetch(`/api/jira/prompt?${query.toString()}`);
   if (!res.ok) throw new Error(await failureOf(res));
   return res.text();
+}
+
+/**
+ * `GET /api/jira/refs` — one mapped repo's branches for the launch sheet's picker. `key` marks the ticket's own branches and is left off the query when `null`
+ * (the route treats an EMPTY `key` as invalid, so absent and empty are not interchangeable). An unreadable repo is a 200 with `available: false`, not a
+ * rejection; this rejects only on a refusal (`<repo> is not mapped`) or a body that is not refs at all.
+ */
+export async function fetchJiraRefs(repo: string, key: string | null): Promise<JiraRepoRefs> {
+  const query = new URLSearchParams({ repo });
+  if (key !== null) query.set('key', key);
+  const res = await fetch(`/api/jira/refs?${query.toString()}`);
+  if (!res.ok) throw new Error(await failureOf(res));
+  const body = (await res.json()) as Partial<JiraRepoRefs> | null;
+  if (typeof body !== 'object' || body === null || typeof body.repo !== 'string' || typeof body.available !== 'boolean') throw new Error('malformed response');
+  return body as JiraRepoRefs;
+}
+
+/** `GET /api/jira/worktrees` — every working tree of every mapped repo. Rejects with the server's sentence, or `malformed response` without both lists. */
+export async function fetchJiraWorktrees(): Promise<JiraWorktreesPayload> {
+  const res = await fetch('/api/jira/worktrees');
+  if (!res.ok) throw new Error(await failureOf(res));
+  const body = (await res.json()) as Partial<JiraWorktreesPayload> | null;
+  if (typeof body !== 'object' || body === null || !Array.isArray(body.worktrees) || !Array.isArray(body.unavailable)) throw new Error('malformed response');
+  return body as JiraWorktreesPayload;
+}
+
+/**
+ * `POST /api/jira/repo-defaults`. BOTH keys always go out, `null` for unset: the server treats the body as a full replace of the path's entry, so leaving a key
+ * off would not mean "keep it" — and a client that sent only the one it edited would have no way to say the other was already empty. Resolves to the entry as
+ * stored (the path normalised); rejects with the server's sentence.
+ */
+export async function saveRepoDefaults(
+  path: string,
+  base: string | null,
+  namePattern: string | null
+): Promise<{ path: string; base: string | null; namePattern: string | null }> {
+  const res = await fetch('/api/jira/repo-defaults', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path, base, namePattern })
+  });
+  if (!res.ok) throw new Error(await failureOf(res));
+  return (await res.json()) as { path: string; base: string | null; namePattern: string | null };
+}
+
+// ── The branch choice (Jira repo/branch, spec §5) ───────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How stale the last `git fetch` is, as the picker prints it beside the branch list — the list is only as fresh as that fetch, and the sheet never fetches
+ * (the server never writes git). `never fetched` for no stamp or one that does not parse. Floors, never rounds up: `59 min` must not read `1 h`. `now` is
+ * required, as everywhere in this file. A stamp ahead of `now` (clock skew between the host and the browser) reads `just now`, never a negative age.
+ */
+export function fetchAgeLine(fetchedAt: string | null, now: number): string {
+  if (fetchedAt === null) return 'never fetched';
+  const then = Date.parse(fetchedAt);
+  if (Number.isNaN(then)) return 'never fetched';
+  const ms = Math.max(0, now - then);
+  const lead = 'as of last fetch,';
+  if (ms < 60_000) return `${lead} just now`;
+  if (ms < 3_600_000) return `${lead} ${Math.floor(ms / 60_000)} min ago`;
+  if (ms < 48 * 3_600_000) return `${lead} ${Math.floor(ms / 3_600_000)} h ago`;
+  return `${lead} ${Math.floor(ms / 86_400_000)} d ago`;
+}
+
+/**
+ * What the launch sheet opens with for `action` (spec §5.2). `context` writes no code, so it needs no branch: `none`. Anything else continues on the first
+ * `ticket` branch — the server sorts the ticket's own branches first, newest commit first, so "first" is "newest" — and only with none of those starts a `new`
+ * one, named from the repo's stored pattern (else `DEFAULT_NAME_PATTERN`) and cut from the repo's default base. Unavailable or unread refs leave the stored
+ * base as the one hint there is. `base` is `''` for the modes that do not use it, and for a repo whose default base is unknown — the sheet then asks.
+ *
+ * A ticket branch the mapped checkout itself holds (`mainBranch`) is skipped for the next one, and with none left the sheet opens on New: `branchRefusal`
+ * refuses Continue on that branch, so pre-selecting it would open the sheet on a choice it will not launch (Ruling 15).
+ */
+export function branchSheetDefaults(
+  action: JiraAction,
+  refs: JiraRepoRefs | null,
+  key: string,
+  summary: string,
+  defaults: JiraRepoDefaults | undefined
+): { mode: 'new' | 'continue' | 'none'; branch: string; base: string } {
+  if (action === 'context') return { mode: 'none', branch: '', base: '' };
+  const existing = refs !== null && refs.available ? refs.branches.find((b) => b.ticket && b.name !== refs.mainBranch) : undefined;
+  if (existing !== undefined) return { mode: 'continue', branch: existing.name, base: '' };
+  const branch = renderBranchPattern(defaults?.namePattern ?? DEFAULT_NAME_PATTERN, key, slugOf(summary));
+  const base = refs !== null && refs.available ? (refs.defaultBase ?? '') : (defaults?.base ?? '');
+  return { mode: 'new', branch, base };
+}
+
+/**
+ * The sheet's pre-Start checks on the branch field, the same rules the server and `jira.mjs worktree` enforce — said before the click instead of after. `null`
+ * is "nothing to say". Order: Table A first (a malformed name makes every later check meaningless), then, for `new`, the key (Table B) and whether the name is
+ * already listed — which carries `offerContinue`, so the sheet can offer the switch the server's own 409 words as `switch to Continue` — and, for `continue`,
+ * whether the mapped checkout holds it (git refuses a second checkout of one branch, and the session must not run in the person's own tree). `continue` does
+ * not need the key: continuing a branch someone else named is the point. Unavailable refs make no state checks — there is nothing to compare against.
+ *
+ * `base`, when given, is a `new` branch's base and is checked between the name and the key — the order `parseBranchChoice` checks them in, so the sheet says
+ * the sentence the server would: `''` is the server's own `base is required for a new branch`, a malformed one `base <problem>` (Ruling 16). It is checked
+ * with or without refs, because a typed base in the unavailable form is exactly where a bad one comes from. Omitted, there is no base check at all — a
+ * caller judging only the name keeps working.
+ */
+export function branchRefusal(
+  mode: 'new' | 'continue' | 'none',
+  branch: string,
+  key: string,
+  refs: JiraRepoRefs | null,
+  base?: string
+): { text: string; offerContinue: boolean } | null {
+  if (mode === 'none') return null;
+  const problem = branchNameProblem(branch);
+  if (problem !== null) return { text: `branch ${problem}`, offerContinue: false };
+  if (mode === 'new') {
+    if (base !== undefined) {
+      if (base === '') return { text: 'base is required for a new branch', offerContinue: false };
+      const baseProblem = branchNameProblem(base);
+      if (baseProblem !== null) return { text: `base ${baseProblem}`, offerContinue: false };
+    }
+    if (!branchCarriesKey(branch, key)) return { text: `branch must carry ${key}`, offerContinue: false };
+    if (refs !== null && refs.available && refs.branches.some((b) => b.name === branch)) return { text: `${branch} exists`, offerContinue: true };
+    return null;
+  }
+  if (refs !== null && refs.available && refs.mainBranch === branch) {
+    return { text: `${branch} is checked out in the mapped checkout ${refs.repo}`, offerContinue: false };
+  }
+  return null;
+}
+
+/**
+ * What the launch sheet's Branch section holds while the person edits it: every mode's fields at once, so flipping New → Continue → New gives back the name
+ * they typed rather than re-rendering the pattern over it. `target` is the MR target as the field shows it, `''` for "the repository's default branch".
+ * `branchChoiceOf` is what leaves the sheet; this never does.
+ */
+export interface BranchDraft {
+  mode: 'new' | 'continue' | 'none';
+  newBranch: string;
+  base: string;
+  continueBranch: string;
+  openMr: boolean;
+  target: string;
+}
+
+/**
+ * The draft the sheet opens with (spec §5.3): `branchSheetDefaults` decides the mode, and the two modes it did not pick are filled anyway, as they would open
+ * if picked — New from the pattern and the default base (the same call with the ticket's branches taken away, so one derivation names both), Continue on the
+ * first ticket branch the mapped checkout does not hold, else nothing. The MR target opens on the repo's default base — the stored one when refs could not be
+ * read — and the switch itself always opens off (spec §5.6).
+ */
+export function branchDraft(
+  action: JiraAction,
+  refs: JiraRepoRefs | null,
+  key: string,
+  summary: string,
+  defaults: JiraRepoDefaults | undefined
+): BranchDraft {
+  const picked = branchSheetDefaults(action, refs, key, summary, defaults);
+  const bare = refs !== null && refs.available ? { ...refs, branches: [] } : refs;
+  const fresh = branchSheetDefaults('execute', bare, key, summary, defaults);
+  const ticket = refs !== null && refs.available ? refs.branches.find((b) => b.ticket && b.name !== refs.mainBranch) : undefined;
+  return {
+    mode: picked.mode,
+    newBranch: fresh.branch,
+    base: fresh.base,
+    continueBranch: picked.mode === 'continue' ? picked.branch : (ticket?.name ?? ''),
+    openMr: false,
+    target: refs !== null && refs.available ? (refs.defaultBase ?? '') : (defaults?.base ?? '')
+  };
+}
+
+/**
+ * The choice the draft stands for. `openMr` is `execute`'s alone (a skill's prompt is its template, with no commit rule to amend — spec §5.6), and `target`
+ * rides only with Continue and the MR on, because the server refuses it anywhere else; a blank target is `null`, "the repository's default branch".
+ */
+export function branchChoiceOf(draft: BranchDraft, action: JiraAction): JiraBranchChoice {
+  const openMr = action === 'execute' && draft.openMr;
+  if (draft.mode === 'none') return { mode: 'none' };
+  if (draft.mode === 'new') return { mode: 'new', branch: draft.newBranch, base: draft.base, openMr };
+  return { mode: 'continue', branch: draft.continueBranch, openMr, target: openMr && draft.target !== '' ? draft.target : null };
+}
+
+/**
+ * The choice as `POST /api/agents/dispatch-jira`'s five flat fields — the same rule `fetchJiraPrompt` follows on its query: each field only with the mode it
+ * belongs to, because the server refuses a stray one (`base is only for a new branch`) rather than ignoring it. `openMr` goes out as the boolean it is.
+ */
+export function branchDispatchFields(choice: JiraBranchChoice): Pick<JiraDispatchRequest, 'mode' | 'branch' | 'base' | 'openMr' | 'target'> {
+  if (choice.mode === 'none') return { mode: 'none' };
+  if (choice.mode === 'new') return { mode: 'new', branch: choice.branch, base: choice.base, openMr: choice.openMr };
+  return { mode: 'continue', branch: choice.branch, openMr: choice.openMr, ...(choice.target !== null ? { target: choice.target } : {}) };
+}
+
+/**
+ * The sheet's one refusal for a draft: `branchRefusal` on the mode's own branch (and, for New, its base), then a TYPED MR target — only the unavailable form
+ * has a text field for it, the select offers listed names only — checked like any name (`target <problem>`), since the server would refuse it with that
+ * sentence. A blank target is not a problem: it means the repository's default. Continue with nothing chosen says so in the select's own words (`choose…`)
+ * rather than as Table A's `branch is empty`.
+ */
+export function draftRefusal(
+  draft: BranchDraft,
+  action: JiraAction,
+  key: string,
+  refs: JiraRepoRefs | null
+): { text: string; offerContinue: boolean } | null {
+  const choice = branchChoiceOf(draft, action);
+  if (choice.mode === 'none') return null;
+  if (choice.mode === 'continue' && choice.branch === '') return { text: 'choose a branch to continue', offerContinue: false };
+  const refused = branchRefusal(choice.mode, choice.branch, key, refs, choice.mode === 'new' ? choice.base : undefined);
+  if (refused !== null) return refused;
+  if (choice.mode === 'continue' && choice.target !== null) {
+    const problem = branchNameProblem(choice.target);
+    if (problem !== null) return { text: `target ${problem}`, offerContinue: false };
+  }
+  return null;
+}
+
+/** The trees a ticket has open: not a repo's own working tree, on a branch that carries the key (`timify-1234` is not `TIMIFY-123`). By repo, then path. */
+export function ticketWorktrees(key: string, payload: JiraWorktreesPayload): JiraWorktree[] {
+  const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  return payload.worktrees
+    .filter((t) => !t.main && t.branch !== null && branchCarriesKey(t.branch, key))
+    .sort((a, b) => cmp(a.repo, b.repo) || cmp(a.path, b.path));
+}
+
+/**
+ * The command a person pastes to remove a tree: the board never writes git, so Setup and the modal hand over the line instead. Never `--force` — git then
+ * refuses a tree with uncommitted work, which is exactly the refusal a person wants to see before throwing that work away. Both paths are quoted: a repo
+ * under `/my repos/` or a name with `'` in it must survive the shell.
+ */
+export function removeCommand(t: JiraWorktree): string {
+  return `git -C ${shellQuote(t.repo)} worktree remove ${shellQuote(t.path)}`;
 }
 
 /** POSTs `body` as JSON to an agents route and resolves to its parsed 200; a refusal rejects with the server's sentence (`failureOf`). */

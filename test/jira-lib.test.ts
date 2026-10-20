@@ -12,6 +12,18 @@ import {
   JIRA_QUERY_PRESETS,
   dispatchJira,
   fetchJiraPrompt,
+  fetchJiraRefs,
+  fetchJiraWorktrees,
+  saveRepoDefaults,
+  fetchAgeLine,
+  branchSheetDefaults,
+  branchRefusal,
+  branchDraft,
+  branchChoiceOf,
+  branchDispatchFields,
+  draftRefusal,
+  ticketWorktrees,
+  removeCommand,
   stopJira,
   transitionOptions,
   JIRA_SWEEP_CALL_CEILING,
@@ -52,7 +64,7 @@ import type { JiraFold } from '../client/src/lib/jira';
 import { modelEffortFlags } from '../client/src/lib/agents';
 import { isJiraPage, JIRA_PAGE_KEY, JIRA_PAGES } from '../client/src/lib/jira-page';
 import { elapsedSince, formatCreated } from '../client/src/lib/item-age';
-import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraSkill, JiraStatusPayload } from '../shared/types';
+import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraRepoRefs, JiraSkill, JiraStatusPayload } from '../shared/types';
 import { daysAgoStamp } from './helpers/dates';
 
 /**
@@ -116,6 +128,7 @@ function payload(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
     detail: null,
     boards: [board()],
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 3, last429At: null },
@@ -967,19 +980,19 @@ describe('the launch sheet wire', () => {
 
   it('fetchJiraPrompt escapes the skill colon and the repo path once, and reads text', async () => {
     const f = answer(200, null, 'the prompt');
-    await expect(fetchJiraPrompt('PAY-1', { skill: 's_0a1b2c3d' }, '/Users/a/b')).resolves.toBe('the prompt');
-    expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=skill%3As_0a1b2c3d&repo=%2FUsers%2Fa%2Fb');
+    await expect(fetchJiraPrompt('PAY-1', { skill: 's_0a1b2c3d' }, '/Users/a/b', { mode: 'none' })).resolves.toBe('the prompt');
+    expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=skill%3As_0a1b2c3d&repo=%2FUsers%2Fa%2Fb&mode=none');
   });
 
   it('fetchJiraPrompt rejects with the server sentence, else HTTP <status>', async () => {
     answer(400, { error: 'unknown skill s_deadbeef' });
-    await expect(fetchJiraPrompt('PAY-1', 'execute', '/r')).rejects.toThrow('unknown skill s_deadbeef');
+    await expect(fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'none' })).rejects.toThrow('unknown skill s_deadbeef');
     answer(502, 'not json');
-    await expect(fetchJiraPrompt('PAY-1', 'execute', '/r')).rejects.toThrow('HTTP 502');
+    await expect(fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'none' })).rejects.toThrow('HTTP 502');
   });
 
   it('dispatchJira posts the request as JSON and rejects with the 409 sentence', async () => {
-    const req = { key: 'PAY-1', repo: '/r', action: 'execute' as const, assign: false, transitionId: null, permissionMode: 'plan' as const, remoteControl: true };
+    const req = { key: 'PAY-1', repo: '/r', action: 'execute' as const, assign: false, transitionId: null, mode: 'none' as const, permissionMode: 'plan' as const, remoteControl: true };
     const f = answer(200, { sessionId: 's1' });
     await expect(dispatchJira(req)).resolves.toEqual({ sessionId: 's1' });
     expect(f.mock.calls[0][0]).toBe('/api/agents/dispatch-jira');
@@ -1014,5 +1027,298 @@ describe('jiraWritesStand', () => {
     expect(jiraWritesStand('transition not offered')).toBe(false);
     expect(jiraWritesStand('PAY-131 already has a live Run session')).toBe(false);
     expect(jiraWritesStand('the assign stands, they said, but this is not that sentence')).toBe(false);
+  });
+});
+
+describe('the branch choice wire', () => {
+  const answer = (status: number, body: unknown): jest.Mock =>
+    (global.fetch = jest.fn().mockResolvedValue({
+      ok: status < 300,
+      status,
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve('p')
+    })) as jest.Mock;
+
+  it('fetchJiraPrompt adds mode, and branch/base/openMr/target only for the modes that carry them', async () => {
+    let f = answer(200, null);
+    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'new', branch: 'feature/pay-1-x', base: 'develop', openMr: false });
+    expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=new&branch=feature%2Fpay-1-x&base=develop');
+    f = answer(200, null);
+    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'continue', branch: 'pay-1-x', openMr: true, target: 'main' });
+    expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=continue&branch=pay-1-x&openMr=true&target=main');
+    f = answer(200, null);
+    await fetchJiraPrompt('PAY-1', 'execute', '/r', { mode: 'continue', branch: 'pay-1-x', openMr: false, target: null });
+    expect(f.mock.calls[0][0]).toBe('/api/jira/prompt?key=PAY-1&action=execute&repo=%2Fr&mode=continue&branch=pay-1-x');
+  });
+
+  it('fetchJiraRefs sends key only when there is one, and rejects with the sentence', async () => {
+    const refs = { repo: '/r', available: false, reason: 'does not exist' };
+    let f = answer(200, refs);
+    await expect(fetchJiraRefs('/my r', 'PAY-1')).resolves.toEqual(refs);
+    expect(f.mock.calls[0][0]).toBe('/api/jira/refs?repo=%2Fmy+r&key=PAY-1');
+    f = answer(200, refs);
+    await fetchJiraRefs('/r', null);
+    expect(f.mock.calls[0][0]).toBe('/api/jira/refs?repo=%2Fr');
+    answer(400, { error: '/x is not mapped' });
+    await expect(fetchJiraRefs('/x', null)).rejects.toThrow('/x is not mapped');
+    answer(200, { nope: 1 });
+    await expect(fetchJiraRefs('/x', null)).rejects.toThrow('malformed response');
+  });
+
+  it('fetchJiraWorktrees reads the payload and rejects on a refusal or a malformed body', async () => {
+    const payload = { worktrees: [], unavailable: [] };
+    const f = answer(200, payload);
+    await expect(fetchJiraWorktrees()).resolves.toEqual(payload);
+    expect(f.mock.calls[0][0]).toBe('/api/jira/worktrees');
+    answer(503, { error: 'Jira is not configured' });
+    await expect(fetchJiraWorktrees()).rejects.toThrow('Jira is not configured');
+    answer(200, {});
+    await expect(fetchJiraWorktrees()).rejects.toThrow('malformed response');
+  });
+
+  it('saveRepoDefaults always sends both keys, null when unset', async () => {
+    const f = answer(200, { path: '/r', base: null, namePattern: 'x{key}' });
+    await expect(saveRepoDefaults('/r', null, 'x{key}')).resolves.toEqual({ path: '/r', base: null, namePattern: 'x{key}' });
+    expect(f.mock.calls[0][0]).toBe('/api/jira/repo-defaults');
+    expect(f.mock.calls[0][1].method).toBe('POST');
+    expect(f.mock.calls[0][1].headers).toEqual({ 'content-type': 'application/json' });
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ path: '/r', base: null, namePattern: 'x{key}' });
+    answer(400, { error: 'namePattern renders as x' });
+    await expect(saveRepoDefaults('/r', null, 'x')).rejects.toThrow('namePattern renders as x');
+  });
+});
+
+describe('fetchAgeLine', () => {
+  const now = Date.parse('2026-10-20T12:00:00Z');
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  it('buckets the age of the last fetch', () => {
+    expect(fetchAgeLine(null, now)).toBe('never fetched');
+    expect(fetchAgeLine('garbage', now)).toBe('never fetched');
+    expect(fetchAgeLine(ago(59_000), now)).toBe('as of last fetch, just now');
+    expect(fetchAgeLine(ago(60_000), now)).toBe('as of last fetch, 1 min ago');
+    expect(fetchAgeLine(ago(7 * 60_000), now)).toBe('as of last fetch, 7 min ago');
+    expect(fetchAgeLine(ago(59 * 60_000), now)).toBe('as of last fetch, 59 min ago');
+    expect(fetchAgeLine(ago(60 * 60_000), now)).toBe('as of last fetch, 1 h ago');
+    expect(fetchAgeLine(ago(3 * 3_600_000), now)).toBe('as of last fetch, 3 h ago');
+    expect(fetchAgeLine(ago(47 * 3_600_000), now)).toBe('as of last fetch, 47 h ago');
+    expect(fetchAgeLine(ago(48 * 3_600_000), now)).toBe('as of last fetch, 2 d ago');
+    expect(fetchAgeLine(ago(4 * 86_400_000 + 5_000), now)).toBe('as of last fetch, 4 d ago');
+  });
+  it('a stamp in the future reads just now, never negative', () => {
+    expect(fetchAgeLine(ago(-5 * 60_000), now)).toBe('as of last fetch, just now');
+  });
+});
+
+describe('branch choice derivations', () => {
+  const branch = (name: string, ticket: boolean, extra: Partial<{ worktree: string | null }> = {}) => ({
+    name,
+    local: true,
+    remote: false,
+    sync: null,
+    committedAt: '2026-10-01T00:00:00Z',
+    worktree: null,
+    ticket,
+    ...extra
+  });
+  const refsOf = (branches: ReturnType<typeof branch>[], over: Partial<{ defaultBase: string | null; mainBranch: string | null }> = {}): JiraRepoRefs => ({
+    repo: '/repos/app',
+    available: true,
+    fetchedAt: null,
+    mainBranch: 'develop',
+    defaultBase: 'develop',
+    branches,
+    ...over
+  });
+
+  describe('branchSheetDefaults', () => {
+    it('context never needs a branch', () => {
+      const refs = refsOf([branch('timify-123-x', true)]);
+      expect(branchSheetDefaults('context', refs, 'TIMIFY-123', 'Export', undefined)).toEqual({ mode: 'none', branch: '', base: '' });
+    });
+    it('continues on the first ticket branch', () => {
+      const refs = refsOf([branch('feature/timify-123-newest', true), branch('timify-123-older', true), branch('develop', false)]);
+      expect(branchSheetDefaults('execute', refs, 'TIMIFY-123', 'Export contacts', undefined)).toEqual({
+        mode: 'continue',
+        branch: 'feature/timify-123-newest',
+        base: ''
+      });
+    });
+    it('without one, a new branch from the pattern and the repo default base', () => {
+      expect(
+        branchSheetDefaults('execute', refsOf([branch('develop', false)]), 'TIMIFY-123', 'Export contacts', { namePattern: 'feature/{key}-{slug}' })
+      ).toEqual({ mode: 'new', branch: 'feature/timify-123-export-contacts', base: 'develop' });
+      expect(branchSheetDefaults('execute', refsOf([]), 'TIMIFY-123', 'Export contacts', undefined).branch).toBe('timify-123-export-contacts');
+    });
+    it('a summary with no slug leaves the bare key', () => {
+      expect(branchSheetDefaults('execute', refsOf([]), 'TIMIFY-123', '🙂🙂', undefined).branch).toBe('timify-123');
+    });
+    it('a null defaultBase is an empty base', () => {
+      expect(branchSheetDefaults('execute', refsOf([], { defaultBase: null }), 'TIMIFY-123', 'x', undefined).base).toBe('');
+    });
+    it('unavailable or unread refs fall back to the stored base', () => {
+      const down: JiraRepoRefs = { repo: '/r', available: false, reason: 'does not exist' };
+      expect(branchSheetDefaults('execute', down, 'TIMIFY-123', 'Export', { base: 'main' })).toEqual({
+        mode: 'new',
+        branch: 'timify-123-export',
+        base: 'main'
+      });
+      expect(branchSheetDefaults('execute', null, 'TIMIFY-123', 'Export', undefined)).toEqual({ mode: 'new', branch: 'timify-123-export', base: '' });
+    });
+    it('a skill action is treated as execute', () => {
+      expect(branchSheetDefaults({ skill: 's_0a1b2c3d' }, refsOf([]), 'TIMIFY-123', 'x', undefined).mode).toBe('new');
+    });
+    // Ruling 15: the sheet refuses Continue on the mapped checkout's own branch, so opening on it would be a dead end.
+    it('skips a ticket branch the mapped checkout holds, taking the next one, else New', () => {
+      const held = { mainBranch: 'timify-123-main' };
+      expect(
+        branchSheetDefaults('execute', refsOf([branch('timify-123-main', true), branch('timify-123-y', true)], held), 'TIMIFY-123', 'x', undefined)
+      ).toEqual({ mode: 'continue', branch: 'timify-123-y', base: '' });
+      expect(branchSheetDefaults('execute', refsOf([branch('timify-123-main', true)], held), 'TIMIFY-123', 'Export', undefined)).toEqual({
+        mode: 'new',
+        branch: 'timify-123-export',
+        base: 'develop'
+      });
+    });
+  });
+
+  describe('branchRefusal', () => {
+    const refs = refsOf([branch('timify-123-x', true)]);
+    it('none and a clean choice refuse nothing', () => {
+      expect(branchRefusal('none', '', 'TIMIFY-123', refs)).toBeNull();
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', refs)).toBeNull();
+      expect(branchRefusal('continue', 'timify-123-x', 'TIMIFY-123', refs)).toBeNull();
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', null)).toBeNull();
+    });
+    it('a Table A problem comes first, as branch <problem>', () => {
+      expect(branchRefusal('new', 'a..b', 'TIMIFY-123', refs)).toEqual({ text: 'branch may not contain ..', offerContinue: false });
+      expect(branchRefusal('continue', '', 'TIMIFY-123', refs)).toEqual({ text: 'branch is empty', offerContinue: false });
+    });
+    it('a new branch must carry the key', () => {
+      expect(branchRefusal('new', 'timify-1234-x', 'TIMIFY-123', refs)).toEqual({ text: 'branch must carry TIMIFY-123', offerContinue: false });
+    });
+    it('a new branch that is listed offers Continue', () => {
+      expect(branchRefusal('new', 'timify-123-x', 'TIMIFY-123', refs)).toEqual({ text: 'timify-123-x exists', offerContinue: true });
+    });
+    it('continuing on the mapped checkout branch is refused', () => {
+      expect(branchRefusal('continue', 'develop', 'TIMIFY-123', refs)).toEqual({
+        text: 'develop is checked out in the mapped checkout /repos/app',
+        offerContinue: false
+      });
+    });
+    it('continue does not require the key, and unavailable refs add no state checks', () => {
+      expect(branchRefusal('continue', 'whatever', 'TIMIFY-123', refs)).toBeNull();
+      expect(branchRefusal('continue', 'develop', 'TIMIFY-123', { repo: '/r', available: false, reason: 'does not exist' })).toBeNull();
+    });
+    // Ruling 16: the server refuses a new branch with no base, or a malformed one, so the sheet says it before Start rather than sending a sure 400.
+    it('a new branch needs a well-formed base, checked after the branch and before the key, refs or not', () => {
+      const down: JiraRepoRefs = { repo: '/r', available: false, reason: 'does not exist' };
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', refs, '')).toEqual({ text: 'base is required for a new branch', offerContinue: false });
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', down, '')).toEqual({ text: 'base is required for a new branch', offerContinue: false });
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', refs, 'a..b')).toEqual({ text: 'base may not contain ..', offerContinue: false });
+      expect(branchRefusal('new', 'x y', 'TIMIFY-123', refs, '')).toEqual({ text: 'branch may hold only A-Z a-z 0-9 . _ / -', offerContinue: false });
+      expect(branchRefusal('new', 'nokey', 'TIMIFY-123', refs, '')).toEqual({ text: 'base is required for a new branch', offerContinue: false });
+      expect(branchRefusal('new', 'timify-123-fresh', 'TIMIFY-123', refs, 'origin/develop')).toBeNull();
+      expect(branchRefusal('continue', 'timify-123-x', 'TIMIFY-123', refs, '')).toBeNull();
+    });
+  });
+
+  describe('the sheet draft', () => {
+    const tickets = refsOf([branch('timify-123-x', true), branch('develop', false)]);
+    it('execute with a ticket branch: Continue on it, and New and the MR target still filled for a switch', () => {
+      expect(branchDraft('execute', tickets, 'TIMIFY-123', 'Export contacts', undefined)).toEqual({
+        mode: 'continue',
+        continueBranch: 'timify-123-x',
+        newBranch: 'timify-123-export-contacts',
+        base: 'develop',
+        openMr: false,
+        target: 'develop'
+      });
+    });
+    it('context: No branch, with the other two modes pre-filled', () => {
+      expect(branchDraft('context', tickets, 'TIMIFY-123', 'Export', { namePattern: 'feature/{key}-{slug}' })).toEqual({
+        mode: 'none',
+        continueBranch: 'timify-123-x',
+        newBranch: 'feature/timify-123-export',
+        base: 'develop',
+        openMr: false,
+        target: 'develop'
+      });
+    });
+    it('unread refs: the stored base fills base and target, and Continue has nothing to offer', () => {
+      expect(branchDraft('execute', null, 'TIMIFY-123', 'Export', { base: 'main' })).toEqual({
+        mode: 'new',
+        continueBranch: '',
+        newBranch: 'timify-123-export',
+        base: 'main',
+        openMr: false,
+        target: 'main'
+      });
+    });
+    it('the choice keeps only the fields its mode and action own', () => {
+      const draft = { mode: 'continue' as const, continueBranch: 'b', newBranch: 'n', base: 'develop', openMr: true, target: 'main' };
+      expect(branchChoiceOf(draft, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, target: 'main' });
+      expect(branchChoiceOf({ ...draft, target: '' }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: true, target: null });
+      expect(branchChoiceOf({ ...draft, openMr: false }, 'execute')).toEqual({ mode: 'continue', branch: 'b', openMr: false, target: null });
+      expect(branchChoiceOf(draft, 'context')).toEqual({ mode: 'continue', branch: 'b', openMr: false, target: null });
+      expect(branchChoiceOf({ ...draft, mode: 'new' }, 'execute')).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: true });
+      expect(branchChoiceOf({ ...draft, mode: 'new' }, { skill: 's_0a1b2c3d' })).toEqual({ mode: 'new', branch: 'n', base: 'develop', openMr: false });
+      expect(branchChoiceOf({ ...draft, mode: 'none' }, 'context')).toEqual({ mode: 'none' });
+    });
+    it('the dispatch fields are the five flat ones, each only with its mode', () => {
+      expect(branchDispatchFields({ mode: 'none' })).toEqual({ mode: 'none' });
+      expect(branchDispatchFields({ mode: 'new', branch: 'n', base: 'develop', openMr: false })).toEqual({
+        mode: 'new',
+        branch: 'n',
+        base: 'develop',
+        openMr: false
+      });
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: true, target: 'main' })).toEqual({
+        mode: 'continue',
+        branch: 'b',
+        openMr: true,
+        target: 'main'
+      });
+      expect(branchDispatchFields({ mode: 'continue', branch: 'b', openMr: false, target: null })).toEqual({ mode: 'continue', branch: 'b', openMr: false });
+    });
+    it('the draft refusal reads the mode\'s own fields, then a typed MR target', () => {
+      const draft = { mode: 'new' as const, continueBranch: 'develop', newBranch: 'timify-123-n', base: '', openMr: false, target: '' };
+      expect(draftRefusal(draft, 'execute', 'TIMIFY-123', tickets)?.text).toBe('base is required for a new branch');
+      expect(draftRefusal({ ...draft, mode: 'continue' }, 'execute', 'TIMIFY-123', tickets)?.text).toBe(
+        'develop is checked out in the mapped checkout /repos/app'
+      );
+      const cont = { ...draft, mode: 'continue' as const, continueBranch: 'timify-123-x', openMr: true };
+      expect(draftRefusal({ ...cont, target: 'a..b' }, 'execute', 'TIMIFY-123', null)?.text).toBe('target may not contain ..');
+      expect(draftRefusal(cont, 'execute', 'TIMIFY-123', null)).toBeNull();
+      expect(draftRefusal({ ...cont, target: 'a..b', openMr: false }, 'execute', 'TIMIFY-123', null)).toBeNull();
+      expect(draftRefusal({ ...draft, mode: 'none' }, 'context', 'TIMIFY-123', tickets)).toBeNull();
+      expect(draftRefusal({ ...draft, mode: 'continue', continueBranch: '' }, 'execute', 'TIMIFY-123', tickets)?.text).toBe('choose a branch to continue');
+    });
+  });
+
+  describe('ticketWorktrees and removeCommand', () => {
+    const t = (repo: string, path: string, br: string | null, main = false) => ({ repo, path, branch: br, main });
+    it('drops the main tree, other tickets and detached trees; sorts by repo then path', () => {
+      const payload = {
+        worktrees: [
+          t('/b', '/b/.worktrees/timify-123-z', 'timify-123-z'),
+          t('/a', '/a', 'timify-123-main', true),
+          t('/a', '/a/.worktrees/timify-1234-x', 'timify-1234-x'),
+          t('/a', '/a/.worktrees/feature-timify-123-y', 'feature/timify-123-y'),
+          t('/a', '/a/.worktrees/detached', null),
+          t('/a', '/a/.worktrees/a-timify-123', 'a/timify-123')
+        ],
+        unavailable: []
+      };
+      expect(ticketWorktrees('TIMIFY-123', payload).map((w) => w.path)).toEqual([
+        '/a/.worktrees/a-timify-123',
+        '/a/.worktrees/feature-timify-123-y',
+        '/b/.worktrees/timify-123-z'
+      ]);
+    });
+    it('removeCommand quotes both paths and never forces', () => {
+      const cmd = removeCommand(t("/my repos/it's", "/my repos/it's/.worktrees/x", 'x'));
+      expect(cmd).toBe(`git -C '/my repos/it'\\''s' worktree remove '/my repos/it'\\''s/.worktrees/x'`);
+      expect(cmd).not.toContain('--force');
+    });
   });
 });

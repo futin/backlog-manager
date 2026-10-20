@@ -170,6 +170,7 @@ describe('unconfigured', () => {
       detail: 'BM_JIRA_SITE is not set',
       boards: [],
       repos: {},
+      repoDefaults: {},
       projects: [],
       skills: [],
       calls: { sweep: 0, last429At: null },

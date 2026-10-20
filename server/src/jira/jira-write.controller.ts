@@ -10,10 +10,14 @@ import {
   JiraUnknownIdError,
   deleteBoard,
   deleteSkill,
+  jiraConfigFile,
   parseBoardWrite,
+  parseRepoDefaultsWrite,
   parseReposWrite,
+  readJiraConfig,
   parseSkillWrite,
   writeBoard,
+  writeRepoDefaults,
   writeRepos,
   writeSkill
 } from './config.util';
@@ -22,8 +26,9 @@ import { JiraPollerService } from './poller.service';
 import { jiraWriteOrThrow } from './unwrap.util';
 
 /**
- * The seven write routes under `/api/jira` — five of them config writes (Jira phase 2, spec §5 and §8; the two skill routes, `POST /skills` and
- * `POST /skills/delete`, are phase 5's), `POST /boards`, `POST /boards/delete`, `POST /repos`, `POST /skills` and `POST /skills/delete`, the only callers of the
+ * The eight write routes under `/api/jira` — six of them config writes (Jira phase 2, spec §5 and §8; the two skill routes, `POST /skills` and
+ * `POST /skills/delete`, are phase 5's, and `POST /repo-defaults` the repo/branch work's), `POST /boards`, `POST /boards/delete`, `POST /repos`,
+ * `POST /repo-defaults`, `POST /skills` and `POST /skills/delete`, the only callers of the
  * writers in `config.util.ts`, and two of them writes to JIRA itself (phase 3), `POST /issue/assign` and
  * `POST /issue/transition`, the first calls this server makes that change anything outside `~/.backlog-manager`. They are POSTs (the app has no PUT or DELETE route anywhere) and each carries `SameOriginPostGuard`, the one guard every other
  * state-changing route here carries: `application/json` and a same-origin `Origin`, 403 otherwise. The Host allowlist is global and has already answered
@@ -39,7 +44,7 @@ import { jiraWriteOrThrow } from './unwrap.util';
  * the poller's business to be a no-op there.
  *
  * Two failures are the writers' own and are mapped here, once: `JiraConfigUnreadableError` is a 409 carrying its message (the file exists, a person has to
- * repair it, and nothing was written — #270's refusal, restated for five writers), and `JiraUnknownIdError` is a 404 `unknown board` or `unknown skill` by the kind it carries (the board sentence and
+ * repair it, and nothing was written — #270's refusal, restated for six writers), and `JiraUnknownIdError` is a 404 `unknown board` or `unknown skill` by the kind it carries (the board sentence and
  * status are the read route's for a malformed or absent id). Anything else the writer throws is an I/O failure and stays Nest's 500.
  *
  * The two issue writes differ from the config writes in what they are gated on, and the difference is deliberate (§8): they ARE refused while `access` is
@@ -53,7 +58,8 @@ import { jiraWriteOrThrow } from './unwrap.util';
  *
  * After a config write, the poller is re-aimed. A saved board awaits `boardSaved`, which sweeps THAT board and resolves when the sweep is done or after its
  * own `JIRA_SAVE_SWEEP_WAIT_MS` cap — it already races itself and never rejects, so this route adds no second timer. A deleted board drops its cache at once
- * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos write re-aims nothing: no sweep reads `repos`.
+ * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos or repo-defaults write re-aims nothing: no sweep reads
+ * either.
  */
 @Controller('api/jira')
 export class JiraWriteController {
@@ -95,6 +101,29 @@ export class JiraWriteController {
     if (!parsed.ok) throw new HttpException({ error: parsed.error }, 400);
     this.requireConfigured();
     this.writing(() => writeRepos(parsed.value.project, parsed.value.paths));
+    return parsed.value;
+  }
+
+  /**
+   * `POST /api/jira/repo-defaults` — `{ path, base, namePattern }`, `null` meaning unset; both `null` deletes the path's entry. Answers `{ path, base,
+   * namePattern }` as stored (the path normalised, `null` for unset). The order is the file's usual one with one addition: guard → validate (400) → configured
+   * (503) → `jira.json` readable (409) → the path mapped to SOME project (400 `<path> is not mapped`) → write. The mapping check needs the file, so it sits
+   * after the 503 and after the 409 — an unreadable file cannot say what is mapped, so it answers the refusal a person can act on, with the file untouched —
+   * and it quotes the NORMALISED path, which is what the client got from the status payload. The defaults are per path, so any project's mapping will do, as on
+   * `/refs`; it keeps the file from collecting entries for paths nobody can reach. No re-aim: no sweep reads `repoDefaults`.
+   */
+  @Post('repo-defaults')
+  @HttpCode(200)
+  @UseGuards(SameOriginPostGuard)
+  saveRepoDefaults(@Body() body: unknown): { path: string; base: string | null; namePattern: string | null } {
+    const parsed = parseRepoDefaultsWrite(body, homedir());
+    if (!parsed.ok) throw new HttpException({ error: parsed.error }, 400);
+    this.requireConfigured();
+    const { path, base, namePattern } = parsed.value;
+    const config = readJiraConfig();
+    if (config.unreadable !== null) throw new HttpException({ error: new JiraConfigUnreadableError(jiraConfigFile(), config.unreadable).message }, 409);
+    if (!Object.values(config.repos).some((paths) => paths.includes(path))) throw new HttpException({ error: `${path} is not mapped` }, 400);
+    this.writing(() => writeRepoDefaults(path, { ...(base !== null && { base }), ...(namePattern !== null && { namePattern }) }));
     return parsed.value;
   }
 

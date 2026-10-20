@@ -3,14 +3,21 @@
 The Jira Cloud integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md)): a parallel subsystem beside the item
 sources, not a third source. A Jira board is a set of issue keys and saved JQL defined in one per-machine file; it has no `backlog/`, no `source.json` and no
 registry entry, and nothing in `items/` knows it exists. This doc describes **phases 1 to 5** (spec §12) — phase 5 as 5a, the server half, and 5b, the client half. Phase 1 is the server's read half — the Jira
-client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and the read routes (six, then seven with phase 5a's `/prompt`). Phase 2 adds `jira.json`'s
-writers behind three guarded write routes (five since 5a's skills) and the whole client section: a rail entry with two pages (Board and Setup), the issue modal, the shell chip and
+client, the config reader, the poller and its caches, the issue mapping, the ADF converter, the ticket block and the read routes (six, then seven with phase
+5a's `/prompt`, nine with the repo/branch work's `/refs` and `/worktrees`). Phase 2 adds `jira.json`'s writers behind three guarded write routes (five since
+5a's skills, six with `/repo-defaults`) and the whole client section: a rail entry with two pages (Board and Setup), the issue modal, the shell chip and
 the Trackers row. Phase 3 adds the first two writes to Jira itself — assign the issue to me and transition it — behind two more guarded routes, each followed
 by a re-read of the issue that is spliced into the board caches, and the modal's two controls that call them. Phase 4 adds the `jira` skill and its CLI,
 `jira.mjs`, which reach those same routes from any Claude session on this machine — and changes nothing in the server. Phase 5a is the server half of Run: the
 skills writers and their two routes, the prompt composer and `GET /api/jira/prompt`, the in-memory live map, and — in `agents/`, because they call the dashboard —
 `POST /api/agents/dispatch-jira`, `/jira-stop` and the reconciler that keeps the map honest. Phase 5b is the client half: `Run ▾`, the launch sheet, the card's
 live strip, the modal's session fact and `Stop session`, the Skills card and the `Jira default action` setting — [below](#the-client-half-of-run-phase-5b).
+
+The **repo/branch work** ([spec](../superpowers/specs/2026-10-20-jira-repo-branch-design.md)) gives a Run a branch and its own git worktree. The launch sheet
+picks New, Continue or No branch from the mapped repo's refs (`GET /api/jira/refs`); the server checks the choice and opens the prompt with a workspace block
+whose `jira.mjs worktree` line the session runs first; Setup stores a base and a name pattern per path (`POST /api/jira/repo-defaults`); and the board shows the
+trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies the command. The server reads those repos' git and never writes it —
+[invariants](invariants.md#the-server-never-writes-git) — and the map is [below](#branch-and-worktree-the-repobranch-work).
 
 `server/src/jira/` is the third outbound-calling module, after `agents/` and `tracker/`, and the only one that talks to Atlassian.
 
@@ -19,11 +26,16 @@ live strip, the modal's session fact and `Stop session`, the Skills card and the
 - **Per machine, in `.env`**: `BM_JIRA_SITE` (a hostname only, `acme.atlassian.net`), `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN`. A scoped API token needs
   `read:jira-work`, `write:jira-work` and `read:jira-user`; a classic token works as it is. All three or none: any one missing (or blank) is
   `configured: false`, and every route but `GET /api/jira` answers 503. Compose passes each through as `'${BM_JIRA_<NAME>:-}'`, never a literal.
-- **Per machine, in `~/.backlog-manager/settings/jira.json`** (`BM_JIRA_FILE` overrides): `{ boards, repos, skills }`. The server is its one writer
-  since phase 2 — the Setup page's boards and repository map, and since phase 5a its skills, through the five config write routes below — and a hand edit still
-  lands, because every reader reads it fresh and every writer merges one entry into the RAW file. A skill is `{ id, name, prompt }` with an `s_` id: a template
-  the Run launch sheet offers beside the two built-ins, filled in by the composer (below).
-- **Per project: nothing.** A mapped repository is a path in `jira.json` and never enters `registry.json`.
+- **Per machine, in `~/.backlog-manager/settings/jira.json`** (`BM_JIRA_FILE` overrides): `{ boards, repos, repoDefaults, skills }`. The server is its one
+  writer since phase 2 — the Setup page's boards and repository map, and since phase 5a its skills, through the six config write routes below — and a hand edit
+  still lands, because every reader reads it fresh and every writer merges one entry into the RAW file. A skill is `{ id, name, prompt }` with an `s_` id: a
+  template the Run launch sheet offers beside the two built-ins, filled in by the composer (below). `repoDefaults` (the repo/branch work) maps an absolute
+  mapped path to `{ base?, namePattern? }`: the base a New branch is cut from and the pattern it is named by, per PATH because one checkout can serve two
+  projects.
+- **Per project: nothing.** A mapped repository is a path in `jira.json` and never enters `registry.json`. Under compose it has to sit under one of the two
+  read-only mounts, `BM_PROJECT_ROOT` or `BM_JIRA_REPO_ROOT` (both passed to the server as `BM_REPO_ROOTS`), or its refs read as `not mounted into the board`.
+  A root that does not exist on the host is created by Docker's bind mount, as an empty directory (root-owned on Linux), so set `BM_JIRA_REPO_ROOT` to a
+  directory that already exists on a machine without `~/Documents/timify-projects`.
 - **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | setup`, a module store) since
   phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b. The Board page's filters and summary search are per mount and never persisted.
 
@@ -31,8 +43,8 @@ live strip, the modal's session fact and `Stop session`, the Skills card and the
 
 | file                 | what it holds                                                                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `env.util.ts`        | `jiraEnv()` — the three variables, read per call, trimmed, never cached; `JIRA_ENV` is their one spelling and `isJiraHostname` the site check    |
-| `config.util.ts`     | `readJiraConfig()` and the per-entry readers (`readBoard`, `readQuery`, `readRepos`, `readSkill`); `isJiraId`, `JIRA_JQL_MAX_CHARS`; since phase 2 the write half — `parseBoardWrite`, `parseReposWrite`, `normaliseRepoPath`, `mintJiraId`, the five writers `writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill`, `deleteSkill` (with `parseSkillWrite`), and their two refusals `JiraConfigUnreadableError`, `JiraUnknownIdError` (which carries the entry kind, `board` or `skill`) |
+| `env.util.ts`        | `jiraEnv()` — the three variables, read per call, trimmed, never cached; `JIRA_ENV` is their one spelling and `isJiraHostname` the site check; `repoRoots()` reads `BM_REPO_ROOTS` (`REPO_ROOTS_ENV`), `null` on a host-run API |
+| `config.util.ts`     | `readJiraConfig()` and the per-entry readers (`readBoard`, `readQuery`, `readRepos`, `readRepoDefaults`, `readSkill`); `isJiraId`, `JIRA_JQL_MAX_CHARS`; since phase 2 the write half — `parseBoardWrite`, `parseReposWrite`, `normaliseRepoPath`, `mintJiraId`, the six writers `writeBoard`, `deleteBoard`, `writeRepos`, `writeRepoDefaults` (with `parseRepoDefaultsWrite`), `writeSkill`, `deleteSkill` (with `parseSkillWrite`), and their two refusals `JiraConfigUnreadableError`, `JiraUnknownIdError` (which carries the entry kind, `board` or `skill`) |
 | `jira.client.ts`     | `JiraClient` — one `fetch` wrapper over the endpoints read and, since phase 3, the two it writes (`assign`, `transition`); the gateway, the one auth header, the call counter, the deadline; `jqlString` |
 | `errors.util.ts`     | `accessOf` and `jiraHttpError` — the one mapping from a Jira response to an access state and to an HTTP error (spec §8)                        |
 | `identity.ts`        | `JiraBootState` — the four boot answers, the token kind, the site-level `access`/`detail`, the 429 window and the 15 s → 5 min back-off        |
@@ -41,10 +53,12 @@ live strip, the modal's session fact and `Stop session`, the Skills card and the
 | `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30)              |
 | `poller.service.ts`  | `JiraPollerService` — the ticker, the boot sequence, the per-board caches, every fresh read the routes make, and since phase 3 `assignToMe`, `transitionIssue`, the splice and the sweep's newest-wins rule |
 | `unwrap.util.ts`     | `unwrapJira` — a poller outcome as its value or its §8 error, shared by both controllers so a failure means the same on every route (phase 3); `jiraWriteOrThrow` (phase 5a) — an issue write's outcome with its two own refusals, hoisted out of the write controller so the two write routes and `dispatch-jira` answer a failure in the same words |
-| `prompt.util.ts`     | `composeJiraPrompt` — what a Run session is told, the ticket framed as data (phase 5a); `resolveJiraActionOrThrow`; `JIRA_PROMPT_MAX`            |
+| `prompt.util.ts`     | `composeJiraPrompt` — what a Run session is told, the ticket framed as data (phase 5a); `resolveJiraActionOrThrow`; `JIRA_PROMPT_MAX`; since the repo/branch work `workspaceBlock` and the Open MR closing rule |
+| `refs.util.ts`       | the repo/branch work's one reader of git: `readRepoRefs` (`JiraRepoRefs`), `readWorktrees`, `checkRepo` (the unavailable reasons) — every call a read through `runGit` |
+| `branch-choice.util.ts` | `parseBranchChoice` (the branch choice's shape, 400s) and `resolveWorkspace` (the choice against the refs, 409s), shared by `/prompt` and `dispatch-jira` |
 | `live.service.ts`    | `JiraLiveService` — the in-memory key → session map (phase 5a, → [the live map](#the-live-map-phase-5a)); not `JiraService`, the spec's name for it |
-| `jira.controller.ts` | the seven read routes (six, and phase 5's `GET /prompt`)                                                                                       |
-| `jira-write.controller.ts` | the seven write routes — five config writes (three in phase 2, the two skills routes in 5a) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
+| `jira.controller.ts` | the nine read routes (six, phase 5's `GET /prompt`, and the repo/branch work's `GET /refs` and `GET /worktrees`)                                |
+| `jira-write.controller.ts` | the eight write routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
 | `jira.module.ts`     | `JiraModule` — the poller and the client (a factory value, the one place a suite swaps in a fake `fetch`), both exported                       |
 
 `agents/` holds the other half of Run, in `jira-agents.controller.ts` (the two POSTs), `jira-dispatch.service.ts` (`JiraDispatchService`: dispatch and stop),
@@ -78,7 +92,9 @@ unconfigured, then ask the poller — so a malformed request never reads as an e
 | `GET /api/jira/search?q=`         | ≤ 20 issues for the roots picker; `q` required (400), trimmed, blank → `[]` with no call, over 100 characters → 400            |
 | `GET /api/jira/projects`          | every project the credentials see, `{ key, name }[]` sorted by key, paged by `startAt`                                          |
 | `GET /api/jira/jql/check?jql=`    | `{ ok: true, count }` or `{ ok: false, message }` (Jira rejected it — still a 200); `jql` required, over 2 000 characters → 400  |
-| `GET /api/jira/prompt?key&action&repo` | `text/plain`: `composeJiraPrompt`'s answer. Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context or skill:<id>`, 400 `repo is required`, 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), 400 `prompt too long` |
+| `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&target` | `text/plain`: `composeJiraPrompt`'s answer. Refusals in order: 400 `invalid issue key`, 400 `action must be execute, context or skill:<id>`, 400 `repo is required`, the branch choice's 400s (`parseBranchChoice`, [below](#branch-and-worktree-the-repobranch-work)), 503, 409 (`jira.json` unreadable), 400 `unknown skill <id>`, the issue read (§8), 400 `<repo> is not mapped to <PROJECT>` (`repos[detail.project.key]`, repo normalised like a stored path), the refs' 409s (`resolveWorkspace`), 400 `prompt too long` |
+| `GET /api/jira/refs?repo&key`     | `JiraRepoRefs` for one mapped repo, as of its last fetch. 400 `repo is required`, 400 `invalid issue key` (`key` is optional), 503, 409, 400 `<repo> is not mapped`; an unreadable repo is a 200 with `available: false` and its reason |
+| `GET /api/jira/worktrees`         | `{ worktrees, unavailable }` — every working tree of every distinct mapped path, and each repo that could not be read with its reason; never an error for one repo |
 
 Every route but the first answers 503 `Jira is not configured` while unconfigured. `GET /api/jira` fills `live` from the live map in the controller (the poller
 never sees it; an unconfigured server keeps `{}`), and `GET /api/jira/issue/:key` fills `session` the same way. A failed Jira call is mapped
@@ -102,7 +118,7 @@ what `GET /api/jira` says — rather than the `unreachable` its synthesised stat
 
 ### The config write routes (phase 2; skills in 5a)
 
-Five config POSTs in `jira-write.controller.ts`, the only callers of the writers — POSTs because the app has no PUT or DELETE route anywhere. Each carries
+Six config POSTs in `jira-write.controller.ts`, the only callers of the writers — POSTs because the app has no PUT or DELETE route anywhere. Each carries
 `SameOriginPostGuard` (`application/json` and a same-origin `Origin`, 403 otherwise), and inside each the order is fixed: guard → validate (400, naming the
 field) → configured (503 `Jira is not configured`) → write (404 / 409) → re-aim the poller. Every error body is `{ error }`. They are not gated on `access`:
 a save while the credential is rejected or the site `unsupported` touches only `jira.json`, and the sweep that follows is the poller's to skip.
@@ -112,6 +128,7 @@ a save while the credential is rejected or the site `unsupported` touches only `
 | `POST /api/jira/boards`         | `{ id?, name, interval, roots, queries }` | the board as stored, ids server-minted; waits for `boardSaved` (below); 404 for an `id` the file does not hold |
 | `POST /api/jira/boards/delete`  | `{ id }`                                | `{ ok: true }`; drops the board's cache at once (`boardDeleted`) and re-`arm()`s; 404 for an unknown id, a second delete included |
 | `POST /api/jira/repos`          | `{ project, paths }`                    | `{ project, paths }` as stored, normalised and deduplicated; `[]` removes the project's key; re-aims nothing |
+| `POST /api/jira/repo-defaults`  | `{ path, base, namePattern }`           | `{ path, base, namePattern }` as stored, `null` for unset; both `null` deletes the path's entry; a base failing Table A or a pattern failing `patternProblem` is a 400 naming the field; after the 409, 400 `<path> is not mapped` unless SOME project maps it; re-aims nothing |
 | `POST /api/jira/skills`         | `{ id?, name, prompt }`                 | the skill as stored, an `s_` id minted on create; a trimmed `name` of 1–60 and `prompt` of 1–2 000; 404 `unknown skill` for an `id` the file does not hold; re-aims nothing |
 | `POST /api/jira/skills/delete`  | `{ id }`                                | `{ ok: true }`; 404 `unknown skill`, a second delete included                                      |
 
@@ -225,12 +242,15 @@ tracker cache's, which this doc points to rather than restates.
 
 Read fresh on every use. Missing, or a parsed non-object: empty. Exists but cannot be read or parsed: empty with `unreadable` set, carried on the payload as
 `configUnreadable`, and never replaced. Everything else falls back per entry — a board needs a `b_` id and a name; a root must pass `isJiraKey`; a query
-needs a `q_` id, a label and JQL; a repos key must be a project key and each path a non-empty string; a skill needs an `s_` id, a name and a prompt — and each
-dropped entry is warned once. An `interval` that is missing or not one of `15s`, `1m`, `5m`, `off` reads `1m`.
+needs a `q_` id, a label and JQL; a repos key must be a project key and each path a non-empty string; a skill needs an `s_` id, a name and a prompt; a
+`repoDefaults` key must be an absolute normalised path, and each of its values falls back on its own — and each dropped entry or value is warned once. An
+`interval` that is missing or not one of `15s`, `1m`, `5m`, `off` reads `1m`.
 
-The five writers (three in phase 2, `writeSkill` and `deleteSkill` in 5a) follow `writeSyncInterval`'s shape: read the RAW file; ENOENT starts from `{}`; a file that cannot be read or does not parse
+The six writers (three in phase 2, `writeSkill` and `deleteSkill` in 5a, `writeRepoDefaults` in the repo/branch work) follow `writeSyncInterval`'s shape: read
+the RAW file; ENOENT starts from `{}`; a file that cannot be read or does not parse
 throws `JiraConfigUnreadableError` and writes nothing; a parsed non-object is replaced; otherwise merge ONE entry — a board by id (keeping its position in
-`boards`), one project's path list by key, a skill by id (keeping its position in `skills`) — and keep everything else, malformed entries and unknown top-level keys included, then write
+`boards`), one project's path list by key, one path's defaults by path, a skill by id (keeping its position in `skills`) — and keep everything else, malformed
+entries and unknown top-level keys included, then write
 `JSON.stringify(next, null, 2) + '\n'` to a temp file in the same directory and `rename` it over. Ids are `b_`/`q_`/`s_` plus eight lower-case hex digits,
 minted against every id the file already holds, malformed entries' included, so a minted id never collides.
 
@@ -286,7 +306,12 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   `usePersistedState` effect would never run) and calls `onOpenJiraPage('board')`. `JiraBoardSheet` composes `ui/FormSheet`, seeds its fields once at
   mount, debounces the root search (`JIRA_ROOT_SEARCH_DEBOUNCE_MS`, 300 ms) and the JQL check (`JIRA_JQL_CHECK_DEBOUNCE_MS`, 500 ms), leaves validation to the
   server, and on any answer but a 200 stays open with the server's sentence. `JiraReposGroup` sends a project's whole list per write, the typed path trimmed
-  but otherwise as typed — the server alone normalises. `JiraConnectionGroup` is a read-only report. Every landed write reloads the shell's status, even if
+  but otherwise as typed — the server alone normalises. Since the repo/branch work each distinct path's first row also carries its defaults — a base field
+  (placeholder `e.g. develop`, the branches offered once the row's one `/refs` read lands), a pattern field (`{key}-{slug}`, `patternProblem` as a hint that
+  never blocks) and `Save` to `/repo-defaults` — and an unreadable repo says `branches unavailable — <path> <reason>` with both fields still usable.
+  The base has a never-blocking hint too, `defaultBaseProblem`'s `base is a branch name, without origin/`, which the route also refuses with: the tool adds
+  `origin/` itself, so a stored prefix would make every Start exit 4.
+  `JiraConnectionGroup` is a read-only report. Every landed write reloads the shell's status, even if
   the page has gone.
 - **The chip and the Trackers row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` — the
   strip at desktop width, the rail bar's `chipSlot` below 700 px — and wears its `.tracker-chip*` classes; it draws only while configured. Its popover is a
@@ -295,9 +320,12 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
 
 ## The skill (phase 4)
 
-`skills/jira/` is the plugin's seventh skill, and `skills/jira/tools/jira.mjs` its CLI. Every command is a request to the routes above, on
+`skills/jira/` is the plugin's seventh skill, and `skills/jira/tools/jira.mjs` its CLI. Every command but `worktree` is a request to the routes above, on
 `127.0.0.1:${BM_API_PORT || 4322}` — the CLI carries no Jira credential, reads no `BM_JIRA_*` and sends no `authorization` header, so the server stays Jira's
-one caller (spec §10), and a source guard in `jira.test.mjs` holds all three.
+one caller (spec §10), and a source guard in `jira.test.mjs` holds all three. The one `BM_JIRA_` name it may read is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s
+pause before its one fetch retry — a test knob, nothing of Jira's. Since the final review (M4) there is a second, `BM_JIRA_FETCH_TIMEOUT_MS`: each fetch is
+killed after 60 s by default (a `fetch failed: git fetch timed out after 60 s` note), and runs ssh as `ssh -o BatchMode=yes` unless `GIT_SSH_COMMAND`,
+`GIT_SSH` or the repo's `core.sshCommand` already says how — so a host-key or passphrase prompt fails at once instead of hanging the session.
 
 | command                     | route(s)                                                                      | stdout                                              |
 | --------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -306,6 +334,7 @@ one caller (spec §10), and a source guard in `jira.test.mjs` holds all three.
 | `transition <KEY> <id\|name>` | `GET /api/jira/issue/:key`, then `POST /api/jira/issue/transition`            | `<KEY>: <label>`                                    |
 | `assign <KEY>`              | `POST /api/jira/issue/assign`                                                 | `<KEY> assigned to you`                             |
 | `status`                    | `GET /api/jira`                                                               | `site:`, `signed in as:`, `access:`, `boards:` lines |
+| `worktree <KEY> --repo <path> --mode new\|continue --branch <name> [--base <name>]` | none — git only (`fetch`, the re-checks, `worktree add`, `merge --ff-only`) | one JSON line, `{ worktree, branch, created, notes }` |
 
 - **Keys** are trimmed and upper-cased, then checked against a copy of `JIRA_KEY_RE` before any request — a miss is exit `1` and sends nothing, so no raw
   argument ever reaches a URL path.
@@ -320,6 +349,12 @@ one caller (spec §10), and a source guard in `jira.test.mjs` holds all three.
   one more read; Nest's own 404, which carries `statusCode` and means a stack built before the route, as `the API has no <route> — rebuild or restart the
   backlog-manager stack …`), `3` a 5xx or a 2xx whose body cannot be read, `5` the stack is down — a sentence naming the backlog-manager checkout, because the
   CLI runs in a mapped repository where `pnpm run dev` means something else.
+- **`worktree`** is git only and so the exception to every line above: it works with the stack down and exits `0`, `1` or `4` — git refused, or a re-check
+  stopped the Run (a New branch that exists, a Continue branch the mapped checkout holds or that has diverged), and nothing changed — never `2`, `3` or `5`. It
+  fetches with `GIT_TERMINAL_PROMPT=0` (one retry, only when git names a lock), enters a tree that already holds the branch or makes one at
+  `<repo>/.worktrees/<branch with / as ->`, fast-forwards only a clean tree, and for a tree it made writes `.worktrees/` and `node_modules` to `info/exclude`
+  and links `node_modules`. It never runs `--force`, `-D`, `prune` or `reset`. Its Table A and B are copies of `shared/jira-branch.ts`'s
+  ([invariants](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy)); the commands and the JSON are `SKILL.md`'s.
 
 ## Run (phase 5a)
 
@@ -339,9 +374,20 @@ done category, then `COMMIT_RULE`, imported from `shared/agent.ts`) or `context`
 description is cut from the end with a marker line after the closing fence; a built-in prompt that cannot hold one character of it, or a skill's whose
 placeholders fill past the cap, is `prompt too long`. The ticket-as-data framing is the invariant's.
 
+Since the repo/branch work the composer takes the Run's workspace too, `composeJiraPrompt(detail, action, repo, workspace)`. A workspace (modes `new` and
+`continue`; `none` is `null` and changes nothing) puts `workspaceBlock` FIRST, ahead of a built-in's instruction and a skill's template alike: one line of facts
+(repo, mode, branch, base, expected worktree), the `jira.mjs worktree` command on its own line — the repo `shellQuote`d, `branch` and `base` bare because Table
+A already made them shell-safe — and the rules: the printed path wins over the expected one, `EnterWorktree` first and `git -C` as the fallback, confirm the
+branch, never check anything out in the mapped checkout, stop and report on a mismatch. Its fixed text is at most 600 characters and counts toward the cap. A
+skill's template gains `{branch}`, `{base}` and `{worktree}` (the EXPECTED path; all three empty under `none`, `{base}` empty for `continue`). `execute` no
+longer says "create a branch" — the block owns that, and `execute` without a branch is refused upstream. With `openMr`, the closing rule's `Do not push.`
+becomes "push the branch and open one merge request into the target, else the base, else the repository's default": on GitLab the mr-review-loop skill if
+installed, else `glab mr create`; on GitHub `gh pr create`; otherwise report the command.
+
 `GET /api/jira/prompt?key=&action=&repo=` answers `text/plain`. Its refusals, in order: 400 `invalid issue key`; 400 `action must be execute, context or
 skill:<id>`; 400 `repo is required`; 503 not configured; 409 for an unreadable `jira.json`; 400 `unknown skill <id>`; the issue read through §8's mapping; 400
-`<repo> is not mapped to <PROJECT>`; 400 `prompt too long`. The repo is normalised as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped).
+`<repo> is not mapped to <PROJECT>`; the refs' 409s; 400 `prompt too long`. The branch choice's 400s come right after `repo is required`. The repo is normalised
+as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped).
 **The mapping check differs between the two routes by design:** `dispatch-jira` checks the repo against the KEY'S PREFIX, before any Jira read — a project key
 holds no `-`, so the prefix is the project — while `/prompt` checks the read detail's `project.key`, which it has anyway. They agree for every issue except one
 Jira has moved to another project, where the key keeps its old prefix and the detail names the new project.
@@ -356,19 +402,22 @@ and the poller never does.
 
 ### `POST /api/agents/dispatch-jira`
 
-`{ key, repo, action, assign, transitionId, permissionMode?, model?, effort?, remoteControl? }` → `JiraDispatchResult` (`sessionId`, `assigned`, `transitioned`
-— the transition's NAME or `null` — and `session`). The controller (`JiraAgentsController`, behind `SameOriginPostGuard`, answering 200) checks the body's shape
+`{ key, repo, action, assign, transitionId, mode, branch?, base?, openMr?, target?, permissionMode?, model?, effort?, remoteControl? }` → `JiraDispatchResult`
+(`sessionId`, `assigned`, `transitioned` — the transition's NAME or `null` — and `session`). The controller (`JiraAgentsController`, behind
+`SameOriginPostGuard`, answering 200) checks the body's shape
 field by field; `JiraDispatchService.dispatch` then does, in this order: configured → `jira.json` readable → the skill exists → the repo mapped to the key's
 project → the dashboard gate (`projectDispatchGate`) → `live.reserve` → `no identity` if an assign is asked and the poller has no `me` → a FRESH issue read →
 the transition is among the ones that read offers → the first composition fits → assign (skipped when the ticket is already mine) → transition → re-read and
 re-compose, only if something was written → spawn in the repo under the session name `jira <KEY>` → `confirm` and arm the reconciler. Everything that can be
-refused is refused before the first write; any failure after the reservation releases it.
+refused is refused before the first write; any failure after the reservation releases it. The branch choice is parsed by the controller (`parseBranchChoice`, a
+400), and the repo's refs are read and judged (`resolveWorkspace`, a 409) after the mapping check and BEFORE `live.reserve`, so a refused choice has reserved
+nothing and written nothing.
 
 | status | `error` |
 | ------ | ------- |
-| 400 | `invalid issue key`; `action must be execute, context or { skill: <id> }`; `repo is required`; `assign must be true or false`; `transitionId must be null or a non-empty string` |
+| 400 | `invalid issue key`; `action must be execute, context or { skill: <id> }`; `repo is required`; `assign must be true or false`; `transitionId must be null or a non-empty string`; the branch choice's (`mode must be new, continue or none`, `execute needs a branch (mode new or continue)`, `base is only for a new branch`, `branch must carry <KEY>`, `openMr is only for execute with a branch`, `target is only for openMr with continue`, a name failing Table A) |
 | 503 | `Jira is not configured`; `no identity` |
-| 409 | `settings/jira.json <reason> — fix or delete it by hand`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment` |
+| 409 | `settings/jira.json <reason> — fix or delete it by hand`; `<branch> exists — switch to Continue`; `<branch> is checked out in the mapped checkout <repo>`; the dashboard gate's reason; `<KEY> is starting`; `<KEY> already has a session`; `too many Jira sessions are starting — try again in a moment` |
 | 400 | `unknown skill <id>`; `<repo> is not mapped to <PROJECT>`; `transition not offered`; `prompt too long` |
 | 502 | dispatch is on and the dashboard is unreachable (the gate's reason); a spawn the dashboard refused |
 | as §8 | the issue read, the assign and the transition, through `unwrapJira` / `jiraWriteOrThrow` — `retryAt` verbatim; an assign or transition failure is prefixed `assign: ` / `transition: ` |
@@ -418,7 +467,7 @@ section (seven dialogs). The browser still never talks to Jira or the dashboard:
   `useAgents()` is read only then). It posts `stopJira` (`POST /api/agents/jira-stop`) through the same `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
 - **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an
-  add row and a `×` that asks through `ui/Confirm`; every write is one of the five config routes and reloads the shell's status. Settings › Local › Dispatch
+  add row and a `×` that asks through `ui/Confirm`; every write is one of the six config routes and reloads the shell's status. Settings › Local › Dispatch
   gains `Jira default action`, drawn only while Jira is configured. It is read by `Run ▾`, not by the sheet — every way into the sheet passes the clicked
   row — which lists the resolved default first, marked `default`; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` in the select
   and in the menu alike, without rewriting the stored value.
@@ -446,6 +495,34 @@ Spec §14's phase-0 probe, against a real Cloud site with a scoped token, and wh
 - **P13** — `serverInfo.deploymentType` is `Cloud` → anything else is `unsupported`.
 - **P14** — the cloud id comes from the unauthenticated `tenant_info` → the first boot call, with no `authorization` header.
 
+### Branch and worktree (the repo/branch work)
+
+The look is DESIGN.md §8.9.1 (the card's worktree chip), §8.9.2 (the modal's Worktrees list), §8.9.3 (the Repositories row defaults) and §8.9.5 (the launch
+sheet's Branch section). The rules are [the server never writes git](invariants.md#the-server-never-writes-git) and [one branch-name
+rule](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-one-hand-kept-copy).
+
+- **The Branch section** (`components/jira/JiraBranchSection.tsx`, state in `useBranchState`) sits in the launch sheet under the repository. `New` / `Continue`
+  / `No branch` — `No branch` is not offered for `execute`. Its one read is `fetchJiraRefs(repo, key)`; the line under the modes is `fetchAgeLine` (`as of last
+  fetch, N min ago`, or `never fetched`), because the server lists refs and never fetches. The sheet opens on Continue when a branch already carries the key,
+  else on New (`context` on No branch); New pre-fills the base (the path's stored base, else `origin/HEAD`, else the checkout's own branch) and the name from
+  the path's pattern (`branchSheetDefaults`); Continue lists `this ticket`'s branches over `other branches`, with a `behind` or `diverged` word for a stale
+  local copy. An unreadable repo swaps the age line for `branches unavailable — <path> <reason>` and the selects for text fields. `will work in <path>` is said
+  when Continue picks a branch another tree holds, and `works in the mapped checkout itself — no branch, no worktree` for No branch, paths in `~` form
+  (`displayPath`). `draftRefusal` judges the draft as the server will and blocks Start and Copy prompt in a `.sheet-blocked` line, with a `switch to Continue`
+  chip when a New name exists; the server's own refusal reaches the Prompt field through the preview, and a refused Start is the sheet's `.sheet-error` alert.
+  `execute` with a branch adds the `Open MR when done` switch, and with Continue, once it is on, a Target field (`the repository's default` when empty). The
+  choice rides both the preview (`fetchJiraPrompt`) and Start (`branchDispatchFields`).
+  Typing waits (final review, I1): every preview is an issue read (three Jira calls) and a refs read, so an edit inside one mode is asked about only once it has
+  stood still for `PREVIEW_SETTLE_MS` (350 ms), while the first ready choice, an action change and a mode switch go at once. Until the preview for the CURRENT
+  choice has landed, Start and Copy prompt are disabled (`the prompt has not loaded`), so Start never sends a choice other than the one previewed.
+- **The card's worktree chip.** `JiraBoardView` reads `GET /api/jira/worktrees` once on mount and again only when the SET of live keys changes — not a poller —
+  and `ticketWorktrees(key, payload)` picks the trees on a branch that carries the key, never a repo's own tree. One tree draws its branch name, more draw `N
+  worktrees`; a failed read draws nothing. A Start's own tree is cut later, by the session, so its chip appears on the next change of live keys or a remount.
+- **The modal's Worktrees list.** `JiraIssueModal` asks the same route itself — on open, and when the key or its session changes — and lists the trees under a
+  heading with a count pill. Each row's `Remove` copies `removeCommand` — `git -C <repo> worktree remove <path>`, both quoted — and runs nothing: the board
+  cannot see a session it did not start (Copy prompt, a terminal), so its title says to make sure none is using the tree. It is disabled while the key has a
+  live session, titled `a session is running on <KEY>`.
+
 ## Tests
 
 jest, flat in `test/`, none reaching a real Jira: `jira-env`, `jira-config`, `jira-client`, `jira-adf`, `jira-map-issue`, `jira-block`, `jira-poller` and
@@ -458,6 +535,11 @@ Phase 5a adds `jira-prompt` (the composer and `GET /prompt`), `jira-live` (the m
 `session`) and `agents-origin-guard` (the two new POSTs). Phase 5b adds the jsdom suite `jira-launch` (the sheet: preview, gates, Start, Copy prompt) and widens
 `jira-lib`, `jira-board` (`Run ▾`, the strip), `jira-modal` (the session fact, Stop), `jira-setup` (the Skills card), `settings-view` and `settings`
 (`jiraDefaultAction`), `use-jira` and `dialog-count-docs`.
+The repo/branch work adds `jira-branch` (Tables A–E of `shared/jira-branch.ts`), `jira-branch-choice` (`parseBranchChoice`, `resolveWorkspace`) and `jira-refs`
+(`refs.util.ts` over real temp repos), and widens `jira-config`, `jira-config-write`, `jira-write-routes` (`repoDefaults`, `/repo-defaults`), `jira-routes`
+(`/refs`, `/worktrees`, the prompt's branch parameters), `jira-prompt` (the workspace block, the placeholders, Open MR), `agents-dispatch-jira`, `compose-env`
+(the second mount, `BM_REPO_ROOTS`), `jira-lib`, `jira-launch` (the Branch section), `jira-setup` (the row defaults), `jira-board` (the chip) and `jira-modal`
+(the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the compose passthrough.
 

@@ -39,6 +39,7 @@ function status(boards: JiraBoardStatus[], over: Partial<JiraStatusPayload> = {}
     detail: null,
     boards,
     repos: {},
+    repoDefaults: {},
     projects: [],
     skills: [],
     calls: { sweep: 0, last429At: null },
@@ -468,6 +469,7 @@ function WriteProbe() {
             action: 'execute',
             assign: false,
             transitionId: null,
+            mode: 'none',
             permissionMode: 'plan',
             remoteControl: false
           }).then(reload)
