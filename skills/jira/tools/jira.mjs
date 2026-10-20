@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // jira.mjs — read a Jira ticket and move it, through this machine's backlog-manager API.
 //
-// What this tool is: a thin client of `/api/jira` on 127.0.0.1. Every command is one to three requests to routes the server already serves — `GET /api/jira`,
-// `GET /api/jira/issue/:key` (JSON, or `?format=text` for the ticket block), `POST /api/jira/issue/assign` and `POST /api/jira/issue/transition` — and every
-// refusal it prints is the server's own sentence (a refused transition prefixed with its key and followed by what is offered now), except a route a stale
-// stack does not have, which `failure` names along with the fix.
+// What this tool is: a thin client of `/api/jira` on 127.0.0.1 — and, for one command, of git. Every other command is one to three requests to routes the
+// server already serves — `GET /api/jira`, `GET /api/jira/issue/:key` (JSON, or `?format=text` for the ticket block), `POST /api/jira/issue/assign` and
+// `POST /api/jira/issue/transition` — and every refusal it prints is the server's own sentence (a refused transition prefixed with its key and followed by
+// what is offered now), except a route a stale stack does not have, which `failure` names along with the fix.
 //
 // What it is not: a Jira client. It never calls Atlassian, reads no `BM_JIRA_*` variable and sends no `authorization` header (spec §10). The server is
 // Jira's ONE caller on this machine, which keeps three things single: one rate-limit budget, one 429 window, one identity. And a token that never reaches a
@@ -13,10 +13,18 @@
 // Why there is no offline mode — the same reason `backlog.mjs` gives for its API mode, plus a stronger one: there is no Jira credential on this side at all,
 // so there is nothing an offline path could do. A refused connection is exit `5` with the two commands that start the stack named.
 //
+// The exception is `worktree` (spec §5.4 of the repo-and-branch design): git only, no request at all, so it works with the stack down. A Jira Run's spawn
+// prompt prints that command line; the session runs it in the mapped repository and then works in the tree it prints. It is the first command here that
+// writes anything, and it writes only what git does for a fetch and one `worktree add` (plus the `info/exclude` lines and a `node_modules` link for a tree it
+// made) — never `--force`, `-D`, `prune`, `reset` or a merge that is not `--ff-only`, the rule `orchestrate.mjs` keeps for its own worktrees.
+//
 // Exit codes (spec §9): `0` success, `1` usage (including a key that is not one — nothing is sent), `2` a 4xx the server answered, `3` a 5xx (or a 2xx
-// whose body cannot be read), `5` the stack is not running.
+// whose body cannot be read), `4` (`worktree` only) git refused or a re-check stopped the Run, `5` the stack is not running. `worktree` exits only `0`,
+// `1` or `4`: it makes no request, so the request codes cannot arise.
 
+import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 export const USAGE = `usage: jira.mjs <command>
@@ -27,11 +35,14 @@ commands:
   jira.mjs transition <KEY> <id|name>    apply one transition, matched by id, then transition name, then target status
   jira.mjs assign <KEY>                  assign the issue to the signed-in user
   jira.mjs status                        is Jira connected, and can the next call work (exit 0 only when access is ok and someone is signed in)
+  jira.mjs worktree <KEY> --repo <path> --mode new|continue --branch <name> [--base <name>]
+                                         cut or enter the ticket's git worktree in a mapped repo; prints one JSON line (git only, no API)
 
-every command needs the backlog-manager API running on 127.0.0.1 (BM_API_PORT, default 4322)`
+every command but worktree needs the backlog-manager API running on 127.0.0.1 (BM_API_PORT, default 4322)`
 
 // Exit 5, and its sentence (R9). Different from backlog.mjs's tail on purpose: this tool runs in a MAPPED repository, where `pnpm run dev` means something
-// else or nothing, so the sentence says which checkout the two commands belong to — and it needs the stack always, not only in a tracker project.
+// else or nothing, so the sentence says which checkout the two commands belong to — and it needs the stack always, not only in a tracker project. Always
+// but for `worktree`, which is git only and never reaches this sentence; the sentence says so, so nobody starts a stack for it.
 export const API_DOWN_CODE = 5
 
 /** A failure `main` turns into stderr and an exit code. Thrown anywhere below, caught once. */
@@ -54,10 +65,10 @@ function apiBase() {
 }
 
 function apiDownMessage() {
-  return `the backlog-manager API is not running on 127.0.0.1:${apiPort()} — start it with \`pnpm run dev\` or \`pnpm run docker:up\` in the backlog-manager checkout; every jira.mjs command needs it`
+  return `the backlog-manager API is not running on 127.0.0.1:${apiPort()} — start it with \`pnpm run dev\` or \`pnpm run docker:up\` in the backlog-manager checkout; every jira.mjs command but worktree needs it`
 }
 
-// A copy of backlog.mjs's `apiRequest`. One request, and the only place this file touches the network.
+// A copy of backlog.mjs's `apiRequest`. One request, and the only place this file makes one (`worktree`'s `git fetch` is git's, not this file's).
 //
 // `connection: close` so no socket outlives the call: the entry guard requires that nothing hold the event loop open when `main` returns, and an
 // agent-pooled keep-alive socket is exactly the handle that would.
@@ -286,9 +297,368 @@ async function assign(args) {
   return 0
 }
 
-const COMMANDS = { show, transitions, transition, assign, status }
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------
+// worktree — cut or enter a Jira ticket's git worktree in a mapped repository (spec §5.4 of the repo-and-branch design). Git only: no request, so the
+// stack may be down. The server composed the command line from values it validated, but it may not have been able to read the repo (an unmounted path), so
+// every check that matters is made again here, against the repo as it is after the fetch — and every refusal (exit 4) leaves nothing created.
 
-// `main` is async because every command awaits a `fetch`; see the entry guard's note for why that is safe.
+/** Longest branch or base name accepted — the same number as `BRANCH_NAME_MAX` in shared/jira-branch.ts. */
+const BRANCH_NAME_MAX = 200
+
+const BRANCH_CHARSET = /^[A-Za-z0-9._/-]+$/
+
+/**
+ * Table A — a copy of `branchNameProblem` in shared/jira-branch.ts, not an import: no skill's `tools/` imports `shared/` (an installed skill is a standalone
+ * copy of the pushed HEAD with no path back to it). A rule changed there has to be changed here by hand; this suite pins the same rows. Why `name` cannot be
+ * a branch, or `null` — first hit wins. The allowlist is narrower than git's on purpose: the name rides a shell command line in the spawn prompt.
+ */
+export function branchNameProblem(name) {
+  if (name === '') return 'is empty'
+  if (name.length > BRANCH_NAME_MAX) return `is longer than ${BRANCH_NAME_MAX} characters`
+  if (!BRANCH_CHARSET.test(name)) return 'may hold only A-Z a-z 0-9 . _ / -'
+  if (name.startsWith('-')) return 'may not start with -'
+  if (name.includes('..')) return 'may not contain ..'
+  if (name.startsWith('/') || name.endsWith('/') || name.includes('//')) return 'may not start or end with /, or contain //'
+  const parts = name.split('/')
+  if (parts.some((p) => p.startsWith('.'))) return 'may not have a part starting with .'
+  if (parts.some((p) => p.endsWith('.lock'))) return 'may not have a part ending in .lock'
+  if (name.endsWith('.')) return 'may not end with .'
+  return null
+}
+
+const isAlnum = (ch) => ch !== undefined && /[A-Za-z0-9]/.test(ch)
+
+/**
+ * Table B — a copy of `branchCarriesKey` in shared/jira-branch.ts, for the same reason. The key, case-insensitive, bounded on both sides by a
+ * non-alphanumeric character or the string's end; every occurrence is tried, so an unbounded hit earlier cannot hide a bounded one later.
+ */
+export function branchCarriesKey(branch, key) {
+  if (key === '') return false
+  const hay = branch.toLowerCase()
+  const needle = key.toLowerCase()
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) {
+    if (!isAlnum(hay[at - 1]) && !isAlnum(hay[at + needle.length])) return true
+  }
+  return false
+}
+
+// Whole lines, fixed strings — the same pair `orchestrate.mjs` writes, since both tools put their trees under `<repo>/.worktrees/`. `node_modules` is bare
+// on purpose: a worktree gets a SYMLINK to the main tree's directory, git stores a symlink as a blob, and a directory-only pattern (`node_modules/`) cannot
+// match one.
+const WORKTREE_EXCLUDES = ['.worktrees/', 'node_modules']
+
+// A copy of `ensureExcludeLines` in skills/backlog-orchestrate/tools/orchestrate.mjs, not an import: one skill's `tools/` never imports another's. Keep the
+// two in step. The comment below is that function's own.
+//
+// Appends each pattern that is not already a whole line of `<commonDir>/info/exclude`, and returns what it appended. The
+// common dir, because `info/exclude` is one shared file for the repo and every worktree of it: a blind append grows
+// duplicates in a file the user owns. Whole-line equality, never a substring test: `node_modules_old` must not stand in for
+// `node_modules`. A final line with no newline gets one first, or the first append would glue itself onto it.
+// `info/exclude`, never `.gitignore`: `.gitignore` is tracked, and a stray commit would ride a merge into the base.
+export function ensureExcludeLines(commonDir, patterns) {
+  const file = path.join(commonDir, 'info', 'exclude')
+  let text = ''
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e
+  }
+  const present = new Set(text.split('\n'))
+  const missing = patterns.filter((p) => !present.has(p))
+  if (missing.length === 0) return []
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.appendFileSync(file, `${text !== '' && !text.endsWith('\n') ? '\n' : ''}${missing.map((p) => `${p}\n`).join('')}`)
+  return missing
+}
+
+/**
+ * Did git fail because it could not take a lock? Two Starts in one repo at once can collide inside git — `fetch` locks each ref it updates (and
+ * `shallow` in a shallow clone) — and only that failure is worth a second try; a missing remote or a refused login would fail the same way twice.
+ */
+export function isLockFailure(stderr) {
+  return /cannot lock ref|unable to create '[^']*\.lock'/i.test(stderr)
+}
+
+// The pause before the one retry. 1 s by default; the environment knob exists so a test does not wait a whole second, and a value that is not a
+// non-negative number is the default rather than no pause at all.
+function fetchRetryMs() {
+  const raw = process.env.BM_JIRA_FETCH_RETRY_MS
+  const ms = raw === undefined || raw.trim() === '' ? NaN : Number(raw)
+  return Number.isFinite(ms) && ms >= 0 ? ms : 1000
+}
+
+// A synchronous sleep with no timer, so nothing holds the event loop open when `main` returns (the entry guard's condition).
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+// Every git this command runs, against one directory. `spawnSync` is right here (a CLI, not the server's request path). `GIT_TERMINAL_PROMPT=0`: the
+// session that runs this has no terminal, so a fetch that wants a password must fail — and become the `fetch failed:` note — rather than hang the session.
+function git(dir, ...args) {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
+  return { ok: !r.error && r.status === 0, stdout: (r.stdout ?? '').replace(/\n$/, ''), stderr: r.stderr ?? '', status: r.status, error: r.error }
+}
+
+// The one line of git's stderr worth quoting: its `fatal:` or `error:` line — git prints progress ("Preparing worktree …") before a refusal — else its last.
+function gitSaid(r) {
+  if (r.error) return r.error.message
+  const lines = r.stderr.split('\n').filter((l) => l.trim() !== '')
+  return lines.find((l) => l.startsWith('fatal:') || l.startsWith('error:')) ?? lines[lines.length - 1] ?? `git exited ${r.status}`
+}
+
+// Realpaths on both sides: `rev-parse --show-toplevel` and `worktree list` print resolved paths (`/var/folders/…` is `/private/var/folders/…` on macOS),
+// so a plain string compare fails every tmp directory and any symlinked mapped path. A path that does not resolve is compared as given.
+function samePath(a, b) {
+  const real = (p) => {
+    try {
+      return fs.realpathSync(p)
+    } catch {
+      return path.resolve(p)
+    }
+  }
+  return real(a) === real(b)
+}
+
+// Anything at `p` — a file, a directory, or a link, dangling or not. `fs.existsSync` follows a link, so a dangling one would read as free.
+function lexists(p) {
+  try {
+    fs.lstatSync(p)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** `git worktree list --porcelain -z`, parsed: each tree's path, its branch (null when detached) and whether it is the main one (always listed first). */
+function listWorktrees(repo) {
+  const r = git(repo, 'worktree', 'list', '--porcelain', '-z')
+  if (!r.ok) throw new JiraCliError(`git could not list the worktrees of ${repo} (git: ${gitSaid(r)})`, 4)
+  const trees = []
+  for (const entry of r.stdout.split('\0\0')) {
+    const tree = { path: null, branch: null, main: trees.length === 0 }
+    for (const line of entry.split('\0')) {
+      if (line.startsWith('worktree ')) tree.path = line.slice('worktree '.length)
+      else if (line.startsWith('branch refs/heads/')) tree.branch = line.slice('branch refs/heads/'.length)
+    }
+    if (tree.path !== null) trees.push(tree)
+  }
+  return trees
+}
+
+const WORKTREE_FLAGS = ['--repo', '--mode', '--branch', '--base']
+
+/** Step 1: every usage check, before git is asked anything. Each refusal is its own sentence, then the command's usage line. */
+function parseWorktreeArgs(args) {
+  const usage = commandUsage('worktree')
+  if (args.length === 0) throw new JiraCliError(usage, 1)
+  const refuse = (why) => {
+    throw new JiraCliError(`${why}\n${usage}`, 1)
+  }
+  const flags = {}
+  const positional = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (!arg.startsWith('--')) {
+      positional.push(arg)
+      continue
+    }
+    if (!WORKTREE_FLAGS.includes(arg)) refuse(`unknown option ${arg}`)
+    const name = arg.slice(2)
+    if (Object.hasOwn(flags, name)) refuse(`${arg} given twice`)
+    const value = args[i + 1]
+    if (value === undefined || value === '' || value.startsWith('--')) refuse(`${arg} needs a value`)
+    flags[name] = value
+    i++
+  }
+  if (positional.length === 0) refuse('the issue key is required')
+  if (positional.length > 1) refuse(`one issue key, not ${positional.length}: ${positional.join(' ')}`)
+  for (const name of ['repo', 'mode', 'branch']) if (flags[name] === undefined) refuse(`--${name} is required`)
+  if (flags.mode !== 'new' && flags.mode !== 'continue') refuse(`--mode must be new or continue, not ${flags.mode}`)
+  if (flags.mode === 'new' && flags.base === undefined) refuse('--base is required with --mode new')
+  if (flags.mode === 'continue' && flags.base !== undefined) refuse('--base is not taken with --mode continue')
+  const key = normaliseKey(positional[0])
+  if (key === null) refuse(`not a Jira issue key: ${positional[0]} — expected a key like PAY-131`)
+  for (const name of ['branch', 'base']) {
+    const problem = flags[name] === undefined ? null : branchNameProblem(flags[name])
+    if (problem) refuse(`--${name} ${problem}`)
+  }
+  return { key, repo: path.resolve(flags.repo), mode: flags.mode, branch: flags.branch, base: flags.base ?? null }
+}
+
+// A refusal after step 1: exit 4, and the sentence is git's or the re-check's.
+function stop(message) {
+  return new JiraCliError(message, 4)
+}
+
+/**
+ * Steps 2–10. The order is the contract: every re-check (step 4) runs before any tree is made (step 6), which is what lets every exit 4 promise that
+ * nothing was created — the fetch alone has moved anything, and only remote-tracking refs.
+ */
+function cutOrEnter({ key, repo, mode, branch, base }) {
+  const notes = []
+
+  // 2. The mapped checkout's top level, not a directory inside one: the tree goes under `<repo>/.worktrees/`, and the "mapped checkout holds the branch"
+  // re-check below needs to know which tree is the mapped one.
+  const top = git(repo, 'rev-parse', '--show-toplevel')
+  if (!top.ok || !samePath(top.stdout, repo)) throw stop(`${repo} is not a git repository`)
+
+  // 3. Fetch, so `origin/<base>` is fresh and the re-checks see what others pushed. One retry, only on a lock (two Starts in one repo at once); any final
+  // failure — no `origin`, no network, a refused login — is a note, and the run goes on with the refs as of the last fetch.
+  let fetched = git(repo, 'fetch', 'origin')
+  if (!fetched.ok && isLockFailure(fetched.stderr)) {
+    sleepSync(fetchRetryMs())
+    fetched = git(repo, 'fetch', 'origin')
+  }
+  if (!fetched.ok) notes.push(`fetch failed: ${gitSaid(fetched)} — using refs as of last fetch`)
+
+  // 4. The re-checks. Full ref names throughout, so a tag or a file that shares the branch's name cannot answer for it.
+  const hasRef = (ref) => git(repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`).ok
+  const remoteRef = `refs/remotes/origin/${branch}`
+  const local = hasRef(`refs/heads/${branch}`)
+  const remote = hasRef(remoteRef)
+  // `<branch>...origin/<branch>`, left and right: commits only the local branch has (ahead), and only origin's (behind). Refs alone — no tree is needed.
+  const aheadBehind = () => {
+    const r = git(repo, 'rev-list', '--left-right', '--count', `refs/heads/${branch}...${remoteRef}`)
+    const [ahead, behind] = r.stdout.trim().split(/\s+/).map(Number)
+    if (!r.ok || !Number.isInteger(ahead) || !Number.isInteger(behind)) throw stop(`git could not compare ${branch} with origin/${branch} (git: ${gitSaid(r)})`)
+    return { ahead, behind }
+  }
+  const trees = listWorktrees(repo)
+  let start = null
+  if (mode === 'new') {
+    if (!branchCarriesKey(branch, key)) throw stop(`branch must carry ${key}`)
+    if (local || remote) throw stop(`${branch} exists — Start again with Continue`)
+    // "Fetch first" means the fresh remote copy wins; the local base is the fallback, and saying so is the session's cue that it may be stale.
+    if (hasRef(`refs/remotes/origin/${base}`)) start = `refs/remotes/origin/${base}`
+    else if (hasRef(`refs/heads/${base}`)) {
+      start = `refs/heads/${base}`
+      notes.push(`cut from local ${base}: no origin/${base}`)
+    } else throw stop(`no base ${base} locally or on origin`)
+  } else {
+    // The mapped checkout is the person's own tree: a worktree cannot take its branch, and switching it is never this tool's to do. The main tree counts
+    // as the mapped one too when the mapped path is itself a linked tree — it is still the checkout somebody works in by hand.
+    const mapped = trees.find((t) => t.branch === branch && (t.main || samePath(t.path, repo)))
+    if (mapped) throw stop(`${branch} is checked out in the mapped checkout ${samePath(mapped.path, repo) ? repo : mapped.path} — a worktree cannot take it`)
+    if (!local && !remote) throw stop(`no branch ${branch} locally or on origin`)
+    if (local && remote) {
+      const { ahead, behind } = aheadBehind()
+      if (ahead > 0 && behind > 0) {
+        throw stop(`${branch} has diverged from origin/${branch} (${ahead} ahead, ${behind} behind) — never reset, never merged`)
+      }
+    }
+  }
+
+  // 5. A linked tree already holding the branch is entered where it is. Otherwise the target is `<repo>/.worktrees/<branch with / as ->`, and a target
+  // that exists already is refused rather than guessed at: two branches can flatten to one name (`feature/a-X` and `feature-a/X`).
+  let tree
+  let created
+  const holder = trees.find((t) => t.branch === branch)
+  if (holder) {
+    if (!fs.existsSync(holder.path)) {
+      throw stop(`${branch} is held by the worktree at ${holder.path}, which no longer exists — \`git worktree prune\` in ${repo} clears that record`)
+    }
+    tree = holder.path
+    created = 'entered'
+  } else {
+    const target = path.join(repo, '.worktrees', branch.replaceAll('/', '-'))
+    if (lexists(target)) {
+      const other = trees.find((t) => samePath(t.path, target))
+      throw stop(`${target} already exists (${other ? (other.branch ? `holds ${other.branch}` : 'holds a detached HEAD') : 'is not a worktree'})`)
+    }
+
+    // 6. Create. `new` never tracks: the branch is the ticket's, and its upstream is whatever the session's first push makes it. A local branch is
+    // attached by its NAME (`refs/heads/<branch>` would detach); a branch only origin has becomes a local one tracking it.
+    let add
+    if (mode === 'new') {
+      add = ['worktree', 'add', '--no-track', '-b', branch, target, start]
+      created = 'new'
+    } else if (local) {
+      add = ['worktree', 'add', target, branch]
+      created = 'attached'
+    } else {
+      add = ['worktree', 'add', '--track', '-b', branch, target, remoteRef]
+      created = 'tracked'
+    }
+    const added = git(repo, ...add)
+    if (!added.ok) {
+      // A tree holding the branch DETACHED mid-rebase (or mid-bisect) is invisible to `worktree list`'s `branch` lines while git still knows it owns the
+      // branch — `orchestrate.mjs` meets the same thing for a base and notes it at its own `worktree add`. Detected by the create failing, never by the
+      // scan, and said in words the session can act on.
+      const said = gitSaid(added)
+      const held = /(?:already used by worktree|already checked out) at '([^']*)'/.exec(said)
+      throw stop(held ? `${branch} is held by the worktree at ${held[1]} (detached, likely mid-rebase) — finish or abort there first` : said)
+    }
+    tree = target
+  }
+
+  // 7. Fast-forward a continued branch that is strictly behind origin — only ever `--ff-only`, and only in a clean tree, since the person's uncommitted
+  // work is not this tool's to carry across. Divergence was refused in step 4, before any tree existed.
+  if (mode === 'continue' && hasRef(remoteRef)) {
+    const { ahead, behind } = aheadBehind()
+    if (ahead === 0 && behind > 0) {
+      const status = git(tree, 'status', '--porcelain')
+      if (!status.ok || status.stdout.trim() !== '') {
+        notes.push(`behind origin by ${behind}, not fast-forwarded: ${status.ok ? 'uncommitted changes' : gitSaid(status)}`)
+      } else {
+        const merged = git(tree, 'merge', '--ff-only', '--quiet', remoteRef)
+        const plural = behind === 1 ? '' : 's'
+        notes.push(merged.ok ? `fast-forwarded ${behind} commit${plural}` : `behind origin by ${behind}, not fast-forwarded: ${gitSaid(merged)}`)
+      }
+    }
+  }
+
+  // 8. Only for a tree this command made: keep `.worktrees/` and the link out of everybody's `git status` (the common dir's `info/exclude`, shared by
+  // every tree of the repo), and give the tree the repo's `node_modules` unless it already has one of any kind — a branch may track a real one. Both are
+  // conveniences, so a failure is a note: the tree exists and is on its branch, and an exit 4 would wrongly say nothing was made.
+  if (created !== 'entered') {
+    const common = git(repo, 'rev-parse', '--git-common-dir')
+    try {
+      if (!common.ok) throw new Error(gitSaid(common))
+      ensureExcludeLines(path.resolve(repo, common.stdout.trim()), WORKTREE_EXCLUDES)
+    } catch (e) {
+      notes.push(`info/exclude not written: ${e.message}`)
+    }
+    const source = path.join(repo, 'node_modules')
+    const link = path.join(tree, 'node_modules')
+    if (fs.existsSync(source) && !lexists(link)) {
+      try {
+        fs.symlinkSync(source, link)
+      } catch (e) {
+        notes.push(`node_modules not linked: ${e.message}`)
+      }
+    }
+  }
+
+  // 9. The tree must be on the branch, asked from inside it — the session will work there and nowhere else.
+  const head = git(tree, 'rev-parse', '--abbrev-ref', 'HEAD')
+  if (!head.ok || head.stdout.trim() !== branch) {
+    throw stop(`the worktree is on ${head.ok ? head.stdout.trim() : `nothing git can name (${gitSaid(head)})`}, not ${branch}`)
+  }
+
+  // 10.
+  console.log(JSON.stringify({ worktree: tree, branch, created, notes }))
+  return 0
+}
+
+/**
+ * `worktree <KEY> --repo <path> --mode new|continue --branch <name> [--base <name>]` → one JSON line `{ worktree, branch, created, notes }`, `created` one
+ * of `new` (cut from a base), `tracked` (a local branch made from `origin/<branch>`), `attached` (an existing local branch given a tree), `entered` (an
+ * existing tree reused). Exits only 0, 1 or 4: anything unexpected is a 4 too, never `main`'s API-flavoured 3.
+ */
+function worktree(args) {
+  const opts = parseWorktreeArgs(args)
+  try {
+    return cutOrEnter(opts)
+  } catch (err) {
+    if (err instanceof JiraCliError) throw err
+    throw stop(`jira.mjs worktree: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+const COMMANDS = { show, transitions, transition, assign, status, worktree }
+
+// `main` is async because every API command awaits a `fetch` (`worktree` is synchronous, and awaiting its number is harmless); see the entry guard's note
+// for why that is safe.
 export async function main(argv) {
   const [cmd, ...args] = argv
   if (cmd === 'help' || cmd === '-h' || cmd === '--help') {
@@ -301,8 +671,8 @@ export async function main(argv) {
     return 1
   }
   try {
-    // R8: no command takes a flag, so anything starting `--` is usage rather than a key or a transition word.
-    if (args.some((a) => a.startsWith('--'))) throw new JiraCliError(commandUsage(cmd), 1)
+    // R8: no API command takes a flag, so anything starting `--` is usage rather than a key or a transition word. `worktree` is all flags and parses its own.
+    if (cmd !== 'worktree' && args.some((a) => a.startsWith('--'))) throw new JiraCliError(commandUsage(cmd), 1)
     return await run(args)
   } catch (err) {
     if (err instanceof JiraCliError) {
@@ -318,7 +688,8 @@ export async function main(argv) {
 
 // `process.exitCode = await main(...)`, never `process.exit(...)`: `process.exit()` drops whatever of a large stdout write is still queued for a pipe (a
 // whole ticket, for `show`). Awaiting `main` is safe because every `fetch` is awaited to completion and sends `connection: close`, so nothing holds the event
-// loop open once it returns. `retro.mjs` carries the long-form copy of this note.
+// loop open once it returns — and `worktree` holds nothing either: its git children are `spawnSync`, and its one pause is an `Atomics.wait`, not a timer.
+// `retro.mjs` carries the long-form copy of this note.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2))
 }
