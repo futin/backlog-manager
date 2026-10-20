@@ -408,15 +408,17 @@ function gitSaid(r) {
 
 // Realpaths on both sides: `rev-parse --show-toplevel` and `worktree list` print resolved paths (`/var/folders/…` is `/private/var/folders/…` on macOS),
 // so a plain string compare fails every tmp directory and any symlinked mapped path. A path that does not resolve — a registered worktree whose directory
-// was deleted, a target not made yet — is its realpathed parent plus its own name, which is how git spelled it when the tree was added; failing that, as given.
+// was deleted, a target not made yet — is its nearest EXISTING ancestor realpathed, plus the missing parts below it: that is how git spelled it when the
+// tree was added. The nearest, not the parent: with `.worktrees/` itself gone and `--repo` given through a symlink, the parent does not resolve either, and
+// stopping there would compare the symlink spelling against git's realpath, miss the stale record, and let the add put a second record on that path.
 function canonicalPath(p) {
-  try {
-    return fs.realpathSync(p)
-  } catch {
+  const missing = []
+  for (let at = path.resolve(p); ; at = path.dirname(at)) {
     try {
-      return path.join(fs.realpathSync(path.dirname(p)), path.basename(p))
+      return path.join(fs.realpathSync(at), ...missing)
     } catch {
-      return path.resolve(p)
+      if (path.dirname(at) === at) return path.resolve(p)
+      missing.unshift(path.basename(at))
     }
   }
 }

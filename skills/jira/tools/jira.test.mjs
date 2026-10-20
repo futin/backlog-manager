@@ -760,6 +760,7 @@ test('worktree continue on a local branch 2 behind origin attaches it and fast-f
   const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-behind'))
   assert.equal(out.status, 0, out.stderr)
   assert.equal(out.json.created, 'attached')
+  assert.equal(out.json.worktree, fs.realpathSync(path.join(fx.repo, '.worktrees', 'TIMIFY-123-behind')), 'the realpath form, as for every created')
   assert.deepEqual(out.json.notes, ['fast-forwarded 2 commits'])
   assert.equal(git(out.json.worktree, 'rev-parse', 'HEAD'), tip)
   assert.ok(fs.lstatSync(path.join(out.json.worktree, 'node_modules')).isSymbolicLink())
@@ -892,6 +893,22 @@ test('worktree refuses a target git still has registered after its directory was
     assert.notEqual(gitTry(fx.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).status, 0, `${mode}: no branch was left behind`)
     assert.equal(worktreeList(fx), before)
   }
+})
+
+test('worktree finds a stale record at the target through a symlinked --repo even when .worktrees/ itself is gone', () => {
+  // git records the realpath; the target is built from --repo as given. With the parent gone too, only the nearest EXISTING ancestor can be realpathed —
+  // here the symlinked repo itself — and the comparison must still land on git's spelling, or the add goes ahead and the path gets a second record.
+  const fx = wtFixture()
+  const link = path.join(fx.root, 'repo-link')
+  fs.symlinkSync(fx.repo, link)
+  git(fx.repo, 'worktree', 'add', '-q', '-b', 'other-s', path.join(fx.repo, '.worktrees', 'TIMIFY-123-s'), 'main')
+  fs.rmSync(path.join(fx.repo, '.worktrees'), { recursive: true, force: true })
+  const before = worktreeList(fx)
+  const out = runWorktree(['TIMIFY-123', '--repo', link, '--mode', 'new', '--branch', 'TIMIFY-123-s', '--base', 'main'])
+  assert.equal(out.status, 4, out.stdout + out.stderr)
+  assert.match(out.stderr, /TIMIFY-123-s is a registered worktree \(holds other-s\) whose directory is gone — `git worktree remove /)
+  assert.notEqual(gitTry(fx.repo, 'rev-parse', '--verify', '--quiet', 'refs/heads/TIMIFY-123-s').status, 0, 'no branch was left behind')
+  assert.equal(worktreeList(fx), before, 'no second record at that path')
 })
 
 test('worktree refuses a branch held by a tree whose directory is gone, naming the one record to remove — and that remedy works', () => {
