@@ -98,29 +98,24 @@ under `~/Documents/timify-projects/`, which the container cannot see. The contai
 - prints `{ worktree, branch, created }`.
 
 The session never touches the main tree, and every later command takes the worktree path explicitly (`git -C`, `--cwd`, a `( cd <worktree> && … )` subshell).
-The Jira Run does the same. A new **`jira.mjs worktree`** command does the fetch and the create-or-enter of §5.4, built on the same worktree code as
-`orchestrate.mjs`, shared rather than copied. The session then works inside the printed path.
+The Jira Run does the same. A new **`jira.mjs worktree`** command does the fetch and the create-or-enter of §5.4, on the same mechanism as
+`orchestrate.mjs`. The session then works inside the printed path.
 
-Sharing means **extracting**, because `cmdWorktree` is bound to the run file and to `backlog/<id>` naming (`orchestrate.mjs` `cmdWorktree`). Three pieces
-move into one module:
-
-- the leftover probe;
-- `git worktree add` (new branch from a base, or an existing branch);
-- `ensureExcludeLines`.
-
-`orchestrate.mjs` and `jira.mjs` both import that module. It must live under `skills/` and be imported by a relative path, because `scripts/sync-plugin.mjs`
-publishes only `PUBLISHED_PATHS = ['skills', '.claude-plugin', 'agents']`, and a module anywhere else would be missing from the installed plugin. The exact
-file is the builder's call. `orchestrate.mjs`'s behaviour must not change; its existing tests are the guard.
+**Duplicated, not shared** *(the user's ruling, 2026-10-20, superseding this section's first draft)*. A skill's `tools/` may never import another skill's
+([skills.md](../../subsystems/skills.md)), so a helper two tools need exists twice, each copy pinned by its own suite — as `linkedWorktreeInfo` and
+`hostIdentity` already do. `jira.mjs` carries its own `ensureExcludeLines` and its own `git worktree add` handling. `orchestrate.mjs` is not touched: its
+leftover probe is backlog-specific (`backlog/<id>`, the `done/` archive check) and has no Jira counterpart to share with.
 
 **`node_modules` is new code, not extracted.** `orchestrate.mjs` excludes a `node_modules` symlink, but no tool creates one: no code under `skills/` does.
 `jira.mjs worktree` creates it itself, so the repo's tests can run in the new worktree. It links the main tree's `node_modules` only when the main tree has
 one. It never replaces a real directory or an existing link in the worktree.
 
-**Builder: the one thing still to probe.** The orchestrator never needs a session to *move into* a worktree. It starts a fresh headless child already inside
-one (`cd <worktree> && claude -p …`), which the dashboard's spawn cannot do (above). So check whether an interactive session can switch its working directory
-into an existing worktree path, through Claude Code's `EnterWorktree` tool or another way. If it can, the session switches. If it cannot, the session works by
-absolute path and `git -C`, under the orchestrator's own "path is always explicit" rule, and the prompt says so. Only if neither works reliably, stop and come
-back. The fallback (teaching the dashboard a `cwd` override) is a cross-repo change and the user's call.
+**The probe, answered from the tool's contract (2026-10-20).** The orchestrator never needs a session to *move into* a worktree. It starts a fresh headless
+child already inside one (`cd <worktree> && claude -p …`), which the dashboard's spawn cannot do (above). Claude Code's `EnterWorktree` takes a `path` to an
+existing worktree and switches the session into it, provided that path appears in `git worktree list` of the repository the session was launched in — any
+location, `.worktrees/` included, on first entry. So the prompt tells the session to switch with `EnterWorktree`, and, if that tool is missing or refuses,
+to work by absolute path and `git -C` under the orchestrator's own "path is always explicit" rule. The plan's last task confirms this live. Only if neither
+holds, stop and come back: the fallback (teaching the dashboard a `cwd` override) is a cross-repo change and the user's call.
 
 ## 5. Behaviour
 
