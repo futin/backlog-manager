@@ -400,8 +400,8 @@ is a run whose driver has not noticed yet — it will, within one `watch` tick. 
 of those two: `off` and `exhausted` both mean "not right now, and a person may hand-resume", while a stop means "not at all, by that person's own request",
 and reporting the weaker reason would invite exactly the click it is there to prevent. `'stopped'` is an eighth `WatchdogEventKind`, logged once per condition
 behind `entry.stoppedLogged` — the ring buffer cannot answer "did I already say this". `AgentsService.resume()` refuses a stopped run with an **uncoded** 409
-for the same reason the resume lock's is uncoded: `RUN_IN_PROGRESS_CODE` is treated as a silent success by both callers, and this one needs a person to cancel
-the stop.
+for the same reason the resume lock's does not carry `RUN_IN_PROGRESS_CODE`: that code is treated as a silent success by both callers, and this one needs a
+person to cancel the stop.
 
 **What was rejected, and why.** A sixth `RunStatus` (`stopped`): `aborted` already means "a person ended this run", and a second spelling would reach every
 exhaustiveness site for no fact anyone could act on differently — the same reasoning that keeps `crashed` from being one. The server writing `run.json`:
@@ -1873,12 +1873,17 @@ details:
 - **Cleared when the spawn throws.** A spawn that threw started no session; keeping the stamp would silence the board's only resume control for a quarter of an
   hour because the dashboard was briefly down. Grace still covers the failure case, and is untouched — grace is a backoff (write-only from a board click, read
   only by the sweeper), this is a lock.
-- **Uncoded 409.** `RUN_IN_PROGRESS_CODE` means "a run is alive for this project, right now", which is false here: the run is crashed and a resume is on its
-  way. Both callers treat that code as a silent success, which is the wrong reaction to being told to wait.
+- **Its own code, never `RUN_IN_PROGRESS_CODE`.** That code means "a run is alive for this project, right now", which is false here: the run is crashed and a
+  resume is on its way. Both callers treat that code as a silent success, which is the wrong reaction to being told to wait. The lock's 409 was uncoded until
+  #268 gave it `RESUME_LOCKED_CODE`, because the watchdog has to tell "wait" apart from "refused" (next paragraph).
 
-A consequence to leave alone: with `graceMs` at ten minutes and the lock at fifteen, the sweeper's second attempt is refused at t+10m (a `failed` line, no
-attempt spent, grace re-stamped) and lands nearer t+20m. That is correct — the first resume was still inside its own liveness window — and it is pinned by
-`test/watchdog-sweep.test.ts`.
+A consequence to leave alone: with `graceMs` at ten minutes and the lock at fifteen, the sweeper's second attempt is refused at t+10m (no attempt spent, grace
+re-stamped) and lands nearer t+20m. That is correct — the first resume was still inside its own liveness window — and it is pinned by
+`test/watchdog-sweep.test.ts`. What is NOT correct, and was until #268, is counting that refusal: it used to log a `failed` line and move bug-35's
+`consecutiveFailures`, so at the five-minute `graceMs` floor and the default cap of 2 the refusals at t+5m and t+10m stood a run down as "stalled" after ONE
+real attempt — the sweeper's own successful spawn spending its refusal ceiling. The watchdog now reads `RESUME_LOCKED_CODE` as "not yet": neither counter
+moves and nothing is logged, and the next try is one grace window on. Raising `graceMs`'s floor to `RUN_STALE_MS` instead was rejected: it would move design
+§5.2's default (ten minutes) along with the floor, and a run whose resume dies early would wait a quarter of an hour where five minutes is enough.
 
 **Layer 3 — the driver lease in the run file.** The durable one, and the only one that can refuse a resume this app never asked for. Occurrence 2 was one
 backlog-manager resume (`claude -p --session-id <new> … -n resume <project>`, this app's spawn) racing a dashboard session-resume
