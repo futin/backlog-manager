@@ -120,7 +120,7 @@ describe('unconfigured', () => {
     ['/search?q='],
     ['/projects'],
     ['/jql/check?jql=assignee%20%3D%20currentUser()'],
-    ['/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay'],
+    ['/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay&mode=new&branch=pay-131-export&base=develop'],
     ['/refs?repo=%2Fwork%2Fpay'],
     ['/worktrees']
   ])('GET /api/jira%s is 503 Jira is not configured', async (path) => {
@@ -133,6 +133,8 @@ describe('unconfigured', () => {
     expect((await get('/issue/pay-1').expect(400)).body).toEqual({ error: 'invalid issue key' });
     expect((await get('/search').expect(400)).body).toEqual({ error: 'q is required' });
     expect((await get('/prompt?key=pay-1&action=execute&repo=%2Fwork%2Fpay').expect(400)).body).toEqual({ error: 'invalid issue key' });
+    // The branch choice is shape too (Task 6): a missing mode is a 400 where the same request with a mode is a 503.
+    expect((await get('/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay').expect(400)).body).toEqual({ error: 'mode must be new, continue or none' });
     expect((await get('/refs').expect(400)).body).toEqual({ error: 'repo is required' });
     expect((await get('/refs?repo=%2Fwork%2Fpay&key=pay-1').expect(400)).body).toEqual({ error: 'invalid issue key' });
   });
@@ -443,7 +445,26 @@ describe('GET /api/jira/prompt', () => {
   const SKILL = { id: 's_0123abcd', name: 'Review it', prompt: 'Review {key} in {repo}, then stop.' };
   const REPO = '/work/pay';
   const q = (params: Record<string, string>) => `/prompt?${new URLSearchParams(params).toString()}`;
-  const ok = { key: 'PAY-131', action: 'execute', repo: REPO };
+  const ok = { key: 'PAY-131', action: 'execute', repo: REPO, mode: 'new', branch: 'pay-131-export', base: 'develop' };
+  /** The same ticket and repo with no branch: what context and skill ask, and what a request wrong BEFORE the branch choice is checked sends. */
+  const NONE = { key: 'PAY-131', repo: REPO, mode: 'none' };
+  const branch = (name: string, worktree: string | null = null) => ({
+    name,
+    local: true,
+    remote: true,
+    sync: 'same' as const,
+    committedAt: '2026-01-01T00:00:00.000Z',
+    worktree,
+    ticket: true
+  });
+  const refsOf = (branches: ReturnType<typeof branch>[], mainBranch: string | null = 'develop'): JiraRepoRefs => ({
+    repo: REPO,
+    available: true,
+    fetchedAt: null,
+    mainBranch,
+    defaultBase: 'develop',
+    branches
+  });
 
   beforeAll(async () => {
     prepare('prompt');
@@ -451,6 +472,7 @@ describe('GET /api/jira/prompt', () => {
     await build(false);
   });
   afterAll(() => app.close());
+  afterEach(() => jest.restoreAllMocks());
 
   it('400 invalid issue key comes first, whatever else is wrong', async () => {
     expect((await get(q({ key: 'pay-1', action: 'nope' })).expect(400)).body).toEqual({ error: 'invalid issue key' });
@@ -477,6 +499,8 @@ describe('GET /api/jira/prompt', () => {
     try {
       expect((await get(q(ok)).expect(503)).body).toEqual({ error: 'Jira is not configured' });
       expect((await get(q({ ...ok, repo: '' })).expect(400)).body).toEqual({ error: 'repo is required' });
+      // The branch choice is shape, so it too answers before the 503.
+      expect((await get(q({ ...ok, mode: 'nope' })).expect(400)).body).toEqual({ error: 'mode must be new, continue or none' });
     } finally {
       configure(true);
     }
@@ -488,7 +512,7 @@ describe('GET /api/jira/prompt', () => {
     writeFileSync(file, '{ not json');
     const calls = fake.calls.length;
     try {
-      const res = await get(q({ ...ok, action: 'skill:s_ffffffff' })).expect(409);
+      const res = await get(q({ ...NONE, action: 'skill:s_ffffffff' })).expect(409);
       expect(res.body.error).toMatch(/jira\.json does not parse as JSON/);
       expect(fake.calls.length).toBe(calls);
     } finally {
@@ -498,37 +522,39 @@ describe('GET /api/jira/prompt', () => {
 
   it('400 unknown skill <id> for a well-formed id the file does not hold, before Jira is asked', async () => {
     const calls = fake.calls.length;
-    const res = await get(q({ ...ok, key: 'PAY-999', action: 'skill:s_ffffffff' })).expect(400);
+    const res = await get(q({ ...NONE, key: 'PAY-999', action: 'skill:s_ffffffff' })).expect(400);
     expect(res.body).toEqual({ error: 'unknown skill s_ffffffff' });
     expect(fake.calls.length).toBe(calls);
   });
 
   it("404 issue not found passes through unwrapJira's mapping, ahead of the repo check", async () => {
-    expect((await get(q({ ...ok, key: 'PAY-999', repo: '/elsewhere' })).expect(404)).body).toEqual({ error: 'issue not found' });
+    expect((await get(q({ ...NONE, action: 'context', key: 'PAY-999', repo: '/elsewhere' })).expect(404)).body).toEqual({ error: 'issue not found' });
   });
 
   it("400 <repo> is not mapped to <PROJECT>, quoting the repo as sent and using the issue's own project key", async () => {
     expect((await get(q({ ...ok, repo: '/elsewhere' })).expect(400)).body).toEqual({ error: '/elsewhere is not mapped to PAY' });
     // A project with no `repos` entry at all is the same refusal.
     fake.issues.set('ZED-1', makeRawIssue({ key: 'ZED-1', fields: { project: { key: 'ZED', name: 'Zed' } } }));
-    expect((await get(q({ ...ok, key: 'ZED-1' })).expect(400)).body).toEqual({ error: `${REPO} is not mapped to ZED` });
+    expect((await get(q({ ...ok, key: 'ZED-1', branch: 'zed-1-export' })).expect(400)).body).toEqual({ error: `${REPO} is not mapped to ZED` });
   });
 
   it('200 text/plain for a mapped repo: the execute text first, then the framed ticket block', async () => {
     const res = await get(q(ok)).expect(200);
     expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
-    expect(res.text.startsWith('Work on Jira ticket PAY-131 in this repository, end to end')).toBe(true);
+    // The workspace block leads (Task 6); with refs the server cannot read the worktree is the conventional path.
+    expect(res.text.startsWith(`Workspace: repository ${REPO}, mode new, branch pay-131-export cut from develop, expected worktree ${REPO}/.worktrees/pay-131-export. `)).toBe(true);
+    expect(res.text).toContain('Work on Jira ticket PAY-131 in this repository, end to end');
     expect(res.text).toContain('BEGIN TICKET');
     expect(res.text).toContain('END TICKET');
   });
 
   it('the context built-in answers its own text', async () => {
-    const res = await get(q({ ...ok, action: 'context' })).expect(200);
+    const res = await get(q({ ...NONE, action: 'context' })).expect(200);
     expect(res.text.startsWith('Read Jira ticket PAY-131 below, then wait')).toBe(true);
   });
 
   it("skill:<id> answers the template's text with its placeholders filled, and no ticket block", async () => {
-    const res = await get(q({ ...ok, action: `skill:${SKILL.id}` })).expect(200);
+    const res = await get(q({ ...NONE, action: `skill:${SKILL.id}` })).expect(200);
     expect(res.text).toBe(`Review PAY-131 in ${REPO}, then stop.`);
   });
 
@@ -556,6 +582,63 @@ describe('GET /api/jira/prompt', () => {
     expect((await get(q({ ...ok, repo: 'work/pay' })).expect(400)).body).toEqual({ error: 'work/pay is not mapped to PAY' });
   });
 
+  it('400 mode must be new, continue or none after the repo and before the configured check, the issue lookup and any git read', async () => {
+    const refs = jest.spyOn(refsUtil, 'readRepoRefs');
+    const calls = fake.calls.length;
+    const bare = { key: 'PAY-131', action: 'execute', repo: REPO };
+    expect((await get(q(bare)).expect(400)).body).toEqual({ error: 'mode must be new, continue or none' });
+    expect((await get(q({ ...bare, mode: 'fork' })).expect(400)).body).toEqual({ error: 'mode must be new, continue or none' });
+    expect((await get(q({ ...bare, repo: '/elsewhere' })).expect(400)).body).toEqual({ error: 'mode must be new, continue or none' });
+    expect(fake.calls.length).toBe(calls);
+    expect(refs).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['execute with none', { ...NONE, action: 'execute' }, 'execute needs a branch (mode new or continue)'],
+    ['a branch with none', { ...NONE, action: 'context', branch: 'pay-131-x' }, 'branch is not for mode none'],
+    ['a new branch with no name', { ...ok, branch: '' }, 'branch is empty'],
+    ['a new branch with no base', { ...ok, base: '' }, 'base is empty'],
+    ['a new branch that does not carry the key', { ...ok, branch: 'export' }, 'branch must carry PAY-131'],
+    ['openMr that is neither true nor false', { ...ok, openMr: 'yes' }, 'openMr must be true or false'],
+    ['an MR for context', { ...ok, action: 'context', openMr: 'true' }, 'openMr is only for execute with a branch'],
+    ['a target for a new branch', { ...ok, openMr: 'true', target: 'release/9' }, 'target is only for openMr with continue']
+  ])('400 for %s, before the configured check, the issue lookup and any git read', async (_label, params, error) => {
+    const refs = jest.spyOn(refsUtil, 'readRepoRefs');
+    const calls = fake.calls.length;
+    expect((await get(q(params)).expect(400)).body).toEqual({ error });
+    expect(fake.calls.length).toBe(calls);
+    expect(refs).not.toHaveBeenCalled();
+  });
+
+  it('reads the refs after the mapping check, with the repo, the key and the stored base, and answers the workspace the refs name', async () => {
+    const refs = jest.spyOn(refsUtil, 'readRepoRefs').mockResolvedValue(refsOf([branch('develop', REPO), branch('pay-131-hand', '/work/pay-hand-made')]));
+    // Unmapped: the 400 comes first and nothing is read.
+    await get(q({ ...ok, repo: '/elsewhere' })).expect(400);
+    expect(refs).not.toHaveBeenCalled();
+    const { base: _base, ...noBase } = ok;
+    const res = await get(q({ ...noBase, mode: 'continue', branch: 'pay-131-hand', openMr: 'true', target: 'release/9' })).expect(200);
+    expect(res.text.startsWith(`Workspace: repository ${REPO}, mode continue, branch pay-131-hand, expected worktree /work/pay-hand-made. `)).toBe(true);
+    expect(res.text).toContain('release/9');
+    expect(refs.mock.calls.map((c) => [c[0], c[1], c[3]])).toEqual([[REPO, 'PAY-131', null]]);
+  });
+
+  it('409 <branch> exists — switch to Continue for a new branch whose name is listed', async () => {
+    jest.spyOn(refsUtil, 'readRepoRefs').mockResolvedValue(refsOf([branch('develop', REPO), branch('pay-131-export')]));
+    expect((await get(q(ok)).expect(409)).body).toEqual({ error: 'pay-131-export exists — switch to Continue' });
+  });
+
+  it('409 for a continued branch the mapped checkout holds', async () => {
+    jest.spyOn(refsUtil, 'readRepoRefs').mockResolvedValue(refsOf([branch('pay-131-export', REPO)], 'pay-131-export'));
+    const params = { key: 'PAY-131', action: 'execute', repo: REPO, mode: 'continue', branch: 'pay-131-export' };
+    expect((await get(q(params)).expect(409)).body).toEqual({ error: `pay-131-export is checked out in the mapped checkout ${REPO}` });
+  });
+
+  it('mode none reads no refs', async () => {
+    const refs = jest.spyOn(refsUtil, 'readRepoRefs');
+    await get(q({ ...NONE, action: 'context' })).expect(200);
+    expect(refs).not.toHaveBeenCalled();
+  });
+
   it('400 prompt too long when the template and the facts alone are over the cap, with nothing left to trim', async () => {
     const file = process.env.BM_JIRA_FILE!;
     // A template whose every placeholder is the ticket's url: filled, it is far past 4 000, and a skill's prompt has nothing to trim.
@@ -563,7 +646,7 @@ describe('GET /api/jira/prompt', () => {
     fake.issues.set('PAY-600', makeRawIssue({ key: 'PAY-600', fields: { summary: 'S'.repeat(300) } }));
     writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [tpl] }));
     try {
-      const res = await get(q({ key: 'PAY-600', action: `skill:${SKILL.id}`, repo: REPO })).expect(400);
+      const res = await get(q({ key: 'PAY-600', action: `skill:${SKILL.id}`, repo: REPO, mode: 'none' })).expect(400);
       expect(res.body).toEqual({ error: 'prompt too long' });
     } finally {
       writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));

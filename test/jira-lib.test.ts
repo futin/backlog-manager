@@ -980,7 +980,7 @@ describe('the launch sheet wire', () => {
   });
 
   it('dispatchJira posts the request as JSON and rejects with the 409 sentence', async () => {
-    const req = { key: 'PAY-1', repo: '/r', action: 'execute' as const, assign: false, transitionId: null, permissionMode: 'plan' as const, remoteControl: true };
+    const req = { key: 'PAY-1', repo: '/r', action: 'execute' as const, assign: false, transitionId: null, mode: 'none' as const, permissionMode: 'plan' as const, remoteControl: true };
     const f = answer(200, { sessionId: 's1' });
     await expect(dispatchJira(req)).resolves.toEqual({ sessionId: 's1' });
     expect(f.mock.calls[0][0]).toBe('/api/agents/dispatch-jira');

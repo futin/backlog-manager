@@ -367,6 +367,7 @@ describe('JiraLaunchSheet — assign and move', () => {
       action: 'execute',
       assign: false,
       transitionId: null,
+      mode: 'none',
       permissionMode: 'acceptEdits',
       remoteControl: true
     });
@@ -389,6 +390,7 @@ describe('JiraLaunchSheet — assign and move', () => {
       action: { skill: SKILL.id },
       assign: true,
       transitionId: '31',
+      mode: 'none',
       model: 'opus',
       effort: 'high',
       permissionMode: 'plan',

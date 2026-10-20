@@ -3,8 +3,9 @@ import { Controller, Get, HttpException, Param, Query, Res } from '@nestjs/commo
 import type { Response } from 'express';
 
 import { isJiraKey, parseJiraActionParam } from '../../../shared/types';
-import type { JiraIssue, JiraIssueDetail, JiraRepoRefs, JiraStatusPayload, JiraWorktreesPayload } from '../../../shared/types';
+import type { JiraIssue, JiraIssueDetail, JiraRepoRefs, JiraStatusPayload, JiraWorkspace, JiraWorktreesPayload } from '../../../shared/types';
 import { renderTicketBlock } from './block';
+import { parseBranchChoice, resolveWorkspace } from './branch-choice.util';
 import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from './config.util';
 import { jiraEnv, repoRoots } from './env.util';
 import { JiraLiveService } from './live.service';
@@ -115,12 +116,16 @@ export class JiraController {
   }
 
   /**
-   * `GET /api/jira/prompt?key&action&repo` — exactly what Copy prompt copies and what Start sends but for the status and assignee lines (spec §5, §7): the launch
-   * sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind the preview, the copy and the spawn. The
-   * refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid issue key`), `action` (400), `repo` present
-   * (400 `repo is required`), configured (503 — after the three parameters, as everywhere in this file), `jira.json` readable (409 — a skill or a mapping read
-   * out of a file we cannot read would be a guess), the skill exists (400 `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8
-   * mapping), the repo mapped for the ISSUE'S project (400), the cap (400 `prompt too long`).
+   * `GET /api/jira/prompt?key&action&repo&mode&branch&base&openMr&target` — exactly what Copy prompt copies and what Start sends but for the status and
+   * assignee lines (spec §5, §7): the launch sheet previews it and the clipboard takes it from here, so there is one composition (`composeJiraPrompt`) behind
+   * the preview, the copy and the spawn. The refusals come in the contract's order, each one wrong in a way no later check can excuse: `key` (400 `invalid
+   * issue key`), `action` (400), `repo` present (400 `repo is required`), the branch choice's shape (400, `parseBranchChoice` — the same sentences
+   * `dispatch-jira` answers; `mode` is required, so a caller that sends none is refused rather than guessed at), configured (503 — after the three parameters,
+   * as everywhere in this file), `jira.json` readable (409 — a skill or a mapping read out of a file we cannot read would be a guess), the skill exists (400
+   * `unknown skill <id>`, before Jira is asked), the issue read (`unwrapJira`'s §8 mapping), the repo mapped for the ISSUE'S project (400), the choice against
+   * the repo's refs (409, `resolveWorkspace` — a new branch that exists, a continued one the mapped checkout holds), the cap (400 `prompt too long`). The refs
+   * are read only for a mode that names a branch, after the mapping check, so a repo that is not this project's is never handed to git; the repo's stored base
+   * is looked up as `/refs` looks it up.
    *
    * The mapping is keyed by the detail's `project.key`, not the key's prefix: the detail is read anyway, and it is what Jira says the project is. The repo is
    * normalised exactly as `parseReposWrite` stored it (`~` expanded, one trailing slash dropped), so a path typed either way finds its entry, while the
@@ -133,12 +138,19 @@ export class JiraController {
     @Query('key') key: unknown,
     @Query('action') actionParam: unknown,
     @Query('repo') repo: unknown,
+    @Query('mode') mode: unknown,
+    @Query('branch') branch: unknown,
+    @Query('base') base: unknown,
+    @Query('openMr') openMr: unknown,
+    @Query('target') target: unknown,
     @Res({ passthrough: true }) res: Response
   ): Promise<string> {
     if (typeof key !== 'string' || !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
     const action = parseJiraActionParam(actionParam);
     if (action === null) throw new HttpException({ error: 'action must be execute, context or skill:<id>' }, 400);
     if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
+    const choice = parseBranchChoice({ mode, branch, base, openMr, target }, key, action);
+    if (!choice.ok) throw new HttpException({ error: choice.error }, 400);
     this.requireConfigured();
     const config = readJiraConfig();
     if (config.unreadable !== null) {
@@ -150,7 +162,14 @@ export class JiraController {
     if (normalised === null || !(config.repos[detail.project.key] ?? []).includes(normalised)) {
       throw new HttpException({ error: `${repo} is not mapped to ${detail.project.key}` }, 400);
     }
-    const composed = composeJiraPrompt(detail, composeAction, normalised, null);
+    let workspace: JiraWorkspace | null = null;
+    if (choice.value.mode !== 'none') {
+      const refs = await readRepoRefs(normalised, key, repoRoots(), config.repoDefaults[normalised]?.base ?? null);
+      const resolved = resolveWorkspace(choice.value, key, normalised, refs);
+      if (!resolved.ok) throw new HttpException({ error: resolved.error }, resolved.status);
+      workspace = resolved.workspace;
+    }
+    const composed = composeJiraPrompt(detail, composeAction, normalised, workspace);
     if (!composed.ok) throw new HttpException({ error: composed.error }, 400);
     res.type('text/plain; charset=utf-8');
     return composed.prompt;

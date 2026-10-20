@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nes
 
 import { isJiraKey, parseJiraAction } from '../../../shared/types';
 import type { JiraDispatchRequest, JiraDispatchResult } from '../../../shared/types';
+import { parseBranchChoice } from '../jira/branch-choice.util';
 import { JIRA_TRANSITION_ID_MAX_CHARS } from '../jira/config.util';
 import { JiraDispatchService } from './jira-dispatch.service';
 import { SameOriginPostGuard } from './origin.guard';
@@ -24,6 +25,10 @@ export class JiraAgentsController {
    * the body on, so a field this route does not know never reaches the service. `permissionMode`, `model` and `effort` are forwarded unvalidated for
    * `dispatch`'s reasons: `clampMode` and `pickFrom` are where a junk value becomes a safe one, never a refusal. 200, not Nest's default 201 for a POST:
    * what this answers is a session that started elsewhere, not a resource this server now holds.
+   *
+   * The branch choice (`mode`, `branch`, `base`, `openMr`, `target`) is read by `parseBranchChoice`, which `GET /api/jira/prompt` calls too, so a preview and a
+   * Start refuse a choice in the same sentence. The service takes the PARSED choice as `choice` and reads none of the wire's flat fields: `mode` is set from
+   * the parsed value only because the request type says it is required.
    */
   @UseGuards(SameOriginPostGuard)
   @Post('dispatch-jira')
@@ -42,12 +47,17 @@ export class JiraAgentsController {
     if (transitionId !== null && (typeof transitionId !== 'string' || transitionId === '' || transitionId.length > JIRA_TRANSITION_ID_MAX_CHARS)) {
       throw new HttpException({ error: 'transitionId must be null or a non-empty string' }, 400);
     }
+    // The branch choice is shape too (spec §5.3): `/prompt` refuses it in the same words, before it looks at the environment.
+    const choice = parseBranchChoice(body, key, action);
+    if (!choice.ok) throw new HttpException({ error: choice.error }, 400);
     return this.dispatcher.dispatch({
       key,
       repo,
       action,
       assign: body.assign,
       transitionId,
+      mode: choice.value.mode,
+      choice: choice.value,
       permissionMode: body.permissionMode as JiraDispatchRequest['permissionMode'],
       model: body.model as string | undefined,
       effort: body.effort as string | undefined,

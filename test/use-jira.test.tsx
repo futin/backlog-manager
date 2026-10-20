@@ -469,6 +469,7 @@ function WriteProbe() {
             action: 'execute',
             assign: false,
             transitionId: null,
+            mode: 'none',
             permissionMode: 'plan',
             remoteControl: false
           }).then(reload)

@@ -156,6 +156,9 @@ export function JiraLaunchSheet({
           assign: assignNow,
           // `null` is "leave as is" — the server's own spelling, not an empty string it would have to refuse.
           transitionId: transitionId === '' ? null : transitionId,
+          // The server now requires a branch choice. This sheet has no Branch section yet (a later task adds it), and `none` is the choice that changes
+          // nothing — though the server refuses it for `execute`, so an execute Start is a 400 until the section lands.
+          mode: 'none',
           ...modelEffortFlags(model, effort),
           permissionMode: mode,
           remoteControl

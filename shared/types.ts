@@ -911,6 +911,10 @@ export interface AgentDispatchResult {
  * project, in any spelling `normaliseRepoPath` accepts; `transitionId` is `null` for "leave as is", else an id from the transitions the sheet was drawn from,
  * checked again against a fresh read before anything is written. `permissionMode`, `model` and `effort` are treated exactly as `AgentDispatchRequest`'s: clamped
  * to the dashboard's ceiling and dropped when off the list, never refused.
+ *
+ * `mode` and the four fields after it are the branch choice (Jira repo/branch, spec §5.3), the same five `GET /api/jira/prompt` takes on its query: `mode` is
+ * required — both routes 400 without it — and the rest ride only with the modes they belong to (`base` with `new`; `target` with `openMr` and `continue`;
+ * `openMr` absent means `false`). The server checks the combinations; this is the wire shape.
  */
 export interface JiraDispatchRequest {
   key: string;
@@ -918,6 +922,11 @@ export interface JiraDispatchRequest {
   action: JiraAction;
   assign: boolean;
   transitionId: string | null;
+  mode: 'new' | 'continue' | 'none';
+  branch?: string;
+  base?: string;
+  openMr?: boolean;
+  target?: string;
   model?: string;
   effort?: string;
   permissionMode: PermissionMode;
