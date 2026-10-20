@@ -407,16 +407,22 @@ function gitSaid(r) {
 }
 
 // Realpaths on both sides: `rev-parse --show-toplevel` and `worktree list` print resolved paths (`/var/folders/…` is `/private/var/folders/…` on macOS),
-// so a plain string compare fails every tmp directory and any symlinked mapped path. A path that does not resolve is compared as given.
-function samePath(a, b) {
-  const real = (p) => {
+// so a plain string compare fails every tmp directory and any symlinked mapped path. A path that does not resolve — a registered worktree whose directory
+// was deleted, a target not made yet — is its realpathed parent plus its own name, which is how git spelled it when the tree was added; failing that, as given.
+function canonicalPath(p) {
+  try {
+    return fs.realpathSync(p)
+  } catch {
     try {
-      return fs.realpathSync(p)
+      return path.join(fs.realpathSync(path.dirname(p)), path.basename(p))
     } catch {
       return path.resolve(p)
     }
   }
-  return real(a) === real(b)
+}
+
+function samePath(a, b) {
+  return canonicalPath(a) === canonicalPath(b)
 }
 
 // Anything at `p` — a file, a directory, or a link, dangling or not. `fs.existsSync` follows a link, so a dangling one would read as free.
@@ -520,7 +526,9 @@ function cutOrEnter({ key, repo, mode, branch, base }) {
   const aheadBehind = () => {
     const r = git(repo, 'rev-list', '--left-right', '--count', `refs/heads/${branch}...${remoteRef}`)
     const [ahead, behind] = r.stdout.trim().split(/\s+/).map(Number)
-    if (!r.ok || !Number.isInteger(ahead) || !Number.isInteger(behind)) throw stop(`git could not compare ${branch} with origin/${branch} (git: ${gitSaid(r)})`)
+    if (!r.ok || !Number.isInteger(ahead) || !Number.isInteger(behind)) {
+      throw stop(`git could not compare ${branch} with origin/${branch} (git: ${gitSaid(r)})`)
+    }
     return { ahead, behind }
   }
   const trees = listWorktrees(repo)
@@ -549,22 +557,28 @@ function cutOrEnter({ key, repo, mode, branch, base }) {
   }
 
   // 5. A linked tree already holding the branch is entered where it is. Otherwise the target is `<repo>/.worktrees/<branch with / as ->`, and a target
-  // that exists already is refused rather than guessed at: two branches can flatten to one name (`feature/a-X` and `feature-a/X`).
+  // that exists already is refused rather than guessed at: two branches can flatten to one name (`feature/a-X` and `feature-a/X`). "Exists" is on disk OR
+  // in git's worktree records: `worktree add -b` makes the branch BEFORE it checks the path and leaves it behind when the path turns out to be a
+  // registered tree whose directory was deleted — a refusal that would break the "exit 4 created nothing" promise, and turn the retry into "exists —
+  // Start again with Continue". The remedy named is `git worktree remove <path>`, which clears that ONE record; `prune` would clear every stale one in
+  // the repo, an orchestrator tree on an unmounted path included.
   let tree
   let created
   const holder = trees.find((t) => t.branch === branch)
   if (holder) {
     if (!fs.existsSync(holder.path)) {
-      throw stop(`${branch} is held by the worktree at ${holder.path}, which no longer exists — \`git worktree prune\` in ${repo} clears that record`)
+      throw stop(`${branch} is held by the worktree at ${holder.path}, which no longer exists — \`git worktree remove ${holder.path}\` clears that record`)
     }
     tree = holder.path
     created = 'entered'
   } else {
     const target = path.join(repo, '.worktrees', branch.replaceAll('/', '-'))
-    if (lexists(target)) {
-      const other = trees.find((t) => samePath(t.path, target))
-      throw stop(`${target} already exists (${other ? (other.branch ? `holds ${other.branch}` : 'holds a detached HEAD') : 'is not a worktree'})`)
+    const other = trees.find((t) => samePath(t.path, target))
+    const holds = other ? (other.branch ? `holds ${other.branch}` : 'holds a detached HEAD') : 'is not a worktree'
+    if (other && !lexists(target)) {
+      throw stop(`${target} is a registered worktree (${holds}) whose directory is gone — \`git worktree remove ${target}\` clears that record`)
     }
+    if (lexists(target)) throw stop(`${target} already exists (${holds})`)
 
     // 6. Create. `new` never tracks: the branch is the ticket's, and its upstream is whatever the session's first push makes it. A local branch is
     // attached by its NAME (`refs/heads/<branch>` would detach); a branch only origin has becomes a local one tracking it.
@@ -635,8 +649,9 @@ function cutOrEnter({ key, repo, mode, branch, base }) {
     throw stop(`the worktree is on ${head.ok ? head.stdout.trim() : `nothing git can name (${gitSaid(head)})`}, not ${branch}`)
   }
 
-  // 10.
-  console.log(JSON.stringify({ worktree: tree, branch, created, notes }))
+  // 10. The path in git's own form — its realpath — whichever way the tree was found or made, so the one path the prompt calls authoritative has one
+  // spelling: `entered` reads it from `worktree list`, which prints realpaths, and a created tree is resolved to match.
+  console.log(JSON.stringify({ worktree: fs.realpathSync(tree), branch, created, notes }))
   return 0
 }
 

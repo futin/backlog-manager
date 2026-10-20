@@ -695,7 +695,8 @@ test('worktree new cuts the branch from origin/<base> after the fetch, with no u
   const ahead = pushCommits(fx, 'develop', 1)
   const out = runWorktree(wtArgs(fx, 'new', 'feature/TIMIFY-123-x', 'develop'))
   assert.equal(out.status, 0, out.stderr)
-  const tree = path.join(fx.repo, '.worktrees', 'feature-TIMIFY-123-x')
+  // The printed path is git's form, the realpath (fx.repo sits under /var/folders, which is /private/var/folders on macOS), for every `created`.
+  const tree = fs.realpathSync(path.join(fx.repo, '.worktrees', 'feature-TIMIFY-123-x'))
   assert.deepEqual(out.json, { worktree: tree, branch: 'feature/TIMIFY-123-x', created: 'new', notes: [] })
   assert.equal(git(tree, 'rev-parse', 'HEAD'), ahead, 'cut from the fetched origin/develop, not the stale local develop')
   assert.equal(git(tree, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature/TIMIFY-123-x')
@@ -746,7 +747,7 @@ test('worktree continue on a branch only origin has makes a local branch trackin
   const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-remote'))
   assert.equal(out.status, 0, out.stderr)
   assert.equal(out.json.created, 'tracked')
-  assert.equal(out.json.worktree, path.join(fx.repo, '.worktrees', 'TIMIFY-123-remote'))
+  assert.equal(out.json.worktree, fs.realpathSync(path.join(fx.repo, '.worktrees', 'TIMIFY-123-remote')))
   assert.equal(git(out.json.worktree, 'rev-parse', 'HEAD'), tip)
   assert.equal(git(out.json.worktree, 'rev-parse', '--abbrev-ref', 'TIMIFY-123-remote@{upstream}'), 'origin/TIMIFY-123-remote')
 })
@@ -840,7 +841,7 @@ test('worktree continue enters a tree that already holds the branch: dirty is le
   const dirty = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-e'))
   assert.equal(dirty.status, 0, dirty.stderr)
   assert.equal(dirty.json.created, 'entered')
-  assert.equal(fs.realpathSync(dirty.json.worktree), fs.realpathSync(sibling))
+  assert.equal(dirty.json.worktree, fs.realpathSync(sibling), 'the same realpath form a created tree is printed in')
   assert.deepEqual(dirty.json.notes, ['behind origin by 1, not fast-forwarded: uncommitted changes'])
   assert.equal(git(sibling, 'rev-parse', 'HEAD'), head)
   assert.equal(fs.existsSync(path.join(sibling, 'node_modules')), false, 'a tree it did not create gets no link')
@@ -867,6 +868,51 @@ test('worktree refuses a target path another branch or a plain directory already
   const plain = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-p', 'main'))
   assert.equal(plain.status, 4)
   assert.equal(plain.stderr.trim(), `${path.join(fx.repo, '.worktrees', 'TIMIFY-123-p')} already exists (is not a worktree)`)
+})
+
+test('worktree refuses a target git still has registered after its directory was deleted, leaving no branch behind (new and tracked)', () => {
+  // `worktree add -b` makes the branch before it looks at the path, and keeps it when git then refuses the path — so this must be refused first.
+  const fx = wtFixture()
+  pushCommits(fx, 'TIMIFY-123-gone2', 1, 'main')
+  git(fx.repo, 'fetch', '-q', 'origin')
+  for (const [mode, branch, base] of [
+    ['new', 'TIMIFY-123-gone', 'main'],
+    ['continue', 'TIMIFY-123-gone2', undefined],
+  ]) {
+    const target = path.join(fx.repo, '.worktrees', branch)
+    git(fx.repo, 'worktree', 'add', '-q', '-b', `other-${branch}`, target, 'main')
+    fs.rmSync(target, { recursive: true, force: true })
+    const before = worktreeList(fx)
+    const out = runWorktree(wtArgs(fx, mode, branch, base))
+    assert.equal(out.status, 4, `${mode}: ${out.stderr}`)
+    assert.equal(
+      out.stderr.trim(),
+      `${target} is a registered worktree (holds other-${branch}) whose directory is gone — \`git worktree remove ${target}\` clears that record`,
+    )
+    assert.notEqual(gitTry(fx.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).status, 0, `${mode}: no branch was left behind`)
+    assert.equal(worktreeList(fx), before)
+  }
+})
+
+test('worktree refuses a branch held by a tree whose directory is gone, naming the one record to remove — and that remedy works', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'branch', '-q', 'TIMIFY-123-h', 'main')
+  const sibling = path.join(fx.root, 'deleted')
+  git(fx.repo, 'worktree', 'add', '-q', sibling, 'TIMIFY-123-h')
+  const recorded = fs.realpathSync(sibling)
+  fs.rmSync(sibling, { recursive: true, force: true })
+  const out = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-h'))
+  assert.equal(out.status, 4, out.stderr)
+  assert.equal(
+    out.stderr.trim(),
+    `TIMIFY-123-h is held by the worktree at ${recorded}, which no longer exists — \`git worktree remove ${recorded}\` clears that record`,
+  )
+  assert.equal(fs.existsSync(path.join(fx.repo, '.worktrees')), false)
+  // The remedy the sentence names clears that one record, and the same command then attaches the branch.
+  git(fx.repo, 'worktree', 'remove', recorded)
+  const again = runWorktree(wtArgs(fx, 'continue', 'TIMIFY-123-h'))
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.json.created, 'attached')
 })
 
 test('worktree with no origin at all goes on from local refs and says so (Review Focus 2)', () => {
