@@ -1336,6 +1336,10 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-setup-defaults-base { flex: 1 1 140px; width: auto; min-width: 0 }
 .jira-setup-defaults-pattern { flex: 2 1 200px; width: auto; min-width: 0 }
 .jira-setup-defaults-hint { flex: 1 0 100% }
+/* A path's worktrees (§8.9.3, M7): a stacked row under the defaults line — a small head with its count, then the modal's own `.jira-wt-row`s. */
+.jira-setup-trees { gap: 0 }
+.jira-setup-trees-head { display: flex; align-items: center; gap: 8px }
+.jira-setup-trees .jira-wt-list { margin-top: 4px }
 /* The Connection card's value, in the control slot: 13 px as the mock draws it, `--ink`. */
 .jira-setup-value { font-size: 13px; color: var(--ink) }
 /* The filter row above the rows (from the sixth board): the field left, the sort note pushed right. Not a `.set-label` row, so it has no name to wrap. */

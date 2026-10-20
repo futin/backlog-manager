@@ -522,6 +522,11 @@ rule](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-on
   heading with a count pill. Each row's `Remove` copies `removeCommand` — `git -C <repo> worktree remove <path>`, both quoted — and runs nothing: the board
   cannot see a session it did not start (Copy prompt, a terminal), so its title says to make sure none is using the tree. It is disabled while the key has a
   live session, titled `a session is running on <KEY>`.
+- **Setup's per-path worktrees** (M7, final review). Card and modal find a tree by the key its branch carries, so a Continue on a key-less branch (`develop`,
+  `hotfix/login`) makes a tree neither ever shows. `JiraReposGroup` therefore reads the same route — on mount, and again only when the set of mapped paths or
+  of live keys changes — and lists under each distinct path's first row every tree it has open beside its own checkout (`repoWorktrees`), ticket or not, with
+  the modal's own row (`JiraWorktreeRow`) and its copy-only `Remove`; `treeLiveKey` disables a row a live key's branch is on. The launch sheet says a Continue
+  on such a branch (`continueOffTicket`) in one note, `this tree won't show on the card — it's listed under the repo in Setup`; it refuses nothing.
 
 ## Tests
 
@@ -538,8 +543,8 @@ Phase 5a adds `jira-prompt` (the composer and `GET /prompt`), `jira-live` (the m
 The repo/branch work adds `jira-branch` (Tables A–E of `shared/jira-branch.ts`), `jira-branch-choice` (`parseBranchChoice`, `resolveWorkspace`) and `jira-refs`
 (`refs.util.ts` over real temp repos), and widens `jira-config`, `jira-config-write`, `jira-write-routes` (`repoDefaults`, `/repo-defaults`), `jira-routes`
 (`/refs`, `/worktrees`, the prompt's branch parameters), `jira-prompt` (the workspace block, the placeholders, Open MR), `agents-dispatch-jira`, `compose-env`
-(the second mount, `BM_REPO_ROOTS`), `jira-lib`, `jira-launch` (the Branch section), `jira-setup` (the row defaults), `jira-board` (the chip) and `jira-modal`
-(the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
+(the second mount, `BM_REPO_ROOTS`), `jira-lib`, `jira-launch` (the Branch section), `jira-setup` (the row defaults and the path's worktrees), `jira-board`
+(the chip) and `jira-modal` (the Worktrees list). `skills/jira/tools/jira.test.mjs` (node) covers `worktree` over real temp repos and its own Tables A and B.
 `test/helpers/jira.ts` is `FakeJira`, an in-memory Jira over the endpoints above with a call log and a per-request failure hook; `test/helpers/env.ts` blanks
 the three keys so no suite inherits a developer's credentials. `test/compose-env.test.ts` pins the compose passthrough.
 

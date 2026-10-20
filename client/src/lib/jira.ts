@@ -1076,6 +1076,33 @@ export function ticketWorktrees(key: string, payload: JiraWorktreesPayload): Jir
 }
 
 /**
+ * Every tree a mapped path has open beside its own checkout — Setup's per-repo list (M7, final review). Unlike `ticketWorktrees` it reads no key: a
+ * Continue on a branch that carries none (`develop`, `hotfix/login`) makes a tree no card can ever claim, and this list is where it is still seen and still
+ * removable. A detached tree is listed too, for the same reason. By path. The payload's `repo` is the mapped path as stored, so equality is the match.
+ */
+export function repoWorktrees(repo: string, payload: JiraWorktreesPayload): JiraWorktree[] {
+  return payload.worktrees.filter((t) => !t.main && t.repo === repo).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/**
+ * The live key a tree belongs to, if any — Setup has no single issue to ask about, so it asks every live key whether the tree's branch carries it, in key
+ * order. `null` for a detached tree or a key-less branch: the board cannot tie such a tree to a session, which is what `Remove`'s own title already warns.
+ */
+export function treeLiveKey(tree: JiraWorktree, liveKeys: readonly string[]): string | null {
+  if (tree.branch === null) return null;
+  const branch = tree.branch;
+  return [...liveKeys].sort().find((k) => branchCarriesKey(branch, k)) ?? null;
+}
+
+/**
+ * Whether a Continue choice names a branch the card will never find its tree by (M7): a non-empty branch that does not carry the issue's key. Not a refusal
+ * — the server and the tool accept it — only the launch sheet's one-line hint that the tree is listed under its repository in Setup, and nowhere else.
+ */
+export function continueOffTicket(choice: JiraBranchChoice, key: string): boolean {
+  return choice.mode === 'continue' && choice.branch.trim() !== '' && !branchCarriesKey(choice.branch.trim(), key);
+}
+
+/**
  * The command a person pastes to remove a tree: the board never writes git, so Setup and the modal hand over the line instead. Never `--force` — git then
  * refuses a tree with uncommitted work, which is exactly the refusal a person wants to see before throwing that work away. Both paths are quoted: a repo
  * under `/my repos/` or a name with `'` in it must survive the shell.

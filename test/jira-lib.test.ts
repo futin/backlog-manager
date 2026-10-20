@@ -24,6 +24,9 @@ import {
   draftRefusal,
   ticketWorktrees,
   removeCommand,
+  repoWorktrees,
+  treeLiveKey,
+  continueOffTicket,
   stopJira,
   transitionOptions,
   JIRA_SWEEP_CALL_CEILING,
@@ -1319,6 +1322,40 @@ describe('branch choice derivations', () => {
       const cmd = removeCommand(t("/my repos/it's", "/my repos/it's/.worktrees/x", 'x'));
       expect(cmd).toBe(`git -C '/my repos/it'\\''s' worktree remove '/my repos/it'\\''s/.worktrees/x'`);
       expect(cmd).not.toContain('--force');
+    });
+  });
+
+  // M7 (final review): a Continue on a key-less branch makes a tree no card finds, so Setup lists every tree of a path, ticket or not.
+  describe('repoWorktrees, treeLiveKey and continueOffTicket', () => {
+    const t = (repo: string, path: string, br: string | null, main = false) => ({ repo, path, branch: br, main });
+    it('repoWorktrees keeps every non-main tree of exactly that path — key-less and detached included — sorted by path', () => {
+      const payload = {
+        worktrees: [
+          t('/a', '/a/.worktrees/timify-123-x', 'timify-123-x'),
+          t('/a', '/a', 'main', true),
+          t('/a', '/a/.worktrees/develop', 'develop'),
+          t('/ab', '/ab/.worktrees/other', 'other'),
+          t('/a', '/a/.worktrees/detached', null)
+        ],
+        unavailable: []
+      };
+      expect(repoWorktrees('/a', payload).map((w) => w.path)).toEqual(['/a/.worktrees/detached', '/a/.worktrees/develop', '/a/.worktrees/timify-123-x']);
+      expect(repoWorktrees('/missing', payload)).toEqual([]);
+    });
+    it('treeLiveKey names the first live key, in key order, whose branch carries it — never one for a key-less or detached tree', () => {
+      expect(treeLiveKey(t('/a', '/a/w', 'feature/timify-123-x'), ['PAY-1', 'TIMIFY-123'])).toBe('TIMIFY-123');
+      expect(treeLiveKey(t('/a', '/a/w', 'timify-1234-x'), ['TIMIFY-123'])).toBeNull();
+      expect(treeLiveKey(t('/a', '/a/w', 'develop'), ['TIMIFY-123'])).toBeNull();
+      expect(treeLiveKey(t('/a', '/a/w', null), ['TIMIFY-123'])).toBeNull();
+      expect(treeLiveKey(t('/a', '/a/w', 'pay-2-timify-123'), ['TIMIFY-123', 'PAY-2'])).toBe('PAY-2');
+    });
+    it('continueOffTicket is true only for a non-empty Continue branch without the key', () => {
+      expect(continueOffTicket({ mode: 'continue', branch: 'develop', openMr: false, target: null }, 'TIMIFY-123')).toBe(true);
+      expect(continueOffTicket({ mode: 'continue', branch: 'feature/timify-123-x', openMr: false, target: null }, 'TIMIFY-123')).toBe(false);
+      expect(continueOffTicket({ mode: 'continue', branch: 'timify-1234', openMr: false, target: null }, 'TIMIFY-123')).toBe(true);
+      expect(continueOffTicket({ mode: 'continue', branch: '  ', openMr: false, target: null }, 'TIMIFY-123')).toBe(false);
+      expect(continueOffTicket({ mode: 'new', branch: 'develop', base: 'main', openMr: false }, 'TIMIFY-123')).toBe(false);
+      expect(continueOffTicket({ mode: 'none' }, 'TIMIFY-123')).toBe(false);
     });
   });
 });
