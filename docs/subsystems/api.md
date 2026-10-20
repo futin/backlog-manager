@@ -134,13 +134,33 @@ the `error` verbatim and exits `1` through its generic non-2xx path — not `5`:
 
 The third outbound-calling module (Jira integration phase 1): a `fetch` client on Atlassian's API gateway, a poller armed only while the three `BM_JIRA_*`
 keys are set and a board is owed a sweep, the per-board issue caches it fills (the second cache in this server whose age is rendered, as `polledAt`), the
-`jira.json` reader, the ADF converter and the ticket block. Seven read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
+`jira.json` reader, the ADF converter and the ticket block. Nine read routes under `/api/jira` — the status payload, a board's cached issues, one issue read
 fresh (`?format=text` for the ticket block), the roots search, the project list, the JQL check and (phase 5a) `/prompt`, the composed Run prompt as `text/plain` — and
-seven guarded POSTs: five config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`) and
+eight guarded POSTs: six config writes that touch only `jira.json` (since phase 2 `/boards`, `/boards/delete`, `/repos`; since 5a `/skills`, `/skills/delete`;
+since the repo/branch work `/repo-defaults`) and
 two writes to Jira itself (since phase 3, `/issue/assign` and `/issue/transition`), each followed by a re-read of the issue that is spliced into every board cache
 holding it. Since 5a the module also owns `JiraLiveService`, the in-memory map behind the status payload's `live` and an issue's `session`; the two POSTs that
 fill and clear it live in `agents/`, below, because they call the dashboard. The credentials are read per call and reach no payload. → [jira.md](jira.md),
 the full doc.
+
+The repo/branch work (spec `2026-10-20-jira-repo-branch-design.md`) added the module's one reader of git, `refs.util.ts`, and three routes around it — all of
+them reads of git, never writes ([invariants](invariants.md#the-server-never-writes-git)):
+
+- `GET /api/jira/refs?repo=<path>&key=<KEY>` — one mapped repo's branches as of its last fetch (`JiraRepoRefs`: each branch with its local and `origin/` twin
+  folded into one entry, its sync against `origin`, the tree holding it and whether it carries the key; the mapped checkout's own branch, the default base, and
+  `FETCH_HEAD`'s mtime as the last fetch). 400 for a missing `repo` or a malformed key, 503 unconfigured, 409 an unreadable `jira.json`, 400 `<repo> is not
+  mapped`; a repo that cannot be read is a 200 with `available: false` and its reason — `not mounted into the board`, `does not exist` or `not a git
+  repository`.
+- `GET /api/jira/worktrees` — every working tree of every distinct mapped repo (`git worktree list`, the main tree flagged), as `{ worktrees, unavailable: [{
+  repo, reason }] }`; the client matches branches to tickets for the cards' worktree chip and the modal's Worktrees list.
+- `POST /api/jira/repo-defaults` — `{ path, base, namePattern }`, `null` meaning unset and both `null` deleting the path's entry in `jira.json`'s
+  `repoDefaults`. Guard → validate (400) → configured (503) → readable (409) → mapped (400 `<path> is not mapped`) → write; no re-aim, since no sweep reads it.
+
+`GET /api/jira/prompt` and `POST /api/agents/dispatch-jira` both take the Run's branch choice — `mode` (`new`, `continue` or `none`), `branch`, `base`,
+`openMr`, `target` — through one parser, `parseBranchChoice` (`branch-choice.util.ts`), whose refusals are 400s (`mode must be new, continue or none`, `execute
+needs a branch (mode new or continue)`, `branch must carry <KEY>`, …), and then one comparison with the repo's refs, `resolveWorkspace`, whose refusals are 409s
+(`<branch> exists — switch to Continue`, `<branch> is checked out in the mapped checkout <repo>`). A repo the server cannot read skips the 409s; `jira.mjs
+worktree` makes the same checks on the host.
 
 ### `registry/`
 
@@ -169,7 +189,8 @@ One of the three modules that call outbound, and every POST in it is guarded by 
   optional `unqueueFailed` (ids as `run.json` spells them) and never fails the stop — the spawned `--abort` repeats the sweep.
 - `POST /api/agents/dispatch-jira` — a Jira ticket's Run (`jira-agents.controller.ts` → `JiraDispatchService.dispatch`): reserve the key in the live map, optionally
   assign and transition in Jira, then spawn a session in the mapped repository. The action is a pick from the body, never derived; the prompt is composed server-side
-  by `composeJiraPrompt`. A failure after a Jira write says the write stands. → [jira.md](jira.md#run-phase-5a)
+  by `composeJiraPrompt`. A failure after a Jira write says the write stands. Since the repo/branch work the body also carries the branch choice (`mode`,
+  `branch`, `base`, `openMr`, `target`, above), checked before anything is reserved or written. → [jira.md](jira.md#run-phase-5a)
 - `POST /api/agents/jira-stop` — stops that key's live session through the dashboard (`session-stop.util.ts`, shared with the item abort) and clears its map entry;
   never calls Jira. `JiraLiveReconciler` clears entries whose session the dashboard no longer lists as working.
 - `GET /api/agents/watchdog`, `POST /api/agents/watchdog/config` — the run watchdog's live state, read out of this process's own memory and the settings file it

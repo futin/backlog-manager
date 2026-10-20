@@ -1,8 +1,8 @@
 # The skills
 
 Seven skills under `skills/` — six backlog skills and `jira` — one agent under `agents/`, and four CLIs beneath the skills — two of which do all the writing
-to items, the registry and the run file, a third that only reads them, and `jira.mjs`, which writes no file at all and reaches Jira only through the local API
-— plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's
+to items, the registry and the run file, a third that only reads them, and `jira.mjs`, which writes no file of its own and reaches Jira only through the local
+API, its one git command (`worktree`) aside — plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's
 skill root — never duplicated under `.claude/skills/`, which would load the same skills twice and drift.
 
 ## Mechanism
@@ -17,7 +17,7 @@ skill root — never duplicated under `.claude/skills/`, which would load the sa
 | `backlog-execute`     | does the work on a groomed bug or task, then archives it once verification proves it worked                                                                                                                                                 |
 | `backlog-orchestrate` | drains a project's groomed queue unattended, one item per git worktree, each reviewed and verified before it merges                                                                                                                         |
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
-| `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`                                                                                       |
+| `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`; on a Jira Run, makes the ticket's git worktree in a mapped repo (git only)           |
 
 `backlog-orchestrate` is the largest of the seven and the only one that touches git. Told to drain a queue, it works every ready bug and task one at a time —
 each in its own worktree and its own headless `backlog-execute` session — then commits that item, has it reviewed and verified, and merges it into the run's
@@ -48,6 +48,12 @@ its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch
 - `skills/jira/tools/jira.mjs` — the `jira` skill's CLI (Jira phase 4): `show`, `transitions`, `transition`, `assign` and `status`, each one or two requests to
   `/api/jira` on `127.0.0.1` and nothing else. API-only, so it has no files mode and writes no file; it carries no Jira credential, the server being Jira's
   one caller. Exit `0` success, `1` usage (a key that is not one included — nothing is sent), `2` a 4xx, `3` a 5xx, `5` the stack is down.
+  Since the repo/branch work it has one more command, `worktree <KEY> --repo <path> --mode new|continue --branch <name> [--base <name>]`, and it is the
+  exception to all of that: git only, no request, so it works with the stack down. It fetches (one retry on a lock, `BM_JIRA_FETCH_RETRY_MS` apart), re-checks
+  the Run's choice against the fresh refs, enters or makes the tree at `<repo>/.worktrees/<branch with / as ->`, fast-forwards a clean tree with `--ff-only`,
+  writes `.worktrees/` and `node_modules` to `info/exclude` and links `node_modules` for a tree it made, and prints one JSON line
+  (`{ worktree, branch, created, notes }`). It never runs `--force`, `-D`, `prune` or `reset`. Exit `0`, `1` usage, or `4` — git refused, or a re-check
+  stopped the Run, and nothing changed — never `2`, `3` or `5`.
 - `skills/backlog-retro/tools/retro.mjs` — `backlog-retro`'s own CLI, and the only writer of `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`). It is the one of
   the three that writes nothing anybody else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by
   recorded lease id, a run's driver transcript (`$BM_CLAUDE_PROJECTS`), and its `record` command writes a sweep, the session's labels and the report beside
@@ -57,6 +63,10 @@ No skill's tools may import another skill's: one skill's `tools/` directory is n
 twice, on purpose. No helper is shared by all of them, and the two pairs are different pairs — `backlog.mjs` and `orchestrate.mjs` each carry the
 linked-worktree discriminator (the `commondir` entry in a `gitdir:` target, never "`.git` is a file"), while `orchestrate.mjs` and `retro.mjs` each carry
 `orchHome()` and `projectDir()`.
+The Jira repo/branch work added two more pairs, each across a different border: `orchestrate.mjs` and `jira.mjs` each carry `ensureExcludeLines` (the
+idempotent append to `<common dir>/info/exclude` that keeps `.worktrees/` and the `node_modules` link out of `git status`), and `jira.mjs` carries Tables A
+and B — `branchNameProblem` and `branchCarriesKey` — whose other home is not a tool at all but `shared/jira-branch.ts`, which the server and the client import
+and no skill can. `jira.test.mjs` pins the same Table A and B rows as `test/jira-branch.test.ts`.
 `retro.mjs` has no discriminator at all — it needs no git root, because its subject is every project at once — and `backlog.mjs` has neither path helper,
 because the run-state directory is none of its business. Each copy is pinned by its own tool's suite.
 

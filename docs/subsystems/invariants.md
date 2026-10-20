@@ -431,6 +431,12 @@ the only skill that pushes: `git -C "<base tree>" pull --ff-only origin <base>` 
 each merge, and `git push -u origin backlog/<n>` from the item worktree under branch mode. For a files project nothing changed and publishing remains the
 user's call, merge commits or otherwise.
 
+**A Jira Run's push is not a skill's, so it does not contradict this rule** (Jira repo/branch, spec §6). This rule is about this plugin's skills operating on
+backlog items. A Jira Run started with **Open MR when done** ticked is told by its prompt to push its branch and open one merge request once the work is done:
+that push is the spawned session following its prompt, in a foreign repository the board only maps, and only when the person ticked the switch — without it
+the prompt still says "Do not push." No skill of this repo pushes there, and neither does the server, which writes no git at all
+([the server never writes git](#the-server-never-writes-git)).
+
 The reason a tracker project is different is not a change of taste: it is that the project is SHARED by definition. Its items are issues every machine reads,
 so a merge that stayed on one laptop would be a run reporting `merged` for work nobody else can see — the same second-source-of-truth failure the whole
 tracker-backed direction exists to remove. That is also why the push sits between the merge and `stage <n> merged`: the tool cannot see a push, so the close
@@ -3103,19 +3109,22 @@ round: `test/tracker-labels.test.ts` reads the skill's source as text and assert
 The Jira integration ([spec](../superpowers/specs/2026-10-15-jira-integration-design.md) §2) keeps its boards, saved queries, repository map and skill
 prompts in `~/.backlog-manager/settings/jira.json` — the fourth file under `settings/`, and the first one a person is expected to edit by hand as well as
 through the server. It takes `tracker-sync.json`'s posture (the settings-file exception above): read fresh on every use, cached nowhere, one writer — the
-server, through five routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/skills` and `/skills/delete` — and a person's hand-edits, which the writers are built to survive.
+server, through six routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete` — and a person's hand-edits,
+which the writers are built to survive.
 
 **An unreadable file is reported, never treated as empty.** `readJiraConfig` answers `unreadable` for a file that exists but cannot be read or parsed, and
 `GET /api/jira` carries it as `configUnreadable`. The failure this prevents is the one #270 found in `tracker-sync.json`'s writer, one step earlier: a
 board that renders `No boards yet` over a file with a stray comma invites the person to create a board, and the write that follows — reading the file as `{}`
 and writing one board back — would erase every board, query and mapping the file held. So the reader says the file is broken, the sweep prunes no board
-cache while it is (a board the file still holds keeps its list until the file parses again), and all five writers refuse with a 409 rather than replace it.
+cache while it is (a board the file still holds keeps its list until the file parses again), and all six writers refuse with a 409 rather than replace it.
 A MISSING file is a fresh install and reads as empty; so does a file that parses to something other than an object, which is what `tracker-sync.json`'s
-writer already replaces and so what the five writers agree with.
+writer already replaces and so what the six writers agree with.
 
-**Five writers, one contract, and the refusal is each writer's own.** `writeBoard`, `deleteBoard`, `writeRepos`, `writeSkill` and `deleteSkill` each read the RAW file, not what the reader
+**Six writers, one contract, and the refusal is each writer's own.** `writeBoard`, `deleteBoard`, `writeRepos`, `writeRepoDefaults`, `writeSkill` and
+`deleteSkill` each read the RAW file, not what the reader
 would accept, because a writer that round-tripped through the reader would silently drop every entry the reader warned about — the same erasure #270 found,
-by a quieter road. They merge exactly one entry (a board by id, one project's list by key, a skill by id) and leave the rest untouched, hand-written junk and unknown
+by a quieter road. They merge exactly one entry (a board by id, one project's list by key, one path's defaults by path, a skill by id) and leave the rest
+untouched, hand-written junk and unknown
 top-level keys included, so a person's annotation or a newer version's key survives a save made by an older one. The write is a temp file in the same
 directory and a `rename`, so a crash leaves the old file or the new one and never half of either. The refusal is the writer's rather than a check the route
 makes first because the route's read and the writer's read would be two reads: a file that broke between them would be replaced after the check passed. So
@@ -3130,6 +3139,15 @@ so the route answers 200 with the board either way.
 key, a query with an empty label, a repos path that is not a string. Spec §2 drew the line at the board; the reader goes one level finer — a bad root or
 query costs itself, not the board it sits in — because a board that vanishes over one lower-case key is the more surprising failure. Every drop is warned
 once, naming the file and the entry, so a vanished entry leaves a trace in the server log. The mechanism is `server/src/jira/config.util.ts`.
+
+**`repoDefaults` joined under the same contract** (Jira repo/branch, spec §5.1, §6). It maps a mapped path — absolute, normalised — to the base a New worktree
+is cut from and the pattern its branch is named by, and it is keyed by PATH rather than by project because one checkout can be mapped to two Jira projects and
+has one convention. Its writer is the sixth, `writeRepoDefaults`, behind `POST /api/jira/repo-defaults`: the same raw read, the same one-entry merge, the same
+temp file and `rename`, the same 409 for an unreadable file; both values unset deletes the path's entry. The route adds one check the other five do not need —
+the path must be mapped by SOME project, a 400 otherwise — so the file does not collect defaults for paths nothing can reach, and it sits after the 409
+because an unreadable file cannot say what is mapped. Its reader's fallback goes one level finer again, to the VALUE: a base that fails `branchNameProblem` or
+a pattern that fails `patternProblem` — the same checks the route applies — costs only itself, so a hand-edited bad pattern leaves that path's good base
+working.
 
 ## The Jira token never leaves the server, and the poller is armed only while a board syncs
 
@@ -3184,6 +3202,27 @@ A PERSON's JQL — a board's saved query, the text in the board sheet's check li
 rewritten order, no quoting. Jira parses it and Jira refuses it (`jql/parse?validation=strict` for the check, a 400 on a sweep that becomes a `failures` row
 on the board, never a dropped board). Rewriting it would be guessing at what the person meant, and a filter that silently differs from the one typed is worse
 than one Jira rejects out loud. The only bound is length (`JIRA_JQL_MAX_CHARS`, 2 000), because a query that long is a paste accident, not a filter.
+
+## A Jira branch name obeys one rule, and `jira.mjs` carries its one hand-kept copy
+
+A Jira Run names a branch — and, for a New one, a base — that the server pastes into the spawn prompt's `jira.mjs worktree` line (Jira repo/branch, spec §6).
+Three hands judge those names: the launch sheet, before Start; the server, on `GET /api/jira/prompt` and `POST /api/agents/dispatch-jira`, whether or not the
+repo is mounted; and the tool, in the session, before it runs any git. Two of them share code, so the rule is written once, in `shared/jira-branch.ts`, the
+way `shared/agent.ts` holds what both sides of the board must agree on: `branchNameProblem` (Table A) says why a name cannot be a branch, and
+`branchCarriesKey` (Table B) says whether a branch belongs to the ticket. The setup pattern is judged by the same two, through `patternProblem`, on the name
+it would render — a pattern whose branches the board would never find again is refused at Setup, not at Start.
+
+**Narrower than git, on purpose.** Table A is `git check-ref-format --branch`'s rules plus two of this app's own: at most 200 characters, and nothing outside
+`[A-Za-z0-9._/-]`. Git accepts far more, but a name that reaches the prompt is a word in a shell command a session will run, and with that allowlist it
+cannot carry a space, a quote, `$`, a backtick, `;` or a newline at all — so the server prints `branch` and `base` bare and does not lean on the session to
+quote them. The repo path is the one value that can hold anything, and it alone goes through `shellQuote`. A name git would take and this refuses (`~`, `^`,
+`:`, `@`, anything non-ASCII) costs a rename; a name that escaped the prompt would cost whatever it said.
+
+**The third hand cannot import, so it copies.** A skill's `tools/` is a standalone copy of what was pushed, with no build step and no path back into this
+repo (the reason `backlog.mjs` restates `resolveSource`), so `jira.mjs` re-implements Tables A and B and says so above each. The drift guard is the tests:
+`skills/jira/tools/jira.test.mjs` pins the same rows `test/jira-branch.test.ts` does, so a rule changed in one place and not the other fails on the side left
+behind. The tool's copy is not redundant with the server's check: the person can paste the prompt into a terminal and edit the line, and the tool is the
+last thing between that line and `git worktree add`.
 
 ## The board's Jira writes are assign and transition, nothing else
 
@@ -3860,6 +3899,14 @@ ticket has no local store to fall back to — there is no files mode to be in �
 could do. Its exit-`5` sentence differs from this tool's on purpose: it runs in a MAPPED repository, where `pnpm run dev` starts something else or nothing, so
 it names the backlog-manager checkout the two commands belong to.
 
+**`jira.mjs worktree` is the one exception** (Jira repo/branch, spec §6). It makes no API call at all — it is git only (`fetch`, `worktree add`, a
+`merge --ff-only` on a clean tree, two lines in the repository's `info/exclude`) — so it works with the stack down and never exits `2`, `3` or `5`. Its own
+codes are `0` (the tree is ready, its path printed as one JSON line), `1` (usage) and a new `4`: git refused, or one of the re-checks that guard a Run stopped
+it — a New branch that already exists, a Continue branch held by the mapped checkout or diverged from `origin` — and nothing was changed. The exception is
+the command's, not the tool's: every other `jira.mjs` command still needs the stack and still says so with `5`. It is also the tool's first git-writing
+command, and it writes only into the tree it was asked for, the way `orchestrate.mjs worktree` does: no `--force`, no `-D`, no `prune`, no `reset`, no merge
+but `--ff-only`.
+
 **`main` is async, and the entry guard awaits it.** The "every skill CLI exits through `process.exitCode`" rule is about `process.exit()` truncating a
 pipe, which asynchrony has nothing to do with; what it actually requires is that nothing hold the event loop open when `main` returns. Every `fetch` here is
 awaited to completion and each carries `connection: close`, so no pooled socket outlives the call. The source guard accepts `= await main(` for this file,
@@ -3982,6 +4029,28 @@ The synchronous `fs` reads (`readFileSync`, `readdirSync`, `statSync` in `orches
 During the incident `ls -R` of a backlog took 76 ms while git took 38 s; they were not what stalled anything, and converting them is churn with no failure
 behind it. The grep guard is for spawns only, and scoped to `server/src` — the skills' own CLIs (`skills/**/tools/*.mjs`) legitimately `spawnSync`, because
 nothing there serves requests.
+
+## The server never writes git
+
+Every git command the server runs is a read: `rev-parse`, `for-each-ref`, `rev-list`, `symbolic-ref`, `show-ref`, `check-ref-format`, `log`, `diff`,
+`ls-files`, `remote get-url`, `describe` and `worktree list`, each through `runGit`. Nothing under `server/src` fetches, adds or removes a worktree, checks
+out, commits, merges or pushes; those are the session's — `jira.mjs worktree` on a Jira Run, `orchestrate.mjs` on an orchestrator run, a person in a terminal
+otherwise. This was true before it was written down (Jira repo/branch, spec §6); it is stated now because the server started reading FOREIGN repositories —
+the ones a Jira project is mapped to — whose branches and worktrees the board lists (`server/src/jira/refs.util.ts`).
+
+**Why a read-only server, and not a convenient `fetch` before listing.** The ref listing the launch sheet draws is as of the repo's last fetch, and it says so
+("as of last fetch, N min ago"). A server that fetched would be a process with no terminal reaching a remote with the person's credentials — a credential
+prompt with nobody to answer it, a lock held against the person's own `git pull` — and it would be doing it in a repository it does not own, on a request
+whose answer is only a list. The session that will work in the tree fetches first, retrying once on a lock, and the worst case of a stale listing is a
+re-check refusal (exit `4`) the person can act on, never a write made behind their back.
+
+**The Worktrees list's Remove copies a command; it never runs one.** Removing a worktree is the one destructive git operation the board offers, and it is
+offered as text on the clipboard — `git -C <repo> worktree remove <path>` — for the same reason: a session the board did not start (Copy prompt, a terminal)
+cannot be seen from here, and a tree it is using must not be pulled from under it by a click.
+
+**Under compose the mounts make it physical.** Both project roots are mounted `:ro`, so a git write from inside the container would fail outright. On a
+host-run API the mount is not there to catch it, which is why this is a rule about the code rather than a property of the deployment: a new git call under
+`server/src` is a read, or it belongs to a session.
 
 ## A client poller built on `useCoalescedFetch` never has two of its own requests in flight
 

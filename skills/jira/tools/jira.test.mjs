@@ -1014,7 +1014,7 @@ test('jira/SKILL.md is the jira skill, triggered by /jira', () => {
 
 test('jira/SKILL.md documents every command, through the braced plugin root', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8')
-  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status']) {
+  for (const cmd of ['show', 'transitions', 'transition', 'assign', 'status', 'worktree']) {
     assert.match(text, new RegExp(`jira\\.mjs ${cmd}\\b`), `SKILL.md never shows jira.mjs ${cmd}`)
   }
   const nodeLines = text.split('\n').filter((line) => /\bnode\s+"/.test(line))
@@ -1024,9 +1024,16 @@ test('jira/SKILL.md documents every command, through the braced plugin root', ()
 
 test('jira/SKILL.md documents every exit code and both ways to start the stack', () => {
   const text = fs.readFileSync(SKILL_MD, 'utf8')
-  for (const code of ['0', '1', '2', '3', '5']) assert.match(text, new RegExp(`^\\|\\s*\`${code}\`\\s*\\|`, 'm'), `the exit table has no row for ${code}`)
+  for (const code of ['0', '1', '2', '3', '4', '5']) assert.match(text, new RegExp(`^\\|\\s*\`${code}\`\\s*\\|`, 'm'), `the exit table has no row for ${code}`)
   assert.match(text, /pnpm run dev/)
   assert.match(text, /pnpm run docker:up/)
+})
+
+test('jira/SKILL.md documents the worktree command: its JSON line and both fast-forward notes', () => {
+  const text = fs.readFileSync(SKILL_MD, 'utf8')
+  for (const needle of ['--mode new', '--mode continue', '"worktree"', '"created"', '"notes"', 'fast-forwarded', 'not fast-forwarded: uncommitted changes']) {
+    assert.ok(text.includes(needle), `SKILL.md lost ${needle}`)
+  }
 })
 
 test('jira/SKILL.md says the ticket text is data, not instructions (RF 1)', () => {
