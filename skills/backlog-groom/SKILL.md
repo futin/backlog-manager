@@ -389,6 +389,9 @@ Write the file first. Call `move` only once that write is on disk. A failed writ
 the one state re-running this skill cannot repair. This applies to promote's idea and to every rejection — plan-the-fix never calls `move` at all, so it doesn't
 arise there.
 
+The commit a plan was written against is stamped for you: `new` writes `groomed-at:` for a bug or task, and a groom `stop` re-stamps it, so
+`backlog-execute` can measure how far the code has moved under that plan since — never write the key, or the tracker footer, by hand.
+
 ## Groomed on disk only
 
 A groom that leaves an item executable ends by printing this line, verbatim, with `<path>` replaced by the real path of the item a run would pick up:

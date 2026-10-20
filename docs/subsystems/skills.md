@@ -95,7 +95,8 @@ What each verb does differently, and the four that exist only here:
 | `heartbeat`      | new — says this session still holds the item; refused (exit `1`) on another session's claim, naming both sessions and, when the claim recorded one, both machines (bug-45, bug-46). Files mode: exit `1` |
 | `abort`          | new — releases a LIVE claim this machine's own dead session left behind (bug-48): refused unless the claim's `host` equals `hostIdentity()` and Claude Code's session registry (`<configDir>/sessions/*.json`) holds no running entry for the holder — and refused as `cannot tell` when that registry is unreadable, malformed, or has no running entry for the aborting session itself (bug-49); a board-dispatched `claude -p` session between turns has no entry either, and reads as gone; releases with `reason: 'aborted'` and no `counters`. A dead claim exits `0` saying the next `start` retires it. Files mode: exit `1`, naming `stop <id> --abandon` |
 | `comment`        | new — appends a comment. Files mode: exit `1`                                                                                                      |
-| `body`           | new — groom's body patch, behind `--if-updated-at`. Files mode: exit `1`                                                                           |
+| `body`           | new — groom's body patch, behind `--if-updated-at`; a bug's or task's body gets exactly one `bm:groomed-at` footer (#322). Files mode: exit `1`     |
+| `drift`          | both modes — files reads the item file, API mode the body and its footer; GET requests only (#322)                                               |
 | `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |
 
 Ids are `31`, `#31` or this project's own URN, all meaning one issue; a file-shaped id and another repo's URN are each refused with their own sentence. Session
@@ -146,6 +147,28 @@ field resumes, so a run from before the change behaves as it did. `SKILL.md` §7
 `claude -p` handed the findings and pointers in a prompt file. `retro.mjs` splits `totals.fixLoops` into `byMode.resumed` and `byMode.fresh`, derived from
 session ids alone (a resumed session keeps the id it was handed), each with its cost, median peak and the next review pass's verdicts, so the threshold can
 be tuned from what each mode came to. Design: `docs/superpowers/specs/2026-09-25-fresh-session-fix-loop-design.md`.
+
+#### Groom drift: the anchor, `drift`, the marker and the mark (#322)
+
+A plan is written against one commit and executed against a later one. Four pieces close that gap, and only the last one is stored:
+
+- **The anchor.** `backlog.mjs new` stamps `groomed-at: <HEAD sha>` into a bug's or task's frontmatter — or, in a tracker project, a
+  `<!-- bm:groomed-at <sha> -->` footer on the body's last line, which `body` keeps to exactly one — and a groom `stop` re-stamps it. An abandon, an execute
+  stop and an idea or refactor never do. A repository with no commits yet writes no key.
+- **`backlog.mjs drift <id> [--base <ref>] [--json]`.** Derived per call from `skills/*/tools/drift-lib.mjs` — two byte-identical copies, one beside each tool,
+  because `orchestrate.mjs` imports nothing from `skills/backlog/tools/`, and `drift-lib.test.mjs` pins them equal. The anchor is `groomed-at` (or its
+  merge-base with the base, off a side branch), else the last commit before `created:` (a bare date read as UTC midnight), else nothing. The paths are the
+  plan's backticked tokens that look like paths and that git knows at the anchor or the base; the answer is `none`, `drifted` (commits since the anchor touching
+  them, counted distinct, or a path gone) or `unknown` with a reason. `orchestrate.mjs plan` prints it as a `~` line under each row that is not `none`, and
+  `--json` carries it as `drift`. Drift is never a verdict.
+- **The marker.** `backlog-execute`'s Task path runs `drift` before `executing-plans`. On `drifted`/`unknown` it checks every step: minor drift is adapted and
+  listed under `Plan adapted:` in the Outcome; a plan that no longer holds changes no code and writes an Outcome whose first line is exactly
+  `Plan no longer holds: <what broke>`, on the existing "nothing moves" path.
+- **The mark.** `orchestrate.mjs inspect` reports that line as `planStale`; the driver runs `stage <id> ungroomed --plan-stale`, which re-reads the line from
+  the same Outcome — the session's prose never rides a command line — and files `{ planHash, detail, runId, at }` in `<projectDir>/stale-plans.json`. Every
+  later `plan`/`init` gate turns the item `ungroomed` while the plan's hash still
+  matches; a re-groom changes the hash and so clears it. `archiveSidecars` never moves the file. `docs/subsystems/invariants.md`'s "a stale-plan mark is keyed
+  by the plan's hash" carries the reasoning.
 
 ### `references/`
 
