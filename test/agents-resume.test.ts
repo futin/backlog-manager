@@ -13,7 +13,7 @@ import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { pauseRequestEffective, readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
-import { RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../shared/types';
+import { RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../shared/types';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import type { AgentsStatus, OrchestratorRun } from '../shared/types';
 
@@ -534,7 +534,7 @@ describe('POST /api/agents/resume', () => {
   // every concurrent caller through, which is precisely what
   // `noteBoardResume`'s after-the-await placement already did.
 
-  it('serializes concurrent resumes of one crashed run — one spawn, the rest an uncoded 409', async () => {
+  it('serializes concurrent resumes of one crashed run — one spawn, the rest a RESUME_LOCKED_CODE 409', async () => {
     const sent = stubDashboard({ ok: true }, 'auto');
     writeRun({
       ...fixture,
@@ -554,11 +554,14 @@ describe('POST /api/agents/resume', () => {
     expect(ok).toHaveLength(1);
     expect(refused).toHaveLength(2);
     for (const r of refused) {
-      // Uncoded, deliberately: RUN_IN_PROGRESS_CODE means "a run is alive for
-      // this project right now", which is false here — the run is crashed and
-      // a resume is on its way to it. The strip treats that code as a silent
-      // success, which is exactly the wrong reaction to this refusal.
-      expect(r.body.code).toBeUndefined();
+      // Not RUN_IN_PROGRESS_CODE, deliberately: that code means "a run is
+      // alive for this project right now", which is false here — the run is
+      // crashed and a resume is on its way to it. The strip treats that code
+      // as a silent success, which is exactly the wrong reaction to this
+      // refusal. Its own code (#268) is what lets the watchdog read it as
+      // "not yet" instead of counting it as a refusal.
+      expect(r.body.code).toBe(RESUME_LOCKED_CODE);
+      expect(r.body.code).not.toBe(RUN_IN_PROGRESS_CODE);
       expect(r.body.error).toContain('resume');
       expect(r.body.error).toContain(fixture.runId);
     }

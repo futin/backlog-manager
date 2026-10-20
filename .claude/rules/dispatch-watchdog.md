@@ -67,7 +67,8 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   [invariants.md](docs/subsystems/invariants.md#one-run-per-project-checked-twice)
 - **A resume is serialized at three layers, and only the third one can refuse a resume this app never asked for** (bug-19). (1) The board's Resume control has a
   synchronous in-flight guard and its mark ends on `running` **and `fresh`**. (2) `AgentsService.resume()` takes `WatchdogEntry.resumeSpawnAt` synchronously
-  before its next `await`, holds it for `RUN_STALE_MS`, clears it when the spawn throws, and refuses with an **uncoded** 409. (3) `orchestrate.mjs` records a
+  before its next `await`, holds it for `RUN_STALE_MS`, clears it when the spawn throws, and refuses with a 409 coded `RESUME_LOCKED_CODE` — never
+  `RUN_IN_PROGRESS_CODE`, which both callers swallow (#268). (3) `orchestrate.mjs` records a
   driver lease (`driver: { sessionId, at } | null`, identity `CLAUDE_CODE_SESSION_ID`, absent means unclaimed); refusal is exit `7`; `claim` refuses only a run
   that is `running`, fresh and led by another session; `abort` and `unpause` TAKE the lease rather than checking it — that is the rule, not an exception. Why:
   [invariants.md](docs/subsystems/invariants.md#a-resume-is-serialized-at-three-layers)
@@ -86,6 +87,7 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   `exhausted` is decided before grace. A board resume is a spawn attempt too (`WatchdogService.noteBoardResume`, called from the controller BEFORE `arm()`):
   grace yes, cap no. Two counters on `WatchdogEntry`, both measured against `config.maxAttempts` and neither stored as a verdict — `attempts` (sessions
   STARTED, moved only by a spawn that returned a session id) and bug-35's `consecutiveFailures` (spawns REFUSED since the last one that started a session).
+  The resume lock's `RESUME_LOCKED_CODE` refusal moves neither and logs nothing — "not yet", since grace is shorter than the lock (#268).
   `watchdogExhausted` and `watchdogFailing` (`shared/agent.ts`) are the two derivations, both read by `visit()` and by `annotate()`, which publishes
   `attempts`/`exhausted` and `failures`/`failing` from ONE config read. `failing` is a third REQUIRED input to `watchdogStoodDown`, so the stand-down ladder
   has three rungs — `off`, then `exhausted`, then `stalled`, a ninth `WatchdogEventKind` logged once per condition behind `stalledLogged` and never a reuse of
