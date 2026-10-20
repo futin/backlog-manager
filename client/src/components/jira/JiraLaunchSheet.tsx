@@ -88,7 +88,7 @@ export function JiraLaunchSheet({
   const [started, setStarted] = useState<JiraDispatchResult | null>(null);
 
   const actionKey = jiraActionParam(action);
-  const preview = useFetched(repo === '' ? null : () => fetchJiraPrompt(issue.key, action, repo), [issue.key, actionKey, repo]);
+  const preview = useFetched(repo === '' ? null : () => fetchJiraPrompt(issue.key, action, repo, { mode: 'none' }), [issue.key, actionKey, repo]);
   const detail = useFetched(() => fetchJiraDetail(issue.key), [issue.key]);
 
   const promptText = preview.status === 'ok' ? preview.value : null;

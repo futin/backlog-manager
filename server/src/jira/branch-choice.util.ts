@@ -1,5 +1,8 @@
 import { branchCarriesKey, branchNameProblem, worktreePathFor } from '../../../shared/jira-branch';
-import type { JiraAction, JiraRepoRefs, JiraWorkspace } from '../../../shared/types';
+import type { JiraAction, JiraBranchChoice, JiraRepoRefs, JiraWorkspace } from '../../../shared/types';
+
+// The type lives in shared/types.ts since the client's sheet builds one too; re-exported so the server's own imports stay as they were.
+export type { JiraBranchChoice };
 
 /**
  * branch-choice.util.ts — the branch choice `GET /api/jira/prompt` and `POST /api/agents/dispatch-jira` both take (Jira repo/branch, spec §5.3): what is
@@ -10,15 +13,6 @@ import type { JiraAction, JiraRepoRefs, JiraWorkspace } from '../../../shared/ty
  * its refusals are 409s: the request was well formed and the repository disagrees (the sheet's own list can be minutes old, and `jira.mjs worktree` re-checks
  * the same two rules on the host, because the server cannot always read the repo).
  */
-
-/**
- * The choice, with the fields that do not belong to a mode absent from its type rather than carried as `null`s. `target` is `null` for "the MR goes to the
- * base".
- */
-export type JiraBranchChoice =
-  | { mode: 'none' }
-  | { mode: 'new'; branch: string; base: string; openMr: boolean }
-  | { mode: 'continue'; branch: string; openMr: boolean; target: string | null };
 
 /**
  * The five flat fields as a route hands them over. `unknown` throughout: the query gives strings (and an array for a repeated parameter), the body gives

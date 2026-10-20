@@ -270,7 +270,7 @@ describe('JiraLaunchSheet — the action and the preview', () => {
 
     await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), `skill:${SKILL.id}`);
     await waitFor(() => expect(promptBox().value).toBe(`prompt for skill:${SKILL.id} in /Users/ada/pay`));
-    expect(calls.map((c) => c.url)).toContain(`/api/jira/prompt?key=PAY-131&action=skill%3A${SKILL.id}&repo=%2FUsers%2Fada%2Fpay`);
+    expect(calls.map((c) => c.url)).toContain(`/api/jira/prompt?key=PAY-131&action=skill%3A${SKILL.id}&repo=%2FUsers%2Fada%2Fpay&mode=none`);
   });
 
   it('ignores jiraDefaultAction — the menu reads it, and the sheet opens on exactly the action it was handed', async () => {

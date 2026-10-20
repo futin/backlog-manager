@@ -818,6 +818,15 @@ export interface JiraWorktreesPayload {
   unavailable: { repo: string; reason: JiraRepoUnavailable }[];
 }
 
+/**
+ * The choice, with the fields that do not belong to a mode absent from its type rather than carried as `null`s. `target` is `null` for "the MR goes to the
+ * base".
+ */
+export type JiraBranchChoice =
+  | { mode: 'none' }
+  | { mode: 'new'; branch: string; base: string; openMr: boolean }
+  | { mode: 'continue'; branch: string; openMr: boolean; target: string | null };
+
 /** The title a Jira Run session carries in the dashboard: `jira <KEY>`, cut to 60 characters. Lives here, not in `agents/`, so `jira/` and `agents/` share it without an import between them. */
 export function jiraSessionName(key: string): string {
   return `jira ${key}`.slice(0, 60);
