@@ -5,7 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
-import { JiraLaunchSheet } from '../client/src/components/jira/JiraLaunchSheet';
+import { JiraLaunchSheet, PREVIEW_SETTLE_MS } from '../client/src/components/jira/JiraLaunchSheet';
 import { JiraContext } from '../client/src/hooks/JiraContext';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoStamp } from './helpers/dates';
@@ -765,6 +765,93 @@ describe('JiraLaunchSheet — the branch', () => {
       permissionMode: 'acceptEdits',
       remoteControl: true
     });
+  });
+});
+
+/*
+  I1 (final review): the preview is keyed on the branch choice, and every keystroke in Name, Base or Target used to be a fresh `GET /api/jira/prompt` — an
+  issue read (three Jira calls) and a refs read (several git spawns) per character. A typed choice now settles for `PREVIEW_SETTLE_MS` before it is asked
+  about, and Start stays gated on a prompt composed for the CURRENT choice. Fake timers from the moment the first preview has landed: the debounce is the
+  clock under test, and `fireEvent.change` is five keystrokes inside one tick of it.
+*/
+describe('JiraLaunchSheet — the preview settles before it is asked', () => {
+  const nameField = (): HTMLInputElement => within(dialog()).getByLabelText('Name') as HTMLInputElement;
+  const modeButton = (name: string): HTMLElement => within(within(dialog()).getByRole('group', { name: 'Branch mode' })).getByRole('button', { name });
+  const typeFast = (base: string, chars: string): void => {
+    for (let i = 1; i <= chars.length; i++) fireEvent.change(nameField(), { target: { value: base + chars.slice(0, i) } });
+  };
+  /** Advances the fake clock and lets the mocked fetch's promise chain settle inside the same act. */
+  const advance = async (ms: number): Promise<void> => {
+    await act(async () => {
+      jest.advanceTimersByTime(ms);
+    });
+  };
+
+  it('settles on a constant between 300 and 400 ms', () => {
+    expect(PREVIEW_SETTLE_MS).toBeGreaterThanOrEqual(300);
+    expect(PREVIEW_SETTLE_MS).toBeLessThanOrEqual(400);
+  });
+
+  it('typing five characters fast asks for exactly one preview, after the debounce, for the last value', async () => {
+    await ready();
+    await waitFor(() => expect(nameField().value).toBe('pay-131-refund-partial-captures'));
+    const before = promptReads().length;
+    jest.useFakeTimers();
+    typeFast('pay-131-', 'abcde');
+    await advance(PREVIEW_SETTLE_MS - 1);
+    expect(promptReads()).toHaveLength(before);
+    await advance(1);
+    expect(promptReads()).toHaveLength(before + 1);
+    expect(promptReads().at(-1)?.searchParams.get('branch')).toBe('pay-131-abcde');
+    // Nothing else is queued behind it: a further wait asks nothing more.
+    await advance(PREVIEW_SETTLE_MS * 4);
+    expect(promptReads()).toHaveLength(before + 1);
+  });
+
+  it('keeps Start disabled through the debounce window and enables it once the preview answers', async () => {
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    jest.useFakeTimers();
+    typeFast('pay-131-', 'xy');
+    // The previous preview was for another name: Start never offers it, not even for the first frame.
+    expect(startButton()).toBeDisabled();
+    expect(startButton()).toHaveAttribute('title', 'the prompt has not loaded');
+    await advance(1);
+    expect(startButton()).toBeDisabled();
+    await advance(PREVIEW_SETTLE_MS - 2);
+    expect(startButton()).toBeDisabled();
+    await advance(1);
+    expect(startButton()).toBeEnabled();
+    expect(promptBox().value).toBe('prompt for execute in /Users/ada/pay');
+  });
+
+  it('Start sends exactly the choice the preview was composed for', async () => {
+    await ready();
+    jest.useFakeTimers();
+    typeFast('pay-131-', 'fix');
+    await advance(PREVIEW_SETTLE_MS);
+    expect(startButton()).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(startButton());
+    });
+    const previewed = Object.fromEntries((promptReads().at(-1) as URL).searchParams);
+    const body = dispatchBody();
+    expect(previewed).toEqual({ key: 'PAY-131', action: 'execute', repo: '/Users/ada/pay', mode: 'new', branch: 'pay-131-fix', base: 'develop' });
+    expect({ key: body.key, action: body.action, repo: body.repo, mode: body.mode, branch: body.branch, base: body.base }).toEqual(previewed);
+  });
+
+  it('a mode switch is asked about at once — only typing waits', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })]) });
+    await ready();
+    await waitFor(() => expect(startButton()).toBeEnabled());
+    const before = promptReads().length;
+    jest.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(modeButton('New'));
+    });
+    expect(promptReads()).toHaveLength(before + 1);
+    expect(promptReads().at(-1)?.searchParams.get('mode')).toBe('new');
+    expect(startButton()).toBeEnabled();
   });
 });
 

@@ -181,6 +181,8 @@ services:
       # ~/Documents/timify-projects, which the container cannot see until it is mounted. Read-only for the same reason the line above is: the server READS
       # their branches and worktrees (jira/refs.util.ts, always through runGit) and never writes a ref — `jira.mjs worktree` does that, on the host, in the
       # session. Same path on both sides, because jira.json names repos by absolute host path.
+      # A path that does not exist on the host is CREATED by this bind mount, as an empty directory (root-owned on Linux) — so on a machine without
+      # ~/Documents/timify-projects, set BM_JIRA_REPO_ROOT in .env to a directory that already exists rather than let Docker make one.
       - ${BM_JIRA_REPO_ROOT:-${HOME}/Documents/timify-projects}:${BM_JIRA_REPO_ROOT:-${HOME}/Documents/timify-projects}:ro
 
   client:

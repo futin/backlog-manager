@@ -40,6 +40,7 @@ import { HttpException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { COMMIT_RULE, oneLine } from '../../../shared/agent';
 import { shellQuote } from '../../../shared/jira-branch';
+import { isJiraKey } from '../../../shared/types';
 import type { JiraAction, JiraIssueDetail, JiraSkill, JiraWorkspace } from '../../../shared/types';
 import { renderTicketBlock } from './block';
 
@@ -48,7 +49,7 @@ export const JIRA_PROMPT_MAX = 4000;
 
 export type JiraComposeAction = { kind: 'execute' | 'context' } | { kind: 'skill'; skill: JiraSkill };
 
-export type JiraComposeResult = { ok: true; prompt: string } | { ok: false; error: 'prompt too long' };
+export type JiraComposeResult = { ok: true; prompt: string } | { ok: false; error: 'prompt too long' | 'invalid issue key' };
 
 /**
  * The block's text, ahead of everything else (spec §5.4). One line of facts the session can check the tool's answer against, then the command on a line of its
@@ -174,6 +175,11 @@ export function composeJiraPrompt(
   workspace: JiraWorkspace | null,
   nonce: string = randomBytes(6).toString('hex')
 ): JiraComposeResult {
+  // The block prints a shell line with the key in it bare, and the key here is Jira's (`mapJiraIssue` does not check it against `JIRA_KEY_RE`), not the
+  // route's validated one. Jira's keys are well-formed in practice, so this is defence in depth (final review, M3): a key that is not one is refused in the
+  // routes' own words for a bad key, and both callers turn it into the same 400 as `prompt too long`. Without a workspace no command is printed, so nothing
+  // changes there.
+  if (workspace !== null && !isJiraKey(detail.key)) return { ok: false, error: 'invalid issue key' };
   // The block, and the blank line after it, ahead of whatever the action builds — empty under `none`, so that path is byte-for-byte what it was.
   const head = workspace === null ? '' : `${workspaceBlock(detail.key, repo, workspace)}\n\n`;
   if (action.kind === 'skill') {

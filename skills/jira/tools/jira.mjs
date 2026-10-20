@@ -387,6 +387,31 @@ function fetchRetryMs() {
   return Number.isFinite(ms) && ms >= 0 ? ms : 1000
 }
 
+// How long one `git fetch` may run before it is killed (final review, M4). A fetch that never answers — a dead remote, an SSH host-key or passphrase
+// prompt in a session with no terminal — used to hang the headless session; killed, it is the same `fetch failed:` note as any other failure, and the run
+// goes on from the refs it has. 60 s is generous for a real fetch of a large repo and still short beside a session's budget. The environment knob exists
+// so a test does not wait a minute; a value that is not a positive number is the default.
+const FETCH_TIMEOUT_MS = 60_000
+
+function fetchTimeoutMs() {
+  const raw = process.env.BM_JIRA_FETCH_TIMEOUT_MS
+  const ms = raw === undefined || raw.trim() === '' ? NaN : Number(raw)
+  return Number.isFinite(ms) && ms > 0 ? ms : FETCH_TIMEOUT_MS
+}
+
+// `ms` as a person reads it: `60 s` for a whole number of seconds, else `300 ms`.
+const duration = (ms) => (ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`)
+
+// The fetch's environment on top of `git`'s own: `GIT_SSH_COMMAND=ssh -o BatchMode=yes`, so an SSH remote that wants a host-key confirmation or a
+// passphrase fails at once instead of waiting out the timeout on a prompt nobody sees (an agent still answers; only interactive prompts are off). Only when
+// nothing already says how to run ssh: `GIT_SSH_COMMAND` outranks `GIT_SSH` and the repo's `core.sshCommand`, so setting it over either of those — or over
+// the person's own `GIT_SSH_COMMAND` — would silently replace their key or proxy setup for this one command.
+function fetchEnv(repo) {
+  const set = (name) => (process.env[name] ?? '') !== ''
+  if (set('GIT_SSH_COMMAND') || set('GIT_SSH') || git(repo, 'config', '--get', 'core.sshCommand').ok) return {}
+  return { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' }
+}
+
 // A synchronous sleep with no timer, so nothing holds the event loop open when `main` returns (the entry guard's condition).
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
@@ -395,7 +420,13 @@ function sleepSync(ms) {
 // Every git this command runs, against one directory. `spawnSync` is right here (a CLI, not the server's request path). `GIT_TERMINAL_PROMPT=0`: the
 // session that runs this has no terminal, so a fetch that wants a password must fail — and become the `fetch failed:` note — rather than hang the session.
 function git(dir, ...args) {
-  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
+  return gitWith({}, dir, ...args)
+}
+
+// `git` with a bound and extra environment — the fetch's (`timeout` kills it with SIGTERM, which reads as `error.code` `ETIMEDOUT`). Every other git call
+// here is local and quick, so only the fetch carries one.
+function gitWith({ timeout, env = {} }, dir, ...args) {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env } })
   return { ok: !r.error && r.status === 0, stdout: (r.stdout ?? '').replace(/\n$/, ''), stderr: r.stderr ?? '', status: r.status, error: r.error }
 }
 
@@ -512,12 +543,16 @@ function cutOrEnter({ key, repo, mode, branch, base }) {
 
   // 3. Fetch, so `origin/<base>` is fresh and the re-checks see what others pushed. One retry, only on a lock (two Starts in one repo at once); any final
   // failure — no `origin`, no network, a refused login — is a note, and the run goes on with the refs as of the last fetch.
-  let fetched = git(repo, 'fetch', 'origin')
+  // Each attempt is bounded by `fetchTimeoutMs()` and runs ssh non-interactively (`fetchEnv`), so a fetch that would wait forever is a failure like the rest.
+  const timeout = fetchTimeoutMs()
+  const fetchOnce = () => gitWith({ timeout, env: fetchEnv(repo) }, repo, 'fetch', 'origin')
+  let fetched = fetchOnce()
   if (!fetched.ok && isLockFailure(fetched.stderr)) {
     sleepSync(fetchRetryMs())
-    fetched = git(repo, 'fetch', 'origin')
+    fetched = fetchOnce()
   }
-  if (!fetched.ok) notes.push(`fetch failed: ${gitSaid(fetched)} — using refs as of last fetch`)
+  const why = fetched.error?.code === 'ETIMEDOUT' ? `git fetch timed out after ${duration(timeout)}` : gitSaid(fetched)
+  if (!fetched.ok) notes.push(`fetch failed: ${why} — using refs as of last fetch`)
 
   // 4. The re-checks. Full ref names throughout, so a tag or a file that shares the branch's name cannot answer for it.
   const hasRef = (ref) => git(repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`).ok

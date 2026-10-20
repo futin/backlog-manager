@@ -44,7 +44,7 @@ import { jiraWriteOrThrow } from './unwrap.util';
  * the poller's business to be a no-op there.
  *
  * Two failures are the writers' own and are mapped here, once: `JiraConfigUnreadableError` is a 409 carrying its message (the file exists, a person has to
- * repair it, and nothing was written — #270's refusal, restated for five writers), and `JiraUnknownIdError` is a 404 `unknown board` or `unknown skill` by the kind it carries (the board sentence and
+ * repair it, and nothing was written — #270's refusal, restated for six writers), and `JiraUnknownIdError` is a 404 `unknown board` or `unknown skill` by the kind it carries (the board sentence and
  * status are the read route's for a malformed or absent id). Anything else the writer throws is an I/O failure and stays Nest's 500.
  *
  * The two issue writes differ from the config writes in what they are gated on, and the difference is deliberate (§8): they ARE refused while `access` is

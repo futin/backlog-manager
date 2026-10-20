@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { branchNameProblem, patternProblem } from '../../../shared/jira-branch';
+import { defaultBaseProblem, patternProblem } from '../../../shared/jira-branch';
 import {
   DEFAULT_JIRA_INTERVAL,
   SYNC_INTERVALS,
@@ -179,7 +179,7 @@ export function readRepos(value: unknown, file: string): Record<string, string[]
 /**
  * The per-path defaults (spec §5.1), whole: absolute normalised path → `{ base?, namePattern? }`. The fallback is per VALUE, one level finer than the entry: a
  * key that is not an absolute, already-normalised path (`normaliseRepoPath` with no home returns it unchanged — a `~` key would expand to something else and a
- * relative one is refused) costs the entry; a value that is not a string or fails the same check the write route applies — `branchNameProblem` for the base,
+ * relative one is refused) costs the entry; a value that is not a string or fails the same check the write route applies — `defaultBaseProblem` for the base,
  * `patternProblem` for the pattern — costs only itself, so a hand-edited bad pattern leaves that path's good base working; an entry left with neither is
  * dropped. Each drop is warned once. A `repoDefaults` that is not an object reads as `{}`. `__proto__` is skipped by name, as `readRepos` does, though the
  * absolute-path test would refuse it anyway.
@@ -200,7 +200,7 @@ export function readRepoDefaults(value: unknown, file: string): Record<string, J
     }
     const defaults: JiraRepoDefaults = {};
     if (entry.base !== undefined) {
-      const problem = typeof entry.base !== 'string' ? 'is not a string' : branchNameProblem(entry.base);
+      const problem = typeof entry.base !== 'string' ? 'is not a string' : defaultBaseProblem(entry.base);
       if (problem === null) defaults.base = entry.base as string;
       else drop(file, `${what} base`, problem);
     }
@@ -428,6 +428,9 @@ export function parseReposWrite(body: unknown, home: string): Parsed<{ project: 
  * that left a field out has not said whether to keep or clear it. Nothing is trimmed — Table A refuses a space, so a padded value is a refusal, not a silent
  * fix. Whether the path is MAPPED, and whether the base exists, are not decided here: the first needs the file (the route reads it), the second is deliberately
  * never checked (spec §5.1 — the branch may exist only on `origin`).
+ *
+ * A base is Table A plus one rule of its own (`defaultBaseProblem`, final review M1): `base is a branch name, without origin/`. The tool adds `origin/`
+ * itself, so a stored prefix made every Start exit 4.
  */
 export function parseRepoDefaultsWrite(body: unknown, home: string): Parsed<{ path: string; base: string | null; namePattern: string | null }> {
   if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
@@ -437,7 +440,7 @@ export function parseRepoDefaultsWrite(body: unknown, home: string): Parsed<{ pa
   if (body.base !== null && typeof body.base !== 'string') return { ok: false, error: 'base must be a string or null' };
   if (body.namePattern !== null && typeof body.namePattern !== 'string') return { ok: false, error: 'namePattern must be a string or null' };
   if (body.base !== null) {
-    const problem = branchNameProblem(body.base);
+    const problem = defaultBaseProblem(body.base);
     if (problem !== null) return { ok: false, error: `base ${problem}` };
   }
   if (body.namePattern !== null) {

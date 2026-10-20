@@ -769,7 +769,7 @@ describe('the Repositories card — a path\'s defaults', () => {
     mapPay({ repoDefaults: { '/home/ada/pay': { base: 'develop' } } });
     await renderSetup();
     expect(baseField().value).toBe('develop');
-    expect(baseField().placeholder).toBe('origin/HEAD');
+    expect(baseField().placeholder).toBe('e.g. develop');
     expect(patternField().value).toBe('');
     expect(patternField().placeholder).toBe('{key}-{slug}');
     expect(saveButton()).toBeDisabled();
@@ -814,6 +814,26 @@ describe('the Repositories card — a path\'s defaults', () => {
 
     fireEvent.change(patternField(), { target: { value: '{key}-{slug}' } });
     expect(within(reposCard()).queryByText(/^renders as/)).toBeNull();
+  });
+
+  // M1 (final review): the old `origin/HEAD` placeholder invited a value the tool refuses at every Start. The hint is instant; Save still goes, and the
+  // server's sentence is the one shown in the group's error slot.
+  it('hints at an origin/ base while it is typed, and still lets Save go — the server\'s sentence wins', async () => {
+    mapPay();
+    defaultsAnswer = () => answer({ error: 'base is a branch name, without origin/' }, 400);
+    await renderSetup();
+    fireEvent.change(baseField(), { target: { value: 'origin/develop' } });
+    const hint = within(reposCard()).getByText('base is a branch name, without origin/');
+    expect(hint).toHaveClass('jira-setup-warn');
+    expect(saveButton()).toBeEnabled();
+
+    await userEvent.click(saveButton());
+    const shown = (): HTMLElement[] => within(reposCard()).queryAllByText('base is a branch name, without origin/');
+    await waitFor(() => expect(shown().some((e) => e.classList.contains('set-error'))).toBe(true));
+    expect(baseField().value).toBe('origin/develop');
+
+    fireEvent.change(baseField(), { target: { value: 'develop' } });
+    expect(shown().filter((e) => e.classList.contains('jira-setup-warn'))).toHaveLength(0);
   });
 
   it('says the server did not answer, or answered without a sentence, under the same slot', async () => {

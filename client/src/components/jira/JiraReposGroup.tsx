@@ -4,7 +4,7 @@ import { useJiraContext } from '../../hooks/JiraContext';
 import { useFetched } from '../../hooks/useFetched';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { displayPath, fetchJiraRefs, saveRepoDefaults, unmappedProjects } from '../../lib/jira';
-import { patternProblem } from '../../../../shared/jira-branch';
+import { defaultBaseProblem, patternProblem } from '../../../../shared/jira-branch';
 import type { JiraRepoDefaults, JiraStatusPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
 import { Select } from '../ui/Select';
@@ -24,13 +24,15 @@ import { errorOf, postJson, type JiraProjectList } from './JiraBoardSheet';
  *   server's sentence, and the Select stays disabled — mapped rows above it still read and still remove.
  *
  * **A path's defaults** (Jira repo/branch, spec §5.1; DESIGN.md §8.9.3): under the FIRST row of each distinct path — the defaults belong to the path, not to a
- * project, so a checkout mapped to two projects has one line — two fields and `Save`: the base a New worktree is cut from (placeholder `origin/HEAD`) and the
+ * project, so a checkout mapped to two projects has one line — two fields and `Save`: the base a New worktree is cut from (placeholder `e.g. develop`) and the
  * pattern its branch is named by (`{key}-{slug}`). Each is stored per PATH through `POST /api/jira/repo-defaults`, both values always sent and an empty field
  * as `null` (unset), and a refusal is the server's sentence in the SAME error slot the path writes use. The row reads the path's refs once on mount
  * (`fetchJiraRefs(path, null)`, never again on a status reload): readable, the branch names are offered on the base field; unreadable, the row says
  * `branches unavailable — <path> <reason>` and both fields stay usable, because a repo that cannot be listed from the board may still be fine on the host.
  * `patternProblem` is an instant HINT while the pattern is typed — the same rules the server applies, so the sentence is rarely a surprise — and it never
- * blocks Save: the server's sentence is the one that counts, and a client rule that drifted ahead of it would refuse a pattern the server accepts.
+ * blocks Save: the server's sentence is the one that counts, and a client rule that drifted ahead of it would refuse a pattern the server accepts. The base
+ * gets the same kind of hint from `defaultBaseProblem` (final review M1): it was `origin/HEAD` the old placeholder invited, and a stored `origin/` prefix is
+ * a value the tool refuses at every Start, so the row says `base is a branch name, without origin/` as it is typed rather than after the first failed run.
  *
  * **A write replaces one project's whole list** (`POST /api/jira/repos` `{ project, paths }`, spec §5), so `×` sends the list minus that path and `Add` the
  * list plus the typed one. An emptied list removes the key, which is how a project becomes unmapped again. The typed path goes out TRIMMED but otherwise as
@@ -225,6 +227,8 @@ function RepoDefaultsRow({
   const sentPattern = pattern.trim() === '' ? null : pattern.trim();
   const changed = sentBase !== (stored?.base ?? null) || sentPattern !== (stored?.namePattern ?? null);
   const problem = sentPattern === null ? null : patternProblem(sentPattern);
+  // Prefixed with the field's name, as the server's 400 is, because the base's own rule reads as nothing on its own (`is a branch name, without origin/`).
+  const baseProblem = sentBase === null ? null : defaultBaseProblem(sentBase);
 
   async function save(): Promise<void> {
     if (!(await onSave(path, sentBase, sentPattern)) || !mounted.current) return;
@@ -238,7 +242,7 @@ function RepoDefaultsRow({
         className="set-text jira-setup-defaults-base"
         type="text"
         aria-label={`Default base for ${shown}`}
-        placeholder="origin/HEAD"
+        placeholder="e.g. develop"
         list={listed === null ? undefined : listId}
         value={base}
         disabled={busy}
@@ -263,6 +267,7 @@ function RepoDefaultsRow({
       <Chip size={28} disabled={busy || !changed} aria-label={`Save defaults for ${shown}`} onClick={() => void save()}>
         Save
       </Chip>
+      {baseProblem !== null && <span className="set-hint jira-setup-warn jira-setup-defaults-hint">base {baseProblem}</span>}
       {problem !== null && <span className="set-hint jira-setup-warn jira-setup-defaults-hint">{problem}</span>}
       {unavailable !== null && <span className="set-hint jira-setup-defaults-hint">{unavailable}</span>}
     </div>

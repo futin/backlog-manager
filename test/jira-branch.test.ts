@@ -5,6 +5,7 @@ import {
   SLUG_MAX,
   branchCarriesKey,
   branchNameProblem,
+  defaultBaseProblem,
   patternProblem,
   renderBranchPattern,
   shellQuote,
@@ -116,6 +117,21 @@ describe('renderBranchPattern (Table D)', () => {
     ['{key}/{slug}', '', 'timify-123']
   ])('%j + %j -> %j', (pattern, slug, expected) => {
     expect(renderBranchPattern(pattern, 'TIMIFY-123', slug)).toBe(expected);
+  });
+});
+
+// M1 (final review): a stored base is what `git worktree add` is cut from, and the tool resolves it locally or as `origin/<base>` itself — so a saved
+// `origin/develop` is asked for as `origin/origin/develop` and every Start exits 4. Table A first, then the prefix.
+describe('defaultBaseProblem', () => {
+  it('passes a plain branch name, and one that merely contains origin', () => {
+    for (const base of ['develop', 'release/1.2', 'origin', 'feature/origin/x', 'origins/x']) expect(defaultBaseProblem(base)).toBeNull();
+  });
+
+  it('refuses an origin/ prefix in its own words, and Table A before it', () => {
+    expect(defaultBaseProblem('origin/develop')).toBe('is a branch name, without origin/');
+    expect(defaultBaseProblem('origin/HEAD')).toBe('is a branch name, without origin/');
+    expect(defaultBaseProblem('origin/a b')).toBe('may hold only A-Z a-z 0-9 . _ / -');
+    expect(defaultBaseProblem('')).toBe('is empty');
   });
 });
 

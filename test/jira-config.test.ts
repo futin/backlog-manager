@@ -208,6 +208,12 @@ describe('readJiraConfig — repoDefaults', () => {
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
+  it('drops a hand-written origin/ base the write route would refuse, keeping that entry\'s pattern', () => {
+    put({ repoDefaults: { '/a': { base: 'origin/develop', namePattern: '{key}-{slug}' } } });
+    expect(readJiraConfig(file).repoDefaults).toEqual({ '/a': { namePattern: '{key}-{slug}' } });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it('drops an entry left with no value, and one that is not an object, and a non-string value', () => {
     put({ repoDefaults: { '/a': { base: 'a b' }, '/b': 'develop', '/c': [], '/d': { base: 7, namePattern: null }, '/e': {}, '/f': { base: 'ok' } } });
     expect(readJiraConfig(file).repoDefaults).toEqual({ '/f': { base: 'ok' } });

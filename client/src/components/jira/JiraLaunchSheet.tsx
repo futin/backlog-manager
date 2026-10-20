@@ -26,6 +26,14 @@ import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 
 /**
+ * How long a typed branch choice must stand still before the preview asks about it (final review, I1). Every `GET /api/jira/prompt` is a fresh issue read —
+ * three Jira calls against the same 429 budget the board's poller lives on — plus a refs read of several git spawns, so a request per keystroke turned a
+ * 30-character name into ~90 Jira calls. 350 ms sits inside the 300–400 ms band where a steady typist's next key lands first and a pause reads as done; it is
+ * exported so the suite advances the clock by the constant, never by a copy of it.
+ */
+export const PREVIEW_SETTLE_MS = 350;
+
+/**
  * JiraLaunchSheet — the one extra tap between a ticket and a running Claude (Jira phase 5, spec §7; DESIGN.md §8.7 Sheet, §8.9 — the board's `LaunchSheet` is
  * its sibling and this mirrors its shape). Dispatch is not a read: an `execute` launch edits code in another repo with no human at a terminal, so the sheet is
  * where the prompt is read before it is sent, where the permission mode is chosen inside the ceiling the host allows, and where "the dashboard cannot see this
@@ -35,7 +43,8 @@ import { Switch } from '../ui/Switch';
  * **The preview is the server's prompt, not this file's.** `GET /api/jira/prompt` composes what Start sends (and what Copy prompt copies) — one
  * composition behind three readers — so the sheet never builds a prompt, and a refusal (`unknown skill s_…` for a skill deleted since the menu was drawn,
  * `prompt too long`) is drawn where the prompt would be, with Start disabled: a sentence the server refused is not one to launch. It is keyed on the
- * action, the repository and the branch choice through `useFetched`, so a superseded answer never lands over the one the reader is looking at.
+ * action, the repository and the branch choice through `useFetched`, so a superseded answer never lands over the one the reader is looking at — and a
+ * typed choice is asked about only once it has stood still for `PREVIEW_SETTLE_MS`, because every preview is three Jira calls and a git read.
  *
  * **The branch choice is the Branch section's** (`JiraBranchSection`, spec §5.3): this sheet holds its state, because the preview, Copy prompt and Start all
  * carry it — the preview on its query, Start as the five flat fields. Until the section has seeded from the chosen repository's refs nothing is asked: a
@@ -95,14 +104,31 @@ export function JiraLaunchSheet({
   const [started, setStarted] = useState<JiraDispatchResult | null>(null);
 
   const actionKey = jiraActionParam(action);
-  const branch = useBranchState(action, repo, issue.key, issue.summary, data?.repoDefaults[repo]);
+  const branch = useBranchState(action, repo, issue.key, issue.summary, data?.repoDefaults?.[repo]);
   const branchSent = branch.ready && branch.refusal === null;
-  const preview = useFetched(branchSent ? () => fetchJiraPrompt(issue.key, action, repo, branch.choice) : null, [
-    issue.key,
-    actionKey,
-    repo,
-    JSON.stringify(branch.choice)
-  ]);
+  const choiceKey = JSON.stringify(branch.choice);
+  // The choice the preview may be asked about — the live one once it has stood still (I1). Typing (a field or a switch inside the same mode) waits
+  // `PREVIEW_SETTLE_MS`; the rest goes through at once, set during render like `useBranchState`'s re-seed so no frame asks about the old one: the first
+  // ready choice (`settled` is cleared whenever the section is not ready, so a repository change lands here), an action change, and a mode switch. Those
+  // are single clicks, never a burst, and making them wait would only delay a preview the reader is looking for. One edge waits anyway: an action change
+  // whose re-seed keeps the mode but changes a field — the re-seed lands one render after the action, so that render reads as an edit. Nothing is lost:
+  // the preview is 350 ms later, never wrong.
+  const [settled, setSettled] = useState<{ action: string; mode: string; choice: string } | null>(null);
+  if (!branch.ready) {
+    if (settled !== null) setSettled(null);
+  } else if (settled === null || settled.action !== actionKey || settled.mode !== branch.choice.mode) {
+    setSettled({ action: actionKey, mode: branch.choice.mode, choice: choiceKey });
+  }
+  useEffect(() => {
+    if (settled === null || settled.choice === choiceKey) return;
+    const timer = setTimeout(() => setSettled({ ...settled, choice: choiceKey }), PREVIEW_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [settled, choiceKey]);
+  // Asked only while the settled choice IS the live one: during the wait the load is `null` — `idle`, no request, and `promptText` null so Start and
+  // Copy prompt are disabled — and the moment it settles the key changes once, so `useFetched` starts exactly one request for it. Start can therefore
+  // never send a choice other than the one the preview was composed for: any edit after the answer makes the key differ again and the answer reads stale.
+  const previewable = branchSent && settled !== null && settled.choice === choiceKey;
+  const preview = useFetched(previewable ? () => fetchJiraPrompt(issue.key, action, repo, branch.choice) : null, [issue.key, actionKey, repo, choiceKey]);
   const detail = useFetched(() => fetchJiraDetail(issue.key), [issue.key]);
 
   const promptText = preview.status === 'ok' ? preview.value : null;

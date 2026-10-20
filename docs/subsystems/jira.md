@@ -34,6 +34,8 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
   projects.
 - **Per project: nothing.** A mapped repository is a path in `jira.json` and never enters `registry.json`. Under compose it has to sit under one of the two
   read-only mounts, `BM_PROJECT_ROOT` or `BM_JIRA_REPO_ROOT` (both passed to the server as `BM_REPO_ROOTS`), or its refs read as `not mounted into the board`.
+  A root that does not exist on the host is created by Docker's bind mount, as an empty directory (root-owned on Linux), so set `BM_JIRA_REPO_ROOT` to a
+  directory that already exists on a machine without `~/Documents/timify-projects`.
 - **Per browser**: `backlog-manager.jira-board` (the board pick, `usePersistedState`) and `backlog-manager.jira-page` (`board | setup`, a module store) since
   phase 2; `jiraDefaultAction` (a `Settings` key, capped at 64 characters) since phase 5b. The Board page's filters and summary search are per mount and never persisted.
 
@@ -305,8 +307,10 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
   mount, debounces the root search (`JIRA_ROOT_SEARCH_DEBOUNCE_MS`, 300 ms) and the JQL check (`JIRA_JQL_CHECK_DEBOUNCE_MS`, 500 ms), leaves validation to the
   server, and on any answer but a 200 stays open with the server's sentence. `JiraReposGroup` sends a project's whole list per write, the typed path trimmed
   but otherwise as typed — the server alone normalises. Since the repo/branch work each distinct path's first row also carries its defaults — a base field
-  (placeholder `origin/HEAD`, the branches offered once the row's one `/refs` read lands), a pattern field (`{key}-{slug}`, `patternProblem` as a hint that
+  (placeholder `e.g. develop`, the branches offered once the row's one `/refs` read lands), a pattern field (`{key}-{slug}`, `patternProblem` as a hint that
   never blocks) and `Save` to `/repo-defaults` — and an unreadable repo says `branches unavailable — <path> <reason>` with both fields still usable.
+  The base has a never-blocking hint too, `defaultBaseProblem`'s `base is a branch name, without origin/`, which the route also refuses with: the tool adds
+  `origin/` itself, so a stored prefix would make every Start exit 4.
   `JiraConnectionGroup` is a read-only report. Every landed write reloads the shell's status, even if
   the page has gone.
 - **The chip and the Trackers row.** `JiraChip` (`components/JiraChip.tsx`) sits beside `TrackerChip` in the one home `App` picks with `useNarrow` — the
@@ -319,7 +323,9 @@ The look is [`.claude/DESIGN.md`](../../.claude/DESIGN.md) §8.9; this is the me
 `skills/jira/` is the plugin's seventh skill, and `skills/jira/tools/jira.mjs` its CLI. Every command but `worktree` is a request to the routes above, on
 `127.0.0.1:${BM_API_PORT || 4322}` — the CLI carries no Jira credential, reads no `BM_JIRA_*` and sends no `authorization` header, so the server stays Jira's
 one caller (spec §10), and a source guard in `jira.test.mjs` holds all three. The one `BM_JIRA_` name it may read is `BM_JIRA_FETCH_RETRY_MS`, `worktree`'s
-pause before its one fetch retry — a test knob, nothing of Jira's.
+pause before its one fetch retry — a test knob, nothing of Jira's. Since the final review (M4) there is a second, `BM_JIRA_FETCH_TIMEOUT_MS`: each fetch is
+killed after 60 s by default (a `fetch failed: git fetch timed out after 60 s` note), and runs ssh as `ssh -o BatchMode=yes` unless `GIT_SSH_COMMAND`,
+`GIT_SSH` or the repo's `core.sshCommand` already says how — so a host-key or passphrase prompt fails at once instead of hanging the session.
 
 | command                     | route(s)                                                                      | stdout                                              |
 | --------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------- |
@@ -461,7 +467,7 @@ section (seven dialogs). The browser still never talks to Jira or the dashboard:
   `useAgents()` is read only then). It posts `stopJira` (`POST /api/agents/jira-stop`) through the same `useAction` as the two writes, so one guard and one
   error line serve all three; a landed stop reloads the status and nudges the board.
 - **Skills and the default action.** `JiraSkillsGroup` (Jira › Setup, under Connection) lists the two locked built-ins and one row per stored skill, with an
-  add row and a `×` that asks through `ui/Confirm`; every write is one of the five config routes and reloads the shell's status. Settings › Local › Dispatch
+  add row and a `×` that asks through `ui/Confirm`; every write is one of the six config routes and reloads the shell's status. Settings › Local › Dispatch
   gains `Jira default action`, drawn only while Jira is configured. It is read by `Run ▾`, not by the sheet — every way into the sheet passes the clicked
   row — which lists the resolved default first, marked `default`; `resolveJiraAction(setting, skills)` reads a deleted skill's id as `execute` in the select
   and in the menu alike, without rewriting the stored value.
@@ -506,9 +512,12 @@ rule](invariants.md#a-jira-branch-name-obeys-one-rule-and-jiramjs-carries-its-on
   chip when a New name exists; the server's own refusal reaches the Prompt field through the preview, and a refused Start is the sheet's `.sheet-error` alert.
   `execute` with a branch adds the `Open MR when done` switch, and with Continue, once it is on, a Target field (`the repository's default` when empty). The
   choice rides both the preview (`fetchJiraPrompt`) and Start (`branchDispatchFields`).
+  Typing waits (final review, I1): every preview is an issue read (three Jira calls) and a refs read, so an edit inside one mode is asked about only once it has
+  stood still for `PREVIEW_SETTLE_MS` (350 ms), while the first ready choice, an action change and a mode switch go at once. Until the preview for the CURRENT
+  choice has landed, Start and Copy prompt are disabled (`the prompt has not loaded`), so Start never sends a choice other than the one previewed.
 - **The card's worktree chip.** `JiraBoardView` reads `GET /api/jira/worktrees` once on mount and again only when the SET of live keys changes — not a poller —
   and `ticketWorktrees(key, payload)` picks the trees on a branch that carries the key, never a repo's own tree. One tree draws its branch name, more draw `N
-  worktrees`; a failed read draws nothing.
+  worktrees`; a failed read draws nothing. A Start's own tree is cut later, by the session, so its chip appears on the next change of live keys or a remount.
 - **The modal's Worktrees list.** `JiraIssueModal` asks the same route itself — on open, and when the key or its session changes — and lists the trees under a
   heading with a count pill. Each row's `Remove` copies `removeCommand` — `git -C <repo> worktree remove <path>`, both quoted — and runs nothing: the board
   cannot see a session it did not start (Copy prompt, a terminal), so its title says to make sure none is using the tree. It is disabled while the key has a

@@ -956,6 +956,49 @@ test('worktree: a fetch that cannot take its ref lock is retried, then reported,
   assert.equal(git(out.json.worktree, 'rev-parse', 'HEAD'), stale, 'cut from the refs as of the last fetch')
 })
 
+// M4 (final review): a fetch that never answers — a dead remote, an SSH host-key or passphrase prompt nobody can see — used to hang the headless session.
+// It is now bounded (`BM_JIRA_FETCH_TIMEOUT_MS` shortens the 60 s default here) and lands in the same `fetch failed:` note. The remote is an `ssh://` URL
+// whose "ssh" is a script: one that sleeps, or one that records its arguments and fails at once.
+function fakeSsh(fx, name, body) {
+  const file = path.join(fx.root, name)
+  fs.writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 })
+  return file
+}
+
+test('worktree: a fetch that hangs is cut off by the timeout, reported as a note, and the run goes on', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'remote', 'set-url', 'origin', 'ssh://example.invalid/origin.git')
+  // stderr goes to /dev/null so the orphaned sleep holds no pipe the tool waits on once git is killed.
+  const hang = fakeSsh(fx, 'hang-ssh', 'exec 2>/dev/null\nexec sleep 5')
+  const started = Date.now()
+  // GIT_SSH_COMMAND already set is the person's own, and is used as it is: the sleeping script runs, not `ssh -o BatchMode=yes`.
+  const out = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-hang', 'main'), { GIT_SSH_COMMAND: hang, BM_JIRA_FETCH_TIMEOUT_MS: '300' })
+  assert.equal(out.status, 0, out.stderr)
+  assert.ok(Date.now() - started < 4000, `took ${Date.now() - started} ms`)
+  assert.ok(out.json.notes.includes('fetch failed: git fetch timed out after 300 ms — using refs as of last fetch'), out.json.notes.join(' | '))
+})
+
+test('worktree: the fetch runs ssh with BatchMode=yes unless GIT_SSH_COMMAND, GIT_SSH or core.sshCommand already says how', () => {
+  const fx = wtFixture()
+  git(fx.repo, 'remote', 'set-url', 'origin', 'ssh://example.invalid/origin.git')
+  const bin = path.join(fx.root, 'bin')
+  fs.mkdirSync(bin)
+  const said = path.join(fx.root, 'ssh-args')
+  fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh\necho "$@" >> '${said}'\nexit 255\n`, { mode: 0o755 })
+  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}`, GIT_SSH_COMMAND: undefined, GIT_SSH: undefined }
+
+  const batch = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-b1', 'main'), env)
+  assert.equal(batch.status, 0, batch.stderr)
+  assert.match(fs.readFileSync(said, 'utf8'), /-o BatchMode=yes/)
+
+  // The repo's own core.sshCommand wins over the default — the env variable would override it, so the tool sets none.
+  fs.rmSync(said)
+  git(fx.repo, 'config', 'core.sshCommand', path.join(bin, 'ssh'))
+  const own = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-b2', 'main'), env)
+  assert.equal(own.status, 0, own.stderr)
+  assert.doesNotMatch(fs.readFileSync(said, 'utf8'), /BatchMode/)
+})
+
 test('worktree leaves a real node_modules directory in an attached tree a directory', () => {
   const fx = wtFixture()
   git(fx.seed, 'fetch', '-q', 'origin')
@@ -984,9 +1027,11 @@ test('jira.mjs talks to 127.0.0.1 only, carries no Jira credential, and never ca
   const code = codeLines().join('\n')
   assert.ok(!code.includes('process.exit('), 'process.exit( truncates a pipe')
   assert.ok(!/atlassian/i.test(code), 'jira.mjs names an Atlassian host')
-  // `BM_JIRA_FETCH_RETRY_MS` is the one `BM_JIRA_` name allowed: the worktree command's fetch-retry pause, a test knob that carries nothing of Jira's.
-  // Removed by exact name before the check, so any other `BM_JIRA_` spelling — the credentials above all — is still refused.
-  assert.ok(!code.replaceAll('BM_JIRA_FETCH_RETRY_MS', '').includes('BM_JIRA_'), 'jira.mjs reads a Jira credential variable')
+  // `BM_JIRA_FETCH_RETRY_MS` and `BM_JIRA_FETCH_TIMEOUT_MS` are the two `BM_JIRA_` names allowed: the worktree command's fetch-retry pause and its fetch's
+  // bound, test knobs that carry nothing of Jira's. Removed by exact name before the check, so any other `BM_JIRA_` spelling — the credentials above all —
+  // is still refused.
+  const knobsGone = code.replaceAll('BM_JIRA_FETCH_RETRY_MS', '').replaceAll('BM_JIRA_FETCH_TIMEOUT_MS', '')
+  assert.ok(!knobsGone.includes('BM_JIRA_'), 'jira.mjs reads a Jira credential variable')
   assert.ok(!/authorization/i.test(code), 'jira.mjs builds an authorization header')
   // Every scheme in the code, whatever follows it — a templated host (`https://${site}`) included, which a host-shaped match would miss. The one allowed
   // is the loopback base; the stack-down sentence is built from host and port, so it carries no scheme to exempt.

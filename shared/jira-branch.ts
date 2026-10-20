@@ -110,6 +110,15 @@ export function renderBranchPattern(pattern: string, key: string, slug: string):
 }
 
 /**
+ * Why `base` cannot be a path's stored default base, or `null` (final review, M1). Table A first, then one rule of its own: no `origin/` prefix. The base is a
+ * BRANCH name — `jira.mjs worktree` resolves it locally or as `origin/<base>` itself — so a stored `origin/develop` is looked up as `origin/origin/develop`
+ * and every Start exits 4. Only the stored default gets this rule: a base or target typed at Start goes through Table A alone, as the tool judges it.
+ */
+export function defaultBaseProblem(base: string): string | null {
+  return branchNameProblem(base) ?? (base.startsWith('origin/') ? 'is a branch name, without origin/' : null);
+}
+
+/**
  * Why `pattern` cannot name a branch, or `null`. A pattern is judged by what it produces: it renders the sample, runs `branchNameProblem` on that, then
  * `branchCarriesKey` for the sample key — a pattern whose names the board would never find again is refused at Setup, not at Start.
  */

@@ -587,6 +587,11 @@ describe('parseRepoDefaultsWrite', () => {
     expect(refuse({ path: '/a', base: 'a'.repeat(201), namePattern: null })).toBe('base is longer than 200 characters');
   });
 
+  // M1 (final review): the tool adds `origin/` itself, so a stored `origin/develop` made every Start exit 4.
+  it('refuses a base with an origin/ prefix', () => {
+    expect(refuse({ path: '/a', base: 'origin/develop', namePattern: null })).toBe('base is a branch name, without origin/');
+  });
+
   it('refuses a pattern by Table E, naming namePattern', () => {
     expect(refuse({ path: '/a', base: null, namePattern: '{slug}' })).toBe('namePattern renders as sample-slug, which does not carry ABC-1');
     expect(refuse({ path: '/a', base: null, namePattern: '{foo}-{key}' })).toBe(

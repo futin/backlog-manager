@@ -46,10 +46,12 @@ its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch
   exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
   `8` (the stack is down) and `9` (a refusal this command cannot absorb).
 - `skills/jira/tools/jira.mjs` — the `jira` skill's CLI (Jira phase 4): `show`, `transitions`, `transition`, `assign` and `status`, each one or two requests to
-  `/api/jira` on `127.0.0.1` and nothing else. API-only, so it has no files mode and writes no file; it carries no Jira credential, the server being Jira's
-  one caller. Exit `0` success, `1` usage (a key that is not one included — nothing is sent), `2` a 4xx, `3` a 5xx, `5` the stack is down.
+  `/api/jira` on `127.0.0.1`. API-only except `worktree`, which runs git in the mapped repo (below); the API commands have no files mode and write no file,
+  and none of it carries a Jira credential, the server being Jira's one caller.
+  Exit `0` success, `1` usage (a key that is not one included — nothing is sent), `2` a 4xx, `3` a 5xx, `5` the stack is down.
   Since the repo/branch work it has one more command, `worktree <KEY> --repo <path> --mode new|continue --branch <name> [--base <name>]`, and it is the
-  exception to all of that: git only, no request, so it works with the stack down. It fetches (one retry on a lock, `BM_JIRA_FETCH_RETRY_MS` apart), re-checks
+  exception to all of that: git only, no request, so it works with the stack down. It fetches (one retry on a lock, `BM_JIRA_FETCH_RETRY_MS` apart; each
+  attempt killed after 60 s, `BM_JIRA_FETCH_TIMEOUT_MS`, and ssh run with `BatchMode=yes` unless something already configures it), re-checks
   the Run's choice against the fresh refs, enters or makes the tree at `<repo>/.worktrees/<branch with / as ->`, fast-forwards a clean tree with `--ff-only`,
   writes `.worktrees/` and `node_modules` to `info/exclude` and links `node_modules` for a tree it made, and prints one JSON line
   (`{ worktree, branch, created, notes }`). It never runs `--force`, `-D`, `prune` or `reset`. Exit `0`, `1` usage, or `4` — git refused, or a re-check

@@ -379,6 +379,16 @@ describe('the workspace block', () => {
     }
   });
 
+  // M3 (final review): the block prints a shell line with the key in it bare, and `mapJiraIssue` does not check Jira's key against `JIRA_KEY_RE`. Jira's keys
+  // are well-formed in practice, so this is defence in depth: a key that is not one is refused in the routes' own words rather than printed into a command.
+  it('refuses a detail whose key is not a Jira key, for a built-in and a skill alike, and composes it as before without a workspace', () => {
+    const bad = detail({ key: 'PAY-1; rm -rf ~' });
+    const skill = { kind: 'skill' as const, skill: { id: 's_0a1b2c3d', name: 'Groom', prompt: '/jira-groom {key}' } };
+    expect(composeJiraPrompt(bad, { kind: 'execute' }, '/r', newWs(), NONCE)).toEqual({ ok: false, error: 'invalid issue key' });
+    expect(composeJiraPrompt(bad, skill, '/r', contWs(), NONCE)).toEqual({ ok: false, error: 'invalid issue key' });
+    expect(composeJiraPrompt(bad, { kind: 'context' }, '/r', null, NONCE).ok).toBe(true);
+  });
+
   describe('new', () => {
     const prompt = exe('/r', newWs());
 
