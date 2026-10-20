@@ -11,8 +11,9 @@ import { JIRA_JQL_MAX_CHARS } from '../server/src/jira/config.util';
 import { JiraClient } from '../server/src/jira/jira.client';
 import { JiraLiveService } from '../server/src/jira/live.service';
 import { JiraPollerService } from '../server/src/jira/poller.service';
+import * as refsUtil from '../server/src/jira/refs.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
-import type { JiraIssueDetail, JiraStatusPayload } from '../shared/types';
+import type { JiraIssueDetail, JiraRepoRefs, JiraStatusPayload, JiraWorktree } from '../shared/types';
 import { listenLoopback } from './helpers/app';
 import { FakeJira, makeRawIssue } from './helpers/jira';
 import { makeRegistry } from './helpers/store';
@@ -119,7 +120,9 @@ describe('unconfigured', () => {
     ['/search?q='],
     ['/projects'],
     ['/jql/check?jql=assignee%20%3D%20currentUser()'],
-    ['/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay']
+    ['/prompt?key=PAY-131&action=execute&repo=%2Fwork%2Fpay'],
+    ['/refs?repo=%2Fwork%2Fpay'],
+    ['/worktrees']
   ])('GET /api/jira%s is 503 Jira is not configured', async (path) => {
     const res = await get(path).expect(503);
     expect(res.body).toEqual({ error: 'Jira is not configured' });
@@ -130,6 +133,8 @@ describe('unconfigured', () => {
     expect((await get('/issue/pay-1').expect(400)).body).toEqual({ error: 'invalid issue key' });
     expect((await get('/search').expect(400)).body).toEqual({ error: 'q is required' });
     expect((await get('/prompt?key=pay-1&action=execute&repo=%2Fwork%2Fpay').expect(400)).body).toEqual({ error: 'invalid issue key' });
+    expect((await get('/refs').expect(400)).body).toEqual({ error: 'repo is required' });
+    expect((await get('/refs?repo=%2Fwork%2Fpay&key=pay-1').expect(400)).body).toEqual({ error: 'invalid issue key' });
   });
 });
 
@@ -562,6 +567,121 @@ describe('GET /api/jira/prompt', () => {
       expect(res.body).toEqual({ error: 'prompt too long' });
     } finally {
       writeFileSync(file, JSON.stringify({ repos: { PAY: [REPO] }, skills: [SKILL] }));
+    }
+  });
+});
+
+/**
+ * `GET /api/jira/refs` and `GET /api/jira/worktrees` (Jira repo/branch, Task 3; spec §4 and §5.2) — the launch sheet's branch picker and Setup's warnings. The
+ * git reads are stubbed here (`jira-refs.test.ts` runs them against real git): what this suite owns is the contract around them — the order of the refusals,
+ * the mapping check, the distinct-path rule and the shape handed back. Its own app for the same reason the prompt's is: the routes read `repos` from `jira.json`.
+ */
+describe('GET /api/jira/refs and /api/jira/worktrees', () => {
+  const PAY = '/work/pay';
+  const SHARED = '/work/shared';
+  const OTHER = '/work/other';
+  const REFS: JiraRepoRefs = {
+    repo: PAY,
+    available: true,
+    fetchedAt: '2026-01-01T00:00:00.000Z',
+    mainBranch: 'develop',
+    defaultBase: 'develop',
+    branches: [{ name: 'develop', local: true, remote: true, sync: 'same', committedAt: '2026-01-01T00:00:00.000Z', worktree: PAY, ticket: false }]
+  };
+  let refs: jest.SpyInstance;
+  let trees: jest.SpyInstance;
+
+  beforeAll(async () => {
+    prepare('refs');
+    writeFileSync(process.env.BM_JIRA_FILE!, JSON.stringify({ repos: { PAY: [PAY, SHARED], OPS: [SHARED, OTHER] } }));
+    await build(false);
+  });
+  afterAll(() => app.close());
+  beforeEach(() => {
+    refs = jest.spyOn(refsUtil, 'readRepoRefs').mockResolvedValue(REFS);
+    trees = jest.spyOn(refsUtil, 'readWorktrees').mockResolvedValue([]);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  const q = (params: Record<string, string>) => `/refs?${new URLSearchParams(params).toString()}`;
+
+  it.each([['absent', undefined], ['empty', ''], ['blank', '   ']])('400 repo is required when the repo is %s', async (_label, repo) => {
+    expect((await get(repo === undefined ? '/refs' : q({ repo })).expect(400)).body).toEqual({ error: 'repo is required' });
+    expect(refs).not.toHaveBeenCalled();
+  });
+
+  it.each([['lower case', 'pay-1'], ['no number', 'PAY'], ['empty', '']])('400 invalid issue key for a key that is %s, before the repo is looked at', async (_label, key) => {
+    expect((await get(q({ repo: '/not/mapped', key })).expect(400)).body).toEqual({ error: 'invalid issue key' });
+    expect(refs).not.toHaveBeenCalled();
+  });
+
+  it('400 <repo> is not mapped when the normalised path is in no project\'s list, quoting the repo as sent', async () => {
+    expect((await get(q({ repo: '/work/elsewhere' })).expect(400)).body).toEqual({ error: '/work/elsewhere is not mapped' });
+    expect((await get(q({ repo: 'work/pay' })).expect(400)).body).toEqual({ error: 'work/pay is not mapped' });
+    expect(refs).not.toHaveBeenCalled();
+  });
+
+  it('200 hands the stubbed refs back unchanged, for a path in ANY project\'s list, with a trailing slash dropped', async () => {
+    expect((await get(q({ repo: PAY })).expect(200)).body).toEqual(REFS);
+    await get(q({ repo: `${OTHER}/` })).expect(200);
+    expect(refs.mock.calls[1][0]).toBe(OTHER);
+  });
+
+  it('passes the key (null without one), the roots from the environment and a null stored base', async () => {
+    const saved = process.env.BM_REPO_ROOTS;
+    process.env.BM_REPO_ROOTS = '/work:/more';
+    try {
+      await get(q({ repo: PAY, key: 'PAY-131' })).expect(200);
+      await get(q({ repo: PAY })).expect(200);
+    } finally {
+      if (saved === undefined) delete process.env.BM_REPO_ROOTS;
+      else process.env.BM_REPO_ROOTS = saved;
+    }
+    expect(refs.mock.calls).toEqual([
+      [PAY, 'PAY-131', ['/work', '/more'], null],
+      [PAY, null, ['/work', '/more'], null]
+    ]);
+  });
+
+  it('answers an unavailable repo as a 200 with its reason — the sheet shows it, it is not an error', async () => {
+    const down: JiraRepoRefs = { repo: PAY, available: false, reason: 'not mounted into the board' };
+    refs.mockResolvedValue(down);
+    expect((await get(q({ repo: PAY })).expect(200)).body).toEqual(down);
+  });
+
+  it('409 when jira.json cannot be read, on both routes', async () => {
+    const file = process.env.BM_JIRA_FILE!;
+    const good = JSON.stringify({ repos: { PAY: [PAY, SHARED], OPS: [SHARED, OTHER] } });
+    writeFileSync(file, '{ not json');
+    try {
+      for (const path of [q({ repo: PAY }), '/worktrees']) {
+        const res = await get(path).expect(409);
+        expect(res.body.error).toMatch(/^settings\/jira\.json does not parse as JSON/);
+      }
+      expect(refs).not.toHaveBeenCalled();
+      expect(trees).not.toHaveBeenCalled();
+    } finally {
+      writeFileSync(file, good);
+    }
+  });
+
+  it('/worktrees reads every distinct mapped path once, even when two projects map it, and reports an unavailable one', async () => {
+    const tree: JiraWorktree = { repo: PAY, path: PAY, branch: 'develop', main: true };
+    trees.mockImplementation(async (repo: string) => (repo === OTHER ? 'does not exist' : repo === PAY ? [tree] : []));
+    const res = await get('/worktrees').expect(200);
+    expect(res.body).toEqual({ worktrees: [tree], unavailable: [{ repo: OTHER, reason: 'does not exist' }] });
+    expect(trees.mock.calls.map((c) => c[0]).sort()).toEqual([OTHER, PAY, SHARED]);
+  });
+
+  it('/worktrees is an empty payload when nothing is mapped', async () => {
+    const file = process.env.BM_JIRA_FILE!;
+    const good = JSON.stringify({ repos: { PAY: [PAY, SHARED], OPS: [SHARED, OTHER] } });
+    writeFileSync(file, '{}');
+    try {
+      expect((await get('/worktrees').expect(200)).body).toEqual({ worktrees: [], unavailable: [] });
+      expect(trees).not.toHaveBeenCalled();
+    } finally {
+      writeFileSync(file, good);
     }
   });
 });

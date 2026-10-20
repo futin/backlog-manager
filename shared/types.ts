@@ -747,6 +747,50 @@ export function isJiraKey(value: unknown): value is string {
   return typeof value === 'string' && JIRA_KEY_RE.test(value);
 }
 
+/**
+ * Why the server cannot list a mapped repo's branches, in the order the checks run (spec §4): the path is outside every root compose mounts (only when the
+ * server knows its roots), then it does not exist, then it is not the top of a git repository. Setup and the launch sheet say the sentence verbatim.
+ */
+export type JiraRepoUnavailable = 'not mounted into the board' | 'does not exist' | 'not a git repository';
+
+/**
+ * One branch of a mapped repo, local and `origin/` twin folded into one entry. `name` never carries `origin/`. `sync` is set whenever both sides exist — by
+ * NAME, never by upstream, because a branch the board cuts is `--no-track` — and says where the LOCAL copy stands against `origin/<name>` as of the last fetch;
+ * `null` when only one side exists or the comparison could not be made. `committedAt` is the newer tip's committer date, ISO. `worktree` is the absolute path
+ * of the tree that has the branch checked out (the main tree included), `ticket` whether the branch carries the requested issue key (spec §5.2).
+ */
+export interface JiraRefBranch {
+  name: string;
+  local: boolean;
+  remote: boolean;
+  sync: 'same' | 'behind' | 'ahead' | 'diverged' | null;
+  committedAt: string;
+  worktree: string | null;
+  ticket: boolean;
+}
+
+/**
+ * `GET /api/jira/refs`. `fetchedAt` is `FETCH_HEAD`'s mtime (ISO), `null` when the repo was never fetched; `mainBranch` the branch the main working tree has
+ * checked out (`null` on a detached HEAD); `defaultBase` the branch a New worktree is cut from unless the person says otherwise.
+ */
+export type JiraRepoRefs =
+  | { repo: string; available: true; fetchedAt: string | null; mainBranch: string | null; defaultBase: string | null; branches: JiraRefBranch[] }
+  | { repo: string; available: false; reason: JiraRepoUnavailable };
+
+/** One working tree of a mapped repo (`git worktree list`). `main` is the first one git lists — the repo's own working tree. */
+export interface JiraWorktree {
+  repo: string;
+  path: string;
+  branch: string | null;
+  main: boolean;
+}
+
+/** `GET /api/jira/worktrees`: every tree of every distinct mapped repo, and the repos that could not be read, each with its reason. */
+export interface JiraWorktreesPayload {
+  worktrees: JiraWorktree[];
+  unavailable: { repo: string; reason: JiraRepoUnavailable }[];
+}
+
 /** The title a Jira Run session carries in the dashboard: `jira <KEY>`, cut to 60 characters. Lives here, not in `agents/`, so `jira/` and `agents/` share it without an import between them. */
 export function jiraSessionName(key: string): string {
   return `jira ${key}`.slice(0, 60);

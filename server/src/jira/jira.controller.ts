@@ -3,17 +3,18 @@ import { Controller, Get, HttpException, Param, Query, Res } from '@nestjs/commo
 import type { Response } from 'express';
 
 import { isJiraKey, parseJiraActionParam } from '../../../shared/types';
-import type { JiraIssue, JiraIssueDetail, JiraStatusPayload } from '../../../shared/types';
+import type { JiraIssue, JiraIssueDetail, JiraRepoRefs, JiraStatusPayload, JiraWorktreesPayload } from '../../../shared/types';
 import { renderTicketBlock } from './block';
 import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from './config.util';
-import { jiraEnv } from './env.util';
+import { jiraEnv, repoRoots } from './env.util';
 import { JiraLiveService } from './live.service';
 import { JIRA_SEARCH_MAX_CHARS, JiraPollerService } from './poller.service';
 import { composeJiraPrompt, resolveJiraActionOrThrow } from './prompt.util';
+import { readRepoRefs, readWorktrees } from './refs.util';
 import { unwrapJira } from './unwrap.util';
 
 /**
- * The seven read routes under `/api/jira` (Jira phase 1, and phase 5's `/prompt`; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
+ * The nine read routes under `/api/jira` (Jira phase 1, phase 5's `/prompt`, and the repo/branch work's `/refs` and `/worktrees`; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
  * poller performs for it — never from a call this file makes, so the 429 window, the boot's missing `cloudId` and the 401 bookkeeping have one home
  * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: the board and repository writes live in
  * `jira-write.controller.ts` (phase 2), and the dispatch route is `AgentsModule`'s (phase 5).
@@ -153,6 +154,57 @@ export class JiraController {
     if (!composed.ok) throw new HttpException({ error: composed.error }, 400);
     res.type('text/plain; charset=utf-8');
     return composed.prompt;
+  }
+
+  /**
+   * `GET /api/jira/refs?repo&key` — one mapped repo's branches, local and `origin/` folded, for the launch sheet's picker (spec §4 and §5.2). The order of the
+   * refusals is the prompt's: `repo` (400 `repo is required`), `key` when sent (400 `invalid issue key` — absent is fine and leaves `ticket` false everywhere;
+   * an empty value is NOT absent), configured (503), `jira.json` readable (409 — a mapping read out of a file we cannot read would be a guess), then the repo
+   * mapped to SOME project (400 `<repo> is not mapped`, quoting the repo as sent). Any project, not the key's: there is no Jira read here to learn the key's
+   * project from, and the route reads git, not Jira — the mapping check only keeps it from being a way to list any directory the container can see.
+   *
+   * A repo the server cannot read is still a 200, `available: false` with its reason: the sheet shows the sentence and lets the person type a branch. The
+   * stored base is `null` until the repo's defaults are wired in (Task 4); the roots come from the environment per call.
+   */
+  @Get('refs')
+  async refs(@Query('repo') repo: unknown, @Query('key') key: unknown): Promise<JiraRepoRefs> {
+    if (typeof repo !== 'string' || repo.trim() === '') throw new HttpException({ error: 'repo is required' }, 400);
+    if (key !== undefined && !isJiraKey(key)) throw new HttpException({ error: 'invalid issue key' }, 400);
+    this.requireConfigured();
+    const config = this.requireReadableConfig();
+    const normalised = normaliseRepoPath(repo, homedir());
+    const mapped = Object.values(config.repos).some((paths) => paths.includes(normalised ?? ''));
+    if (normalised === null || !mapped) throw new HttpException({ error: `${repo} is not mapped` }, 400);
+    return readRepoRefs(normalised, key ?? null, repoRoots(), null);
+  }
+
+  /**
+   * `GET /api/jira/worktrees` — every working tree of every DISTINCT mapped path, for Setup → Repositories and the board's worktree readings (spec §5.5). A
+   * path two projects map is read once. A repo that cannot be read is reported under `unavailable` with its reason, never dropped and never an error, so the
+   * Setup row can carry the warning before a Start. The reads run in parallel — each is bounded by `runGit` — and the result keeps the order of `jira.json`.
+   */
+  @Get('worktrees')
+  async worktrees(): Promise<JiraWorktreesPayload> {
+    this.requireConfigured();
+    const config = this.requireReadableConfig();
+    const paths = [...new Set(Object.values(config.repos).flat())];
+    const roots = repoRoots();
+    const read = await Promise.all(paths.map(async (path) => ({ path, result: await readWorktrees(path, roots) })));
+    const payload: JiraWorktreesPayload = { worktrees: [], unavailable: [] };
+    for (const { path, result } of read) {
+      if (typeof result === 'string') payload.unavailable.push({ repo: path, reason: result });
+      else payload.worktrees.push(...result);
+    }
+    return payload;
+  }
+
+  /** `jira.json` as the routes read it, or the 409 every route that depends on a mapping or a skill answers when the file cannot be read. */
+  private requireReadableConfig(): ReturnType<typeof readJiraConfig> {
+    const config = readJiraConfig();
+    if (config.unreadable !== null) {
+      throw new HttpException({ error: `settings/jira.json ${config.unreadable} — fix or delete it by hand` }, 409);
+    }
+    return config;
   }
 
   private requireConfigured(): void {
