@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useAction } from '../../hooks/useAction';
@@ -15,7 +15,6 @@ import {
   issueDatesLine,
   modalTree,
   progressLine,
-  removeCommand,
   repoBasename,
   stopJira,
   ticketWorktrees,
@@ -34,6 +33,7 @@ import { Pill } from '../ui/Pill';
 import { Select } from '../ui/Select';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
+import { WorktreeRow } from './JiraWorktreeRow';
 
 /**
  * JiraIssueModal — one Jira issue's detail, the board's two writes to Jira itself (Jira phase 3) and its session controls (Jira phase 5) — spec §6.3, §7;
@@ -328,9 +328,9 @@ export function JiraIssueModal({
 }
 
 /**
- * The ticket's worktrees (header, "The Worktrees list"): one row per tree — branch, path and repo through `displayPath` — and a `Remove` that copies the
- * command and runs nothing. The button reads `Copied` for 2 s; with no clipboard API, or a refused write, the command itself is drawn under the row so it can
- * be selected by hand. It is disabled while `live` — the shell knows of a session on this key — and its title then names the key.
+ * The ticket's worktrees (header, "The Worktrees list"): one `WorktreeRow` per tree — branch, path and repo through `displayPath` — and a `Remove` that
+ * copies the command and runs nothing (the row's own header says how). It is disabled while `live` — the shell knows of a session on this key — and its
+ * title then names the key.
  */
 function WorktreesList({ trees, issueKey, live, home }: { trees: readonly JiraWorktree[]; issueKey: string; live: boolean; home: string | null }) {
   return (
@@ -341,64 +341,10 @@ function WorktreesList({ trees, issueKey, live, home }: { trees: readonly JiraWo
       </div>
       <ul className="jira-wt-list">
         {trees.map((t) => (
-          <WorktreeRow key={t.path} tree={t} issueKey={issueKey} live={live} home={home} />
+          <WorktreeRow key={t.path} tree={t} home={home} liveKey={live ? issueKey : null} showRepo />
         ))}
       </ul>
     </section>
-  );
-}
-
-const REMOVE_TITLE =
-  'Copies the command. Sessions the board did not start — Copy prompt, a terminal — cannot be seen: make sure none is using this tree.';
-
-function WorktreeRow({ tree, issueKey, live, home }: { tree: JiraWorktree; issueKey: string; live: boolean; home: string | null }) {
-  const command = removeCommand(tree);
-  const canCopy = typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function';
-  const [copied, setCopied] = useState(false);
-  const [refused, setRefused] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (timer.current !== null) clearTimeout(timer.current);
-    },
-    []
-  );
-  const copy = (): void => {
-    if (!canCopy) {
-      setRefused(true);
-      return;
-    }
-    navigator.clipboard.writeText(command).then(
-      () => {
-        setRefused(false);
-        setCopied(true);
-        if (timer.current !== null) clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(false), 2000);
-      },
-      () => setRefused(true)
-    );
-  };
-  const branch = tree.branch ?? 'detached';
-  return (
-    <li className="jira-wt-row">
-      <span className="jira-wt-branch">{branch}</span>
-      <span className="jira-wt-path" title={tree.path}>
-        {displayPath(tree.path, home)}
-      </span>
-      <span className="jira-wt-repo" title={tree.repo}>
-        {displayPath(tree.repo, home)}
-      </span>
-      <Chip
-        size={28}
-        disabled={live}
-        title={live ? `a session is running on ${issueKey}` : REMOVE_TITLE}
-        aria-label={`Remove worktree ${branch}`}
-        onClick={copy}
-      >
-        {copied ? 'Copied' : 'Remove'}
-      </Chip>
-      {refused && <code className="jira-wt-cmd">{command}</code>}
-    </li>
   );
 }
 

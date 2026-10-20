@@ -119,6 +119,8 @@ let defaultsAnswer: (body: { path: string; base: string | null; namePattern: str
 /* `GET /api/jira/refs?repo=…` — what each defaults row reads once on mount. The default is a readable repo; a case that wants the unavailable form
    replaces it. */
 let refsAnswer: (repo: string) => Promise<Response>;
+/* `GET /api/jira/worktrees` — every tree of every mapped path (M7). The default lists none; a case that wants rows replaces it. */
+let worktreesAnswer: () => Promise<Response>;
 let sent: Sent[];
 
 const answer = (body: unknown, code = 200) =>
@@ -168,6 +170,7 @@ beforeEach(() => {
         { name: 'develop', local: true, remote: true, sync: 'same', committedAt: '2026-10-02T00:00:00Z', worktree: null, ticket: false }
       ]
     });
+  worktreesAnswer = () => answer({ worktrees: [], unavailable: [] });
   sent = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -185,6 +188,7 @@ beforeEach(() => {
     if (url === '/api/jira/boards/delete') return answer({ ok: true });
     if (url === '/api/jira/repos') return reposAnswer(JSON.parse(String(init?.body)));
     if (url === '/api/jira/repo-defaults') return defaultsAnswer(JSON.parse(String(init?.body)));
+    if (url === '/api/jira/worktrees') return worktreesAnswer();
     if (url.startsWith('/api/jira/refs?')) return refsAnswer(new URLSearchParams(url.split('?')[1]).get('repo') ?? '');
     if (url === '/api/jira/skills') return skillsAnswer(JSON.parse(String(init?.body)));
     if (url === '/api/jira/skills/delete') return skillsDeleteAnswer(JSON.parse(String(init?.body)));
@@ -886,6 +890,83 @@ describe('the Repositories card — a path\'s defaults', () => {
     fireEvent.change(baseField('~/shared'), { target: { value: 'develop' } });
     await userEvent.click(saveButton('~/shared'));
     await waitFor(() => expect(defaultsPosts()).toEqual([{ path: '/home/ada/shared', base: 'develop', namePattern: null }]));
+  });
+});
+
+// M7 (final review): a Continue on a key-less branch makes a tree no card or modal shows, so each path lists every tree it has open, ticket or not.
+describe('the Repositories card — a path\'s worktrees', () => {
+  const tree = (repo: string, path: string, branch: string | null, main = false) => ({ repo, path, branch, main });
+  const treesUnder = (): HTMLElement[] => Array.from(reposCard().querySelectorAll('.jira-setup-trees'));
+  const branchesOf = (row: HTMLElement): string[] => Array.from(row.querySelectorAll('.jira-wt-branch')).map((b) => b.textContent ?? '');
+  const worktreeReads = (): number => sent.filter((x) => x.url === '/api/jira/worktrees').length;
+
+  it('lists every non-main tree of each distinct path once — key-less and detached included — and Remove copies the command', async () => {
+    const writeText = jest.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'], OPS: ['/home/ada/pay', '/home/ada/ops'] }, home: '/home/ada' });
+    worktreesAnswer = () =>
+      answer({
+        worktrees: [
+          tree('/home/ada/pay', '/home/ada/pay', 'main', true),
+          tree('/home/ada/pay', '/home/ada/pay/.worktrees/pay-1-x', 'pay-1-x'),
+          tree('/home/ada/pay', '/home/ada/pay/.worktrees/develop', 'develop'),
+          tree('/home/ada/pay', '/home/ada/pay/.worktrees/detached', null),
+          tree('/home/ada/ops', '/home/ada/ops', 'main', true)
+        ],
+        unavailable: []
+      });
+    await renderSetup();
+    await waitFor(() => expect(treesUnder()).toHaveLength(1));
+    const [list] = treesUnder();
+    expect(branchesOf(list)).toEqual(['detached', 'develop', 'pay-1-x']);
+    expect(within(list).getByText('3')).toBeInTheDocument();
+    expect(within(list).getByText('~/pay/.worktrees/develop')).toBeInTheDocument();
+    // The repository is the row above: the modal's repo column is not drawn again here.
+    expect(list.querySelector('.jira-wt-repo')).toBeNull();
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Remove worktree develop' }));
+    expect(writeText).toHaveBeenCalledWith("git -C '/home/ada/pay' worktree remove '/home/ada/pay/.worktrees/develop'");
+    expect(await within(list).findByText('Copied')).toBeInTheDocument();
+  });
+
+  it('disables a tree a live session is on and names its key; a key-less tree keeps the warning title', async () => {
+    statusAnswer = status({
+      projects: PROJECTS,
+      repos: { PAY: ['/home/ada/pay'] },
+      live: { 'PAY-1': { name: 'pay-1', startedAt: '2026-10-20T00:00:00Z', repo: '/home/ada/pay', starting: false } }
+    });
+    worktreesAnswer = () =>
+      answer({
+        worktrees: [tree('/home/ada/pay', '/home/ada/pay/.worktrees/pay-1-x', 'pay-1-x'), tree('/home/ada/pay', '/home/ada/pay/.worktrees/develop', 'develop')],
+        unavailable: []
+      });
+    await renderSetup();
+    const live = await within(reposCard()).findByRole('button', { name: 'Remove worktree pay-1-x' });
+    expect(live).toBeDisabled();
+    expect(live).toHaveAttribute('title', 'a session is running on PAY-1');
+    const free = within(reposCard()).getByRole('button', { name: 'Remove worktree develop' });
+    expect(free).toBeEnabled();
+    expect(free.getAttribute('title')).toMatch(/^Copies the command\./);
+  });
+
+  it('reads the trees once per set of mapped paths — a defaults save does not re-read — and a failed read draws no list', async () => {
+    statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/pay'] } });
+    worktreesAnswer = () => answer({ error: 'boom' }, 500);
+    await renderSetup();
+    await waitFor(() => expect(worktreeReads()).toBe(1));
+    expect(treesUnder()).toHaveLength(0);
+
+    fireEvent.change(within(reposCard()).getByRole('textbox', { name: 'Branch name pattern for ~/pay' }), { target: { value: '{key}-{slug}' } });
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Save defaults for ~/pay' }));
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(1));
+    expect(worktreeReads()).toBe(1);
+
+    worktreesAnswer = () => answer({ worktrees: [tree('/home/ada/pay', '/home/ada/pay/.worktrees/develop', 'develop')], unavailable: [] });
+    await pickProject('OPS');
+    fireEvent.change(addField(), { target: { value: '/home/ada/ops' } });
+    await userEvent.click(within(reposCard()).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(worktreeReads()).toBe(2));
+    await waitFor(() => expect(treesUnder()).toHaveLength(1));
   });
 });
 

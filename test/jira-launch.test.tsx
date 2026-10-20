@@ -666,6 +666,24 @@ describe('JiraLaunchSheet — the branch', () => {
     expect(within(dialog()).getByText('behind')).toBeInTheDocument();
   });
 
+  // M7 (final review): the card and the modal find a tree by the key its branch carries, so a Continue on a key-less branch is said, not refused.
+  it('says a Continue on a branch without the key makes a tree only Setup lists — never beside a refusal, and Start still goes', async () => {
+    const hint = "this tree won't show on the card — it's listed under the repo in Setup";
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true }), refBranch('release-2')]) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(within(dialog()).queryByText(hint)).toBeNull();
+
+    await userEvent.selectOptions(field('Branch'), 'release-2');
+    expect(within(dialog()).getByText(hint)).toHaveClass('sheet-note');
+    await waitFor(() => expect(startButton()).toBeEnabled());
+
+    // `develop` carries no key either, but the mapped checkout holds it: the refusal is the one sentence drawn.
+    await userEvent.selectOptions(field('Branch'), 'develop');
+    expect(await within(dialog()).findByText('develop is checked out in the mapped checkout /Users/ada/pay')).toBeInTheDocument();
+    expect(within(dialog()).queryByText(hint)).toBeNull();
+  });
+
   it('unavailable refs: the warning sentence, two text fields, and Start enabled', async () => {
     server.refs = (repo) => ({ status: 200, body: { repo, available: false, reason: 'not mounted into the board' } });
     await ready({ status: { repoDefaults: { '/Users/ada/pay': { base: 'develop' } } } });

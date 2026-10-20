@@ -1,15 +1,17 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useFetched } from '../../hooks/useFetched';
 import { useMountedRef } from '../../hooks/useMountedRef';
-import { displayPath, fetchJiraRefs, saveRepoDefaults, unmappedProjects } from '../../lib/jira';
+import { displayPath, fetchJiraRefs, fetchJiraWorktrees, repoWorktrees, saveRepoDefaults, treeLiveKey, unmappedProjects } from '../../lib/jira';
 import { defaultBaseProblem, patternProblem } from '../../../../shared/jira-branch';
-import type { JiraRepoDefaults, JiraStatusPayload } from '../../../../shared/types';
+import type { JiraRepoDefaults, JiraStatusPayload, JiraWorktree, JiraWorktreesPayload } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
+import { Pill } from '../ui/Pill';
 import { Select } from '../ui/Select';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { errorOf, postJson, type JiraProjectList } from './JiraBoardSheet';
+import { WorktreeRow } from './JiraWorktreeRow';
 
 /**
  * Jira › Setup › Repositories (Jira phase 2, spec §6.4; DESIGN.md §8.9.3, and §8.6 for the card language) — which local checkouts a Jira project's tickets
@@ -33,6 +35,14 @@ import { errorOf, postJson, type JiraProjectList } from './JiraBoardSheet';
  * blocks Save: the server's sentence is the one that counts, and a client rule that drifted ahead of it would refuse a pattern the server accepts. The base
  * gets the same kind of hint from `defaultBaseProblem` (final review M1): it was `origin/HEAD` the old placeholder invited, and a stored `origin/` prefix is
  * a value the tool refuses at every Start, so the row says `base is a branch name, without origin/` as it is typed rather than after the first failed run.
+ *
+ * **A path's worktrees** (M7, the repo/branch final review; DESIGN.md §8.9.3): under the same first row, every tree the path has open beside its own checkout
+ * (`repoWorktrees`), ticket or not, as the issue modal's `WorktreeRow` — branch, `~` path, a `Remove` that copies the command. The card and the modal find a
+ * tree by the key its branch carries, so a Continue on `develop` or `hotfix/login` makes a tree neither ever shows; this is the one place it is still seen
+ * and still removable. `GET /api/jira/worktrees` is read once on mount and again only when the set of mapped paths or of live keys changes (the moments a
+ * tree can appear), never on a status reload; the last answer is kept while a re-read is out, so a mapping write does not blank every list for a frame. A
+ * failed read draws no list anywhere, as on the card: the defaults row above already says when a path cannot be read. A row is disabled while a live key's
+ * session is on it (`treeLiveKey`), which only a key-carrying branch can show — a key-less tree's `Remove` keeps the title that says so.
  *
  * **A write replaces one project's whole list** (`POST /api/jira/repos` `{ project, paths }`, spec §5), so `×` sends the list minus that path and `Add` the
  * list plus the typed one. An emptied list removes the key, which is how a project becomes unmapped again. The typed path goes out TRIMMED but otherwise as
@@ -58,6 +68,14 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
   const unmapped = data === null ? [] : unmappedProjects(data);
   const home = data?.home ?? null;
   const shownDefaults = new Set<string>();
+
+  const distinctPaths = [...new Set(mapped.flatMap((m) => m.paths))].sort().join('\n');
+  const liveKeys = Object.keys(data?.live ?? {}).sort();
+  const trees = useFetched(data === null ? null : () => fetchJiraWorktrees(), [distinctPaths, liveKeys.join(',')]);
+  const keptTrees = useRef<JiraWorktreesPayload | null>(null);
+  if (trees.status === 'ok' && trees.value !== null) keptTrees.current = trees.value;
+  else if (trees.status === 'failed') keptTrees.current = null;
+  const kept = keptTrees.current;
 
   /** POST the project's whole new list. Resolves `true` when the server stored it. */
   async function write(key: string, paths: string[]): Promise<boolean> {
@@ -124,9 +142,11 @@ export function JiraReposGroup({ projects }: { projects: JiraProjectList }) {
           // The defaults belong to the PATH: only its first appearance, in project-key order, draws the line.
           if (shownDefaults.has(p)) return [row];
           shownDefaults.add(p);
+          const own = kept === null ? [] : repoWorktrees(p, kept);
           return [
             row,
-            <RepoDefaultsRow key={`defaults\n${p}`} path={p} home={home} stored={data?.repoDefaults?.[p]} busy={busy} onSave={saveDefaults} />
+            <RepoDefaultsRow key={`defaults\n${p}`} path={p} home={home} stored={data?.repoDefaults?.[p]} busy={busy} onSave={saveDefaults} />,
+            ...(own.length === 0 ? [] : [<RepoWorktreesRow key={`trees\n${p}`} trees={own} home={home} liveKeys={liveKeys} />])
           ];
         })
       )}
@@ -270,6 +290,23 @@ function RepoDefaultsRow({
       {baseProblem !== null && <span className="set-hint jira-setup-warn jira-setup-defaults-hint">base {baseProblem}</span>}
       {problem !== null && <span className="set-hint jira-setup-warn jira-setup-defaults-hint">{problem}</span>}
       {unavailable !== null && <span className="set-hint jira-setup-defaults-hint">{unavailable}</span>}
+    </div>
+  );
+}
+
+/** One path's open trees (see the group's header): a `worktrees` head with a count, then the modal's own rows, without the repository — the row above. */
+function RepoWorktreesRow({ trees, home, liveKeys }: { trees: readonly JiraWorktree[]; home: string | null; liveKeys: readonly string[] }) {
+  return (
+    <div className="set-row set-row-stacked jira-setup-trees">
+      <div className="jira-setup-trees-head">
+        <span className="set-hint">worktrees</span>
+        <Pill tone="neutral">{trees.length}</Pill>
+      </div>
+      <ul className="jira-wt-list">
+        {trees.map((t) => (
+          <WorktreeRow key={t.path} tree={t} home={home} liveKey={treeLiveKey(t, liveKeys)} showRepo={false} />
+        ))}
+      </ul>
     </div>
   );
 }

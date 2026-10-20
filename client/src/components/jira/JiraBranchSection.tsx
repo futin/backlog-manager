@@ -1,7 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 
 import { useFetched, type Fetched } from '../../hooks/useFetched';
-import { branchChoiceOf, branchDraft, displayPath, draftRefusal, fetchAgeLine, fetchJiraRefs, type BranchDraft } from '../../lib/jira';
+import { branchChoiceOf, branchDraft, continueOffTicket, displayPath, draftRefusal, fetchAgeLine, fetchJiraRefs, type BranchDraft } from '../../lib/jira';
 import { jiraActionParam } from '../../../../shared/types';
 import type { JiraAction, JiraBranchChoice, JiraRepoDefaults, JiraRepoRefs } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
@@ -20,6 +20,8 @@ export interface BranchState {
   setDraft: Dispatch<SetStateAction<BranchDraft>>;
   choice: JiraBranchChoice;
   refusal: { text: string; offerContinue: boolean } | null;
+  /** A ready Continue on a branch without the issue's key (`continueOffTicket`): accepted, but its tree is listed only under the repository in Setup. */
+  offTicket: boolean;
 }
 
 /**
@@ -61,14 +63,16 @@ export function useBranchState(
   }
 
   const ready = repo !== '' && settled && seed.visit === visit.n;
+  const choice = branchChoiceOf(draft, action);
   return {
     refs,
     known,
     ready,
     draft,
     setDraft,
-    choice: branchChoiceOf(draft, action),
-    refusal: ready ? draftRefusal(draft, action, key, known) : null
+    choice,
+    refusal: ready ? draftRefusal(draft, action, key, known) : null,
+    offTicket: ready && continueOffTicket(choice, key)
   };
 }
 
@@ -83,6 +87,9 @@ export function useBranchState(
  * **The list is only as fresh as the last fetch, and the board never fetches** (the server writes no git), so the age of `FETCH_HEAD` is printed under the
  * modes. Refs the server could not read — or a request that failed — turn the selects into text fields under one `branches unavailable` line: the person
  * can still name a branch and a base, and `jira.mjs worktree` re-checks on the host what the board could not.
+ *
+ * **A Continue on a branch without the key is said, not refused** (M7): its tree is invisible to the card and the modal, which find trees by the key, so one
+ * `.sheet-note` says where it is listed instead — under its repository in Setup.
  *
  * **Refusals are said before Start.** `draftRefusal` is the same rules the server and the tool apply; its sentence is drawn here and the sheet disables Start
  * and Copy prompt on it. A New name that already exists offers `switch to Continue` on that branch, the server's own remedy, one click away.
@@ -101,7 +108,7 @@ export function JiraBranchSection({
   repo: string;
   home: string | null;
 }) {
-  const { refs, known, ready, draft, setDraft, refusal } = branch;
+  const { refs, known, ready, draft, setDraft, refusal, offTicket } = branch;
   const set = (patch: Partial<BranchDraft>): void => setDraft((d) => ({ ...d, ...patch }));
 
   const modes: { value: BranchDraft['mode']; label: string }[] = [
@@ -171,6 +178,9 @@ export function JiraBranchSection({
           will work in {displayPath(chosen.worktree, home)}
         </div>
       )}
+      {/* M7: the card and the modal find a tree by the key its branch carries, so a Continue on `develop` makes one neither shows. Not a refusal — only
+          where to find it again. Said once the draft is otherwise sendable, so it never stands beside a refusal's sentence. */}
+      {offTicket && refusal === null && <div className="sheet-note">this tree won't show on the card — it's listed under the repo in Setup</div>}
 
       {ready && draft.mode === 'new' && (
         <div className="sheet-row">
