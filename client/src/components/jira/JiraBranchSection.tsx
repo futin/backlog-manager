@@ -27,10 +27,14 @@ export interface BranchState {
  *
  * **When the defaults are recomputed.** On an action change, and on the first time the SELECTED repository's refs settle after it was picked — `ok` or
  * `failed`, since a failed read is the unavailable form and still has defaults (the stored base and pattern). Never otherwise: the person's edits are the
- * state from then on, and a later answer for the same repository must not overwrite what they picked. `seed.repo` is the repository whose SETTLED refs fed
- * the draft, not merely the one on screen: at the moment the repo changes its refs are still pending, and an action change in that window seeds from no refs
- * and leaves `seed.repo` alone, so the refs landing still re-seed. A → B → A reads A's refs again (`useFetched` keys on the repo) and re-seeds from them,
- * so A's defaults come back rather than B's draft lingering.
+ * state from then on, and a later answer for the same repository must not overwrite what they picked.
+ *
+ * The seed is keyed on a VISIT, not on the repository's name: `visit` counts every change of the picked repository, and `seed.visit` is the visit whose
+ * SETTLED refs fed the draft. The name would not do (Task 8 review, I1): A → B → A while B's refs are still out leaves the name where it was, so A's refs
+ * landing again would not count as a change — an edit made in A would survive the round trip, and an action change inside the window (which seeds from no
+ * refs and B's stored defaults) would leave B's pattern and base on A. Counting visits makes every null → loaded transition after a repo change re-seed,
+ * however fast the switch, while a re-read of the SAME repository — same visit — never does. An action change while the refs are out seeds from no refs and
+ * leaves `seed.visit` alone, so the refs landing still re-seed.
  *
  * The re-seed is a `setState` during render, React's own idiom for state derived from a changed input, rather than an effect: an effect would commit one frame
  * with the old draft, and the preview's `useFetched` would already have asked the server about the previous repository's branch by then.
@@ -48,13 +52,15 @@ export function useBranchState(
   const known = refs.status === 'ok' ? refs.value : null;
 
   const [draft, setDraft] = useState<BranchDraft>(() => branchDraft(action, null, key, summary, defaults));
-  const [seed, setSeed] = useState<{ action: string; repo: string | null }>({ action: actionKey, repo: null });
-  if (seed.action !== actionKey || (settled && seed.repo !== repo)) {
+  const [visit, setVisit] = useState({ repo, n: 0 });
+  if (visit.repo !== repo) setVisit({ repo, n: visit.n + 1 });
+  const [seed, setSeed] = useState<{ action: string; visit: number | null }>({ action: actionKey, visit: null });
+  if (seed.action !== actionKey || (settled && seed.visit !== visit.n)) {
     setDraft(branchDraft(action, known, key, summary, defaults));
-    setSeed({ action: actionKey, repo: settled ? repo : seed.repo });
+    setSeed({ action: actionKey, visit: settled ? visit.n : seed.visit });
   }
 
-  const ready = repo !== '' && settled && seed.repo === repo;
+  const ready = repo !== '' && settled && seed.visit === visit.n;
   return {
     refs,
     known,
@@ -218,7 +224,7 @@ export function JiraBranchSection({
               label="Target"
               value={draft.target}
               onChange={(target) => set({ target })}
-              options={[{ value: '', label: "the repository's default" }, ...names.map((n) => ({ value: n, label: n }))]}
+              options={withValue(draft.target, [{ value: '', label: "the repository's default" }, ...names.map((n) => ({ value: n, label: n }))])}
             />
           ) : (
             textField('Target', draft.target, (target) => set({ target }), "the repository's default")

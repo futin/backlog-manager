@@ -98,8 +98,8 @@ interface Server {
   agents: AgentsStatus;
   detail: JiraIssueDetail | { status: number; error: string };
   prompt: (url: URL) => { status: number; body: string };
-  /** `GET /api/jira/refs`, per repository: refs, or a refusal. */
-  refs: (repo: string) => { status: number; body: unknown };
+  /** `GET /api/jira/refs`, per repository: refs, a refusal, or `'pending'` for a read that never answers (a slow git read held open). */
+  refs: (repo: string) => { status: number; body: unknown } | 'pending';
   dispatch: { status: number; body: unknown };
   /** When set, the detail read answers only once this settles — a case's way to act before the detail lands. */
   detailGate?: Promise<void>;
@@ -171,6 +171,7 @@ beforeEach(() => {
     }
     if (url.pathname === '/api/jira/refs') {
       const r = server.refs(url.searchParams.get('repo') ?? '');
+      if (r === 'pending') return new Promise<Response>(() => undefined);
       return Promise.resolve(r.status === 200 ? res(200, r.body) : res(r.status, { error: r.body }));
     }
     if (url.pathname.startsWith('/api/jira/issue/')) {
@@ -551,6 +552,34 @@ describe('JiraLaunchSheet — the branch', () => {
     expect(asked).toEqual(['/Users/ada/pay', '/Users/ada/pay-web', '/Users/ada/pay']);
   });
 
+  // I1 (Task 8 review): going back to A before B's refs answer is still a repo change — A's refs landing again re-seed, whatever the person typed in A.
+  it('puts A\'s defaults back after an edit in A and a quick A → B → A, B\'s refs never answering', async () => {
+    server.refs = (repo) => (repo === '/Users/ada/pay' ? { status: 200, body: refsOf(repo) } : 'pending');
+    mount({ status: TWO });
+    const repoSelect = await within(dialog()).findByRole('combobox', { name: 'Repository' });
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await waitFor(() => expect(pressed()).toBe('New'));
+    await userEvent.clear(field('Name'));
+    await userEvent.type(field('Name'), 'pay-131-edited');
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay-web');
+    expect(within(dialog()).getByText('loading branches…')).toBeInTheDocument();
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await waitFor(() => expect(field('Name').value).toBe('pay-131-refund-partial-captures'));
+  });
+
+  it('an action change while B is pending does not leave B\'s stored defaults on A', async () => {
+    server.refs = (repo) => (repo === '/Users/ada/pay' ? { status: 200, body: refsOf(repo, [refBranch('pay-131-a', { ticket: true })]) } : 'pending');
+    mount({ status: { ...TWO, repoDefaults: { '/Users/ada/pay-web': { base: 'main', namePattern: 'feature/{key}-{slug}' } } } });
+    const repoSelect = await within(dialog()).findByRole('combobox', { name: 'Repository' });
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay-web');
+    await userEvent.selectOptions(within(dialog()).getByRole('combobox', { name: 'Action' }), `skill:${SKILL.id}`);
+    await userEvent.selectOptions(repoSelect, '/Users/ada/pay');
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    expect(field('Branch').value).toBe('pay-131-a');
+  });
+
   it('falls back to the unavailable form, seeded from the stored defaults, when the refs request fails', async () => {
     server.refs = () => ({ status: 500, body: 'boom' });
     await ready({ status: { repoDefaults: { '/Users/ada/pay': { base: 'main', namePattern: 'feature/{key}-{slug}' } } } });
@@ -684,6 +713,24 @@ describe('JiraLaunchSheet — the branch', () => {
     expect(within(dialog()).queryByLabelText('Target')).not.toBeInTheDocument();
     await userEvent.click(modeButton('Continue'));
     expect(field('Target').value).toBe('develop');
+  });
+
+  // M1 (Task 8 review): a default base the list does not hold by name is still what the Target select shows — displayed is what Start sends.
+  it('shows a default target the list lacks rather than the first option', async () => {
+    server.refs = (repo) => ({ status: 200, body: refsOf(repo, [refBranch('pay-131-x', { ticket: true })], { defaultBase: 'origin/develop' }) });
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('Continue'));
+    await userEvent.click(mrSwitch() as HTMLElement);
+    expect(field('Target').value).toBe('origin/develop');
+  });
+
+  // M3 (Task 8 review): Continue on a repo with no ticket branch opens on `choose…`, and says so in those words rather than as Table A's `branch is empty`.
+  it('asks for a branch to continue when none is chosen', async () => {
+    await ready();
+    await waitFor(() => expect(pressed()).toBe('New'));
+    await userEvent.click(modeButton('Continue'));
+    expect(within(dialog()).getByText('choose a branch to continue')).toBeInTheDocument();
+    expect(startButton()).toBeDisabled();
   });
 
   it('Start sends the five flat fields, and the preview asked with the same choice', async () => {

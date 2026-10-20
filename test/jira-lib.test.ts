@@ -1291,6 +1291,7 @@ describe('branch choice derivations', () => {
       expect(draftRefusal(cont, 'execute', 'TIMIFY-123', null)).toBeNull();
       expect(draftRefusal({ ...cont, target: 'a..b', openMr: false }, 'execute', 'TIMIFY-123', null)).toBeNull();
       expect(draftRefusal({ ...draft, mode: 'none' }, 'context', 'TIMIFY-123', tickets)).toBeNull();
+      expect(draftRefusal({ ...draft, mode: 'continue', continueBranch: '' }, 'execute', 'TIMIFY-123', tickets)?.text).toBe('choose a branch to continue');
     });
   });
 

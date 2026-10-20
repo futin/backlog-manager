@@ -1046,7 +1046,8 @@ export function branchDispatchFields(choice: JiraBranchChoice): Pick<JiraDispatc
 /**
  * The sheet's one refusal for a draft: `branchRefusal` on the mode's own branch (and, for New, its base), then a TYPED MR target — only the unavailable form
  * has a text field for it, the select offers listed names only — checked like any name (`target <problem>`), since the server would refuse it with that
- * sentence. A blank target is not a problem: it means the repository's default.
+ * sentence. A blank target is not a problem: it means the repository's default. Continue with nothing chosen says so in the select's own words (`choose…`)
+ * rather than as Table A's `branch is empty`.
  */
 export function draftRefusal(
   draft: BranchDraft,
@@ -1056,6 +1057,7 @@ export function draftRefusal(
 ): { text: string; offerContinue: boolean } | null {
   const choice = branchChoiceOf(draft, action);
   if (choice.mode === 'none') return null;
+  if (choice.mode === 'continue' && choice.branch === '') return { text: 'choose a branch to continue', offerContinue: false };
   const refused = branchRefusal(choice.mode, choice.branch, key, refs, choice.mode === 'new' ? choice.base : undefined);
   if (refused !== null) return refused;
   if (choice.mode === 'continue' && choice.target !== null) {
