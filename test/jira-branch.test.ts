@@ -111,7 +111,9 @@ describe('renderBranchPattern (Table D)', () => {
     ['{KEY}_{slug}', 'x', 'TIMIFY-123_x'],
     ['{key}-{slug}', '', 'timify-123'],
     ['feature/{key}_{slug}', '', 'feature/timify-123'],
-    ['{slug}-{key}', '', 'timify-123']
+    ['{slug}-{key}', '', 'timify-123'],
+    ['feature/{slug}-{key}', '', 'feature/timify-123'],
+    ['{key}/{slug}', '', 'timify-123']
   ])('%j + %j -> %j', (pattern, slug, expected) => {
     expect(renderBranchPattern(pattern, 'TIMIFY-123', slug)).toBe(expected);
   });

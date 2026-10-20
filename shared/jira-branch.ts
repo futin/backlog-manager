@@ -82,18 +82,27 @@ export function slugOf(summary: string): string {
 }
 
 /**
- * Render a name pattern for a ticket. `{key}` is the key lower-cased, `{KEY}` as Jira writes it, `{slug}` the slug. An empty slug takes `{slug}` and the
- * separator in front of it with it — `{key}-{slug}` gives `timify-123`, never `timify-123-` — and when nothing precedes `{slug}`, the separator AFTER it
- * goes instead (`{slug}-{key}` gives `timify-123`). The separators are `-`, `_`, `/` and `.`.
+ * Render a name pattern for a ticket. `{key}` is the key lower-cased, `{KEY}` as Jira writes it, `{slug}` the slug. An empty slug takes `{slug}` and one
+ * separator with it, so no name is left with a dangling one — `{key}-{slug}` gives `timify-123`, never `timify-123-`. The separator in FRONT of `{slug}`
+ * goes, except when it is a `/` or when nothing precedes `{slug}`: then the one AFTER it goes instead (`{slug}-{key}` gives `timify-123`,
+ * `feature/{slug}-{key}` gives `feature/timify-123`). A `/` is a namespace boundary the person chose, so it is kept whenever the other side offers a
+ * separator to drop; only when `/` is the sole one (`{key}/{slug}`) does it go, because the alternative is a trailing `/`. The separators are `-`, `_`, `/`
+ * and `.`.
  */
 export function renderBranchPattern(pattern: string, key: string, slug: string): string {
   let out = pattern;
   if (slug === '') {
-    for (let at = out.indexOf('{slug}'); at !== -1; at = out.indexOf('{slug}')) {
-      const before = at > 0 && SEPARATORS.includes(out[at - 1]);
-      const after = at === 0 && out.length > '{slug}'.length && SEPARATORS.includes(out['{slug}'.length]);
-      const from = before ? at - 1 : at;
-      const to = at + '{slug}'.length + (after ? 1 : 0);
+    const token = '{slug}';
+    for (let at = out.indexOf(token); at !== -1; at = out.indexOf(token)) {
+      const prev = at > 0 ? out[at - 1] : '';
+      const next = out[at + token.length] ?? '';
+      const prevIsSep = prev !== '' && SEPARATORS.includes(prev);
+      const nextIsSep = next !== '' && SEPARATORS.includes(next);
+      let from = at;
+      let to = at + token.length;
+      if (prevIsSep && prev !== '/') from = at - 1;
+      else if (nextIsSep && (at === 0 || prev === '/')) to += 1;
+      else if (prev === '/') from = at - 1;
       out = out.slice(0, from) + out.slice(to);
     }
   }
