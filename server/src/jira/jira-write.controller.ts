@@ -58,7 +58,8 @@ import { jiraWriteOrThrow } from './unwrap.util';
  *
  * After a config write, the poller is re-aimed. A saved board awaits `boardSaved`, which sweeps THAT board and resolves when the sweep is done or after its
  * own `JIRA_SAVE_SWEEP_WAIT_MS` cap — it already races itself and never rejects, so this route adds no second timer. A deleted board drops its cache at once
- * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos or repo-defaults write re-aims nothing: no sweep reads either.
+ * (`boardDeleted`) and the poller is `arm()`ed so it re-judges whether anything is left to poll. A repos or repo-defaults write re-aims nothing: no sweep reads
+ * either.
  */
 @Controller('api/jira')
 export class JiraWriteController {
@@ -106,9 +107,9 @@ export class JiraWriteController {
   /**
    * `POST /api/jira/repo-defaults` — `{ path, base, namePattern }`, `null` meaning unset; both `null` deletes the path's entry. Answers `{ path, base,
    * namePattern }` as stored (the path normalised, `null` for unset). The order is the file's usual one with one addition: guard → validate (400) → configured
-   * (503) → `jira.json` readable (409) → the path mapped to SOME project (400 `<path> is not mapped`) → write. The mapping check needs the file, so it sits after
-   * the 503 and after the 409 — an unreadable file cannot say what is mapped, so it answers the refusal a person can act on, with the file untouched — and it
-   * quotes the NORMALISED path, which is what the client got from the status payload. The defaults are per path, so any project's mapping will do, as on
+   * (503) → `jira.json` readable (409) → the path mapped to SOME project (400 `<path> is not mapped`) → write. The mapping check needs the file, so it sits
+   * after the 503 and after the 409 — an unreadable file cannot say what is mapped, so it answers the refusal a person can act on, with the file untouched —
+   * and it quotes the NORMALISED path, which is what the client got from the status payload. The defaults are per path, so any project's mapping will do, as on
    * `/refs`; it keeps the file from collecting entries for paths nobody can reach. No re-aim: no sweep reads `repoDefaults`.
    */
   @Post('repo-defaults')

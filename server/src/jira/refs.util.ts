@@ -10,10 +10,10 @@ import { runGit } from '../git-run.util';
  * repo/branch, spec §4 and §5.2).
  *
  * **Read-only, always.** Every git call here is `runGit` — async, bounded at 10 s, a timeout landing in the call site's failure branch (the invariant in
- * `git-run.util.ts`) — and every one of them is a READ: `rev-parse`, `for-each-ref`, `rev-list`, `symbolic-ref`, `worktree list`. There is no fetch, no worktree
- * add, no checkout and no branch write anywhere in this file: the writing is `jira.mjs worktree`'s, run by the session on the host, and the compose mount this
- * reads through is `:ro` so a slip here would be refused by the kernel as well. `fetchedAt` is how a stale picture says it is stale — the board never refreshes
- * it, because the container holds no SSH credentials (spec §4).
+ * `git-run.util.ts`) — and every one of them is a READ: `rev-parse`, `for-each-ref`, `rev-list`, `symbolic-ref`, `worktree list`. There is no fetch, no
+ * worktree add, no checkout and no branch write anywhere in this file: the writing is `jira.mjs worktree`'s, run by the session on the host, and the compose
+ * mount this reads through is `:ro` so a slip here would be refused by the kernel as well. `fetchedAt` is how a stale picture says it is stale — the board
+ * never refreshes it, because the container holds no SSH credentials (spec §4).
  *
  * **Not cached.** Each request reads afresh, each read bounded; the picker is opened by a person, not polled, and a cache would need the invalidation that
  * `jira.mjs worktree` — which runs outside this process — cannot give it. Revisit only if the sheet feels slow.
@@ -136,8 +136,8 @@ async function syncByName(repo: string, name: string): Promise<Sync | null> {
  * person is about to continue and a board-cut branch has no upstream; every other branch on both sides is read from the one `for-each-ref` already made, and
  * only when its upstream IS `origin/<name>`. One call per ticket branch, not one per branch in the repo.
  *
- * A failed side read (`worktree list`, `symbolic-ref`, `--git-common-dir`) degrades that field — no worktree, no base, no `fetchedAt` — rather than the listing;
- * only a failed `for-each-ref` makes the repo unavailable, since without it there is nothing to show.
+ * A failed side read (`worktree list`, `symbolic-ref`, `--git-common-dir`) degrades that field — no worktree, no base, no `fetchedAt` — rather than the
+ * listing; only a failed `for-each-ref` makes the repo unavailable, since without it there is nothing to show.
  */
 export async function readRepoRefs(repo: string, key: string | null, roots: string[] | null, storedBase: string | null): Promise<JiraRepoRefs> {
   const unavailable = await checkRepo(repo, roots);

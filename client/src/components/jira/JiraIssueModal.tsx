@@ -64,7 +64,7 @@ import { JiraRunMenu } from './JiraRunMenu';
  *   reload is the strip going away (spec §11). `StopSession` is mounted only for a confirmed entry, which is also the only time `useAgents()` reads
  *   `/api/agents/status`: a key with no session never asks.
  *
- * **The Worktrees list** (Jira repo/branch, spec §5.3; DESIGN.md §8.9.2) sits under the body and above the comments note, independent of the detail read: the
+ * **The Worktrees list** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.2) sits under the body and above the comments note, independent of the detail read: the
  * trees come from `GET /api/jira/worktrees`, which this modal asks for itself — on open, and again when the key changes or a session on it starts or ends
  * (the moments a tree is made or becomes safe to remove) — and `ticketWorktrees` narrows to this key's. The main tree never gets a row. A failed read, or
  * no tree, draws no heading at all; the previous answer for the same key stays drawn while a re-read is out, so the list does not blink on a Stop. Each row's
@@ -328,15 +328,9 @@ export function JiraIssueModal({
 }
 
 /**
- * `Stop session` and its confirmation (Jira phase 5, spec §7; DESIGN.md §8.9.2). Mounted by the modal only for a confirmed live entry, so `useAgents()` — the
- * dashboard's `enabled` flag, the same gate the card's dispatch control reads — asks `/api/agents/status` only then. Nothing is drawn with agents off or
- * before the answer lands: a Stop the dashboard would refuse is a promise it cannot keep. The question REPLACES the chip in place (`ui/Confirm`, the claim
- * release's precedent), and the safe answer holds the focus. The POST itself is the modal's, so its refusal draws in the modal's one alert line.
- */
-/**
  * The ticket's worktrees (header, "The Worktrees list"): one row per tree — branch, path and repo through `displayPath` — and a `Remove` that copies the
- * command and runs nothing. The button reads `Copied` for 2 s; with no clipboard API, or a refused write, the command itself is drawn under the row so it can be
- * selected by hand. It is disabled while `live` — the shell knows of a session on this key — and its title then names the key.
+ * command and runs nothing. The button reads `Copied` for 2 s; with no clipboard API, or a refused write, the command itself is drawn under the row so it can
+ * be selected by hand. It is disabled while `live` — the shell knows of a session on this key — and its title then names the key.
  */
 function WorktreesList({ trees, issueKey, live, home }: { trees: readonly JiraWorktree[]; issueKey: string; live: boolean; home: string | null }) {
   return (
@@ -408,6 +402,12 @@ function WorktreeRow({ tree, issueKey, live, home }: { tree: JiraWorktree; issue
   );
 }
 
+/**
+ * `Stop session` and its confirmation (Jira phase 5, spec §7; DESIGN.md §8.9.2). Mounted by the modal only for a confirmed live entry, so `useAgents()` — the
+ * dashboard's `enabled` flag, the same gate the card's dispatch control reads — asks `/api/agents/status` only then. Nothing is drawn with agents off or
+ * before the answer lands: a Stop the dashboard would refuse is a promise it cannot keep. The question REPLACES the chip in place (`ui/Confirm`, the claim
+ * release's precedent), and the safe answer holds the focus. The POST itself is the modal's, so its refusal draws in the modal's one alert line.
+ */
 function StopSession({ busy, onStop }: { busy: boolean; onStop: () => void }) {
   const { status } = useAgents();
   const [asking, setAsking] = useState(false);

@@ -87,11 +87,11 @@ const NO_TREES: readonly JiraWorktree[] = [];
  * card its `cardSessions` — its own and every folded issue's — and passes `onRun` straight through; it hosts NO sheet. `JiraView` does, one for the whole
  * section, because the sheet has to mount above an open modal as well and the modal is not this page's child.
  *
- * **Worktree chips** (Jira repo/branch, spec §5.3; DESIGN.md §8.9.1). The page reads `GET /api/jira/worktrees` ONCE on mount and again only when the SET of live
- * keys changes — the moment a Start or a Stop has just made or ended a tree — compared as a sorted, joined key list, so a status reload that hands back a new
- * `live` object with the same keys, or a render, asks for nothing. It is not a poller: nothing runs on a clock, and a tree made in a terminal shows up at the next
- * mount or live change. A failed read is not an error state — no chip is drawn and nothing is said, because the chip is a convenience and Setup is where the
- * trees' health is. While a re-read is out the previous answer stays drawn, so a chip does not blink off between a Start and its answer.
+ * **Worktree chips** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). The page reads `GET /api/jira/worktrees` ONCE on mount and again only when the SET of
+ * live keys changes — the moment a Start or a Stop has just made or ended a tree — compared as a sorted, joined key list, so a status reload that hands back a
+ * new `live` object with the same keys, or a render, asks for nothing. It is not a poller: nothing runs on a clock, and a tree made in a terminal shows up at
+ * the next mount or live change. A failed read is not an error state — no chip is drawn and nothing is said, because the chip is a convenience and Setup is
+ * where the trees' health is. While a re-read is out the previous answer stays drawn, so a chip does not blink off between a Start and its answer.
  *
  * `nudge` is `JiraView`'s write counter (Jira phase 3, R7), handed to `useJiraBoard` as given: this page neither reads nor bumps it, so a write in the modal
  * re-reads the list without the modal and the board knowing about each other.

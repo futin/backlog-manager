@@ -24,9 +24,10 @@
  *     the fence with it.
  *
  * **A workspace block goes first** when the Run has a branch (spec §5.4): `workspaceBlock` tells the session to create or enter its git worktree with `jira.mjs
- * worktree`, switch into the path that command prints, and work only there. It is the SAME text ahead of a built-in's instruction and ahead of a skill's template,
- * and it counts toward the cap: a built-in's description trimming absorbs it, a skill that fits today stops fitting only by the block's fixed text (at most 600
- * characters, plus the repo, branch, base and path it names — a test measures the fixed part). `null` for the workspace is mode `none` and changes nothing.
+ * worktree`, switch into the path that command prints, and work only there. It is the SAME text ahead of a built-in's instruction and ahead of a skill's
+ * template, and it counts toward the cap: a built-in's description trimming absorbs it, a skill that fits today stops fitting only by the block's fixed text
+ * (at most 600 characters, plus the repo, branch, base and path it names — a test measures the fixed part). `null` for the workspace is mode `none` and changes
+ * nothing.
  *
  * The cap is `JIRA_PROMPT_MAX`, the dashboard's own `PROMPT_CAP` — NOT the 8 000 `PROMPT_MAX` the item-dispatch paste bound uses. For a built-in, over it, the
  * description is trimmed from the end and a marker line says so — after the closing fence, as server text, never inside the ticket's own; the facts are bounded
@@ -50,12 +51,12 @@ export type JiraComposeAction = { kind: 'execute' | 'context' } | { kind: 'skill
 export type JiraComposeResult = { ok: true; prompt: string } | { ok: false; error: 'prompt too long' };
 
 /**
- * The block's text, ahead of everything else (spec §5.4). One line of facts the session can check the tool's answer against, then the command on a line of its own
- * (so a person who Copies the prompt can run it), then the rules: the PRINTED path wins over the expected one (the server's guess can be stale, or the repo
- * unreadable), `EnterWorktree` first with absolute paths and `git -C` as the fallback, the branch confirmed there, nothing checked out in the mapped checkout, and
- * a stop-and-report on anything that does not match — never another branch. `branch` and `base` are printed bare: they have passed §6's name checks (characters
- * `[A-Za-z0-9._/-]`), which no shell reads as anything but a word; the repo path is the one value that can hold anything, so it alone is `shellQuote`d. The
- * `--base` is the `new` mode's alone — `continue` cuts nothing.
+ * The block's text, ahead of everything else (spec §5.4). One line of facts the session can check the tool's answer against, then the command on a line of its
+ * own (so a person who Copies the prompt can run it), then the rules: the PRINTED path wins over the expected one (the server's guess can be stale, or the repo
+ * unreadable), `EnterWorktree` first with absolute paths and `git -C` as the fallback, the branch confirmed there, nothing checked out in the mapped checkout,
+ * and a stop-and-report on anything that does not match — never another branch. `branch` and `base` are printed bare: they have passed §6's name checks
+ * (characters `[A-Za-z0-9._/-]`), which no shell reads as anything but a word; the repo path is the one value that can hold anything, so it alone is
+ * `shellQuote`d. The `--base` is the `new` mode's alone — `continue` cuts nothing.
  */
 export function workspaceBlock(key: string, repo: string, ws: JiraWorkspace): string {
   const command =
@@ -89,7 +90,8 @@ function closingRule(ws: JiraWorkspace | null): string {
 
 /**
  * `execute`: implement, verify; then move the issue ONLY when the workflow offers exactly one way to `done` — a ticket with two (`Done` and `Won't do`) or
- * none is a judgement for the person, and the session is told to say so rather than pick. The workspace block owns the branch step, so the instruction no longer says "create a branch" (a Run with no branch is refused for `execute` upstream). The commit rule is item dispatch's, imported from `shared/agent.ts`
+ * none is a judgement for the person, and the session is told to say so rather than pick. The workspace block owns the branch step, so the instruction no
+ * longer says "create a branch" (a Run with no branch is refused for `execute` upstream). The commit rule is item dispatch's, imported from `shared/agent.ts`
  * (`server/src/jira/` imports no `agents/` service or prompt code; the one allowed import from there is the `SameOriginPostGuard`, spec §3).
  */
 function executeText(key: string, ws: JiraWorkspace | null): string {
@@ -113,7 +115,8 @@ const NAMES_KEY_RE = /\{key\}/;
 
 /**
  * A skill's whole prompt: the template filled in one pass (a replacement function, so `$&` in a repo path is text), and the key appended when it is not named.
- * `{branch}`, `{base}` and `{worktree}` are the workspace's (`{base}` empty for `continue`, and all three empty under `none`); `{worktree}` is the EXPECTED path.
+ * `{branch}`, `{base}` and `{worktree}` are the workspace's (`{base}` empty for `continue`, and all three empty under `none`); `{worktree}` is the EXPECTED
+ * path.
  */
 function skillPrompt(template: string, detail: JiraIssueDetail, repo: string, ws: JiraWorkspace | null): string {
   const values: Record<string, string> = { key: detail.key, url: detail.url, repo, branch: ws?.branch ?? '', base: ws?.base ?? '', worktree: ws?.worktree ?? '' };

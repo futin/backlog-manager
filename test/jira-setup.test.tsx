@@ -116,7 +116,8 @@ let skillsDeleteAnswer: (body: { id: string }) => Promise<Response>;
 /* `POST /api/jira/repo-defaults`. The default does what the server does — stores the path's two values in the status the next `GET /api/jira` answers (a
    `null` drops its key) — so a case can watch the row follow its own save. A case that wants a refusal replaces it. */
 let defaultsAnswer: (body: { path: string; base: string | null; namePattern: string | null }) => Promise<Response>;
-/* `GET /api/jira/refs?repo=…` — what each defaults row reads once on mount. The default is a readable repo; a case that wants the unavailable form replaces it. */
+/* `GET /api/jira/refs?repo=…` — what each defaults row reads once on mount. The default is a readable repo; a case that wants the unavailable form
+   replaces it. */
 let refsAnswer: (repo: string) => Promise<Response>;
 let sent: Sent[];
 

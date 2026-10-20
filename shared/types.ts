@@ -616,10 +616,10 @@ export const JIRA_BUILTIN_LABELS: Record<'execute' | 'context', string> = {
 };
 
 /**
- * The workspace a Jira Run is told to work in (spec §5.4, §5.6): `null` where it is carried means mode `none` — no branch, no worktree, no block. `branch`, `base`
- * and `target` have passed the §6 name checks, so they are shell-safe by construction. `worktree` is the EXPECTED path (5.4: the one 5.2 found holding the branch,
- * else `<repo>/.worktrees/<branch with / as ->`); the path `jira.mjs worktree` prints is the authoritative one. `base` is `null` for `continue`, which cuts
- * nothing; `target` is the MR's destination and is only ever set with `openMr` and `continue`.
+ * The workspace a Jira Run is told to work in (spec §5.4, §5.6): `null` where it is carried means mode `none` — no branch, no worktree, no block. `branch`,
+ * `base` and `target` have passed the §6 name checks, so they are shell-safe by construction. `worktree` is the EXPECTED path (5.4: the one 5.2 found holding
+ * the branch, else `<repo>/.worktrees/<branch with / as ->`); the path `jira.mjs worktree` prints is the authoritative one. `base` is `null` for `continue`,
+ * which cuts nothing; `target` is the MR's destination and is only ever set with `openMr` and `continue`.
  */
 export interface JiraWorkspace {
   mode: 'new' | 'continue';
@@ -719,9 +719,9 @@ export interface JiraIssueWriteResult {
 }
 
 /**
- * One mapped path's defaults (spec §5.1): the base a New worktree is cut from, and the pattern its branch is named by. Each is absent when unset — the base then
- * falls back to `origin/HEAD` and the checkout's own branch, the pattern to `DEFAULT_NAME_PATTERN`. Stored per PATH, not per project, because one checkout can be
- * mapped to two Jira projects and has one convention.
+ * One mapped path's defaults (spec §5.1): the base a New worktree is cut from, and the pattern its branch is named by. Each is absent when unset — the base
+ * then falls back to `origin/HEAD` and the checkout's own branch, the pattern to `DEFAULT_NAME_PATTERN`. Stored per PATH, not per project, because one checkout
+ * can be mapped to two Jira projects and has one convention.
  */
 export interface JiraRepoDefaults {
   base?: string;

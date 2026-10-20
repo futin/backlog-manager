@@ -15,7 +15,8 @@ import { readRepoRefs, readWorktrees } from './refs.util';
 import { unwrapJira } from './unwrap.util';
 
 /**
- * The nine read routes under `/api/jira` (Jira phase 1, phase 5's `/prompt`, and the repo/branch work's `/refs` and `/worktrees`; spec §5, errors per §8). Every one answers from the poller's cache or status, or from ONE fresh read the
+ * The nine read routes under `/api/jira` (Jira phase 1, phase 5's `/prompt`, and the repo/branch work's `/refs` and `/worktrees`; spec §5, errors per §8).
+ * Every one answers from the poller's cache or status, or from ONE fresh read the
  * poller performs for it — never from a call this file makes, so the 429 window, the boot's missing `cloudId` and the 401 bookkeeping have one home
  * (`JiraPollerService.gate` / `routeFailed`) and a route cannot forget them. There is no POST here: the board and repository writes live in
  * `jira-write.controller.ts` (phase 2), and the dispatch route is `AgentsModule`'s (phase 5).

@@ -52,7 +52,10 @@ export function jiraEnv(env: NodeJS.ProcessEnv = process.env): JiraEnv {
   return { configured: true, site, email, token };
 }
 
-/** The one spelling of the variable that names the roots compose mounts into the container (spec §4). Exported, like `JIRA_ENV`, so `compose-env.test.ts` pins it. */
+/**
+ * The one spelling of the variable that names the roots compose mounts into the container (spec §4). Exported, like `JIRA_ENV`, so `compose-env.test.ts`
+ * pins it.
+ */
 export const REPO_ROOTS_ENV = 'BM_REPO_ROOTS';
 
 /**

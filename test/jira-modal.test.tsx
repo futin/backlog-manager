@@ -1010,7 +1010,7 @@ describe('JiraView — the open-issue slot draws the modal', () => {
   });
 });
 
-/* The Worktrees list (Jira repo/branch, spec §5.3; DESIGN.md §8.9.2): the trees this ticket has, each with a Remove that only copies the command — the board
+/* The Worktrees list (Jira repo/branch, spec §5.5; DESIGN.md §8.9.2): the trees this ticket has, each with a Remove that only copies the command — the board
    never writes git — and is off while the board knows of a session on the key. The main tree never gets a row. */
 describe('JiraIssueModal — Worktrees (Jira repo/branch)', () => {
   const PAY_TREE = { repo: '/Users/ada/pay', path: '/Users/ada/pay/.worktrees/PAY-131-refund', branch: 'PAY-131-refund', main: false };

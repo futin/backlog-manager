@@ -41,8 +41,8 @@ import { JiraRunMenu } from './JiraRunMenu';
  * it, draws a `LiveStrip` (`board-card-live hatch`, the Board's look) before the face, one per session, the folded ones naming their key — a folded issue
  * is not a card, so without that its session would show nowhere on the board. `sessions` is `cardSessions`' list, computed once by the page.
  *
- * **The worktree chip** (Jira repo/branch, spec §5.3; DESIGN.md §8.9.1). `trees` is `ticketWorktrees`' answer for THIS card's own key, computed once by the page
- * from its one `GET /api/jira/worktrees`: the branch name when the ticket has one tree, `N worktrees` when it has several, the paths in the title. A card
+ * **The worktree chip** (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1). `trees` is `ticketWorktrees`' answer for THIS card's own key, computed once by the
+ * page from its one `GET /api/jira/worktrees`: the branch name when the ticket has one tree, `N worktrees` when it has several, the paths in the title. A card
  * with none draws nothing — and so does one whose read failed, which is why this is a prop and not a request: the card has no error state to draw. Only the
  * card's own key counts; a folded issue's tree shows in its own modal, as a folded issue's session shows only in the strip's key.
  *

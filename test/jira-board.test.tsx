@@ -954,7 +954,7 @@ describe('Run ▾ and the live strip', () => {
   });
 });
 
-/* Worktree chips (Jira repo/branch, spec §5.3; DESIGN.md §8.9.1): the board asks `/api/jira/worktrees` once on mount, and again only when the SET of live keys
+/* Worktree chips (Jira repo/branch, spec §5.5; DESIGN.md §8.9.1): the board asks `/api/jira/worktrees` once on mount, and again only when the SET of live keys
    changes — never on a timer, never because a render handed it a new object — and a failed read draws no chip and no error. */
 describe('worktree chips on the card', () => {
   const tree = (branch: string | null, over: Partial<{ repo: string; path: string; main: boolean }> = {}) => ({

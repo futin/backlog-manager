@@ -177,12 +177,12 @@ export function readRepos(value: unknown, file: string): Record<string, string[]
 }
 
 /**
- * The per-path defaults (spec §5.1), whole: absolute normalised path → `{ base?, namePattern? }`. The fallback is per VALUE, one level finer than the entry: a key
- * that is not an absolute, already-normalised path (`normaliseRepoPath` with no home returns it unchanged — a `~` key would expand to something else and a
+ * The per-path defaults (spec §5.1), whole: absolute normalised path → `{ base?, namePattern? }`. The fallback is per VALUE, one level finer than the entry: a
+ * key that is not an absolute, already-normalised path (`normaliseRepoPath` with no home returns it unchanged — a `~` key would expand to something else and a
  * relative one is refused) costs the entry; a value that is not a string or fails the same check the write route applies — `branchNameProblem` for the base,
- * `patternProblem` for the pattern — costs only itself, so a hand-edited bad pattern leaves that path's good base working; an entry left with neither is dropped.
- * Each drop is warned once. A `repoDefaults` that is not an object reads as `{}`. `__proto__` is skipped by name, as `readRepos` does, though the absolute-path
- * test would refuse it anyway.
+ * `patternProblem` for the pattern — costs only itself, so a hand-edited bad pattern leaves that path's good base working; an entry left with neither is
+ * dropped. Each drop is warned once. A `repoDefaults` that is not an object reads as `{}`. `__proto__` is skipped by name, as `readRepos` does, though the
+ * absolute-path test would refuse it anyway.
  */
 export function readRepoDefaults(value: unknown, file: string): Record<string, JiraRepoDefaults> {
   const out: Record<string, JiraRepoDefaults> = {};
@@ -265,7 +265,8 @@ export function readJiraConfig(file: string = jiraConfigFile()): JiraConfig {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
-// Writers (phase 2). Called by the six config POST routes under `/api/jira` (boards, boards/delete, repos, repo-defaults, skills, skills/delete) and nothing else.
+// Writers (phase 2). Called by the six config POST routes under `/api/jira` (boards, boards/delete, repos, repo-defaults, skills, skills/delete) and nothing
+// else.
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
 /**
@@ -422,10 +423,10 @@ export function parseReposWrite(body: unknown, home: string): Parsed<{ project: 
 
 /**
  * Validate a `POST /api/jira/repo-defaults` body: `{ path, base, namePattern }`, where `null` is "unset". The path is normalised as `parseReposWrite` does; the
- * 400 sentences are the field's name and the shared rule's own wording (`base <Table A problem>`, `namePattern <Table E problem>`), so the Setup row can put them
- * under the field. A missing value is refused like a wrong one (`base must be a string or null`): the body replaces the path's whole entry, and a client that
- * left a field out has not said whether to keep or clear it. Nothing is trimmed — Table A refuses a space, so a padded value is a refusal, not a silent fix.
- * Whether the path is MAPPED, and whether the base exists, are not decided here: the first needs the file (the route reads it), the second is deliberately
+ * 400 sentences are the field's name and the shared rule's own wording (`base <Table A problem>`, `namePattern <Table E problem>`), so the Setup row can put
+ * them under the field. A missing value is refused like a wrong one (`base must be a string or null`): the body replaces the path's whole entry, and a client
+ * that left a field out has not said whether to keep or clear it. Nothing is trimmed — Table A refuses a space, so a padded value is a refusal, not a silent
+ * fix. Whether the path is MAPPED, and whether the base exists, are not decided here: the first needs the file (the route reads it), the second is deliberately
  * never checked (spec §5.1 — the branch may exist only on `origin`).
  */
 export function parseRepoDefaultsWrite(body: unknown, home: string): Parsed<{ path: string; base: string | null; namePattern: string | null }> {

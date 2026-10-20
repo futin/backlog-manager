@@ -657,7 +657,8 @@ describe('GET /api/jira/prompt', () => {
 /**
  * `GET /api/jira/refs` and `GET /api/jira/worktrees` (Jira repo/branch, Task 3; spec §4 and §5.2) — the launch sheet's branch picker and Setup's warnings. The
  * git reads are stubbed here (`jira-refs.test.ts` runs them against real git): what this suite owns is the contract around them — the order of the refusals,
- * the mapping check, the distinct-path rule and the shape handed back. Its own app for the same reason the prompt's is: the routes read `repos` from `jira.json`.
+ * the mapping check, the distinct-path rule and the shape handed back. Its own app for the same reason the prompt's is: the routes read `repos` from
+ * `jira.json`.
  */
 describe('GET /api/jira/refs and /api/jira/worktrees', () => {
   const PAY = '/work/pay';

@@ -30,7 +30,8 @@ const PLACEHOLDERS = ['{key}', '{url}', '{repo}', '{branch}', '{base}', '{worktr
  *   and otherwise as typed — placeholders are the SERVER's to expand, so this card holds no second parser to drift from it.
  * - **The hint** names the six placeholders and says what the list does NOT do: a skill has to exist in the repo or the Claude install, and this list only
  *   names it. A second line says what the last three are: `{branch}` and `{base}` are the choice made on Run, `{worktree}` is the path the board EXPECTS the
- *   tree at — the one `jira.mjs worktree` prints, once the tree exists, is the one that counts. A template that points at nothing is refused by Claude when the session starts, not here — the card has no way to see a repo's skills.
+ *   tree at — the one `jira.mjs worktree` prints, once the tree exists, is the one that counts. A template that points at nothing is refused by Claude when the
+ *   session starts, not here — the card has no way to see a repo's skills.
  *
  * **Every landed write reloads `GET /api/jira`** and the card draws only what that says is stored, never its own optimistic copy, the rule
  * `JiraReposGroup` follows. A refusal (400 with the field's sentence, 404 for a skill another tab removed, 409 for a `jira.json` that cannot be read) is
