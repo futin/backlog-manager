@@ -827,6 +827,24 @@ export function oneLine(text: string): string {
 }
 
 /**
+ * The `--finish` / `--base` token, as one pattern. `AgentsService.dispatch` refuses an execute body containing it (rule 5: the sheet's pickers are the only
+ * channel for either), and `composePrompt` defuses it inside an item title with `defuseFinishFlags` — two uses of one pattern, so what the refusal would
+ * match and what the defuser rewrites cannot drift. A word character or hyphen on either side means a longer word (`--finished`, `--base-ref`, `base64`),
+ * which is not a flag. Non-global on purpose: `.test` on a global regex carries `lastIndex` between calls.
+ */
+export const FINISH_FLAG = /(?<![\w-])--(finish|base)(?![\w-])/;
+
+/**
+ * An item title is free text, and this repo's own history has titles that spell `--base` (`On a --base run the orchestrator's branch -d refuses…`). Left as
+ * is, the board's own untouched execute prompt would trip rule 5 on its quoted title and 400 the default dispatch. The `--` of each flag token becomes two
+ * U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 5 nor the skill's flag parser sees a flag. Only the title goes through
+ * this — a token a person TYPES into the body is still refused.
+ */
+export function defuseFinishFlags(text: string): string {
+  return text.replace(new RegExp(FINISH_FLAG.source, 'g'), (_m, flag: string) => `\u2011\u2011${flag}`);
+}
+
+/**
  * The last sentence of every item-dispatch prompt, whatever the action — and of the Jira `execute` built-in's (Jira phase 5). One copy, here, because
  * `server/src/jira/` imports no `agents/` service or prompt code; a second wording would be the one that loses the narrow-staging clause.
  *

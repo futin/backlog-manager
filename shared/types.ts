@@ -921,7 +921,8 @@ export interface AgentDispatchRequest {
   effort?: string;
   /**
    * How an `execute` session ends (`ExecuteFinish`) and, for `pr`, the branch the PR targets. Both optional so a tab opened before the deploy — which sends
-   * neither — reads as `in-place` rather than a 400; `base` is meaningful only beside `finish: 'pr'` and is ignored otherwise.
+   * neither — reads as `in-place` rather than a 400; `base` is meaningful only beside `finish: 'pr'` — dispatch refuses
+   * (400) a `base` sent with any other finish, or with none.
    */
   finish?: ExecuteFinish;
   base?: string;

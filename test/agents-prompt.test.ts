@@ -1,7 +1,7 @@
 import { readAgentsConfig } from '../server/src/agents/config.util';
 import { dashboardError, resumeSessionName } from '../server/src/agents/agents.service';
 import { composePrompt, sessionName } from '../server/src/agents/prompt.util';
-import { COMMIT_RULE } from '../shared/agent';
+import { COMMIT_RULE, FINISH_FLAG } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -313,7 +313,7 @@ describe('dashboardError', () => {
 
 /*
  * The execute prompt carries no closing clause (the finish pick is the sheet's, appended at dispatch), while groom and capture keep `COMMIT_RULE` in the
- * editable text. composePrompt takes exactly (item, action): nothing about a project's finish mode is read at plan time.
+ * editable text. composePrompt takes exactly (item, action): nothing about the finish mode is read at plan time — it is the sheet's pick.
  */
 describe('composePrompt closing clause', () => {
   it('execute ends with the instruction sentence and carries neither COMMIT_RULE nor a --finish token', () => {
@@ -327,5 +327,29 @@ describe('composePrompt closing clause', () => {
   it.each(['groom', 'capture'] as const)('%s still ends with COMMIT_RULE', (action) => {
     const it_ = action === 'capture' ? fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null }) : fakeItem({ groomed: false });
     expect(composePrompt(it_, action).endsWith(COMMIT_RULE)).toBe(true);
+  });
+});
+
+/*
+ * A title is free text, and one that spells `--base` or `--finish` (this repo's own history has one) would make the untouched composed execute prompt trip
+ * dispatch's token refusal. composePrompt defuses the two tokens inside the quoted title with U+2011 hyphens — same look, no flag — through the one pattern
+ * the refusal itself uses.
+ */
+describe('composePrompt title flag tokens', () => {
+  const NB = '\u2011\u2011';
+  it('an execute title with --base and --finish composes a prompt the token refusal would not match, the words still readable', () => {
+    const p = composePrompt(fakeItem({ id: 'task-3', title: 'Fix --base handling and --finish flags', section: 'tasks', groomed: true }), 'execute');
+    expect(FINISH_FLAG.test(p)).toBe(false);
+    expect(p).toContain(`"Fix ${NB}base handling and ${NB}finish flags"`);
+  });
+
+  it('leaves longer words alone: --finished and --base-ref are not tokens', () => {
+    const p = composePrompt(fakeItem({ id: 'task-3', title: 'Rename --finished and --base-ref', section: 'tasks', groomed: true }), 'execute');
+    expect(p).toContain('"Rename --finished and --base-ref"');
+  });
+
+  it('applies to groom and capture too, one rule for every action', () => {
+    const p = composePrompt(fakeItem({ title: 'About --finish' }), 'groom');
+    expect(p).toContain(`"About ${NB}finish"`);
   });
 });

@@ -18,6 +18,7 @@ import {
   clampMode,
   deriveAction,
   dispatchBlock,
+  FINISH_FLAG,
   finishClause,
   inReviewBlock,
   isExecuteFinish,
@@ -462,7 +463,7 @@ export class AgentsService {
     //      that no word character or hyphen sits on either side of the token — `[\w-]` — rather than requiring whitespace: `--finished`, `--base-ref` and a
     //      `base64` blob are longer words and are left alone, while `--base=develop` (`=` is neither) is refused. Groom and capture bodies are free text no
     //      flag parser reads, and are not refused.
-    if (req.action === 'execute' && /(?<![\w-])--(finish|base)(?![\w-])/.test(prompt)) {
+    if (req.action === 'execute' && FINISH_FLAG.test(prompt)) {
       throw new HttpException({ error: "the finish mode and base are set by the sheet's pickers — remove --finish and --base from the prompt" }, 400);
     }
 

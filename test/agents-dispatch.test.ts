@@ -11,8 +11,9 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { OrchestratorRun, RunStage } from '../shared/types';
+import type { BacklogItem, OrchestratorRun, RunStage } from '../shared/types';
 import { COMMIT_RULE, DEFAULT_MODEL, finishClause } from '../shared/agent';
+import { composePrompt } from '../server/src/agents/prompt.util';
 
 // Same cast every suite reading this fixture makes: it is plain JSON, so TS
 // widens its string fields to `string` rather than the literal unions
@@ -624,6 +625,38 @@ describe('POST /api/agents/dispatch', () => {
       }).expect(201);
       // Groom sends its body unchanged: no clause is appended.
       expect(spawnedPrompt(sent)).toBe('Use the backlog-manager:backlog-groom skill on bug-1. Mention --base x.');
+    });
+
+    /* A title spelling `--base x` must not break the board's own untouched default: composePrompt defuses the token inside the quoted title, so rule 5 sees
+       only a typed one. The spawned prompt then carries exactly one `--base`, the clause's. */
+    describe('an item whose title spells --base', () => {
+      const titled = () => {
+        const file = 'bug-3-flagged.md';
+        const body = '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n';
+        writeFileSync(join(projectPath, 'backlog', 'bugs/open', file), item('bug-3', 'On a --base run the branch -d refuses', body));
+        const itemPath = bugPath(file);
+        const prompt = composePrompt(
+          { id: 'bug-3', title: 'On a --base run the branch -d refuses', section: 'bugs', groomed: true } as BacklogItem,
+          'execute'
+        );
+        return { itemPath, prompt };
+      };
+
+      it('finish pr: 201, and the spawned prompt contains exactly one --base (the clause\'s)', async () => {
+        makeRepo('main');
+        const { itemPath, prompt } = titled();
+        const sent = stubDashboard();
+        await exec({ itemPath, prompt, finish: 'pr', base: 'main' }).expect(201);
+        const p = spawnedPrompt(sent);
+        expect(p.match(/--base/g)).toHaveLength(1);
+        expect(p.endsWith(finishClause('pr', 'main'))).toBe(true);
+      });
+
+      it('finish in-place: 201', async () => {
+        const { itemPath, prompt } = titled();
+        stubDashboard();
+        await exec({ itemPath, prompt, finish: 'in-place' }).expect(201);
+      });
     });
 
     it('proves main too: a master-trunk repo gets a 400, not a PR into a branch that is not there', async () => {

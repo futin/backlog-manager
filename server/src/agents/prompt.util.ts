@@ -1,4 +1,4 @@
-import { COMMIT_RULE, oneLine } from '../../../shared/agent';
+import { COMMIT_RULE, defuseFinishFlags, oneLine } from '../../../shared/agent';
 import type { AgentAction } from '../../../shared/agent';
 import type { BacklogItem } from '../../../shared/types';
 
@@ -24,7 +24,9 @@ const SKILL: Record<AgentAction, string> = {
 };
 
 export function composePrompt(item: BacklogItem, action: AgentAction): string {
-  const head = `Use the ${SKILL[action]} skill on ${item.id} — "${oneLine(item.title)}" — in this repo's backlog.`;
+  // The title is defused of `--finish`/`--base` tokens for every action — one rule, and harmless for groom and capture — because for an execute, dispatch's
+  // rule 5 would otherwise refuse the board's own untouched prompt over a title that merely mentions the flag.
+  const head = `Use the ${SKILL[action]} skill on ${item.id} — "${defuseFinishFlags(oneLine(item.title))}" — in this repo's backlog.`;
   // An execute's closing clause is NOT part of the composed prompt: the launch sheet's finish picker owns it, and `AgentsService.dispatch` appends
   // `finishClause(finish, base)` from validated fields after the sheet's body. Were it here, in the textarea the person may edit, deleting ` --finish pr` from
   // the text would leave the sheet showing PR while the session stays in place. Groom and capture write item files, never open a PR, and have no picker, so
