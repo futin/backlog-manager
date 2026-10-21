@@ -93,7 +93,7 @@ whose items live on GitHub.
 The stack has to be running: there is no offline queue, because a write parked on one laptop would be a second source of truth invisible to every other machine.
 A refused connection is **exit `5`**, a new code, naming the port and both ways to start the stack.
 
-What each verb does differently, and the four that exist only here:
+What each verb does differently, and the five that exist only here:
 
 | Verb             | API mode                                                                                                                                           |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |

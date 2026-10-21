@@ -378,16 +378,17 @@ whatever time was spent and drops `started` along with it, because there's nothi
   happily stamp either one for you, and the refusal gate below inspects only a task's `## Plan` and a bug's `## Fix`, so a refactor that got past this check
   would find no rule to fail. The id has to be checked here, before `start` is ever reached.
 - **Writes only under the repo root `show` resolved** — in `pr` mode that root is the worktree it picked — and, in a tracker project, only to the issue that
-  root's marker names. Every write this skill makes —
+  root's marker names. Every `backlog.mjs` write this skill makes —
   the `start`/`stop` markers, the `## Outcome` append, the `move` to `done/` — lands inside the one tree `backlog.mjs` resolved from this session's own cwd.
   Another checkout of the same repository is another tree: writing into it from here produces changes on nobody's branch, attributable to no commit, in a
   working copy this session was never given. The tracker half is the same rule over a different address space: the API refuses an id naming another
-  repository, so an item id copied from somewhere else fails rather than writing into somebody else's backlog.
+  repository, so an item id copied from somewhere else fails rather than writing into somebody else's backlog. `pr` mode's own writes outside that tree — the
+  new worktree, the common `info/exclude`, a per-session temp directory — are the ones `references/pr-mode.md` instructs, and are not `backlog.mjs`'s.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a hard limit, not a suggestion: no proof, no archive.
 - **Never escalates to the user while an `[orchestrator-run` marker holds.** Covered above, and a hard limit for the same reason the one above it is: an
   unattended run has nobody to answer, and a session that stops to negotiate keeps the whole queue waiting on a decision the run was going to make by itself.
 
 ## Next
 
-`/backlog` shows one fewer open item once this is done. Anything new the work surfaces — a fresh bug, a follow-on idea — is a new `backlog-capture`, not an edit
+`/backlog` shows one fewer open item once this is done — in `pr` mode, once the PR merges. Anything new the work surfaces — a fresh bug, a follow-on idea — is a new `backlog-capture`, not an edit
 to this one.

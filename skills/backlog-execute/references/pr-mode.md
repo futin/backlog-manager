@@ -42,6 +42,9 @@ default branch, else `main`). That `base` is `<base>` everywhere below.
 Before `show`, because `show` resolves the item from the cwd's tree and the item has to be read from the tree the work happens in. With no id in the trigger,
 choose one first with `board` from the starting tree — a read — then pick the tree; `show` and everything after it run in that tree.
 
+**First check, ahead of both paths below:** `git rev-parse --verify --quiet refs/heads/<base>` in the starting tree. No local `<base>` branch → stop and say so, and
+do not fetch one into existence: the reuse check's `git rev-list --count <base>..HEAD` errors without it, and a new tree is cut from it.
+
 ### Reuse the tree you started in — only when every one of these holds
 
 ```bash
@@ -73,13 +76,11 @@ Any one of them fails → cut a new tree, below. Never "clean up" a tree to make
 `origin/<base>`: local is where a freshly groomed item is committed, the same reason the orchestrator cuts from local base.
 
 ```bash
-git -C <root> rev-parse --verify --quiet refs/heads/<base>
 git -C <root> show-ref --verify --quiet refs/heads/execute/<id>
 test -e <root>/.worktrees/execute-<id>
 git -C <root> worktree add <root>/.worktrees/execute-<id> -b execute/<id> <base>
 ```
 
-- No local `<base>` branch → stop and say so. Do not fetch one into existence.
 - **The branch `execute/<id>` or the path `.worktrees/execute-<id>` already exists → stop and say so. Never reuse it from here and never delete it** — it may
   hold an earlier session's work. (A person who wants that tree worked can start a session inside it; the reuse rule above then decides.)
 - The names are chosen so they never collide with the orchestrator's `.worktrees/<id>` / `backlog/<id>`, whose leftover probe parks an item that has either.
@@ -101,12 +102,8 @@ The same setup the orchestrator gives its own trees (orchestrate SKILL.md §4, _
    for p in '.worktrees/' 'node_modules'; do grep -qxF "$p" "$EXCL" || printf '%s\n' "$p" >> "$EXCL"; done
    ```
 
-2. **Dependencies: a `node_modules` symlink to the main tree's directory** — the orchestrator's mechanism, "the `node_modules` idiom"
-   (`backlog-orchestrate/references/rationale.md` §4). A fresh checkout has none of its own, and the project's tests usually cannot run without one:
-
-   ```bash
-   [ -d <root>/node_modules ] && [ ! -e <tree>/node_modules ] && ln -s <root>/node_modules <tree>/node_modules
-   ```
+2. **Dependencies: a `node_modules` symlink to the main tree's directory** — set under "Every command runs in that tree" below, because a reused tree needs
+   it as much as a new one.
 
    **Nothing else goes on that list** — not a shim, a scratch config, a build artifact. `info/exclude` lives in the common git dir, so a line added there
    also hides that path in the person's main checkout and in every other tree, and nothing ever takes it out again. A file this session writes into the tree
@@ -130,7 +127,19 @@ make. (A fast-forward §2 gave it stays; it moved the branch to a commit the bas
 ### Every command runs in that tree
 
 `cd <tree> && …` on every later command — `backlog.mjs`, tests, builds, git — never a `--root` flag, and never a path into another tree. `backlog.mjs` keeps
-resolving its store from the cwd, so SKILL.md's "writes only under the repo root `show` resolved" holds as written: the resolved root simply is `<tree>`.
+resolving its store from the cwd, so the `backlog.mjs`-writes clause of SKILL.md's "writes only under the repo root `show` resolved" is the one that holds: the
+resolved root simply is `<tree>`. The three writes pr mode makes outside it are the ones this file instructs — the new tree and its `.git/worktrees/` entry, the
+common `info/exclude`, and `<tmp>`.
+
+**Dependencies, in a new tree and a reused one alike:** a `node_modules` symlink to the main tree's directory — the orchestrator's mechanism, "the `node_modules`
+idiom" (`backlog-orchestrate/references/rationale.md` §4). A fresh checkout has none of its own, and the project's tests usually cannot run without one. A
+guarded no-op when the link or the directory already exists, so it is safe to run on either path:
+
+```bash
+[ -d <root>/node_modules ] && [ ! -e <tree>/node_modules ] && ln -s <root>/node_modules <tree>/node_modules
+```
+
+(For a reused tree `<root>` is the main working tree, `git worktree list --porcelain | sed -n '1s/^worktree //p'`, as above.)
 
 ## 3. Pick an item, refusal gate, mark in progress, dispatch, verify — unchanged
 
@@ -142,6 +151,9 @@ correct: say to commit the groom first, then remove what §2 cut. An item carryi
 `heartbeat <id>` before §6's commit, before every reviewer dispatch, right after every verdict, and before §8's push. A refused heartbeat means another
 session has taken the item: stop right there — commit nothing more, push nothing — and report the branch and the tree. Nothing is lost at either point:
 before §6 the work sits uncommitted in `<tree>`, after it the work is committed on the branch.
+
+The reviewer dispatch in §7 is one blocking call, so no heartbeat lands while it runs. That is accepted: the claim only goes stale (contestable), it is never
+released, and the reviewer is bounded — the same race the orchestrator already accepts. Do not split the dispatch to squeeze one in.
 
 ## 4. Verification fails
 
@@ -212,7 +224,7 @@ nothing was pushed, so there is nothing for a label to guard.
 
 ```bash
 cd <tree> && git push -u origin <branch>
-cd <tree> && gh pr create --base <base> --title "<subject>" --body-file <tmp>/pr.md
+cd <tree> && gh pr create --base <base> --title "$(git log -1 --format=%s)" --body-file <tmp>/pr.md
 ```
 
 `<branch>` is §7's. **Never force-push**, in any spelling. A push the remote rejects stops here and is reported with git's own words — nothing after it runs

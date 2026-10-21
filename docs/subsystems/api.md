@@ -82,7 +82,7 @@ it on a skip, at `finish` and at `--abort`, while two server paths remove it on 
 claimed, and `POST /api/agents/stop` sweeps the run's never-claimed items (below). Nothing on this side reads the label as exclusion: the claim is still the
 only lock.
 
-`review` is the tenth item write, and its label IS read as exclusion, unlike `queue`'s: `backlog.mjs review <id> on|off` is its one caller, run by
+`review` is one of the ten item writes, and its label IS read as exclusion, unlike `queue`'s: `backlog.mjs review <id> on|off` is its one caller, run by
 `backlog-execute` in `pr` mode right after it pushes an item's branch (the claim is released then, and the issue stays open until the PR merges) and by a person
 when a PR closes unmerged. `plan`/`dispatch` refuse a mapped `inReview` item with `a PR is open for this item` (`inReviewBlock`, `shared/agent.ts`), and the
 orchestrator gate turns it `ungroomed` with the same sentence.
