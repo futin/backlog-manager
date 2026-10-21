@@ -27,7 +27,10 @@ decisions are numbered there and cited here as "spec D<n>".
 - Label name: `in-review`. Write route: `POST /api/items/review`, body `{ project, id, inReview: boolean }`, a non-boolean `inReview` is a 400.
 - Item flag: `inReview?: true` on `BacklogItem` — `true` or absent, never `false` (same contract as `queued`).
 - Branch/worktree names for a new tree: `execute/<id>` at `<project root>/.worktrees/execute-<id>` (tracker `<id>` = bare issue number).
-- The pr-mode prompt sentence, exact: `Finish in this project's pr mode: the skill commits, reviews, pushes and opens the PR.`
+- The pr-mode prompt sentence, exact (backticks included, as `COMMIT_RULE` carries its own): ``Finish in this project's `pr` mode: the skill commits,
+  reviews, pushes and opens the PR.``
+- The in-review reason, exact, one string everywhere (dispatch ladders, orchestrator gate reason, execute's refusal): `a PR is open for this item` —
+  lowercase like the ladder's other fragments (`shared/agent.ts:460`, `client/src/lib/item-progress.ts:106`).
 - The one-off override phrase, exact: `in place this time`.
 - Every skill CLI ends `process.exitCode = main(...)`. Node tests sit beside the tool; jest tests flat in `test/`. Supertest suites use `listenLoopback`.
 - Comments explain *why* at the repo's existing density; new prose wraps at 160 columns; commit bodies at 72.
@@ -35,9 +38,9 @@ decisions are numbered there and cited here as "spec D<n>".
 
 ## Review Focus
 
-1. **A reused desktop worktree that is detached or on `<base>`** — must not be reused; a new tree is cut instead. (Task 6 — SKILL.md rule + manual check.)
+1. **A reused desktop worktree that is detached or on `<base>`** — must not be reused; a new tree is cut instead. (Task 6 prose test.)
 2. **Refusal after a new tree was cut** (item absent / ungroomed / claim lost) — the tree and `execute/<id>` branch are removed, a reused tree never is.
-   (Task 6.)
+   (Task 6 prose test.)
 3. **Board prompt with a malformed `backlog/config.json`** — prompt keeps `COMMIT_RULE`; no 500. (Task 2 test.)
 4. **`in-review` set on an issue a running orchestrator would otherwise queue** — gated out of the queue with a reason, never silently dropped. (Task 4 test.)
 5. **`config` run in a tracker project with the stack down** — still works (local file), never exit `5`. (Task 1 test.)
@@ -84,7 +87,8 @@ decisions are numbered there and cited here as "spec D<n>".
 
 - [ ] **Step 1: Failing tests** — for `execute`: no file / `in-place` / malformed JSON / `finish:"merge"` → prompt ends with `COMMIT_RULE` exactly; `pr` →
   ends with `PR_FINISH_RULE` exactly and contains no `Do not push`. For `groom` and `capture` in a `pr` project → still end with `COMMIT_RULE`. The existing
-  tail assertions stay green. Use a temp project dir per case.
+  tail assertions stay green; rewrite their comment "The commit rule rides on EVERY action" (`test/agents-prompt.test.ts:108-113`), now false for execute in
+  a `pr` project. Use a temp project dir per case. `readFinishMode` never throws — that util test is the guard for Review Focus 3.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/agents-prompt.test.ts` — FAIL.
 - [ ] **Step 3: Implement** reader, constant, the optional parameter, and pass `readFinishMode(item.projectPath)` at the call site.
 - [ ] **Step 4: Run** same + `pnpm run typecheck` — PASS.
@@ -97,20 +101,22 @@ decisions are numbered there and cited here as "spec D<n>".
   `A PR for this item is open — the work lands when it merges`), `shared/types.ts` (`inReview?: true` beside `queued`, doc comment saying gates DO read it —
   unlike `queued`; `ItemReviewRequest extends ItemWriteRequest { id: string; inReview: boolean }`), `server/src/tracker/map-issue.ts:~148-249` (flag from the
   label; exclude it from `tags` like `QUEUED_LABEL`), `server/src/items/sources/source.ts:~217` (`review(...)` beside `queue`), `server/src/items/sources/
-  github.source.ts:~883` (impl, mirroring `queue`: add/remove the label, removal that 404s is success), the files source's refusal for it,
-  `server/src/items/items-write.controller.ts:~254` (`@Post('review')`, same guards and per-item serialisation as `queue`)
+  github.source.ts:~883` (impl, mirroring `queue`: add/remove the label, removal that 404s is success; `ItemWriter` has this one impl — the files refusal
+  is the controller's, before any writer, `items-write.controller.ts:29`), `server/src/items/items-write.controller.ts:~254` (`@Post('review')`, same guards and per-item serialisation as `queue`)
 - Test: `test/tracker-labels.test.ts`, `test/tracker-map.test.ts`, `test/tracker-write.test.ts`, `test/agents-origin-guard.test.ts` (it enumerates every
   write route and builds one body with every field they need, `:92-132` — add `review` and `inReview: true`, and fix its route-count comments)
 
 **Interfaces:**
-- Produces: `IN_REVIEW_LABEL`; `BacklogItem.inReview?: true`; `POST /api/items/review` → `200 { id, inReview }`.
+- Also: "nine" wording for the label list in `server/src/tracker/labels.ts:63,95` and the title at `test/tracker-poll.test.ts:467` becomes ten.
+- Produces: `IN_REVIEW_LABEL`; `BacklogItem.inReview?: true`; `POST /api/items/review` → `201 { id, inReview }` (Nest's POST default, as the sibling
+  `queue` suite pins, `test/tracker-write.test.ts:515`).
 
 - [ ] **Step 1: Failing tests** — labels: `TRACKER_LABELS` has length `10`, last entry name `in-review`, describe title updated from "the nine labels";
   map: an issue labelled `in-review` maps with `inReview: true` and the label not in `tags`; an unlabelled issue has no `inReview` key at all; route:
-  `{inReview:true}` adds the label (client fake records `addLabel(repo, n, 'in-review')`), `{inReview:false}` removes it, a removal answered 404 is `200`,
+  `{inReview:true}` adds the label (client fake records `addLabel(repo, n, 'in-review')`), `{inReview:false}` removes it, both `201`; a removal answered 404 is `201`,
   `inReview:"yes"` → `400 { error: 'inReview must be a boolean' }`, a `files` project → refused with the same status the `queue` route uses for one, a
   wrong content-type / foreign origin → refused like every write route.
-- [ ] **Step 2: Run** `pnpm run test:jest -- test/tracker-labels.test.ts test/tracker-map.test.ts test/tracker-write.test.ts` — FAIL.
+- [ ] **Step 2: Run** `pnpm run test:jest -- test/tracker-labels.test.ts test/tracker-map.test.ts test/tracker-write.test.ts test/agents-origin-guard.test.ts test/tracker-poll.test.ts` — FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** same + `pnpm run typecheck` — PASS.
 - [ ] **Step 5: Commit** `feat(tracker): in-review label and its write route`.
@@ -123,25 +129,26 @@ decisions are numbered there and cited here as "spec D<n>".
   `dispatchBlock(...) ?? runClaimBlock(...) ?? syncOffBlock(...)`) and where dispatch refuses (`~451-493`); add an exported helper beside `runClaimBlock` in
   `shared/agent.ts` (my name: `inReviewBlock(item: BacklogItem): string | null`) that both ladders call. `dispatchBlock`/`dispatchGate` are project-level
   (derived from `projectDispatchGate`) and stay untouched. `skills/backlog-orchestrate/tools/
-  orchestrate.mjs` (`trackerCandidates` ~1918 / `buildGatedQueue` ~1627: an `inReview` item is gated with reason `in review — a PR is open`, shown wherever
-  existing gate reasons are shown), `skills/backlog/tools/backlog.mjs` (verb `review <id> on|off` → `apiPost('review', { project, id, inReview })`,
+  orchestrate.mjs` (`trackerCandidates` ~1918 / `buildGatedQueue` ~1627: an `inReview` item gets `gate: 'ungroomed'` with the in-review reason prepended to
+  `reasons`, exactly as `applyStaleMarks` does (~1760) — no new gate value, so `RunStage` and its consumers are untouched), `skills/backlog/tools/backlog.mjs` (verb `review <id> on|off` → `apiPost('review', { project, id, inReview })`,
   tracker-only: a files project exits `1` with `review is for tracker projects`; stack down → exit `5` like every tracker verb)
-- Test: `test/dispatch-button.test.tsx`, `test/agents-shared.test.ts` (`inReviewBlock`), `test/agents-dispatch.test.ts` (the server refusal),
+- Test: `test/dispatch-button.test.tsx`, `test/agents-shared.test.ts` (`inReviewBlock`), `test/tracker-dispatch.test.ts` (the server refusal — a tracker
+  suite with `FakeGithub`; `agents-dispatch.test.ts` is files-only and cannot produce an `inReview` item),
   `skills/backlog-orchestrate/tools/orchestrate.test.mjs` (near the `trackerCandidates`
   cases ~7372), `skills/backlog/tools/backlog.test.mjs`
 
 **Interfaces:**
 - Consumes: `BacklogItem.inReview` (Task 3), `POST /api/items/review` (Task 3).
-- Produces: disabled-reason text, exact: `In review — a PR is open for this item`.
+- Produces: the in-review reason from Global Constraints, from `inReviewBlock`.
 
 - [ ] **Step 1: Failing tests** — button: item `inReview:true` → Run disabled with that reason; `inReview` + `started` → the in-progress reason wins;
   `inReviewBlock` returns the reason for an `inReview` item and `null` for one without; `POST` dispatch of an `inReview` item → `409` with that reason (same
   status the run-claim refusal uses), and the plan/status answer carries it as `blocked`; orchestrator: a tracker cache with `#3` (inReview) and `#4`
   (plain) → queue holds only `4`, `#3` listed among gated items with the reason (Review Focus 4); `--ids 3` naming it → gated, not silently dropped;
   CLI: `review 7 on` posts `{inReview:true}` to `/api/items/review` (fake server), `off` posts `false`, `review 7 maybe` → exit `1`, files project → exit `1`.
-- [ ] **Step 2: Run** the four suites — FAIL.
+- [ ] **Step 2: Run** the five suites — FAIL.
 - [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** the four suites + `pnpm run typecheck` — PASS.
+- [ ] **Step 4: Run** the five suites + `pnpm run typecheck` — PASS.
 - [ ] **Step 5: Commit** `feat: gates skip in-review tracker items; backlog.mjs review`.
 
 ### Task 5: Reviewer agent accepts execute's inputs
@@ -163,12 +170,19 @@ decisions are numbered there and cited here as "spec D<n>".
   (one sentence each pointing at the reference for `pr`), Hard limits first bullet (`:343-345`, conditional form). Leave `:32` as is.
 - Create: `skills/backlog-execute/references/pr-mode.md` — the full flow, spec steps 1-9 in order, with decisions 5-9 and every "my call" from the spec.
 
+**Interfaces:**
+- Consumes: `backlog.mjs config` (Task 1), `PR_FINISH_RULE` (Task 2), `backlog.mjs review <id> on|off` and the in-review reason (Task 4), the reviewer's
+  widened inputs (Task 5). `ensureExcludeLines` cannot be called from here (`orchestrate.mjs` refuses every verb but `init` inside a linked worktree), so the
+  exclude step is prose — that is the decision.
+
 **Behaviour the text must pin (each is one sentence or one short list in the reference):**
 - Mode read once from the starting tree via `backlog.mjs config`; skipped entirely under `[orchestrator-run`; stated in one line; override only by the exact
   phrase; `PR_FINISH_RULE` in a prompt means "follow pr mode", `COMMIT_RULE` in an `in-place` project is today's behaviour.
 - Tree choice (Review Focus 1): reuse only a clean linked worktree on a named branch ≠ `<base>`, no commits beyond `<base>`; fast-forward it if behind;
   else `git worktree add <root>/.worktrees/execute-<id> -b execute/<id> <base>`; existing path/branch → stop, never reuse/delete; new tree gets the
-  `info/exclude` lines (`.worktrees/`, bare `node_modules`) and dependencies as orchestrate SKILL.md §541-544 does; every command `cd <tree> && …`.
+  `info/exclude` lines (`.worktrees/`, bare `node_modules` — orchestrate SKILL.md §541-544, `orchestrate.mjs` `WORKTREE_EXCLUDES` ~4174) and a
+  `node_modules` **symlink** to the main tree's directory, the orchestrator's dependency mechanism (`references/rationale.md:98`), stated explicitly;
+  every command `cd <tree> && …`.
 - Refusal cleanup (Review Focus 2): only the tree and branch this session made, only while the branch has no commits beyond `<base>`; say so.
 - Files project archive unchanged and committed; tracker: Outcome to a temp file, claim held with heartbeats through review and push, no `move`.
 - Commit with `git add -A` (only in the chosen tree); conventional subject (bug → `fix:`, task → `feat:`, `(scope)` optional).
@@ -177,13 +191,20 @@ decisions are numbered there and cited here as "spec D<n>".
   failure report.
 - Push `-u origin <branch>` (never force); `gh pr create --base <base>`, body = Outcome summary + review verdict + `Closes #<n>` (default-branch base) or
   `Refs #<n>`; no `gh` / not GitHub → report the exact command. Tracker, after a successful push: `review <id> on` → `comment` → `stop --keep-started`.
-- Permission-denied git/gh call → stop there, keep what exists, print remaining commands.
+- Permission-denied git/gh call → stop there, keep what exists, print remaining commands. A push the remote rejects stops and is reported; `gh` missing or not
+  authenticated → report the command. A failed label write undoes nothing; the final message says the guard is missing.
+- PR body carries the review findings' one-line summaries; the subject satisfies the target repo's PR-title rule where it has one; the refusal of an
+  `inReview` item names the PR when it can; a tracker session heartbeats across the review loop (15-minute stale window).
 - Refusal gate gains: an `inReview` item is refused (`a PR is open for this item`).
 - Final message: PR URL (or command), branch, worktree path; tracker: the label and how to remove it; files: "merge this PR before draining the backlog".
 
-- [ ] **Step 1: Write** the reference, then the SKILL.md edits (one statement each, story in the reference).
-- [ ] **Step 2: Check** `pnpm run test:skills` and `pnpm run test:jest -- test/claude-rules.test.ts` — PASS.
-- [ ] **Step 3: Commit** `feat(skills): backlog-execute pr finish mode`.
+- [ ] **Step 1: Failing prose tests** in `skills/backlog/tools/backlog.test.mjs`, beside the existing `executeSection` cases (~3064-3116), reading
+  `skills/backlog-execute/references/pr-mode.md`: (a) the reuse rule names a named branch, refuses a detached `HEAD`, and refuses a tree on `<base>`
+  (Review Focus 1); (b) the refusal cleanup is limited to the tree and branch this session made and says a reused tree is never removed (Review Focus 2).
+  Run `pnpm run test:skills` — FAIL (file absent).
+- [ ] **Step 2: Write** the reference, then the SKILL.md edits (one statement each, story in the reference).
+- [ ] **Step 3: Check** `pnpm run test:skills` and `pnpm run test:jest -- test/claude-rules.test.ts` — PASS.
+- [ ] **Step 4: Commit** `feat(skills): backlog-execute pr finish mode`.
 
 ### Task 7: Invariants and docs sweep
 
