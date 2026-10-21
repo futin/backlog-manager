@@ -21,8 +21,7 @@ paths: ["skills/**", "agents/**"]
   `{"kind":"github"}` with a valid repo routes every command through `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming
   the marker, NEVER a fallback to files. There is no offline queue on purpose: a parked write would be a second source of truth on one laptop. Ids are `31` /
   `#31` / this project's own URN; a file-shaped id and another repo's URN are each refused with their own sentence. `review <id> on|off` is the opposite —
-  tracker-only,
-  through `POST /api/items/review`, exit `1` in a files project. `jira.mjs` has no files mode at all: every command but
+  tracker-only, through `POST /api/items/review`, exit `1` in a files project. `jira.mjs` has no files mode at all: every command but
   `worktree` is an
   API call, a refused connection is exit `5` with a sentence naming the backlog-manager checkout (it runs in a mapped repository, where `pnpm run dev` means
   something else), and its other codes are `2` (a 4xx) and `3` (a 5xx). `worktree` makes no request — git only, so it works with the stack down — and exits `0`,

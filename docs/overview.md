@@ -108,8 +108,7 @@ push). `backlog-orchestrate` is the only skill that merges — it works one item
 was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and
 opens one pull request into the base, and for a tracker project it pushes that base — while execute does the work and groom writes the plans. Groom never
 commits; execute commits and pushes only when its trigger says `--finish pr` (the board's launch sheet picks it per run), and then only its own branch in its
-own
-worktree, ending in a pull request rather than a merge.
+own worktree, ending in a pull request rather than a merge.
 
 An install is a copy of the pushed `HEAD`, never the working tree; see [workflows/publishing.md](workflows/publishing.md).
 

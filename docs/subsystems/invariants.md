@@ -456,8 +456,8 @@ call, merge commits or otherwise. The one other push in this plugin is execute's
 projects alike.
 
 **Execute's `pr` mode commits and pushes, and it is this same argument applied to a tree execute owns** (the execute pr-mode spec). The limit above was never
-"execute must not touch git"; it was "no skill stages in a tree it does not own". A hand execute session started with `--finish pr --base <ref>` (the
-sheet's Finish picker, or typed into a terminal) finishes as a pull request, and it first makes the tree that limit asks
+"execute must not touch git"; it was "no skill stages in a tree it does not own". A hand execute session started with `--finish pr --base <ref>` (the sheet's
+Finish picker, or typed into a terminal) finishes as a pull request, and it first makes the tree that limit asks
 for: `.worktrees/execute-<id>` on `execute/<id>`, cut from local `<base>` — named so it never collides with the orchestrator's `.worktrees/<id>` /
 `backlog/<id>` — or a linked worktree it starts in that is clean, on a named branch other than `<base>`, with no commits beyond it. That tree holds this item's
 work alone, so `git add -A` there is as safe as in the orchestrator's, for the same reason. In it execute commits, has `backlog-reviewer` review
@@ -3992,8 +3992,8 @@ but `--ff-only`.
 
 **`review <id> on|off` is a plain tracker verb, not an exception.** It sets the `in-review` label through `POST /api/items/review`: API only, exit `5` with the
 stack down, and refused in a files project, which has no label to carry. There is no local-file verb left in `backlog.mjs` — `config`, which read and wrote a
-committed file for execute, was the one, and it went when the mode became a trigger flag; the only commands that skip the stack are `jira.mjs worktree`'s,
-above.
+committed file for execute, was the one, and it went when the mode became a trigger flag; in a tracker project the only command that skips the stack is
+`jira.mjs worktree`, above.
 
 **`main` is async, and the entry guard awaits it.** The "every skill CLI exits through `process.exitCode`" rule is about `process.exit()` truncating a
 pipe, which asynchrony has nothing to do with; what it actually requires is that nothing hold the event loop open when `main` returns. Every `fetch` here is

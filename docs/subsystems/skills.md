@@ -33,14 +33,15 @@ its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch
 
 `backlog-execute` has a per-run **finish mode**, read from its trigger: `--finish in-place|pr`, with `--base <ref>` beside `pr`. `in-place` — the default, and
 what an absent flag means — is execute as it always was: it works in the tree it starts in and never commits or pushes. `pr` makes execute the one other skill
-that writes git: it works in its own worktree (`.worktrees/execute-<id>` on `execute/<id>`, cut from local `base`, or a clean reused linked worktree), commits
-there, has `backlog-reviewer` review the diff (at most two fix rounds), pushes that branch and opens a pull request into `base` with `gh pr create`. It never
-merges, never pushes `base`, never force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely — inside a run the orchestrator still owns
-git. `base` is the trigger's `--base`, else the remote's default branch (`origin/HEAD`), else `main`. An unknown or doubled `--finish` stops execute rather than
-falling back to either mode. In a tracker project nothing is archived: the claim is held through the review, and after the push `backlog.mjs review <id> on`
-puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges and closes it. The board's execute launch
-sheet is where the flag normally comes from: its Finish picker (seeded from the `executeDefaultFinish` setting) and Base select make the server append the
-clause, and a typed trigger carries the same flag by hand.
+that writes git: it works in its own
+worktree (`.worktrees/execute-<id>` on `execute/<id>`, cut from local `base`, or a clean reused linked worktree), commits there, has `backlog-reviewer` review
+the diff (at most two fix rounds), pushes that branch and opens a pull request into `base` with `gh pr create`. It never merges, never pushes `base`, never
+force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely — inside a run the orchestrator still owns git. `base` is the trigger's
+`--base`, else the remote's default branch (`origin/HEAD`), else `main`. An unknown or doubled `--finish` stops execute rather than falling back to either mode.
+In a tracker project nothing is archived: the claim is held through the review, and after the push
+`backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges and closes
+it. The board's execute launch sheet is where the flag normally comes from: its Finish picker (seeded from the `executeDefaultFinish` setting) and Base select
+make the server append the clause, and a typed trigger carries the same flag by hand.
 `skills/backlog-execute/references/pr-mode.md` is the whole flow, and
 [invariants.md](invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-and-execute-commits-and-pushes-only-in-pr-mode) the reasoning.
 `backlog-groom` lands on disk only, so an item has to be committed before an orchestrator run can read it.
