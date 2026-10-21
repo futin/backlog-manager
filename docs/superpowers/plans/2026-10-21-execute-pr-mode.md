@@ -99,8 +99,8 @@ decisions are numbered there and cited here as "spec D<n>".
   label; exclude it from `tags` like `QUEUED_LABEL`), `server/src/items/sources/source.ts:~217` (`review(...)` beside `queue`), `server/src/items/sources/
   github.source.ts:~883` (impl, mirroring `queue`: add/remove the label, removal that 404s is success), the files source's refusal for it,
   `server/src/items/items-write.controller.ts:~254` (`@Post('review')`, same guards and per-item serialisation as `queue`)
-- Test: `test/tracker-labels.test.ts`, `test/tracker-map.test.ts`, `test/tracker-write.test.ts`, `test/agents-origin-guard.test.ts` (if it enumerates the
-  write routes)
+- Test: `test/tracker-labels.test.ts`, `test/tracker-map.test.ts`, `test/tracker-write.test.ts`, `test/agents-origin-guard.test.ts` (it enumerates every
+  write route and builds one body with every field they need, `:92-132` — add `review` and `inReview: true`, and fix its route-count comments)
 
 **Interfaces:**
 - Produces: `IN_REVIEW_LABEL`; `BacklogItem.inReview?: true`; `POST /api/items/review` → `200 { id, inReview }`.
@@ -119,11 +119,15 @@ decisions are numbered there and cited here as "spec D<n>".
 
 **Files:**
 - Modify: `client/src/lib/item-progress.ts:95` (`progressBlock` — or a sibling the button reads right after it; your call, keep "in progress → in review →
-  run claim" order), `shared/agent.ts:439` (`dispatchBlock` — the server-side mirror; leave `dispatchGate` untouched), `skills/backlog-orchestrate/tools/
+  run claim" order), `server/src/agents/agents.service.ts` — the server's per-item ladder, both where it is composed for the plan/status answer (`:414`,
+  `dispatchBlock(...) ?? runClaimBlock(...) ?? syncOffBlock(...)`) and where dispatch refuses (`~451-493`); add an exported helper beside `runClaimBlock` in
+  `shared/agent.ts` (my name: `inReviewBlock(item: BacklogItem): string | null`) that both ladders call. `dispatchBlock`/`dispatchGate` are project-level
+  (derived from `projectDispatchGate`) and stay untouched. `skills/backlog-orchestrate/tools/
   orchestrate.mjs` (`trackerCandidates` ~1918 / `buildGatedQueue` ~1627: an `inReview` item is gated with reason `in review — a PR is open`, shown wherever
   existing gate reasons are shown), `skills/backlog/tools/backlog.mjs` (verb `review <id> on|off` → `apiPost('review', { project, id, inReview })`,
   tracker-only: a files project exits `1` with `review is for tracker projects`; stack down → exit `5` like every tracker verb)
-- Test: `test/dispatch-button.test.tsx`, `test/agents-shared.test.ts`, `skills/backlog-orchestrate/tools/orchestrate.test.mjs` (near the `trackerCandidates`
+- Test: `test/dispatch-button.test.tsx`, `test/agents-shared.test.ts` (`inReviewBlock`), `test/agents-dispatch.test.ts` (the server refusal),
+  `skills/backlog-orchestrate/tools/orchestrate.test.mjs` (near the `trackerCandidates`
   cases ~7372), `skills/backlog/tools/backlog.test.mjs`
 
 **Interfaces:**
@@ -131,7 +135,8 @@ decisions are numbered there and cited here as "spec D<n>".
 - Produces: disabled-reason text, exact: `In review — a PR is open for this item`.
 
 - [ ] **Step 1: Failing tests** — button: item `inReview:true` → Run disabled with that reason; `inReview` + `started` → the in-progress reason wins;
-  `dispatchBlock` returns the same reason for an `inReview` item and `null` for one without; orchestrator: a tracker cache with `#3` (inReview) and `#4`
+  `inReviewBlock` returns the reason for an `inReview` item and `null` for one without; `POST` dispatch of an `inReview` item → `409` with that reason (same
+  status the run-claim refusal uses), and the plan/status answer carries it as `blocked`; orchestrator: a tracker cache with `#3` (inReview) and `#4`
   (plain) → queue holds only `4`, `#3` listed among gated items with the reason (Review Focus 4); `--ids 3` naming it → gated, not silently dropped;
   CLI: `review 7 on` posts `{inReview:true}` to `/api/items/review` (fake server), `off` posts `false`, `review 7 maybe` → exit `1`, files project → exit `1`.
 - [ ] **Step 2: Run** the four suites — FAIL.
