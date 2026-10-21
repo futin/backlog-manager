@@ -2307,7 +2307,8 @@ function runConfig(argv) {
     return 1
   }
   const [, key, value] = argv
-  if (!(key in CONFIG_SETTERS)) {
+  // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so `hasOwnProperty` or `toString` read as known keys and wrote a garbage `undefined` key.
+  if (!Object.hasOwn(CONFIG_SETTERS, key)) {
     console.error(`unknown config key ${JSON.stringify(key)}\n${CONFIG_USAGE}`)
     return 1
   }

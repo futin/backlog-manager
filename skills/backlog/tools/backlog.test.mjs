@@ -6206,7 +6206,9 @@ test('CLI config set: a refused value leaves the file byte-identical', () => {
   const { dir } = backlogFixture()
   const before = '{"execute":{"finish":"pr"}}\n'
   writeConfig(dir, before)
-  for (const args of [['execute.finish', 'bogus'], ['execute.base', ''], ['execute.base', '  '], ['execute.base', '-x'], ['execute.nope', 'x'], ['execute.finish']]) {
+  for (const args of [['execute.finish', 'bogus'], ['execute.base', ''], ['execute.base', '  '], ['execute.base', '-x'], ['execute.nope', 'x'], ['execute.finish'],
+    // Prototype keys: an `in` check walks the chain, so these once passed as known keys and wrote `{"execute":{"undefined":"x"}}`.
+    ['hasOwnProperty', 'x'], ['__proto__', 'x'], ['toString', 'x']]) {
     const out = run(dir, 'config', 'set', ...args)
     assert.equal(out.status, 1, JSON.stringify(args))
     assert.equal(out.stdout, '', JSON.stringify(args))
