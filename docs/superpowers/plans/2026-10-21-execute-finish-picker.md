@@ -97,7 +97,8 @@ where the code proves it wrong, and say so in your report. Any size note is a so
 - Description and hard-limits bullet: "unless the project's committed finish mode is pr" → "unless the trigger says `--finish pr`".
 
 - [ ] **Step 1: Re-aim the guard** in `test/agents-shared.test.ts` ~836–840: keep the SKILL.md `IN_REVIEW_REASON` assertion; replace the
-  `PR_FINISH_RULE` assertion with: `skills/backlog-execute/references/pr-mode.md`, whitespace-collapsed, contains `finishClause('pr', '<base>')`.
+  `PR_FINISH_RULE` assertion with: `skills/backlog-execute/references/pr-mode.md`, whitespace-collapsed, contains `finishClause('pr', '<base>')`. Drop
+  `PR_FINISH_RULE` from the import list (~20) and import `finishClause` instead — Task 3 deletes the constant, and a stale import is a ts-jest compile error.
 - [ ] **Step 2:** `pnpm run test:jest -- test/agents-shared.test.ts` → FAIL (pr-mode.md does not quote it yet).
 - [ ] **Step 3:** Rewrite the skill text as above; delete the `config` code and its tests.
 - [ ] **Step 4:** Same jest command → PASS. `pnpm run test:skills` → PASS (no `config` test left, no import of a removed name).
@@ -139,7 +140,12 @@ where the code proves it wrong, and say so in your report. Any size note is a so
   - `agents-prompt.test.ts`: execute prompt ends with the instruction sentence ("…Report what you changed.") and contains neither `COMMIT_RULE` nor
     `--finish`; groom and capture still end with `COMMIT_RULE`; no test references `readFinishMode` or a third `composePrompt` argument.
   - `agents-plan.test.ts`: the plan for a groomed task returns that clause-less prompt.
-  - `agents-dispatch.test.ts` (spy on the spawn the suite already stubs), one case per rule:
+  - `agents-dispatch.test.ts` (spy on the spawn the suite already stubs), one case per rule. **Rewrite the existing byte-for-byte case** (~179–184,
+    `expect(body.prompt).toBe(good.prompt)`, an execute dispatch with no `finish`) to expect `good.prompt + ' ' + COMMIT_RULE`, keeping it an equality and
+    updating its comment: the sheet's body is still forwarded verbatim, then the clause is appended. **Fixture:** the suite's `projectPath` comes from
+    `makeProject` (`test/helpers/store.ts:25`), a plain directory with no git; every `finish: 'pr'` case first runs `git init -q -b <trunk>` and one commit in
+    it (as `test/base-branch.test.ts`'s `makeRepo` ~73–76 does), trunk `main` by default, `master` for the no-`main` case, plus `git branch develop` where
+    named.
     - no `finish`, execute → spawned prompt ends with `COMMIT_RULE` (an old client's body that already ends with `COMMIT_RULE` → spawned prompt ends with
       it twice, status 200 — Review Focus 1).
     - `finish: 'in-place'` → ends with `COMMIT_RULE`, no `--finish` in the spawned prompt.
@@ -152,7 +158,9 @@ where the code proves it wrong, and say so in your report. Any size note is a so
     - `finish: 'pr', base: 'main'` in a fixture repo whose trunk is `master` (no `main`) → 400 `base must be an existing local branch — "main" is not a branch
       in this project`; `base: 'nope'` → the same message with `"nope"`.
     - Every 400 above spawns nothing.
-  - `base-branch.test.ts`: `proveBaseBranch('main', repoWithoutMain)` → 400; `proveBaseBranch('main', repoWithMain)` → `'main'`; `proveBaseBranch('', …)`
+  - `base-branch.test.ts` (today an HTTP suite of `POST /api/agents/orchestrate` that never imports the util; add a `describe` that imports
+    `proveBaseBranch`/`resolveBaseBranch` directly, and give its `makeRepo` a trunk parameter, `main` default, so `repoWithoutMain` is `makeRepo(root,
+    'master')`): `proveBaseBranch('main', repoWithoutMain)` → 400; `proveBaseBranch('main', repoWithMain)` → `'main'`; `proveBaseBranch('', …)`
     and `proveBaseBranch(undefined, …)` → 400 "not a valid branch name"; `resolveBaseBranch('main', repoWithoutMain)` still → `'main'` (unchanged).
 - [ ] **Step 2:** `pnpm run test:jest -- test/agents-prompt.test.ts test/agents-plan.test.ts test/agents-dispatch.test.ts test/base-branch.test.ts` → FAIL.
 - [ ] **Step 3: Implement** as above. Comments: why the clause sits outside the editable body (an edit must not contradict the picker), why `main` is proved
@@ -186,7 +194,8 @@ where the code proves it wrong, and say so in your report. Any size note is a so
   - `settings.test.ts`, new `describe('executeDefaultFinish')`: `{}` → `'in-place'`; `'pr'` → `'pr'`; `'merge'`, `7`, `'PR'` → `'in-place'` (Review Focus 5).
   - `settings-view.test.tsx`: the Dispatch group shows `Execute finish` with options `In place` and `PR`; picking `PR` stores
     `executeDefaultFinish: 'pr'` under `SETTINGS_STORAGE_KEY`.
-  - `launch-sheet.test.tsx` (mock `fetchAgentPlan`, `dispatchAgent`, `fetchBranches` as the suite already mocks the first two):
+  - `launch-sheet.test.tsx` — the suite stubs `global.fetch` by URL in `stub()` (~47–60: `/plan`, else the dispatch answer), so a branches call would
+    get `{sessionId}`. Extend `stub()` with a `branches` handler matched on `/api/agents/branches` (an array, or a reject form for the failure case):
     - execute plan, default settings → Finish shows `In place`, no Base select, clause line equals `COMMIT_RULE`; launch sends `finish: 'in-place'` and no
       `base` key.
     - stored `executeDefaultFinish: 'pr'`, branches `['main', 'develop']` → Finish shows `PR`, Base shows `main`, clause line equals
@@ -210,8 +219,9 @@ where the code proves it wrong, and say so in your report. Any size note is a so
   trigger says `--finish pr`".
 - Modify: `.claude/rules/dispatch-watchdog.md` ~16 and ~54 — "taken outright" gains its one exception: an execute's finish clause is appended server-side from
   validated `finish`/`base`, and a body spelling either flag is a 400.
-- Modify: `docs/subsystems/invariants.md` — **replace** the ~459–460 committed-file reasoning with the trigger-flag reasoning (spec "Invariants this
-  changes"); rewrite ~3944 ("every command but `config`") and ~3972–3978 (the `config` verb) under the same anchor; ~1456 to match; the
+- Modify: `docs/subsystems/invariants.md` — **replace** the ~466–467 committed-file reasoning ("The mode is a committed file rather than a prompt
+  switch…") with the trigger-flag reasoning (spec "Invariants this changes"); rewrite ~458–460 (`backlog/config.json` / `execute.finish: pr` read through
+  `backlog.mjs config`) to "a hand execute session started with `--finish pr`"; rewrite ~3944 ("every command but `config`") and ~3972–3978 (the `config` verb) under the same anchor; ~1456 to match; the
   "orchestrate and Jira spawn prompts are composed server-side" entry notes execute's finish clause as a third server-composed piece.
 - Modify: `docs/subsystems/skills.md` (~17, ~34–42, the `config` row ~113), `docs/overview.md` ~110, `docs/subsystems/api.md` ~180–181 (the plan's
   execute prompt has no closing clause; dispatch takes `finish`/`base`) and `docs/subsystems/board.md` ~130 (the launch sheet's Finish/Base pickers and clause line), plus ~143 if it lists the keys the sheet reads.
