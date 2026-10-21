@@ -3,7 +3,7 @@ name: backlog-execute
 description: >
   Do the actual work on a groomed bug or task — debug and fix, or build out a planned task — then archive it once verification proves it worked. Refuses
   anything ungroomed: a task with no real plan, or a bug whose fix is still unknown. Use it to execute task 12, fix bug 7, work the backlog, or do the next
-  thing. Never touches ideas or already-rejected items, and never commits or pushes on its own — unless the project's committed finish mode is pr, where it
+  thing. Never touches ideas or already-rejected items, and never commits or pushes on its own — unless the trigger says `--finish pr`, where it
   works in a worktree of its own and ends in a commit, a review, a push and a PR it never merges. Trigger: /backlog-execute
 trigger: /backlog-execute
 ---
@@ -64,22 +64,18 @@ necessarily re-reading this section.
 
 ## Finish mode: `in-place` or `pr`
 
-Under an `[orchestrator-run` marker skip this section entirely: the run owns every git step and the config is not read. Otherwise, once, right after the
-trigger and before `show`, from the tree this session started in:
+Under an `[orchestrator-run` marker skip this section entirely: the run owns every git step and no finish mode is read there. Otherwise read it from the
+trigger, once, before `show`:
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config
-```
-
-- **`"finish":"in-place"`** — today's behaviour, unchanged and unannounced. Everything below applies as written.
-- **`"finish":"pr"`** — say `finish mode: pr → PR into <base>` in one line, ask nothing, and read
-  `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/pr-mode.md` in full before Pick an item. It picks the tree every later command runs in, and it
-  replaces this file's archive and never-commits text where it says so.
-- **Exit `1`** — `backlog/config.json` is invalid. Stop with the message it printed; never fall back to either mode.
-- **The only override is the trigger's own words containing `in place this time`** — then this session is `in-place`, and the one line says so. Generic
-  commit wording elsewhere in a prompt is not an override, and this skill never offers one.
-- **A board prompt ending** ``Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.`` means follow `pr` mode; one
-  ending in the "commit … Do not push." rule is an `in-place` project's, today's behaviour.
+- **No `--finish`, or `--finish in-place`** — today's behaviour, unchanged and unannounced. Everything below applies as written. A `--base` beside it is
+  ignored, and one line says so.
+- **`--finish pr`** — `<base>` is the trigger's `--base <ref>`, else the remote's default branch, else `main` (`references/pr-mode.md` §1 has the git
+  read). Say `finish mode: pr → PR into <base>` in one line, ask nothing, and read `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/pr-mode.md` in
+  full before Pick an item. It picks the tree every later command runs in, and it replaces this file's archive and never-commits text where it says so.
+- **Any other `--finish` value** — stop and say the two legal values are `in-place` and `pr`. **Both `--finish pr` and `--finish in-place`** — stop and name
+  both. Never fall back to either mode.
+- **The `--finish pr` token is the one signal**, typed or inside the board's closing sentence (pr-mode.md §1 quotes it). A board prompt ending in the
+  "commit … Do not push." rule is `in-place`. Generic commit or PR wording elsewhere in a prompt switches nothing, and this skill never offers a switch.
 
 ## Pick an item
 
@@ -366,7 +362,7 @@ whatever time was spent and drops `started` along with it, because there's nothi
 
 ## Hard limits
 
-- **Never commits, never pushes — unless this project's finish mode is `pr`.** In `in-place` mode staging is the user's call — a targeted `git add` in a
+- **Never commits, never pushes — unless the trigger says `--finish pr`.** In `in-place` mode staging is the user's call — a targeted `git add` in a
   dirty tree can sweep in unrelated in-flight work that has nothing to do with this item. Leave the working tree as it is; tell the user what files changed
   and let them stage and commit it themselves — or, under an `[orchestrator-run` marker, list them in the final message instead, because the run commits that
   worktree itself in its next step and no user is reading. The marker overrides `pr` mode too. In `pr` mode (`references/pr-mode.md`) it commits only in the

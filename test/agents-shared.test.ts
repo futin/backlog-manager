@@ -20,7 +20,6 @@ import {
   isQuestionMode,
   modesUpTo,
   pickFrom,
-  PR_FINISH_RULE,
   projectDispatchGate,
   queueItemIs,
   resumeGate,
@@ -833,13 +832,18 @@ describe('inReviewBlock', () => {
     expect(tool).toContain(`const IN_REVIEW_REASON = '${IN_REVIEW_REASON}';`);
   });
 
-  /* The third copy: execute's refusal gate says the same sentence, in prose a session prints. Same seam, same reason — and the board's pr-mode prompt
-     sentence rides along, because execute's mode section quotes it to say what it means, and a reworded constant would leave that quote naming a sentence
-     no prompt carries any more. */
-  it('is the same sentence backlog-execute refuses with, beside the pr-mode prompt sentence it recognises', () => {
+  /* The third copy: execute's refusal gate says the same sentence, in prose a session prints. Same seam, same reason. */
+  it('is the same sentence backlog-execute refuses with', () => {
     const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
     expect(skill).toContain(IN_REVIEW_REASON);
-    expect(skill).toContain(PR_FINISH_RULE);
+  });
+
+  /* The board's pr sentence, as pr-mode.md §1 quotes it to say what it means. The skill text and the constant drifted once already (#326 review 2), and a
+     reworded `finishClause` would leave that quote naming a sentence no prompt carries any more. The quote spells the base as the literal `<base>`
+     placeholder, so that is the base it is rendered with here. */
+  it('is the pr sentence backlog-execute pr-mode.md quotes', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('pr', '<base>'));
   });
 });
 

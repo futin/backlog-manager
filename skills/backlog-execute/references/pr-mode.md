@@ -1,13 +1,13 @@
 # backlog-execute — the `pr` finish mode
 
-Read this file **in full, once**, when `backlog.mjs config` printed `"finish":"pr"` and the trigger did not say `in place this time` — before Pick an item. An
-`in-place` project never opens it, and neither does a session under an `[orchestrator-run` marker: the run owns the worktree, the branch and every git step,
-so the config is not even read there.
+Read this file **in full, once**, when the trigger says `--finish pr` — before Pick an item. An `in-place` session (no `--finish`, or `--finish in-place`)
+never opens it, and neither does a session under an `[orchestrator-run` marker: the run owns the worktree, the branch and every git step, so no finish mode is
+read there.
 
 In `pr` mode execute works the item in a worktree that holds this item's work and nothing else, and on verified success commits it, has
 `backlog-manager:backlog-reviewer` review the commit, pushes the branch and opens one PR into the base. It never merges — a person (or GitHub) does that, and
-`backlog-orchestrate` stays the only skill that merges. It never asks "should I push / open a PR?": the committed config already answered that, and asking is
-the exact step this mode exists to remove.
+`backlog-orchestrate` stays the only skill that merges. It never asks "should I push / open a PR?": the trigger already answered that, and asking is the exact
+step this mode exists to remove.
 
 Numbered sections follow the flow in order. Everything SKILL.md says that this file does not replace still holds — the refusal gate, dispatch, verification,
 both pre-review checks — and is done inside the tree §2 picks. A reference file is read with the Read tool and never has `${CLAUDE_PLUGIN_ROOT}` filled in:
@@ -16,26 +16,27 @@ they are first used; in a tracker project `<id>` is the bare issue number (`31`,
 
 ## 1. Resolve the mode
 
-Once, right after the trigger, before `show`, from the tree the session started in:
+Once, right after the trigger, before `show`, from the tree the session started in. SKILL.md's Finish mode section has already read `--finish pr` out of the
+trigger and refused an unknown or doubled `--finish`; this section settles `<base>`.
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config
-```
+- **`<base>` is the trigger's `--base <ref>`.** With no `--base`, it is the remote's default branch:
 
-It prints the effective config, `{"execute":{"finish":"in-place"|"pr","base":"<branch>"}}`, with `base` already resolved (the file's value, else the remote's
-default branch, else `main`). That `base` is `<base>` everywhere below.
+  ```bash
+  git symbolic-ref --quiet --short refs/remotes/origin/HEAD
+  ```
 
-- **Exit `1`** — `backlog/config.json` is malformed or names an unknown mode, and the message says which. Stop with that message. Never fall back to either
-  mode: a quiet `in-place` would skip the PR the team configured, and a quiet `pr` would commit and push in a project that never asked for it.
-- **It is read once, from the starting tree, and never re-read in the new worktree.** That is the tree the person (or the board's spawn) pointed at. A config
-  that exists only uncommitted there still sets the mode for this session.
+  It prints `origin/<branch>`: strip the `origin/` prefix, and `<branch>` is `<base>`. It prints nothing — no `origin`, or a clone that never recorded its
+  `HEAD` — and `<base>` is `main`. A local git read, in a files and a tracker project alike: no `backlog.mjs` call, so it works with the stack down. Whatever
+  the value, §2's first check is what proves a local `<base>` branch exists. That `<base>` is `<base>` everywhere below.
+- **An unknown or doubled `--finish` never falls back to either mode:** a quiet `in-place` would skip the PR the person asked for, and a quiet `pr` would
+  commit and push where nobody asked for it.
+- **It is read once, from the trigger, and never re-read in the new worktree.**
 - **State the mode in one line and ask nothing:** `finish mode: pr → PR into <base>`.
-- **The one override** is the person's own trigger words containing the exact phrase `in place this time` ("execute task 12, in place this time"). Then say
-  `finish mode: in-place this time (project says pr)` and follow SKILL.md as an `in-place` project would — this file no longer applies. Nothing else is an
-  override: not generic commit wording elsewhere in a prompt, and not the board's `COMMIT_RULE` sentence. This skill never offers the override.
-- **A board-dispatched prompt in a `pr` project ends with** ``Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.`` That
-  sentence means "follow this file": it is the same config read, made server-side, in place of the "commit … Do not push." rule an `in-place` project's prompt
-  ends with. A prompt that carries `COMMIT_RULE` in an `in-place` project is today's behaviour, untouched by this file.
+- **A board-dispatched prompt in `pr` mode ends with**
+  ``Finish with `--finish pr --base <base>`: the skill commits, reviews, pushes and opens the PR into <base>, and never merges.``
+  — the real base in place of `<base>`. That sentence is the trigger's flag, composed server-side from the launch sheet's pickers: its `--finish pr` is the
+  same one signal a typed trigger carries, and its `--base` is `<base>`. A board prompt ending in `COMMIT_RULE`'s "commit … Do not push." sentence is an
+  `in-place` launch, untouched by this file. Nothing else is a signal: generic commit or PR wording elsewhere in a prompt switches nothing.
 
 ## 2. Pick the tree
 
@@ -237,7 +238,7 @@ The PR body, written to `<tmp>/pr.md`:
 - the review verdict, the number of fix rounds, and the one-line summary of every Critical/Important finding the rounds fixed — never a local report path;
 - tracker only: `Closes #<n>` when `<base>` is the repository's default branch, otherwise `Refs #<n>` — GitHub only auto-closes from a PR into the default
   branch. The default branch is `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with its `origin/` prefix stripped (it prints `origin/main`,
-  which never equals a `<base>` of `main`; `remoteDefaultBranch` in `backlog.mjs` strips it the same way), else
+  which never equals a `<base>` of `main`; §1's `<base>` fallback strips it the same way), else
   `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
 
 **No `gh`, not authenticated, or not a GitHub remote** → the branch is still pushed; the final message says the PR was not opened and why, and gives the exact
@@ -293,7 +294,7 @@ The design spec (`docs/superpowers/specs/2026-10-21-execute-pr-mode-design.md`) 
 - **Decision 9, the `in-review` label guards a tracker item while its PR is open** — added after a successful push, read by every gate, removed by the merge
   or by the person (§3, §8, §9).
 
-And the calls the spec made itself: the config is read once from the starting tree (§1); commands reach the tree by `cd`, never a new flag (§2); a
+And the calls the spec made itself: the mode is read once and never re-read in the new tree (§1); commands reach the tree by `cd`, never a new flag (§2); a
 permission denial stops only the git and `gh` steps — a tracker item's `backlog.mjs` steps still run — and hands over the remaining commands (§8); the
 reviewer is used as-is, with its report outside the repo and only one-line
 summaries in the PR body (§7, §8); a tree behind the base is fast-forwarded (§2); a new tree's names are `execute/<id>` and `.worktrees/execute-<id>` (§2);

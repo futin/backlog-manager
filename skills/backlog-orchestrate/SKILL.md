@@ -24,7 +24,7 @@ capture keeps filing new items.
 Two things make this skill different from its three siblings, and both are worth having in mind before the first command runs:
 
 - **It commits and merges.** No other backlog skill merges, and none commits inside a run: execute's "never commits, never pushes" hard limit holds _inside_
-  the sessions this skill spawns — their prompt carries the `[orchestrator-run` marker, under which a project's `pr` finish mode is ignored. The orchestrator is
+  the sessions this skill spawns — their prompt carries the `[orchestrator-run` marker, under which a `--finish pr` is ignored. The orchestrator is
   the committer, on `backlog/<id>` branches and on the run's base, by merge commit only.
 - **It runs unattended.** The person who started it is usually not watching. So every rule below that looks paranoid — park rather than merge, ask best-effort
   rather than block, never `reset --hard` — is there because the failure it prevents would otherwise happen silently, hours after anyone could have caught it.
@@ -761,7 +761,7 @@ parking this item, then §10's _Finishing_ with `finish --status failed` in plac
 
 ## 6. Commit — the orchestrator's job, still never execute's
 
-Execute's hard limit still holds inside the session — under the run's marker it never commits and never pushes, whatever the project's finish mode — because
+Execute's hard limit still holds inside the session — under the run's marker it never commits and never pushes, whatever its `--finish` says — because
 staging inside a tree it does not own can sweep
 up work it knows nothing about. Here that reasoning does not apply — the worktree contains this item's work and nothing else, which is the whole point of
 creating one — so the orchestrator commits, and says so in the commit body:
