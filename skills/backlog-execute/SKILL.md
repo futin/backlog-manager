@@ -390,5 +390,5 @@ whatever time was spent and drops `started` along with it, because there's nothi
 
 ## Next
 
-`/backlog` shows one fewer open item once this is done — in `pr` mode, once the PR merges. Anything new the work surfaces — a fresh bug, a follow-on idea — is a new `backlog-capture`, not an edit
-to this one.
+`/backlog` shows one fewer open item once this is done — in `pr` mode, once the PR merges. Anything new the work surfaces — a fresh bug, a follow-on
+idea — is a new `backlog-capture`, not an edit to this one.

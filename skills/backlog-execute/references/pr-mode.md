@@ -42,8 +42,8 @@ default branch, else `main`). That `base` is `<base>` everywhere below.
 Before `show`, because `show` resolves the item from the cwd's tree and the item has to be read from the tree the work happens in. With no id in the trigger,
 choose one first with `board` from the starting tree — a read — then pick the tree; `show` and everything after it run in that tree.
 
-**First check, ahead of both paths below:** `git rev-parse --verify --quiet refs/heads/<base>` in the starting tree. No local `<base>` branch → stop and say so, and
-do not fetch one into existence: the reuse check's `git rev-list --count <base>..HEAD` errors without it, and a new tree is cut from it.
+**First check, ahead of both paths below:** `git rev-parse --verify --quiet refs/heads/<base>` in the starting tree. No local `<base>` branch → stop and
+say so, and do not fetch one into existence: the reuse check's `git rev-list --count <base>..HEAD` errors without it, and a new tree is cut from it.
 
 ### Reuse the tree you started in — only when every one of these holds
 
@@ -128,12 +128,12 @@ make. (A fast-forward §2 gave it stays; it moved the branch to a commit the bas
 
 `cd <tree> && …` on every later command — `backlog.mjs`, tests, builds, git — never a `--root` flag, and never a path into another tree. `backlog.mjs` keeps
 resolving its store from the cwd, so the `backlog.mjs`-writes clause of SKILL.md's "writes only under the repo root `show` resolved" is the one that holds: the
-resolved root simply is `<tree>`. The three writes pr mode makes outside it are the ones this file instructs — the new tree and its `.git/worktrees/` entry, the
-common `info/exclude`, and `<tmp>`.
+resolved root simply is `<tree>`. The three writes pr mode makes outside it are the ones this file instructs — the new tree and its `.git/worktrees/`
+entry, the common `info/exclude`, and `<tmp>`.
 
-**Dependencies, in a new tree and a reused one alike:** a `node_modules` symlink to the main tree's directory — the orchestrator's mechanism, "the `node_modules`
-idiom" (`backlog-orchestrate/references/rationale.md` §4). A fresh checkout has none of its own, and the project's tests usually cannot run without one. A
-guarded no-op when the link or the directory already exists, so it is safe to run on either path:
+**Dependencies, in a new tree and a reused one alike:** a `node_modules` symlink to the main tree's directory — the orchestrator's mechanism, "the
+`node_modules` idiom" (`backlog-orchestrate/references/rationale.md` §4). A fresh checkout has none of its own, and the project's tests usually cannot run
+without one. A guarded no-op when the link or the directory already exists, so it is safe to run on either path:
 
 ```bash
 [ -d <root>/node_modules ] && [ ! -e <tree>/node_modules ] && ln -s <root>/node_modules <tree>/node_modules
