@@ -456,15 +456,18 @@ call, merge commits or otherwise. The one other push in this plugin is execute's
 projects alike.
 
 **Execute's `pr` mode commits and pushes, and it is this same argument applied to a tree execute owns** (the execute pr-mode spec). The limit above was never
-"execute must not touch git"; it was "no skill stages in a tree it does not own". A project that commits `backlog/config.json` with `execute.finish: pr` (read
-through `backlog.mjs config`, a local-file verb in both modes) has a hand execute session finish as a pull request, and it first makes the tree that limit asks
+"execute must not touch git"; it was "no skill stages in a tree it does not own". A hand execute session started with `--finish pr --base <ref>` (the
+sheet's Finish picker, or typed into a terminal) finishes as a pull request, and it first makes the tree that limit asks
 for: `.worktrees/execute-<id>` on `execute/<id>`, cut from local `<base>` — named so it never collides with the orchestrator's `.worktrees/<id>` /
 `backlog/<id>` — or a linked worktree it starts in that is clean, on a named branch other than `<base>`, with no commits beyond it. That tree holds this item's
 work alone, so `git add -A` there is as safe as in the orchestrator's, for the same reason. In it execute commits, has `backlog-reviewer` review
 `<base>...<branch>` (at most two fix rounds), pushes `-u origin <branch>` and runs `gh pr create --base <base>` — and that is the whole of its git: never to
 `<base>`, never a force-push, never a merge (the merge is the PR's, done by a person), and never under an `[orchestrator-run` marker, where the run owns git and
-the old limit holds unchanged. The mode is a committed file rather than a prompt switch so a project's set of committers is visible in its own history, and a
-malformed file stops execute rather than falling back to either mode, for the reason an `unsupported` source never falls back to `files`. A permission-layer
+the old limit holds unchanged. The mode is a trigger flag, chosen per run, rather than a committed file: a project-wide setting made every hand run a PR run
+until someone edited and committed a file back, and what a person wants from one launch is not a fact about the project. The flag is composed server-side from a
+validated field the way `--merge-mode` is (`AgentsService` appends `finishClause(finish, base)` from the sheet's `finish`/`base` after the editable body, and a
+body that spells `--finish` or `--base` is a 400), and an unknown or doubled `--finish` stops execute rather than falling back to either mode, for the reason an
+`unsupported` source never falls back to `files`. A permission-layer
 denial of a git or `gh` step stops those steps and hands over the remaining commands; it is never retried another way. In a tracker project the pushed item then
 carries the `in-review` label, which every per-item gate reads as `a PR is open for this item` — see [the ten item-write
 routes](#the-ten-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item).
@@ -604,7 +607,9 @@ that wanted to merge and was refused _degrades to that outcome_ rather than park
 The setting is chosen in a browser and consumed by a headless process on the machine, so it cannot travel by `localStorage`, and the run file already has
 exactly one writer. It rides the one channel that exists — the spawn prompt — and lands in the run file, where every other fact about a run lives:
 `orchestrateDefaultMergeMode` (client Settings, per-device, default `'merge'`, clamped by the same `pickOne` as `dispatchDefaultModel`) seeds the
-`OrchestrateSheet` picker; the sheet sends `mergeMode` on **every** launch, including when it equals the default, because the field is the sheet's answer to
+`OrchestrateSheet` picker (and `executeDefaultFinish` — per-device, default `'in-place'`, clamped by the same `pickOne` over `EXECUTE_FINISHES` — seeds the
+execute `LaunchSheet`'s Finish picker on every open, never from the last launch); the sheet sends `mergeMode` on **every** launch, including when it equals the
+default, because the field is the sheet's answer to
 "what should this run do" and inferring it server-side from an absent field would put one decision in two places; `AgentsService` validates it and appends the
 compile-time literal ` --merge-mode branch` (or ` --merge-mode pr`, below); `orchestrate.mjs init` writes `mergeMode`, `mergeModeEffective` and
 `mergeModeNote`.
@@ -1453,7 +1458,18 @@ placed after the closing fence, never inside the ticket's own. The cap is the da
 description is what yields to it; a prompt that cannot keep at least one character of it is a 400 rather than one that says `(no description)` about a ticket
 that has one. This is mitigation, not proof — a model can still be talked into things — and the rest of the defence is that the session is the person's own,
 in a repository the person mapped, under the permission mode they chose, clamped to the dashboard's ceiling. **Item `dispatch` stays the exception to the
-whole rule:** its prompt is the launch sheet's text, which a human edits before sending, and is the one field taken outright.
+whole rule:** its prompt is the launch sheet's text, which a human edits before sending, and is the one field taken outright
+— save an execute's finish clause, which is appended server-side from the validated `finish`/`base` fields, after the body, and never travels in the
+editable text.
+
+**An execute's finish clause is the third server-composed piece, beside the orchestrate trigger's flags and the Jira prompt.** `finishClause(finish, base)`
+(`shared/agent.ts`) is the whole of it: ` --finish pr --base <base>` plus its sentence for `pr`, today's `COMMIT_RULE` for `in-place`, built from `finish` (a
+member of `EXECUTE_FINISHES`, else a 400) and a `base` that is proved the way the orchestrate `base` is (`proveBaseBranch`) and only ever sent under `pr`. The
+plan's execute prompt carries no closing clause at all, so the sheet's textarea holds the body alone and the clause sits read-only below it: deleting ` --finish
+pr` from an editable box would otherwise silently turn a PR run into an in-place one. For the same reason an execute body spelling `--finish` or `--base` (bare,
+quoted or backticked — a word character or hyphen on either side is what spares `--finished` and `--base-ref`) is a 400 rather than being merged with the
+clause. An old client that sends no `finish` is treated as in-place and gets `COMMIT_RULE` appended even if its prompt already ends with it — a doubled
+sentence, harmless, and never a 400.
 
 ## The browser never talks to the dashboard
 
@@ -1796,6 +1812,11 @@ exits `0` reporting `subtype: "success"`. So the hazard a too-low rung buys is n
 its conclusion by some other route, with the refusal recorded nowhere but the transcript's `permission_denials` array. That is the failure mode the ladder's
 default sits where it does to avoid. `auto` is still not the top rung — `bypassPermissions` stays a per-launch choice, since asking for the most a host allows
 by default is how a convenience becomes an incident — and the ceiling clamps `auto` down on a dashboard that caps lower, so this never widens a stricter host.
+
+The execute sheet's Finish picker follows the same rule: `executeDefaultFinish` (per-device, default `'in-place'`, clamped by the same `pickOne` over
+`EXECUTE_FINISHES`, so a stored `'merge'`, a number or a missing key reads as in-place) seeds it on every open and the last launch never does. Its Base select
+is the one place the rule goes further — there is no stored base at all, because a branch name remembered from last week is a ref that may no longer exist, so
+the select opens on the literal `main` and is sent only under PR.
 
 `backlog-orchestrate` reaches the same conclusion from the other side. It used to hard-code `--dangerously-skip-permissions` on its headless dispatch, justified
 by a premise the paragraph above disproves — that a prompt inside a headless session is a hang. It now dispatches under `--permission-mode auto` like everything
@@ -3941,7 +3962,7 @@ the run has CLAIMED, and the sheet says that too; a LOCAL run of a tracker proje
 
 ## `backlog.mjs` in a tracker project needs the stack up
 
-Task-46, spec §6.5. A project whose committed marker says `github` has no item files, so every command but `config` (below) routes through the backlog-manager
+Task-46, spec §6.5. A project whose committed marker says `github` has no item files, so every command routes through the backlog-manager
 API on this machine, which holds the credential and does the writing. A project with no marker never reaches any of that code: `files` mode runs the same
 synchronous path it always did, and `test/…/backlog.test.mjs` asserts a files fixture makes zero HTTP requests across
 `init`/`new`/`show`/`board`/`start`/`stop`/`move`.
@@ -3969,13 +3990,10 @@ the command's, not the tool's: every other `jira.mjs` command still needs the st
 command, and it writes only into the tree it was asked for, the way `orchestrate.mjs worktree` does: no `--force`, no `-D`, no `prune`, no `reset`, no merge
 but `--ff-only`.
 
-**`backlog.mjs config` is this tool's one exception** (the execute pr-mode spec, "The config"). `config` prints the effective execute config as JSON and
-`config set execute.finish <in-place|pr>` / `config set execute.base <branch>` write it, and in BOTH modes they touch the committed `backlog/config.json` and
-nothing else: they never go through `requireStore`'s tracker routing, make no request, and never exit `5`. The config is a committed file of the project's, not
-a fact the tracker holds, and execute reads the mode before anything else — so a tracker project's mode must not depend on the stack being up, and a stopped
-stack must not silently read as `in-place`. A malformed file is exit `1` naming `backlog/config.json`, never a fall back to either mode. The exception is the
-verb's, like `jira.mjs worktree`'s: its sibling `review <id> on|off`, which sets the `in-review` label, is an ordinary tracker verb — API only, exit `5` with
-the stack down, and refused in a files project, which has no label to carry.
+**`review <id> on|off` is a plain tracker verb, not an exception.** It sets the `in-review` label through `POST /api/items/review`: API only, exit `5` with the
+stack down, and refused in a files project, which has no label to carry. There is no local-file verb left in `backlog.mjs` — `config`, which read and wrote a
+committed file for execute, was the one, and it went when the mode became a trigger flag; the only commands that skip the stack are `jira.mjs worktree`'s,
+above.
 
 **`main` is async, and the entry guard awaits it.** The "every skill CLI exits through `process.exitCode`" rule is about `process.exit()` truncating a
 pipe, which asynchrony has nothing to do with; what it actually requires is that nothing hold the event loop open when `main` returns. Every `fetch` here is

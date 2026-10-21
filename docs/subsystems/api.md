@@ -177,8 +177,11 @@ Read-only view of the registry file, re-read on every request so a capture made 
 One of the three modules that call outbound, and every POST in it is guarded by content-type and origin:
 
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
-- `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt.
-- `POST /api/agents/dispatch` — spawns the session in that dashboard.
+- `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's prompt has no closing clause: the
+  finish clause is the sheet's picker, not editable text.
+- `POST /api/agents/dispatch` — spawns the session in that dashboard. An execute dispatch also takes `finish` (`in-place` | `pr`, absent meaning in-place) and
+  `base` (a local branch, proved server-side, legal only with `pr` and required by it); the server appends the finish clause from those validated fields after
+  the body, and a body that spells `--finish` or `--base` is a 400. `finish` on any other action is a 400.
 - `POST /api/agents/orchestrate` — spawns a headless `/backlog-orchestrate` run for one project. The prompt is composed server-side, so a caller can influence
   which items, which modes and which base branch, and nothing else. A TRACKER project is accepted since task-47: `resolveIds` proves its ids against
   `ItemsService` rather than against a directory scan, accepts `#31` / the URN / a bare `31`, and **emits bare digits alone**, so the prompt never carries a
