@@ -31,7 +31,9 @@ question.
   only the files this session changed … Do not push." — the opposite of steps 6 and 8, and the most specific instruction the spawned session gets. My call:
   `composePrompt` reads the project's effective finish mode (a read of the committed config, never a write) and, for an `execute` in a `pr` project, appends a
   pr-mode sentence instead of `COMMIT_RULE` ("Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR."). Groom and capture,
-  and execute in an `in-place` project, keep `COMMIT_RULE` byte for byte. The "known seam" comment above `COMMIT_RULE` (`shared/agent.ts:819-825`) is the
+  and execute in an `in-place` project, keep `COMMIT_RULE` byte for byte. A config the reader would reject (malformed JSON, unknown `finish`, unreadable
+  file) reads as `in-place` here → `COMMIT_RULE`; the spawned skill then reads the same file itself and stops with the error (review 2, my call). Test cases
+  in `test/agents-prompt.test.ts`: no file, `in-place`, `pr`, malformed, unknown value — only `pr` drops `COMMIT_RULE`. The "known seam" comment above `COMMIT_RULE` (`shared/agent.ts:819-825`) is the
   place it says the reconciliation starts, and is rewritten with it.
 - No machine-wide default. The config is per project and committed, so a team shares it and each repo can differ.
 - No merging. Execute opens the PR; a human (or GitHub) merges it. `backlog-orchestrate` stays the only skill that merges.
@@ -83,7 +85,9 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
    marker skip all of this. State the mode in one line ("finish mode: pr → PR into main").
 2. **Pick the tree** (before `show`, because `show` resolves the item from the cwd's tree and the item must be read from the tree the work happens in):
    - Current tree is a clean linked worktree, `HEAD` on a **named branch other than `<base>`** (not detached, not the orchestrator's `_base-<base>` tree or
-     any tree holding `<base>` itself), with no commits not in `<base>` → use it, on its existing branch.
+     any tree holding `<base>` itself), with no commits not in `<base>` → use it, on its existing branch. If it is **behind** `<base>`, fast-forward it first
+     (`git merge --ff-only <base>` — safe, it is clean and has no commits of its own), so the work runs on the current base and a groom committed after the
+     tree was cut is visible (review 2, my call).
    - Otherwise → cut a new worktree from local `<base>` (local, not `origin/<base>`: that is where a freshly groomed item is committed, the same reason the
      orchestrator cuts from local base). My call on names: `.worktrees/execute-<id>` on branch `execute/<id>`, chosen so they never collide with the
      orchestrator's `.worktrees/<id>` / `backlog/<id>`. If the branch or path already exists, stop and say so — do not reuse or delete it.
@@ -99,17 +103,23 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
    rule now also catches a groomed-but-uncommitted item in `pr` mode, which is correct: commit the groom first.
 4. **Verification fails** → today's failure path, nothing more. No commit, no push, no PR. Final message names the worktree path and branch.
 5. **Verification passes** → in a files project, today's archive step (Outcome written, `stop --keep-started`, `move … done`) — those writes land in the tree
-   and so in the commit; the item moves to `done/` on the base only when the PR merges. In a tracker project, the archive is replaced by comment + release,
-   with no `move` (decision 8 below).
+   and so in the commit; the item moves to `done/` on the base only when the PR merges. In a tracker project nothing is archived here: the Outcome is
+   written to a temp file and **the claim is held** (heartbeats continue) through steps 6-8; the comment + release happen at the end of step 8, with no
+   `move` (decision 8 below).
 6. **Commit** in the chosen tree: `git add -A` is safe here for the same reason it is safe in the orchestrator's tree — the tree holds this item's work only
    (step 2 guarantees it). One conventional commit; the subject must satisfy the target repo's PR-title rule where one exists (this repo's `ci / pr-title`).
 7. **Review**: dispatch `backlog-manager:backlog-reviewer` with all five inputs its contract requires (`agents/backlog-reviewer.md:58-75`): worktree,
-   branch, **base**, item, report path — it diffs `<base>...<branch>`, and a missing input makes it stop. It returns a verdict plus Critical/Important findings.
+   branch, **base**, item, report path — it diffs `<base>...<branch>`, and a missing input makes it stop. In a tracker project there is no item file and no
+   run-state snapshot (only a run writes one), so execute writes the issue body plus the temp Outcome to one file beside the report and passes that; the
+   reviewer's `item file path` line (`agents/backlog-reviewer.md:65-70`) is widened to accept it (review 2). Fix-loop records in a tracker project are
+   appended to the temp Outcome, which becomes the comment at step 8. It returns a verdict plus Critical/Important findings.
    Fix those, **re-run the Outcome's verification commands and append a `### Fix loop <n>` record with their output** (as the orchestrator's fix loop does,
    orchestrate SKILL.md ~830-835), commit, re-review — bounded (my call: at most two fix rounds, mirroring the orchestrator's loop). Verification red after a
    fix, or still failing review after the cap → do not push; report like a verification failure.
 8. **Push and open the PR**: `git push -u origin <branch>`, then `gh pr create --base <base>` with a body carrying the Outcome summary, the review verdict and,
-   for a tracker project, `Closes #<n>` — then, tracker only, add the `in-review` label (decision 9). No `gh`, not authenticated, or not a GitHub remote → the branch is still pushed and the final message says the PR was
+   for a tracker project, `Closes #<n>`. Tracker only, in this order (review 2): `review <id> on` after the push succeeds, PR or not → `comment <id> --body
+   <outcome file>` → `stop <id> --keep-started` (releases the claim; the flag is inert in tracker mode). So the claim covers the work and the review loop, and
+   the label takes over the moment pushed work exists. No `gh`, not authenticated, or not a GitHub remote → the branch is still pushed and the final message says the PR was
    not opened and why. A rejected push stops there and is reported; never force-push.
 9. **Leave the worktree in place** (my call): the PR may need follow-up fixes there. Final message: PR URL, branch, worktree path.
 
@@ -120,8 +130,10 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
   own branch only in `pr` mode, only in a tree that holds the item's work alone, never to `<base>`, never under an `[orchestrator-run` marker. Every site
   that states the old rule moves together: `CLAUDE.md:175` and `.claude/rules/orchestrator.md:33` (byte-equal headlines, guarded by
   `test/claude-rules.test.ts`) plus that rules bullet's body (`orchestrator.md:35-37`, "No other skill touches git history at all"), `invariants.md`
-  §"`backlog-orchestrate` is the only skill that commits or merges" (~434-454, incl. the push paragraph), `skills/backlog-orchestrate/SKILL.md:9`, and
-  `docs/subsystems/skills.md:34`. The reasoning paragraph should say why: the original limit was about trees execute does not own; `pr` mode only commits in
+  §"`backlog-orchestrate` is the only skill that commits or merges" (~434-454, incl. the push paragraph), `skills/backlog-orchestrate/SKILL.md:9` and `:26`,
+  `docs/subsystems/skills.md:34`, `skills/backlog-groom/SKILL.md:18`, `skills/backlog/SKILL.md:138`, and — to re-read, likely still true because they are
+  about execute inside a run — `skills/backlog-orchestrate/references/recovery.md:253` and the comment at `orchestrate.mjs:6127` (review 2). The list is
+  not a substitute for a final `grep -rn "never commits\|only skill that commits\|touches git"` over `skills/ agents/ docs/ CLAUDE.md .claude/`. The reasoning paragraph should say why: the original limit was about trees execute does not own; `pr` mode only commits in
   one it cut (or verified clean) for this item.
 - `agents/backlog-reviewer.md`: the description and the `branch` / `report path` input lines (`:62`, `:72-73`) are widened so `execute/<id>` (or a reused
   tree's branch) and a report outside `~/.backlog-manager/orchestrator/` are legitimate inputs.
@@ -147,8 +159,9 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
 
 ## Decided by the user after review
 
-8. **Tracker project: the issue closes when the PR merges, not at verification.** In `pr` mode step 5's archive differs for a tracker project: write the
-   Outcome to a temp file, `comment <id> --body <file>`, then `stop <id> --keep-started` to release the claim — and **no `move <id> done`**. The PR body
+8. **Tracker project: the issue closes when the PR merges, not at verification.** In `pr` mode a tracker project never archives: the Outcome goes to a temp
+   file at step 5, the claim is held through review and push, and at the end of step 8 the Outcome becomes a `comment` and `stop <id> --keep-started` releases
+   the claim — **no `move <id> done`**. The PR body
    carries `Closes #<n>`, so GitHub closes the issue on merge. The issue stays open, unclaimed, while the PR is in review. A files project is unaffected: its
    `move … done` lands in the commit and reaches the base with the merge.
 9. **While the PR is in review, a tracker item is guarded by a label** (review 1 finding on concurrent use). Without it, an open, unclaimed issue looks
@@ -162,12 +175,14 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
    - **One new guarded write route** that adds or removes it, held to the same guards as the other item write routes (content-type, origin, refused for a
      `files` project, serialised per item), and a `backlog.mjs` verb that calls it (my name: `review <id> on|off`). The "nine `/api/items/*` write routes"
      count in `CLAUDE.md`, the rules file and `invariants.md` becomes ten — every site that states the count moves.
-   - **Writer:** execute in `pr` mode adds it right after the PR is opened (after the push, so a failed push never leaves an item guarded with no PR behind it).
-     A failed label write does not undo the PR; the final message says the guard is missing.
+   - **Writer:** execute in `pr` mode adds it right after a **successful push, whether or not `gh pr create` then succeeds** — the guard protects pushed
+     work, and a failed push never leaves an item guarded with nothing behind it. When the PR could not be opened, the final message carries the exact
+     `gh pr create` command. A failed label write undoes nothing; the final message says the guard is missing.
    - **Readers — the gates that must skip it:** the issue→item mapping exposes it as a flag beside `queued` (`server/src/tracker/map-issue.ts:148-249`);
      the orchestrator's queue excludes such items; execute's refusal gate refuses one ("a PR is open for this item"), naming the PR when it can; and the
-     board's per-item dispatch gate (`shared/agent.ts` `dispatchGate`) disables Run on it with that reason. No new card badge — the disabled Run's reason is the
-     surface (my call).
+     board's two per-item dispatch ladders gain an `in-review` rung that disables Run with that reason — the client's (`DispatchButton.tsx:145-160`, beside the
+     in-progress rung) and the server's (`dispatchBlock`, `agents.service.ts` ~451-493, its mirror). `dispatchGate` in `shared/agent.ts` is project-level only
+     and stays untouched (review 2). No new card badge — the disabled Run's reason is the surface (my call).
    - **Removal:** a merged PR with `Closes #<n>` closes the issue, and a closed issue is outside every gate, so the label needs no removal on the happy path. A
      PR closed **without** merging, or a non-default-base PR (`Refs #<n>`), leaves the label on an open issue: removing it is the person's
      (`backlog.mjs review <id> off`), and execute's final message says so whenever it adds the label.
