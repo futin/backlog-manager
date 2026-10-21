@@ -72,11 +72,11 @@ where the code proves it wrong, and say so in your report. Any size note is a so
 - Modify: `skills/backlog-execute/references/pr-mode.md` (intro before §1, and §1 "Resolve the mode")
 - Modify: `skills/backlog/tools/backlog.mjs` — delete the `config` block (~2188–2361: `CONFIG_FILE`, `CONFIG_REL`, `CONFIG_USAGE`,
   `EXECUTE_FINISH_MODES`, `configRefusal`, `parseExecuteConfig`, `remoteDefaultBranch`, `remindToCommitConfig`, `CONFIG_SETTERS`, `runConfig`) and the
-  dispatch line `if (cmd === 'config') …` (~3830), and `config` from any usage/help listing
-- Modify: `skills/backlog/tools/backlog.test.mjs` — delete the config block (~6194 to the end of the `CLI config:` tests, ~6410) and `parseExecuteConfig`
+  dispatch line `if (cmd === 'config') …` (~3830), the `config` line of the usage listing (~2177), and the explanatory comment above the block (~2188–2192)
+- Modify: `skills/backlog/tools/backlog.test.mjs` — delete the config block (its comment at ~6193 through end of file, ~6402) and `parseExecuteConfig`
   from the import line 8
 - Modify: `skills/backlog/SKILL.md` (~107–118, the `config` paragraph)
-- Modify: `agents/backlog-reviewer.md` (~6, ~54: "a project whose committed finish mode is `pr`" → a session started with `--finish pr`)
+- Modify: `agents/backlog-reviewer.md` (~6, ~54, ~73: "a project whose (committed) finish mode is `pr`" / "the project's configured base" → a session started with `--finish pr` / the run's `<base>`)
 - Modify: `skills/backlog-orchestrate/SKILL.md` (~27, ~764: same rewording, only where they name the committed mode)
 - Test: `test/agents-shared.test.ts` (the guard ~836–840)
 
@@ -118,7 +118,7 @@ where the code proves it wrong, and say so in your report. Any size note is a so
 - Modify: `server/src/agents/agents.service.ts` `dispatch` ~429 — validation and composition below.
 - Modify: `shared/agent.ts` — delete `PR_FINISH_RULE` and update the `COMMIT_RULE` doc comment (~845–853) that names it.
 - Modify: `shared/types.ts` — `AgentPlan.prompt` doc (~885): for execute, the body without its closing clause, which the sheet renders read-only.
-- Test: `test/agents-dispatch.test.ts`, `test/agents-plan.test.ts`, `test/agents-prompt.test.ts` (rewrite the `describe('finish mode')` block ~322–410),
+- Test: `test/agents-dispatch.test.ts`, `test/agents-plan.test.ts`, `test/agents-prompt.test.ts` (rewrite the `describe('finish mode')` block ~316–413, its doc comment included, and drop the `readFinishMode` import line 4),
   `test/base-branch.test.ts`
 
 **Interfaces:**
@@ -210,11 +210,11 @@ where the code proves it wrong, and say so in your report. Any size note is a so
   trigger says `--finish pr`".
 - Modify: `.claude/rules/dispatch-watchdog.md` ~16 and ~54 — "taken outright" gains its one exception: an execute's finish clause is appended server-side from
   validated `finish`/`base`, and a body spelling either flag is a 400.
-- Modify: `docs/subsystems/invariants.md` — **replace** the ~466–467 committed-file reasoning with the trigger-flag reasoning (spec "Invariants this
-  changes"); rewrite ~3944 ("every command but `config`") and ~3972–3978 (the `config` verb) under the same anchor; ~459 and ~1456 to match; the
+- Modify: `docs/subsystems/invariants.md` — **replace** the ~459–460 committed-file reasoning with the trigger-flag reasoning (spec "Invariants this
+  changes"); rewrite ~3944 ("every command but `config`") and ~3972–3978 (the `config` verb) under the same anchor; ~1456 to match; the
   "orchestrate and Jira spawn prompts are composed server-side" entry notes execute's finish clause as a third server-composed piece.
-- Modify: `docs/subsystems/skills.md` (~17, ~34–42, the `config` row ~113), `docs/overview.md` ~110, `docs/subsystems/api.md` / `board.md` where they
-  describe the plan/dispatch bodies or the launch sheet (grep them).
+- Modify: `docs/subsystems/skills.md` (~17, ~34–42, the `config` row ~113), `docs/overview.md` ~110, `docs/subsystems/api.md` ~180–181 (the plan's
+  execute prompt has no closing clause; dispatch takes `finish`/`base`) and `docs/subsystems/board.md` ~130 (the launch sheet's Finish/Base pickers and clause line), plus ~143 if it lists the keys the sheet reads.
 - Test: `test/claude-rules.test.ts`
 
 - [ ] **Step 1:** Edit as above. Wrap new prose at 160; do not reflow untouched lines.
