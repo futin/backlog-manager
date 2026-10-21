@@ -369,7 +369,7 @@ function commentIdOf(value: unknown): number {
 /**
  * `ItemClaimRequest.run`, or `undefined` when the caller sent none (task-47).
  *
- * Validated field by field, and it is the only nested object on these eight
+ * Validated field by field, and it is the only nested object on these nine
  * routes that is — `heartbeat`'s `state` is taken outright one route over, and
  * the difference between them is the whole rule: **the server BRANCHES on this
  * one.** `runId` decides whether a contesting claim is a takeover or a race
