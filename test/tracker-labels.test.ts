@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { QUEUED_LABEL, TRACKER_LABELS, TRACKER_LABEL_NAMES, TYPE_LABELS } from '../server/src/tracker/labels';
+import { IN_REVIEW_LABEL, QUEUED_LABEL, TRACKER_LABELS, TRACKER_LABEL_NAMES, TYPE_LABELS } from '../server/src/tracker/labels';
 
 /**
  * The label set has one home — `server/src/tracker/labels.ts` — and one place
@@ -29,8 +29,8 @@ function formLabels(): string[] {
   return [...CONNECT_SOURCE.matchAll(/label:\s*'(type:[a-z]+)'/g)].map((m) => m[1]).sort();
 }
 
-describe('the nine labels', () => {
-  it('names exactly the set spec §5.2 lists, plus orchestrator:queued last', () => {
+describe('the ten labels', () => {
+  it('names exactly the set spec §5.2 lists, plus orchestrator:queued and in-review last', () => {
     expect(TRACKER_LABEL_NAMES).toEqual([
       'type:bug',
       'type:idea',
@@ -40,21 +40,34 @@ describe('the nine labels', () => {
       'kind:debt',
       'runner-fix',
       'in-progress',
-      'orchestrator:queued'
+      'orchestrator:queued',
+      'in-review'
     ]);
-    expect(TRACKER_LABELS).toHaveLength(9);
+    expect(TRACKER_LABELS).toHaveLength(10);
   });
 
   /* The ninth label arrived with the orchestrator:queued spec (§1), appended
      rather than inserted so the bootstrap's diff against an existing repo is
      exactly one create. Its name has one spelling, exported, so the write
      route and the Stop sweep import it instead of repeating the string. */
-  it('ends with orchestrator:queued, exported as QUEUED_LABEL with the description the spec fixes', () => {
+  it('carries orchestrator:queued, exported as QUEUED_LABEL with the description the spec fixes', () => {
     expect(QUEUED_LABEL).toBe('orchestrator:queued');
-    expect(TRACKER_LABELS[TRACKER_LABELS.length - 1]).toEqual({
+    expect(TRACKER_LABELS[TRACKER_LABELS.length - 2]).toEqual({
       name: QUEUED_LABEL,
       color: expect.stringMatching(/^[0-9a-f]{6}$/),
       description: "In a live orchestrator run's queue, not yet picked up — a plan, not a claim"
+    });
+  });
+
+  /* The tenth arrived with the execute pr-mode spec (decision 9), appended for
+     the same reason the ninth was: the bootstrap's diff against an existing
+     repo is exactly one create. Unlike the queued label it IS read by gates. */
+  it('ends with in-review, exported as IN_REVIEW_LABEL with the description the spec fixes', () => {
+    expect(IN_REVIEW_LABEL).toBe('in-review');
+    expect(TRACKER_LABELS[TRACKER_LABELS.length - 1]).toEqual({
+      name: IN_REVIEW_LABEL,
+      color: expect.stringMatching(/^[0-9a-f]{6}$/),
+      description: 'A PR for this item is open — the work lands when it merges'
     });
   });
 

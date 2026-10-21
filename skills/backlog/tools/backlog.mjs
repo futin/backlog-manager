@@ -449,7 +449,7 @@ export function init(backlog) {
 //   - it does not touch `~/.backlog-manager/registry.json`. That file's one-writer relationship with this tool stands, but registration answers "does this
 //     machine's board know about this project at all", which is per machine and unchanged by connecting; the marker answers "where do this project's items
 //     come from", which is per project and committed. Conflating the two would make connecting a project on one machine silently re-register it there;
-//   - it makes no network call and needs no server running. The nine labels the issue→item mapping depends on are created by the board's poller on its first
+//   - it makes no network call and needs no server running. The ten labels the issue→item mapping depends on are created by the board's poller on its first
 //     successful sync (spec §5.2), so a `connect` run on a laptop with no token still produces a correct, committable marker;
 //   - it does not create the labels' issue forms' *labels*, only forms that REQUEST them. A form naming a label that does not exist yet is not an error on
 //     GitHub's side — the label is applied once it exists, and the poller creates it before anyone can file through the form in anger.
@@ -2174,6 +2174,7 @@ commands:
   stop        clear the in-progress marker
   drift       how far the base has moved under the paths a bug's or task's plan names
   connect     point this project's backlog at a tracker (github)
+  config      read, or set, how backlog-execute finishes an item (in-place | pr)
   import      move this project's item files onto a tracker (github)
   unregister  drop a project from the board registry by path
 
@@ -2181,7 +2182,183 @@ tracker projects only (backlog/source.json names github):
   heartbeat   say this session still holds an item
   abort       release a live claim this machine's own dead session left behind
   comment     append a comment to an item
-  body        replace an item's body (groom's only write)`
+  body        replace an item's body (groom's only write)
+  review      mark an item as having an open PR (on), or clear it (off)`
+
+// `config` — the per-project finish mode of `backlog-execute`, kept in `backlog/config.json`: `{ "execute": { "finish": "in-place" | "pr", "base"?: string } }`.
+// A committed file in the project, so a team shares it and each repo can differ; `source.json` is deliberately not reused, it is the tracker marker with its own
+// guarded semantics. Both verbs are LOCAL-FILE commands in files and tracker mode alike: they never go through `requireStore`, because the mode is read before
+// anything else and the file is not an item, so a github-marked project answers them with the stack down. This file is the config's one tool-side writer, and
+// the skill never parses the JSON itself — it reads the effective config this prints.
+const CONFIG_FILE = 'config.json'
+const CONFIG_REL = `backlog/${CONFIG_FILE}`
+export const EXECUTE_FINISH_MODES = ['in-place', 'pr']
+const REVIEW_USAGE = `usage: backlog.mjs review <id> on|off`
+
+const CONFIG_USAGE = `usage: backlog.mjs config
+       backlog.mjs config set execute.finish <in-place|pr>
+       backlog.mjs config set execute.base <branch>`
+
+const configRefusal = (detail) => ({ ok: false, message: `${CONFIG_REL}: ${detail}` })
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+
+// Pure: file text (or null for "no file") → the validated execute config. Every malformed shape is a REFUSAL naming the file, never a default — a quiet
+// fall back to either mode is the failure this reader exists to prevent, for the same reason an `unsupported` source never falls back to `files`. `base`
+// stays null here when the file names none; resolving "the remote's default branch, else main" needs git, which a parser has no business asking.
+export function parseExecuteConfig(text) {
+  if (text === null) return { ok: true, finish: 'in-place', base: null }
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch (e) {
+    return configRefusal(`is not valid JSON (${e.message})`)
+  }
+  if (!isPlainObject(parsed)) return configRefusal('must hold a JSON object')
+  if (!('execute' in parsed)) return { ok: true, finish: 'in-place', base: null }
+  const execute = parsed.execute
+  if (!isPlainObject(execute)) return configRefusal('"execute" must be an object')
+  let finish = 'in-place'
+  if ('finish' in execute) {
+    if (!EXECUTE_FINISH_MODES.includes(execute.finish)) {
+      return configRefusal(`execute.finish is ${JSON.stringify(execute.finish)} — expected one of ${EXECUTE_FINISH_MODES.map((m) => `"${m}"`).join(', ')}`)
+    }
+    finish = execute.finish
+  }
+  let base = null
+  if ('base' in execute) {
+    if (typeof execute.base !== 'string' || execute.base.trim() === '') {
+      return configRefusal(`execute.base is ${JSON.stringify(execute.base)} — expected a non-empty branch name`)
+    }
+    base = execute.base
+  }
+  return { ok: true, finish, base }
+}
+
+// The remote's default branch as a bare name, `main` when git cannot say (no remote, no `origin/HEAD`, not a usable repo). `origin/HEAD` is a symbolic ref
+// only a clone (or `git remote set-head`) creates, so "no answer" is a normal state here, not an error.
+function remoteDefaultBranch(root) {
+  const head = spawnSync('git', ['-C', root, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { encoding: 'utf8' })
+  const name = head.status === 0 ? head.stdout.trim() : ''
+  return name.startsWith('origin/') && name.length > 'origin/'.length ? name.slice('origin/'.length) : 'main'
+}
+
+// ENOENT is "no file" and nothing else: an unreadable file (a directory in its place, a permissions error) must reach the caller as an error, because
+// treating it as absent would let `config set` write over something it never read.
+function readConfigText(file) {
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch (e) {
+    if (e.code === 'ENOENT') return null
+    throw e
+  }
+}
+
+const effectiveConfig = (root, cfg) => ({ execute: { finish: cfg.finish, base: cfg.base ?? remoteDefaultBranch(root) } })
+
+// One stderr line, only when git can say the file still needs committing: a setter that ran in a repo whose config is already committed and unchanged has
+// nothing to remind about, and one where git cannot answer (`status` non-zero) stays silent rather than failing a write that already succeeded.
+function remindToCommitConfig(root) {
+  const status = spawnSync('git', ['-C', root, 'status', '--porcelain', '--', CONFIG_REL], { encoding: 'utf8' })
+  if (status.status === 0 && status.stdout.trim() !== '') console.error(`${CONFIG_REL} changed — commit it so the whole team and every worktree sees the same mode`)
+}
+
+// What `config set <key> <value>` may write, and the check each value has to pass BEFORE the file is touched. A base starting with `-` would later land in a
+// git argument position as an option, and whitespace cannot be part of a ref, so neither is accepted from the setter; the reader only insists on non-empty,
+// because a hand-edited file is the person's own and git will say what it thinks of it.
+const CONFIG_SETTERS = {
+  'execute.finish': (value) => (EXECUTE_FINISH_MODES.includes(value) ? null : `execute.finish must be one of ${EXECUTE_FINISH_MODES.join(', ')} — got ${JSON.stringify(value)}`),
+  'execute.base': (value) =>
+    value.trim() === '' || /\s/.test(value) || value.startsWith('-') ? `execute.base must be a branch name with no whitespace and no leading "-" — got ${JSON.stringify(value)}` : null,
+}
+
+// Write beside the target and rename over it, so a concurrent reader sees the old complete file or the new one, never a truncated window.
+function writeConfigAtomic(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const tmp = `${file}.tmp-${process.pid}`
+  fs.writeFileSync(tmp, text)
+  fs.renameSync(tmp, file)
+}
+
+function runConfig(argv) {
+  const r = resolveRootOrFail()
+  if (!r.ok) return r.code
+  const { root, backlog } = r.resolved
+  const file = path.join(backlog, CONFIG_FILE)
+
+  const print = (cfg) => console.log(JSON.stringify(effectiveConfig(root, cfg)))
+
+  let text
+  try {
+    text = readConfigText(file)
+  } catch (e) {
+    console.error(`${CONFIG_REL}: cannot be read (${e.message})`)
+    return 1
+  }
+
+  if (argv.length === 0) {
+    const cfg = parseExecuteConfig(text)
+    if (!cfg.ok) {
+      console.error(cfg.message)
+      return 1
+    }
+    print(cfg)
+    return 0
+  }
+
+  if (argv[0] !== 'set' || argv.length !== 3) {
+    console.error(CONFIG_USAGE)
+    return 1
+  }
+  const [, key, value] = argv
+  // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so `hasOwnProperty` or `toString` read as known keys and wrote a garbage `undefined` key.
+  if (!Object.hasOwn(CONFIG_SETTERS, key)) {
+    console.error(`unknown config key ${JSON.stringify(key)}\n${CONFIG_USAGE}`)
+    return 1
+  }
+  const refused = CONFIG_SETTERS[key](value)
+  if (refused) {
+    console.error(refused)
+    return 1
+  }
+
+  // Only the structure is needed to merge: an existing file that is not a JSON object with an object-or-absent `execute` is never replaced. Every other key
+  // — top-level or under `execute` — is carried through untouched, which is what lets this file grow keys this tool has not heard of.
+  let doc = {}
+  if (text !== null) {
+    const shape = parseExecuteConfig(text)
+    let parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = undefined
+    }
+    if (!isPlainObject(parsed) || ('execute' in parsed && !isPlainObject(parsed.execute))) {
+      console.error(shape.ok ? `${CONFIG_REL}: cannot be merged into` : shape.message)
+      return 1
+    }
+    doc = parsed
+  }
+  const [, field] = key.split('.')
+  doc.execute = { ...(doc.execute ?? {}), [field]: value }
+
+  // Validate the file as it WOULD be, not just the value: a sibling key that is already invalid (`base: ""` while setting `finish`) is refused here too, so
+  // this tool never leaves behind a file its own reader will then refuse.
+  const next = JSON.stringify(doc, null, 2) + '\n'
+  const result = parseExecuteConfig(next)
+  if (!result.ok) {
+    console.error(result.message)
+    return 1
+  }
+  try {
+    writeConfigAtomic(file, next)
+  } catch (e) {
+    console.error(`${CONFIG_REL}: write failed (${e.message})`)
+    return 1
+  }
+  print(result)
+  remindToCommitConfig(root)
+  return 0
+}
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
        backlog.mjs new <section> <title> --body <file> [--from <id>] [--kind chore|debt] [--runner-fix]   (tracker projects)
@@ -3647,6 +3824,44 @@ export async function main(argv) {
     for (const rel of committable) console.log(rel)
     for (const rel of deleted) console.log(rel)
     return 0
+  }
+
+  // Local-file in both modes — see `runConfig` for why it deliberately skips `requireStore`.
+  if (cmd === 'config') return runConfig(argv.slice(1))
+
+  // `review <id> on|off` — the in-review guard's writer (execute `pr` mode, spec decision 9). `on` adds the issue's `in-review` label, which every gate
+  // reads as "a PR is open for this item": execute runs it right after a successful push, so pushed work waiting on a reviewer is never executed twice.
+  // `off` is the person's way out when a PR closes WITHOUT merging, or targets a non-default base, and leaves the label on an open issue.
+  //
+  // Tracker-only, unlike `config`: the guard is a label, and a files project has nothing to carry it (its PR guard is a named known limitation). The
+  // usage check runs before `requireStore`, so a malformed call makes no request on any path; after it, the same exit codes every tracker verb has —
+  // `5` with the stack down, `1` with the server's own sentence for a refusal.
+  if (cmd === 'review') {
+    const [, id, state] = argv
+    if (!id || (state !== 'on' && state !== 'off') || argv.length !== 3) {
+      console.error(REVIEW_USAGE)
+      return 1
+    }
+
+    const r = requireStore()
+    if (!r.ok) return r.code
+    if (r.mode.kind !== 'api') {
+      console.error('review is for tracker projects: a files project has no label to carry it, and its item stays open until the PR merges')
+      return 1
+    }
+
+    try {
+      const project = registryRoot(r.resolved.root)
+      const wanted = trackerId(id, r.mode.repo)
+      const inReview = state === 'on'
+      await apiPost('review', { project, id: wanted, inReview })
+      console.log(`gh:${r.mode.repo}${wanted} ${inReview ? 'in review' : 'not in review'}`)
+      return 0
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
   }
 
   // The registry's one removal path, and the only command in this file that

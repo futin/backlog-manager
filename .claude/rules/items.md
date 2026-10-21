@@ -4,12 +4,12 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
 
-- **The nine `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
+- **The ten `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
   `@UseGuards(SameOriginPostGuard)` (`items-write.controller.ts`, one decorator on the class) and each is a thin pass-through to an `ItemWriter` method:
   `ItemsService.writerFor` gates the `project` against the registry by a RAW string compare, resolves the marker per request, and answers `unregistered` (404)
   / `files` (400, `this project's items are files — the skills write them directly`) / `unsupported` (400, carrying `resolveSource`'s own reason) / the call.
   None of those four makes a network request. `FilesSource` has no `writer` at all, and that absence IS the rule. The adapter answers a VALUE for every
-  failure (`WriteRefusal`), and `answer` (`write-answer.util.ts`, #270) is the only mapping from one to a status — the eight routes, `abort` and the
+  failure (`WriteRefusal`), and `answer` (`write-answer.util.ts`, #270) is the only mapping from one to a status — the nine routes here, `abort` and the
   `GET /api/items/claim` read all go through it: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited`
   429 · anything else 502. `heartbeat` also takes `finished: { at, status }` (task-48), validated field by field and accepted on a RELEASED claim, where it
   sets `finished` and nothing else — `finish` stamps a claim its terminal stage already released. `claim` takes an optional `host` (bug-46), validated by
@@ -22,9 +22,11 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   literal boolean or a 400, adds or removes `orchestrator:queued` through `ItemWriter.queue` on the same per-URN chain, and answers a REMOVAL's GitHub 404 as
   success, because every `queued: false` caller is a sweep. The ninth, `abort` (#225), is the one outside this directory — `agents/items-abort.controller.ts`,
   because it calls the dashboard — yet gates and maps through the same exported `writable`/`answer`, and releases with `authority: 'board'`, a field the
-  `release` route never parses, so no HTTP body can set it. The one READ beside them, `GET /api/items/claim`, is unguarded like every other GET and exists
+  `release` route never parses, so no HTTP body can set it. The tenth, `review` (execute `pr` mode), is `queue`'s twin: `{ project, id, inReview }` with
+  `inReview` a literal boolean or a 400, adding or removing the `in-review` label through `ItemWriter.review` on the same per-URN chain, a removal's 404
+  answered as success. The one READ beside them, `GET /api/items/claim`, is unguarded like every other GET and exists
   because `start` and `stop` are two processes. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-nine-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
+  [invariants.md](docs/subsystems/invariants.md#the-ten-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **A project's source is a committed marker, resolved per request, and an `unsupported` one never falls back to `files`.** `resolveSource`
   (`server/src/items/sources/resolve.util.ts`) reads `backlog/source.json` per request, caches nothing, and answers `missing` / `files` / `tracker` /
   `unsupported`; `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES` and **throws at boot** if two claim one kind. Absent means `files`;

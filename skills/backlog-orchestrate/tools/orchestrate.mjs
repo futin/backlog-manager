@@ -1912,6 +1912,9 @@ function trackerById(mine) {
 //   * `hoisted` reads `item.runnerFix`, the label, where the files walk reads
 //     a frontmatter key.
 //
+// And one addition the files walk has no counterpart for: `item.inReview`, the
+// `in-review` label, gates the item through `inReviewGate` (execute `pr` mode).
+//
 // Ordering is bugs then tasks, oldest ISSUE NUMBER first — the same rule the
 // files walk applies to its own `<prefix>-<n>` numbers, and for the same
 // reason: the oldest open thing has been waiting longest.
@@ -2010,11 +2013,27 @@ function trackerCandidates(projectRoot, { ids, drift = false, base = BASE_REF_DE
       id,
       title: item.title,
       hoisted: item.runnerFix === true,
-      ...gateItem(item.section, text, projectRoot),
+      ...inReviewGate(item, gateItem(item.section, text, projectRoot)),
       planHash: planHash(planSection(text, item.section) ?? ''),
       ...(drift ? { drift: planDrift({ projectRoot, body: text, frontmatter, section: item.section, base }) } : {})
     };
   });
+}
+
+// The in-review guard's sentence (execute `pr` mode, spec decision 9) — a HAND-KEPT copy of `IN_REVIEW_REASON` in `shared/agent.ts`, because this file
+// is installed as a standalone copy of what was pushed and cannot import it. One string everywhere is a global constraint of that spec: the board's Run
+// button, the server's dispatch ladder, this gate and execute's own refusal all say it, so a change there is a change here.
+const IN_REVIEW_REASON = 'a PR is open for this item';
+
+// A tracker issue labelled `in-review` has a pushed branch and an open PR, and sits open and UNCLAIMED until the PR merges and `Closes #<n>` shuts it.
+// To every other gate it reads ready, so without this a run on any machine would execute it a second time. It turns the verdict `ungroomed` with the
+// reason first — the shape `applyStaleMarks` gives a stale-plan mark — so no new verdict reaches `RunStage`, the run file or anything that reads one, and
+// the driver skips it at pre-flight like any other ungroomed item. Unlike a stale mark it applies to an already-ungroomed item too: "a PR is open" is the
+// reason a reader needs first whatever else the plan lacks, because grooming it would not make it dispatchable. Membership is untouched — an in-review
+// item is gated, never dropped, so `--ids` naming one says why rather than silently running nothing.
+function inReviewGate(item, verdict) {
+  if (item.inReview !== true) return verdict;
+  return { ...verdict, gate: 'ungroomed', reasons: [IN_REVIEW_REASON, ...verdict.reasons], questions: [] };
 }
 
 // --- the claim, as this machine's state on a tracker item (task-47) ------

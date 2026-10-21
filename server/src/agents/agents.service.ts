@@ -18,6 +18,7 @@ import {
   clampMode,
   deriveAction,
   dispatchBlock,
+  inReviewBlock,
   isItemId,
   isMergeMode,
   isQuestionMode,
@@ -31,6 +32,7 @@ import {
   PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
+import { readFinishMode } from './finish-mode.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
@@ -386,7 +388,7 @@ export class AgentsService {
     const { runs, starting } = this.orchestrator.runs();
     return {
       action,
-      prompt: composePrompt(item, action),
+      prompt: composePrompt(item, action, readFinishMode(item.projectPath)),
       project: item.project,
       allowedModes: modesUpTo(status.spawnMaxPermission),
       // auto, not the ceiling: a dispatched session runs unattended, and often
@@ -411,7 +413,10 @@ export class AgentsService {
       // from — a sheet that offers a launch button for an item the dispatch
       // route below is about to 409 is the half-fixed state.
       // #17: a project whose sync is off is the third, after the run claim — the sheet must not offer what `dispatch` below would refuse.
-      blocked: dispatchBlock(item, status) ?? runClaimBlock(item, runs, starting) ?? this.poller.syncOffBlock(item.projectPath) ?? undefined
+      // The in-review rung (spec decision 9) sits between the dashboard ladder and the run claim, the client's order: a PR is open for this tracker
+      // item, and `dispatch` below refuses it with the same sentence.
+      blocked:
+        dispatchBlock(item, status) ?? inReviewBlock(item) ?? runClaimBlock(item, runs, starting) ?? this.poller.syncOffBlock(item.projectPath) ?? undefined
     };
   }
 
@@ -457,6 +462,12 @@ export class AgentsService {
       // and said no" both get 409 — a state the reader can go and change.
       throw new HttpException({ error: blocked }, status.enabled && !status.reachable ? 502 : 409);
     }
+
+    // The in-review block (spec decision 9), re-checked for the reason the run claim below is: the sheet's plan was read once, and execute in `pr` mode
+    // may have labelled the issue since. Uncoded 409, the run-claim refusal's status — a fact about this item a person can go and resolve (merge or
+    // close the PR, or `backlog.mjs review <id> off`), with no upstream to blame.
+    const inReview = inReviewBlock(item);
+    if (inReview !== null) throw new HttpException({ error: inReview }, 409);
 
     // The run-claim block, re-checked here rather than trusted from `plan()`.
     // This is the layer that actually holds: LaunchSheet fetches its plan once

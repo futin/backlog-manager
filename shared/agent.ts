@@ -466,6 +466,27 @@ export function runClaimBlock(item: BacklogItem, runs: OrchestratorRunsPayload['
 }
 
 /**
+ * The in-review guard's one sentence (spec decision 9), and the global constraint that it is ONE string everywhere: the board's Run button, the server's
+ * plan/dispatch ladder, the orchestrator's gate reason and execute's own refusal. `orchestrate.mjs` and the execute skill carry hand-kept copies — a plugin
+ * skill's `tools/` is a standalone copy of what was pushed and cannot import this file — so a change here is a change in those copies too.
+ */
+export const IN_REVIEW_REASON = 'a PR is open for this item';
+
+/**
+ * Why this item cannot be dispatched because a PR for it is open, or null. A tracker issue carries `inReview` while its `in-review` label is on: execute in
+ * `pr` mode adds the label after a successful push, and the issue then sits open and UNCLAIMED until the PR merges and `Closes #<n>` shuts it. Without this
+ * rung that open, unclaimed issue reads ready to every gate, and a click would start a second execution of work already waiting on a reviewer.
+ *
+ * Per-item, beside `runClaimBlock` and read by both ladders — the client's `DispatchButton` (after the in-progress block, before the run claim: the label is
+ * on the item this board renders, while a run claim is the volatile fact about another worktree) and the server's `plan`/`dispatch` (after `dispatchBlock`,
+ * before the run claim, for the same reason). `dispatchGate`/`dispatchBlock` stay project-level and never learn about it. A files item never carries the
+ * flag — its PR guard is a named known limitation — so this reads the flag alone and does not re-check the source.
+ */
+export function inReviewBlock(item: BacklogItem): string | null {
+  return item.inReview === true ? IN_REVIEW_REASON : null;
+}
+
+/**
  * The queue entry a FRESH run in this item's project holds this item at, when
  * that stage is one of `stages` — or null.
  *
@@ -817,14 +838,28 @@ export function oneLine(text: string): string {
  * not be trimmed. Pushing stays banned: nothing here is reviewed.
  *
  * Known seam, deliberately one-sided: `skills/backlog-execute/SKILL.md` still
- * says "Never commits, never pushes", and CLAUDE.md's invariant still names
- * `backlog-orchestrate` as the only skill that commits. Only this prompt
- * changed — it is the most specific instruction the spawned session receives,
- * and `skills/` is a publishing boundary (an install is a copy of the pushed
- * HEAD, so a skill edit reaches nothing until `pnpm run plugin:sync`). If the
- * two sides are ever reconciled, this sentence is where it starts.
+ * says "Never commits, never pushes" for an in-place finish, and CLAUDE.md's
+ * invariant reads "`backlog-orchestrate` is the only skill that merges;
+ * `backlog-execute` commits and pushes its own branch only in `pr` mode" — a
+ * commit from an in-place dispatch is in neither half.
+ * Only this prompt changed — it is the most specific instruction the spawned
+ * session receives, and `skills/` is a publishing boundary (an install is a copy
+ * of the pushed HEAD, so a skill edit reaches nothing until `pnpm run
+ * plugin:sync`). The seam has one exception, and it is `PR_FINISH_RULE` below:
+ * an execute in a project whose `backlog/config.json` says `finish: "pr"` is
+ * told to commit AND push through the skill, so this sentence — which ends "Do
+ * not push." — would contradict it. `composePrompt` therefore appends
+ * `PR_FINISH_RULE` instead, for that one action in that one mode.
  */
 export const COMMIT_RULE =
   'When the job is done, commit the work: stage only the files this session ' +
   'changed, never `git add -A` or `git add .` — the tree may hold unrelated ' +
   "uncommitted work of the user's. Do not push.";
+
+/**
+ * The closing sentence of an `execute` dispatch in a `pr`-mode project, in place of `COMMIT_RULE` (spec "Non-goals", the prompt paragraph). Deliberately says
+ * nothing about staging or pushing itself: the skill's own pr procedure owns every git step (worktree, narrow staging, review, push, PR), and restating any of
+ * it here would be a second, drifting copy of a rule the spawned session reads in full from the skill. This sentence only has to stop `COMMIT_RULE`'s
+ * "Do not push." from being the last, most specific word the session hears.
+ */
+export const PR_FINISH_RULE = "Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.";

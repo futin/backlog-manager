@@ -1,4 +1,4 @@
-import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agent';
+import { actionLabel, deriveAction, dispatchGate, inReviewBlock } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { disabledReason } from '../../lib/gate-view';
 import { progressBlock } from '../../lib/item-progress';
@@ -38,19 +38,21 @@ export function dispatchAvailable(item: BacklogItem, status: AgentsStatus | null
  *    disabled on every single card, for a reason that is not about any of
  *    them, is noise; "BM_AGENTS is off" belongs in Settings, which reports it.
  *
- * There are THREE per-item blocks, not one: the dashboard cannot see this
+ * There are FOUR per-item blocks, not one: the dashboard cannot see this
  * item's project (derived here, from `status`), a local skill session already
- * holds this item (derived here too, by `progressBlock` — the only one of the
- * three the item file itself can answer, since `started:` is right there in
- * its frontmatter), and an orchestrator run has already claimed this item
- * (handed in as `runBlock`, because nothing in the item file or the status
- * payload can know it). All three disable with their reason; see the comment
- * above `gateBlock` below for why they read in that order.
+ * holds this item (derived here too, by `progressBlock` — one of the two the
+ * item itself can answer, since `started:` is right there in its
+ * frontmatter), a PR is open for this item (`inReviewBlock`, the other one:
+ * a tracker issue's `in-review` label, from execute's `pr` mode), and an
+ * orchestrator run has already claimed this item (handed in as `runBlock`,
+ * because nothing in the item file or the status payload can know it). All
+ * four disable with their reason; see the comment above `gateBlock` below for
+ * why they read in that order.
  *
- * Exactly ONE of the three lets a click do something anyway, and that is
+ * Exactly ONE of the four lets a click do something anyway, and that is
  * bug-13: a project-visibility block is the only one that can be silently
  * out of date, so clicking it RE-ASKS the status (`reverify`) and opens the
- * sheet if the block has cleared. The other two are refused as before — see
+ * sheet if the block has cleared. The other three are refused as before — see
  * `reverify`'s own prop comment for why the asymmetry is the whole fix and
  * not an inconsistency.
  *
@@ -111,7 +113,7 @@ export function DispatchButton({
    *
    * bug-13. `useAgents` refetches on mount and window focus only, and that
    * cadence is deliberate (see its own comment). It is also, for one of the
-   * three per-item blocks, unrecoverable: a board whose window never loses
+   * four per-item blocks, unrecoverable: a board whose window never loses
    * focus keeps whatever `projectPaths` it last fetched, and while a stale
    * *enable* self-corrects (the click opens the sheet, whose `plan()`
    * re-derives the block server-side), a stale *disable* cannot — the sheet
@@ -144,9 +146,9 @@ export function DispatchButton({
 
   /*
    * Order is the invariant, not a preference: ENVIRONMENT-level → per-item
-   * project visibility → in progress → run claim. The first still returns
+   * project visibility → in progress → in review → run claim. The first still returns
    * `null` above (no control at all — see the file comment and `dispatchGate`
-   * for why), and the other three disable with a reason. The run claim reads
+   * for why), and the other four disable with a reason. The run claim reads
    * LAST of the four because it is the most volatile and the least
    * fundamental: with dispatch off or the project invisible there is nothing
    * to say about a run, and a reason naming a stage would send the reader to
@@ -160,12 +162,14 @@ export function DispatchButton({
    * no stamp at all — and when they do, the file wins.
    */
   const gateBlock = disabledReason(gate);
-  /* The two a click can never clear, in that same precedence — split out
+  /* The three a click can never clear, in that same precedence — split out
      from the gate's own block rather than folded into one string because
-     bug-13's re-ask has to know WHICH of the three is speaking. Kept as one
-     value because the answer it feeds is the same for both: refuse, ask
+     bug-13's re-ask has to know WHICH of the four is speaking. Kept as one
+     value because the answer it feeds is the same for all three: refuse, ask
      nothing. */
-  const itemBlock = progressBlock(item, Date.now()) ?? runBlock;
+  /* The in-review rung (spec decision 9) sits between them: a tracker issue whose PR is open carries the flag on the item this board renders, so it
+     outranks the volatile run claim, while a live session's stamp still names the more immediate fact. */
+  const itemBlock = progressBlock(item, Date.now()) ?? inReviewBlock(item) ?? runBlock;
 
   return (
     <>

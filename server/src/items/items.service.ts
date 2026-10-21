@@ -302,7 +302,7 @@ export class ItemsService {
 
   /**
    * How, if at all, one registered project's items may be WRITTEN through this
-   * API (task-46, spec §6.2) — the one gate the nine write routes share
+   * API (task-46, spec §6.2) — the one gate the ten write routes share
    * (the ninth, `abort`, reaches it from `agents/items-abort.service.ts`).
    *
    * Four answers rather than a boolean, because the routes owe four different
@@ -363,7 +363,7 @@ export class ItemsService {
     const lookup = this.writerFor(projectPath);
     if (lookup.kind !== 'writer') throw new HttpException({ error: 'not found' }, 404);
     // Mapped by `answer`, the write routes' own mapping, rather than a local not-found-or-502: a missing token is a 503 and a rate limit a 429 with its
-    // `resetAt` on this route exactly as on the nine writes, because the caller (`backlog.mjs stop`) acts on the status the same way (#270).
+    // `resetAt` on this route exactly as on the ten writes, because the caller (`backlog.mjs stop`) acts on the status the same way (#270).
     return answer(await lookup.writer.readClaim(lookup.project, lookup.marker, id));
   }
 

@@ -68,9 +68,10 @@ paths: ["client/src/**"]
   (`server/src/security.ts`), and dev has no CSP, so the failure is invisible until the built app is served. Why:
   [invariants.md](docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it)
 - **An environment-level block hides the dispatch control; the per-item ones disable it.** With `BM_AGENTS` off the Board shows no dispatch buttons — do not
-  "improve" that into disabled buttons. The stated exception is the Jira card's `Run ▾`, which is not a Board dispatch control (next bullet). Three per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
+  "improve" that into disabled buttons. The stated exception is the Jira card's `Run ▾`, which is not a Board dispatch control (next bullet). Four per-item blocks keep their button, read by `DispatchButton` in this order: project visibility (`dispatchGate`), a
   local session's `started:` stamp (`progressBlock`, `client/src/lib/item-progress.ts` — ANY stamp, fresh or stale, for a files item; a tracker claim past
-  `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an orchestrator claim (`runClaimBlock`).
+  `CLAIM_STALE_MS` lets the click through unless a run or the board's own session holds it, #227), an open PR (`inReviewBlock`, `shared/agent.ts` — a
+  tracker issue labelled `in-review`; the server's `plan`/`dispatch` read the same helper), an orchestrator claim (`runClaimBlock`).
   Exactly one lets the click through, and only when it speaks alone: the visibility block re-asks the status through `useReverify`
   (`client/src/hooks/useReverify.ts`), whose one caller is `GatedChip` (`components/ui/GatedChip.tsx`, rule in `lib/gate-view.ts`), which `DispatchButton` and
   the toolbar Orchestrate control both compose (bug-13, bug-16, #272); the other blocks keep swallowing it. Why:

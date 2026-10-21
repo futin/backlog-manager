@@ -19,7 +19,8 @@ import type { ClaimRecord, ClaimRun, ItemsIndex } from '../shared/types';
 /**
  * The eight write routes and the claim protocol, end to end (task-46,
  * spec §6.2 and §6.3; `queue` is the orchestrator:queued spec's §2). The ninth,
- * `abort`, calls the dashboard and has its own suite, `test/tracker-abort.test.ts`.
+ * `abort`, calls the dashboard and has its own suite, `test/tracker-abort.test.ts`;
+ * the tenth, `review` (the execute pr-mode spec, decision 9), is covered below beside `queue`.
  *
  * The network is an in-memory GitHub behind a REAL `GithubClient`
  * (`test/helpers/github.ts` — see its header for why a whole little server
@@ -598,6 +599,90 @@ describe('queue', () => {
     const names = gh.issues.get(31)?.labels.map((l) => l.name);
     expect(names).toContain('in-progress');
     expect(names).not.toContain('orchestrator:queued');
+  });
+});
+
+/* =========================================================================
+ * review — the tenth write route (the execute pr-mode spec, decision 9)
+ * ========================================================================= */
+
+describe('review', () => {
+  it('adds in-review for inReview: true, and answers the id and the flag', async () => {
+    gh.issue();
+    await sync();
+    const res = await post('review', { project: trackerPath, id: '#31', inReview: true }).expect(201);
+    expect(res.body).toEqual({ id: '#31', inReview: true });
+
+    const adds = gh.matching('/issues/31/labels', 'POST');
+    expect(adds).toHaveLength(1);
+    expect(adds[0].body).toEqual({ labels: ['in-review'] });
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('in-review');
+  });
+
+  it('removes the label for inReview: false', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'in-review' }] });
+    await sync();
+    const res = await post('review', { project: trackerPath, id: '#31', inReview: false }).expect(201);
+    expect(res.body).toEqual({ id: '#31', inReview: false });
+
+    expect(gh.matching('/issues/31/labels/in-review', 'DELETE')).toHaveLength(1);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toEqual(['type:bug']);
+  });
+
+  /* `review <id> off` is the person's hand-removal after a PR closed unmerged;
+     a label already gone is the state they asked for. */
+  it('answers success when the removal 404s because the label was never there', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }] });
+    await sync();
+    const res = await post('review', { project: trackerPath, id: '#31', inReview: false }).expect(201);
+    expect(res.body).toEqual({ id: '#31', inReview: false });
+    expect(gh.matching('/labels/in-review', 'DELETE')).toHaveLength(1);
+  });
+
+  it('maps any other failure through the refusal table — an add on a missing issue is a 404', async () => {
+    await sync();
+    await post('review', { project: trackerPath, id: '#31', inReview: true }).expect(404);
+  });
+
+  it('400s an inReview that is not a boolean, and a missing id, reaching GitHub not at all', async () => {
+    gh.issue();
+    await sync();
+    const bad = await post('review', { project: trackerPath, id: '#31', inReview: 'yes' }).expect(400);
+    expect(bad.body).toEqual({ error: 'inReview must be a boolean' });
+    await post('review', { project: trackerPath, id: '#31' }).expect(400);
+    const noId = await post('review', { project: trackerPath, inReview: true }).expect(400);
+    expect(noId.body.error).toMatch(/id/);
+    expect(gh.calls).toEqual([]);
+  });
+
+  it('refuses a files project the way the other routes do, and makes no request', async () => {
+    const res = await post('review', { project: filesPath, id: '#31', inReview: true }).expect(400);
+    expect(res.body.error).toMatch(/files/);
+    expect(gh.calls).toEqual([]);
+  });
+
+  /* Driven at the adapter, as the queue case is: two supertest calls never
+     overlap here. Both writes share the item's chain, so the add (fired first)
+     lands before the removal and the end state is "off" — never a mix. */
+  it('serialises a concurrent add and remove on one item, in the order they were fired', async () => {
+    gh.issue();
+    await sync();
+    const source = app.get(GithubSource);
+    const project = registryEntry();
+    const marker = { kind: 'github', repo: REPO };
+
+    const [on, off] = await Promise.all([
+      source.review(project, marker, { project: trackerPath, id: '#31', inReview: true }),
+      source.review(project, marker, { project: trackerPath, id: '#31', inReview: false })
+    ]);
+    expect(on.ok).toBe(true);
+    expect(off.ok).toBe(true);
+
+    const add = gh.calls.findIndex((c) => c.method === 'POST' && c.url.endsWith('/issues/31/labels'));
+    const del = gh.calls.findIndex((c) => c.method === 'DELETE' && c.url.includes('/issues/31/labels/in-review'));
+    expect(add).toBeGreaterThanOrEqual(0);
+    expect(add).toBeLessThan(del);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('in-review');
   });
 });
 

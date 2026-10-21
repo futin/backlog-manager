@@ -1,5 +1,5 @@
 /**
- * The nine labels a connected repo must carry (task-45, spec §5.2), and the
+ * The ten labels a connected repo must carry (task-45, spec §5.2), and the
  * one home for that list.
  *
  * Four of them ARE the mapping: `section` is read off the one `type:*` label
@@ -17,6 +17,12 @@
  * successful sync, because the bootstrap diffs names rather than counting —
  * which is also why the ninth is APPENDED: order is cosmetic to GitHub, but
  * this file's order is what spec §5.2 and its tests read.
+ *
+ * The tenth, `in-review`, arrived with the execute pr-mode spec (decision 9) and
+ * is appended for the same reason. It is the one label here besides `in-progress`
+ * that gates DO read: a PR is open for the item, so the dispatch ladders, the
+ * orchestrator's queue and execute's refusal all skip it — an open, unclaimed
+ * issue would otherwise look ready to every machine while its work waits in review.
  *
  * Created by the POLLER, the first time a repo syncs successfully and any is
  * missing, which is why `connect` needs no server and no network (spec §5.7):
@@ -60,7 +66,15 @@ export const TYPE_LABELS = ['type:bug', 'type:idea', 'type:task', 'type:refactor
  */
 export const QUEUED_LABEL = 'orchestrator:queued';
 
-/** The nine, in the order spec §5.2 lists them, `orchestrator:queued` last. */
+/**
+ * The one spelling of the in-review label's name (execute pr-mode spec, decision 9),
+ * for the same reason `QUEUED_LABEL` has one: the write route and the mapper
+ * import it, so a rename is one edit and a typo is a compile error rather than a
+ * label GitHub silently creates on first use.
+ */
+export const IN_REVIEW_LABEL = 'in-review';
+
+/** The ten, in the order spec §5.2 lists them, `orchestrator:queued` and then `in-review` last. */
 export const TRACKER_LABELS: readonly TrackerLabel[] = [
   { name: 'type:bug', color: 'd73a4a', description: 'A defect — backlog section: bugs' },
   { name: 'type:idea', color: '0e8a16', description: 'Something new — backlog section: ideas' },
@@ -70,7 +84,8 @@ export const TRACKER_LABELS: readonly TrackerLabel[] = [
   { name: 'kind:debt', color: 'fbca04', description: "A refactor's flavour: a deliberate shortcut, now due" },
   { name: 'runner-fix', color: 'b60205', description: 'Executing this repairs machinery the orchestrator run itself depends on' },
   { name: 'in-progress', color: 'ededed', description: 'A session holds this item (set by the claim protocol)' },
-  { name: QUEUED_LABEL, color: 'bfdadc', description: "In a live orchestrator run's queue, not yet picked up — a plan, not a claim" }
+  { name: QUEUED_LABEL, color: 'bfdadc', description: "In a live orchestrator run's queue, not yet picked up — a plan, not a claim" },
+  { name: IN_REVIEW_LABEL, color: 'fef2c0', description: 'A PR for this item is open — the work lands when it merges' }
 ];
 
 /**
@@ -92,7 +107,7 @@ export const TRACKER_LABELS: readonly TrackerLabel[] = [
  */
 export const KIND_NAMES: readonly string[] = TRACKER_LABELS.filter((l) => l.name.startsWith('kind:')).map((l) => l.name.slice('kind:'.length));
 
-/** The nine names alone — what the bootstrap compares the repo's existing
+/** The ten names alone — what the bootstrap compares the repo's existing
  *  labels against. Case-insensitive on purpose: GitHub label names are
  *  case-preserving but collide case-insensitively, so a repo that already has
  *  `Type:Bug` has the label, and creating it again is a 422. */

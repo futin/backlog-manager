@@ -237,6 +237,46 @@ describe('DispatchButton', () => {
     expect(btn.getAttribute('title')).not.toContain('reviewing');
   });
 
+  /* The in-review rung (spec decision 9): a tracker issue whose PR is open carries the `in-review` label, and Run must not start a second execution of
+     work that is already pushed and waiting on a reviewer. It sits after in-progress and before the run claim — the label is on the item this board is
+     rendering, like the stamp, while a run claim is the volatile fact about another worktree. */
+  it('disables with the in-review reason when a PR is open for the item', () => {
+    render(<DispatchButton item={fakeItem({ source: 'github', inReview: true })} status={READY} onDispatch={() => {}} />);
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('a PR is open for this item'));
+    const describedBy = btn.getAttribute('aria-describedby');
+    expect(document.getElementById(String(describedBy))).toHaveTextContent('a PR is open for this item');
+  });
+
+  it('dispatches nothing when an in-review button is clicked', async () => {
+    const onDispatch = jest.fn();
+    render(<DispatchButton item={fakeItem({ source: 'github', inReview: true })} status={READY} onDispatch={onDispatch} />);
+    await userEvent.click(screen.getByRole('button', { name: 'execute' }));
+    expect(onDispatch).not.toHaveBeenCalled();
+  });
+
+  it("prefers the session's reason over the in-review one when an item carries both", () => {
+    render(<DispatchButton item={fakeItem({ source: 'github', inReview: true, started: STARTED, phase: 'execute' })} status={READY} onDispatch={() => {}} />);
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('title', expect.stringContaining('executing'));
+    expect(btn.getAttribute('title')).not.toContain('a PR is open');
+  });
+
+  it("prefers the in-review reason over a run's when an item carries both", () => {
+    render(
+      <DispatchButton
+        item={fakeItem({ source: 'github', inReview: true })}
+        status={READY}
+        onDispatch={() => {}}
+        runBlock="an orchestrator run is working this item (reviewing)"
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('title', expect.stringContaining('a PR is open for this item'));
+    expect(btn.getAttribute('title')).not.toContain('reviewing');
+  });
+
   /* And the other half: project visibility still outranks it. A reason naming
      a running session would send the reader to look for a session when what
      actually needs fixing is which projects the dashboard can see. */

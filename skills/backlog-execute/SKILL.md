@@ -3,7 +3,8 @@ name: backlog-execute
 description: >
   Do the actual work on a groomed bug or task — debug and fix, or build out a planned task — then archive it once verification proves it worked. Refuses
   anything ungroomed: a task with no real plan, or a bug whose fix is still unknown. Use it to execute task 12, fix bug 7, work the backlog, or do the next
-  thing. Never touches ideas or already-rejected items, and never commits or pushes on its own. Trigger: /backlog-execute
+  thing. Never touches ideas or already-rejected items, and never commits or pushes on its own — unless the project's committed finish mode is pr, where it
+  works in a worktree of its own and ends in a commit, a review, a push and a PR it never merges. Trigger: /backlog-execute
 trigger: /backlog-execute
 ---
 
@@ -61,6 +62,25 @@ that channel** — under the marker, every one of those exits reports to the run
 are the verification-failure path and the never-commits hard limit; they carry the exception themselves, because a session reading one of them is not
 necessarily re-reading this section.
 
+## Finish mode: `in-place` or `pr`
+
+Under an `[orchestrator-run` marker skip this section entirely: the run owns every git step and the config is not read. Otherwise, once, right after the
+trigger and before `show`, from the tree this session started in:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config
+```
+
+- **`"finish":"in-place"`** — today's behaviour, unchanged and unannounced. Everything below applies as written.
+- **`"finish":"pr"`** — say `finish mode: pr → PR into <base>` in one line, ask nothing, and read
+  `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/pr-mode.md` in full before Pick an item. It picks the tree every later command runs in, and it
+  replaces this file's archive and never-commits text where it says so.
+- **Exit `1`** — `backlog/config.json` is invalid. Stop with the message it printed; never fall back to either mode.
+- **The only override is the trigger's own words containing `in place this time`** — then this session is `in-place`, and the one line says so. Generic
+  commit wording elsewhere in a prompt is not an override, and this skill never offers one.
+- **A board prompt ending** ``Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.`` means follow `pr` mode; one
+  ending in the "commit … Do not push." rule is an `in-place` project's, today's behaviour.
+
 ## Pick an item
 
 If the trigger already named an id ("fix bug 7", "execute task 12"), use it. Otherwise find the next thing to work:
@@ -108,7 +128,8 @@ whole item — read the plan or the fix there. `show <id> --json` if you also ne
 **`## Outcome` goes into a temp file and becomes a comment**, on both paths and in the same words either way:
 
 - **Archiving** — write the Outcome to a temp file, `stop <id> --keep-started`, then
-  `move <id> done --outcome /tmp/outcome.md`. The closing comment carries it.
+  `move <id> done --outcome /tmp/outcome.md`. The closing comment carries it. In `pr` mode there is no `move`: `references/pr-mode.md` §5 and §8 hold the
+  claim through review and push, and the PR's merge closes the issue.
 - **Verification failed** — the same text, through `comment <id> --body /tmp/outcome.md`, and **nothing moves**. Same rule as a files project: no proof, no
   archive.
 
@@ -141,6 +162,9 @@ whole execute session spent on it. The section check is what makes the gate tota
   if all that's there is a placeholder like `unknown`. Tell the user: run `/backlog-groom` on `<id>` first.
 - **Bug:** look at `## Fix`. Refuse if its content is still exactly `unknown` — the placeholder `backlog-capture` writes for a bug nobody has diagnosed yet.
   Tell the user: run `/backlog-groom` on `<id>` first.
+- **Either, in a tracker project, in either finish mode:** refuse an item whose `show <id> --json` carries `"inReview":true`, with `a PR is open for this item`
+  — naming the PR when `gh pr list --state open --head execute/<id> --json url` finds it. Its pushed work is waiting on a review; removing the label is the
+  person's `review <id> off`, never this skill's.
 
 `## Cause` isn't part of this gate on its own — but `superpowers:systematic-debugging` re-confirms it live before any change is made anyway (see Dispatch
 below), so an unreliable cause doesn't slip through even though the gate itself doesn't inspect it.
@@ -255,7 +279,7 @@ git diff HEAD
 ```
 
 In a hand session that same tree may hold unrelated in-flight changes — scope both checks to the files this item actually touched, not to everything `git diff`
-prints.
+prints. In `pr` mode it cannot: the tree was cut (or verified clean) for this item, so the whole diff is this item's, as in an orchestrator worktree.
 
 **1. Contract sweep.** List every rule sentence, identifier, number, path, flag, command and default the diff changed or removed. For each, search the
 repository for its _old_ form **outside the diff** — `CLAUDE.md`, `.claude/rules/*.md`, `docs/`, `README*`, compose and env files, `skills/**/*.md`,
@@ -279,7 +303,8 @@ Skip only for a test that pins a pure refactor with no behaviour to revert, and 
 
 ## Archive when verification proves it
 
-Only once verification passed and both checks above have actually been run:
+Only once verification passed and both checks above have actually been run. In `pr` mode a files project archives exactly as below, inside the tree it
+picked, and a tracker project does not archive at all — `references/pr-mode.md` §5 onward takes over from here.
 
 1. Append `## Outcome` to the item's file, after its existing headings — never replacing them. Write the date, a sentence on what actually happened, and **the
    verification command's actual output**, pasted in. Not "tests pass" — the output that shows tests passing. Then one line for each of the two checks above, in
@@ -320,7 +345,8 @@ Stop. The item stays exactly where it is, open — `move` is never called on thi
 the real output showing the failure. That record is what keeps the next attempt — yours or someone else's — from repeating the same dead end. Tell the user what
 failed and let them decide whether to retry, re-groom, or escalate — **unless an `[orchestrator-run` marker holds**, in which case there is no user to tell and
 no decision to wait for: the `## Outcome` and this session's final message are the whole report, and the run reads both and decides retry, skip or park from
-outside. Say what failed there and exit.
+outside. Say what failed there and exit. In `pr` mode nothing is committed, pushed or opened either, and the final message names the worktree path and the
+branch, which are left as they are (`references/pr-mode.md` §4).
 
 **A plan that no longer holds takes this path too, and its `## Outcome`'s first line is exactly `Plan no longer holds: <one line saying what broke>`**,
 followed by the evidence — the commits, the paths, what the plan assumed against what is there now. That line is a contract with `backlog-orchestrate`, which
@@ -340,25 +366,29 @@ whatever time was spent and drops `started` along with it, because there's nothi
 
 ## Hard limits
 
-- **Never commits, never pushes.** Staging is the user's call — a targeted `git add` in a dirty tree can sweep in unrelated in-flight work that has nothing to
-  do with this item. Leave the working tree as it is; tell the user what files changed and let them stage and commit it themselves — or, under an
-  `[orchestrator-run` marker, list them in the final message instead, because the run commits that worktree itself in its next step and no user is reading.
+- **Never commits, never pushes — unless this project's finish mode is `pr`.** In `in-place` mode staging is the user's call — a targeted `git add` in a
+  dirty tree can sweep in unrelated in-flight work that has nothing to do with this item. Leave the working tree as it is; tell the user what files changed
+  and let them stage and commit it themselves — or, under an `[orchestrator-run` marker, list them in the final message instead, because the run commits that
+  worktree itself in its next step and no user is reading. The marker overrides `pr` mode too. In `pr` mode (`references/pr-mode.md`) it commits only in the
+  tree it cut, or verified clean, for this item; pushes only that tree's own branch, never `<base>` and never with force; and never merges.
 - **Never touches `ideas/`, `refactors/` or `out-of-scope/`.** An idea isn't executable by definition, and neither is a refactor — promoting either into a task
   is `backlog-groom`'s job. A rejected item is closed. If `show` resolves the id into any of those three directories, refuse immediately (see Pick an item
   above). Nothing but this rule enforces the idea and refactor halves of it: `start` used to refuse an idea and no longer does, because grooming one is real
   work and `backlog-groom` now marks it in progress the same way this skill does — and `start` never had any notion of a refactor to refuse. The tool will
   happily stamp either one for you, and the refusal gate below inspects only a task's `## Plan` and a bug's `## Fix`, so a refactor that got past this check
   would find no rule to fail. The id has to be checked here, before `start` is ever reached.
-- **Writes only under the repo root `show` resolved** — and, in a tracker project, only to the issue that root's marker names. Every write this skill makes —
+- **Writes only under the repo root `show` resolved** — in `pr` mode that root is the worktree it picked — and, in a tracker project, only to the issue that
+  root's marker names. Every `backlog.mjs` write this skill makes —
   the `start`/`stop` markers, the `## Outcome` append, the `move` to `done/` — lands inside the one tree `backlog.mjs` resolved from this session's own cwd.
   Another checkout of the same repository is another tree: writing into it from here produces changes on nobody's branch, attributable to no commit, in a
   working copy this session was never given. The tracker half is the same rule over a different address space: the API refuses an id naming another
-  repository, so an item id copied from somewhere else fails rather than writing into somebody else's backlog.
+  repository, so an item id copied from somewhere else fails rather than writing into somebody else's backlog. `pr` mode's own writes outside that tree — the
+  new worktree, the common `info/exclude`, a per-session temp directory — are the ones `references/pr-mode.md` instructs, and are not `backlog.mjs`'s.
 - **If verification fails, nothing moves.** Covered above — restated here because it's a hard limit, not a suggestion: no proof, no archive.
 - **Never escalates to the user while an `[orchestrator-run` marker holds.** Covered above, and a hard limit for the same reason the one above it is: an
   unattended run has nobody to answer, and a session that stops to negotiate keeps the whole queue waiting on a decision the run was going to make by itself.
 
 ## Next
 
-`/backlog` shows one fewer open item once this is done. Anything new the work surfaces — a fresh bug, a follow-on idea — is a new `backlog-capture`, not an edit
-to this one.
+`/backlog` shows one fewer open item once this is done — in `pr` mode, once the PR merges. Anything new the work surfaces — a fresh bug, a follow-on
+idea — is a new `backlog-capture`, not an edit to this one.

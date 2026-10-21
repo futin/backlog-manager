@@ -178,8 +178,8 @@ describe('plan', () => {
    * `progressBlock` (`client/src/lib/item-progress.ts`) needs.
    *
    * The block is NOT asserted on the PLAN, which still offers the dispatch:
-   * `plan.blocked` is `dispatchBlock ?? runClaimBlock`, and `progressBlock` is
-   * the client's own second of three per-item blocks. Task-46 built no server
+   * `plan.blocked` is `dispatchBlock ?? inReviewBlock ?? runClaimBlock`, and
+   * `progressBlock` is the client's own second of four per-item blocks. Task-46 built no server
    * refusal for a claimed item at all, to keep tracker and files symmetric;
    * #227 added one to `dispatch` for a TRACKER item alone (the `item claim`
    * describe below), because a tracker claim has a heartbeat the server can
@@ -236,6 +236,33 @@ describe('dispatch', () => {
       .send({ itemPath: bugPath(), action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
       .expect(409);
     expect(res.body.error).toMatch(/orchestrator run/i);
+    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+});
+
+/**
+ * The in-review guard (spec decision 9): an issue labelled `in-review` has a PR open for it, so the plan answers it as `blocked` with the one shared
+ * sentence and `dispatch` refuses it with the same uncoded 409 the run-claim refusal uses. Driven through the real label and the real mapper, because the
+ * flag only exists on a tracker item — a files project has no way to carry it.
+ */
+describe('an item whose PR is in review', () => {
+  beforeEach(async () => {
+    gh.issues.get(31)!.labels.push({ name: 'in-review' });
+    await app.get(TrackerPollerService).tick();
+  });
+
+  it('is blocked in the plan with the in-review reason', async () => {
+    const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(res.body.action).toBe('execute');
+    expect(res.body.blocked).toBe('a PR is open for this item');
+  });
+
+  it('409s dispatch with the in-review reason, and spawns nothing', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
+      .expect(409);
+    expect(res.body).toEqual({ error: 'a PR is open for this item' });
     expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
   });
 });

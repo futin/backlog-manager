@@ -15,14 +15,14 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
 export { answer };
 
 /**
- * items-write.controller.ts — the eight write routes of a tracker project
- * (task-46, spec §6.2; the eighth, `queue`, is the orchestrator:queued spec's §2).
+ * items-write.controller.ts — nine of a tracker project's ten item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
+ * spec's §2), and the tenth, `review` (the execute pr-mode spec's decision 9).
  * The ninth item write, `POST /api/items/abort` (#225), is NOT here: it calls the dashboard, so it lives in
  * `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this file.
  *
  * ## What this file is, and what it deliberately is not
  *
- * Eight thin pass-throughs. Every route does the same four things in the same
+ * Nine thin pass-throughs. Every route does the same four things in the same
  * order and nothing else: rebuild the body field by field, ask
  * `ItemsService.writerFor` whether this project can be written to at all, call
  * one `ItemWriter` method, and turn its `WriteRefusal` into a status. No route
@@ -45,7 +45,7 @@ export { answer };
  * for: a hidden cross-origin form auto-submit needs no CORS preflight, and
  * without the guard any page in the developer's browser could file issues, edit
  * bodies and close items. `test/agents-origin-guard.test.ts`'s route list is
- * where the guarded set lives, and it grew by these eight.
+ * where the guarded set lives, and it grew by every one of these.
  *
  * A JSON POST with NO `Origin` at all still passes, deliberately and by the
  * guard's existing rule — because the CLI is exactly that caller.
@@ -193,7 +193,7 @@ export class ItemsWriteController {
     const finished = claimFinishedOf(raw.finished);
 
     const w = writable(this.items.writerFor(project));
-    // `state` is the ONE field on these eight routes taken outright, and it is
+    // `state` is the ONE field on these nine routes taken outright, and it is
     // safe for the reason the dispatch route's `prompt` is not: no predicate
     // branches on it. It is the `ClaimState` task-47's driver publishes,
     // round-tripped into a comment this app wrote and back out again; its one
@@ -262,13 +262,32 @@ export class ItemsWriteController {
     const w = writable(this.items.writerFor(project));
     return answer(await w.writer.queue(w.project, w.marker, { project, id, queued }));
   }
+
+  /**
+   * The tenth route (the execute pr-mode spec, decision 9): add or remove the `in-review` label that guards an item while its PR is open. Execute in `pr`
+   * mode adds it after a successful push; a person removes it (`backlog.mjs review <id> off`) when the PR closes unmerged.
+   *
+   * `inReview` must be a literal boolean, a 400 otherwise, for `queue`'s reason: coercing `'false'` to truthy would add the guard somebody was trying to
+   * lift, and a stuck guard hides a ready item from every gate.
+   */
+  @Post('review')
+  async review(@Body() body: Record<string, unknown> | undefined): Promise<{ id: string; inReview: boolean }> {
+    const raw = body ?? {};
+    const project = required(raw.project, 'project');
+    const id = required(raw.id, 'id');
+    if (typeof raw.inReview !== 'boolean') throw new HttpException({ error: 'inReview must be a boolean' }, 400);
+    const inReview = raw.inReview;
+
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.review(w.project, w.marker, { project, id, inReview }));
+  }
 }
 
 /**
- * The project gate, in one place for all nine (the second, third and fourth
+ * The project gate, in one place for all ten (the second, third and fourth
  * refusals). Throws rather than returning a union, because every caller does
- * the identical thing with a failure and an eighth copy of that branch is
- * eight chances for one of them to answer 404 where the others answer 400.
+ * the identical thing with a failure and a tenth copy of that branch is
+ * ten chances for one of them to answer 404 where the others answer 400.
  *
  * Exported since #225, so the abort route in `agents/` gates a project exactly as these routes do.
  */
@@ -350,7 +369,7 @@ function commentIdOf(value: unknown): number {
 /**
  * `ItemClaimRequest.run`, or `undefined` when the caller sent none (task-47).
  *
- * Validated field by field, and it is the only nested object on these eight
+ * Validated field by field, and it is the only nested object on these nine
  * routes that is — `heartbeat`'s `state` is taken outright one route over, and
  * the difference between them is the whole rule: **the server BRANCHES on this
  * one.** `runId` decides whether a contesting claim is a takeover or a race

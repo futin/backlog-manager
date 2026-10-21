@@ -315,6 +315,14 @@ export interface BacklogItem {
    */
   queued?: true;
   /**
+   * The `in-review` label, for a TRACKER item only (execute pr-mode spec, decision 9): a PR for this item is open and the work lands when it merges, so
+   * the issue stays open and unclaimed in the meantime. **Unlike `queued`, gates DO read it** — the board's two per-item dispatch ladders, the
+   * orchestrator's queue and execute's refusal all skip such an item, because an open unclaimed issue otherwise looks ready to every machine.
+   *
+   * **Optional, `true` or absent, and never `false`,** by the same rule as `queued` and `runnerFix`: the mapper is the only writer.
+   */
+  inReview?: true;
+  /**
    * Who holds this TRACKER item's claim right now (#225) — the newest claim, when it is unreleased, which is the same claim `started` and `phase` are read
    * from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
    *
@@ -2160,7 +2168,7 @@ export interface OrchestratorArchivePayload {
 
 /* ===========================================================================
  * The write side of a tracker project (task-46, spec §6) — the claim protocol's
- * vocabulary and the nine write routes' request/response shapes.
+ * vocabulary and the ten write routes' request/response shapes.
  *
  * It sits at the END of this file, after `RUN_STALE_MS`, for one mechanical
  * reason worth stating rather than rediscovering: `CLAIM_STALE_MS` is an ALIAS
@@ -2426,7 +2434,7 @@ export const CLAIM_STALE_MS = RUN_STALE_MS;
 
 /**
  * The write routes' request bodies (spec §6.2, the orchestrator:queued spec §2 for
- * the eighth, #225 for `abort`, the ninth). Declared here so the
+ * the eighth, #225 for `abort`, the ninth, the execute pr-mode spec's decision 9 for `review`, the tenth). Declared here so the
  * server's validation and the CLI's expectations are checked against ONE
  * declaration rather than against each other.
  *
@@ -2669,6 +2677,20 @@ export interface ItemCommentRequest extends ItemWriteRequest {
 export interface ItemQueueRequest extends ItemWriteRequest {
   id: string;
   queued: boolean;
+}
+
+/**
+ * `POST /api/items/review` — the tenth write route (the execute pr-mode spec,
+ * decision 9). `true` adds `in-review`, `false` removes it, no third state: the
+ * writer is execute in `pr` mode saying "a PR is open", and the remover is a
+ * person saying "that PR is gone".
+ *
+ * Unlike `queue`'s label this one guards: gates read it, so a failed write
+ * leaves the item looking ready, and the caller is told so.
+ */
+export interface ItemReviewRequest extends ItemWriteRequest {
+  id: string;
+  inReview: boolean;
 }
 
 /** What `claim`, `release` and `heartbeat` answer on success: the comment that

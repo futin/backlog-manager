@@ -10,7 +10,7 @@ registers the project's absolute path in `~/.backlog-manager/registry.json`. Thi
 fixed columns — refactoring, ideas, bugs, tasks. Items that were decided against are not on the board at all: out-of-scope is a record rather than queue work,
 and it lives in Archive.
 
-`/backlog-orchestrate` is the largest of the seven and the only one that touches git. Told to drain a project's groomed queue, it works every ready bug and task
+`/backlog-orchestrate` is the largest of the seven and the only one that merges. Told to drain a project's groomed queue, it works every ready bug and task
 one at a time — each in its own git worktree and its own headless `/backlog-execute` session — then commits that item, has it reviewed and verified, and merges
 it into the run's base branch before the next one starts — `main` unless the run was started with `--base <ref>`, which lets a whole phased feature be drained
 onto a branch with `main` never written. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all. On

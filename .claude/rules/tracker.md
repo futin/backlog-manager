@@ -77,7 +77,7 @@ paths: ["server/src/tracker/**"]
   (bug-55) — conditional on a per-issue ETag whose remembered ids a `304` is reconciled against, a comment younger than `RECONCILE_GRACE_MS` kept even when
   absent, `commentsHwm` never moved by it, a `404` read as an empty list — because the repo-wide `since` read can never see a deletion, and `forgetComment`
   only ever hears of the loser THIS process deleted.
-  Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The nine labels
+  Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The ten labels
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
   `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. **The Jira board caches are the second**
   (`JiraPollerService`, `server/src/jira/poller.service.ts`): in memory, one `JiraBoardCache` per board, lost on restart, replaced whole by a sweep or not at
@@ -87,7 +87,7 @@ paths: ["server/src/tracker/**"]
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.** `TrackerPollerService.syncOffBlock(path)` is
   the ONE server home of the sentence `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` (tracker projects only, `null` otherwise);
   `syncOffReason` (`client/src/lib/tracker.ts`) is the client's copy, and both are pinned to the same literal in a test, never an import. It answers 409
-  `{ error }` from the eight `GithubSource` writes — through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check, before
+  `{ error }` from the nine `GithubSource` writes — through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check, before
   any GitHub request (`create` checks it after `ready()`) — from `AgentsService`'s `dispatch`, `orchestrate` and `resume`, before any spawn, and from `ItemsAbortService.abort` before its dashboard stop; `plan()` puts
   it in `blocked`. `WriteRefusal.refused` is `'sync-off'`. `POST /api/trackers/sync` (`orchestrator/tracker-sync.controller.ts`, guarded) answers 400/404/409
   in that order — 409 only for `off`, while a run file on any registered project of the repo reads `running` or `paused`, or a starting entry exists — then

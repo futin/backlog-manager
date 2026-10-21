@@ -8,6 +8,8 @@ import {
   deriveAction,
   dispatchBlock,
   dispatchGate,
+  IN_REVIEW_REASON,
+  inReviewBlock,
   isAgentAction,
   isItemId,
   isMergeMode,
@@ -15,6 +17,7 @@ import {
   isQuestionMode,
   modesUpTo,
   pickFrom,
+  PR_FINISH_RULE,
   projectDispatchGate,
   queueItemIs,
   resumeGate,
@@ -23,6 +26,8 @@ import {
   watchdogFailing,
   watchdogStoodDown
 } from '../shared/agent';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem, RunStage, StartingRun } from '../shared/types';
@@ -801,6 +806,37 @@ describe('runClaimBlock', () => {
     const live = [...RUN_CLAIMED_STAGES, ...ATTENTION_RUN_STAGES];
     expect([...live, ...EXITED_STAGES].sort()).toEqual([...all].sort());
     expect(live.filter((s) => EXITED_STAGES.includes(s))).toEqual([]);
+  });
+});
+
+/*
+ * The in-review guard (spec decision 9): execute in `pr` mode labels a tracker issue `in-review` after a successful push, and every per-item gate reads
+ * the mapped flag. One sentence, the global-constraints string, shared by the board's button, the server's two ladders and execute's own refusal.
+ */
+describe('inReviewBlock', () => {
+  it('names the open PR for an item carrying the flag', () => {
+    expect(inReviewBlock(fakeItem({ source: 'github', inReview: true }))).toBe('a PR is open for this item');
+  });
+
+  it('is null for an item without the flag', () => {
+    expect(inReviewBlock(fakeItem())).toBeNull();
+    expect(inReviewBlock(fakeItem({ source: 'github' }))).toBeNull();
+  });
+
+  /* `orchestrate.mjs` cannot import this module (a plugin skill's `tools/` is a standalone copy of what was pushed), so its gate carries a hand-kept
+     copy of the sentence. This is what keeps the "one string everywhere" constraint mechanical rather than a promise. */
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const IN_REVIEW_REASON = '${IN_REVIEW_REASON}';`);
+  });
+
+  /* The third copy: execute's refusal gate says the same sentence, in prose a session prints. Same seam, same reason — and the board's pr-mode prompt
+     sentence rides along, because execute's mode section quotes it to say what it means, and a reworded constant would leave that quote naming a sentence
+     no prompt carries any more. */
+  it('is the same sentence backlog-execute refuses with, beside the pr-mode prompt sentence it recognises', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(IN_REVIEW_REASON);
+    expect(skill).toContain(PR_FINISH_RULE);
   });
 });
 

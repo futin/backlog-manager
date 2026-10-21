@@ -19,7 +19,7 @@ import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
 
 /**
- * What `off` refuses (#17, spec §8 with plan amendment 2): the eight `/api/items/*` write routes, dispatch, orchestrate and resume — each a 409 carrying
+ * What `off` refuses (#17, spec §8 with plan amendment 2): the nine `/api/items/*` write routes, dispatch, orchestrate and resume — each a 409 carrying
  * `syncOffBlock`'s sentence verbatim, and each without a single request to GitHub or a spawn on the dashboard.
  *
  * Built the way `tracker-dispatch.test.ts` builds its app: the in-memory GitHub behind a real `GithubClient`, the dashboard on global `fetch`, the cache
@@ -140,7 +140,8 @@ describe('the item write routes', () => {
     ['heartbeat', () => ({ project: trackerPath, id: '#31', commentId: 100, session: 'A' })],
     ['body', () => ({ project: trackerPath, id: '#31', body: 'new text', ifUpdatedAt: '2026-09-02T10:00:00Z' })],
     ['comment', () => ({ project: trackerPath, id: '#31', body: 'hello' })],
-    ['queue', () => ({ project: trackerPath, id: '#31', queued: true })]
+    ['queue', () => ({ project: trackerPath, id: '#31', queued: true })],
+    ['review', () => ({ project: trackerPath, id: '#31', inReview: true })]
   ];
 
   it.each(ROUTES)('%s answers 409 with the sentence and makes no request to GitHub', async (route, body) => {

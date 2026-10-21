@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { claimsByIssue, claimsFor, currentClaim, isLive, liveClaims, newestClaim, renderClaim, winner, type ParsedClaim } from '../../tracker/claim';
 import { GithubClient, isRepo, type GithubComment, type GithubIssue, type GithubResponse } from '../../tracker/github.client';
-import { QUEUED_LABEL } from '../../tracker/labels';
+import { IN_REVIEW_LABEL, QUEUED_LABEL } from '../../tracker/labels';
 import { issueNumberFor, issueUrn, mapIssue, parseUrn } from '../../tracker/map-issue';
 import { TrackerPollerService, bodyHash } from '../../tracker/poller.service';
 import { githubToken } from '../../tracker/token.util';
@@ -21,6 +21,7 @@ import type {
   ItemCreateRequest,
   ItemHeartbeatRequest,
   ItemQueueRequest,
+  ItemReviewRequest,
   ItemReleaseRequest,
   ItemStateRequest,
   Registry,
@@ -914,6 +915,34 @@ export class GithubSource implements ItemSource, ItemWriter {
       const ok = res.status === 200 || (!req.queued && res.status === 404);
       if (!ok) return { ok: false as const, refusal: refusalFor(res) };
       return { ok: true as const, value: { id: `#${number}`, queued: req.queued } };
+    });
+  }
+
+  /**
+   * Add or remove `in-review` — the tenth write route (the execute pr-mode spec, decision 9). `queue`'s twin, and deliberately the same shape.
+   *
+   * On the item's chain, so a label write and a claim's swap can never interleave. No `issueNow` first: the route has no opinion about the issue's
+   * state, and a closed issue is not refused — a person removing a stale guard from one is a cleanup worth doing. An add on an issue that does not exist
+   * is answered by GitHub's own 404 through `refusalFor`.
+   *
+   * A removal's 404 is SUCCESS, for the reason `queue` gives: the caller's contract is "the label is not there". Here the caller is `backlog.mjs review
+   * <id> off`, a person clearing a guard after a PR closed unmerged, and a guard already gone is the state they asked for.
+   */
+  async review(project: RegistryProject, marker: SourceMarker, req: ItemReviewRequest): Promise<WriteOutcome<{ id: string; inReview: boolean }>> {
+    const ready = this.ready(marker);
+    if (!ready.ok) return ready;
+    const { repo, token } = ready.value;
+
+    const number = issueNumberFor(req.id, repo);
+    if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
+
+    return this.writeChain(project, issueUrn(repo, number), async () => {
+      const res = req.inReview
+        ? await this.client.addLabels(repo, number, [IN_REVIEW_LABEL], { token })
+        : await this.client.removeLabel(repo, number, IN_REVIEW_LABEL, { token });
+      const ok = res.status === 200 || (!req.inReview && res.status === 404);
+      if (!ok) return { ok: false as const, refusal: refusalFor(res) };
+      return { ok: true as const, value: { id: `#${number}`, inReview: req.inReview } };
     });
   }
 

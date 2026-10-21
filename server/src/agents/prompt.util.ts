@@ -1,4 +1,5 @@
-import { COMMIT_RULE, oneLine } from '../../../shared/agent';
+import { COMMIT_RULE, PR_FINISH_RULE, oneLine } from '../../../shared/agent';
+import type { FinishMode } from './finish-mode.util';
 import type { AgentAction } from '../../../shared/agent';
 import type { BacklogItem } from '../../../shared/types';
 
@@ -23,16 +24,19 @@ const SKILL: Record<AgentAction, string> = {
   capture: 'backlog-manager:backlog-capture'
 };
 
-export function composePrompt(item: BacklogItem, action: AgentAction): string {
+export function composePrompt(item: BacklogItem, action: AgentAction, finish: FinishMode = 'in-place'): string {
   const head = `Use the ${SKILL[action]} skill on ${item.id} — "${oneLine(item.title)}" — in this repo's backlog.`;
+  // Only an execute in a `pr` project swaps its closing rule: `COMMIT_RULE` ends "Do not push.", the opposite of a pr finish, and it is the most specific
+  // instruction the spawned session gets. Groom and capture write item files and never open a PR, so a `pr` project changes nothing for them.
+  const closing = action === 'execute' && finish === 'pr' ? PR_FINISH_RULE : COMMIT_RULE;
 
-  return [head, instruction(item, action), COMMIT_RULE].join(' ');
+  return [head, instruction(item, action), closing].join(' ');
 }
 
 /**
  * The action- and section-specific middle of the prompt — everything between
  * the "use this skill on this item" head and the commit rule every action
- * shares. Split out so `COMMIT_RULE` is appended in exactly one place: when it
+ * shares (or, for a `pr` execute, the pr rule). Split out so the closing rule is appended in exactly one place: when it
  * lived at the end of each branch's own template, the next branch added was the
  * one that forgot it.
  */

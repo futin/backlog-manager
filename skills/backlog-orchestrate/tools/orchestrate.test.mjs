@@ -4171,7 +4171,8 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
     `the verification-failure path still hands the decision to a user with no exception for ${RUN_MARKER_TOKEN}`
   );
 
-  const bulletStart = text.indexOf('- **Never commits, never pushes.**');
+  // A prefix, not the whole bold label: since execute's `pr` finish mode the label goes on to name its one exception, and the marker clause is what this pins.
+  const bulletStart = text.indexOf('- **Never commits, never pushes');
   assert.ok(bulletStart !== -1, 'the never-commits hard limit is gone');
   const bullet = text.slice(bulletStart, text.indexOf('\n- ', bulletStart + 1));
   assert.ok(bullet.includes(RUN_MARKER_TOKEN), `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`);
@@ -7581,6 +7582,60 @@ test('--ids on a tracker project takes bare numbers only, and names the shape it
   const absent = await withApi(routes, (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '99', '--json'));
   assert.equal(absent.out.status, 1);
   assert.match(absent.out.stderr, /unknown item id: 99/);
+});
+
+// --- the in-review guard (execute pr mode, spec decision 9) -----------------
+//
+// An issue labelled `in-review` has a pushed branch and an open PR, and is open and unclaimed while a reviewer reads it. Without the guard it reads `ready`
+// to every gate and a run would execute it a second time. The gate turns it `ungroomed` with the shared sentence first, the shape a stale-plan mark takes,
+// so no new verdict reaches `RunStage` or anything that reads one.
+
+const IN_REVIEW_REASON = 'a PR is open for this item';
+
+test('plan on a tracker project gates an in-review issue out of the ready queue, with the reason first', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { inReview: true }), apiItem(project, 4)];
+  const bodies = { 3: GROOMED_TASK_BODY, 4: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.deepEqual(
+    rows.filter((r) => r.gate === 'ready').map((r) => r.id),
+    ['4'],
+  );
+  const gated = rows.find((r) => r.id === '3');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], IN_REVIEW_REASON);
+});
+
+test('--ids naming an in-review issue gates it rather than dropping it', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { inReview: true }), apiItem(project, 4)];
+  const bodies = { 3: GROOMED_TASK_BODY, 4: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '3', '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.gate, r.reasons[0]]),
+    [['3', 'ungroomed', IN_REVIEW_REASON]],
+  );
+});
+
+test('an in-review issue that is also ungroomed keeps both reasons, the in-review one first', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { inReview: true })];
+
+  const { out } = await withApi(gateRoutes(items, { 3: UNGROOMED_TASK_BODY }), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const [row] = JSON.parse(out.stdout);
+  assert.equal(row.gate, 'ungroomed');
+  assert.equal(row.reasons[0], IN_REVIEW_REASON);
+  assert.ok(row.reasons.length > 1, 'the groom reason is kept behind it');
 });
 
 // --- G-2a … G-2e: the cache a tracker queue is built from (bug-41) ----------

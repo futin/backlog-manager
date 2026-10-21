@@ -1,6 +1,6 @@
 import { deriveGroomed } from '../items/parse.util';
 import { newestClaim, type ParsedClaim } from './claim';
-import { QUEUED_LABEL } from './labels';
+import { IN_REVIEW_LABEL, QUEUED_LABEL } from './labels';
 import type { GithubIssue } from './github.client';
 import type { BacklogItem, ClaimCounters, RegistryProject, Section } from '../../../shared/types';
 
@@ -146,9 +146,10 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   const kind = kindLabel === undefined ? '' : kindLabel.slice('kind:'.length);
   const runnerFix = names.includes('runner-fix');
   const queued = names.includes(QUEUED_LABEL);
+  const inReview = names.includes(IN_REVIEW_LABEL);
 
   // Every label that is not a type, a kind, the runner-fix marker, the
-  // in-progress flag or the queued label. All five are CONSUMED — they are
+  // in-progress flag, the queued label or the in-review label. All six are CONSUMED — they are
   // structure, and leaving one in `tags` would draw it twice on a card, once as
   // the thing it means and once as a word.
   //
@@ -156,8 +157,9 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   // it, so hiding it would have been hiding a label this build had no other way
   // to show; now the claim protocol sets it and `started`/`phase` below render
   // it as the in-progress bar every other item gets. `orchestrator:queued`
-  // joined in task-52 for the same reason: the card draws it as its own badge.
-  const tags = names.filter((n) => !(n in SECTION_BY_LABEL) && !n.startsWith('kind:') && n !== 'runner-fix' && n !== 'in-progress' && n !== QUEUED_LABEL);
+  // joined in task-52 for the same reason: the card draws it as its own badge. `in-review` joined with the pr-mode spec: gates read the `inReview` flag
+  // below (the disabled Run's reason is the surface — no badge), so a tag would say it twice.
+  const tags = names.filter((n) => !(n in SECTION_BY_LABEL) && !n.startsWith('kind:') && n !== 'runner-fix' && n !== 'in-progress' && n !== QUEUED_LABEL && n !== IN_REVIEW_LABEL);
 
   const closed = issue.state === 'closed';
   const reason = typeof issue.state_reason === 'string' ? issue.state_reason : null;
@@ -247,6 +249,9 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // `MappedIssue` beside it: `runnerFix` rides there because `list`'s
     // bookkeeping reads it, and nothing reads `queued` but the card.
     ...(queued ? { queued: true as const } : {}),
+    // The same spread (pr-mode spec, decision 9) — but unlike `queued`, gates read this one: the dispatch ladders, the orchestrator's queue and execute's
+    // refusal. Still absent, never `false`, so `'inReview' in item` means what it says.
+    ...(inReview ? { inReview: true as const } : {}),
     // #225 — the holding claim, off the same `held` reading `started` and `phase` use, spread-absent for the reason the two above give. Optional keys
     // inside it are spread too, so a claim with no `host` or `run` carries no such key. `dispatched` is not set here: the mapper knows claims, not which
     // sessions this server spawned — `GithubSource.list` adds it.

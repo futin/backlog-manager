@@ -36,7 +36,7 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 [docs/subsystems/invariants.md](docs/subsystems/invariants.md). The doc map is [docs/overview.md](docs/overview.md).
 
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
-  adapters, and — since task-46 — the eight guarded write routes in `items-write.controller.ts`, which with the ninth, `abort`, are the ONLY writes this
+  adapters, and — since task-46 — the nine guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this
   server makes to anybody's items), `agents/` (the
   dashboard calls — #225's item `abort` among them — plus the run watchdog, and since Jira phase 5 `POST /api/agents/dispatch-jira` and `/jira-stop` with the
   60 s reconciler that keeps the Jira live map honest), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
@@ -77,7 +77,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
   [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
-  `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge.
+  `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge, and `backlog-execute` before a `pr`-mode push.
 - `.claude/rules/` — ten path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps each rule's headline, `docs/subsystems/invariants.md` its reasoning. Guarded by
   `test/claude-rules.test.ts`: bullets only, each anchored exactly once, one home per anchor, headlines byte-equal with the ones below.
@@ -116,15 +116,15 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-strips-height-and-the-wells-gap-are-one-token)
 - **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
-  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the nine routes
+  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the ten routes
   below — never a file, on any path — **and a Jira issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`.**
-- **The nine `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-nine-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
+- **The ten `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-ten-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
 - **`orchestrator:queued` is a plan, never a claim: the driver adds it, the claim and the Stop remove it, and no reader treats it as exclusion.**
   Why: [invariants.md](docs/subsystems/invariants.md#orchestratorqueued-is-a-plan-never-a-claim)
-- **`backlog.mjs` in a tracker project — and `jira.mjs` always, save its git-only `worktree` — needs the stack up, and says so with exit `5`.**
+- **`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `backlog.mjs config` and `jira.mjs worktree`.**
   Why: [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
 - **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.**
   Why: [invariants.md](docs/subsystems/invariants.md#import-writes-the-marker-first-and-deletes-the-files-last)
@@ -172,8 +172,8 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **`refactors/` is a peer section, not a facet on ideas** Why: [invariants.md](docs/subsystems/invariants.md#refactors-is-a-peer-section-not-a-facet-on-ideas)
 - **`started:` and `phase:` are the lifecycle keys allowed in frontmatter, and neither is a status**
   Why: [invariants.md](docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status)
-- **`backlog-orchestrate` is the only skill that commits or merges — and, for a TRACKER project only, the only one that pushes.**
-  Why: [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-commits-or-merges)
+- **`backlog-orchestrate` is the only skill that merges; `backlog-execute` commits and pushes its own branch only in `pr` mode.**
+  Why: [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-and-execute-commits-and-pushes-only-in-pr-mode)
 - **On a tracker project the DRIVER owns each item's claim, and the execute session never touches the issue**
   Why: [invariants.md](docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item)
 - **The merge happens in whichever tree holds the base, and the run removes only the tree it made.**

@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles } from './backlog.mjs'
+import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles, parseExecuteConfig } from './backlog.mjs'
 import { IMPORT_BODY_CAP } from './import-lib.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
@@ -3125,6 +3125,78 @@ test('backlog-execute reads the tracker refusal the same two ways backlog-groom 
   }
 })
 
+// --- execute's `pr` finish mode: which tree it commits in, and what it removes --
+//
+// `pr` mode is the first time `backlog-execute` runs `git add -A` and pushes, and both are safe only because of the tree they run in: one that holds this
+// item's work and nothing else. The reference that says which tree that is, and what a refusal before any work may delete, is prose a session follows
+// literally — so the two rules whose loss would be silent are pinned here, beside the other execute prose cases and for their reason (`backlog-execute` has
+// no `tools/` of its own). Read, never imported.
+//
+// (a) Reuse. A rule that dropped "named branch" would let a detached `HEAD` through, with no branch to push; one that dropped the `<base>` refusal would
+// let `git add -A` + commit land on the base itself — the one branch this mode never writes, and the case the orchestrator's `_base-<base>` tree presents.
+// (b) Cleanup. Removing a tree the session did not make, or a branch that already carries commits, destroys somebody's work; the rule's limits are the rule.
+const PR_MODE_MD = fileURLToPath(new URL('../../backlog-execute/references/pr-mode.md', import.meta.url))
+
+// Heading to the next heading of the same or a higher level, whitespace-collapsed for `flat`'s reason.
+const prModeSection = (heading) => {
+  const raw = fs.readFileSync(PR_MODE_MD, 'utf8')
+  const at = raw.indexOf(heading)
+  assert.notEqual(at, -1, `backlog-execute/references/pr-mode.md no longer has a "${heading}" section`)
+  const level = heading.match(/^#+/)[0].length
+  const next = new RegExp(`\\n#{1,${level}} `, 'g')
+  next.lastIndex = at + heading.length
+  const end = next.exec(raw)
+  return raw.slice(at, end ? end.index : raw.length).replace(/\s+/g, ' ')
+}
+
+test('pr mode reuses only a clean linked worktree on a named branch that is not the base', () => {
+  const section = prModeSection('### Reuse the tree you started in')
+  const RULES = [
+    ['linked worktree', 'only a linked worktree is reusable — never the main checkout'],
+    ['named branch', 'the reused tree must have HEAD on a named branch'],
+    ['A detached `HEAD` is never reused', 'a detached HEAD has no branch to push or open a PR from'],
+    ['A tree checked out on `<base>` is never reused', 'committing there would commit to the base itself'],
+    ['`git status --porcelain` prints nothing', 'clean means no uncommitted or untracked change'],
+    ['`git rev-list --count <base>..HEAD` prints `0`', 'no commits of its own beyond the base'],
+    ['git merge --ff-only <base>', 'a reused tree behind the base is fast-forwarded first'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `pr-mode.md lost the reuse rule: ${rule} (${needle})`)
+  }
+})
+
+test('pr mode cleans up after a refusal only what this session made, and never a reused tree', () => {
+  const section = prModeSection('### A refusal before any work leaves nothing behind')
+  const RULES = [
+    ['only the tree and the branch this session made', 'the cleanup is limited to what this session created'],
+    ['only while the branch has no commits beyond `<base>`', 'a branch carrying commits is never deleted'],
+    ['A reused tree is never removed', 'a worktree the session found and reused is not its to remove'],
+    ['the refusal message says so', 'the person is told what was removed'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `pr-mode.md lost the cleanup rule: ${rule} (${needle})`)
+  }
+})
+
+// (c) Temp files. One machine-wide `<tmpdir>/backlog-execute/<id>-…` namespace collides across projects — issue numbers and `task-N` ids repeat — so two
+// concurrent pr-mode sessions in different repos would overwrite each other's Outcome, snapshot, PR body and review report. One `mktemp -d` per session.
+test('pr mode keeps every temp file in one per-session directory', () => {
+  const text = fs.readFileSync(PR_MODE_MD, 'utf8')
+  assert.ok(/mktemp -d "[^"\n]*\/<id>-XXXXXX"/.test(text), 'pr-mode.md no longer makes a per-session temp directory with mktemp -d')
+  assert.ok(text.includes('/backlog-execute"'), 'pr-mode.md no longer roots its per-session temp directories under <tmpdir>/backlog-execute')
+  assert.ok(!/<tmp>\/<id>-/.test(text), 'pr-mode.md names a temp file by id directly under the shared directory again — two projects can collide there')
+})
+
+// (d) The exclude list. The common git dir's `info/exclude` is shared with the person's main checkout and nobody cleans it, so any line this flow adds
+// silently hides that path from `git status` and `git add -A` there too. Only the orchestrator's two lines go in; anything else is deleted, or stops the flow.
+test('pr mode adds only .worktrees/ and node_modules to info/exclude', () => {
+  const section = prModeSection('### Set the new tree up')
+  assert.ok(section.includes('Nothing else goes on that list'), 'pr-mode.md no longer limits info/exclude to its two lines')
+  assert.ok(!/goes onto the same exclude list/.test(fs.readFileSync(PR_MODE_MD, 'utf8')), 'pr-mode.md tells the session to exclude its own scratch files again')
+  const commit = prModeSection('## 6. Commit')
+  assert.ok(commit.includes('cannot be told apart from the work'), 'pr-mode.md no longer stops on an untracked path it cannot attribute')
+})
+
 // --- task-44: the orchestrator hands the reviewer its base -------------------
 //
 // Another two-files-one-contract seam, the same shape as the pair above and
@@ -3174,7 +3246,7 @@ test('backlog-orchestrate hands the reviewer a base and the reviewer diffs again
 // sweep (bug-12 twice here, bug-13 in claude-agents-dashboard, bug-16 in ixray,
 // bug-7 in the dashboard), each one a spent run slot and a second trip for a
 // person. `backlog-groom` is the skill that creates the uncommitted state, the
-// commit is the user's own act — no skill but orchestrate touches git history —
+// commit is the user's own act — no skill commits a groom for them —
 // and `backlog.mjs` has no notion of whether a file is committed, so the whole
 // fix is one sentence said where the state is made.
 //
@@ -4727,6 +4799,58 @@ test('API mode: body sends the caller-s ifUpdatedAt, and a 409 says to read it a
   assert.match(stale.out.stderr, /2026-09-18T11:30:00Z/)
 })
 
+// `review <id> on|off` — the in-review guard's writer (spec decision 9). execute in `pr` mode runs `on` after a successful push; a person runs `off` when a
+// PR closes without merging. The wire shape is the route's: `{ project, id, inReview }`, a real boolean, never the word.
+test('API mode: review on posts inReview true, and off posts false', async () => {
+  const { dir } = trackerFixture()
+  const routes = { '/api/items/review': (body) => ({ status: 201, body: { id: body.id, inReview: body.inReview } }) }
+
+  const on = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'review', '7', 'on'))
+  assert.equal(on.out.status, 0, on.out.stderr)
+  assert.equal(on.requests.length, 1)
+  assert.equal(on.requests[0].method, 'POST')
+  assert.equal(on.requests[0].path, '/api/items/review')
+  assert.deepEqual(on.requests[0].body, { project: dir, id: '#7', inReview: true })
+
+  const off = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'review', '#7', 'off'))
+  assert.equal(off.out.status, 0, off.out.stderr)
+  assert.deepEqual(off.requests[0].body, { project: dir, id: '#7', inReview: false })
+})
+
+test('API mode: review with neither on nor off is exit 1 and makes no request', async () => {
+  const { dir } = trackerFixture()
+  for (const args of [['7', 'maybe'], ['7'], []]) {
+    const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'review', ...args))
+    assert.equal(out.status, 1, JSON.stringify(args))
+    assert.match(out.stderr, /usage: backlog\.mjs review/, JSON.stringify(args))
+    assert.deepEqual(requests, [], JSON.stringify(args))
+  }
+})
+
+test('API mode: review with the stack down is exit 5', async () => {
+  const { dir } = trackerFixture()
+  const out = await runNode(dir, apiEnv(1), 'review', '7', 'on')
+  assert.equal(out.status, 5)
+  assert.match(out.stderr, /pnpm run dev/)
+})
+
+test('API mode: a refused review write is exit 1 with the server-s sentence', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi({ '/api/items/review': { status: 409, body: { error: 'sync is off for futin/x' } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'review', '7', 'on'),
+  )
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /sync is off for futin\/x/)
+})
+
+test('files mode: review is refused as tracker-only', () => {
+  const { dir } = backlogFixture()
+  run(dir, 'init')
+  const out = run(dir, 'review', 'task-1', 'on')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /review is for tracker projects/)
+})
+
 test('files mode: the three tracker-only verbs are each refused with their own reason', async () => {
   const { dir } = backlogFixture()
   run(dir, 'init')
@@ -5410,7 +5534,7 @@ test('import composes each create from the frontmatter the tracker has a field f
   assert.ok(one.body.endsWith('<!-- bm:imported from=task-1 created=2026-01-01 tags=x,y -->\n_Imported from backlog/tasks/open/task-1-one.md_'), one.body.slice(-200))
   assert.equal('runnerFix' in two, false)
   assert.equal(five.section, 'out-of-scope')
-  // The label set is the closed nine the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
+  // The label set is the closed ten the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
   for (const create of creates) assert.equal('labels' in create.body, false)
   const tagsOutsideFooter = one.body.replace(/<!-- bm:imported[^]*$/, '')
   assert.equal(/\bx, y\b/.test(tagsOutsideFooter), false, 'the tags line must not survive anywhere but the footer')
@@ -6065,4 +6189,214 @@ test('API mode: drift reads the body as show does and takes the anchor from its 
   assert.equal(result.anchor, c1)
   assert.equal(result.commits, 1)
   assert.ok(requests.every((q) => q.method === 'GET'), 'drift writes nothing')
+})
+
+// `config` is the per-project execute finish mode: `backlog/config.json`, a committed file, read and set by two local-file verbs that never go through
+// `requireStore`, so a github-marked project answers them with the stack down (the spec's "The config"). The reader is strict on purpose — a malformed file or
+// an unknown `finish` is exit 1 naming the file, never a quiet fall back to either mode — and the setter validates the WHOLE resulting file before it writes,
+// so a refusal leaves the file byte-identical.
+
+const configPath = (dir) => path.join(dir, 'backlog', 'config.json')
+const writeConfig = (dir, text) => {
+  fs.mkdirSync(path.join(dir, 'backlog'), { recursive: true })
+  fs.writeFileSync(configPath(dir), text)
+}
+const effective = (out) => JSON.parse(out.stdout)
+
+test('parseExecuteConfig: no file is in-place with no base of its own', () => {
+  assert.deepEqual(parseExecuteConfig(null), { ok: true, finish: 'in-place', base: null })
+})
+
+test('parseExecuteConfig: finish and base are read, and each is optional', () => {
+  assert.deepEqual(parseExecuteConfig('{"execute":{"finish":"pr"}}'), { ok: true, finish: 'pr', base: null })
+  assert.deepEqual(parseExecuteConfig('{"execute":{"finish":"pr","base":"develop"}}'), { ok: true, finish: 'pr', base: 'develop' })
+  assert.deepEqual(parseExecuteConfig('{}'), { ok: true, finish: 'in-place', base: null })
+  assert.deepEqual(parseExecuteConfig('{"execute":{"base":"develop"}}'), { ok: true, finish: 'in-place', base: 'develop' })
+})
+
+test('parseExecuteConfig: every malformed shape is a refusal that names backlog/config.json', () => {
+  const bad = ['', '{nope', '[]', 'null', '"pr"', '{"execute":null}', '{"execute":[]}', '{"execute":"pr"}', '{"execute":{"finish":"merge"}}', '{"execute":{"finish":null}}',
+    '{"execute":{"base":""}}', '{"execute":{"base":"  "}}', '{"execute":{"base":3}}', '{"execute":{"base":null}}']
+  for (const text of bad) {
+    const r = parseExecuteConfig(text)
+    assert.equal(r.ok, false, text)
+    assert.match(r.message, /backlog\/config\.json/, text)
+  }
+  assert.match(parseExecuteConfig('{"execute":{"finish":"merge"}}').message, /"merge"/)
+})
+
+test('CLI config: no file is in-place into main, and writes nothing', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(effective(out), { execute: { finish: 'in-place', base: 'main' } })
+  assert.equal(fs.existsSync(path.join(dir, 'backlog')), false)
+})
+
+test('CLI config: finish pr is read from the file', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"finish":"pr"}}\n')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(effective(out), { execute: { finish: 'pr', base: 'main' } })
+})
+
+test('CLI config: a base in the file is echoed as is', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"finish":"pr","base":"release/1.x"}}\n')
+  assert.deepEqual(effective(run(dir, 'config')), { execute: { finish: 'pr', base: 'release/1.x' } })
+})
+
+test('CLI config: with no base of its own, the remote default branch is the base', () => {
+  const { dir } = backlogFixture()
+  seedCommit(dir)
+  assert.equal(spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/trunk', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], { encoding: 'utf8' }).status, 0)
+  assert.deepEqual(effective(run(dir, 'config')), { execute: { finish: 'in-place', base: 'trunk' } })
+})
+
+test('CLI config: a configured base wins over the remote default branch', () => {
+  const { dir } = backlogFixture()
+  seedCommit(dir)
+  spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/trunk', 'HEAD'], { encoding: 'utf8' })
+  spawnSync('git', ['-C', dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], { encoding: 'utf8' })
+  writeConfig(dir, '{"execute":{"base":"develop"}}\n')
+  assert.equal(effective(run(dir, 'config')).execute.base, 'develop')
+})
+
+test('CLI config: malformed JSON is exit 1 naming backlog/config.json', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute": ')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+  assert.equal(out.stdout, '')
+})
+
+test('CLI config: an unknown finish is exit 1 naming the value', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"finish":"merge"}}\n')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+  assert.match(out.stderr, /merge/)
+})
+
+test('CLI config: an empty base is exit 1', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"base":""}}\n')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+})
+
+test('CLI config: a github-marked project answers with no API listening', () => {
+  const { dir } = trackerFixture()
+  writeConfig(dir, '{"execute":{"finish":"pr"}}\n')
+  const out = runWithEnv(dir, apiEnv(1), 'config')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(effective(out).execute.finish, 'pr')
+  const set = runWithEnv(dir, apiEnv(1), 'config', 'set', 'execute.finish', 'in-place')
+  assert.equal(set.status, 0, set.stderr)
+  assert.equal(JSON.parse(fs.readFileSync(configPath(dir), 'utf8')).execute.finish, 'in-place')
+})
+
+test('CLI config set: execute.finish pr on no file creates it with that key alone, 2-space JSON and a trailing newline', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(configPath(dir), 'utf8'), '{\n  "execute": {\n    "finish": "pr"\n  }\n}\n')
+  assert.deepEqual(effective(out), { execute: { finish: 'pr', base: 'main' } })
+})
+
+test('CLI config set: an unrelated top-level key and a sibling execute key survive', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"other":{"keep":[1,2]},"execute":{"base":"develop","extra":true}}\n')
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath(dir), 'utf8')), { other: { keep: [1, 2] }, execute: { base: 'develop', extra: true, finish: 'pr' } })
+  assert.deepEqual(effective(out), { execute: { finish: 'pr', base: 'develop' } })
+})
+
+test('CLI config set: execute.base feature/x is written and echoed', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config', 'set', 'execute.base', 'feature/x')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath(dir), 'utf8')), { execute: { base: 'feature/x' } })
+  assert.deepEqual(effective(out), { execute: { finish: 'in-place', base: 'feature/x' } })
+})
+
+test('CLI config set: a refused value leaves the file byte-identical', () => {
+  const { dir } = backlogFixture()
+  const before = '{"execute":{"finish":"pr"}}\n'
+  writeConfig(dir, before)
+  for (const args of [['execute.finish', 'bogus'], ['execute.base', ''], ['execute.base', '  '], ['execute.base', '-x'], ['execute.nope', 'x'], ['execute.finish'],
+    // Prototype keys: an `in` check walks the chain, so these once passed as known keys and wrote `{"execute":{"undefined":"x"}}`.
+    ['hasOwnProperty', 'x'], ['__proto__', 'x'], ['toString', 'x']]) {
+    const out = run(dir, 'config', 'set', ...args)
+    assert.equal(out.status, 1, JSON.stringify(args))
+    assert.equal(out.stdout, '', JSON.stringify(args))
+    assert.equal(fs.readFileSync(configPath(dir), 'utf8'), before, JSON.stringify(args))
+  }
+})
+
+test('CLI config set: refused value with no file creates no file', () => {
+  const { dir } = backlogFixture()
+  assert.equal(run(dir, 'config', 'set', 'execute.finish', 'bogus').status, 1)
+  assert.equal(fs.existsSync(configPath(dir)), false)
+})
+
+test('CLI config set: a file that cannot be read is never replaced', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute": ')
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+  assert.equal(fs.readFileSync(configPath(dir), 'utf8'), '{"execute": ')
+})
+
+test('CLI config set: a write that would leave another key invalid is refused and the file stays', () => {
+  const { dir } = backlogFixture()
+  const before = '{"execute":{"base":""}}\n'
+  writeConfig(dir, before)
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 1)
+  assert.equal(fs.readFileSync(configPath(dir), 'utf8'), before)
+})
+
+test('CLI config set: the commit reminder names the file while it is untracked or modified, and stops once it is committed', () => {
+  const { dir } = backlogFixture()
+  seedCommit(dir)
+  const first = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(first.status, 0, first.stderr)
+  assert.match(first.stderr, /commit/i)
+  assert.match(first.stderr, /backlog\/config\.json/)
+  assert.equal(spawnSync('git', ['-C', dir, 'add', 'backlog/config.json'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', dir, ...GIT_IDENT, 'commit', '-qm', 'cfg'], { encoding: 'utf8' }).status, 0)
+  const again = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.stderr, '', 'unchanged and committed: nothing to remind about')
+  const changed = run(dir, 'config', 'set', 'execute.base', 'develop')
+  assert.match(changed.stderr, /backlog\/config\.json/)
+})
+
+test('CLI config set: where git cannot answer there is no reminder and no error', () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-bad-git-')))
+  fs.mkdirSync(path.join(dir, '.git'))
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stderr, '')
+  assert.equal(effective(out).execute.finish, 'pr')
+})
+
+test('CLI config: no .git above the cwd is exit 2, like every other verb', () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-no-git-')))
+  assert.equal(run(dir, 'config').status, 2)
+})
+
+test('CLI config: an unknown subcommand is a usage error', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config', 'frobnicate')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs config/)
 })

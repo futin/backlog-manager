@@ -80,6 +80,9 @@ The commands and flags that exist only here, one line each:
   the holder is on this one.
 - `comment <id> --body <file>` appends a comment without moving anything.
 - `body <id> --body <file> --if-updated-at <iso>` replaces the item's body, refusing if the body changed since you read it (a claim's own label or comment write does not count). Only `backlog-groom` uses it.
+- `review <id> on|off` sets or clears the issue's `in-review` label — the guard every gate reads as `a PR is open for this item`, so pushed work waiting on a
+  reviewer is never executed twice. `backlog-execute` in `pr` mode runs `on` right after it pushes; run `off` yourself when the PR closes without merging.
+  Refused in a files project, which has no label to carry it.
 
 ## Print it as returned
 
@@ -98,6 +101,25 @@ reworded is a board the next reader can't trust to be complete.
 - **`1`** — the board still printed, but at least one open item's file is malformed (its
   path is named on stderr). Show whatever printed anyway — that's a real, partial board,
   not a failed command.
+
+## Execute's finish mode
+
+`backlog.mjs` also reads and writes `backlog/config.json`, the committed file that tells `backlog-execute` how to finish a piece of work:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config set execute.finish <in-place|pr>
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config set execute.base <branch>
+```
+
+`config` prints the effective config as one JSON line, `{"execute":{"finish":…,"base":…}}`. A missing file or key is `in-place` — execute works in the tree
+it is in and never commits — and a missing `base` is the remote's default branch (`origin/HEAD`), else `main`. `pr` has execute work in its own worktree cut
+from `base`, then commit, get a review, push and open a pull request into `base`. A malformed file, an unknown `finish` or an empty `base` is exit `1` naming
+`backlog/config.json` — never a quiet fall back to either mode.
+
+`config set` checks the value and the whole file as it would be, keeps every key it does not know, writes atomically, prints the effective config and — when
+git says the file differs from what is committed — reminds you to commit it: a teammate's checkout and every worktree see only a committed mode. Both are
+local-file commands in both modes: in a tracker project too they never touch the API and work with the stack down.
 
 ## Connecting a project to GitHub
 
@@ -151,7 +173,7 @@ carries it (untracked or staged), a resume leaves it out of the uncommitted-chan
 marker included — still refuses.
 
 Three things do not survive the move. A body over GitHub's 65,536-character cap is cut at a `## ` heading boundary and gains a line linking the full file at
-HEAD. `tags:` live in the footer only, since the tracker's label set is a closed nine. And the file's git history stays in the repository — the issue is dated
+HEAD. `tags:` live in the footer only, since the tracker's label set is a closed ten. And the file's git history stays in the repository — the issue is dated
 by its `created` frontmatter, not by the commit that filed it.
 
 ## Next

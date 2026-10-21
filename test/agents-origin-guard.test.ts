@@ -97,7 +97,7 @@ describe('the agents POST guard', () => {
   // here, because the guard refuses every case in this loop before a handler
   // runs.
   const bodyFor = (route: string): Record<string, unknown> => {
-    // Every field any of the nine needs, in one object: the routes validate
+    // Every field any of the ten needs, in one object: the routes validate
     // the BODY before they ask which project this is, so a body missing a field
     // would be refused for the wrong reason and the case below would pass on a
     // 400 that says nothing about the project gate.
@@ -114,7 +114,8 @@ describe('the agents POST guard', () => {
         commentId: 100,
         reason: 'stopped',
         ifUpdatedAt: '2026-09-18T10:00:00Z',
-        queued: true
+        queued: true,
+        inReview: true
       };
     }
     const verb = route.slice('/api/agents/'.length);
@@ -130,8 +131,8 @@ describe('the agents POST guard', () => {
   // This array, not a count in CLAUDE.md's prose, is where the guarded set
   // actually lives — the agents routes (`pause` is task-17's, `stop` is
   // bug-39's), the seven item-write routes task-46 added, `queue`, the
-  // eighth (the orchestrator:queued spec, §2), and `abort`, the ninth (#225) —
-  // the one item write that lives in `agents/`, because it calls the dashboard.
+  // eighth (the orchestrator:queued spec, §2), `abort`, the ninth (#225) — the one item write that lives in `agents/`, because it calls the
+  // dashboard — and `review`, the tenth (the execute pr-mode spec, decision 9).
   // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop.
   const GUARDED = [
     '/api/agents/plan',
@@ -151,7 +152,8 @@ describe('the agents POST guard', () => {
     '/api/items/body',
     '/api/items/comment',
     '/api/items/queue',
-    '/api/items/abort'
+    '/api/items/abort',
+    '/api/items/review'
   ];
 
   for (const route of GUARDED) {
@@ -195,9 +197,9 @@ describe('the agents POST guard', () => {
   }
 
   /* The CLI's exact shape: a JSON POST with no `Origin` at all, which the guard
-     allows on purpose (see `origin.guard.ts`). Asserted for each of the nine
+     allows on purpose (see `origin.guard.ts`). Asserted for each of the ten
      write routes rather than only for `plan`, because `backlog.mjs` in API mode
-     is that caller for all nine and a guard tightened to require an origin
+     is that caller for all ten and a guard tightened to require an origin
      would break every skill while adding nothing a browser cannot forge.
 
      Each gets past the GUARD and is then refused by the route's own project

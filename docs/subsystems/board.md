@@ -370,6 +370,11 @@ the mapper fills from an unreleased claim and disables the control with its usua
 "A stale claim reads stale": a stale hand claim lets dispatch through, a stale run-held or board-dispatched one still blocks, and the server re-checks a tracker
 item's claim at dispatch (`itemClaimBlock`) where it never re-checks a files item's stamp.
 
+**An `in-review` issue keeps its control, disabled with `a PR is open for this item`** (execute `pr` mode). `inReviewBlock` (`shared/agent.ts`) reads the
+mapped `inReview` flag after `progressBlock` and before `runClaimBlock`, and the server's `plan`/`dispatch` read the same helper. The label goes on once execute
+has pushed a `pr`-mode branch — the moment its claim is released and the still-open issue would otherwise read ready — and comes off when the PR merges and
+closes the issue, or by `backlog.mjs review <id> off`. A files item never carries it.
+
 **The toolbar's Orchestrate control is drawn for a tracker project too, since task-47 (phase 4a).** Task-46 kept it off with a fifth condition,
 `projectIsFiles` (`lib/tracker.ts`), because a tracker project could not then be orchestrated at all; phase 4a made it orchestratable, so that predicate is
 DELETED — it had exactly one job and its own doc comment said so — and `showOrchestrate` is back to the four conditions it had before phase 3. The server's
@@ -419,8 +424,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 
 ## Invariants
 
-The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the three per-item dispatch blocks
-and which one lets a click through, the dialog escape stack and its seven dialogs, a crashed run rendering as crashed, "queue wait is not work",
+The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the four per-item dispatch blocks
+(the in-review rung, `a PR is open for this item`, the newest) and which one lets a click through, the dialog escape stack and its seven dialogs, a crashed
+run rendering as crashed, "queue wait is not work",
 [Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
 row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that

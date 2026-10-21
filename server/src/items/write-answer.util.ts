@@ -3,8 +3,8 @@ import { HttpException } from '@nestjs/common';
 import type { WriteOutcome, WriteRefusal } from './sources/source';
 
 /*
- * write-answer.util.ts — the ONE mapping from an `ItemWriter` refusal to an HTTP status, shared by the eight write routes in `items-write.controller.ts`,
- * the ninth (`agents/items-abort.service.ts`, through the controller's re-export) and the read route `GET /api/items/claim` (`ItemsService.readClaim`).
+ * write-answer.util.ts — the ONE mapping from an `ItemWriter` refusal to an HTTP status, shared by the nine write routes in `items-write.controller.ts`,
+ * `abort` (`agents/items-abort.service.ts`, through the controller's re-export) and the read route `GET /api/items/claim` (`ItemsService.readClaim`).
  * Its own file rather than a function in the controller because the service needs it, and the controller injects the service.
  */
 
