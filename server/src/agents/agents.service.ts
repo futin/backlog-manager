@@ -31,6 +31,7 @@ import {
   PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
+import { readFinishMode } from './finish-mode.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
@@ -386,7 +387,7 @@ export class AgentsService {
     const { runs, starting } = this.orchestrator.runs();
     return {
       action,
-      prompt: composePrompt(item, action),
+      prompt: composePrompt(item, action, readFinishMode(item.projectPath)),
       project: item.project,
       allowedModes: modesUpTo(status.spawnMaxPermission),
       // auto, not the ceiling: a dispatched session runs unattended, and often

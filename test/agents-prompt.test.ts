@@ -1,6 +1,11 @@
 import { readAgentsConfig } from '../server/src/agents/config.util';
 import { dashboardError, resumeSessionName } from '../server/src/agents/agents.service';
 import { composePrompt, sessionName } from '../server/src/agents/prompt.util';
+import { readFinishMode } from '../server/src/agents/finish-mode.util';
+import { COMMIT_RULE, PR_FINISH_RULE } from '../shared/agent';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { BacklogItem } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -105,8 +110,9 @@ describe('composePrompt', () => {
   });
 
   /*
-   * The commit rule rides on EVERY action, so it is asserted per action rather
-   * than once against `execute`. Each of these writes files — a groom rewrites
+   * The commit rule rides on every action EXCEPT an execute in a `pr` project
+   * (asserted in the finish-mode block below), so it is asserted per action
+   * rather than once against `execute`. Each of these writes files — a groom rewrites
    * an item, a promote creates a task, a capture creates a new item — and a
    * dispatched session that leaves them loose in the working tree has produced
    * nothing that survives on its own.
@@ -305,5 +311,103 @@ describe('dashboardError', () => {
     expect(dashboardError(new Error('/api/configs answered 500'), 'x', 1)).toBe('/api/configs answered 500');
     expect(dashboardError('a bare string', 'x', 1)).toBe('a bare string');
     expect(dashboardError(null, 'x', 1)).toBe('null');
+  });
+});
+
+/*
+ * The board's execute prompt follows the project's committed finish mode. `COMMIT_RULE` ends with "Do not push." — the opposite of what a `pr` finish does —
+ * so a `pr` project's execute gets `PR_FINISH_RULE` instead. Anything the config reader would reject reads as `in-place` here (the spawned skill reads the
+ * same file itself and stops with the error), so every invalid shape below must still end in `COMMIT_RULE`.
+ */
+describe('finish mode', () => {
+  const dirs: string[] = [];
+  /** A fresh project dir per case; `config` undefined means no backlog/config.json at all. */
+  function project(config?: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'bm-finish-'));
+    dirs.push(dir);
+    if (config !== undefined) {
+      mkdirSync(join(dir, 'backlog'), { recursive: true });
+      writeFileSync(join(dir, 'backlog', 'config.json'), config);
+    }
+    return dir;
+  }
+  afterAll(() => {
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  describe('readFinishMode', () => {
+    it.each([
+      ['no file', undefined, 'in-place'],
+      ['in-place', '{"execute":{"finish":"in-place"}}', 'in-place'],
+      ['pr', '{"execute":{"finish":"pr"}}', 'pr'],
+      ['pr with a base', '{"execute":{"finish":"pr","base":"main"}}', 'pr'],
+      ['no execute key', '{}', 'in-place'],
+      ['no finish key', '{"execute":{"base":"main"}}', 'in-place'],
+      ['malformed JSON', '{"execute":', 'in-place'],
+      ['empty file', '', 'in-place'],
+      ['unknown finish', '{"execute":{"finish":"merge"}}', 'in-place'],
+      ['wrong-case finish', '{"execute":{"finish":"PR"}}', 'in-place'],
+      ['non-string finish', '{"execute":{"finish":true}}', 'in-place'],
+      ['non-object execute', '{"execute":"pr"}', 'in-place'],
+      ['null execute', '{"execute":null}', 'in-place'],
+      ['array root', '[{"execute":{"finish":"pr"}}]', 'in-place'],
+      ['null root', 'null', 'in-place']
+    ] as const)('%s reads as %s', (_name, config, want) => {
+      expect(readFinishMode(project(config))).toBe(want);
+    });
+
+    it('never throws: a path that does not exist, and a config that is a directory, read as in-place', () => {
+      expect(readFinishMode(join(tmpdir(), 'bm-finish-does-not-exist'))).toBe('in-place');
+      const dir = project();
+      mkdirSync(join(dir, 'backlog', 'config.json'), { recursive: true });
+      expect(readFinishMode(dir)).toBe('in-place');
+    });
+
+    it('is read per call: a committed change shows on the very next read', () => {
+      const dir = project('{"execute":{"finish":"in-place"}}');
+      expect(readFinishMode(dir)).toBe('in-place');
+      writeFileSync(join(dir, 'backlog', 'config.json'), '{"execute":{"finish":"pr"}}');
+      expect(readFinishMode(dir)).toBe('pr');
+    });
+  });
+
+  describe('composePrompt', () => {
+    const item = (over: Partial<BacklogItem> = {}) => fakeItem({ id: 'task-12', section: 'tasks', groomed: true, ...over });
+    const finish = (config?: string) => readFinishMode(project(config));
+
+    it.each([
+      ['no file', undefined],
+      ['in-place', '{"execute":{"finish":"in-place"}}'],
+      ['malformed JSON', '{"execute":'],
+      ['unknown finish', '{"execute":{"finish":"merge"}}']
+    ] as const)('execute with %s ends with COMMIT_RULE exactly', (_name, config) => {
+      const p = composePrompt(item(), 'execute', finish(config));
+      expect(p.endsWith(COMMIT_RULE)).toBe(true);
+      expect(p).not.toContain(PR_FINISH_RULE);
+    });
+
+    it('execute with the default (no third argument) ends with COMMIT_RULE exactly', () => {
+      expect(composePrompt(item(), 'execute').endsWith(COMMIT_RULE)).toBe(true);
+    });
+
+    it('execute in a pr project ends with PR_FINISH_RULE exactly, and carries no commit-and-do-not-push rule', () => {
+      const p = composePrompt(item(), 'execute', finish('{"execute":{"finish":"pr"}}'));
+      expect(p.endsWith(PR_FINISH_RULE)).toBe(true);
+      expect(p).not.toContain('Do not push');
+      expect(p).not.toContain(COMMIT_RULE);
+      expect(p).toContain('backlog-manager:backlog-execute');
+      expect(p).toContain('task-12');
+    });
+
+    it('PR_FINISH_RULE is the one sentence the spec names, byte for byte', () => {
+      expect(PR_FINISH_RULE).toBe("Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.");
+    });
+
+    it.each(['groom', 'capture'] as const)('%s in a pr project still ends with COMMIT_RULE', (action) => {
+      const it_ = action === 'capture' ? fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null }) : item({ groomed: false });
+      const p = composePrompt(it_, action, finish('{"execute":{"finish":"pr"}}'));
+      expect(p.endsWith(COMMIT_RULE)).toBe(true);
+      expect(p).not.toContain(PR_FINISH_RULE);
+    });
   });
 });

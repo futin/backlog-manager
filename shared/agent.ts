@@ -817,14 +817,26 @@ export function oneLine(text: string): string {
  * not be trimmed. Pushing stays banned: nothing here is reviewed.
  *
  * Known seam, deliberately one-sided: `skills/backlog-execute/SKILL.md` still
- * says "Never commits, never pushes", and CLAUDE.md's invariant still names
- * `backlog-orchestrate` as the only skill that commits. Only this prompt
- * changed — it is the most specific instruction the spawned session receives,
- * and `skills/` is a publishing boundary (an install is a copy of the pushed
- * HEAD, so a skill edit reaches nothing until `pnpm run plugin:sync`). If the
- * two sides are ever reconciled, this sentence is where it starts.
+ * says "Never commits, never pushes" for an in-place finish, and CLAUDE.md's
+ * invariant still names `backlog-orchestrate` as the only skill that commits.
+ * Only this prompt changed — it is the most specific instruction the spawned
+ * session receives, and `skills/` is a publishing boundary (an install is a copy
+ * of the pushed HEAD, so a skill edit reaches nothing until `pnpm run
+ * plugin:sync`). The seam has one exception, and it is `PR_FINISH_RULE` below:
+ * an execute in a project whose `backlog/config.json` says `finish: "pr"` is
+ * told to commit AND push through the skill, so this sentence — which ends "Do
+ * not push." — would contradict it. `composePrompt` therefore appends
+ * `PR_FINISH_RULE` instead, for that one action in that one mode.
  */
 export const COMMIT_RULE =
   'When the job is done, commit the work: stage only the files this session ' +
   'changed, never `git add -A` or `git add .` — the tree may hold unrelated ' +
   "uncommitted work of the user's. Do not push.";
+
+/**
+ * The closing sentence of an `execute` dispatch in a `pr`-mode project, in place of `COMMIT_RULE` (spec "Non-goals", the prompt paragraph). Deliberately says
+ * nothing about staging or pushing itself: the skill's own pr procedure owns every git step (worktree, narrow staging, review, push, PR), and restating any of
+ * it here would be a second, drifting copy of a rule the spawned session reads in full from the skill. This sentence only has to stop `COMMIT_RULE`'s
+ * "Do not push." from being the last, most specific word the session hears.
+ */
+export const PR_FINISH_RULE = "Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.";
