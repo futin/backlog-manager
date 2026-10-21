@@ -17,6 +17,7 @@ import {
   isQuestionMode,
   modesUpTo,
   pickFrom,
+  PR_FINISH_RULE,
   projectDispatchGate,
   queueItemIs,
   resumeGate,
@@ -827,6 +828,15 @@ describe('inReviewBlock', () => {
   it('is the same sentence the orchestrator gate carries by hand', () => {
     const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
     expect(tool).toContain(`const IN_REVIEW_REASON = '${IN_REVIEW_REASON}';`);
+  });
+
+  /* The third copy: execute's refusal gate says the same sentence, in prose a session prints. Same seam, same reason — and the board's pr-mode prompt
+     sentence rides along, because execute's mode section quotes it to say what it means, and a reworded constant would leave that quote naming a sentence
+     no prompt carries any more. */
+  it('is the same sentence backlog-execute refuses with, beside the pr-mode prompt sentence it recognises', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(IN_REVIEW_REASON);
+    expect(skill).toContain(PR_FINISH_RULE);
   });
 });
 

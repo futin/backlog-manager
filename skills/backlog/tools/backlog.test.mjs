@@ -3125,6 +3125,59 @@ test('backlog-execute reads the tracker refusal the same two ways backlog-groom 
   }
 })
 
+// --- execute's `pr` finish mode: which tree it commits in, and what it removes --
+//
+// `pr` mode is the first time `backlog-execute` runs `git add -A` and pushes, and both are safe only because of the tree they run in: one that holds this
+// item's work and nothing else. The reference that says which tree that is, and what a refusal before any work may delete, is prose a session follows
+// literally — so the two rules whose loss would be silent are pinned here, beside the other execute prose cases and for their reason (`backlog-execute` has
+// no `tools/` of its own). Read, never imported.
+//
+// (a) Reuse. A rule that dropped "named branch" would let a detached `HEAD` through, with no branch to push; one that dropped the `<base>` refusal would
+// let `git add -A` + commit land on the base itself — the one branch this mode never writes, and the case the orchestrator's `_base-<base>` tree presents.
+// (b) Cleanup. Removing a tree the session did not make, or a branch that already carries commits, destroys somebody's work; the rule's limits are the rule.
+const PR_MODE_MD = fileURLToPath(new URL('../../backlog-execute/references/pr-mode.md', import.meta.url))
+
+// Heading to the next heading of the same or a higher level, whitespace-collapsed for `flat`'s reason.
+const prModeSection = (heading) => {
+  const raw = fs.readFileSync(PR_MODE_MD, 'utf8')
+  const at = raw.indexOf(heading)
+  assert.notEqual(at, -1, `backlog-execute/references/pr-mode.md no longer has a "${heading}" section`)
+  const level = heading.match(/^#+/)[0].length
+  const next = new RegExp(`\\n#{1,${level}} `, 'g')
+  next.lastIndex = at + heading.length
+  const end = next.exec(raw)
+  return raw.slice(at, end ? end.index : raw.length).replace(/\s+/g, ' ')
+}
+
+test('pr mode reuses only a clean linked worktree on a named branch that is not the base', () => {
+  const section = prModeSection('### Reuse the tree you started in')
+  const RULES = [
+    ['linked worktree', 'only a linked worktree is reusable — never the main checkout'],
+    ['named branch', 'the reused tree must have HEAD on a named branch'],
+    ['A detached `HEAD` is never reused', 'a detached HEAD has no branch to push or open a PR from'],
+    ['A tree checked out on `<base>` is never reused', 'committing there would commit to the base itself'],
+    ['`git status --porcelain` prints nothing', 'clean means no uncommitted or untracked change'],
+    ['`git rev-list --count <base>..HEAD` prints `0`', 'no commits of its own beyond the base'],
+    ['git merge --ff-only <base>', 'a reused tree behind the base is fast-forwarded first'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `pr-mode.md lost the reuse rule: ${rule} (${needle})`)
+  }
+})
+
+test('pr mode cleans up after a refusal only what this session made, and never a reused tree', () => {
+  const section = prModeSection('### A refusal before any work leaves nothing behind')
+  const RULES = [
+    ['only the tree and the branch this session made', 'the cleanup is limited to what this session created'],
+    ['only while the branch has no commits beyond `<base>`', 'a branch carrying commits is never deleted'],
+    ['A reused tree is never removed', 'a worktree the session found and reused is not its to remove'],
+    ['the refusal message says so', 'the person is told what was removed'],
+  ]
+  for (const [needle, rule] of RULES) {
+    assert.ok(section.includes(needle), `pr-mode.md lost the cleanup rule: ${rule} (${needle})`)
+  }
+})
+
 // --- task-44: the orchestrator hands the reviewer its base -------------------
 //
 // Another two-files-one-contract seam, the same shape as the pair above and

@@ -4171,7 +4171,8 @@ test('backlog-execute redirects its user-facing exits when the marker holds', ()
     `the verification-failure path still hands the decision to a user with no exception for ${RUN_MARKER_TOKEN}`
   );
 
-  const bulletStart = text.indexOf('- **Never commits, never pushes.**');
+  // A prefix, not the whole bold label: since execute's `pr` finish mode the label goes on to name its one exception, and the marker clause is what this pins.
+  const bulletStart = text.indexOf('- **Never commits, never pushes');
   assert.ok(bulletStart !== -1, 'the never-commits hard limit is gone');
   const bullet = text.slice(bulletStart, text.indexOf('\n- ', bulletStart + 1));
   assert.ok(bullet.includes(RUN_MARKER_TOKEN), `the never-commits hard limit still tells the user what changed with no exception for ${RUN_MARKER_TOKEN}`);
