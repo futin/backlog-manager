@@ -166,6 +166,17 @@ describe('issue → BacklogItem', () => {
     expect('queued' in (plain?.item ?? {})).toBe(false);
   });
 
+  /* in-review (execute pr-mode, decision 9): the same `true | absent` shape as
+     `queued`, consumed for the same reason — unlike `queued`, gates read it. */
+  it('reads in-review as inReview: true, consumes it, and puts no key on an issue without it', () => {
+    const reviewed = map({ labels: [{ name: 'type:task' }, { name: 'in-review' }] });
+    expect(reviewed?.item.inReview).toBe(true);
+    expect(reviewed?.item.tags).toEqual([]);
+
+    const plain = map({ labels: [{ name: 'type:task' }] });
+    expect('inReview' in (plain?.item ?? {})).toBe(false);
+  });
+
   it('maps an open issue to open', () => {
     expect(map({ state: 'open' })?.item.status).toBe('open');
   });

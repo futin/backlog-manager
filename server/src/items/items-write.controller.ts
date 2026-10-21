@@ -15,8 +15,8 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
 export { answer };
 
 /**
- * items-write.controller.ts — the eight write routes of a tracker project
- * (task-46, spec §6.2; the eighth, `queue`, is the orchestrator:queued spec's §2).
+ * items-write.controller.ts — the nine write routes of a tracker project
+ * (task-46, spec §6.2; the eighth, `queue`, is the orchestrator:queued spec's §2; the tenth overall, `review`, is the execute pr-mode spec's decision 9).
  * The ninth item write, `POST /api/items/abort` (#225), is NOT here: it calls the dashboard, so it lives in
  * `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this file.
  *
@@ -193,7 +193,7 @@ export class ItemsWriteController {
     const finished = claimFinishedOf(raw.finished);
 
     const w = writable(this.items.writerFor(project));
-    // `state` is the ONE field on these eight routes taken outright, and it is
+    // `state` is the ONE field on these nine routes taken outright, and it is
     // safe for the reason the dispatch route's `prompt` is not: no predicate
     // branches on it. It is the `ClaimState` task-47's driver publishes,
     // round-tripped into a comment this app wrote and back out again; its one
@@ -262,13 +262,32 @@ export class ItemsWriteController {
     const w = writable(this.items.writerFor(project));
     return answer(await w.writer.queue(w.project, w.marker, { project, id, queued }));
   }
+
+  /**
+   * The tenth route (the execute pr-mode spec, decision 9): add or remove the `in-review` label that guards an item while its PR is open. Execute in `pr`
+   * mode adds it after a successful push; a person removes it (`backlog.mjs review <id> off`) when the PR closes unmerged.
+   *
+   * `inReview` must be a literal boolean, a 400 otherwise, for `queue`'s reason: coercing `'false'` to truthy would add the guard somebody was trying to
+   * lift, and a stuck guard hides a ready item from every gate.
+   */
+  @Post('review')
+  async review(@Body() body: Record<string, unknown> | undefined): Promise<{ id: string; inReview: boolean }> {
+    const raw = body ?? {};
+    const project = required(raw.project, 'project');
+    const id = required(raw.id, 'id');
+    if (typeof raw.inReview !== 'boolean') throw new HttpException({ error: 'inReview must be a boolean' }, 400);
+    const inReview = raw.inReview;
+
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.review(w.project, w.marker, { project, id, inReview }));
+  }
 }
 
 /**
- * The project gate, in one place for all nine (the second, third and fourth
+ * The project gate, in one place for all ten (the second, third and fourth
  * refusals). Throws rather than returning a union, because every caller does
- * the identical thing with a failure and an eighth copy of that branch is
- * eight chances for one of them to answer 404 where the others answer 400.
+ * the identical thing with a failure and a tenth copy of that branch is
+ * ten chances for one of them to answer 404 where the others answer 400.
  *
  * Exported since #225, so the abort route in `agents/` gates a project exactly as these routes do.
  */

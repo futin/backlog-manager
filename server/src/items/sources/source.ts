@@ -10,6 +10,7 @@ import type {
   ItemHeartbeatRequest,
   ItemQueueRequest,
   ItemReleaseRequest,
+  ItemReviewRequest,
   ItemStateRequest,
   ProjectSummary,
   Registry,
@@ -107,7 +108,7 @@ export interface ItemSource {
    * than a gap: item files are written by the skills and by nothing else
    * (CLAUDE.md, "Item files are read-only to the server and client"). A files
    * project reaching a write route is a 400 saying so, produced by the ONE
-   * check that reads this field — never by nine routes each remembering to
+   * check that reads this field — never by ten routes each remembering to
    * ask.
    */
   readonly writer?: ItemWriter;
@@ -163,8 +164,8 @@ export interface CreatedItem {
 }
 
 /**
- * The write half of one source (task-46, spec §6.2) — eight methods, one per
- * route in `items-write.controller.ts` (the ninth route, `abort`, adds none: it is a
+ * The write half of one source (task-46, spec §6.2) — nine methods, one per
+ * route in `items-write.controller.ts` (the ninth write route, `abort`, lives elsewhere and adds none: it is a
  * `readClaim` and a `release`), each a value-returning call the controller turns into a status.
  *
  * Every method takes the RESOLVED project and marker rather than a project
@@ -223,11 +224,17 @@ export interface ItemWriter {
   queue(project: RegistryProject, marker: SourceMarker, req: ItemQueueRequest): Promise<WriteOutcome<{ id: string; queued: boolean }>>;
 
   /**
+   * Add or remove `in-review` (the tenth write route; the execute pr-mode spec, decision 9). The same shape as `queue` and for the same reasons: it reads
+   * nothing first, a closed issue is not refused, and a removal that 404s is success — the caller's contract is "the label is not there".
+   */
+  review(project: RegistryProject, marker: SourceMarker, req: ItemReviewRequest): Promise<WriteOutcome<{ id: string; inReview: boolean }>>;
+
+  /**
    * The claim that holds one item — the lowest live id, the holder `claim`
    * itself resolves, or the newest claim when nothing is live (bug-58) — or
    * `null` for an item nobody has ever claimed. The one READ on this
    * interface, and the one read route (`GET /api/items/claim`) beside the
-   * eight writes.
+   * nine writes.
    *
    * It is here rather than on `ItemSource` because the claim IS the writer's:
    * the protocol writes it, the protocol's vocabulary describes it, and the
