@@ -107,7 +107,10 @@ decisions are numbered there and cited here as "spec D<n>".
   write route and builds one body with every field they need, `:92-132` — add `review` and `inReview: true`, and fix its route-count comments)
 
 **Interfaces:**
-- Also: "nine" wording for the label list in `server/src/tracker/labels.ts:63,95` and the title at `test/tracker-poll.test.ts:467` becomes ten.
+- Also: "nine" wording for the label list in `server/src/tracker/labels.ts:63,95` and the title at `test/tracker-poll.test.ts:467` becomes ten. The
+  "earlier eight" case (`test/tracker-poll.test.ts:448-463`) goes red with a tenth label: its fixture excludes both `orchestrator:queued` and `in-review`
+  (asserting 8 remain) and expects created exactly `['orchestrator:queued', 'in-review']` in `TRACKER_LABELS` order; add a sibling case for a repo with the
+  other nine that creates exactly `['in-review']`.
 - Produces: `IN_REVIEW_LABEL`; `BacklogItem.inReview?: true`; `POST /api/items/review` → `201 { id, inReview }` (Nest's POST default, as the sibling
   `queue` suite pins, `test/tracker-write.test.ts:515`).
 
@@ -172,8 +175,8 @@ decisions are numbered there and cited here as "spec D<n>".
 
 **Interfaces:**
 - Consumes: `backlog.mjs config` (Task 1), `PR_FINISH_RULE` (Task 2), `backlog.mjs review <id> on|off` and the in-review reason (Task 4), the reviewer's
-  widened inputs (Task 5). `ensureExcludeLines` cannot be called from here (`orchestrate.mjs` refuses every verb but `init` inside a linked worktree), so the
-  exclude step is prose — that is the decision.
+  widened inputs (Task 5). `ensureExcludeLines` cannot be called from here (no `orchestrate.mjs` verb exposes it — its one caller is `init`,
+  `orchestrate.mjs:4332`), so the exclude step is prose — that is the decision.
 
 **Behaviour the text must pin (each is one sentence or one short list in the reference):**
 - Mode read once from the starting tree via `backlog.mjs config`; skipped entirely under `[orchestrator-run`; stated in one line; override only by the exact
