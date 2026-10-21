@@ -16,7 +16,7 @@ Settings, a picker on the Orchestrate sheet seeded from it, carried spawn → pr
 ## Goals
 
 - A typed `/backlog-execute <id> --finish pr [--base <ref>]` runs pr mode; without `--finish` it is `in-place`, today's default, unannounced.
-- Settings gets one row, **Execute finish: in-place | PR**, the default the board's execute sheet is seeded with.
+- Settings gets one row, **Execute finish: In place | PR**, the default the board's execute sheet is seeded with.
 - The board's execute launch sheet gets a finish picker, overridable for that one launch, and — while PR is picked — a base picker.
 - The pick reaches the spawned session through the server-composed prompt, the way `--merge-mode` does.
 - `backlog/config.json`, `backlog.mjs config` and the server's `finish-mode.util.ts` are removed, with their tests, docs and rule text.
@@ -70,10 +70,20 @@ execute only (my call, builder check Q1):
 - `AgentDispatchRequest` gains `finish?: 'in-place' | 'pr'` and `base?: string`. Validated in `AgentsService.dispatch`:
   - `finish` absent → `in-place` (a client written before this field). Present but not one of the two → 400. Present with an action other than `execute` → 400.
   - `base` required with `finish: 'pr'` and refused without it (400 either way); proved against the project's real local branches the way the orchestrate
-    start's `base` is (the long comment near `resolveMergeMode` in `agents.service.ts` explains why a base is *proved* and a mode is merely *recognised*).
-    Unknown → 400.
+    start's `base` is, through `resolveBaseBranch` (`server/src/items/base-branch.util.ts`; `resolveBase`'s doc comment in `agents.service.ts` explains why a
+    base is *proved* and a mode is merely *recognised*). Unknown → 400. **`main` is proved too**: `resolveBaseBranch` answers `'main'` without asking git,
+    which is right for orchestrate (it appends nothing at `main`) but wrong here, where `--base main` is always appended — a `master`-trunk repo must get the
+    400 at click time, not a halt inside the spawned session. How the proof skips that carve-out is the builder's call.
+  - No source gate: pr finish is legal in files and tracker projects alike (as #326 built it), unlike `--merge-mode pr`. Do not copy `resolveMergeMode`'s
+    tracker-only refusal.
+  - **An execute body that contains a `--finish` or `--base` token is a 400** (`the finish mode and base are set by the sheet's pickers — remove --finish and
+    --base from the prompt`). The pickers are the only channel: without this, a typed `--finish pr` under an In place pick would reach the skill beside
+    `COMMIT_RULE` (which carries no token) and push, and a typed `--base develop` beside the clause's `--base main` would leave two bases. Groom and capture
+    bodies are not scanned.
   - The server then sends `req.prompt + ' ' + finishClause(finish, base)`. The clause comes from validated values only; nothing the person typed can change the
-    mode.
+    mode. `PROMPT_MAX` keeps applying to the typed body, before the append; the clause is a bounded literal plus a proved branch name.
+- `AgentsController.dispatch` rebuilds the body field by field (`.claude/rules/dispatch-watchdog.md`), so it must forward `finish` and `base` — unvalidated,
+  as it forwards `model`/`effort`, because the service is where they are checked. Without that forward every launch would read as in-place.
 - **`--base` is always spelled out under PR** (my call, builder check Q3), even when it is `main` — unlike orchestrate, which omits it at `main`. The board
   always knows the base it showed; letting the skill's own fallback (remote default → `main`) pick could open the PR into `develop` while the sheet said
   `main`. The fallback is for a typed trigger only.
@@ -96,7 +106,8 @@ error naming both, rather than picking one.
   `GET /api/agents/branches` and seeded to `'main'`, failing soft to `['main']` exactly as the Orchestrate sheet's does.
 - Under the textarea, a read-only line shows `finishClause(finish, base)` for the current picks, so the person sees exactly what will be appended. Flipping
   either select updates that line only; it never re-fetches the plan or touches what was typed.
-- The dispatch sends `finish` always (even when untouched — the same reason the Orchestrate sheet always sends `mergeMode`) and `base` when PR.
+- The dispatch sends `finish` on every execute launch (even when untouched — the same reason the Orchestrate sheet always sends `mergeMode`) and `base` when
+  PR. A groom or capture launch from the same `LaunchSheet` omits both, since the server 400s `finish` on any other action.
 
 ## What is removed
 
@@ -108,10 +119,14 @@ error naming both, rather than picking one.
 ## Invariants this changes
 
 - CLAUDE.md's "`backlog-orchestrate` is the only skill that merges; `backlog-execute` commits and pushes its own branch only in `pr` mode." — the headline
-  holds; its reasoning in `invariants.md` and the mechanism in `.claude/rules/orchestrator.md` / `skills.md` change "a project's committed config" to "the
-  trigger's `--finish pr`".
-- `invariants.md`'s `config` verb entry (around line 3973) is removed, along with `.claude/rules/skills.md`'s bullet that the verb is local-file in both
-  modes. `test/claude-rules.test.ts` must stay green: one home per anchor, headlines byte-equal.
+  holds; the mechanism in `.claude/rules/orchestrator.md` changes "a project's committed config" to "the trigger's `--finish pr`". In `invariants.md` the
+  sentence at ~466–467 ("The mode is a committed file rather than a prompt switch so a project's set of committers is visible in its own history, and a
+  malformed file stops execute…") argues against this design and is **replaced**, not word-swapped: the mode is a trigger flag, composed server-side from a
+  validated field the way `--merge-mode` is, and an unknown or doubled `--finish` stops execute rather than falling back to either mode.
+- The exit-5 headline — "**`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `backlog.mjs config`
+  and `jira.mjs worktree`.**" — names the verb being deleted. Rewrite it to drop `backlog.mjs config` **in both homes at once** (CLAUDE.md:127 and
+  `.claude/rules/skills.md:19`, which `test/claude-rules.test.ts` holds byte-equal), drop the two `config` sentences inside that bullet (skills.md:23–24,
+  including "routes every command but `config`"), and rewrite `invariants.md` ~3972–3978 under the same anchor (~3942). The exit-5 rule itself stays.
 - The prompt-composition invariant ("The orchestrate and Jira spawn prompts are composed server-side") gains execute's finish flag as a third
   server-composed piece; its reasoning entry should say so.
 
@@ -119,11 +134,19 @@ error naming both, rather than picking one.
 
 - Whether `<base>`'s fallback (remote default → `main`) lives in the skill's prose or in a small `backlog.mjs` helper.
 - Exact copy of the Settings hint and the sheet's labels.
-- The doc sweep: `git grep -n -i "config.json\|execute\.finish\|execute\.base\|parseExecuteConfig\|readFinishMode\|in place this time"` must come back empty
-  outside `docs/superpowers/` (specs and plans are history and stay as written).
-- Tests: for the server, the 400s above (bad `finish`, `finish` on groom, `base` without pr, pr without `base`, unknown base), that an execute plan's prompt
-  carries no closing clause, and that the spawned prompt ends with `finishClause` for each mode whatever the typed text says (including a typed
-  `--finish in-place` under a PR pick); for the client, the seed-from-Settings, the base select appearing only under PR, the read-only clause line tracking
-  both selects, and that `finish` is always sent.
+- The doc sweep: `git grep -n -i "config\.json\|execute\.finish\|execute\.base\|parseExecuteConfig\|readFinishMode\|in place this time\|backlog\.mjs config\|
+  \"finish\":\"pr\"\|PR_FINISH_RULE\|committed config\|config is not read"` must come back empty outside `docs/superpowers/` (specs and plans are history and
+  stay as written) — `tsconfig.json` and git `config` hits excepted. `pr-mode.md`'s intro (the paragraphs before §1, which open "when `backlog.mjs config`
+  printed…" and say "the committed config already answered that") is rewritten along with §1; §2 onward is unchanged.
+- Tests: for the server, the 400s above (bad `finish`, `finish` on groom, `base` without pr, pr without `base`, unknown base, an unproved `main`, an execute
+  body containing `--finish` or `--base`), that an execute plan's prompt carries no closing clause, and that the spawned prompt ends with `finishClause` for
+  each mode; for the client, the seed-from-Settings, the base select appearing only under PR, the read-only clause line tracking both selects, and that
+  `finish` is sent on every execute launch and never on groom or capture.
+- Notes that go stale: `AgentPlan.prompt`'s doc comment (`shared/types.ts`, "The composed default. The sheet may edit it…") and `test/agents-prompt.test.ts`'s
+  per-action closing-rule assertion both describe the closing rule as part of every plan; execute's no longer is.
+- If `<base>`'s fallback becomes a `backlog.mjs` helper, it is a local git read in both modes — no stack, never exit `5` — or the exit-5 headline needs a new
+  exception in place of the one this removes.
+- `pr-mode.md` §1 quotes `finishClause`'s pr sentence exactly as it ships (the skill text and the constant drifted once already, #326 review 2).
+- The execute sheet (body editable, clause read-only below) and the groom/capture sheets (closing rule inside the editable text) look different on purpose.
 - The rule that item dispatch's prompt is "taken outright" (`.claude/rules/dispatch-watchdog.md` lines 16 and 54, reasoning at `invariants.md` ~1456) gains
   its one exception: an execute's finish clause is appended server-side from validated fields.
