@@ -17,6 +17,7 @@ describe('clampSettings', () => {
       staleDays: 14,
       orchestrateDefaultMergeMode: 'branch',
       orchestrateDefaultQuestionMode: 'decide',
+      executeDefaultFinish: 'pr',
       settingsScope: 'shared',
       contentWidth: 'full',
       jiraDefaultAction: 's_0123abcd'
@@ -32,6 +33,7 @@ describe('clampSettings', () => {
       staleDays: 14,
       orchestrateDefaultMergeMode: 'branch',
       orchestrateDefaultQuestionMode: 'decide',
+      executeDefaultFinish: 'pr',
       settingsScope: 'shared',
       contentWidth: 'full',
       jiraDefaultAction: 's_0123abcd'
@@ -48,7 +50,8 @@ describe('clampSettings', () => {
       dispatchDefaultEffort: 7,
       staleDays: 'soon',
       orchestrateDefaultMergeMode: 'rebase',
-      orchestrateDefaultQuestionMode: 'auto'
+      orchestrateDefaultQuestionMode: 'auto',
+      executeDefaultFinish: 'merge'
     });
     expect(s).toEqual(DEFAULT_SETTINGS);
   });
@@ -155,6 +158,26 @@ describe('dispatch defaults', () => {
   it('offers exactly the lists the launch sheet pickers are built from', () => {
     expect(MODELS).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
     expect(EFFORTS).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+});
+
+/**
+ * `executeDefaultFinish` seeds the board's execute launch sheet's Finish select, and is clamped exactly as `orchestrateDefaultMergeMode` below is: a closed
+ * two-member enum (`EXECUTE_FINISHES`), so anything a hand-edited localStorage could hold that is not a member — a mode this feature never had (`'merge'`),
+ * a wrong case, a non-string — reads as the default rather than reaching the select, which would otherwise render a value none of its options carry.
+ */
+describe('executeDefaultFinish', () => {
+  it('defaults to in-place — what every execute did before the picker existed', () => {
+    expect(clampSettings({}).executeDefaultFinish).toBe('in-place');
+    expect(DEFAULT_SETTINGS.executeDefaultFinish).toBe('in-place');
+  });
+
+  it('keeps pr', () => {
+    expect(clampSettings({ executeDefaultFinish: 'pr' }).executeDefaultFinish).toBe('pr');
+  });
+
+  it.each([['merge'], [7], ['PR'], [null]])('clamps %p to in-place', (junk) => {
+    expect(clampSettings({ executeDefaultFinish: junk }).executeDefaultFinish).toBe('in-place');
   });
 });
 

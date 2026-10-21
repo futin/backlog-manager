@@ -3,6 +3,7 @@ import type {
   AgentDispatchResult,
   AgentPlan,
   AgentsStatus,
+  ExecuteFinish,
   ItemAbortResult,
   MergeMode,
   OrchestratorArchivePayload,
@@ -18,6 +19,7 @@ import type {
   WatchdogStatus
 } from '../../../shared/types';
 import { EFFORTS, MODELS } from '../../../shared/agent';
+import { EXECUTE_FINISHES } from '../../../shared/types';
 
 /**
  * agents.ts — the board's seven calls into its own API.
@@ -474,6 +476,14 @@ export async function resumeOrchestrate(project: string): Promise<AgentDispatchR
  */
 export const MODEL_OPTIONS: { value: string; label: string }[] = [{ value: '', label: 'default' }, ...MODELS.map((m) => ({ value: m, label: m }))];
 export const EFFORT_OPTIONS: { value: string; label: string }[] = [{ value: '', label: 'default' }, ...EFFORTS.map((f) => ({ value: f, label: f }))];
+
+/**
+ * The execute Finish select's options — one home because Settings' `Execute finish` row and the board's launch sheet draw the same two choices, and the
+ * row's label has to read as the control it seeds. A record over `ExecuteFinish`, so a third finish added to the union fails to compile here until it has
+ * a label; the option order is `EXECUTE_FINISHES`', in-place first.
+ */
+const EXECUTE_FINISH_LABELS: Record<ExecuteFinish, string> = { 'in-place': 'In place', pr: 'PR' };
+export const EXECUTE_FINISH_OPTIONS: { value: ExecuteFinish; label: string }[] = EXECUTE_FINISHES.map((f) => ({ value: f, label: EXECUTE_FINISH_LABELS[f] }));
 
 /**
  * The model and effort a launch body carries, as spreadable fields: the key is ABSENT for the `default` option rather than present-and-empty, which is the

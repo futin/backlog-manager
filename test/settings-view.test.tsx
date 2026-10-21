@@ -447,6 +447,21 @@ describe('SettingsView', () => {
       expect(stored.dispatchDefaultEffort).toBe('low');
     });
 
+    // The board's execute launch sheet's Finish default: both real options, no blank third state (an absent value reads in-place), and a pick lands under
+    // the one settings key like the model/effort defaults beside it.
+    it('offers an execute finish default, starting on In place, and persists a pick', async () => {
+      renderView();
+      const select = (await screen.findByLabelText('Execute finish')) as HTMLSelectElement;
+      expect(select.value).toBe('in-place');
+      expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+        ['in-place', 'In place'],
+        ['pr', 'PR']
+      ]);
+      expect(screen.getByText('PR mode works in its own worktree, reviews, pushes and opens a PR. It never merges.')).toBeInTheDocument();
+      await userEvent.selectOptions(select, 'pr');
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').executeDefaultFinish).toBe('pr');
+    });
+
     // Task 7: the orchestrator's own default, seeding the sheet Task 8 adds —
     // not the per-item launch sheet the two rows above feed. Asserted the
     // same way as those: the row offers both real options (never a blank
@@ -548,7 +563,7 @@ describe('SettingsView', () => {
         ['s_0123abcd', 'Groom ticket']
       ]);
       expect(select.value).toBe('execute');
-      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Jira default action', 'Dashboard link']);
+      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Jira default action', 'Dashboard link']);
     });
 
     it('persists a pick as the setting string', async () => {
@@ -710,7 +725,7 @@ describe('SettingsView', () => {
       renderView();
       expect(rowNamesIn('Display')).toEqual(['Theme', 'Density', 'Text size', 'Content width', 'Opens on']);
       expect(rowNamesIn('Board')).toEqual(['Archive after']);
-      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Dashboard link']);
+      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Dashboard link']);
     });
 
     it('leaves the Shared Agents card its status row alone', async () => {

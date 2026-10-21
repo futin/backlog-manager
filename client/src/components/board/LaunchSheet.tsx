@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
 
-import { EFFORT_OPTIONS, MODEL_OPTIONS, dispatchAgent, fetchAgentPlan, modelEffortFlags, sessionUrl } from '../../lib/agents';
+import {
+  EFFORT_OPTIONS,
+  EXECUTE_FINISH_OPTIONS,
+  MODEL_OPTIONS,
+  dispatchAgent,
+  fetchAgentPlan,
+  fetchBranches,
+  modelEffortFlags,
+  sessionUrl
+} from '../../lib/agents';
 import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import { useSettings } from '../../hooks/useSettings';
@@ -9,7 +18,8 @@ import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
-import type { BacklogItem, PermissionMode } from '../../../../shared/types';
+import { finishClause } from '../../../../shared/agent';
+import type { BacklogItem, ExecuteFinish, PermissionMode } from '../../../../shared/types';
 
 /**
  * LaunchSheet — the one extra tap between a card and a running Claude.
@@ -23,6 +33,11 @@ import type { BacklogItem, PermissionMode } from '../../../../shared/types';
  * The plan is re-fetched on open rather than passed down from the board's
  * status: the board's read may be minutes old, and the item may have been
  * groomed or archived in a terminal since.
+ *
+ * An `execute` launch also picks how the session finishes — In place or PR, and under PR the base branch — and a read-only line under the prompt shows the
+ * closing clause those picks append. The plan's prompt carries no such clause: the server appends it at dispatch from the `finish`/`base` this sheet sends,
+ * through the same `finishClause` this file previews with, so what is shown is what is sent. Its selects are the 36 px family, `.claude/DESIGN.md` §8.2/§8.6,
+ * like every other select on this sheet.
  */
 export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () => void }) {
   const { settings } = useSettings();
@@ -45,6 +60,11 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const [model, setModel] = useState(settings.dispatchDefaultModel);
   const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
   const [remoteControl, setRemoteControl] = useState(true);
+  // Execute's finish pick, seeded from Settings and from nowhere else, for the same reason as model/effort above. `clampSettings` has already dropped
+  // anything outside EXECUTE_FINISHES, so the select can only be seeded with a value it offers. Only an `execute` plan draws or sends it.
+  const [finish, setFinish] = useState<ExecuteFinish>(settings.executeDefaultFinish);
+  // Never stored, never seeded from a previous launch: a base is a fact about one repository's branches, so every open starts on `'main'`.
+  const [base, setBase] = useState<string>('main');
   const { busy, error, run } = useAction();
   const [sessionId, setSessionId] = useState<string | null>(null);
 
@@ -55,6 +75,21 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
     setPrompt(plan.prompt);
     setMode(plan.defaultMode);
   }, [plan]);
+
+  const isExecute = plan?.action === 'execute';
+  /**
+   * The Base select's options — `GET /api/agents/branches`, the Orchestrate sheet's base picker's read (`OrchestrateSheet.tsx`, task-44), keyed on the
+   * project so it runs once per sheet open and never again as Finish flips. Skipped (`null`) for groom and capture, which draw no picker.
+   *
+   * **A failure here leaves the select holding `'main'` alone and never blocks a launch** — the reasoning is that sheet's, unchanged: the list only offers
+   * alternatives to the default, so losing it costs the alternatives and leaves the default, which is exactly what a launch that asked for nothing else
+   * wants. `'main'` is unioned in rather than assumed present, because a repository whose trunk is named something else has no `main` branch at all and the
+   * select still has to offer the value the launch will send; the server proves the base against real branches and refuses a missing one, which is the
+   * honest answer.
+   */
+  const fetchedBranches = useFetched(isExecute ? () => fetchBranches(item.projectPath) : null, [item.projectPath]);
+  const fetchedList = fetchedBranches.status === 'ok' ? fetchedBranches.value! : [];
+  const branches: string[] = fetchedList.includes('main') ? fetchedList : ['main', ...fetchedList];
 
   // Escape is `FormSheet`'s now (task-40), not this file's: one stack, one
   // window listener, topmost dialog only — see hooks/useDialogEscape.ts. The
@@ -75,7 +110,11 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           permissionMode: mode,
           // Spread, not `model: model || undefined` — see `modelEffortFlags`.
           ...modelEffortFlags(model, effort),
-          remoteControl
+          remoteControl,
+          // Execute always names its finish, even untouched — the server appends the closing clause from it, so an absent key would read as in-place whatever
+          // the sheet showed. `base` rides only under PR: a base picked and then abandoned must not reach an in-place launch, which the server refuses.
+          // Groom and capture send neither key; the server 400s `finish` on any other action.
+          ...(isExecute ? (finish === 'pr' ? { finish, base } : { finish }) : {})
         }),
       { onSuccess: (r) => setSessionId(r.sessionId) }
     );
@@ -146,6 +185,26 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <span className="set-name">Prompt</span>
             <textarea aria-label="Prompt" className="sheet-prompt" rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
           </label>
+
+          {/* The line the server will append to the prompt at launch — `finishClause`, the one function, so this cannot drift from what is sent. Read-only
+              and outside the textarea on purpose: flipping Finish or Base updates only this line, never the plan and never what was typed. */}
+          {isExecute && <div className="sheet-note">{finishClause(finish, base)}</div>}
+
+          {isExecute && (
+            <div className="sheet-row">
+              <label className="sheet-field">
+                <span className="set-name">Finish</span>
+                <Select<ExecuteFinish> label="Finish" value={finish} onChange={setFinish} options={EXECUTE_FINISH_OPTIONS} />
+              </label>
+
+              {finish === 'pr' && (
+                <label className="sheet-field">
+                  <span className="set-name">Base</span>
+                  <Select label="Base" value={base} onChange={setBase} options={branches.map((b) => ({ value: b, label: b }))} />
+                </label>
+              )}
+            </div>
+          )}
 
           {/* One row, three controls: "how should this run" is a single
               decision, and the dashboard's own launch panel groups the same
