@@ -25,7 +25,8 @@ question.
 ## Non-goals
 
 - No third mode (worktree + push branch, no PR). Two modes only: `in-place`, `pr`.
-- No board UI. No new route, no Settings control, no client change. **One server change is required** (review 1, Critical): the board's execute prompt ends
+- No new board UI: no Settings control, no new card badge. Server and shared changes are limited to the tracker `in-review` guard (decision 9: a label, one
+  write route, the gates that read it) and the prompt change below. **The prompt change is required** (review 1, Critical): the board's execute prompt ends
   in `COMMIT_RULE` (`shared/agent.ts:827-830`, appended unconditionally by `composePrompt`, `server/src/agents/prompt.util.ts:29`), which says "commit … stage
   only the files this session changed … Do not push." — the opposite of steps 6 and 8, and the most specific instruction the spawned session gets. My call:
   `composePrompt` reads the project's effective finish mode (a read of the committed config, never a write) and, for an `execute` in a `pr` project, appends a
@@ -108,7 +109,7 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
    orchestrate SKILL.md ~830-835), commit, re-review — bounded (my call: at most two fix rounds, mirroring the orchestrator's loop). Verification red after a
    fix, or still failing review after the cap → do not push; report like a verification failure.
 8. **Push and open the PR**: `git push -u origin <branch>`, then `gh pr create --base <base>` with a body carrying the Outcome summary, the review verdict and,
-   for a tracker project, `Closes #<n>`. No `gh`, not authenticated, or not a GitHub remote → the branch is still pushed and the final message says the PR was
+   for a tracker project, `Closes #<n>` — then, tracker only, add the `in-review` label (decision 9). No `gh`, not authenticated, or not a GitHub remote → the branch is still pushed and the final message says the PR was
    not opened and why. A rejected push stops there and is reported; never force-push.
 9. **Leave the worktree in place** (my call): the PR may need follow-up fixes there. Final message: PR URL, branch, worktree path.
 
@@ -150,6 +151,27 @@ Order relative to today's skill sections (Pick an item → refusal gate → mark
    Outcome to a temp file, `comment <id> --body <file>`, then `stop <id> --keep-started` to release the claim — and **no `move <id> done`**. The PR body
    carries `Closes #<n>`, so GitHub closes the issue on merge. The issue stays open, unclaimed, while the PR is in review. A files project is unaffected: its
    `move … done` lands in the commit and reaches the base with the merge.
+9. **While the PR is in review, a tracker item is guarded by a label** (review 1 finding on concurrent use). Without it, an open, unclaimed issue looks
+   ready to every gate, and an orchestrator run on any machine would execute it again. Files projects get no guard: the item stays in `open/` on `<base>` until
+   the PR merges, and that is a named known limitation (the final message says "merge this PR before draining the backlog").
+
+   The mechanism, modelled on `orchestrator:queued` (`server/src/tracker/labels.ts:61`, the eighth write route `POST /api/items/queue`,
+   `orchestrate.mjs` `trackerQueueLabel` ~2327):
+   - **A tenth tracker label, `in-review`** (my name; description along the lines of "A PR for this item is open — the work lands when it merges"), appended
+     to `TRACKER_LABELS` so the poller's `ensureLabels` creates it, and its name exported as one constant the way `QUEUED_LABEL` is.
+   - **One new guarded write route** that adds or removes it, held to the same guards as the other item write routes (content-type, origin, refused for a
+     `files` project, serialised per item), and a `backlog.mjs` verb that calls it (my name: `review <id> on|off`). The "nine `/api/items/*` write routes"
+     count in `CLAUDE.md`, the rules file and `invariants.md` becomes ten — every site that states the count moves.
+   - **Writer:** execute in `pr` mode adds it right after the PR is opened (after the push, so a failed push never leaves an item guarded with no PR behind it).
+     A failed label write does not undo the PR; the final message says the guard is missing.
+   - **Readers — the gates that must skip it:** the issue→item mapping exposes it as a flag beside `queued` (`server/src/tracker/map-issue.ts:148-249`);
+     the orchestrator's queue excludes such items; execute's refusal gate refuses one ("a PR is open for this item"), naming the PR when it can; and the
+     board's per-item dispatch gate (`shared/agent.ts` `dispatchGate`) disables Run on it with that reason. No new card badge — the disabled Run's reason is the
+     surface (my call).
+   - **Removal:** a merged PR with `Closes #<n>` closes the issue, and a closed issue is outside every gate, so the label needs no removal on the happy path. A
+     PR closed **without** merging, or a non-default-base PR (`Refs #<n>`), leaves the label on an open issue: removing it is the person's
+     (`backlog.mjs review <id> off`), and execute's final message says so whenever it adds the label.
+
    - My call (review 1): `Closes #<n>` only auto-closes when the PR targets the repository's **default** branch. With a configured non-default `base`, the
      PR body says `Refs #<n>` instead, the issue stays open, and the final message says it must be closed by hand once the work reaches the default branch —
      that is when it is actually done.
