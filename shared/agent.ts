@@ -853,11 +853,12 @@ export function oneLine(text: string): string {
  * Only this prompt changed — it is the most specific instruction the spawned
  * session receives, and `skills/` is a publishing boundary (an install is a copy
  * of the pushed HEAD, so a skill edit reaches nothing until `pnpm run
- * plugin:sync`). The seam has one exception, and it is `PR_FINISH_RULE` below:
- * an execute in a project whose `backlog/config.json` says `finish: "pr"` is
- * told to commit AND push through the skill, so this sentence — which ends "Do
- * not push." — would contradict it. `composePrompt` therefore appends
- * `PR_FINISH_RULE` instead, for that one action in that one mode.
+ * plugin:sync`). It is also the in-place half of `finishClause` below: an
+ * execute's closing sentence is appended by `AgentsService.dispatch` from the
+ * sheet's finish pick, and for `in-place` that sentence is this one; a `pr`
+ * pick swaps it for `finishClause`'s pr sentence, since this one ends "Do not
+ * push." — the opposite of a pr finish. Groom and capture keep it in their
+ * editable text.
  */
 export const COMMIT_RULE =
   'When the job is done, commit the work: stage only the files this session ' +
@@ -865,17 +866,11 @@ export const COMMIT_RULE =
   "uncommitted work of the user's. Do not push.";
 
 /**
- * The closing sentence of an `execute` dispatch in a `pr`-mode project, in place of `COMMIT_RULE` (spec "Non-goals", the prompt paragraph). Deliberately says
- * nothing about staging or pushing itself: the skill's own pr procedure owns every git step (worktree, narrow staging, review, push, PR), and restating any of
- * it here would be a second, drifting copy of a rule the spawned session reads in full from the skill. This sentence only has to stop `COMMIT_RULE`'s
- * "Do not push." from being the last, most specific word the session hears.
- */
-export const PR_FINISH_RULE = "Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.";
-
-/**
  * The closing sentence of an `execute` prompt for a chosen finish. Lives here, not in the server, so the launch sheet's preview and the prompt the server sends
  * are one function and cannot drift. `in-place` is `COMMIT_RULE` byte for byte (the base is ignored); `pr` names the flags the skill's own pr procedure parses
- * and says the PR goes into `base` and is never merged — it restates no git step, for the reason `PR_FINISH_RULE` above does not.
+ * and says the PR goes into `base` and is never merged. It restates no git step: the skill's pr procedure owns every one (worktree, narrow staging, review,
+ * push, PR), and a copy here would drift from the rule the spawned session reads in full from the skill. This sentence only has to stop `COMMIT_RULE`'s
+ * "Do not push." from being the last, most specific word the session hears.
  */
 export function finishClause(finish: ExecuteFinish, base: string): string {
   if (finish === 'in-place') return COMMIT_RULE;

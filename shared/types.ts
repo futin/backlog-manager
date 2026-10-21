@@ -882,7 +882,11 @@ export interface AgentsStatus {
  */
 export interface AgentPlan {
   action: AgentAction;
-  /** The composed default. The sheet may edit it before dispatching. */
+  /**
+   * The composed default. The sheet may edit it before dispatching. For an `execute` it is the body WITHOUT its closing clause: the sheet renders
+   * `finishClause(finish, base)` read-only beneath it and dispatch appends it, so an edit cannot contradict the finish picker. Groom and capture keep
+   * their `COMMIT_RULE` inside this text.
+   */
   prompt: string;
   /** Display name of the project the session will run in. */
   project: string;

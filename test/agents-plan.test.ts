@@ -11,6 +11,7 @@ import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, RunStage } from '../shared/types';
+import { COMMIT_RULE } from '../shared/agent';
 
 // Plain JSON, so TS widens its string fields to `string` rather than the
 // literal unions (`RunStage`) the run-claim case below turns on.
@@ -151,6 +152,10 @@ describe('POST /api/agents/plan', () => {
     const res = await post({ itemPath: itemPath('bugs/open', 'bug-2-a-known-bug.md') }).expect(201);
     expect(res.body.action).toBe('execute');
     expect(res.body.prompt).toContain('backlog-manager:backlog-execute');
+    // The finish clause is the sheet's pick, appended by dispatch — the editable body ends on the instruction, so an edit cannot contradict the picker.
+    expect(res.body.prompt.endsWith('Report what you changed.')).toBe(true);
+    expect(res.body.prompt).not.toContain(COMMIT_RULE);
+    expect(res.body.prompt).not.toContain('--finish');
   });
 
   it("plans a capture for an out-of-scope item — Archive's promotion path", async () => {
