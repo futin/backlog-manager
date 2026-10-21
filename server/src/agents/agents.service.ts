@@ -456,10 +456,13 @@ export class AgentsService {
     }
     //   5. An execute body carrying a `--finish` or `--base` token. The pickers are the only channel for either: the clause appended below is built from
     //      validated values alone, so a typed `--finish pr` under an In place pick would reach the skill beside `COMMIT_RULE` (which carries no token)
-    //      and push, and a typed `--base develop` beside the clause's own `--base main` would leave the session two bases. The pattern wants the token
-    //      to start a word and to end at whitespace, `=` or the end, so `--finished` and a `base64` blob are left alone. Groom and capture bodies are
-    //      free text no flag parser reads, and are not refused.
-    if (req.action === 'execute' && /(^|\s)--(finish|base)(?=\s|=|$)/.test(prompt)) {
+    //      and push, and a typed `--base develop` beside the clause's own `--base main` would leave the session two bases. The skill reads the token
+    //      as the pr signal wherever it appears in the trigger, and the board's own clause spells it inside backticks, so a body that quotes, backticks or
+    //      parenthesises the token (`--finish pr`, "--finish pr", (--base x)) steers the session as surely as a bare one. The pattern therefore asks only
+    //      that no word character or hyphen sits on either side of the token — `[\w-]` — rather than requiring whitespace: `--finished`, `--base-ref` and a
+    //      `base64` blob are longer words and are left alone, while `--base=develop` (`=` is neither) is refused. Groom and capture bodies are free text no
+    //      flag parser reads, and are not refused.
+    if (req.action === 'execute' && /(?<![\w-])--(finish|base)(?![\w-])/.test(prompt)) {
       throw new HttpException({ error: "the finish mode and base are set by the sheet's pickers — remove --finish and --base from the prompt" }, 400);
     }
 

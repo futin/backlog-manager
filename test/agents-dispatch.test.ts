@@ -597,7 +597,10 @@ describe('POST /api/agents/dispatch', () => {
       ['a trailing --finish pr', 'Use the skill on bug-2. --finish pr'],
       ['a leading --base=develop', '--base=develop Use the skill on bug-2.'],
       ['--finish alone', '--finish'],
-      ['--base in the middle', 'Use the skill --base develop on bug-2.']
+      ['--base in the middle', 'Use the skill --base develop on bug-2.'],
+      ['a backticked token', 'Use the skill on bug-2, then `--finish pr`.'],
+      ['a double-quoted token', 'Use the skill on bug-2 with "--finish pr".'],
+      ['a parenthesised token', 'Use the skill on bug-2 (--base develop).']
     ])('400s an execute body with %s (rule 5), whatever the pick', async (_name, prompt) => {
       const sent = stubDashboard();
       await exec({ prompt }).expect(400, { error: TOKEN_REFUSAL });
@@ -605,9 +608,9 @@ describe('POST /api/agents/dispatch', () => {
       expect(spawned(sent)).toBeUndefined();
     });
 
-    it('does not refuse words that merely contain the tokens: --finished, base64', async () => {
+    it('does not refuse words that merely contain the tokens: --finished, --base-ref, base64', async () => {
       const sent = stubDashboard();
-      await exec({ prompt: 'Use the skill on bug-2; the --finished flag and a base64 blob stay.' }).expect(201);
+      await exec({ prompt: 'Use the skill on bug-2; the --finished flag, a --base-ref name and a base64 blob stay.' }).expect(201);
       expect(spawned(sent)).toBeDefined();
     });
 
