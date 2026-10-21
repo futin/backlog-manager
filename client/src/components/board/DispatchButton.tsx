@@ -1,4 +1,4 @@
-import { actionLabel, deriveAction, dispatchGate } from '../../../../shared/agent';
+import { actionLabel, deriveAction, dispatchGate, inReviewBlock } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { disabledReason } from '../../lib/gate-view';
 import { progressBlock } from '../../lib/item-progress';
@@ -144,7 +144,7 @@ export function DispatchButton({
 
   /*
    * Order is the invariant, not a preference: ENVIRONMENT-level → per-item
-   * project visibility → in progress → run claim. The first still returns
+   * project visibility → in progress → in review → run claim. The first still returns
    * `null` above (no control at all — see the file comment and `dispatchGate`
    * for why), and the other three disable with a reason. The run claim reads
    * LAST of the four because it is the most volatile and the least
@@ -165,7 +165,9 @@ export function DispatchButton({
      bug-13's re-ask has to know WHICH of the three is speaking. Kept as one
      value because the answer it feeds is the same for both: refuse, ask
      nothing. */
-  const itemBlock = progressBlock(item, Date.now()) ?? runBlock;
+  /* The in-review rung (spec decision 9) sits between them: a tracker issue whose PR is open carries the flag on the item this board renders, so it
+     outranks the volatile run claim, while a live session's stamp still names the more immediate fact. */
+  const itemBlock = progressBlock(item, Date.now()) ?? inReviewBlock(item) ?? runBlock;
 
   return (
     <>

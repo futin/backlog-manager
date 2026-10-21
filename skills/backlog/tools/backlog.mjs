@@ -2182,7 +2182,8 @@ tracker projects only (backlog/source.json names github):
   heartbeat   say this session still holds an item
   abort       release a live claim this machine's own dead session left behind
   comment     append a comment to an item
-  body        replace an item's body (groom's only write)`
+  body        replace an item's body (groom's only write)
+  review      mark an item as having an open PR (on), or clear it (off)`
 
 // `config` — the per-project finish mode of `backlog-execute`, kept in `backlog/config.json`: `{ "execute": { "finish": "in-place" | "pr", "base"?: string } }`.
 // A committed file in the project, so a team shares it and each repo can differ; `source.json` is deliberately not reused, it is the tracker marker with its own
@@ -2192,6 +2193,8 @@ tracker projects only (backlog/source.json names github):
 const CONFIG_FILE = 'config.json'
 const CONFIG_REL = `backlog/${CONFIG_FILE}`
 export const EXECUTE_FINISH_MODES = ['in-place', 'pr']
+const REVIEW_USAGE = `usage: backlog.mjs review <id> on|off`
+
 const CONFIG_USAGE = `usage: backlog.mjs config
        backlog.mjs config set execute.finish <in-place|pr>
        backlog.mjs config set execute.base <branch>`
@@ -3825,6 +3828,41 @@ export async function main(argv) {
 
   // Local-file in both modes — see `runConfig` for why it deliberately skips `requireStore`.
   if (cmd === 'config') return runConfig(argv.slice(1))
+
+  // `review <id> on|off` — the in-review guard's writer (execute `pr` mode, spec decision 9). `on` adds the issue's `in-review` label, which every gate
+  // reads as "a PR is open for this item": execute runs it right after a successful push, so pushed work waiting on a reviewer is never executed twice.
+  // `off` is the person's way out when a PR closes WITHOUT merging, or targets a non-default base, and leaves the label on an open issue.
+  //
+  // Tracker-only, unlike `config`: the guard is a label, and a files project has nothing to carry it (its PR guard is a named known limitation). The
+  // usage check runs before `requireStore`, so a malformed call makes no request on any path; after it, the same exit codes every tracker verb has —
+  // `5` with the stack down, `1` with the server's own sentence for a refusal.
+  if (cmd === 'review') {
+    const [, id, state] = argv
+    if (!id || (state !== 'on' && state !== 'off') || argv.length !== 3) {
+      console.error(REVIEW_USAGE)
+      return 1
+    }
+
+    const r = requireStore()
+    if (!r.ok) return r.code
+    if (r.mode.kind !== 'api') {
+      console.error('review is for tracker projects: a files project has no label to carry it, and its item stays open until the PR merges')
+      return 1
+    }
+
+    try {
+      const project = registryRoot(r.resolved.root)
+      const wanted = trackerId(id, r.mode.repo)
+      const inReview = state === 'on'
+      await apiPost('review', { project, id: wanted, inReview })
+      console.log(`gh:${r.mode.repo}${wanted} ${inReview ? 'in review' : 'not in review'}`)
+      return 0
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
+  }
 
   // The registry's one removal path, and the only command in this file that
   // takes a project path instead of deriving one. That is deliberate: every

@@ -241,6 +241,33 @@ describe('dispatch', () => {
 });
 
 /**
+ * The in-review guard (spec decision 9): an issue labelled `in-review` has a PR open for it, so the plan answers it as `blocked` with the one shared
+ * sentence and `dispatch` refuses it with the same uncoded 409 the run-claim refusal uses. Driven through the real label and the real mapper, because the
+ * flag only exists on a tracker item — a files project has no way to carry it.
+ */
+describe('an item whose PR is in review', () => {
+  beforeEach(async () => {
+    gh.issues.get(31)!.labels.push({ name: 'in-review' });
+    await app.get(TrackerPollerService).tick();
+  });
+
+  it('is blocked in the plan with the in-review reason', async () => {
+    const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(res.body.action).toBe('execute');
+    expect(res.body.blocked).toBe('a PR is open for this item');
+  });
+
+  it('409s dispatch with the in-review reason, and spawns nothing', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
+      .expect(409);
+    expect(res.body).toEqual({ error: 'a PR is open for this item' });
+    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+});
+
+/**
  * #227 — the item-claim block, re-checked by `dispatch` for a tracker item the way `runClaimBlock` is. A live claim, a run's claim and a claim held by a
  * session the board itself dispatched all refuse; a STALE hand claim proceeds — the spawned session's `start` retires it — unless this machine can show
  * the holder is still running.

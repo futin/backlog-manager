@@ -466,6 +466,27 @@ export function runClaimBlock(item: BacklogItem, runs: OrchestratorRunsPayload['
 }
 
 /**
+ * The in-review guard's one sentence (spec decision 9), and the global constraint that it is ONE string everywhere: the board's Run button, the server's
+ * plan/dispatch ladder, the orchestrator's gate reason and execute's own refusal. `orchestrate.mjs` and the execute skill carry hand-kept copies — a plugin
+ * skill's `tools/` is a standalone copy of what was pushed and cannot import this file — so a change here is a change in those copies too.
+ */
+export const IN_REVIEW_REASON = 'a PR is open for this item';
+
+/**
+ * Why this item cannot be dispatched because a PR for it is open, or null. A tracker issue carries `inReview` while its `in-review` label is on: execute in
+ * `pr` mode adds the label after a successful push, and the issue then sits open and UNCLAIMED until the PR merges and `Closes #<n>` shuts it. Without this
+ * rung that open, unclaimed issue reads ready to every gate, and a click would start a second execution of work already waiting on a reviewer.
+ *
+ * Per-item, beside `runClaimBlock` and read by both ladders — the client's `DispatchButton` (after the in-progress block, before the run claim: the label is
+ * on the item this board renders, while a run claim is the volatile fact about another worktree) and the server's `plan`/`dispatch` (after `dispatchBlock`,
+ * before the run claim, for the same reason). `dispatchGate`/`dispatchBlock` stay project-level and never learn about it. A files item never carries the
+ * flag — its PR guard is a named known limitation — so this reads the flag alone and does not re-check the source.
+ */
+export function inReviewBlock(item: BacklogItem): string | null {
+  return item.inReview === true ? IN_REVIEW_REASON : null;
+}
+
+/**
  * The queue entry a FRESH run in this item's project holds this item at, when
  * that stage is one of `stages` — or null.
  *

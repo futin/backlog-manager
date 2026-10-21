@@ -4727,6 +4727,58 @@ test('API mode: body sends the caller-s ifUpdatedAt, and a 409 says to read it a
   assert.match(stale.out.stderr, /2026-09-18T11:30:00Z/)
 })
 
+// `review <id> on|off` — the in-review guard's writer (spec decision 9). execute in `pr` mode runs `on` after a successful push; a person runs `off` when a
+// PR closes without merging. The wire shape is the route's: `{ project, id, inReview }`, a real boolean, never the word.
+test('API mode: review on posts inReview true, and off posts false', async () => {
+  const { dir } = trackerFixture()
+  const routes = { '/api/items/review': (body) => ({ status: 201, body: { id: body.id, inReview: body.inReview } }) }
+
+  const on = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'review', '7', 'on'))
+  assert.equal(on.out.status, 0, on.out.stderr)
+  assert.equal(on.requests.length, 1)
+  assert.equal(on.requests[0].method, 'POST')
+  assert.equal(on.requests[0].path, '/api/items/review')
+  assert.deepEqual(on.requests[0].body, { project: dir, id: '#7', inReview: true })
+
+  const off = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'review', '#7', 'off'))
+  assert.equal(off.out.status, 0, off.out.stderr)
+  assert.deepEqual(off.requests[0].body, { project: dir, id: '#7', inReview: false })
+})
+
+test('API mode: review with neither on nor off is exit 1 and makes no request', async () => {
+  const { dir } = trackerFixture()
+  for (const args of [['7', 'maybe'], ['7'], []]) {
+    const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'review', ...args))
+    assert.equal(out.status, 1, JSON.stringify(args))
+    assert.match(out.stderr, /usage: backlog\.mjs review/, JSON.stringify(args))
+    assert.deepEqual(requests, [], JSON.stringify(args))
+  }
+})
+
+test('API mode: review with the stack down is exit 5', async () => {
+  const { dir } = trackerFixture()
+  const out = await runNode(dir, apiEnv(1), 'review', '7', 'on')
+  assert.equal(out.status, 5)
+  assert.match(out.stderr, /pnpm run dev/)
+})
+
+test('API mode: a refused review write is exit 1 with the server-s sentence', async () => {
+  const { dir } = trackerFixture()
+  const { out } = await withApi({ '/api/items/review': { status: 409, body: { error: 'sync is off for futin/x' } } }, async (port) =>
+    await runNode(dir, apiEnv(port), 'review', '7', 'on'),
+  )
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /sync is off for futin\/x/)
+})
+
+test('files mode: review is refused as tracker-only', () => {
+  const { dir } = backlogFixture()
+  run(dir, 'init')
+  const out = run(dir, 'review', 'task-1', 'on')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /review is for tracker projects/)
+})
+
 test('files mode: the three tracker-only verbs are each refused with their own reason', async () => {
   const { dir } = backlogFixture()
   run(dir, 'init')
