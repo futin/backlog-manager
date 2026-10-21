@@ -59,8 +59,8 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`items/`** — resolves which source owns each registered project's items (its committed `backlog/source.json`, read per request; absent means the files on
   disk), lists them through that source's adapter — `files` or, since task-45, `github` — parses frontmatter, derives what the board needs, and serves item
   bodies through a registry-built allowlist so a file outside every registered `backlog/` cannot be read; a `gh:<owner>/<repo>#<n>` URN goes to the tracker
-  adapter instead, gated on the registry the same way. Since task-46 it also holds the app's ONLY writes to anybody's items — nine guarded POST routes (the
-  ninth, `abort`, served from `agents/` because it calls the dashboard) that a tracker project's items go through, refused outright for a `files` project,
+  adapter instead, gated on the registry the same way. Since task-46 it also holds the app's ONLY writes to anybody's items — ten guarded POST routes (one,
+  `abort`, served from `agents/` because it calls the dashboard) that a tracker project's items go through, refused outright for a `files` project,
   whose credential never leaves the server. Two git-backed reads live here: the last
   commit touching an item file (memoised against the files git rewrites) and which items differ from the run's base, `main` by default (memoised nowhere — the edit it reports moves
   neither of those files).
@@ -73,7 +73,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   this machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
   while some run file says `running`.
 - **`tracker/`** — the second of three outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
-  the in-memory issue cache the `github` adapter answers from (one of the two caches in this server whose age is rendered, as `polledAt`), the nine-label
+  the in-memory issue cache the `github` adapter answers from (one of the two caches in this server whose age is rendered, as `polledAt`), the ten-label
   bootstrap, the claim protocol's pure half (`claim.ts` — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for
   Settings. The token is read per call from the environment and reaches no payload.
 - **`jira/`** — the third outbound-calling module, and only while `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are all set: a Jira Cloud client on
@@ -103,11 +103,12 @@ rail ends in a version chip that opens a What's new drawer of every release, rea
 
 Seven skills under `skills/`, four CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
 retro home's only writer and the one of the three writers nothing else reads at runtime; `jira.mjs`, API-only, which writes no file and reaches Jira through
-`/api/jira`), and one agent under `agents/` that the orchestrator dispatches to review an item's branch before it merges. `backlog-orchestrate` is the only
-skill that touches git history at all — it works one item per worktree and merges each into the run's base branch (`main` unless the run was given `--base`), or
-leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and opens one pull request
-into the base, and for a tracker project it is also the only one that pushes — while execute does the work and groom writes the plans, neither of them
-committing anything.
+`/api/jira`), and one agent under `agents/` that the orchestrator dispatches to review an item's branch before it merges (and execute, before a `pr`-mode
+push). `backlog-orchestrate` is the only skill that merges — it works one item per worktree and merges each into the run's base branch (`main` unless the run
+was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and
+opens one pull request into the base, and for a tracker project it pushes that base — while execute does the work and groom writes the plans. Groom never
+commits; execute commits and pushes only in a project whose committed `backlog/config.json` says `execute.finish: pr`, and then only its own branch in its own
+worktree, ending in a pull request rather than a merge.
 
 An install is a copy of the pushed `HEAD`, never the working tree; see [workflows/publishing.md](workflows/publishing.md).
 

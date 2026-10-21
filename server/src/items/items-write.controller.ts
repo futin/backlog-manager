@@ -15,14 +15,14 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
 export { answer };
 
 /**
- * items-write.controller.ts — the nine write routes of a tracker project
- * (task-46, spec §6.2; the eighth, `queue`, is the orchestrator:queued spec's §2; the tenth overall, `review`, is the execute pr-mode spec's decision 9).
+ * items-write.controller.ts — nine of a tracker project's ten item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
+ * spec's §2), and the tenth, `review` (the execute pr-mode spec's decision 9).
  * The ninth item write, `POST /api/items/abort` (#225), is NOT here: it calls the dashboard, so it lives in
  * `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this file.
  *
  * ## What this file is, and what it deliberately is not
  *
- * Eight thin pass-throughs. Every route does the same four things in the same
+ * Nine thin pass-throughs. Every route does the same four things in the same
  * order and nothing else: rebuild the body field by field, ask
  * `ItemsService.writerFor` whether this project can be written to at all, call
  * one `ItemWriter` method, and turn its `WriteRefusal` into a status. No route
@@ -45,7 +45,7 @@ export { answer };
  * for: a hidden cross-origin form auto-submit needs no CORS preflight, and
  * without the guard any page in the developer's browser could file issues, edit
  * bodies and close items. `test/agents-origin-guard.test.ts`'s route list is
- * where the guarded set lives, and it grew by these eight.
+ * where the guarded set lives, and it grew by every one of these.
  *
  * A JSON POST with NO `Origin` at all still passes, deliberately and by the
  * guard's existing rule — because the CLI is exactly that caller.

@@ -446,9 +446,10 @@ describe('the label bootstrap', () => {
     p.disarm();
   });
 
-  /* A repo bootstrapped before orchestrator:queued existed carries the other
-     eight; its next sync must create exactly the one it lacks, and by name —
-     a count alone would pass with the wrong label created. */
+  /* A repo bootstrapped before orchestrator:queued and in-review existed
+     carries the other eight; its next sync must create exactly the two it
+     lacks, and by name — a count alone would pass with the wrong labels
+     created. */
   it('creates exactly orchestrator:queued and in-review for a repo that has the earlier eight', async () => {
     const eight = TRACKER_LABELS.filter((l) => l.name !== 'orchestrator:queued' && l.name !== 'in-review').map((l) => ({ name: l.name }));
     expect(eight).toHaveLength(8);

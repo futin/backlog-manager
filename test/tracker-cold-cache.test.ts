@@ -314,7 +314,7 @@ describe('a claim made before this process started', () => {
 });
 
 /**
- * The read route's refusals carry the SAME statuses the nine write routes give (bug #270): `readClaim` used to collapse every refusal but `not-found` into
+ * The read route's refusals carry the SAME statuses the ten write routes give (bug #270): `readClaim` used to collapse every refusal but `not-found` into
  * a 502, so `backlog.mjs stop` was told "GitHub failed" for a token this machine is missing (a 503 — fix the environment) and for a rate limit (a 429 with
  * the reset time — wait). Both cases take the fresh-read path: no sweep, so the cache holds nothing and the route has to ask GitHub, or find it cannot.
  */

@@ -15,7 +15,8 @@ Groom gives one open item a verdict: **promote** it, **plan its fix** in place, 
 it never does the actual work — that's `backlog-execute`. Every verdict below ends with a file that's either fully rewritten or left fully alone; there's no
 half-done state this skill leaves behind on purpose.
 
-It also never commits — no skill but `backlog-orchestrate` touches git history at all — so a groom lands **on disk only**, and an orchestrator run reads each
+It also never commits — the only skills that do are `backlog-orchestrate` and `backlog-execute` in `pr` mode, each in a worktree of its own — so a groom
+lands **on disk only**, and an orchestrator run reads each
 item at the commit its worktree is created from rather than off the working tree. An executable item that was never committed is therefore invisible to a run,
 which is why the two verdicts that produce one end by saying so out loud (see "Groomed on disk only" below).
 
@@ -406,8 +407,8 @@ the working tree, because those are the only bytes a dispatched session will eve
 gate as ungroomed and is skipped — `not committed on <base> — the worktree this run creates from <base> would not contain backlog/…`, where `<base>` is the
 branch that run was started on (`main` unless it was told otherwise). That verdict fired five times
 across three projects in the 2026-09-06 sweep, and each one cost a run slot and a person a second trip. This skill is what creates the uncommitted state, so it
-is the only place the sentence can be said at the moment it becomes true. It stops there: the commit is the user's own act, since no skill but
-`backlog-orchestrate` touches git history, and `backlog.mjs` has no notion of whether a file is committed — giving it one would make the registry's writer a git
+is the only place the sentence can be said at the moment it becomes true. It stops there: the commit is the user's own act, since no skill commits a groom
+for them, and `backlog.mjs` has no notion of whether a file is committed — giving it one would make the registry's writer a git
 reader for a message this file can print by itself.
 
 **Not printed for a rejection, and not for an idea or refactor left as one.** A rejected item is closed and an un-promoted idea is not a candidate, so no run

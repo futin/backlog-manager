@@ -30,15 +30,19 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   `buildGatedQueue` turns a matching item `ungroomed` before the hoist and the cap; a different hash is ignored. `plan` reads the file and never creates the
   directory; absent or malformed is no marks. No clear verb. Why:
   [invariants.md](docs/subsystems/invariants.md#a-stale-plan-mark-is-keyed-by-the-plans-hash-so-a-re-groom-clears-it-and-nothing-else-does)
-- **`backlog-orchestrate` is the only skill that commits or merges — and, for a TRACKER project only, the only one that pushes.** Inside a per-item worktree,
+- **`backlog-orchestrate` is the only skill that merges; `backlog-execute` commits and pushes its own branch only in `pr` mode.** Inside a per-item worktree,
   on `backlog/<id>` alone; merged into the run's **base branch** (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base
-  is verified to have it actually checked out. No other skill touches git history at all. The push half is task-47's and is exactly three commands, none of
-  them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree, `push origin <base>` after each merge and
+  is verified to have it actually checked out. Execute is the one other skill that writes git, and only when the project's committed `backlog/config.json`
+  says `execute.finish: pr` (`skills/backlog-execute/references/pr-mode.md`): it commits, pushes `-u` and runs `gh pr create` only in a tree that holds this
+  item's work alone — one it cut from local `<base>` as `.worktrees/execute-<id>` on `execute/<id>`, or a clean reused worktree with no commits beyond
+  `<base>` — never to `<base>`, never with force, never under an `[orchestrator-run` marker, and it never merges. The orchestrator's push half is task-47's
+  and is exactly three commands, none of them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree,
+  `push origin <base>` after each merge and
   before `stage <n> merged`, and `push -u origin backlog/<n>` from the item worktree under branch mode. **A rejected or classifier-denied push PARKS, never
   degrades** — the merge has already landed, so `branched` would be false — which is the one exception to the classifier-denial rule. PR mode pushes its run
   branch through that same `push origin <base>` and adds no fourth git command; its one extra remote write is the finish's `gh pr create`, run by the driver
   in a Bash call of its own, never by the tool. Why:
-  [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-commits-or-merges)
+  [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-and-execute-commits-and-pushes-only-in-pr-mode)
 - **On a tracker project the DRIVER owns each item's claim, and the execute session never touches the issue** (task-47). The run claims at
   `stage <n> preflight` — before the worktree exists — and again on a `stage` out of `parked` to a non-release stage (#250), with `phase: 'execute'` and a
   `ClaimRun` naming the run; it publishes the queue item as `ClaimState`

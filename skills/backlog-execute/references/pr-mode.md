@@ -282,6 +282,7 @@ The design spec (`docs/superpowers/specs/2026-10-21-execute-pr-mode-design.md`) 
   or by the person (§3, §8, §9).
 
 And the calls the spec made itself: the config is read once from the starting tree (§1); commands reach the tree by `cd`, never a new flag (§2); a
-permission denial stops the flow and hands over the remaining commands (§8); the reviewer is used as-is, with its report outside the repo and only one-line
+permission denial stops only the git and `gh` steps — a tracker item's `backlog.mjs` steps still run — and hands over the remaining commands (§8); the
+reviewer is used as-is, with its report outside the repo and only one-line
 summaries in the PR body (§7, §8); a tree behind the base is fast-forwarded (§2); a new tree's names are `execute/<id>` and `.worktrees/execute-<id>` (§2);
 at most two fix rounds, mirroring the orchestrator's loop (§7); `Refs #<n>` for a non-default base (§8); and the worktree is left in place (§9).

@@ -431,15 +431,16 @@ flatly out, one writer. `abort --force`: available to every automated caller, in
 suggestion. The server killing the driver process: it has no pid and no kill channel, and it must never pattern-kill. Making `pause` bite mid-item: that is
 what the two-gate placement deliberately rules out, and widening it would make every pause abandon a half-finished worktree.
 
-## `backlog-orchestrate` is the only skill that commits or merges
+## `backlog-orchestrate` is the only skill that merges, and execute commits and pushes only in `pr` mode
 
-Every other skill in this repo edits item files and nothing else; `backlog-orchestrate` is the first, and by this rule the only, one that touches git history at
-all. It can, because of what it alone controls: `backlog-execute`'s "never commits, never pushes" limit exists because a headless execute session runs inside a
-tree it does not own, and staging there could sweep up work that has nothing to do with it — an unscoped `git add` in the user's own checkout is not a call any
-skill gets to make. The orchestrator's worktree is different by construction: `orchestrate.mjs worktree <id>` (`git worktree add .worktrees/<id> -b backlog/<id>
-<base>`) creates a tree that holds exactly one item's work and nothing else, so `add -A` inside it is safe in a way it never is in the main tree — the skill
-says so explicitly at the commit step rather than leaving the asymmetry to be inferred. The commit itself is conventional-commit shaped, names the orchestrator
-as committer in the body (so `git log` never implies a human read the diff before it existed), and lands on `backlog/<id>` alone.
+Every other skill in this repo edits item files and nothing else, with one opt-in exception below; `backlog-orchestrate` was the first one to touch git history,
+and it is still the only one that merges. It can, because of what it alone controls: `backlog-execute`'s "never commits, never pushes" limit exists because an
+execute session — headless inside a run, or by hand in the user's own checkout — runs inside a tree it does not own, and staging there could sweep up work that
+has nothing to do with it — an unscoped `git add` in the user's own checkout is not a call any skill gets to make. The orchestrator's worktree is different by
+construction: `orchestrate.mjs worktree <id>` (`git worktree add .worktrees/<id> -b backlog/<id> <base>`) creates a tree that holds exactly one item's work and
+nothing else, so `add -A` inside it is safe in a way it never is in the main tree — the skill says so explicitly at the commit step rather than leaving the
+asymmetry to be inferred. The commit itself is conventional-commit shaped, names the orchestrator as committer in the body (so `git log` never implies a human
+read the diff before it existed), and lands on `backlog/<id>` alone.
 
 The merge target is **derived, not fixed**. It is `git -C "<base tree>" merge --no-ff --no-edit backlog/<id>`, where `<base>` is the run's own recorded base
 branch (`main` for a run that asked for nothing else) and `<base tree>` is whichever working tree currently has `<base>` checked out — see
@@ -448,10 +449,25 @@ tree has to be found rather than created. It is refused — parked, not forced �
 checks out a branch in a tree it does not own, either. No branch other than the run's base is ever a merge target, and no tree other than the one holding it is
 ever committed to. Force-push and history rewrite stay off the table entirely.
 
-**Push is no longer off the table, and the narrowing is exactly one sentence wide (task-47).** For a TRACKER project — and only for one — this skill is also
-the only skill that pushes: `git -C "<base tree>" pull --ff-only origin <base>` before each item's worktree, `git -C "<base tree>" push origin <base>` after
-each merge, and `git push -u origin backlog/<n>` from the item worktree under branch mode. For a files project nothing changed and publishing remains the
-user's call, merge commits or otherwise.
+**Push is no longer off the table, and the narrowing is exactly one sentence wide (task-47).** For a TRACKER project — and only for one — this skill pushes its
+run's base: `git -C "<base tree>" pull --ff-only origin <base>` before each item's worktree, `git -C "<base tree>" push origin <base>` after each merge, and
+`git push -u origin backlog/<n>` from the item worktree under branch mode. For a files project the orchestrator pushes nothing and publishing remains the user's
+call, merge commits or otherwise. The one other push in this plugin is execute's `pr` mode, below — its own branch only, never `<base>`, in files and tracker
+projects alike.
+
+**Execute's `pr` mode commits and pushes, and it is this same argument applied to a tree execute owns** (the execute pr-mode spec). The limit above was never
+"execute must not touch git"; it was "no skill stages in a tree it does not own". A project that commits `backlog/config.json` with `execute.finish: pr` (read
+through `backlog.mjs config`, a local-file verb in both modes) has a hand execute session finish as a pull request, and it first makes the tree that limit asks
+for: `.worktrees/execute-<id>` on `execute/<id>`, cut from local `<base>` — named so it never collides with the orchestrator's `.worktrees/<id>` /
+`backlog/<id>` — or a linked worktree it starts in that is clean, on a named branch other than `<base>`, with no commits beyond it. That tree holds this item's
+work alone, so `git add -A` there is as safe as in the orchestrator's, for the same reason. In it execute commits, has `backlog-reviewer` review
+`<base>...<branch>` (at most two fix rounds), pushes `-u origin <branch>` and runs `gh pr create --base <base>` — and that is the whole of its git: never to
+`<base>`, never a force-push, never a merge (the merge is the PR's, done by a person), and never under an `[orchestrator-run` marker, where the run owns git and
+the old limit holds unchanged. The mode is a committed file rather than a prompt switch so a project's set of committers is visible in its own history, and a
+malformed file stops execute rather than falling back to either mode, for the reason an `unsupported` source never falls back to `files`. A permission-layer
+denial of a git or `gh` step stops those steps and hands over the remaining commands; it is never retried another way. In a tracker project the pushed item then
+carries the `in-review` label, which every per-item gate reads as `a PR is open for this item` — see [the ten item-write
+routes](#the-ten-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item).
 
 **A Jira Run's push is not a skill's, so it does not contradict this rule** (Jira repo/branch, spec §6). This rule is about this plugin's skills operating on
 backlog items. A Jira Run started with **Open MR when done** ticked is told by its prompt to push its branch and open one merge request once the work is done:
@@ -1469,7 +1485,7 @@ answers `200`. A healthy dashboard plus an unreachable one is the signature of t
 
 Its `POST /api/spawn` takes a `dirName` resolved against projects active inside its `LOOKBACK_HOURS` (24 by default), so a quiet repo has no key to send.
 Accepted, not worked around: the alternative is teaching that app to take an absolute path, which widens the widest write surface it has. This is one of the
-three blocks that leave a control on screen (the other two are a local skill session's `started:` stamp and a live orchestrator run's claim — see the
+four blocks that leave a control on screen (the other three are a local skill session's `started:` stamp, an open PR and a live run's claim — see the
 `dispatchGate` section below): the button's own `title` and its visually-hidden `aria-describedby` span carry the per-item reason (it names the path, and
 nothing else in the UI does), while Settings lists the host-level setup — including the two fixes for this one, a session in that repo or a higher
 `LOOKBACK_HOURS`. That reason states the missing path as fact and the lookback only as a likelihood ("the dashboard does not list X — most likely no Claude
@@ -1492,11 +1508,11 @@ promise in the spec and `.env.example` — with `BM_AGENTS` off the Board "rende
 not "improve" it into a disabled button on forty cards. "On the Board" is deliberate: the Jira card's `Run ▾` is the one stated exception, drawn with agents
 off for the reason [the next section](#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) gives.
 
-The per-item blocks are the opposite case and keep their button. There are **three** of them, not one, and only the first is anything `dispatchGate` itself can
+The per-item blocks are the opposite case and keep their button. There are **four** of them, not one, and only the first is anything `dispatchGate` itself can
 answer:
 
 - **The dashboard cannot see this item's project** — `dispatchGate`'s own fifth line, the section above.
-- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the three derived from the item
+- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the four derived from the item
   file itself. It is the exact mirror of the block below it: `started:` has one writer (`backlog.mjs start`) and one clearer (`stop`), so a session grooming or
   executing an item states that in the frontmatter the board is already reading — `isInProgress` had been deriving it for the card's amber bar since before
   dispatch existed, and nothing ever wired that predicate into the dispatch path. For a files item it blocks on ANY stamp, fresh or stale, matching `start`'s
@@ -1509,6 +1525,11 @@ answer:
   double-dispatch, and the server's dispatch re-scan is unchanged. Unlike the run claim there is nothing here for the server to catch late: the skills already
   refuse (`start` will not stamp a file that carries a stamp), so what a second spawn cost was never a corrupted file but a wasted session and a refusal the
   user had to go and interpret — `backlog-groom` opening the whole "whose marker is this" conversation about a marker its own board set ninety seconds earlier.
+- **A PR for this item is open** — `inReviewBlock` (`shared/agent.ts`), the execute pr-mode spec's decision 9: a tracker issue whose `in-review` label is on,
+  mapped to `inReview: true`. Execute in `pr` mode releases its claim once the branch is pushed, and the issue stays open until the PR merges, so without
+  this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
+  the server reads it too — `plan` and `dispatch()` refuse with the same sentence, `a PR is open for this item` — because the label is on the tracker, where
+  any machine's spawn can see it. A files item never carries the flag; its PR guard is a named known limitation.
 - **An orchestrator run has already claimed this item** — `runClaimBlock` (`shared/agent.ts`), which reads the run payload rather than the item. It has to: a
   run works each item inside its own git worktree and nothing reaches `main` until the item merges, so while a run holds `task-7` at `reviewing` the `task-7`
   file `/api/items` scans on `main` looks untouched — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item is not lying; it is telling the
@@ -1520,9 +1541,11 @@ answer:
   not be unified. This block is checked on the board and again in `dispatch()`, the second being the one that holds: the launch sheet fetches its plan once on
   mount, so a sheet left open while a run starts still shows an enabled launch button, and only the server sees the run as it is at click time.
 
-`DispatchButton` reads all four in one order — environment-hidden, then project visibility, then the in-progress stamp, then the run claim — most fundamental
-first, so the reason on screen names the thing to fix rather than a symptom of it. With dispatch off or the project invisible there is nothing worth saying
-about either kind of session that might hold the item. The last two rungs are in that order for the same reason applied one level down: the `started:` stamp is
+`DispatchButton` reads all five in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the run claim —
+most fundamental first, so the reason on screen names the thing to fix rather than a symptom of it. With dispatch off or the project invisible there is nothing
+worth saying about either kind of session that might hold the item. The open PR sits after the stamp and before the run claim because it, too, is on the item
+this board renders, while a run claim is the volatile fact about another worktree. The stamp and the run claim are in that order for the same reason: the
+`started:` stamp is
 on the very copy of the item this board is rendering, while a run claim is a fact about another worktree that the next poll can change, so the file wins. They
 coexist only pathologically — a run stamps `started:` on its own worktree's copy, which is exactly why `runClaimBlock` has to exist, so the registry's copy of a
 claimed item normally carries no stamp at all — but a reader who has both is better served by the one they can go and look at.
@@ -1533,7 +1556,7 @@ second session against an item held in another worktree on `backlog/<id>`.
 The in-progress block was bug-12, the same shape one rung down and with the data in the opposite place: the card rendered its amber in-progress bar and an
 enabled dispatch button side by side, one telling the reader a session held this item and the other offering to start a second one against it.
 
-**One of the three lets the click through anyway, and only one: a project-visibility block re-asks the status instead of swallowing the click** (bug-13).
+**One of the four lets the click through anyway, and only one: a project-visibility block re-asks the status instead of swallowing the click** (bug-13).
 `useAgents` refetches on mount and window focus alone, deliberately — what changes the answer happens outside the tab and you come back to the tab afterwards —
 and that reasoning simply has no purchase on a window that never loses focus (a board on a second monitor, or the only window in use). The staleness that
 follows was argued to be bounded: `PROJECT_TTL_MS`'s own comment said a minute of it "costs a disabled button that would have worked, which the sheet's own
@@ -3124,7 +3147,7 @@ records the reset TIME (not a duration, which goes stale the moment it is drawn)
 request at all, not even a conditional one: a `304` is free against the budget but a `403` is not, and asking again before the reset is how an app earns a
 secondary limit on top of the one it has.
 
-**The label set has one home and one cross-file guard.** `server/src/tracker/labels.ts` lists the nine labels — spec §5.2's eight plus `orchestrator:queued` (task-52) — and the poller creates whichever
+**The label set has one home and one cross-file guard.** `server/src/tracker/labels.ts` lists the ten labels — spec §5.2's eight, `orchestrator:queued` (task-52) and `in-review` (execute `pr` mode) — and the poller creates whichever
 are missing on the first successful sync of a repo — idempotently, case-insensitively (GitHub label names preserve case but collide without it), treating a 422
 as success because another machine's poller winning the race still leaves the label there. This is phase 2's ONE write to GitHub, and it is a bootstrap rather
 than a lifecycle write: the issue→item mapping cannot work without the set. `skills/backlog/tools/backlog.mjs`'s `connect` writes issue forms that pre-apply the
@@ -3401,7 +3424,7 @@ A closed issue's section can change while its labels never do: `completed` (or n
 intact, and any other reason is `terminal` in `out-of-scope`. The `type:*` label stays on the issue, so the original type is recoverable — which the file store
 cannot do, since a rejected item moves into a flat directory that forgets it.
 
-## The nine item-write routes are guarded, refused for `files`, and serialised per item
+## The ten item-write routes are guarded, refused for `files`, and serialised per item
 
 Task-46, spec §6.2. Until this branch every route in this server either read something or spawned a session; these seven CREATE AND CLOSE ISSUES in somebody's
 repository, with a credential the browser never sees. That is a strictly larger consequence than the dispatch route the origin guard was written for, which is
@@ -3417,7 +3440,7 @@ registry's own `path` (deliberately not realpath — the `uncommitted` rule, and
 be a filesystem touch on a path this server was never given), then `resolveSource` per request, then the adapter's `writer`. It answers `unregistered` → 404,
 `files` → 400 `this project's items are files — the skills write them directly`, `unsupported` → 400 carrying `resolveSource`'s own path-prefixed reason, and
 otherwise the writer. `FilesSource` has NO `writer` field at all, and that absence is the rule rather than a gap: item files are written by the skills and by
-nothing else, and the one check that reads the field is what makes that true for all nine routes at once instead of nine routes each remembering to ask.
+nothing else, and the one check that reads the field is what makes that true for all ten routes at once instead of ten routes each remembering to ask.
 
 **Every refusal is a value.** `ItemWriter` answers `WriteOutcome`, never throws, and `GithubClient` beneath it answers a `GithubResponse` for every status —
 the same posture, one layer down. `answer` (`write-answer.util.ts` since #270, when the claim READ route
@@ -3471,7 +3494,18 @@ there must refuse; here the claim is already forfeit and the probe is only a gua
 dispatch route re-checks the same claim for a tracker item and shares the probe: a run's claim, the board's own session's, or a live one is a 409; a stale one
 proceeds unless the probe refuses.
 
-**Beside the nine there is one route that is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
+**The tenth write route is `review` (the execute pr-mode spec, decision 9), and it is `queue`'s twin.** `POST /api/items/review`, body
+`{ project, id, inReview }`, adds or removes the `in-review` label — the tenth tracker label — with everything `queue` has: the class guard, the `writerFor`
+gate, the per-URN chain, a literal boolean or a 400, and a removal's 404 answered as success. The label exists because `pr` mode leaves a tracker issue OPEN
+and UNCLAIMED once its branch is pushed: the claim is released after the push, and the issue closes only when the PR merges and `Closes #<n>` shuts it. In that
+window every gate would read the item as ready and start a second execution of work already waiting on a reviewer. Execute runs `backlog.mjs review <id> on`
+right after a successful push, PR or not; a person runs `review <id> off` when the PR closes unmerged. Every per-item gate reads the mapped `inReview` flag
+through one sentence, `a PR is open for this item` (`IN_REVIEW_REASON`, `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and execute's skill
+text): the board's Run button, the server's `plan`/`dispatch` ladder (an uncoded 409) and the orchestrator gate, which turns the item `ungroomed` with that
+reason so no new verdict reaches the run's stages. A files project has no label to carry, so `review` is tracker-only and a files item's PR guard is a named
+known limitation, not a gap this route papers over.
+
+**Beside the ten there is one route that is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
 every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
 `backlog.mjs stop` are two PROCESSES: `claim` answers the comment id that identifies the claim, and the `stop` that must release it has no other way to
 rediscover it. Without it the CLI could take an item and never give it back. Spec §6.2 names seven routes and not this one; the deviation is recorded in
@@ -3907,9 +3941,10 @@ the run has CLAIMED, and the sheet says that too; a LOCAL run of a tracker proje
 
 ## `backlog.mjs` in a tracker project needs the stack up
 
-Task-46, spec §6.5. A project whose committed marker says `github` has no item files, so every command routes through the backlog-manager API on this machine,
-which holds the credential and does the writing. A project with no marker never reaches any of that code: `files` mode runs the same synchronous path it always
-did, and `test/…/backlog.test.mjs` asserts a files fixture makes zero HTTP requests across `init`/`new`/`show`/`board`/`start`/`stop`/`move`.
+Task-46, spec §6.5. A project whose committed marker says `github` has no item files, so every command but `config` (below) routes through the backlog-manager
+API on this machine, which holds the credential and does the writing. A project with no marker never reaches any of that code: `files` mode runs the same
+synchronous path it always did, and `test/…/backlog.test.mjs` asserts a files fixture makes zero HTTP requests across
+`init`/`new`/`show`/`board`/`start`/`stop`/`move`.
 
 **Mode is read from the marker and nothing else**, by `sourceMode` — the CLI's own copy of `resolveSource`, restated rather than imported for the reason the
 label list is: a plugin skill's `tools/` is a standalone copy of what was pushed, with no build step and no path back into this repo. It carries the same
@@ -3933,6 +3968,14 @@ it — a New branch that already exists, a Continue branch held by the mapped ch
 the command's, not the tool's: every other `jira.mjs` command still needs the stack and still says so with `5`. It is also the tool's first git-writing
 command, and it writes only into the tree it was asked for, the way `orchestrate.mjs worktree` does: no `--force`, no `-D`, no `prune`, no `reset`, no merge
 but `--ff-only`.
+
+**`backlog.mjs config` is this tool's one exception** (the execute pr-mode spec, "The config"). `config` prints the effective execute config as JSON and
+`config set execute.finish <in-place|pr>` / `config set execute.base <branch>` write it, and in BOTH modes they touch the committed `backlog/config.json` and
+nothing else: they never go through `requireStore`'s tracker routing, make no request, and never exit `5`. The config is a committed file of the project's, not
+a fact the tracker holds, and execute reads the mode before anything else — so a tracker project's mode must not depend on the stack being up, and a stopped
+stack must not silently read as `in-place`. A malformed file is exit `1` naming `backlog/config.json`, never a fall back to either mode. The exception is the
+verb's, like `jira.mjs worktree`'s: its sibling `review <id> on|off`, which sets the `in-review` label, is an ordinary tracker verb — API only, exit `5` with
+the stack down, and refused in a files project, which has no label to carry.
 
 **`main` is async, and the entry guard awaits it.** The "every skill CLI exits through `process.exitCode`" rule is about `process.exit()` truncating a
 pipe, which asynchrony has nothing to do with; what it actually requires is that nothing hold the event loop open when `main` returns. Every `fetch` here is
@@ -4003,7 +4046,7 @@ marker the stopped run wrote itself, while no commit carries it (`??` or `A `): 
 tool's own file (#218). A committed marker edited by hand is still refused.
 
 **Three things are lost, and saying which is the point.** A body over the cap keeps only its leading sections plus the link. `tags:` survive in the footer alone,
-because the tracker's label set is the closed nine of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the
+because the tracker's label set is the closed ten of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the
 repository — the issue's date is its `created` frontmatter, not the commit that filed it. None of the three is recoverable from the tracker, which is why the
 files' history is worth keeping in git rather than deleting the whole `backlog/` directory.
 

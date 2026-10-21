@@ -3246,7 +3246,7 @@ test('backlog-orchestrate hands the reviewer a base and the reviewer diffs again
 // sweep (bug-12 twice here, bug-13 in claude-agents-dashboard, bug-16 in ixray,
 // bug-7 in the dashboard), each one a spent run slot and a second trip for a
 // person. `backlog-groom` is the skill that creates the uncommitted state, the
-// commit is the user's own act — no skill but orchestrate touches git history —
+// commit is the user's own act — no skill commits a groom for them —
 // and `backlog.mjs` has no notion of whether a file is committed, so the whole
 // fix is one sentence said where the state is made.
 //
@@ -5534,7 +5534,7 @@ test('import composes each create from the frontmatter the tracker has a field f
   assert.ok(one.body.endsWith('<!-- bm:imported from=task-1 created=2026-01-01 tags=x,y -->\n_Imported from backlog/tasks/open/task-1-one.md_'), one.body.slice(-200))
   assert.equal('runnerFix' in two, false)
   assert.equal(five.section, 'out-of-scope')
-  // The label set is the closed nine the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
+  // The label set is the closed ten the poller bootstraps, so free-text tags reach GitHub in the footer or not at all.
   for (const create of creates) assert.equal('labels' in create.body, false)
   const tagsOutsideFooter = one.body.replace(/<!-- bm:imported[^]*$/, '')
   assert.equal(/\bx, y\b/.test(tagsOutsideFooter), false, 'the tags line must not survive anywhere but the footer')

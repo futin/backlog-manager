@@ -6,8 +6,8 @@ description: >
   whole phased feature can be drained onto a branch without main being written at all — or, told to leave branches instead, stopped at a reviewed git branch per
   item with nothing merged. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7, drain the backlog onto
   feature/x, work the queue on a branch instead of main, drain the backlog but leave me branches to merge by hand, or to --resume or --abort a run that was
-  interrupted. It is the only skill that commits or merges — execute
-  still does the work, groom still writes the plans, and neither of them ever touches git. Trigger: /backlog-orchestrate
+  interrupted. It is the only skill that merges, and inside a run the only one that commits — execute
+  still does the work, groom still writes the plans, and neither of them touches git here. Trigger: /backlog-orchestrate
 trigger: /backlog-orchestrate
 ---
 
@@ -23,8 +23,9 @@ capture keeps filing new items.
 
 Two things make this skill different from its three siblings, and both are worth having in mind before the first command runs:
 
-- **It commits and merges.** No other backlog skill touches git at all; execute's "never commits, never pushes" hard limit is unchanged and still holds _inside_
-  the sessions this skill spawns. The orchestrator is the committer, on `backlog/<id>` branches and on the run's base, by merge commit only.
+- **It commits and merges.** No other backlog skill merges, and none commits inside a run: execute's "never commits, never pushes" hard limit holds _inside_
+  the sessions this skill spawns — their prompt carries the `[orchestrator-run` marker, under which a project's `pr` finish mode is ignored. The orchestrator is
+  the committer, on `backlog/<id>` branches and on the run's base, by merge commit only.
 - **It runs unattended.** The person who started it is usually not watching. So every rule below that looks paranoid — park rather than merge, ask best-effort
   rather than block, never `reset --hard` — is there because the failure it prevents would otherwise happen silently, hours after anyone could have caught it.
 
@@ -760,7 +761,8 @@ parking this item, then §10's _Finishing_ with `finish --status failed` in plac
 
 ## 6. Commit — the orchestrator's job, still never execute's
 
-Execute's hard limit is unchanged and still true inside the session: it never commits and never pushes, because staging inside a tree it does not own can sweep
+Execute's hard limit still holds inside the session — under the run's marker it never commits and never pushes, whatever the project's finish mode — because
+staging inside a tree it does not own can sweep
 up work it knows nothing about. Here that reasoning does not apply — the worktree contains this item's work and nothing else, which is the whole point of
 creating one — so the orchestrator commits, and says so in the commit body:
 

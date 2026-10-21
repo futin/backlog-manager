@@ -178,8 +178,8 @@ describe('plan', () => {
    * `progressBlock` (`client/src/lib/item-progress.ts`) needs.
    *
    * The block is NOT asserted on the PLAN, which still offers the dispatch:
-   * `plan.blocked` is `dispatchBlock ?? runClaimBlock`, and `progressBlock` is
-   * the client's own second of three per-item blocks. Task-46 built no server
+   * `plan.blocked` is `dispatchBlock ?? inReviewBlock ?? runClaimBlock`, and
+   * `progressBlock` is the client's own second of four per-item blocks. Task-46 built no server
    * refusal for a claimed item at all, to keep tracker and files symmetric;
    * #227 added one to `dispatch` for a TRACKER item alone (the `item claim`
    * describe below), because a tracker claim has a heartbeat the server can
