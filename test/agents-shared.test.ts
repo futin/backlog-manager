@@ -1,5 +1,6 @@
 import {
   AGENT_ACTIONS,
+  COMMIT_RULE,
   EFFORTS,
   MODELS,
   PERMISSION_LADDER,
@@ -8,9 +9,11 @@ import {
   deriveAction,
   dispatchBlock,
   dispatchGate,
+  finishClause,
   IN_REVIEW_REASON,
   inReviewBlock,
   isAgentAction,
+  isExecuteFinish,
   isItemId,
   isMergeMode,
   isPrUrl,
@@ -29,7 +32,7 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import rawFixture from './fixtures/orchestrator-run.json';
-import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
+import { ATTENTION_RUN_STAGES, EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem, RunStage, StartingRun } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -999,5 +1002,41 @@ describe('watchdogStoodDown over a failing run', () => {
 
   it('keeps spawning while the refusals are still under the ceiling', () => {
     expect(watchdogStoodDown({ enabled: true, exhausted: false, failing: false })).toBe(false);
+  });
+});
+
+/* The execute finish vocabulary and the one sentence that closes an execute prompt. `finishClause` is shared so the launch sheet's preview and the prompt the
+   server sends are the same string by construction — these cases pin the bytes, because the pr sentence is what the spawned session obeys. */
+describe('finishClause', () => {
+  it('is COMMIT_RULE for in-place, whatever the base', () => {
+    expect(finishClause('in-place', 'develop')).toBe(COMMIT_RULE);
+    expect(finishClause('in-place', 'main')).toBe(COMMIT_RULE);
+  });
+
+  it('names the base in both places for pr', () => {
+    expect(finishClause('pr', 'main')).toBe(
+      'Finish with `--finish pr --base main`: the skill commits, reviews, pushes and opens the PR into main, and never merges.'
+    );
+  });
+
+  it('carries a slashed base through verbatim', () => {
+    const clause = finishClause('pr', 'release/1.x');
+    expect(clause).toContain('--finish pr --base release/1.x');
+    expect(clause).toContain('into release/1.x');
+  });
+});
+
+describe('isExecuteFinish', () => {
+  it('accepts the two finishes', () => {
+    expect(isExecuteFinish('in-place')).toBe(true);
+    expect(isExecuteFinish('pr')).toBe(true);
+  });
+
+  it.each(['merge', '', undefined, 7, 'PR'])('rejects %p', (value) => {
+    expect(isExecuteFinish(value)).toBe(false);
+  });
+
+  it('EXECUTE_FINISHES is exactly in-place then pr', () => {
+    expect(EXECUTE_FINISHES).toEqual(['in-place', 'pr']);
   });
 });

@@ -1,5 +1,5 @@
-import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
-import type { AgentsStatus, BacklogItem, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
+import { ATTENTION_RUN_STAGES, EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
+import type { AgentsStatus, BacklogItem, ExecuteFinish, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
 
 /**
  * agent.ts — what a card's button does, decided once for both sides.
@@ -46,6 +46,14 @@ export function isAgentAction(value: unknown): value is AgentAction {
  */
 export function isMergeMode(value: unknown): value is MergeMode {
   return typeof value === 'string' && (MERGE_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Is this unvalidated value one of the `ExecuteFinish`es? Beside `isMergeMode` for the same reason: the dispatch route, the trigger-flag parser and Settings'
+ * clamp each need "absent → in-place, valid → itself, anything else → reject or clamp", and a hand-written `=== 'pr'` is a second copy of `EXECUTE_FINISHES`.
+ */
+export function isExecuteFinish(value: unknown): value is ExecuteFinish {
+  return typeof value === 'string' && (EXECUTE_FINISHES as readonly string[]).includes(value);
 }
 
 /**
@@ -863,3 +871,13 @@ export const COMMIT_RULE =
  * "Do not push." from being the last, most specific word the session hears.
  */
 export const PR_FINISH_RULE = "Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.";
+
+/**
+ * The closing sentence of an `execute` prompt for a chosen finish. Lives here, not in the server, so the launch sheet's preview and the prompt the server sends
+ * are one function and cannot drift. `in-place` is `COMMIT_RULE` byte for byte (the base is ignored); `pr` names the flags the skill's own pr procedure parses
+ * and says the PR goes into `base` and is never merged — it restates no git step, for the reason `PR_FINISH_RULE` above does not.
+ */
+export function finishClause(finish: ExecuteFinish, base: string): string {
+  if (finish === 'in-place') return COMMIT_RULE;
+  return `Finish with \`--finish pr --base ${base}\`: the skill commits, reviews, pushes and opens the PR into ${base}, and never merges.`;
+}
