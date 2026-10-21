@@ -126,7 +126,7 @@ error naming both, rather than picking one.
 - The exit-5 headline — "**`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `backlog.mjs config`
   and `jira.mjs worktree`.**" — names the verb being deleted. Rewrite it to drop `backlog.mjs config` **in both homes at once** (CLAUDE.md:127 and
   `.claude/rules/skills.md:19`, which `test/claude-rules.test.ts` holds byte-equal), drop the two `config` sentences inside that bullet (skills.md:23–24,
-  including "routes every command but `config`"), and rewrite `invariants.md` ~3972–3978 under the same anchor (~3942). The exit-5 rule itself stays.
+  including "routes every command but `config`"), and rewrite `invariants.md` ~3972–3978 under the same anchor (~3942), plus its ~3944 "every command but `config`". The exit-5 rule itself stays.
 - The prompt-composition invariant ("The orchestrate and Jira spawn prompts are composed server-side") gains execute's finish flag as a third
   server-composed piece; its reasoning entry should say so.
 
@@ -135,7 +135,8 @@ error naming both, rather than picking one.
 - Whether `<base>`'s fallback (remote default → `main`) lives in the skill's prose or in a small `backlog.mjs` helper.
 - Exact copy of the Settings hint and the sheet's labels.
 - The doc sweep: `git grep -n -i "config\.json\|execute\.finish\|execute\.base\|parseExecuteConfig\|readFinishMode\|in place this time\|backlog\.mjs config\|
-  \"finish\":\"pr\"\|PR_FINISH_RULE\|committed config\|config is not read"` must come back empty outside `docs/superpowers/` (specs and plans are history and
+  \"finish\":\"pr\"\|PR_FINISH_RULE\|committed config\|config is not read\|committed finish mode\|project's finish mode\|whose finish mode\|but \`config\`"`
+  must come back empty outside `docs/superpowers/` (specs and plans are history and
   stay as written) — `tsconfig.json` and git `config` hits excepted. `pr-mode.md`'s intro (the paragraphs before §1, which open "when `backlog.mjs config`
   printed…" and say "the committed config already answered that") is rewritten along with §1; §2 onward is unchanged.
 - Tests: for the server, the 400s above (bad `finish`, `finish` on groom, `base` without pr, pr without `base`, unknown base, an unproved `main`, an execute
@@ -146,7 +147,9 @@ error naming both, rather than picking one.
   per-action closing-rule assertion both describe the closing rule as part of every plan; execute's no longer is.
 - If `<base>`'s fallback becomes a `backlog.mjs` helper, it is a local git read in both modes — no stack, never exit `5` — or the exit-5 headline needs a new
   exception in place of the one this removes.
-- `pr-mode.md` §1 quotes `finishClause`'s pr sentence exactly as it ships (the skill text and the constant drifted once already, #326 review 2).
+- `pr-mode.md` §1 quotes `finishClause`'s pr sentence exactly as it ships (the skill text and the constant drifted once already, #326 review 2). The existing
+  guard, `test/agents-shared.test.ts` ~836–840, asserts SKILL.md `toContain(PR_FINISH_RULE)`; re-aim it at whichever file quotes the sentence, asserting it
+  contains `finishClause('pr', '<base>')` after whitespace collapse — the quote spells the base as the literal placeholder `<base>`.
 - The execute sheet (body editable, clause read-only below) and the groom/capture sheets (closing rule inside the editable text) look different on purpose.
 - The rule that item dispatch's prompt is "taken outright" (`.claude/rules/dispatch-watchdog.md` lines 16 and 54, reasoning at `invariants.md` ~1456) gains
   its one exception: an execute's finish clause is appended server-side from validated fields.
