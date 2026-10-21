@@ -86,6 +86,10 @@ export class AgentsController {
       // undefined, and undefined is what makes the flag disappear.
       model: body.model,
       effort: body.effort,
+      // Unvalidated here too, as `model` is: `AgentsService.dispatch` is the one place a `finish` outside the vocabulary, a `base` without `pr` (or `pr`
+      // without one), or a `base` that is no local branch becomes a 400 — it has the item's action and project in hand, which this shape check does not.
+      finish: body.finish,
+      base: body.base,
       remoteControl: body.remoteControl === true
     });
   }

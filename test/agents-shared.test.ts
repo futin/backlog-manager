@@ -1,5 +1,6 @@
 import {
   AGENT_ACTIONS,
+  COMMIT_RULE,
   EFFORTS,
   MODELS,
   PERMISSION_LADDER,
@@ -8,16 +9,17 @@ import {
   deriveAction,
   dispatchBlock,
   dispatchGate,
+  finishClause,
   IN_REVIEW_REASON,
   inReviewBlock,
   isAgentAction,
+  isExecuteFinish,
   isItemId,
   isMergeMode,
   isPrUrl,
   isQuestionMode,
   modesUpTo,
   pickFrom,
-  PR_FINISH_RULE,
   projectDispatchGate,
   queueItemIs,
   resumeGate,
@@ -29,7 +31,7 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import rawFixture from './fixtures/orchestrator-run.json';
-import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
+import { ATTENTION_RUN_STAGES, EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, QuestionMode, RunQueueItem, RunStage, StartingRun } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -830,13 +832,18 @@ describe('inReviewBlock', () => {
     expect(tool).toContain(`const IN_REVIEW_REASON = '${IN_REVIEW_REASON}';`);
   });
 
-  /* The third copy: execute's refusal gate says the same sentence, in prose a session prints. Same seam, same reason — and the board's pr-mode prompt
-     sentence rides along, because execute's mode section quotes it to say what it means, and a reworded constant would leave that quote naming a sentence
-     no prompt carries any more. */
-  it('is the same sentence backlog-execute refuses with, beside the pr-mode prompt sentence it recognises', () => {
+  /* The third copy: execute's refusal gate says the same sentence, in prose a session prints. Same seam, same reason. */
+  it('is the same sentence backlog-execute refuses with', () => {
     const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
     expect(skill).toContain(IN_REVIEW_REASON);
-    expect(skill).toContain(PR_FINISH_RULE);
+  });
+
+  /* The board's pr sentence, as pr-mode.md §1 quotes it to say what it means. The skill text and the constant drifted once already (#326 review 2), and a
+     reworded `finishClause` would leave that quote naming a sentence no prompt carries any more. The quote spells the base as the literal `<base>`
+     placeholder, so that is the base it is rendered with here. */
+  it('is the pr sentence backlog-execute pr-mode.md quotes', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('pr', '<base>'));
   });
 });
 
@@ -999,5 +1006,41 @@ describe('watchdogStoodDown over a failing run', () => {
 
   it('keeps spawning while the refusals are still under the ceiling', () => {
     expect(watchdogStoodDown({ enabled: true, exhausted: false, failing: false })).toBe(false);
+  });
+});
+
+/* The execute finish vocabulary and the one sentence that closes an execute prompt. `finishClause` is shared so the launch sheet's preview and the prompt the
+   server sends are the same string by construction — these cases pin the bytes, because the pr sentence is what the spawned session obeys. */
+describe('finishClause', () => {
+  it('is COMMIT_RULE for in-place, whatever the base', () => {
+    expect(finishClause('in-place', 'develop')).toBe(COMMIT_RULE);
+    expect(finishClause('in-place', 'main')).toBe(COMMIT_RULE);
+  });
+
+  it('names the base in both places for pr', () => {
+    expect(finishClause('pr', 'main')).toBe(
+      'Finish with `--finish pr --base main`: the skill commits, reviews, pushes and opens the PR into main, and never merges.'
+    );
+  });
+
+  it('carries a slashed base through verbatim', () => {
+    const clause = finishClause('pr', 'release/1.x');
+    expect(clause).toContain('--finish pr --base release/1.x');
+    expect(clause).toContain('into release/1.x');
+  });
+});
+
+describe('isExecuteFinish', () => {
+  it('accepts the two finishes', () => {
+    expect(isExecuteFinish('in-place')).toBe(true);
+    expect(isExecuteFinish('pr')).toBe(true);
+  });
+
+  it.each(['merge', '', undefined, 7, 'PR'])('rejects %p', (value) => {
+    expect(isExecuteFinish(value)).toBe(false);
+  });
+
+  it('EXECUTE_FINISHES is exactly in-place then pr', () => {
+    expect(EXECUTE_FINISHES).toEqual(['in-place', 'pr']);
   });
 });

@@ -105,7 +105,9 @@ paths: ["client/src/**"]
   [invariants.md](docs/subsystems/invariants.md#the-resume-coupling-the-board-offers-a-hand-resume-exactly-when-the-sweeper-will-not)
 - **The launch sheet's model/effort pickers seed from Settings, never the last launch** (`dispatchDefaultModel` / `dispatchDefaultEffort` in
   `client/src/lib/settings.ts`, clamped against `MODELS`/`EFFORTS`). Permission mode has no stored default — it comes from `plan.defaultMode`, clamped to the
-  host ceiling. Why: [invariants.md](docs/subsystems/invariants.md#launch-sheet-modeleffort-pickers-seed-from-settings-never-the-last-launch)
+  host ceiling. The execute sheet's Finish picker seeds the same way from `executeDefaultFinish` (clamped by `pickOne` over `EXECUTE_FINISHES`), and its Base
+  select seeds to the literal `main` every open — a base is never stored. Why:
+  [invariants.md](docs/subsystems/invariants.md#launch-sheet-modeleffort-pickers-seed-from-settings-never-the-last-launch)
 - **"Queue wait is not work."** `itemDurationMs` (`client/src/lib/run-time.ts`) is the one implementation of "how long did this item take"; machine time
   (`runStageTotals`) excludes `pending` too; `MACHINE_STAGES` is the closed list of what counts. Why:
   [invariants.md](docs/subsystems/invariants.md#queue-wait-is-not-work)

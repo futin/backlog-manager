@@ -8,6 +8,7 @@ import '@testing-library/jest-dom';
 import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoDate } from './helpers/dates';
+import { COMMIT_RULE, finishClause } from '../shared/agent';
 import type { AgentPlan, BacklogItem } from '../shared/types';
 
 const ITEM: BacklogItem = {
@@ -44,7 +45,8 @@ const PLAN: AgentPlan = {
   defaultMode: 'acceptEdits'
 };
 
-function stub(handlers: { plan?: unknown; dispatch?: { ok: boolean; body: unknown } }) {
+/** `branches` is the list `GET /api/agents/branches` answers with, or `'reject'` for a network failure; absent, the route answers an empty list. */
+function stub(handlers: { plan?: unknown; dispatch?: { ok: boolean; body: unknown }; branches?: string[] | 'reject' }) {
   const calls: { url: string; body: unknown }[] = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -52,6 +54,10 @@ function stub(handlers: { plan?: unknown; dispatch?: { ok: boolean; body: unknow
     calls.push({ url, body });
     if (url.endsWith('/plan')) {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handlers.plan ?? PLAN) } as Response);
+    }
+    if (url.includes('/api/agents/branches')) {
+      if (handlers.branches === 'reject') return Promise.reject(new Error('NetworkError'));
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ branches: handlers.branches ?? [] }) } as Response);
     }
     const d = handlers.dispatch ?? { ok: true, body: { sessionId: 'sess-1' } };
     return Promise.resolve({ ok: d.ok, status: d.ok ? 200 : 409, json: () => Promise.resolve(d.body) } as Response);
@@ -150,6 +156,8 @@ describe('LaunchSheet', () => {
       action: 'execute',
       prompt: 'do it my way',
       permissionMode: 'acceptEdits',
+      // An execute launch always names its finish, even untouched — the server appends the closing clause from it.
+      finish: 'in-place',
       remoteControl: true
     });
   });
@@ -184,7 +192,8 @@ describe('LaunchSheet', () => {
 
     doubleClick(screen.getByRole('button', { name: 'launch' }));
 
-    expect(calls.filter((c) => !c.url.endsWith('/plan'))).toHaveLength(1);
+    // The branch list the execute sheet reads on open is a read, not a launch — only the dispatch POST may land twice here.
+    expect(calls.filter((c) => !c.url.endsWith('/plan') && !c.url.includes('/api/agents/branches'))).toHaveLength(1);
   });
 
   it('offers no launch at all when the plan comes back blocked', async () => {
@@ -326,6 +335,112 @@ describe('LaunchSheet', () => {
     expect(row).not.toBeNull();
     expect(row).toContainElement(screen.getByLabelText('Model'));
     expect(row).toContainElement(screen.getByLabelText('Effort'));
+  });
+
+  /*
+   * The execute finish picker (spec §4). Finish seeds from Settings and is overridable for the one launch; Base exists only while Finish reads PR; the
+   * clause line under the prompt is `finishClause` for the current picks — the same function the server appends with, so the sheet shows what will be sent.
+   */
+  describe('execute finish picker', () => {
+    const dispatchBody = (calls: { url: string; body: unknown }[]): Record<string, unknown> =>
+      calls.find((c) => c.url.endsWith('/dispatch'))?.body as Record<string, unknown>;
+    const launchNow = async (calls: { url: string; body: unknown }[]): Promise<Record<string, unknown>> => {
+      await userEvent.click(screen.getByRole('button', { name: 'launch' }));
+      await waitFor(() => expect(calls.some((c) => c.url.endsWith('/dispatch'))).toBe(true));
+      return dispatchBody(calls);
+    };
+
+    it('shows In place by default, with no Base select and the commit rule as the clause line, and sends finish with no base', async () => {
+      const calls = stub({});
+      await openSheet();
+      const finish = screen.getByLabelText('Finish') as HTMLSelectElement;
+      expect(finish.value).toBe('in-place');
+      expect([...finish.options].map((o) => [o.value, o.textContent])).toEqual([
+        ['in-place', 'In place'],
+        ['pr', 'PR']
+      ]);
+      expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
+      expect(screen.getByText(COMMIT_RULE)).toBeInTheDocument();
+      const body = await launchNow(calls);
+      expect(body.finish).toBe('in-place');
+      expect(body).not.toHaveProperty('base');
+    });
+
+    it('seeds PR from Settings, offers the project branches, tracks the clause line, and sends finish and the picked base', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+      const calls = stub({ branches: ['main', 'develop'] });
+      await openSheet();
+      expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('pr');
+      const base = screen.getByLabelText('Base') as HTMLSelectElement;
+      await waitFor(() => expect([...base.options].map((o) => o.value)).toEqual(['main', 'develop']));
+      expect(base.value).toBe('main');
+      expect(screen.getByText(finishClause('pr', 'main'))).toBeInTheDocument();
+      expect(screen.queryByText(COMMIT_RULE)).not.toBeInTheDocument();
+      expect(calls.some((c) => c.url.includes('/api/agents/branches?project=%2Fabs%2Falpha'))).toBe(true);
+
+      await userEvent.selectOptions(base, 'develop');
+      expect(screen.getByText(finishClause('pr', 'develop'))).toBeInTheDocument();
+      expect(screen.queryByText(finishClause('pr', 'main'))).not.toBeInTheDocument();
+
+      const body = await launchNow(calls);
+      expect(body.finish).toBe('pr');
+      expect(body.base).toBe('develop');
+    });
+
+    // Review Focus 4: a base picked under PR must not ride along once the person has gone back to In place.
+    it('sends no base after PR, a base pick and a flip back to In place', async () => {
+      const calls = stub({ branches: ['main', 'develop'] });
+      await openSheet();
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'pr');
+      const base = screen.getByLabelText('Base') as HTMLSelectElement;
+      await waitFor(() => expect([...base.options].map((o) => o.value)).toEqual(['main', 'develop']));
+      await userEvent.selectOptions(base, 'develop');
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
+      expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
+      expect(screen.getByText(COMMIT_RULE)).toBeInTheDocument();
+      const body = await launchNow(calls);
+      expect(body.finish).toBe('in-place');
+      expect(body).not.toHaveProperty('base');
+    });
+
+    // Review Focus 2: the list only offers alternatives to the default, so losing it must cost the alternatives and never the launch.
+    it('offers only main when the branch list fails, and still launches onto it', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+      const calls = stub({ branches: 'reject' });
+      await openSheet();
+      const base = screen.getByLabelText('Base') as HTMLSelectElement;
+      expect([...base.options].map((o) => o.value)).toEqual(['main']);
+      const body = await launchNow(calls);
+      expect(body.finish).toBe('pr');
+      expect(body.base).toBe('main');
+    });
+
+    it('keeps a typed prompt when Finish flips, and fetches the plan once', async () => {
+      const calls = stub({ branches: ['main'] });
+      await openSheet();
+      const prompt = screen.getByLabelText('Prompt');
+      await userEvent.clear(prompt);
+      await userEvent.type(prompt, 'my own words');
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'pr');
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
+      expect(screen.getByLabelText('Prompt')).toHaveValue('my own words');
+      expect(calls.filter((c) => c.url.endsWith('/plan'))).toHaveLength(1);
+    });
+
+    it('draws no Finish, no clause line and no finish or base key for a groom launch', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+      const calls = stub({ plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' } });
+      await openSheet();
+      expect(screen.queryByLabelText('Finish')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
+      expect(screen.queryByText(COMMIT_RULE)).not.toBeInTheDocument();
+      expect(screen.queryByText(finishClause('pr', 'main'))).not.toBeInTheDocument();
+      const body = await launchNow(calls);
+      expect(body.action).toBe('groom');
+      expect(body).not.toHaveProperty('finish');
+      expect(body).not.toHaveProperty('base');
+      expect(calls.some((c) => c.url.includes('/api/agents/branches'))).toBe(false);
+    });
   });
 
   /*

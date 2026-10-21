@@ -16,14 +16,12 @@ paths: ["skills/**", "agents/**"]
   evidence, so `record` refuses to overwrite one (exit `2`): the fix for a wrong record is the next sweep, never an edit. `sweep` reads four homes and writes
   none of them — the run-state home, the retro home (for deltas), `registry.json` (for project names) and, by recorded lease id alone, one driver transcript per
   run. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
-- **`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `backlog.mjs config` and `jira.mjs worktree`.**
+- **`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `jira.mjs worktree`.**
   The marker decides the mode — absent or `{"kind":"files"}` runs today's synchronous code byte for byte and makes no HTTP request on any verb;
-  `{"kind":"github"}` with a valid repo routes every command but `config` through `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming
+  `{"kind":"github"}` with a valid repo routes every command through `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming
   the marker, NEVER a fallback to files. There is no offline queue on purpose: a parked write would be a second source of truth on one laptop. Ids are `31` /
-  `#31` / this project's own URN; a file-shaped id and another repo's URN are each refused with their own sentence. `config` (execute's finish mode) is a
-  local-file verb in BOTH modes: it reads and writes the committed `backlog/config.json` and nothing else, never through `requireStore`'s routing, so it makes
-  no request and never exits `5`; a malformed file is exit `1` naming it, never a fall back to `in-place`. `review <id> on|off` is the opposite — tracker-only,
-  through `POST /api/items/review`, exit `1` in a files project. `jira.mjs` has no files mode at all: every command but
+  `#31` / this project's own URN; a file-shaped id and another repo's URN are each refused with their own sentence. `review <id> on|off` is the opposite —
+  tracker-only, through `POST /api/items/review`, exit `1` in a files project. `jira.mjs` has no files mode at all: every command but
   `worktree` is an
   API call, a refused connection is exit `5` with a sentence naming the backlog-manager checkout (it runs in a mapped repository, where `pnpm run dev` means
   something else), and its other codes are `2` (a 4xx) and `3` (a 5xx). `worktree` makes no request — git only, so it works with the stack down — and exits `0`,

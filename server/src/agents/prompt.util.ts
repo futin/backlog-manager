@@ -1,5 +1,4 @@
-import { COMMIT_RULE, PR_FINISH_RULE, oneLine } from '../../../shared/agent';
-import type { FinishMode } from './finish-mode.util';
+import { COMMIT_RULE, defuseFinishFlags, oneLine } from '../../../shared/agent';
 import type { AgentAction } from '../../../shared/agent';
 import type { BacklogItem } from '../../../shared/types';
 
@@ -24,19 +23,22 @@ const SKILL: Record<AgentAction, string> = {
   capture: 'backlog-manager:backlog-capture'
 };
 
-export function composePrompt(item: BacklogItem, action: AgentAction, finish: FinishMode = 'in-place'): string {
-  const head = `Use the ${SKILL[action]} skill on ${item.id} — "${oneLine(item.title)}" — in this repo's backlog.`;
-  // Only an execute in a `pr` project swaps its closing rule: `COMMIT_RULE` ends "Do not push.", the opposite of a pr finish, and it is the most specific
-  // instruction the spawned session gets. Groom and capture write item files and never open a PR, so a `pr` project changes nothing for them.
-  const closing = action === 'execute' && finish === 'pr' ? PR_FINISH_RULE : COMMIT_RULE;
-
-  return [head, instruction(item, action), closing].join(' ');
+export function composePrompt(item: BacklogItem, action: AgentAction): string {
+  // The title is defused of `--finish`/`--base` tokens for every action — one rule, and harmless for groom and capture — because for an execute, dispatch's
+  // rule 5 would otherwise refuse the board's own untouched prompt over a title that merely mentions the flag.
+  const head = `Use the ${SKILL[action]} skill on ${item.id} — "${defuseFinishFlags(oneLine(item.title))}" — in this repo's backlog.`;
+  // An execute's closing clause is NOT part of the composed prompt: the launch sheet's finish picker owns it, and `AgentsService.dispatch` appends
+  // `finishClause(finish, base)` from validated fields after the sheet's body. Were it here, in the textarea the person may edit, deleting ` --finish pr` from
+  // the text would leave the sheet showing PR while the session stays in place. Groom and capture write item files, never open a PR, and have no picker, so
+  // their `COMMIT_RULE` stays in the editable text as it always did.
+  if (action === 'execute') return [head, instruction(item, action)].join(' ');
+  return [head, instruction(item, action), COMMIT_RULE].join(' ');
 }
 
 /**
  * The action- and section-specific middle of the prompt — everything between
- * the "use this skill on this item" head and the commit rule every action
- * shares (or, for a `pr` execute, the pr rule). Split out so the closing rule is appended in exactly one place: when it
+ * the "use this skill on this item" head and the commit rule groom and capture
+ * share (an execute has none here: dispatch appends its finish clause). Split out so the closing rule is appended in exactly one place: when it
  * lived at the end of each branch's own template, the next branch added was the
  * one that forgot it.
  */

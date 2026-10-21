@@ -10,6 +10,9 @@ import { runGit } from '../git-run.util';
  * and `GET /api/items/uncommitted` (#254, which has to ask its question at
  * the same ref the run will gate at, or the sheet's note flags the wrong rows).
  *
+ * A third caller, `POST /api/agents/dispatch`'s execute `finish: 'pr'`, uses the stricter `proveBaseBranch` below (no `'main'` carve-out, for the reason its
+ * doc comment gives); the checks themselves still live in that one function.
+ *
  * One copy rather than two because the two routes answer one question about
  * one value: the sheet sends the same `base` to both, so a branch one route
  * accepted and the other refused would be the sheet disagreeing with itself.
@@ -35,6 +38,23 @@ import { runGit } from '../git-run.util';
  */
 export async function resolveBaseBranch(base: unknown, projectPath: string | undefined): Promise<string> {
   if (base === undefined || base === '' || base === 'main') return 'main';
+  return proveBaseBranch(base, projectPath);
+}
+
+/**
+ * The same proof as `resolveBaseBranch` — the same checks, in the same order, with the same 400 messages — minus its `'main'` carve-out and its
+ * absent/empty default: every value, `'main'` included, is asked of git, and `undefined` or `''` is the "not a valid branch name" 400. `POST
+ * /api/agents/dispatch`'s execute `finish: 'pr'` is the caller.
+ *
+ * The carve-out is right for orchestrate and wrong here for one reason: orchestrate appends NOTHING at `'main'`, so no caller text reaches the prompt and a
+ * repo whose trunk is named something else keeps working. An execute under `pr` ALWAYS spells `--base <base>` out (`finishClause`), `main` included, so an
+ * unproved `'main'` in a `master`-trunk repo would send a session off to open a PR into a branch that does not exist. Here the value is always appended, so
+ * it is always proved.
+ *
+ * `resolveBaseBranch` delegates its post-carve-out half to this function rather than the two repeating the checks, so a branch one route accepts is never
+ * one the other would refuse for a different reason.
+ */
+export async function proveBaseBranch(base: unknown, projectPath: string | undefined): Promise<string> {
   // Echoed back truncated and JSON-quoted, the convention resolveIds,
   // resolveMergeMode and resolveQuestionMode all share. JSON.stringify also
   // renders a non-string (a `42` a Partial-typed body cannot rule out) as

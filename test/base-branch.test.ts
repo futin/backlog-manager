@@ -7,6 +7,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
+import { proveBaseBranch, resolveBaseBranch } from '../server/src/items/base-branch.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
@@ -45,6 +46,16 @@ function stubDashboard(): Sent[] {
   return sent;
 }
 
+/** Turns the fixture project into a real repo with one commit, so
+ *  `refs/heads/<trunk>` actually resolves. `-b <trunk>` rather than a bare `init`
+ *  so the trunk name is this suite's decision and not the developer's
+ *  `init.defaultBranch`; `main` by default, `master` for a repo without a `main`. */
+function makeRepo(root: string, trunk = 'main'): void {
+  execFileSync('git', ['-C', root, 'init', '-q', '-b', trunk]);
+  execFileSync('git', ['-C', root, 'add', '-A']);
+  execFileSync('git', ['-C', root, '-c', 'user.email=t@e.st', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'fixture']);
+}
+
 /**
  * task-44's server suite: `resolveBase`'s resolution table, the composed spawn
  * prompt, and `GET /api/agents/branches`.
@@ -65,16 +76,6 @@ describe('POST /api/agents/orchestrate — base', () => {
   let tmpRoot: string;
   const env = { ...process.env };
   const realFetch = global.fetch;
-
-  /** Turns the fixture project into a real repo with one commit, so
-   *  `refs/heads/main` actually resolves. `-b main` rather than a bare `init`
-   *  so the trunk name is this suite's decision and not the developer's
-   *  `init.defaultBranch`. */
-  function makeRepo(root: string): void {
-    execFileSync('git', ['-C', root, 'init', '-q', '-b', 'main']);
-    execFileSync('git', ['-C', root, 'add', '-A']);
-    execFileSync('git', ['-C', root, '-c', 'user.email=t@e.st', '-c', 'user.name=T', 'commit', '-q', '-m', 'fixture']);
-  }
 
   beforeEach(async () => {
     projectPath = makeProject('alpha', [
@@ -246,5 +247,60 @@ describe('POST /api/agents/orchestrate — base', () => {
   it('400s on a blank project and 404s on an unregistered one — told apart deliberately', async () => {
     await request(app.getHttpServer()).get('/api/agents/branches?project=').expect(400);
     await request(app.getHttpServer()).get('/api/agents/branches?project=%2Fnot%2Fregistered').expect(404);
+  });
+});
+
+/**
+ * `proveBaseBranch` and `resolveBaseBranch` called directly. They differ in exactly one place — `resolveBaseBranch` answers `'main'` (and the absent/empty
+ * default) without asking git, `proveBaseBranch` asks git about every value — so the pair is pinned side by side, with a repo that has `main` and one whose
+ * trunk is `master`.
+ */
+describe('proveBaseBranch / resolveBaseBranch', () => {
+  const roots: string[] = [];
+  function repo(trunk: string): string {
+    const root = makeProject('alpha', []);
+    roots.push(root);
+    makeRepo(root, trunk);
+    return root;
+  }
+  afterAll(() => {
+    for (const r of roots) rmSync(r, { recursive: true, force: true });
+  });
+
+  async function status(promise: Promise<string>): Promise<{ status: number; error: string } | string> {
+    try {
+      return await promise;
+    } catch (e) {
+      const ex = e as { getStatus(): number; getResponse(): { error: string } };
+      return { status: ex.getStatus(), error: ex.getResponse().error };
+    }
+  }
+
+  it("proves main like any other branch: refused in a master-trunk repo, answered in a main one", async () => {
+    expect(await status(proveBaseBranch('main', repo('master')))).toEqual({
+      status: 400,
+      error: 'base must be an existing local branch — "main" is not a branch in this project'
+    });
+    expect(await status(proveBaseBranch('main', repo('main')))).toBe('main');
+  });
+
+  it('has no empty or undefined default: both are the not-a-valid-branch-name 400', async () => {
+    const root = repo('main');
+    const invalid = (shown: string) => ({ status: 400, error: `base must be an existing local branch — ${shown} is not a valid branch name` });
+    expect(await status(proveBaseBranch('', root))).toEqual(invalid('""'));
+    expect(await status(proveBaseBranch(undefined, root))).toEqual(invalid('undefined'));
+  });
+
+  it('keeps the shared checks: an option-like name, a non-string and an unregistered project are refused', async () => {
+    const root = repo('main');
+    expect(await status(proveBaseBranch('-x', root))).toMatchObject({ status: 400 });
+    expect(await status(proveBaseBranch(42, root))).toMatchObject({ status: 400 });
+    expect(await status(proveBaseBranch('main', undefined))).toMatchObject({ status: 400 });
+  });
+
+  it('resolveBaseBranch is unchanged: main still answers without asking git, even in a master-trunk repo', async () => {
+    expect(await resolveBaseBranch('main', repo('master'))).toBe('main');
+    expect(await resolveBaseBranch(undefined, undefined)).toBe('main');
+    expect(await resolveBaseBranch('', undefined)).toBe('main');
   });
 });

@@ -14,7 +14,7 @@ skill root — never duplicated under `.claude/skills/`, which would load the sa
 | `backlog`             | prints the board and nothing else; it never writes                                                                                                                                                                                          |
 | `backlog-capture`     | files one new item, creating the store if the repo has none                                                                                                                                                                                 |
 | `backlog-groom`       | promotes an idea or refactor into a task with a plan, fills a bug's cause and fix, or closes something out as decided against                                                                                                               |
-| `backlog-execute`     | does the work on a groomed bug or task, then archives it once verification proves it worked — or, in a project whose committed finish mode is `pr`, commits it in its own worktree, has it reviewed, pushes and opens a pull request |
+| `backlog-execute`     | does the work on a groomed bug or task, then archives it once verification proves it worked — or, when its trigger says `--finish pr`, commits it in its own worktree, has it reviewed, pushes and opens a pull request |
 | `backlog-orchestrate` | drains a project's groomed queue unattended, one item per git worktree, each reviewed and verified before it merges                                                                                                                         |
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
 | `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`; on a Jira Run, makes the ticket's git worktree in a mapped repo (git only)           |
@@ -31,15 +31,17 @@ its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch
 `orchestrate.mjs pr --url`. A run that merged nothing has its empty run branch deleted by `finish`. The mechanism and its reasoning are in
 [invariants.md](invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run).
 
-`backlog-execute` has a per-project **finish mode**, read from the committed `backlog/config.json` (`{ "execute": { "finish": "in-place" | "pr", "base"?:
-string } }`) through `backlog.mjs config`, never parsed by the skill itself. `in-place` — the default, and what a missing file or key means — is execute as it
-always was: it works in the tree it starts in and never commits or pushes. `pr` makes execute the one other skill that writes git: it works in its own
+`backlog-execute` has a per-run **finish mode**, read from its trigger: `--finish in-place|pr`, with `--base <ref>` beside `pr`. `in-place` — the default, and
+what an absent flag means — is execute as it always was: it works in the tree it starts in and never commits or pushes. `pr` makes execute the one other skill
+that writes git: it works in its own
 worktree (`.worktrees/execute-<id>` on `execute/<id>`, cut from local `base`, or a clean reused linked worktree), commits there, has `backlog-reviewer` review
 the diff (at most two fix rounds), pushes that branch and opens a pull request into `base` with `gh pr create`. It never merges, never pushes `base`, never
-force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely — inside a run the orchestrator still owns git. `base` defaults to the remote's
-default branch (`origin/HEAD`), else `main`. In a tracker project nothing is archived: the claim is held through the review, and after the push
+force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely — inside a run the orchestrator still owns git. `base` is the trigger's
+`--base`, else the remote's default branch (`origin/HEAD`), else `main`. An unknown or doubled `--finish` stops execute rather than falling back to either mode.
+In a tracker project nothing is archived: the claim is held through the review, and after the push
 `backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges and closes
-it. A project opts in with `backlog.mjs config set execute.finish pr` and a commit; `in place this time` in the request overrides it once.
+it. The board's execute launch sheet is where the flag normally comes from: its Finish picker (seeded from the `executeDefaultFinish` setting) and Base select
+make the server append the clause, and a typed trigger carries the same flag by hand.
 `skills/backlog-execute/references/pr-mode.md` is the whole flow, and
 [invariants.md](invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-and-execute-commits-and-pushes-only-in-pr-mode) the reasoning.
 `backlog-groom` lands on disk only, so an item has to be committed before an orchestrator run can read it.
@@ -110,7 +112,6 @@ What each verb does differently, and the five that exist only here:
 | `drift`          | both modes — files reads the item file, API mode the body and its footer; GET requests only (#322)                                               |
 | `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |
 | `review`         | new — `review <id> on\|off` sets or clears the `in-review` label through `POST /api/items/review` (execute `pr` mode). Files mode: exit `1`         |
-| `config`         | both modes, and the one verb API mode does not route: it reads and writes the committed `backlog/config.json` locally, so it never needs the stack     |
 
 Ids are `31`, `#31` or this project's own URN, all meaning one issue; a file-shaped id and another repo's URN are each refused with their own sentence. Session
 identity is `CLAUDE_CODE_SESSION_ID`, falling back to `<user>@<host>` — stable across the two processes `start` and `stop` run in. The MACHINE a claim records

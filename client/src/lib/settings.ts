@@ -13,7 +13,7 @@
  */
 
 import { EFFORTS, MODELS } from '../../../shared/agent';
-import { MERGE_MODES, QUESTION_MODES, type MergeMode, type QuestionMode } from '../../../shared/types';
+import { EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, type ExecuteFinish, type MergeMode, type QuestionMode } from '../../../shared/types';
 import { SECTIONS, type Section } from './sections';
 
 export const THEMES = [
@@ -129,6 +129,16 @@ export interface Settings {
    */
   orchestrateDefaultQuestionMode: QuestionMode;
   /**
+   * Preselected in the board's `execute` launch sheet's Finish select; overridable for that one launch. The same shape as `orchestrateDefaultMergeMode`
+   * above, for the same reasons: a default you set once in a row you can read, never the sheet remembering the last launch's pick.
+   *
+   * `'in-place'` is the default — it is what every execute did before the picker existed — so a board that has never touched this setting keeps
+   * behaving exactly as it does today. Like the merge-mode default there is no blank third state: `ExecuteFinish` is a closed two-member enum and every
+   * launch finishes one way or the other. No base is stored beside it: a base is a fact about one repository's branches, and the sheet seeds `'main'`
+   * every open.
+   */
+  executeDefaultFinish: ExecuteFinish;
+  /**
    * Days. How long an open item may go untouched before it leaves the Board
    * for Archive (`client/src/lib/item-stale.ts`).
    *
@@ -168,6 +178,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dispatchDefaultEffort: '',
   orchestrateDefaultMergeMode: 'merge',
   orchestrateDefaultQuestionMode: 'park',
+  executeDefaultFinish: 'in-place',
   staleDays: 30,
   settingsScope: 'local',
   contentWidth: 'fixed',
@@ -327,6 +338,7 @@ export function clampSettings(raw: unknown): Settings {
     dispatchDefaultEffort: pickOne(s.dispatchDefaultEffort, DISPATCH_EFFORTS, DEFAULT_SETTINGS.dispatchDefaultEffort),
     orchestrateDefaultMergeMode: pickOne(s.orchestrateDefaultMergeMode, MERGE_MODES, DEFAULT_SETTINGS.orchestrateDefaultMergeMode),
     orchestrateDefaultQuestionMode: pickOne(s.orchestrateDefaultQuestionMode, QUESTION_MODES, DEFAULT_SETTINGS.orchestrateDefaultQuestionMode),
+    executeDefaultFinish: pickOne(s.executeDefaultFinish, EXECUTE_FINISHES, DEFAULT_SETTINGS.executeDefaultFinish),
     staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max),
     settingsScope: pickOne(s.settingsScope, SETTINGS_SCOPES, DEFAULT_SETTINGS.settingsScope),
     contentWidth: pickOne(s.contentWidth, CONTENT_WIDTHS, DEFAULT_SETTINGS.contentWidth),

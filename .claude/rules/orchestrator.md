@@ -32,8 +32,8 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   [invariants.md](docs/subsystems/invariants.md#a-stale-plan-mark-is-keyed-by-the-plans-hash-so-a-re-groom-clears-it-and-nothing-else-does)
 - **`backlog-orchestrate` is the only skill that merges; `backlog-execute` commits and pushes its own branch only in `pr` mode.** Inside a per-item worktree,
   on `backlog/<id>` alone; merged into the run's **base branch** (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base
-  is verified to have it actually checked out. Execute is the one other skill that writes git, and only when the project's committed `backlog/config.json`
-  says `execute.finish: pr` (`skills/backlog-execute/references/pr-mode.md`): it commits, pushes `-u` and runs `gh pr create` only in a tree that holds this
+  is verified to have it actually checked out. Execute is the one other skill that writes git, and only when its
+  trigger says `--finish pr` (`skills/backlog-execute/references/pr-mode.md`): it commits, pushes `-u` and runs `gh pr create` only in a tree that holds this
   item's work alone — one it cut from local `<base>` as `.worktrees/execute-<id>` on `execute/<id>`, or a clean reused worktree with no commits beyond
   `<base>` — never to `<base>`, never with force, never under an `[orchestrator-run` marker, and it never merges. The orchestrator's push half is task-47's
   and is exactly three commands, none of them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree,

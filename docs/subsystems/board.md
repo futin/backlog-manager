@@ -127,7 +127,11 @@ drawer left it: a `Dot` taking the worst state present and a count line naming e
 `1 starting ›`. Precedence is exact: crashed over paused or starting over live. It renders the payload's `starting` array with no client-side filter, it is
 absent entirely when there is no run and no starting entry, and clicking it switches the section to Runs, where the rest of the reading lives.
 
-A dispatch control — on the card and again in the modal — opens a launch sheet onto `../claude-agents-dashboard`. The toolbar Orchestrate control opens
+A dispatch control — on the card and again in the modal — opens a launch sheet onto `../claude-agents-dashboard`. An execute's sheet adds a **Finish**
+picker (`In place` / `PR`, seeded on every open from the `executeDefaultFinish` setting, default `In place`, never from the last launch) and, under PR, a
+**Base** select (the project's local branches, seeded to the literal `main` and never stored; a failed branch fetch leaves `main` alone). Below the editable
+body a read-only line shows the closing clause exactly as the server will append it, tracking both selects; `finish` is sent on every execute launch and `base`
+only under PR. Groom and capture sheets keep their closing rule inside the editable text. The toolbar Orchestrate control opens
 `OrchestrateSheet`, three steps inside a `FormSheet`, with Start on the last one alone so it never sits under a scroll region whose length is the project's
 queue:
 

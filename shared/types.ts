@@ -882,7 +882,11 @@ export interface AgentsStatus {
  */
 export interface AgentPlan {
   action: AgentAction;
-  /** The composed default. The sheet may edit it before dispatching. */
+  /**
+   * The composed default. The sheet may edit it before dispatching. For an `execute` it is the body WITHOUT its closing clause: the sheet renders
+   * `finishClause(finish, base)` read-only beneath it and dispatch appends it, so an edit cannot contradict the finish picker. Groom and capture keep
+   * their `COMMIT_RULE` inside this text.
+   */
   prompt: string;
   /** Display name of the project the session will run in. */
   project: string;
@@ -915,6 +919,13 @@ export interface AgentDispatchRequest {
    */
   model?: string;
   effort?: string;
+  /**
+   * How an `execute` session ends (`ExecuteFinish`) and, for `pr`, the branch the PR targets. Both optional so a tab opened before the deploy — which sends
+   * neither — reads as `in-place` rather than a 400; `base` is meaningful only beside `finish: 'pr'` — dispatch refuses
+   * (400) a `base` sent with any other finish, or with none.
+   */
+  finish?: ExecuteFinish;
+  base?: string;
   remoteControl: boolean;
 }
 
@@ -1101,6 +1112,20 @@ export type MergeMode = 'merge' | 'branch' | 'pr';
  * build their options from this list, so `pr` is third there too.
  */
 export const MERGE_MODES: readonly MergeMode[] = ['merge', 'branch', 'pr'];
+
+/**
+ * How a dispatched `backlog-execute` session ends: `in-place` edits the tree it was started in and commits narrowly without pushing (today's `COMMIT_RULE`),
+ * `pr` works in a worktree of its own, reviews, pushes and opens a PR into a base branch — and never merges. A per-run choice made on the launch sheet (seeded
+ * from a Settings default), not a project property, so it is NOT a `MergeMode`: that vocabulary is the orchestrator's and has a `merge` the execute skill must
+ * never reach. Absent anywhere reads as `in-place`.
+ */
+export type ExecuteFinish = 'in-place' | 'pr';
+
+/**
+ * Every member of `ExecuteFinish`, as a value — what a dispatch body's `finish`, the `--finish` trigger flag and Settings' stored default are all checked
+ * against, so no caller restates the union by hand (the reason `MERGE_MODES` exists above). The order is the picker's: In place first, PR second.
+ */
+export const EXECUTE_FINISHES: readonly ExecuteFinish[] = ['in-place', 'pr'];
 
 /**
  * What a run does with an item's open questions when nobody can answer them.

@@ -3,7 +3,7 @@ name: backlog-reviewer
 description: >
   Review one backlog item's branch diff before the orchestrator merges it into the run's base branch: correctness first, the repo's CLAUDE.md invariants second, test adequacy
   third, and the executor's own contract-sweep and red-proof lines fourth. backlog-orchestrate dispatches it once it has committed an item's work on
-  backlog/<id>, handing it the worktree, the branch, the item file and a report path. backlog-execute dispatches it too, in a project whose finish mode is pr:
+  backlog/<id>, handing it the worktree, the branch, the item file and a report path. backlog-execute dispatches it too, in a session started with --finish pr:
   after committing an item's work on execute/<id> (or a clean worktree's own branch it reused), with the same inputs, before it pushes and opens a PR. It
   writes the full report to that path and returns only a verdict plus the Critical/Important findings, one line each. Read-only by design: it never fixes,
   stages or commits anything it finds.
@@ -51,7 +51,7 @@ You review exactly one backlog item's branch: the change `backlog-execute` made 
 decides whether `backlog-orchestrate` merges that branch into the run's base unattended, with nobody reading the diff afterwards. That is the whole weight of this role
 — there is no second reviewer behind you, and the human who queued the run may be asleep.
 
-You have a second caller: `backlog-execute`, in a project whose committed finish mode is `pr`. There a session has done the work in a worktree it cut (or
+You have a second caller: `backlog-execute`, in a session started with `--finish pr`. There a session has done the work in a worktree it cut (or
 verified clean) for this one item and committed it, and your verdict decides whether it pushes the branch and opens a pull request into the base. A person
 merges that PR, so you are not the last pair of eyes — but the PR body carries your verdict, and whoever merges reads it as a review already done. Hold it to
 the same standard; nothing below changes with the caller except where it says so.
@@ -70,7 +70,7 @@ Five fields, always, in the prompt that spawned you:
 - **`base`** — the branch this run merges into, and the ref every diff below is taken against. `main` for most runs; a feature branch for a run started with
   `--base`. Use the value you were given and never substitute `main` for it: on a `--base` run, `main...<branch>` would fold in everything that branch carries
   beyond `main` — other items, possibly weeks of them — and you would review a change set this item's author never wrote. From `backlog-execute` it is the
-  project's configured base, the branch its PR will target — the same rule, the same reason.
+  session's `<base>`, the branch its PR will target — the same rule, the same reason.
 - **`item file path`** — absolute path of the item's markdown file _inside that worktree_. Expect it under `backlog/<section>/done/`, not `open/`: execute
   archives the item inside the session, so the move is part of the diff you are reviewing.
 

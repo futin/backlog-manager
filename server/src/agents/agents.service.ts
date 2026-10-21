@@ -9,7 +9,7 @@ import { TrackerPollerService } from '../tracker/poller.service';
 import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
-import { resolveBaseBranch } from '../items/base-branch.util';
+import { proveBaseBranch, resolveBaseBranch } from '../items/base-branch.util';
 import { parseUrn } from '../tracker/map-issue';
 import { runGit } from '../git-run.util';
 import { readAgentsConfig, type AgentsConfig } from './config.util';
@@ -18,7 +18,10 @@ import {
   clampMode,
   deriveAction,
   dispatchBlock,
+  FINISH_FLAG,
+  finishClause,
   inReviewBlock,
+  isExecuteFinish,
   isItemId,
   isMergeMode,
   isQuestionMode,
@@ -32,7 +35,6 @@ import {
   PERMISSION_LADDER
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
-import { readFinishMode } from './finish-mode.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
@@ -388,7 +390,7 @@ export class AgentsService {
     const { runs, starting } = this.orchestrator.runs();
     return {
       action,
-      prompt: composePrompt(item, action, readFinishMode(item.projectPath)),
+      prompt: composePrompt(item, action),
       project: item.project,
       allowedModes: modesUpTo(status.spawnMaxPermission),
       // auto, not the ceiling: a dispatched session runs unattended, and often
@@ -431,6 +433,38 @@ export class AgentsService {
     if (prompt === '') throw new HttpException({ error: 'prompt is required' }, 400);
     if (prompt.length > PROMPT_MAX) {
       throw new HttpException({ error: 'prompt is too long' }, 400);
+    }
+
+    // The execute finish — the sheet's picker, validated here and appended as `finishClause` below. `req.finish` and `req.base` are typed, but the
+    // controller forwards them unvalidated (as `model` is, and `pickFrom` checks that), so every rule below runs on what the wire actually carried. A body
+    // from before this field sends neither and is `in-place`: no 400, which is what keeps an open tab working across the deploy.
+    //
+    // All the SHAPE rules run before the item lookup — they need only the body — and the one that needs git (the base proof) runs after every 409, so a
+    // reader told "this item's next step is groom" is not first told their branch is wrong.
+    //   1. a finish outside the vocabulary; 2. a finish on anything but an execute; 3. a base without `pr`; 4. `pr` without a base.
+    if (req.finish !== undefined && !isExecuteFinish(req.finish)) {
+      throw new HttpException({ error: 'finish must be in-place or pr' }, 400);
+    }
+    if (req.finish !== undefined && req.action !== 'execute') {
+      throw new HttpException({ error: 'finish applies only to execute' }, 400);
+    }
+    const finish = req.finish ?? 'in-place';
+    if (req.base !== undefined && finish !== 'pr') {
+      throw new HttpException({ error: 'base applies only to finish pr' }, 400);
+    }
+    if (finish === 'pr' && req.base === undefined) {
+      throw new HttpException({ error: 'base is required with finish pr' }, 400);
+    }
+    //   5. An execute body carrying a `--finish` or `--base` token. The pickers are the only channel for either: the clause appended below is built from
+    //      validated values alone, so a typed `--finish pr` under an In place pick would reach the skill beside `COMMIT_RULE` (which carries no token)
+    //      and push, and a typed `--base develop` beside the clause's own `--base main` would leave the session two bases. The skill reads the token
+    //      as the pr signal wherever it appears in the trigger, and the board's own clause spells it inside backticks, so a body that quotes, backticks or
+    //      parenthesises the token (`--finish pr`, "--finish pr", (--base x)) steers the session as surely as a bare one. The pattern therefore asks only
+    //      that no word character or hyphen sits on either side of the token — `[\w-]` — rather than requiring whitespace: `--finished`, `--base-ref` and a
+    //      `base64` blob are longer words and are left alone, while `--base=develop` (`=` is neither) is refused. Groom and capture bodies are free text no
+    //      flag parser reads, and are not refused.
+    if (req.action === 'execute' && FINISH_FLAG.test(prompt)) {
+      throw new HttpException({ error: "the finish mode and base are set by the sheet's pickers — remove --finish and --base from the prompt" }, 400);
     }
 
     const item = await this.findItem(req.itemPath);
@@ -511,8 +545,14 @@ export class AgentsService {
       if (refusal !== null) throw new HttpException({ error: refusal }, 409);
     }
 
+    // Proved last of the checks, and always asked of git — `main` included (`proveBaseBranch`, which says why `resolveBase`'s `'main'` carve-out is wrong
+    // here). `item.projectPath` is the registry's own path for the project, resolved from the item, never from the body.
+    const base = finish === 'pr' ? await proveBaseBranch(req.base, item.projectPath) : '';
+
     const spawned = await this.spawnInProject(item.projectPath, {
-      prompt,
+      // An execute's body is the sheet's text as sent and the clause follows it, built from `finish` and the proved `base` alone — see composePrompt's
+      // note on why the clause is not in the editable body. Groom and capture keep their `COMMIT_RULE` inside the text, so they go out unchanged.
+      prompt: action === 'execute' ? `${prompt} ${finishClause(finish, base)}` : prompt,
       name: sessionName(item),
       permissionMode: req.permissionMode,
       maxPermission: status.spawnMaxPermission,

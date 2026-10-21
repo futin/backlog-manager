@@ -102,25 +102,6 @@ reworded is a board the next reader can't trust to be complete.
   path is named on stderr). Show whatever printed anyway — that's a real, partial board,
   not a failed command.
 
-## Execute's finish mode
-
-`backlog.mjs` also reads and writes `backlog/config.json`, the committed file that tells `backlog-execute` how to finish a piece of work:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config set execute.finish <in-place|pr>
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" config set execute.base <branch>
-```
-
-`config` prints the effective config as one JSON line, `{"execute":{"finish":…,"base":…}}`. A missing file or key is `in-place` — execute works in the tree
-it is in and never commits — and a missing `base` is the remote's default branch (`origin/HEAD`), else `main`. `pr` has execute work in its own worktree cut
-from `base`, then commit, get a review, push and open a pull request into `base`. A malformed file, an unknown `finish` or an empty `base` is exit `1` naming
-`backlog/config.json` — never a quiet fall back to either mode.
-
-`config set` checks the value and the whole file as it would be, keeps every key it does not know, writes atomically, prints the effective config and — when
-git says the file differs from what is committed — reminds you to commit it: a teammate's checkout and every worktree see only a committed mode. Both are
-local-file commands in both modes: in a tracker project too they never touch the API and work with the stack down.
-
 ## Connecting a project to GitHub
 
 `backlog.mjs` carries one command this skill does not print a board with, and it is here because this

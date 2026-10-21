@@ -8,6 +8,7 @@ import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useSettings } from '../../hooks/useSettings';
+import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
 import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
@@ -541,6 +542,17 @@ function DispatchGroup() {
           value={settings.dispatchDefaultEffort}
           options={[{ value: '', label: 'CLI default' }, ...EFFORTS.map((f) => ({ value: f as string, label: f }))]}
           onChange={(dispatchDefaultEffort) => update({ dispatchDefaultEffort })}
+        />
+      </SettingsRow>
+
+      {/* The board's execute sheet's Finish default, beside the two it shares that sheet with. Labels are the sheet's own, so the row and the picker it seeds
+          read as one control; the hint is the whole doctrine of the PR option, since this is where a reader can meet it before any launch. */}
+      <SettingsRow name="Execute finish" hint="PR mode works in its own worktree, reviews, pushes and opens a PR. It never merges.">
+        <Select
+          label="Execute finish"
+          value={settings.executeDefaultFinish}
+          options={EXECUTE_FINISH_OPTIONS}
+          onChange={(executeDefaultFinish) => update({ executeDefaultFinish })}
         />
       </SettingsRow>
 

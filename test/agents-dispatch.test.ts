@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Test } from '@nestjs/testing';
@@ -10,8 +11,9 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { OrchestratorRun, RunStage } from '../shared/types';
-import { DEFAULT_MODEL } from '../shared/agent';
+import type { BacklogItem, OrchestratorRun, RunStage } from '../shared/types';
+import { COMMIT_RULE, DEFAULT_MODEL, finishClause } from '../shared/agent';
+import { composePrompt } from '../server/src/agents/prompt.util';
 
 // Same cast every suite reading this fixture makes: it is plain JSON, so TS
 // widens its string fields to `string` rather than the literal unions
@@ -176,12 +178,10 @@ describe('POST /api/agents/dispatch', () => {
     expect(body.name).toBe('bl alpha bug-2');
     expect(body.permissionMode).toBe('acceptEdits');
     expect(body.remoteControl).toBe(true);
-    // The client's prompt, byte for byte — not a `toContain` on some phrase
-    // both the sent prompt and a server-recomposed one would satisfy. Editing
-    // the prompt in the launch sheet is the whole point of the sheet, and only
-    // an equality assertion can tell "forwards what was sent" from
-    // "recomposes and silently discards the edit".
-    expect(body.prompt).toBe(good.prompt);
+    // The client's prompt, byte for byte, then the finish clause — not a `toContain` on some phrase both the sent prompt and a server-recomposed one
+    // would satisfy. Editing the prompt in the launch sheet is the whole point of the sheet, and only an equality assertion can tell "forwards what was
+    // sent" from "recomposes and silently discards the edit". With no `finish` the clause is the in-place `COMMIT_RULE`, the old client's default.
+    expect(body.prompt).toBe(good.prompt + ' ' + COMMIT_RULE);
     // A path must never be sent — dirName membership is the dashboard's own
     // contract and this is the assertion that keeps us inside it.
     expect(JSON.stringify(body)).not.toContain(projectPath);
@@ -511,5 +511,166 @@ describe('POST /api/agents/dispatch', () => {
     const res = await post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md') }).expect(409);
     expect(res.body.error).toContain('does not list');
     expect(res.body.error).not.toContain('reviewing');
+  });
+
+  /* ---- the execute finish: `finish`/`base` fields, the --finish/--base token refusal, and the appended clause ----
+     The suite's project is a plain directory, so every `finish: 'pr'` case first turns it into a repo with one commit (trunk `main` unless named). */
+  describe('finish and base', () => {
+    function makeRepo(trunk = 'main', extraBranches: string[] = []): void {
+      execFileSync('git', ['-C', projectPath, 'init', '-q', '-b', trunk]);
+      execFileSync('git', ['-C', projectPath, 'add', '-A']);
+      execFileSync('git', ['-C', projectPath, '-c', 'user.email=t@e.st', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'fixture']);
+      for (const b of extraBranches) execFileSync('git', ['-C', projectPath, 'branch', b]);
+    }
+    const spawned = (sent: Sent[]) => sent.find((s) => s.url.endsWith('/api/spawn'));
+    const spawnedPrompt = (sent: Sent[]) => JSON.parse(String(spawned(sent)?.init?.body)).prompt as string;
+    const exec = (over: Record<string, unknown> = {}) => post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md'), ...over });
+    /** The token refusal, byte for byte (the plan's Global Constraints). */
+    const TOKEN_REFUSAL = "the finish mode and base are set by the sheet's pickers — remove --finish and --base from the prompt";
+
+    it('no finish: the spawned prompt ends with COMMIT_RULE', async () => {
+      const sent = stubDashboard();
+      await exec().expect(201);
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + COMMIT_RULE);
+    });
+
+    it("an old client's body that already ends with COMMIT_RULE gets it appended again — doubled, harmless, never a 400", async () => {
+      const sent = stubDashboard();
+      await exec({ prompt: good.prompt + ' ' + COMMIT_RULE }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + COMMIT_RULE + ' ' + COMMIT_RULE);
+    });
+
+    it('finish in-place: ends with COMMIT_RULE and carries no --finish', async () => {
+      const sent = stubDashboard();
+      await exec({ finish: 'in-place' }).expect(201);
+      const p = spawnedPrompt(sent);
+      expect(p.endsWith(COMMIT_RULE)).toBe(true);
+      expect(p).not.toContain('--finish');
+    });
+
+    it('finish pr, base main in a repo whose main exists: ends with finishClause(pr, main)', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      await exec({ finish: 'pr', base: 'main' }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('pr', 'main'));
+    });
+
+    it('finish pr, base develop with a real local develop: ends with finishClause(pr, develop)', async () => {
+      makeRepo('main', ['develop']);
+      const sent = stubDashboard();
+      await exec({ finish: 'pr', base: 'develop' }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('pr', 'develop'));
+    });
+
+    it('400s a finish outside the vocabulary (rule 1)', async () => {
+      const sent = stubDashboard();
+      await exec({ finish: 'merge' }).expect(400, { error: 'finish must be in-place or pr' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('400s a finish on a groom item (rule 2)', async () => {
+      const sent = stubDashboard();
+      await post({
+        ...good,
+        action: 'groom',
+        itemPath: bugPath('bug-1-a-fresh-bug.md'),
+        prompt: 'Use the backlog-manager:backlog-groom skill on bug-1.',
+        finish: 'pr',
+        base: 'main'
+      }).expect(400, { error: 'finish applies only to execute' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('400s a base beside finish in-place, and beside no finish (rule 3)', async () => {
+      const sent = stubDashboard();
+      await exec({ finish: 'in-place', base: 'main' }).expect(400, { error: 'base applies only to finish pr' });
+      await exec({ base: 'main' }).expect(400, { error: 'base applies only to finish pr' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('400s finish pr with no base (rule 4)', async () => {
+      const sent = stubDashboard();
+      await exec({ finish: 'pr' }).expect(400, { error: 'base is required with finish pr' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it.each([
+      ['a trailing --finish pr', 'Use the skill on bug-2. --finish pr'],
+      ['a leading --base=develop', '--base=develop Use the skill on bug-2.'],
+      ['--finish alone', '--finish'],
+      ['--base in the middle', 'Use the skill --base develop on bug-2.'],
+      ['a backticked token', 'Use the skill on bug-2, then `--finish pr`.'],
+      ['a double-quoted token', 'Use the skill on bug-2 with "--finish pr".'],
+      ['a parenthesised token', 'Use the skill on bug-2 (--base develop).']
+    ])('400s an execute body with %s (rule 5), whatever the pick', async (_name, prompt) => {
+      const sent = stubDashboard();
+      await exec({ prompt }).expect(400, { error: TOKEN_REFUSAL });
+      await exec({ prompt, finish: 'in-place' }).expect(400, { error: TOKEN_REFUSAL });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('does not refuse words that merely contain the tokens: --finished, --base-ref, base64', async () => {
+      const sent = stubDashboard();
+      await exec({ prompt: 'Use the skill on bug-2; the --finished flag, a --base-ref name and a base64 blob stay.' }).expect(201);
+      expect(spawned(sent)).toBeDefined();
+    });
+
+    it('rule 5 is execute-only: a groom body containing --base x is not refused by it', async () => {
+      const sent = stubDashboard();
+      await post({
+        ...good,
+        action: 'groom',
+        itemPath: bugPath('bug-1-a-fresh-bug.md'),
+        prompt: 'Use the backlog-manager:backlog-groom skill on bug-1. Mention --base x.'
+      }).expect(201);
+      // Groom sends its body unchanged: no clause is appended.
+      expect(spawnedPrompt(sent)).toBe('Use the backlog-manager:backlog-groom skill on bug-1. Mention --base x.');
+    });
+
+    /* A title spelling `--base x` must not break the board's own untouched default: composePrompt defuses the token inside the quoted title, so rule 5 sees
+       only a typed one. The spawned prompt then carries exactly one `--base`, the clause's. */
+    describe('an item whose title spells --base', () => {
+      const titled = () => {
+        const file = 'bug-3-flagged.md';
+        const body = '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n';
+        writeFileSync(join(projectPath, 'backlog', 'bugs/open', file), item('bug-3', 'On a --base run the branch -d refuses', body));
+        const itemPath = bugPath(file);
+        const prompt = composePrompt(
+          { id: 'bug-3', title: 'On a --base run the branch -d refuses', section: 'bugs', groomed: true } as BacklogItem,
+          'execute'
+        );
+        return { itemPath, prompt };
+      };
+
+      it('finish pr: 201, and the spawned prompt contains exactly one --base (the clause\'s)', async () => {
+        makeRepo('main');
+        const { itemPath, prompt } = titled();
+        const sent = stubDashboard();
+        await exec({ itemPath, prompt, finish: 'pr', base: 'main' }).expect(201);
+        const p = spawnedPrompt(sent);
+        expect(p.match(/--base/g)).toHaveLength(1);
+        expect(p.endsWith(finishClause('pr', 'main'))).toBe(true);
+      });
+
+      it('finish in-place: 201', async () => {
+        const { itemPath, prompt } = titled();
+        stubDashboard();
+        await exec({ itemPath, prompt, finish: 'in-place' }).expect(201);
+      });
+    });
+
+    it('proves main too: a master-trunk repo gets a 400, not a PR into a branch that is not there', async () => {
+      makeRepo('master');
+      const sent = stubDashboard();
+      await exec({ finish: 'pr', base: 'main' }).expect(400, { error: 'base must be an existing local branch — "main" is not a branch in this project' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('400s a base that is no local branch', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      await exec({ finish: 'pr', base: 'nope' }).expect(400, { error: 'base must be an existing local branch — "nope" is not a branch in this project' });
+      expect(spawned(sent)).toBeUndefined();
+    });
   });
 });

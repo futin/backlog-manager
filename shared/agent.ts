@@ -1,5 +1,5 @@
-import { ATTENTION_RUN_STAGES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
-import type { AgentsStatus, BacklogItem, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
+import { ATTENTION_RUN_STAGES, EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
+import type { AgentsStatus, BacklogItem, ExecuteFinish, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
 
 /**
  * agent.ts — what a card's button does, decided once for both sides.
@@ -46,6 +46,14 @@ export function isAgentAction(value: unknown): value is AgentAction {
  */
 export function isMergeMode(value: unknown): value is MergeMode {
   return typeof value === 'string' && (MERGE_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Is this unvalidated value one of the `ExecuteFinish`es? Beside `isMergeMode` for the same reason: the dispatch route, the trigger-flag parser and Settings'
+ * clamp each need "absent → in-place, valid → itself, anything else → reject or clamp", and a hand-written `=== 'pr'` is a second copy of `EXECUTE_FINISHES`.
+ */
+export function isExecuteFinish(value: unknown): value is ExecuteFinish {
+  return typeof value === 'string' && (EXECUTE_FINISHES as readonly string[]).includes(value);
 }
 
 /**
@@ -819,6 +827,24 @@ export function oneLine(text: string): string {
 }
 
 /**
+ * The `--finish` / `--base` token, as one pattern. `AgentsService.dispatch` refuses an execute body containing it (rule 5: the sheet's pickers are the only
+ * channel for either), and `composePrompt` defuses it inside an item title with `defuseFinishFlags` — two uses of one pattern, so what the refusal would
+ * match and what the defuser rewrites cannot drift. A word character or hyphen on either side means a longer word (`--finished`, `--base-ref`, `base64`),
+ * which is not a flag. Non-global on purpose: `.test` on a global regex carries `lastIndex` between calls.
+ */
+export const FINISH_FLAG = /(?<![\w-])--(finish|base)(?![\w-])/;
+
+/**
+ * An item title is free text, and this repo's own history has titles that spell `--base` (`On a --base run the orchestrator's branch -d refuses…`). Left as
+ * is, the board's own untouched execute prompt would trip rule 5 on its quoted title and 400 the default dispatch. The `--` of each flag token becomes two
+ * U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 5 nor the skill's flag parser sees a flag. Only the title goes through
+ * this — a token a person TYPES into the body is still refused.
+ */
+export function defuseFinishFlags(text: string): string {
+  return text.replace(new RegExp(FINISH_FLAG.source, 'g'), (_m, flag: string) => `\u2011\u2011${flag}`);
+}
+
+/**
  * The last sentence of every item-dispatch prompt, whatever the action — and of the Jira `execute` built-in's (Jira phase 5). One copy, here, because
  * `server/src/jira/` imports no `agents/` service or prompt code; a second wording would be the one that loses the narrow-staging clause.
  *
@@ -845,11 +871,12 @@ export function oneLine(text: string): string {
  * Only this prompt changed — it is the most specific instruction the spawned
  * session receives, and `skills/` is a publishing boundary (an install is a copy
  * of the pushed HEAD, so a skill edit reaches nothing until `pnpm run
- * plugin:sync`). The seam has one exception, and it is `PR_FINISH_RULE` below:
- * an execute in a project whose `backlog/config.json` says `finish: "pr"` is
- * told to commit AND push through the skill, so this sentence — which ends "Do
- * not push." — would contradict it. `composePrompt` therefore appends
- * `PR_FINISH_RULE` instead, for that one action in that one mode.
+ * plugin:sync`). It is also the in-place half of `finishClause` below: an
+ * execute's closing sentence is appended by `AgentsService.dispatch` from the
+ * sheet's finish pick, and for `in-place` that sentence is this one; a `pr`
+ * pick swaps it for `finishClause`'s pr sentence, since this one ends "Do not
+ * push." — the opposite of a pr finish. Groom and capture keep it in their
+ * editable text.
  */
 export const COMMIT_RULE =
   'When the job is done, commit the work: stage only the files this session ' +
@@ -857,9 +884,13 @@ export const COMMIT_RULE =
   "uncommitted work of the user's. Do not push.";
 
 /**
- * The closing sentence of an `execute` dispatch in a `pr`-mode project, in place of `COMMIT_RULE` (spec "Non-goals", the prompt paragraph). Deliberately says
- * nothing about staging or pushing itself: the skill's own pr procedure owns every git step (worktree, narrow staging, review, push, PR), and restating any of
- * it here would be a second, drifting copy of a rule the spawned session reads in full from the skill. This sentence only has to stop `COMMIT_RULE`'s
+ * The closing sentence of an `execute` prompt for a chosen finish. Lives here, not in the server, so the launch sheet's preview and the prompt the server sends
+ * are one function and cannot drift. `in-place` is `COMMIT_RULE` byte for byte (the base is ignored); `pr` names the flags the skill's own pr procedure parses
+ * and says the PR goes into `base` and is never merged. It restates no git step: the skill's pr procedure owns every one (worktree, narrow staging, review,
+ * push, PR), and a copy here would drift from the rule the spawned session reads in full from the skill. This sentence only has to stop `COMMIT_RULE`'s
  * "Do not push." from being the last, most specific word the session hears.
  */
-export const PR_FINISH_RULE = "Finish in this project's `pr` mode: the skill commits, reviews, pushes and opens the PR.";
+export function finishClause(finish: ExecuteFinish, base: string): string {
+  if (finish === 'in-place') return COMMIT_RULE;
+  return `Finish with \`--finish pr --base ${base}\`: the skill commits, reviews, pushes and opens the PR into ${base}, and never merges.`;
+}
