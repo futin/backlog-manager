@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles } from './backlog.mjs'
+import { BacklogError, SECTIONS, resolveRoot, slugify, init, parseFrontmatter, renderFrontmatter, nextId, readItem, listOpen, registerProject, unregisterProject, registryFile, linkedWorktreeInfo, registryRoot, startItem, stopItem, transcriptFiles, sumFreshTokens, sessionTokensSince, parseOriginRepo, isValidRepo, backlogItemFiles, parseExecuteConfig } from './backlog.mjs'
 import { IMPORT_BODY_CAP } from './import-lib.mjs'
 
 const SCRIPT = fileURLToPath(new URL('./backlog.mjs', import.meta.url))
@@ -6065,4 +6065,212 @@ test('API mode: drift reads the body as show does and takes the anchor from its 
   assert.equal(result.anchor, c1)
   assert.equal(result.commits, 1)
   assert.ok(requests.every((q) => q.method === 'GET'), 'drift writes nothing')
+})
+
+// `config` is the per-project execute finish mode: `backlog/config.json`, a committed file, read and set by two local-file verbs that never go through
+// `requireStore`, so a github-marked project answers them with the stack down (the spec's "The config"). The reader is strict on purpose — a malformed file or
+// an unknown `finish` is exit 1 naming the file, never a quiet fall back to either mode — and the setter validates the WHOLE resulting file before it writes,
+// so a refusal leaves the file byte-identical.
+
+const configPath = (dir) => path.join(dir, 'backlog', 'config.json')
+const writeConfig = (dir, text) => {
+  fs.mkdirSync(path.join(dir, 'backlog'), { recursive: true })
+  fs.writeFileSync(configPath(dir), text)
+}
+const effective = (out) => JSON.parse(out.stdout)
+
+test('parseExecuteConfig: no file is in-place with no base of its own', () => {
+  assert.deepEqual(parseExecuteConfig(null), { ok: true, finish: 'in-place', base: null })
+})
+
+test('parseExecuteConfig: finish and base are read, and each is optional', () => {
+  assert.deepEqual(parseExecuteConfig('{"execute":{"finish":"pr"}}'), { ok: true, finish: 'pr', base: null })
+  assert.deepEqual(parseExecuteConfig('{"execute":{"finish":"pr","base":"develop"}}'), { ok: true, finish: 'pr', base: 'develop' })
+  assert.deepEqual(parseExecuteConfig('{}'), { ok: true, finish: 'in-place', base: null })
+  assert.deepEqual(parseExecuteConfig('{"execute":{"base":"develop"}}'), { ok: true, finish: 'in-place', base: 'develop' })
+})
+
+test('parseExecuteConfig: every malformed shape is a refusal that names backlog/config.json', () => {
+  const bad = ['', '{nope', '[]', 'null', '"pr"', '{"execute":null}', '{"execute":[]}', '{"execute":"pr"}', '{"execute":{"finish":"merge"}}', '{"execute":{"finish":null}}',
+    '{"execute":{"base":""}}', '{"execute":{"base":"  "}}', '{"execute":{"base":3}}', '{"execute":{"base":null}}']
+  for (const text of bad) {
+    const r = parseExecuteConfig(text)
+    assert.equal(r.ok, false, text)
+    assert.match(r.message, /backlog\/config\.json/, text)
+  }
+  assert.match(parseExecuteConfig('{"execute":{"finish":"merge"}}').message, /"merge"/)
+})
+
+test('CLI config: no file is in-place into main, and writes nothing', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(effective(out), { execute: { finish: 'in-place', base: 'main' } })
+  assert.equal(fs.existsSync(path.join(dir, 'backlog')), false)
+})
+
+test('CLI config: finish pr is read from the file', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"finish":"pr"}}\n')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(effective(out), { execute: { finish: 'pr', base: 'main' } })
+})
+
+test('CLI config: a base in the file is echoed as is', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"finish":"pr","base":"release/1.x"}}\n')
+  assert.deepEqual(effective(run(dir, 'config')), { execute: { finish: 'pr', base: 'release/1.x' } })
+})
+
+test('CLI config: with no base of its own, the remote default branch is the base', () => {
+  const { dir } = backlogFixture()
+  seedCommit(dir)
+  assert.equal(spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/trunk', 'HEAD'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], { encoding: 'utf8' }).status, 0)
+  assert.deepEqual(effective(run(dir, 'config')), { execute: { finish: 'in-place', base: 'trunk' } })
+})
+
+test('CLI config: a configured base wins over the remote default branch', () => {
+  const { dir } = backlogFixture()
+  seedCommit(dir)
+  spawnSync('git', ['-C', dir, 'update-ref', 'refs/remotes/origin/trunk', 'HEAD'], { encoding: 'utf8' })
+  spawnSync('git', ['-C', dir, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'], { encoding: 'utf8' })
+  writeConfig(dir, '{"execute":{"base":"develop"}}\n')
+  assert.equal(effective(run(dir, 'config')).execute.base, 'develop')
+})
+
+test('CLI config: malformed JSON is exit 1 naming backlog/config.json', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute": ')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+  assert.equal(out.stdout, '')
+})
+
+test('CLI config: an unknown finish is exit 1 naming the value', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"finish":"merge"}}\n')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+  assert.match(out.stderr, /merge/)
+})
+
+test('CLI config: an empty base is exit 1', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute":{"base":""}}\n')
+  const out = run(dir, 'config')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+})
+
+test('CLI config: a github-marked project answers with no API listening', () => {
+  const { dir } = trackerFixture()
+  writeConfig(dir, '{"execute":{"finish":"pr"}}\n')
+  const out = runWithEnv(dir, apiEnv(1), 'config')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(effective(out).execute.finish, 'pr')
+  const set = runWithEnv(dir, apiEnv(1), 'config', 'set', 'execute.finish', 'in-place')
+  assert.equal(set.status, 0, set.stderr)
+  assert.equal(JSON.parse(fs.readFileSync(configPath(dir), 'utf8')).execute.finish, 'in-place')
+})
+
+test('CLI config set: execute.finish pr on no file creates it with that key alone, 2-space JSON and a trailing newline', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(fs.readFileSync(configPath(dir), 'utf8'), '{\n  "execute": {\n    "finish": "pr"\n  }\n}\n')
+  assert.deepEqual(effective(out), { execute: { finish: 'pr', base: 'main' } })
+})
+
+test('CLI config set: an unrelated top-level key and a sibling execute key survive', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"other":{"keep":[1,2]},"execute":{"base":"develop","extra":true}}\n')
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath(dir), 'utf8')), { other: { keep: [1, 2] }, execute: { base: 'develop', extra: true, finish: 'pr' } })
+  assert.deepEqual(effective(out), { execute: { finish: 'pr', base: 'develop' } })
+})
+
+test('CLI config set: execute.base feature/x is written and echoed', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config', 'set', 'execute.base', 'feature/x')
+  assert.equal(out.status, 0, out.stderr)
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath(dir), 'utf8')), { execute: { base: 'feature/x' } })
+  assert.deepEqual(effective(out), { execute: { finish: 'in-place', base: 'feature/x' } })
+})
+
+test('CLI config set: a refused value leaves the file byte-identical', () => {
+  const { dir } = backlogFixture()
+  const before = '{"execute":{"finish":"pr"}}\n'
+  writeConfig(dir, before)
+  for (const args of [['execute.finish', 'bogus'], ['execute.base', ''], ['execute.base', '  '], ['execute.base', '-x'], ['execute.nope', 'x'], ['execute.finish']]) {
+    const out = run(dir, 'config', 'set', ...args)
+    assert.equal(out.status, 1, JSON.stringify(args))
+    assert.equal(out.stdout, '', JSON.stringify(args))
+    assert.equal(fs.readFileSync(configPath(dir), 'utf8'), before, JSON.stringify(args))
+  }
+})
+
+test('CLI config set: refused value with no file creates no file', () => {
+  const { dir } = backlogFixture()
+  assert.equal(run(dir, 'config', 'set', 'execute.finish', 'bogus').status, 1)
+  assert.equal(fs.existsSync(configPath(dir)), false)
+})
+
+test('CLI config set: a file that cannot be read is never replaced', () => {
+  const { dir } = backlogFixture()
+  writeConfig(dir, '{"execute": ')
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /backlog\/config\.json/)
+  assert.equal(fs.readFileSync(configPath(dir), 'utf8'), '{"execute": ')
+})
+
+test('CLI config set: a write that would leave another key invalid is refused and the file stays', () => {
+  const { dir } = backlogFixture()
+  const before = '{"execute":{"base":""}}\n'
+  writeConfig(dir, before)
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 1)
+  assert.equal(fs.readFileSync(configPath(dir), 'utf8'), before)
+})
+
+test('CLI config set: the commit reminder names the file while it is untracked or modified, and stops once it is committed', () => {
+  const { dir } = backlogFixture()
+  seedCommit(dir)
+  const first = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(first.status, 0, first.stderr)
+  assert.match(first.stderr, /commit/i)
+  assert.match(first.stderr, /backlog\/config\.json/)
+  assert.equal(spawnSync('git', ['-C', dir, 'add', 'backlog/config.json'], { encoding: 'utf8' }).status, 0)
+  assert.equal(spawnSync('git', ['-C', dir, ...GIT_IDENT, 'commit', '-qm', 'cfg'], { encoding: 'utf8' }).status, 0)
+  const again = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.stderr, '', 'unchanged and committed: nothing to remind about')
+  const changed = run(dir, 'config', 'set', 'execute.base', 'develop')
+  assert.match(changed.stderr, /backlog\/config\.json/)
+})
+
+test('CLI config set: where git cannot answer there is no reminder and no error', () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-bad-git-')))
+  fs.mkdirSync(path.join(dir, '.git'))
+  const out = run(dir, 'config', 'set', 'execute.finish', 'pr')
+  assert.equal(out.status, 0, out.stderr)
+  assert.equal(out.stderr, '')
+  assert.equal(effective(out).execute.finish, 'pr')
+})
+
+test('CLI config: no .git above the cwd is exit 2, like every other verb', () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'backlog-no-git-')))
+  assert.equal(run(dir, 'config').status, 2)
+})
+
+test('CLI config: an unknown subcommand is a usage error', () => {
+  const { dir } = backlogFixture()
+  const out = run(dir, 'config', 'frobnicate')
+  assert.equal(out.status, 1)
+  assert.match(out.stderr, /usage: backlog\.mjs config/)
 })
