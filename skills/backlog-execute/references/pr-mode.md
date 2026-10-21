@@ -108,8 +108,9 @@ The same setup the orchestrator gives its own trees (orchestrate SKILL.md §4, _
    [ -d <root>/node_modules ] && [ ! -e <tree>/node_modules ] && ln -s <root>/node_modules <tree>/node_modules
    ```
 
-   Anything else this session writes into the tree only to make verification possible (a shim, a scratch config) goes onto the same exclude list first, so
-   the commit in §6 never carries it.
+   **Nothing else goes on that list** — not a shim, a scratch config, a build artifact. `info/exclude` lives in the common git dir, so a line added there
+   also hides that path in the person's main checkout and in every other tree, and nothing ever takes it out again. A file this session writes into the tree
+   only to make verification possible is deleted before §6's commit instead, and §6 stops on any untracked path it cannot attribute.
 
 ### A refusal before any work leaves nothing behind
 
@@ -139,7 +140,8 @@ correct: say to commit the groom first, then remove what §2 cut. An item carryi
 
 **Tracker: heartbeat across everything below.** A claim reads stale after 15 minutes without one, and a review loop easily crosses that. Run
 `heartbeat <id>` before §6's commit, before every reviewer dispatch, right after every verdict, and before §8's push. A refused heartbeat means another
-session has taken the item: stop before the push, push nothing, and report the branch and the tree — the work is committed locally and nothing is lost.
+session has taken the item: stop right there — commit nothing more, push nothing — and report the branch and the tree. Nothing is lost at either point:
+before §6 the work sits uncommitted in `<tree>`, after it the work is committed on the branch.
 
 ## 4. Verification fails
 
@@ -151,11 +153,19 @@ the worktree path and the branch.
 - **Files project:** SKILL.md's archive step, unchanged — `## Outcome` appended, `stop <id> --keep-started`, `move <id> done`. Those writes land in `<tree>`
   and so in the commit; the item reaches `done/` on `<base>` only when the PR merges.
 - **Tracker project: nothing is archived here, and there is no `move` at any point.** The issue closes when the PR merges (`Closes #<n>`, §8). Write the whole
-  `## Outcome` — contract-sweep and red-proof lines included — to `<tmp>/<id>-outcome.md`, where `<tmp>` is
-  `"$(node -p 'require("os").tmpdir()')/backlog-execute"` (`mkdir -p` it). **The claim is held**, heartbeats continuing, through §6-§8; the comment and the
-  release come at the end of §8.
+  `## Outcome` — contract-sweep and red-proof lines included — to `<tmp>/outcome.md`. **The claim is held**, heartbeats continuing, through §6-§8; the
+  comment and the release come at the end of §8.
 
-`<tmp>` is outside every repository on purpose, so `git add -A` can never commit a file this flow writes there.
+**`<tmp>` is this session's own temp directory**, made here in either mode, and every temp file below goes inside it:
+
+```bash
+T="$(node -p 'require("os").tmpdir()')/backlog-execute"; mkdir -p "$T"
+mktemp -d "$T/<id>-XXXXXX"
+```
+
+The path `mktemp` prints is `<tmp>`. It is one directory per session because ids are not unique across projects — `#12` and `task-12` recur in every repo —
+and two pr-mode sessions sharing a name would overwrite each other's Outcome, snapshot, review report and PR body. It is outside every repository on purpose,
+so `git add -A` can never commit a file this flow writes there.
 
 ## 6. Commit
 
@@ -165,8 +175,10 @@ cd <tree> && git add -A && git commit -m "<subject>" -m "<id>: <one sentence fro
 ```
 
 `git add -A` is safe here for the reason it is safe in the orchestrator's tree: §2 guarantees the tree holds this item's work and nothing else. Read
-`git status --short` first anyway; a path this session did not write (a build artifact the project does not ignore) is excluded per §2, never committed.
-`add -A` runs in `<tree>` only — never in a tree §2 did not pick.
+`git status --short` first anyway, and make every path in it this item's work: delete a file this session wrote only for verification, and **stop on any
+untracked path that cannot be told apart from the work** (a build artifact the project does not ignore, a file another hand left). Stopping commits nothing
+and never adds the path to `info/exclude` (§2): the final message lists each such path with the tree and the branch, and a tracker item is released in §7's
+shape. `add -A` runs in `<tree>` only — never in a tree §2 did not pick.
 
 **One conventional commit.** Subject: a bug is `fix:`, a task is `feat:`, an optional lowercase `(scope)`, then the item's title — one line. Where the
 target repo has a PR-title rule (this repo's `ci / pr-title`; look in `.github/workflows/` and any contributing guide), the subject satisfies it, because it
@@ -179,40 +191,42 @@ Dispatch `backlog-manager:backlog-reviewer` with all five inputs its contract re
 - `worktree` — `<tree>`
 - `branch` — `execute/<id>`, or the reused tree's branch
 - `base` — `<base>`; it diffs `<base>...<branch>`
-- `item file path` — files: the item's absolute path inside `<tree>` (`show <id>` prints it, now under `done/`). Tracker: `<tmp>/<id>-item.md`, which this
-  session writes — the issue body (`show <id> --json`, its `body`) followed by the contents of `<tmp>/<id>-outcome.md` — beside the report.
-- `report path` — `<tmp>/<id>-review-<k>.md`, `<k>` counting reviews from `1`. Outside the repo, so the commit can never carry it.
+- `item file path` — files: the item's absolute path inside `<tree>` (`show <id>` prints it, now under `done/`). Tracker: `<tmp>/item.md`, which this
+  session writes — the issue body (`show <id> --json`, its `body`) followed by the contents of `<tmp>/outcome.md` — beside the report.
+- `report path` — `<tmp>/review-<k>.md`, `<k>` counting reviews from `1`. Outside the repo, so the commit can never carry it.
 
 Wait for its verdict inside the same turn, and never end a turn waiting on it: a board-dispatched session is `claude -p` and exits when its turn ends. It
 returns `verdict: approve` or `verdict: fix` plus one line per Critical/Important finding.
 
 **`verdict: fix` → a fix round, at most two.** Fix exactly what the findings name; run the two pre-review checks over what the fix changed; **re-run the
 Outcome's verification commands** and append a `### Fix loop <n>` record — what changed and their real output — under `## Outcome` (files: the item file in
-`<tree>`; tracker: `<tmp>/<id>-outcome.md`, rewriting `<tmp>/<id>-item.md` from it). Commit again in `<tree>` (`git add -A`, a conventional subject naming the
+`<tree>`; tracker: `<tmp>/outcome.md`, rewriting `<tmp>/item.md` from it). Commit again in `<tree>` (`git add -A`, a conventional subject naming the
 round), then review again with the next report path.
 
 **Do not push** when verification is red after a fix (commit nothing more), or when the review after the second fix round still says `fix`. Report it the way
 §4 reports a failure: what failed, the findings, the report paths, the tree and the branch, and the §8 commands for the person who decides the findings are
-wrong. Tracker: post the Outcome — the reason it stopped included — with `comment <id> --body <tmp>/<id>-outcome.md`, then release with a plain `stop <id>`;
+wrong. Tracker: post the Outcome — the reason it stopped included — with `comment <id> --body <tmp>/outcome.md`, then release with a plain `stop <id>`;
 nothing was pushed, so there is nothing for a label to guard.
 
 ## 8. Push, open the PR, hand a tracker item to the label
 
 ```bash
 cd <tree> && git push -u origin <branch>
-cd <tree> && gh pr create --base <base> --title "<subject>" --body-file <tmp>/<id>-pr.md
+cd <tree> && gh pr create --base <base> --title "<subject>" --body-file <tmp>/pr.md
 ```
 
 `<branch>` is §7's. **Never force-push**, in any spelling. A push the remote rejects stops here and is reported with git's own words — nothing after it runs
 except the tracker release in §7's shape (comment, plain `stop`), because there is still no pushed work to guard.
 
-The PR body, written to `<tmp>/<id>-pr.md`:
+The PR body, written to `<tmp>/pr.md`:
 
 - the Outcome summary — what was done, the verification command and the lines of its output that show it passing, the `Contract sweep:` and `Red proof:`
   lines;
 - the review verdict, the number of fix rounds, and the one-line summary of every Critical/Important finding the rounds fixed — never a local report path;
-- tracker only: `Closes #<n>` when `<base>` is the repository's default branch (`git symbolic-ref --quiet --short refs/remotes/origin/HEAD`, else
-  `gh repo view --json defaultBranchRef`), otherwise `Refs #<n>` — GitHub only auto-closes from a PR into the default branch.
+- tracker only: `Closes #<n>` when `<base>` is the repository's default branch, otherwise `Refs #<n>` — GitHub only auto-closes from a PR into the default
+  branch. The default branch is `git symbolic-ref --quiet --short refs/remotes/origin/HEAD` with its `origin/` prefix stripped (it prints `origin/main`,
+  which never equals a `<base>` of `main`; `remoteDefaultBranch` in `backlog.mjs` strips it the same way), else
+  `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
 
 **No `gh`, not authenticated, or not a GitHub remote** → the branch is still pushed; the final message says the PR was not opened and why, and gives the exact
 `gh pr create` command above to run by hand.
@@ -221,7 +235,7 @@ The PR body, written to `<tmp>/<id>-pr.md`:
 
 ```bash
 cd <tree> && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" review <id> on
-cd <tree> && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" comment <id> --body <tmp>/<id>-outcome.md
+cd <tree> && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" comment <id> --body <tmp>/outcome.md
 cd <tree> && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop <id> --keep-started
 ```
 
@@ -231,9 +245,13 @@ undoes nothing** — the comment and the release still run — and the final mes
 
 ### When a step is refused
 
-- **The permission layer refuses a `git add`, `git commit`, `git push` or `gh` call** (a denial, as opposed to a rejection by the remote): stop the flow right
-  there. Never retry it another way — another command, a wrapper shell, the API. Whatever is done stays done (a local commit stays committed), and the final
-  message lists the exact remaining commands, in order, to run by hand. The board's spawn permissions are not this skill's to change.
+- **The permission layer refuses a `git add`, `git commit`, `git push` or `gh` call** (a denial, as opposed to a rejection by the remote): stop the git and
+  `gh` steps right there. Never retry it another way — another command, a wrapper shell, the API. Whatever is done stays done (a local commit stays
+  committed). **A denial stops only those steps; a tracker item's `backlog.mjs` steps still run, in the shape the push decides.** Before a successful push —
+  a denied `add`, `commit` or `push` — that is §7's release: the reason it stopped goes into `<tmp>/outcome.md`, then `comment <id> --body <tmp>/outcome.md`
+  and a plain `stop <id>`. After one — a denied `gh` — it is §8's sequence, `review <id> on`, `comment`, `stop <id> --keep-started`, exactly as when `gh` is
+  missing. The final message lists the exact remaining git and `gh` commands, in order, to run by hand — and, when the push is among them, `review <id> on`
+  right after it, because nothing guards pushed work until the label is on. The board's spawn permissions are not this skill's to change.
 - **The remote rejects the push:** stop and report; never force (above).
 - **`gh` is missing or not authenticated:** report the command (above).
 

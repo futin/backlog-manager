@@ -3178,6 +3178,25 @@ test('pr mode cleans up after a refusal only what this session made, and never a
   }
 })
 
+// (c) Temp files. One machine-wide `<tmpdir>/backlog-execute/<id>-…` namespace collides across projects — issue numbers and `task-N` ids repeat — so two
+// concurrent pr-mode sessions in different repos would overwrite each other's Outcome, snapshot, PR body and review report. One `mktemp -d` per session.
+test('pr mode keeps every temp file in one per-session directory', () => {
+  const text = fs.readFileSync(PR_MODE_MD, 'utf8')
+  assert.ok(/mktemp -d "[^"\n]*\/<id>-XXXXXX"/.test(text), 'pr-mode.md no longer makes a per-session temp directory with mktemp -d')
+  assert.ok(text.includes('/backlog-execute"'), 'pr-mode.md no longer roots its per-session temp directories under <tmpdir>/backlog-execute')
+  assert.ok(!/<tmp>\/<id>-/.test(text), 'pr-mode.md names a temp file by id directly under the shared directory again — two projects can collide there')
+})
+
+// (d) The exclude list. The common git dir's `info/exclude` is shared with the person's main checkout and nobody cleans it, so any line this flow adds
+// silently hides that path from `git status` and `git add -A` there too. Only the orchestrator's two lines go in; anything else is deleted, or stops the flow.
+test('pr mode adds only .worktrees/ and node_modules to info/exclude', () => {
+  const section = prModeSection('### Set the new tree up')
+  assert.ok(section.includes('Nothing else goes on that list'), 'pr-mode.md no longer limits info/exclude to its two lines')
+  assert.ok(!/goes onto the same exclude list/.test(fs.readFileSync(PR_MODE_MD, 'utf8')), 'pr-mode.md tells the session to exclude its own scratch files again')
+  const commit = prModeSection('## 6. Commit')
+  assert.ok(commit.includes('cannot be told apart from the work'), 'pr-mode.md no longer stops on an untracked path it cannot attribute')
+})
+
 // --- task-44: the orchestrator hands the reviewer its base -------------------
 //
 // Another two-files-one-contract seam, the same shape as the pair above and
