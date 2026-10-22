@@ -24,7 +24,7 @@ task execution.
   waiting-plan cap allows, it grooms one item. Otherwise it reports "nothing to do".
 - **The user's review gate survives automation.** No plan a tick wrote is executed until the user has approved it, by removing a `plan-review` mark — a
   frontmatter line on a files project, a label on a tracker project.
-- **Bounded pile-up.** Two caps, set per schedule on the trigger line: at most M open tick PRs, at most N plans awaiting review.
+- **Bounded pile-up.** Two caps, set per schedule on the trigger line: at most M open execute PRs, at most N plans awaiting review.
 - **No retry loops.** An item a tick failed on is skipped by later ticks until its content changes.
 - Works on both project sources: files (`backlog/` directories) and tracker (GitHub issues).
 
@@ -37,7 +37,8 @@ task execution.
 - No new scheduler. The dashboard's job file is the only trigger; this repo ships no cron, launchd or watcher of its own.
 - No board control for approving a plan in this version — the user deletes the frontmatter line or removes the label (GitHub or `backlog.mjs`). A one-click
   "approve plan" is a follow-up.
-- No change to `backlog-orchestrate`, other than its queue honouring `plan-review` the way it honours `in-review`.
+- No change to `backlog-orchestrate`, other than its queue honouring `plan-review` the way it honours `in-review` — and since its `in-review` gate is tracker-only, the files walk gains a
+  frontmatter read of `plan-review:` too.
 - No GitLab. Same scope as execute's `pr` finish.
 
 ## Anti-goals (failure even if it technically works)
@@ -58,7 +59,7 @@ task execution.
    tracker project. A tick's groom writes it; every execute gate skips a marked item; the user removes it to approve. (First answer was "the uncommitted groom
    is the gate"; changed after the builder check, because `/git-sync` commits any uncommitted work and would silently approve every tick plan.)
 4. **Execute wins over groom**, and **waiting plans cap grooming**: groom only while fewer than N plans carry `plan-review`.
-5. **Open tick PRs cap executing**: execute only while fewer than M tick PRs are open. Groom may still run while execute is capped.
+5. **Open execute PRs cap executing**: execute only while fewer than M `execute/*` PRs are open. Groom may still run while execute is capped.
 6. **Tracker label mirrors `in-review`**: an eleventh tracker label and a write route.
 7. **Groom verdicts a tick may make:** plan a bug's fix (Cause + Fix), and **promote a refactor** into a planned task. Never promote an idea, never reject.
 8. **Design questions are decided alone.** Where groom would brainstorm with the user (promote; plan-the-fix that needs design), a tick groom settles the open
@@ -73,7 +74,7 @@ A dashboard job file, for example:
 
 ```markdown
 ---
-cron: "*/30 22-6 * * *"
+cron: "*/30 0-6,22-23 * * *"
 machines: [mac]
 run: claude
 foreach: pinned
@@ -97,19 +98,28 @@ way and is the way to try it by hand. My call: `--dry-run` prints the decision w
 The decision (steps 1-4) is made by a deterministic tool, `skills/backlog-tick/tools/tick.mjs decide`, which prints one JSON verdict. The skill only acts on
 that verdict (steps 5-6). This keeps an idle tick to one tool call and one line of output, and makes the rules testable with `node --test` beside the tool.
 
+0. **Stack check, tracker projects only.** Every `backlog.mjs` verb in a tracker project exits `5` with the stack down, and the claim and label reads need
+   the API. So a tracker project with the stack down is verdict `idle: stack down`, exit 0, taken before the lock and before any other check. A files project
+   never needs the stack.
 1. **Lock.** `decide` takes a per-project lock under `~/.backlog-manager/tick/<project-key>/lock`, holding host, the verdict it handed out and a timestamp —
    not a pid, since `decide` exits at once. `record` (step 6) releases it. A lock older than a fixed ceiling (my call: 3 h, comfortably above any sane job
    `timeout:`, overridable with `--lock-ttl`) is a dead tick's and is replaced — see "A tick the dashboard killed" below. Held and fresh → verdict
-   `busy: another tick`. This closes the window between a tick choosing an item and execute/groom writing its `started:` marker or claim.
+   `busy: another tick`. This closes the window between a tick choosing an item and execute/groom writing its `started:` marker or claim. The lock is per machine (`~/.backlog-manager` is local); for a tracker project ticked from two
+   machines the only cross-machine guard is the claim race at `start`, which the losing tick reports as `failed`.
 2. **Busy check.** Any of these → verdict `busy: <reason>`, exit 0:
    - an orchestrator run for this project whose `run.json` says `running` or `paused` (read under `$BM_ORCH_HOME` or `~/.backlog-manager/orchestrator/`);
    - a board-started run that has no run file yet (server memory only — read through the API when the stack is up; when it is down there is no board to
      have started one, so the check is skipped, my call);
    - any open item carrying a `started:` marker (files) or a live claim (tracker) — a human or another session is grooming or executing. A files marker has
-     no heartbeat, so on a files project **any** marker blocks the project, except one a dead tick left (below);
+     no heartbeat, so on a files project **any** marker blocks the project, except one a dead tick left (below). My call: the files scan reads the main
+     checkout **and every linked worktree** in `git worktree list`, because an in-place groom or execute in a linked worktree writes its `started:` there.
+     Two kinds of tree are skipped: the orchestrator's own `.worktrees/<id>` trees (the run file already speaks for them) and `.worktrees/execute-<id>`
+     trees (the candidate exclusion in step 3 and the lock speak for them — and a killed execute there would otherwise block the project for good);
    - a Jira live session is **not** a busy signal (my call): Jira work happens in its own worktree on a ticket, not on a backlog item.
-3. **Execute candidate**, only if open tick PRs < M. Open tick PRs = `execute/<id>` branches whose PR is open, read with `gh pr list --head`. Without a working
-   `gh`, execute is treated as capped (`idle: cannot count open PRs`) — the repo squash-merges, so a branch's merged state cannot be read from git alone. The
+3. **Execute candidate**, only if open execute PRs < M. Open execute PRs = every open PR in the repo whose head branch starts with `execute/`, read once with
+   `gh pr list --state open --json headRefName`. That deliberately counts hand-run `--finish pr` PRs too: they cut from the same base and conflict the same
+   way, and the cap is about the review pile, not who made it. Without a working
+   `gh`, execute is treated as capped (step 3 contributes the reason `cannot count open PRs`; step 4 may still groom) — the repo squash-merges, so a branch's merged state cannot be read from git alone. The
    candidate is the first item, in the order orchestrate's queue already uses (a `runner-fix` item hoisted first), that is:
    - a bug or task, groomed (derived, as the board derives it);
    - **committed on the base** (files) — the same check orchestrate makes, `not committed on <base>`;
@@ -136,24 +146,32 @@ that verdict (steps 5-6). This keeps an idle tick to one tool call and one line 
 ### A tick the dashboard killed
 
 A job's `timeout:` kills the step mid-work: the lock stays, and the item may keep a `started:` marker (files) or a claim (tracker, which goes stale after 15
-minutes and is retired by the claim protocol on its own). The next tick that finds a lock older than the ceiling reads the verdict recorded in it; if that
-item still carries a `started:` marker with no live session, the tick clears **that one marker** with `backlog.mjs stop <id> --abandon` (the interval was no
-one's work), records the item `failed` (`killed at timeout`), and releases the lock. That is the only marker a tick ever clears: it is provably its own. Any
+minutes and is retired by the claim protocol when the next claimant's `start` runs). A step that runs out of `max-turns:` ends mid-work the same way and
+takes the same recovery path. The next tick that finds a lock older than the ceiling reads the verdict recorded in it. The proof
+that a marker is the dead tick's is exactly: the lock is stale, its verdict is `groom <id>`, and `<id>` in the main checkout carries `started:` with
+`phase: groom`. Liveness of a session cannot be read on a files project (`started:` records when, never who), so the proof rests on the lock alone. When it
+holds, the tick clears **that one marker** with `backlog.mjs stop <id> --abandon` (the interval was no one's work), records the item `failed`
+(`killed at timeout`), and releases the lock. An `execute <id>` verdict needs no clearing: its marker lives in `.worktrees/execute-<id>`, which the main
+checkout's busy check does not read. That is the only marker a tick ever clears: it is provably its own. Any
 other marker is a human's or another session's and blocks the project until they clear it. A `--finish pr` execute writes its marker inside
 `.worktrees/execute-<id>`, which the main checkout does not see; the `execute/<id>` worktree it leaves keeps that item off the candidate list anyway.
 
 ### The tick marker
 
-Groom and execute today know one unattended mode, the `[orchestrator-run` marker, and it means "the orchestrator owns git and the worktree" — wrong here, since
-execute's `pr` finish must own its own git. So a new marker, my name `[backlog-tick]`, appended after the id, is read by both skills:
+Execute today knows one unattended mode, the `[orchestrator-run` marker, and it means "the orchestrator owns git and the worktree" — wrong here, since
+execute's `pr` finish must own its own git. Groom has no unattended mode at all: it states a verdict and waits for the user to confirm it
+(`skills/backlog-groom/SKILL.md` §"Three verdicts"), unless the prompt already named the item **and** the verdict, which groom reads as that confirmation
+(§"Mark it in progress"). So the tick's groom trigger always names both — `groom bug-<n>, plan the fix [backlog-tick]` or `groom ref-<n>, promote it to a task
+[backlog-tick]` — which meets groom's consent gate by the prompt. A new marker, my name `[backlog-tick]`, appended after the id, is read by both skills:
 
 - **Never ask.** Every place the skill would ask the user — groom's verdict choice, the Reject confirmation, taking over a marker, brainstorming's questions,
   execute's escalations — is either decided alone (design questions, decision 8) or becomes "stop, leave nothing half-done, report it in the final message".
   The failure record then keeps later ticks off the item.
 - **Groom under the marker** may only plan a bug's fix or promote a refactor. A groom that concludes the item should be rejected, or that cannot find a bug's
-  cause with confidence, writes nothing and reports `failed` with its reason — the user sees that in the run log. Brainstorming and writing-plans still run
+  cause with confidence, writes no verdict (its own `start`/`stop` bookkeeping still lands) and reports `failed` with its reason — the user sees that in the run log. Brainstorming and writing-plans still run
   where groom calls for them, but every question they would put to the user is answered by the session and listed under `Assumptions (unattended)` in the
-  plan.
+  plan. On a files promote, groom keeps the printed frontmatter block exactly as printed; the marker text carves out the `plan-review: true` line the same
+  way `runner-fix: true` is already carved out there.
 - **Markers:** on a files project, never take over another session's `started:` marker. On a tracker project the claim protocol already retires a claim stale
   past 15 minutes when `start` runs; that is the protocol's rule, not a takeover the tick decides, and stays as it is — the busy check has already treated a
   live claim as busy.
@@ -162,7 +180,9 @@ execute's `pr` finish must own its own git. So a new marker, my name `[backlog-t
 
 ### The `plan-review` mark
 
-**Files project:** a frontmatter line `plan-review: true`, written by groom under the tick marker and deleted by the user to approve. It is a gate key in the
+**Files project:** a frontmatter line `plan-review: true`, written by groom under the tick marker. The tick reads it **at `<base>`**, the same tree the
+committed-on-base check reads and the one execute's worktree is cut from, so approval on a files project is *delete the line and commit* (by hand or by
+`/git-sync`) — a line deleted only in the working tree is not yet an approval, and a plan committed with the line still in it is not one either. It is a gate key in the
 same family as `runner-fix:` — not a lifecycle key and not a status — so the "`started:` and `phase:` are the lifecycle keys" invariant is unchanged, but
 its text should name `plan-review:` as a non-lifecycle key so nobody reads it as a third one. `groomed` stays derived exactly as today; `plan-review` is a
 separate gate beside it.
@@ -174,7 +194,9 @@ separate gate beside it.
 - One new guarded `/api/items/*` write route that adds or removes it, under the same guards as the others (content-type, origin, refused for a `files`
   project, serialised per item), and a `backlog.mjs` verb that calls it (the user's way to approve from a terminal), plus the `--plan-review` flag on `body` /
   `new` that groom uses. Every site that states the route count or the label count moves with it — including `CLAUDE.md`'s Layout line that still says
-  "nine guarded write routes", the "ten" counts in CLAUDE.md, the rules file and `invariants.md`, and "a closed ten" in `skills/backlog/SKILL.md`.
+  "nine guarded write routes" (nine `items-write.controller.ts` routes, `abort` the tenth write), the "ten" counts in CLAUDE.md and the rules file,
+  `docs/subsystems/invariants.md`'s already-stale "The nine `/api/items/*` writes", "a closed ten" in `skills/backlog/SKILL.md`, and
+  `test/tracker-labels.test.ts`'s `toHaveLength(10)` with its `describe('the ten labels')`.
 
 **Readers, both sources:** the item mapping exposes a `planReview` flag (files: parsed from frontmatter; tracker: beside `queued` / `inReview` in
 `map-issue.ts`); the orchestrator's queue excludes such items; execute's refusal gate refuses one ("this plan awaits review"); the board's per-item dispatch
@@ -184,7 +206,10 @@ ladders gain a rung that disables Run with that reason — client `DispatchButto
 ### The failure record
 
 `~/.backlog-manager/tick/<project-key>/state.json`, written only by `tick.mjs` (one writer, like the registry and the run file). Per item: last outcome, kind,
-reason, timestamp, and — for `failed` — a content hash at the time: files, a hash of the item file (at the base for execute, the working tree for groom);
+reason, timestamp, and — for `failed` — a content hash at the time. The hash is computed by `record`, **after** the skill's own `stop` has run, and only
+over the item's body plus the frontmatter keys a person edits — never `updated:`, `started:`, `phase:`, `groomed-at:` or the `*-elapsed:` / `*-tokens:`
+counters, which `start`/`stop` rewrite on every attempt and would make every failed item look edited. Files, a hash of the item file (at the base for
+execute, the working tree for groom);
 tracker, a hash of the issue **body** — not `updated_at`, which the tick's own label and comment writes bump and which would re-enable the item at once. An
 item whose current hash differs from the recorded one is eligible again. My call: the record also keeps the last few verdicts per project (bounded, e.g. 50)
 so `tick.mjs status` can print what recent ticks did. Nothing under this directory is read by the server in this version.
@@ -203,7 +228,7 @@ so `tick.mjs status` can print what recent ticks did. Nothing under this directo
 
 ## Settled as my calls (check these while reading)
 
-- Caps default to M = 2 open tick PRs, N = 3 plans awaiting review; both per schedule via trigger flags.
+- Caps default to M = 2 open execute PRs, N = 3 plans awaiting review; both per schedule via trigger flags.
 - A pin with no backlog store, or one that is a linked worktree, is a no-op that exits 0.
 - The decision is a deterministic tool (`tick.mjs decide`); the skill only acts on it. Groom and execute run inside the same headless session via the Skill
   tool, not as a second spawn.
