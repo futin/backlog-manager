@@ -77,8 +77,10 @@ export class ApiError extends Error {
  * when the body carries one, a `code`) is still attached to the thrown
  * `ApiError` (see its own comment) for the one caller that needs to branch
  * on more than just what to display.
+ *
+ * Exported (tick breaker, `lib/ticks.ts`) so a second lib reads a refusal the same way rather than carrying a copy of this.
  */
-async function unwrap<T>(res: Response): Promise<T> {
+export async function unwrap<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => null)) as ({ error?: unknown; code?: unknown } & T) | null;
   if (!res.ok) {
     const error = typeof data?.error === 'string' ? data.error : `request failed (${res.status})`;
