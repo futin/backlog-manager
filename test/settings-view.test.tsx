@@ -700,7 +700,7 @@ describe('SettingsView', () => {
       `this device`, and the day a card on this page says anything else it is a
       card on the wrong page.
     */
-    it("renders the Shared page's three cards, each with its own scope", async () => {
+    it("renders the Shared page's four cards, each with its own scope", async () => {
       renderView('shared');
       await screen.findByText(/connected/);
       // `Trackers` joined the pair in task-45: a third host-backed report, in
@@ -708,8 +708,9 @@ describe('SettingsView', () => {
       // sets. An exact list rather than a `toContain` for the reason the
       // comment above gives — a build that lost one card outright would pass
       // the looser check.
-      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Claude Agents', 'Trackers']);
-      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine']);
+      // `Backlog tick` joined in the tick breaker, under the watchdog in the left column (the two controls), so it renders second.
+      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Claude Agents', 'Trackers']);
+      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine', 'this machine']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.

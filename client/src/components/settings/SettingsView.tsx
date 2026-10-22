@@ -3,6 +3,7 @@ import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
+import { TickGroup } from './TickGroup';
 import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useAgents } from '../../hooks/useAgents';
@@ -202,13 +203,14 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
 
 /**
  * The Shared page: the watchdog's file beside the registry, the host
- * environment `Claude Agents` reports on, and — since task-45 — what this
- * machine can currently see of each project's tracker.
+ * environment `Claude Agents` reports on, what this machine can currently
+ * see of each project's tracker — since task-45 — and, since the tick breaker,
+ * the tick halt threshold under the watchdog.
  *
- * Three cards, and the hand-balanced columns hold up for a different reason
- * here than on Local: this is the watchdog's long card against two shorter
- * reports stacked in one column, rather than Local's two short cards over two
- * taller ones. Both of the right column's cards report on the HOST and neither
+ * Four cards, and the hand-balanced columns hold up for a different reason
+ * here than on Local: the left column is the two machine-wide CONTROLS (the
+ * watchdog's long card over the tick breaker's one-row card), the right the
+ * two reports. Both of the right column's cards report on the HOST and neither
  * sets anything, which is what makes them one column rather than two halves of
  * the page.
  */
@@ -217,6 +219,9 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
     <div className="set-cols">
       <div className="set-col">
         <WatchdogGroup onOpenWatchdog={onOpenWatchdog} />
+        {/* Under the watchdog, in its column: both are machine-wide CONTROLS — a number written to a file on the host — where the right column is host
+            REPORTS. The breaker is the watchdog's sibling in subject too: one resumes a crashed run, the other stops a project that keeps failing. */}
+        <TickGroup />
       </div>
 
       <div className="set-col">
