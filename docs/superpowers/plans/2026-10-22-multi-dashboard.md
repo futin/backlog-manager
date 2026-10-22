@@ -64,8 +64,9 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
 - **Projection** (strategy 3): `runs-out` when `exhaustAt` is an ISO time before the weekly `resetsAt`; `safe` when `exhaustAt` is null, `walkAbsent` is
   null and `resetsAt` is in the future, or when `exhaustAt` ≥ `resetsAt`; `unknown` otherwise (a `walkAbsent` reason, a past or missing `resetsAt`, profile
   fetch failed).
-- **Every outbound call** (dashboard health/configs/account/profile/spawn/stop, remote board projects) has a 5 s timeout and never throws past its caller: a
-  failure is data (`unreachable — <message>`), never a 500.
+- **Every NEW outbound read** (dashboard health/configs/account/profile for offers, remote board projects) has a 5 s timeout and never throws past its
+  caller: a failure is data (`unreachable — <message>`), never a 500. Spawn and stop keep today's `SPAWN_TIMEOUT_MS` / `STOP_TIMEOUT_MS` (10 s) and their
+  502s, on every machine.
 - **Not-offered reasons, exact copy** (first that applies, in this order):
   1. `dashboard unreachable — <error>`
   2. `board unreachable — <error>` (remote only)
@@ -80,8 +81,9 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
   - runway, none safe: `Least likely to run out: no machine is projected safe — <label> by prefer order`
   - no usage anywhere: `No usage figures — <label> by default` (basis `default`)
 - **400s, exact copy:** `unknown machine "<x>"`; `<label> runs tracker projects only — <project> is files-backed`; `finish must be pr on <label>`;
-  `merge mode must be pr on <label>`; `model "<m>" is not in <label>'s list (<a, b>)`; `effort "<e>" is not in <label>'s list (<a, b>)`. An unknown model or
-  effort string (not in `MODELS`/`EFFORTS` at all) is still silently dropped, as today — the 400 is only for a KNOWN one outside the machine's list.
+  `merge mode must be pr on <label>`; `model "<m>" is not in <label>'s list (<a, b>)`; `effort "<e>" is not in <label>'s list (<a, b>)`. On a REMOTE machine any
+  model or effort outside that machine's list is a 400 — unknown strings included (spec: the remote dashboard's silent drop is why the 400 exists). On home
+  the existing `pickFrom` drop is unchanged, unknown or not (agents.service.ts `spawnInProject` / `orchestrate`), so home bodies behave exactly as today.
 - **409s, exact copy:** `<label> is not offered for <project>: <reason>`; `<id> is already starting on <label>`; `<project> is already starting on <label>`;
   `a run of <repo> is live on <label>`; `<id> was dispatched to <machine>, which is no longer configured`.
 - **Remote starting** entries live `RUN_STALE_MS` (`shared/types.ts`) at most, in memory only, never on disk.
@@ -184,8 +186,10 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
     `order: ['home', 'home']` → 400 `order must list configured machines once each`; `order: ['Pro', 'home']` → 200 and persisted.
   - home: `label: ''` → 400 `label must be 1–24 characters`; `models: ['opus']` → 200, GET `home.models: ['opus']`.
   - unreadable file → GET `source: 'unreadable'`, `dashboards: []`; every POST → 409 naming the file; bytes unchanged.
-  - `machine(undefined)`, `machine('HOME')` → home; `machine('nope')` → `null`; `byHost('pro-mac')` → Pro; `byHost(undefined)` → `null`.
-  - `agents-origin-guard.test.ts`: add the four POSTs to its table (cross-origin → 403, non-JSON → 415, as the existing rows assert).
+  - `machine(undefined)`, `machine('HOME')` → home; `machine('nope')` → `null`; with two remotes (Pro on `pro-mac`, Studio on
+    `studio-mini`): `byHost('pro-mac')` → Pro, `byHost('studio-mini')` → Studio, `byHost('ghost')` and `byHost(undefined)` → `null`.
+  - `agents-origin-guard.test.ts`: add the four POSTs to its table (urlencoded, cross-origin JSON and `Origin: null` → 403 with no outbound call, as the existing rows
+    assert).
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/dashboards-routes.test.ts test/agents-origin-guard.test.ts` → FAIL.
 - [ ] **Step 3: Implement.** `guarded()` maps `DashboardsFileUnreadable` → 409 as `tick.controller.ts` does.
 - [ ] **Step 4: Run** → PASS; typecheck.
@@ -238,20 +242,22 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
 **Files:**
 - Create: `server/src/agents/dashboards/remote-board.util.ts`, `server/src/agents/dashboards/offers.service.ts`
 - Modify: `server/src/agents/agents.service.ts` — split `status()` into `statusOf(cfg: AgentsConfig): Promise<AgentsStatus>` with `status()` =
-  `statusOf(readAgentsConfig())`; `projectMap(cfg)` already takes a cfg — make it callable from the offers service (package-visible method). No behaviour
-  change for home.
+  `statusOf(readAgentsConfig())`; `projectMap(cfg)` already takes a cfg — make it `public`, and turn its single-slot cache (`this.cache.url === cfg.url`) into a `Map`
+  keyed by `cfg.url`, each slot with its own `PROJECT_TTL_MS`, so reading a remote never evicts home's map (`test/agents-status.test.ts` "fetches the heavy
+  project list once per TTL" must stay green). No behaviour change for home.
 - Modify: `dashboards.controller.ts` — `GET /api/dashboards/offers?project=<abs path>`
 - Test: `test/dashboards-offers.test.ts`
 
 **Interfaces:**
-- Consumes: Tasks 2–3; `projectDispatchGate` (shared/agent.ts); the items/registry lookup that today gives a project's `source` and `repo`.
+- Consumes: Tasks 2–3; `projectDispatchGate` (shared/agent.ts); `ItemsService.sourceOf(projectPath)` (items.service.ts:292) for the source, and the repo the
+  same way `ProjectSummary.repo` is built for `GET /api/projects`.
 - Produces:
   - `remoteProject(bmUrl: string, repo: string): Promise<{ path: string; interval: SyncInterval | null } | { error: string } | null>` — `null` = not
     registered; reads `GET <bmUrl>/api/projects` (an array of `ProjectSummary`).
   - `OffersService.offers(project: string): Promise<ProjectOffers>` — files project, or no remotes: home alone, `suggestion` = home when offered (basis
     `default`, no usage fetch needed). Otherwise every machine, each with its reason (Global Constraints order) and, if offered, its usage; machines in
     `order`; `suggestion` from `suggest`.
-  - `OffersService.remotePath(project: string, m: Machine): Promise<string | MachineOffer['reason']>` — used by Tasks 5–6 at launch time.
+  - `OffersService.remotePath(project: string, m: Machine): Promise<{ path: string } | { reason: string }>` — used by Tasks 5–6 at launch time.
 
 - [ ] **Step 1: Write the failing tests** (stub dashboards and remote board with in-process HTTP servers on `127.0.0.1`):
   - home-only (no file) → one machine `home`, `offered: true`, suggestion `home` basis `default`, no request to any account/profile route (Review Focus 1).
@@ -273,8 +279,9 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
 ### Task 5: Remote card dispatch
 
 **Files:**
-- Create: `server/src/agents/dashboards/remote-starting.service.ts`
-- Modify: `server/src/agents/agents.service.ts` (`dispatch`, `spawnInProject`, private `spawn`), `server/src/items/dispatch-records.service.ts`
+- Create: `server/src/orchestrator/remote-starting.service.ts` (beside `starting-runs.service.ts`, exported from `OrchestratorModule` — `AgentsModule`
+  already imports that module, so the orchestrator controller can read it in Task 6 without a module cycle)
+- Modify: `server/src/agents/agents.service.ts` (`dispatch`, `spawnInProject`, private `spawn`), `server/src/orchestrator/orchestrator.module.ts`, `server/src/items/dispatch-records.service.ts`
   (`DispatchRecord.machine: string`, `'home'` for home)
 - Test: `test/agents-dispatch-remote.test.ts`; extend `test/agents-dispatch.test.ts` with the byte-identical home case
 
@@ -295,17 +302,19 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
   - `machine: 'Nope'` → 400 `unknown machine "Nope"`.
   - `machine: 'Pro'` on a files project → 400 `Pro runs tracker projects only — <project> is files-backed`.
   - `machine: 'Pro'`, execute, `finish: 'in-place'` → 400 `finish must be pr on Pro`; `finish` absent → spawned with the pr finish clause.
-  - Pro `models: ['opus', 'sonnet']`, body `model: 'haiku'` → 400 `model "haiku" is not in Pro's list (opus, sonnet)`; `model: 'gpt-9'` → dropped, spawn
-    uses `DEFAULT_MODEL` (today's behaviour).
+  - Pro `models: ['opus', 'sonnet']`, body `model: 'haiku'` → 400 `model "haiku" is not in Pro's list (opus, sonnet)`; `model: 'gpt-9'` on Pro → 400 `model "gpt-9" is not in
+    Pro's list (opus, sonnet)`; `model: 'gpt-9'` on home → dropped, spawn uses `DEFAULT_MODEL` (today's behaviour).
   - Pro not offered (board down) → 409 `Pro is not offered for <project>: board unreachable — …`, no spawn.
   - success → spawn hits Pro's URL with `Authorization: Bearer tok-pro-456`, at Pro's `dirName` for the REMOTE path; record `machine: 'Pro'`; a second
     dispatch of the same item to `home` → 409 `<id> is already starting on Pro`.
   - `list` with `claimedHost` returning `pro-mac` for that item → entry gone; at `RUN_STALE_MS + 1` → gone.
   - groom and capture on Pro → no finish clause, no 400 (finish only applies to execute).
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/agents-dispatch-remote.test.ts test/agents-dispatch.test.ts` → new cases FAIL.
-- [ ] **Step 3: Implement.** Order in `dispatch`: existing prompt/finish validation → machine resolve (400) → remote 400s → `findItem`/`deriveAction` →
-  offers 409 → existing blocks → `remoteStarting.itemBlock` (applies to EVERY machine, home included) → `proveBaseBranch` → spawn → record → `markItem`
-  (remote only).
+- [ ] **Step 3: Implement.** Order in `dispatch`: existing prompt/finish validation → machine resolve (`unknown machine` 400) → `findItem`/`deriveAction`
+  → remote 400s (files-backed, finish, model/effort — they need the item's project) → offers 409 → gates → `remoteStarting.itemBlock` (applies to EVERY
+  machine, home included) → `proveBaseBranch` → spawn → record → `markItem` (remote only). Gates for a REMOTE launch: `status()` / `projectDispatchGate` /
+  `dispatchBlock` / the `spawnMaxPermission` ceiling read the remote's `statusOf(m.cfg)`, not home's; `syncOffBlock`, `runClaimBlock` and `itemClaimBlock`
+  run unchanged (they read this machine's tracker cache and runs). Home keeps every gate exactly as today.
 - [ ] **Step 4: Run** → PASS; typecheck.
 - [ ] **Step 5: Commit** `feat(agents): dispatch a card to a remote machine`.
 
@@ -314,9 +323,12 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
 **Files:**
 - Modify: `server/src/agents/agents.service.ts` (`orchestrate`), `server/src/agents/agents.controller.ts` (the orchestrate route: `watchdog.arm()` and
   `starting.mark()` only for home; `remoteStarting.markProject` for remote), `server/src/orchestrator/remote-runs.util.ts` (`RemoteRun.host`),
-  `server/src/orchestrator/orchestrator.controller.ts` (beside `payload.remote = this.remoteRuns.list()`, set `payload.remoteStarting`), `shared/types.ts` (`AgentOrchestrateRequest.machine?`, `OrchestratorRunsPayload.remoteStarting`,
-  `RemoteRun.host: string | null`)
-- Test: `test/agents-orchestrate-remote.test.ts`; extend `test/remote-runs.test.ts`, `test/orchestrator-starting.test.ts`
+  `server/src/orchestrator/orchestrator.controller.ts` (beside `payload.remote = this.remoteRuns.list()`, set `payload.remoteStarting`),
+  `server/src/orchestrator/orchestrator.module.ts` (also export `RemoteRunsService`, so `AgentsService` can read `list()` for the live-remote-run 409 —
+  `OrchestratorService.runs()` always answers `remote: []`), `server/src/agents/agents.service.ts:221` (`AgentOrchestrateRequest.machine?` — the type lives
+  there, not in shared), `shared/types.ts` (`OrchestratorRunsPayload.remoteStarting`, `RemoteRun.host: string | null`)
+- Test: `test/agents-orchestrate-remote.test.ts`; extend `test/remote-runs.test.ts`, `test/orchestrator-runs.test.ts` (beside the bug-57 cases —
+  `test/orchestrator-starting.test.ts` deliberately has no remote cases and stays untouched)
 
 **Interfaces:**
 - Consumes: Task 5's service and `spawnInProject` shape.
@@ -356,7 +368,10 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
   - Pro's stop answers 502 → 502 with `the claim is untouched`, no release call (Review Focus 4).
   - a record whose machine was since deleted from the file → 409 `<id> was dispatched to <machine>, which is no longer configured`, claim untouched.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/tracker-abort.test.ts` → new cases FAIL.
-- [ ] **Step 3: Implement.**
+- [ ] **Step 3: Implement** this ladder, in order: (a) a dispatch record → stop on `machine(record.machine)` (the deleted-machine 409 when `null`);
+  (b) no record and `byHost(holder.host)` finds a remote → stop on it, then release; (c) otherwise today's path unchanged — the empty-`BM_MACHINE_NAME` 409,
+  then the host-equality 409, then `dashboardSessionStatus` on home. The existing cases at `test/tracker-abort.test.ts` "refuses (409) a claim held on
+  another machine" and "refuses (409) a claim that records no host" land in (c) and keep passing unchanged.
 - [ ] **Step 4: Run** → PASS; typecheck.
 - [ ] **Step 5: Commit** `feat(agents): stop a remote card on its own machine`.
 
