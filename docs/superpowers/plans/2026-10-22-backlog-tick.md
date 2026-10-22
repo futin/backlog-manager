@@ -91,7 +91,8 @@ board's dispatch ladders, execute's refusal gate, the tick itself).
 
 **Interfaces:**
 - Produces: `export const PLAN_REVIEW_LABEL = 'plan-review'` (labels.ts); `BacklogItem.planReview?: true` — `true` or absent, never `false`, by the same rule
-  and the same conditional spread as `inReview`. Every later task reads the flag by this name.
+  and the same conditional spread as `inReview`. Every later task reads the flag by this name. Unlike `inReview`, it has two writers — `map-issue.ts` here
+  and `scan.util.ts` for files (Task 4) — and its doc comment says so.
 
 - [ ] **Step 1: Write the failing tests**
   - `tracker-labels.test.ts`: rename `describe('the ten labels')` → `describe('the eleven labels')`; `toHaveLength(10)` → `toHaveLength(11)`; new case
@@ -174,7 +175,7 @@ success prints `gh:<repo><id> awaiting plan review` / `gh:<repo><id> plan approv
 - Modify: `shared/agent.ts:477-494` (beside `IN_REVIEW_REASON` / `inReviewBlock`)
 - Modify: `server/src/agents/agents.service.ts:23,418-421,500-504`
 - Modify: `client/src/components/board/DispatchButton.tsx:1,45,170-172`
-- Test: `test/items.test.ts`, `test/agents-shared.test.ts`, `test/agents-dispatch.test.ts`, `test/dispatch-button.test.tsx`
+- Test: `test/items.test.ts`, `test/agents-shared.test.ts`, `test/tracker-dispatch.test.ts`, `test/agents-dispatch.test.ts`, `test/dispatch-button.test.tsx`
 
 **Interfaces:**
 - Consumes: `BacklogItem.planReview` (Task 1).
@@ -188,10 +189,12 @@ re-check at `:503`, `DispatchButton.tsx:172`).
 - [ ] **Step 1: Write the failing tests**
   - `items.test.ts`: `plan-review: true` → `planReview: true`; `plan-review: yes` → `true`; `plan-review: false` → key absent; no line → key absent.
   - `agents-shared.test.ts`: `planReviewBlock({ planReview: true })` → `'this plan awaits review'`; absent → `null`.
-  - `agents-dispatch.test.ts`: dispatching a `planReview: true` item is refused with `this plan awaits review` (the same status the in-review refusal case
-    asserts); an item with both flags is refused with the **in-review** reason (order pinned).
+  - `tracker-dispatch.test.ts`, beside the in-review pair at `:257-265`: a `plan-review`-labelled issue → `/api/agents/plan` answers `blocked: 'this plan
+    awaits review'`, `/api/agents/dispatch` 409s with it and spawns nothing; an issue with both labels → the **in-review** reason (order pinned).
+  - `agents-dispatch.test.ts`: a files item whose fixture frontmatter has `plan-review: true` → dispatch 409 with `this plan awaits review` — the one
+    end-to-end proof of the `scan.util.ts` read.
   - `dispatch-button.test.tsx`: a `planReview` item renders Run disabled with the reason as its title/tooltip, the way the in-review case asserts.
-- [ ] **Step 2: Run** `pnpm run test:jest -- items agents-shared agents-dispatch dispatch-button` — FAIL.
+- [ ] **Step 2: Run** `pnpm run test:jest -- items agents-shared tracker-dispatch agents-dispatch dispatch-button` — FAIL.
 - [ ] **Step 3: Implement**; extend `DispatchButton.tsx`'s header comment (line ~45) to name the new rung and its DESIGN.md subsection as the in-review one does.
 - [ ] **Step 4: Run** the same plus `pnpm run typecheck` — PASS.
 - [ ] **Step 5: Commit** `feat(agents): plan-review blocks dispatch on board and server`.
@@ -220,8 +223,9 @@ carries both marks the reasons read `[IN_REVIEW_REASON, PLAN_REVIEW_REASON, …]
   - `plan on a tracker project gates a planReview issue` — `apiItem(project, 3, { planReview: true })` gated with the reason first; `apiItem(project, 4)`
     ready.
   - `in-review and plan-review together list both reasons, in-review first`.
-  - `the hand-kept PLAN_REVIEW_REASON matches shared/agent.ts` — read `shared/agent.ts` as text and assert it contains `PLAN_REVIEW_REASON = 'this plan
-    awaits review'` (copy whatever the existing in-review twin test does, if one exists).
+  - The twin guard lives in jest, beside the in-review one at `test/agents-shared.test.ts:826-838`: add `is the same sentence the orchestrator gate carries
+    by hand` for `const PLAN_REVIEW_REASON = '${PLAN_REVIEW_REASON}';` in `orchestrate.mjs`. Run it with `pnpm run test:jest -- agents-shared` in Step 4.
+    (Its SKILL.md sibling belongs to Task 6, so no commit carries a red test.)
 - [ ] **Step 2: Run** `node --test skills/backlog-orchestrate/tools/orchestrate.test.mjs` — FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** the same — PASS.
@@ -256,7 +260,9 @@ Execute:
 - `[backlog-tick]` is not `[orchestrator-run`: execute owns its git here.
 
 - [ ] **Step 1: Edit** both SKILL.md files (and references) as above; every command path written as `${CLAUDE_PLUGIN_ROOT}/skills/...`.
-- [ ] **Step 2: Run** `pnpm run test:jest -- skill-plugin-root skills-plugin-root` — PASS.
+- [ ] **Step 2: Add** to `test/agents-shared.test.ts`, beside `:836-838`, `is the same sentence backlog-execute refuses with` for `PLAN_REVIEW_REASON`
+  against `skills/backlog-execute/SKILL.md` (whitespace-collapsed, as the sibling does). Run `pnpm run test:jest -- skill-plugin-root skills-plugin-root
+  agents-shared` — PASS.
 - [ ] **Step 3: Commit** `feat(skills): [backlog-tick] marker in groom and execute; execute refuses plan-review`.
 
 ### Task 7: `tick-lib.mjs` and `tick-state.mjs`
@@ -281,7 +287,8 @@ Execute:
 - `orderGroom(items): same[]` — bugs by number, then refactors by number.
 
 `tick-state.mjs` — the only writer under `tickHome()`; every write is tmp-file + rename:
-- `type Lock = { host: string, verdict: { kind: 'execute' | 'groom', id: string }, at: string /* ISO */ }`
+- `type Lock = { host: string, verdict: { kind: 'execute' | 'groom', id: string }, base: string, at: string /* ISO */ }` — `base` is the resolved `<base>`
+  `decide` read, so `record` and recover hash the same blob `decide` compared against.
 - `lockState(dir: string, now: number, ttlMs: number): { state: 'free' } | { state: 'held', lock: Lock } | { state: 'stale', lock: Lock }` — an unreadable
   or malformed lock file reads as `stale` (with whatever fields parsed), never as free.
 - `writeLock(dir: string, lock: Lock): boolean` — exclusive create (`wx`); `false` when a lock already exists. Creates `dir` as needed.
@@ -349,14 +356,15 @@ Execute:
 3. `lockState`: `held` → `busy`, `another tick`. `stale` → **recover** (below) and return.
 4. Busy, each its own reason: `run.json` under `projectDir(orchHome(), root)` with status `running`/`paused` → `orchestrator run <status>`; with the API
    reachable, a `starting` entry whose project is `root` → `orchestrator run starting`; tracker only, a `remote` entry with `fresh: true`, this repo, status
-   `running`/`paused` → `remote run`; files: any open item, in the main checkout or in a linked worktree **not under `<root>/.worktrees/`**, whose `started:`
+   `running`/`paused` → `remote run`; files: any open item, in the main checkout or in a linked worktree **not under `<root>/.worktrees/`** (deliberately all of them, broader than the spec's two kinds), whose `started:`
    is non-empty → `started marker on <id>` (tree path in the reason when not the main checkout); tracker: an item of this project with a `holder` whose
    `heartbeat` is younger than 15 minutes → `live claim on <id>`.
 5. Execute, when `openPrs < M`: the first item of `orderExecute(open bugs + tasks)` that is groomed, unmarked (`plan-review`, `in-review`), has no branch
    `refs/heads/execute/<id>` and no `<root>/.worktrees/execute-<id>`, and `!isSkipped(record, hash)`. **Files read `<base>`**: the item's blob via `git show
    <base>:<rel path>` (absent → not a candidate), and `groomed`, `runner-fix`, `plan-review` and the hash all come off that blob. Tracker reads `GET
-   /api/items` (filtered to this project) and the hash from `GET /api/items/body`. `<base>` = `--base`, else `origin/HEAD`'s branch, else `main`. The `<id>`
-   in the branch and path checks is the id exactly as passed to execute.
+   /api/items` (filtered on `projectPath === <root>`, never the display name) and the hash from `GET /api/items/body`. `<base>` = `--base`, else `origin/HEAD`'s branch, else `main`. The `<id>`
+   in the branch and path checks is execute's own: a files id as is (`bug-1`), a tracker id as the **bare issue number** (`#12` → `execute/12`,
+   `.worktrees/execute-12`; `skills/backlog-execute/references/pr-mode.md:15`).
 6. Groom, when `planReview < N`: count = open items of any section carrying the mark (files: **working tree**; tracker: API `planReview`); candidate = the
    first of `orderGroom(open bugs + refactors)` that is an ungroomed bug or a refactor, has no `started:` (files) and `!isSkipped` (files: working-tree hash).
 7. Otherwise `idle`, reason joining what each step said: e.g. `nothing to do: 2 open execute PRs (cap 2); no ungroomed bug or refactor`.
@@ -364,11 +372,13 @@ Execute:
 
 **Recover** (stale lock): `recordOutcome(id, failed, kind, 'killed at timeout', hash)`; `removeLock`; `stop` = files **and** lock kind `groom` **and** the
 item in the main checkout has `started:` with `phase: groom`; verdict `recover`, reason `recovered a killed <kind> on <id>`. Nothing else this tick (one unit
-per tick). `--dry-run` reports the same verdict and writes nothing.
+per tick). `--dry-run` reports the same verdict and writes nothing. A stale lock without a parseable `verdict.id` and `verdict.kind` is `removeLock` only:
+nothing recorded, `stop: false`, no `id`, reason `removed an unreadable lock`.
 
 `--dry-run`: every branch above, but no lock write, no record, no lock removal; `dryRun: true`.
 
-Which text is hashed, wherever a hash is taken (`decide`'s skip check, `record`, recover): files `execute` → the item's blob at `<base>`; files `groom` → the
+Which text is hashed, wherever a hash is taken (`decide`'s skip check, `record`, recover): files `execute` → the item's blob at `<base>` — for `record`
+and recover, the `base` stored in the lock, never a re-resolved default; a blob absent at that ref hashes as the empty string — files `groom` → the
 working-tree file; tracker, either kind → the issue body from `GET /api/items/body`. A Jira live session is never consulted (spec: not a busy signal).
 
 Test harness: each case builds a temp git repo (main + optional linked worktree), sets `BM_TICK_HOME`, `BM_ORCH_HOME`, `BM_API_PORT` (a local
@@ -393,9 +403,12 @@ from `orchestrate.test.mjs:7290-7380`.
       verdict falls through to groom/idle.
     - `uncommitted item is not a candidate` — ready bug present only in the working tree → not picked.
     - `existing execute branch or worktree skips the item` — `refs/heads/execute/bug-1` exists → `bug-2` picked; same with only `.worktrees/execute-bug-1`.
-    - Tracker `#12` with `inReview: true` skipped; `planReview: true` skipped; branch `execute/#12` exists → skipped.
+    - Tracker `#12` with `inReview: true` skipped; `planReview: true` skipped; branch `execute/12` exists → `#12` skipped (and a branch `execute/#12`
+      does not skip it).
     - `failed record with the same hash skips; an edited item is eligible again`.
     - `--base develop` → `args` `bug-1 --finish pr --base develop [backlog-tick]`, and the candidate is read from `develop`, not `main`.
+    - `record hashes at the lock's base` — bug-1 differs between `main` and `develop`; `decide --base develop` → `record bug-1 failed --kind execute` →
+      `decide --base develop` skips bug-1.
   - Caps: `gh` lists 2 `execute/*` heads and 1 `feature/x` with M=2 → execute capped (`openPrs: 2`), groom runs; M=3 → execute.
     `gh failure caps execute but not groom` — fake `gh` exits 1 → reason contains `cannot count open PRs`, verdict `groom`; a 500-element list → same.
   - Groom: `ungroomed bug before refactor` → `groom`, `args` `bug-4, plan the fix [backlog-tick]`; only a refactor → `ref-2, promote it to a task
@@ -404,7 +417,8 @@ from `orchestrate.test.mjs:7290-7380`.
   - `nothing to do` — all caps full → `idle`, reason naming both caps.
   - Recover: stale `groom bug-3` lock + `bug-3` has `started:`/`phase: groom` → `recover`, `stop: true`, `state.json` has `bug-3` failed `killed at timeout`,
     no lock; same with `phase: execute` → `stop: false`; stale `execute bug-3` → `stop: false`; tracker stale `groom #3` → `stop: false`; `--lock-ttl 1`
-    with a 2-minute-old lock → `recover`; dry-run recover writes nothing.
+    with a 2-minute-old lock → `recover`; dry-run recover writes nothing; a lock file holding `not json` → `recover`, reason `removed an unreadable lock`,
+    `state.json` untouched, no lock afterwards.
   - `record` — `record bug-1 failed --kind execute --reason "tests red"` stores the hash of the `<base>` blob and releases a `bug-1` lock; `record bug-2 ok
     --kind groom` with a `bug-1` lock leaves the lock and says so on stderr; bad outcome word → exit 1.
   - `status --json` lists newest first; `forget bug-1` → exit 0 and the next `decide` may pick it; `forget` on an unknown id → exit 1.
@@ -418,7 +432,8 @@ from `orchestrate.test.mjs:7290-7380`.
 
 **Files:**
 - Create: `skills/backlog-tick/SKILL.md`
-- Test: `test/skill-plugin-root.test.ts`, `test/skills-plugin-root.test.ts` (existing guards)
+- Modify: `test/skill-plugin-root.test.ts:29` (`toBe(7)` → `toBe(8)`), `test/skills-plugin-root.test.ts:38-40` (add `'backlog-tick'` to the `it.each` list,
+  "seven" → "eight" in its comment)
 
 Frontmatter `name: backlog-tick`, a description that says: one unattended unit of backlog work per scheduled tick, run by a dashboard job, idle-gated,
 execute first then groom, never merges or asks; `Trigger: /backlog-tick`. Body, in this order:
@@ -434,7 +449,7 @@ execute first then groom, never merges or asks; `Trigger: /backlog-tick`. Body, 
 Builder calls recorded in the skill (spec "Left to the builder"): a `failed` tick still ends as an ordinary result — the run log is the signal, and a push per
 failed night would be noise; there is no `blocked` outcome — a failure that was the environment's fault is cleared with `tick.mjs forget <id>`.
 
-- [ ] **Step 1: Write** the SKILL.md (target ≤ 120 lines; the story behind each rule belongs in the spec, not here).
+- [ ] **Step 1: Write** the SKILL.md (target ≤ 120 lines; the story behind each rule belongs in the spec, not here), and bump the two guards above.
 - [ ] **Step 2: Run** `pnpm run test:jest -- skill-plugin-root skills-plugin-root` — PASS.
 - [ ] **Step 3: Try it by hand** in this repo: `node skills/backlog-tick/tools/tick.mjs decide --dry-run` prints one JSON line and leaves no lock under
   `~/.backlog-manager/tick/`.
@@ -446,10 +461,10 @@ failed night would be noise; there is no `blocked` outcome — a failure that wa
 - Modify: `CLAUDE.md` (line 3 skill count and list; Layout `skills/` bullet — add `skills/backlog-tick/` and that `tick.mjs` owns `~/.backlog-manager/tick/`;
   line 39 "nine guarded write routes" → "ten"; lines 117/119/120 "ten" → "eleven" and the anchor; the three new invariant headlines)
 - Modify: `.claude/rules/items.md:7,12,29`, `.claude/rules/tracker.md:80`, `.claude/rules/skills.md:30` (and the frontmatter-keys rule's mechanism text naming
-  `plan-review:` as a non-lifecycle gate key); a home for the three new rules in whichever rules file's `paths:` covers `skills/backlog-tick/**` (add the
-  glob if none does)
+  `plan-review:` as a non-lifecycle gate key); the three new rules' home is `.claude/rules/skills.md`, whose `paths: ["skills/**", "agents/**"]` already
+  covers `skills/backlog-tick/**`
 - Modify: `docs/subsystems/invariants.md:473,3076,3171,3448,3464,4067` + three new sections; `docs/subsystems/api.md:53,113`; `docs/subsystems/skills.md`
-  (a `backlog-tick` section); `docs/overview.md:22`; `skills/backlog/SKILL.md` ("a closed ten" → eleven, and the `plan-review` verb); `.claude-plugin/plugin.json`
+  (a `backlog-tick` section, and its line 3 "Seven skills … four CLIs"); `docs/overview.md:22`; `README.md:3` ("six backlog skills"); `skills/backlog/SKILL.md` ("a closed ten" → eleven, and the `plan-review` verb); `.claude-plugin/plugin.json`
   description
 - Test: `test/claude-rules.test.ts`
 
