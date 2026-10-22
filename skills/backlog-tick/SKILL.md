@@ -60,8 +60,8 @@ Decide `ok` or `failed` from what the skill left behind, never from how confiden
 | `groom` | the item is groomed afterwards (below) | anything else, a skill that wrote nothing included — same reason |
 
 A groom is `ok` only when the item is groomed AND carries the `plan-review` mark: a **bug** has `## Cause` and `## Fix` filled, neither "unknown", and the
-mark; a **refactor** was promoted to a task that has a plan and the mark. Anything else is `failed` — a bug groom that ends still ungroomed, recorded `ok`, would be
-re-picked every tick, and an unmarked plan would be executed unseen. Read it back, read-only, on the bug's id, or on the new task id the groom printed:
+mark; a **refactor** was promoted to a task that has a plan and the mark. Anything else is `failed` — a bug groom that ends still ungroomed, recorded `ok`,
+would be re-picked every tick, and an unmarked plan would be executed unseen. Read it back, read-only, on the bug's id, or on the new task id the groom printed:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show '<id>' --json
