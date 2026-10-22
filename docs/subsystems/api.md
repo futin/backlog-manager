@@ -1,10 +1,11 @@
 # The API
 
-Nest, one process, every route under `/api`. It owns eight things: reading the registry, listing each registered project's items through whichever source owns
+Nest, one process, every route under `/api`. It owns nine things: reading the registry, listing each registered project's items through whichever source owns
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
-boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), and — behind a switch that is off
-by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are four files under
-`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, `tracker-sync.json` and, since Jira phase 2, `jira.json`. Its writes to
+boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
+by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are five files under
+`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, `tracker-sync.json`, since Jira phase 2 `jira.json` and, for the tick
+breaker, `tick.json`. Its writes to
 Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
@@ -276,6 +277,26 @@ handed `runGit` as its git port, so every launch — the memo key's `rev-parse` 
 `current: null` with the releases kept, an origin that is not GitHub (or none) drops `url`. The memo is keyed by HEAD and the mtimes of `packed-refs` and
 `refs/tags` under the common git dir — a linked worktree's own git dir holds no tags — and a read in which a deciding call failed is never memoised.
 
+### `tick/` — the tick breaker's board
+
+`GET /api/ticks` answers `{ config, projects }` (`shared/types.ts`'s `TicksPayload`). It reads `$BM_TICK_HOME` (else `~/.backlog-manager/tick/`) fresh on every
+call and caches nothing, and it writes nothing there: the tick home's one writer is `skills/backlog-tick/tools/tick.mjs`. One row per project directory; the
+name is the directory's `decodeURIComponent` (the project's absolute main-checkout path), and a directory whose name does not decode, decodes to a relative path
+or does not re-encode to itself is skipped rather than failing the list. A row is `{ root, name, streak, halted, haltedSince?, resetAt?, lock, recent, error? }`
+— `name` is the registry's, else the path's basename; `lock` is the lock file's `{ kind, id, host, at }` or `null`; `recent` is `state.json`'s records newest
+first; `error` is set, with `recent` empty, when `state.json` exists and cannot be read. `streak`, `halted` and `haltedSince` come from `streakOf` in
+`tick-breaker.util.ts`, the server's copy of the rule `tick.mjs decide` applies, and `config` is `{ haltAfter, source: 'file' | 'default' | 'unreadable', error?
+}` — `unreadable` reports `haltAfter` 3 for display only. `tick/` is not an outbound-calling module: files only, no network.
+
+Two POSTs, both behind `SameOriginPostGuard` (content-type and origin, like every agents POST) and the only writes this module makes. `POST /api/ticks/config`
+`{ haltAfter }` is a `400` for anything but an integer, clamps to `TICK_HALT_LIMITS` (1–10), and answers the new `TicksPayload`. `POST /api/ticks/reset` `{
+project }` is a `400` for anything but an absolute-path string, a `404` when the tick home has no directory for it, and otherwise stamps `resetAt[project] =
+max(now, the newest parseable at in its recent)` into `settings/tick.json` and answers the new payload; it is allowed in every state and touches no lock. Both
+are a `409` naming the file when `tick.json` exists and cannot be read — `TickFileUnreadable`, thrown before any write, so the file is left byte-identical. The
+write itself (`writeTickFile`) is a temp file in the same directory plus a `rename`, with `resetAt` merged key by key. The invariants are
+[`tick.json`'s](invariants.md#tickjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced) and [the
+halt's](invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it).
+
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 
 `GET /api/health` is a plain liveness check. `static.ts` serves `client/dist` only when it has been built — registering the static module against a missing
@@ -300,6 +321,8 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
 - **`api.atlassian.com`** — reached only from `jira/`, through the gateway path `/ex/jira/<cloudId>/rest/api/3`, with Basic credentials read per call from
   `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN`, and never by the browser. Two calls go to the site itself (`https://<BM_JIRA_SITE>`): the unauthenticated `tenant_info`
   that yields the `cloudId`, and the one `myself` probe that tells a classic token from a scoped one.
+- **The tick home** — `~/.backlog-manager/tick/`, read fresh per request by `tick/` and never written by this server; its only writer is `tick.mjs`. The one
+  file this server writes for the breaker is `~/.backlog-manager/settings/tick.json`, beside the watchdog config.
 - **The client** — same-origin `fetch` against these routes, plus the built bundle when `static.ts` finds one.
 - **A Lookout hub** — polls `/api/hub/widgets` server-side over the tailnet, read-only; the existing `.ts.net` Host allowance is what admits it.
 

@@ -23,7 +23,8 @@ paths: ["skills/**", "agents/**"]
   `paused` run, and nothing else: no `run.json`, no control file, no sidecar. The tool is self-contained by the same rule every skill's is: it imports nothing
   from another skill's `tools/`, from `server/` or from `shared/`, and shells out to neither `orchestrate.mjs` nor `backlog.mjs`, so every rule it shares with
   one of them is a TWIN whose comment names the original, and a prune of one skill never breaks another. It writes no git either — every git call is a read.
-  Why: [invariants.md](docs/subsystems/invariants.md#backlog-managertick-has-exactly-one-writer-and-the-tick-never-writes-run-state)
+  The server reads this directory too (`GET /api/ticks`, the board's Runs › Ticks page) and writes none of it: a Reset is a stamp in `settings/tick.json`, never a
+  file here. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managertick-has-exactly-one-writer-and-the-tick-never-writes-run-state)
 - **A tick does at most one unit of work, only when the project is idle, and never executes a plan that still carries `plan-review`.** `tick.mjs decide` prints
   ONE verdict — `execute`, `groom`, `recover`, `busy` or `idle` — and writes the lock only for the first two; the skill carries that verdict out in its own
   session and ends with `record`, which releases it. Busy is any of: a `running` or `paused` orchestrator run, a board-started run with no run file yet (read
@@ -44,6 +45,20 @@ paths: ["skills/**", "agents/**"]
   then runs `backlog.mjs stop <id> --abandon` on that one id. A tracker claim is never cleared by a tick (it goes stale after 15 minutes and the next `start`
   retires it), an execute's marker lives in `.worktrees/execute-<id>` and is never touched, and every other marker is a person's or another session's and keeps
   blocking the project. Why: [invariants.md](docs/subsystems/invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)
+- **A tick halt is derived from `state.json`'s `recent` and the reset time, never stored, and only a person's Reset clears it.** `streakOf(recent, resetAt)` in
+  `skills/backlog-tick/tools/tick-breaker.mjs` walks `recent` newest first: an `at` that does not parse (`Date.parse` NaN) stops the walk, checked BEFORE the
+  outcome; an `at` at or before `resetAt` stops it; `ok` stops it; `failed` counts; any other outcome neither counts nor stops. `since` is the oldest counted
+  `at`, and halted is `streak >= haltAfter` (`haltAfter` an integer 1–10, default 3, from `tick.json` via `readTickSettings`). Nothing writes a `halted` flag, so
+  lowering N below a streak halts at the next `decide` and raising it un-halts; groom and execute failures count together, a `recover`'s `killed at timeout`
+  counts, and `forget <id>` leaves `recent` alone (it is the per-item retry, Reset the per-project one). `decide` checks it as step 3b — after the lock and
+  `recover` steps, before any API read — and answers `idle`, reason `halted: <streak> failures in a row (halt after <N>) — reset on the board, Runs › Ticks`, so
+  a halted project costs one call and no API traffic and the check works with the stack down; a stale lock is still recovered while halted, and an unreadable
+  `tick.json` is `idle` too (`<path> unreadable — fix or remove it by hand`), never a default. `status` prints `breaker: N of M failures in a row` or `breaker:
+  HALTED — N failures in a row (halt after M) since <at>`, plus ` (reset <resetAt>)`, and `status --json` carries `breaker: { streak, haltAfter, halted, resetAt,
+  settings }`. The rule has TWO copies — `tick-breaker.mjs` and `server/src/tick/tick-breaker.util.ts` — because a skill's `tools/` never imports `server/` or
+  `shared/`; the same `streakOf` table is pinned row for row in `tick-breaker.test.mjs` and `test/tick-breaker.test.ts`, and a change to one is a change to both.
+  Reset is a `resetAt` stamp the server writes — `max(now, newest parseable at)` — and the tool never writes `tick.json`. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it)
 - **`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `jira.mjs worktree`.**
   The marker decides the mode — absent or `{"kind":"files"}` runs today's synchronous code byte for byte and makes no HTTP request on any verb;
   `{"kind":"github"}` with a valid repo routes every command through `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming

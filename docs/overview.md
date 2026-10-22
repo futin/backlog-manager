@@ -25,7 +25,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
 | [workflows/ci.md](workflows/ci.md)                   | the PR gate: `ci / checks`, `ci / pr-title`, `ci / skills` from release-kit, and the `main-pr-only` ruleset             |
 
-`.claude/rules/` sits beside that table rather than in it: ten path-scoped files that a session loads automatically when it reads a file under their `paths:`
+`.claude/rules/` sits beside that table rather than in it: eleven path-scoped files that a session loads automatically when it reads a file under their `paths:`
 glob, each the one home of the mechanism text for the rules scoped to its paths — CLAUDE.md keeps the headlines, `subsystems/invariants.md` the reasoning. They
 are guarded by `test/claude-rules.test.ts` rather than by `/docs-sync`, because what can rot in them is mechanical: a dead anchor, a glob that matches nothing,
 a headline that no longer matches CLAUDE.md's, an anchor homed in two files or in none.
