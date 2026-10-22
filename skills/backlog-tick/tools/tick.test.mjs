@@ -500,26 +500,31 @@ test('failed record with the same hash skips; an edited item is eligible again',
   assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-1');
 });
 
-// A failure is a judgement about one KIND of work on those bytes. A groom judged failed (on a tracker, most often a plan the label never reached) must not keep
-// the same item off the execute queue once a person has approved it — on a tracker the approval moves a label, not the body, so the hash still matches.
-test('a failed groom with the same hash does not keep the item off the execute queue', async (t) => {
+// A groom judged failed — most often a plan that read back without the `plan-review` mark — keeps the item off the EXECUTE queue too while the bytes are
+// unchanged: that plan is one nobody reviewed, and executing it is the thing the mark exists to stop. A person who has reviewed it runs `forget`.
+test('a failed groom with the same hash keeps the item off the execute queue until forget', async (t) => {
   const fx = project(t);
   item(fx, 'bug-1', BUG_READY);
   commitAll(fx.root);
   assert.equal((await tick(fx, ['record', 'bug-1', 'failed', '--kind', 'groom', '--reason', 'no mark'])).status, 0);
   // the premise: the groom's hash (working tree) is the execute's hash (`<base>` blob)
   assert.equal(readJson(fx.stateFile).items['bug-1'].hash, contentHash(git(fx.root, 'show', 'main:backlog/bugs/open/bug-1-thing.md')));
+  assert.equal((await decide(fx, ['--dry-run'])).verdict, 'idle');
+  assert.equal((await tick(fx, ['forget', 'bug-1'])).status, 0);
   assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-1');
 });
 
-test('tracker: a failed groom with the same hash does not keep the issue off the execute queue', async (t) => {
+test('tracker: a failed groom with the same hash keeps the issue off the execute queue', async (t) => {
   const fx = project(t, { tracker: true });
   const body = '## Cause\n\nc\n\n## Fix\n\nf\n';
   fs.mkdirSync(fx.lockDir, { recursive: true });
   const rec = { outcome: 'failed', kind: 'groom', reason: 'no mark', at: ago(MIN), hash: contentHash(body) };
   fs.writeFileSync(fx.stateFile, JSON.stringify({ items: { '#12': rec }, recent: [] }));
   const routes = trackerRoutes([apiItem(fx, 12)], { bodies: { 'gh:futin/x#12': body } });
-  assert.equal((await withApi(routes, (port) => decide(fx, ['--dry-run'], { port }))).id, '#12');
+  assert.equal((await withApi(routes, (port) => decide(fx, ['--dry-run'], { port }))).verdict, 'idle');
+  // an edited body is a new situation
+  const edited = trackerRoutes([apiItem(fx, 12)], { bodies: { 'gh:futin/x#12': body + 'more\n' } });
+  assert.equal((await withApi(edited, (port) => decide(fx, ['--dry-run'], { port }))).id, '#12');
 });
 
 /** main has bug-1 as `mainBody`, develop as `developBody`; the checkout is left on main. */

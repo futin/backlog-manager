@@ -87,6 +87,8 @@ cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" r
 
 A `failed` outcome skips that item until its content changes, so one bad item cannot take every night's slot. There is no `blocked` outcome: a failure that was
 the environment's fault — the stack down, `gh` signed out — is cleared with `tick.mjs forget '<id>'`, run by a person and never by this session.
+A `failed` groom also keeps that item off the execute queue until its content changes, since its plan may be one nobody reviewed; once a person has reviewed
+it, `tick.mjs forget '<id>'` makes the item eligible again.
 
 ## 4. Final message
 

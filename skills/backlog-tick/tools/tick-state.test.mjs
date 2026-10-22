@@ -149,15 +149,16 @@ test('readState: missing file is empty, a malformed one throws and is left untou
   assert.equal(fs.readFileSync(file, 'utf8'), '{"items":[],"recent":{}}');
 });
 
-test('isSkipped is true only for a failed record of the same kind whose hash still matches', () => {
+test('isSkipped is true for a failed record of the same kind, or a failed groom, whose hash still matches', () => {
   const failed = { outcome: 'failed', kind: 'execute', reason: 'x', at: AT, hash: 'h1' };
   assert.equal(isSkipped(failed, 'h1', 'execute'), true);
   assert.equal(isSkipped(failed, 'h2', 'execute'), false);
   assert.equal(isSkipped({ ...failed, outcome: 'ok' }, 'h1', 'execute'), false);
   assert.equal(isSkipped(undefined, 'h1', 'execute'), false);
   assert.equal(isSkipped({ ...failed, hash: undefined }, 'h1', 'execute'), false);
-  // a failure of one kind of work never skips the other kind on the same bytes
-  assert.equal(isSkipped({ ...failed, kind: 'groom' }, 'h1', 'execute'), false);
+  // a failed groom blocks execute on the same bytes too (its plan may be one nobody reviewed); a failed execute never blocks a groom
+  assert.equal(isSkipped({ ...failed, kind: 'groom' }, 'h1', 'execute'), true);
+  assert.equal(isSkipped({ ...failed, kind: 'groom' }, 'h2', 'execute'), false);
   assert.equal(isSkipped(failed, 'h1', 'groom'), false);
   assert.equal(isSkipped({ ...failed, kind: 'groom' }, 'h1', 'groom'), true);
 });

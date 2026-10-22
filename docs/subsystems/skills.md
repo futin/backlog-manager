@@ -209,9 +209,10 @@ off`, or delete-and-commit on a files project. A tick's groom never promotes an 
 this way: [invariants.md](invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review).
 
 **State lives in `~/.backlog-manager/tick/<project-key>/`** (`$BM_TICK_HOME`): a `lock` and a `state.json` recording each item the tick failed on by content
-hash, so an item that cannot be done is skipped until it changes — by the same kind of unit only, so a failed groom never holds back the execute of the plan a
-person then approved. `decide` refuses a linked worktree; `record`, `status` and `forget` follow one to its main checkout, because an execute's `--finish pr`
-leaves the session inside its own tree, and `record` exits `3` when the lock names another id. The tool is self-contained — it imports from no other skill, `server/` or `shared/`, runs
+hash, so an item that cannot be done is skipped until it changes — by the same kind of unit, except that a failed groom holds back execute too, because its
+plan may be one nobody reviewed; a person who has reviewed it runs `forget`. `decide` refuses a linked worktree; `record`, `status` and `forget` follow one
+to its main checkout, because an execute's `--finish pr` leaves the session inside its own tree, and `record` exits `3` when the lock names another id. The tool
+is self-contained — it imports from no other skill, `server/` or `shared/`, runs
 neither `orchestrate.mjs` nor `backlog.mjs`, and writes no git — and the twins it carries name their originals. A killed tick's lock is recovered by the next
 one, and the only marker it ever clears is the groom `started:` its own stale lock proves was its own
 ([invariants.md](invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)); the ownership rule is
