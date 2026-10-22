@@ -251,7 +251,7 @@ describe('SettingsView', () => {
 
     /*
       No in-page switch, at any width — the rail's tree is the only thing that
-      moves between these two pages, the same rule Runs' two pages follow since
+      moves between these two pages, the same rule Runs' three pages follow since
       task-38. The dashboard this pattern was ported from DOES show a pill
       switch in the band below 700 px; this board does not, because the rail's
       trees stand open at that width and a second control here would be a

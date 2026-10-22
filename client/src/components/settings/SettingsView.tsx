@@ -193,7 +193,7 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
           a truthful heading.
 
           There is no in-page control that moves between these two, at any
-          width. The rail's tree is the only one, the same rule Runs' two pages
+          width. The rail's tree is the only one, the same rule Runs' three pages
           follow since task-38; a second control here would be a second wording
           free to disagree with the tree's. */}
       {shared ? <SharedPage onOpenWatchdog={onOpenWatchdog} /> : <LocalPage />}

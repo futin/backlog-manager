@@ -292,10 +292,10 @@ recovers nothing it cannot prove.
 `~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is `{ "haltAfter": <int>, "resetAt": { "<abs main-checkout path>": "<ISO>" } }` — how many
 failed ticks in a row halt a project, and when a person last Reset each one. It is the fourth file the server owns under `settings/` and it keeps the
 relationship the other three have with their reader: the server writes it (`writeTickFile`, the only write path, behind `POST /api/ticks/config` and `/reset`),
-and `tick.mjs` reads it (`readTickSettings`) and nothing else does. It lives under `settings/` for the reason `watchdog.json` does, though it is not a watchdog
-setting: that directory is the one read-write mount the container has, and the tick home beside it is deliberately read-only to the server. One file holds both
-the number and the resets because they have the same writer and the same reader; `orchestrator-control/` is split per project only because its reader is per
-run.
+and `tick.mjs` reads it (`readTickSettings`) for `decide` and `status`, while the server reads it only to answer `GET /api/ticks` and to merge its own write. It
+lives under `settings/` for the reason `watchdog.json` does, though it is not a watchdog setting: that directory is the one read-write mount the container has,
+and the tick home beside it is deliberately read-only to the server. One file holds both the number and the resets because they have the same writer and the
+same reader; `orchestrator-control/` is split per project only because its reader is per run.
 
 **A file that cannot be read is never replaced, and it is a stricter reading than `jira.json`'s.** `jira.json` reads a parsed non-object as empty, because there
 is nothing in it to lose. Here a person who has hand-edited their way to `[]` or `null` is an edit in flight, and reading it as "3, no resets" would silently
