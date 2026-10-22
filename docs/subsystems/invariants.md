@@ -3638,8 +3638,8 @@ after a landed add leaves the hold on the old body, the safe direction. The patc
 tick needs because it reads the item back at once. A REMOVAL stays after the patch, is checked the same way (a 404 is success), and is followed by a re-read,
 because neither label endpoint answers the issue. Not `labels` in the PATCH: that replaces the set and would race a claim's `in-progress` and the driver's
 `orchestrator:queued`. This route only moves the label, so it has no order to keep; it re-reads after a landed change too.
-The body route can only ADD it — approval is this route with `false`, said once, in one place (`backlog.mjs
-plan-review <id> on|off`). Every per-item gate reads the mapped `planReview` flag through one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
+The body route ADDs it with `true` and removes it with `false`, but only as part of a plan write; approval on its own is this route with `false`, said once, in
+one place (`backlog.mjs plan-review <id> on|off`). Every per-item gate reads the mapped `planReview` flag through one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
 `shared/agent.ts`, with a hand-kept copy in `orchestrate.mjs`), always after `inReview`'s. A files project carries the mark as a `plan-review: true` frontmatter
 line instead, so this route, like `review`, is tracker-only.
 
