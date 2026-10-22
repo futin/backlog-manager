@@ -228,7 +228,7 @@ carries both marks the reasons read `[IN_REVIEW_REASON, PLAN_REVIEW_REASON, …]
     (Its SKILL.md sibling belongs to Task 6, so no commit carries a red test.)
 - [ ] **Step 2: Run** `node --test skills/backlog-orchestrate/tools/orchestrate.test.mjs` — FAIL.
 - [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** the same — PASS.
+- [ ] **Step 4: Run** the same, then `pnpm run test:jest -- agents-shared` — PASS.
 - [ ] **Step 5: Commit** `feat(orchestrate): queue gates out plan-review items`.
 
 ### Task 6: The `[backlog-tick]` marker in groom and execute
@@ -348,6 +348,10 @@ Execute:
   - `tick.mjs forget <id>` — drops the item's record, so the next tick may pick it again (the escape hatch for a failure that was the environment's fault);
     exit 1 when there was nothing to forget.
 
+`<root>` throughout: the nearest directory at or above `path.resolve(process.cwd())` that holds a `.git` entry — a twin of `resolveProjectRoot`
+(`orchestrate.mjs:762`), **never realpath'd** and never `git rev-parse --show-toplevel` (which realpaths, `/var` → `/private/var` on macOS), because the
+registry `projectPath` and the run-state key are compared as raw strings everywhere in this app.
+
 `decide`, in this order (first match wins):
 
 1. `git rev-parse` fails → `idle`, `not a git repository`. `--git-dir` ≠ `--git-common-dir` → `idle`, `not a main checkout`. No `backlog/` → `idle`, `no backlog
@@ -356,7 +360,8 @@ Execute:
 3. `lockState`: `held` → `busy`, `another tick`. `stale` → **recover** (below) and return.
 4. Busy, each its own reason: `run.json` under `projectDir(orchHome(), root)` with status `running`/`paused` → `orchestrator run <status>`; with the API
    reachable, a `starting` entry whose project is `root` → `orchestrator run starting`; tracker only, a `remote` entry with `fresh: true`, this repo, status
-   `running`/`paused` → `remote run`; files: any open item, in the main checkout or in a linked worktree **not under `<root>/.worktrees/`** (deliberately all of them, broader than the spec's two kinds), whose `started:`
+   `running`/`paused` → `remote run`; files: any open item, in the main checkout or in a linked worktree other than the spec's two skipped kinds — `<root>/.worktrees/<id>` (the orchestrator's, `<id>` an item id) and
+   `<root>/.worktrees/execute-<id>` — whose `started:`
    is non-empty → `started marker on <id>` (tree path in the reason when not the main checkout); tracker: an item of this project with a `holder` whose
    `heartbeat` is younger than 15 minutes → `live claim on <id>`.
 5. Execute, when `openPrs < M`: the first item of `orderExecute(open bugs + tasks)` that is groomed, unmarked (`plan-review`, `in-review`), has no branch
@@ -378,7 +383,8 @@ nothing recorded, `stop: false`, no `id`, reason `removed an unreadable lock`.
 `--dry-run`: every branch above, but no lock write, no record, no lock removal; `dryRun: true`.
 
 Which text is hashed, wherever a hash is taken (`decide`'s skip check, `record`, recover): files `execute` → the item's blob at `<base>` — for `record`
-and recover, the `base` stored in the lock, never a re-resolved default; a blob absent at that ref hashes as the empty string — files `groom` → the
+and recover, the `base` stored in the lock, never a re-resolved default; a `record` with no lock for its id (another tick already recovered it) resolves
+`<base>` as `decide` does without `--base` and says so on stderr; a blob absent at that ref hashes as the empty string — files `groom` → the
 working-tree file; tracker, either kind → the issue body from `GET /api/items/body`. A Jira live session is never consulted (spec: not a busy signal).
 
 Test harness: each case builds a temp git repo (main + optional linked worktree), sets `BM_TICK_HOME`, `BM_ORCH_HOME`, `BM_API_PORT` (a local
@@ -395,7 +401,8 @@ from `orchestrate.test.mjs:7290-7380`.
   - `two decides racing for one lock` — spawn two concurrently on a project with one candidate: exactly one `execute`, the other `busy`/`another tick`.
   - Busy: `run.json` `running` → `orchestrator run running`; `paused` → `orchestrator run paused`; `starting` entry for this root → `orchestrator run
     starting`; tracker remote fresh `running` → `remote run`, and a remote with `fresh: false` → not busy; files `started:` in main → `started marker on
-    bug-2`; `started:` in a linked worktree at `<tmp>/other` → busy naming that tree; `started:` only in `<root>/.worktrees/execute-bug-2` → not busy;
+    bug-2`; `started:` in a linked worktree at `<tmp>/other` → busy naming that tree; `started:` only in `<root>/.worktrees/execute-bug-2` → not busy; only in `<root>/.worktrees/bug-2` → not busy;
+    only in `<root>/.worktrees/other` → busy naming that tree;
     tracker holder with heartbeat 5 min old → `live claim on #4`, 20 min old → not busy.
   - Execute candidate:
     - `runner-fix item is picked first` (task-1 `runner-fix: true` committed, bug-1 ready → `task-1`).
@@ -420,7 +427,8 @@ from `orchestrate.test.mjs:7290-7380`.
     with a 2-minute-old lock → `recover`; dry-run recover writes nothing; a lock file holding `not json` → `recover`, reason `removed an unreadable lock`,
     `state.json` untouched, no lock afterwards.
   - `record` — `record bug-1 failed --kind execute --reason "tests red"` stores the hash of the `<base>` blob and releases a `bug-1` lock; `record bug-2 ok
-    --kind groom` with a `bug-1` lock leaves the lock and says so on stderr; bad outcome word → exit 1.
+    --kind groom` with a `bug-1` lock leaves the lock and says so on stderr; `record bug-1 failed --kind execute` with no lock at all hashes the `main`
+    blob and stderr names the default base; bad outcome word → exit 1.
   - `status --json` lists newest first; `forget bug-1` → exit 0 and the next `decide` may pick it; `forget` on an unknown id → exit 1.
 - [ ] **Step 2: Run** `node --test skills/backlog-tick/tools/tick.test.mjs` — FAIL.
 - [ ] **Step 3: Implement** `tick.mjs`, ending in `process.exitCode = await main(process.argv.slice(2))` (or the sync form). Read-only git calls only; no
