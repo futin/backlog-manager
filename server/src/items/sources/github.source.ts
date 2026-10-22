@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { claimsByIssue, claimsFor, currentClaim, isLive, liveClaims, newestClaim, renderClaim, winner, type ParsedClaim } from '../../tracker/claim';
 import { GithubClient, isRepo, type GithubComment, type GithubIssue, type GithubResponse } from '../../tracker/github.client';
-import { IN_REVIEW_LABEL, QUEUED_LABEL } from '../../tracker/labels';
+import { IN_REVIEW_LABEL, PLAN_REVIEW_LABEL, QUEUED_LABEL } from '../../tracker/labels';
 import { issueNumberFor, issueUrn, mapIssue, parseUrn } from '../../tracker/map-issue';
 import { TrackerPollerService, bodyHash } from '../../tracker/poller.service';
 import { githubToken } from '../../tracker/token.util';
@@ -21,6 +21,7 @@ import type {
   ItemCreateRequest,
   ItemHeartbeatRequest,
   ItemQueueRequest,
+  ItemPlanReviewRequest,
   ItemReviewRequest,
   ItemReleaseRequest,
   ItemStateRequest,
@@ -241,6 +242,8 @@ export class GithubSource implements ItemSource, ItemWriter {
     if (typeLabel !== undefined) labels.push(typeLabel);
     if (req.kind !== undefined && req.kind !== '') labels.push(`kind:${req.kind}`);
     if (req.runnerFix === true) labels.push('runner-fix');
+    // In the create call, not a second request: an issue born unlabelled and then failing its labelling would sit ready to every gate (backlog-tick).
+    if (req.planReview === true) labels.push(PLAN_REVIEW_LABEL);
 
     const body = req.from === undefined || req.from === '' ? req.body : `_From ${req.from}._\n\n${req.body}`;
 
@@ -857,6 +860,12 @@ export class GithubSource implements ItemSource, ItemWriter {
       if (req.runnerFix === true) await this.client.addLabels(repo, number, ['runner-fix'], { token });
       else if (req.runnerFix === false) await this.client.removeLabel(repo, number, 'runner-fix', { token });
 
+      /* The `plan-review` marker, moved by the same call and by `runner-fix`'s rules in every respect: after the body patch and after the `ifUpdatedAt`
+         check, neither result checked (a removal's 404 is the contract, an add is idempotent, and the body is already patched). Separate `if`s rather
+         than one chain, because the two markers are independent and a groom may set one and clear the other. */
+      if (req.planReview === true) await this.client.addLabels(repo, number, [PLAN_REVIEW_LABEL], { token });
+      else if (req.planReview === false) await this.client.removeLabel(repo, number, PLAN_REVIEW_LABEL, { token });
+
       return { ok: true as const, value: { id: `#${number}`, updatedAt: patched.data.updated_at } };
     });
   }
@@ -943,6 +952,33 @@ export class GithubSource implements ItemSource, ItemWriter {
       const ok = res.status === 200 || (!req.inReview && res.status === 404);
       if (!ok) return { ok: false as const, refusal: refusalFor(res) };
       return { ok: true as const, value: { id: `#${number}`, inReview: req.inReview } };
+    });
+  }
+
+  /**
+   * Add or remove `plan-review` — the eleventh write route (backlog-tick). `review`'s twin and deliberately the same shape: on the item's chain, no
+   * `issueNow` first, a closed issue not refused, and a removal's 404 answered as success because the caller's contract is "the label is not there".
+   * Here the removing caller is a person approving a plan, and an approval already given is the state they asked for.
+   */
+  async planReview(
+    project: RegistryProject,
+    marker: SourceMarker,
+    req: ItemPlanReviewRequest
+  ): Promise<WriteOutcome<{ id: string; planReview: boolean }>> {
+    const ready = this.ready(marker);
+    if (!ready.ok) return ready;
+    const { repo, token } = ready.value;
+
+    const number = issueNumberFor(req.id, repo);
+    if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
+
+    return this.writeChain(project, issueUrn(repo, number), async () => {
+      const res = req.planReview
+        ? await this.client.addLabels(repo, number, [PLAN_REVIEW_LABEL], { token })
+        : await this.client.removeLabel(repo, number, PLAN_REVIEW_LABEL, { token });
+      const ok = res.status === 200 || (!req.planReview && res.status === 404);
+      if (!ok) return { ok: false as const, refusal: refusalFor(res) };
+      return { ok: true as const, value: { id: `#${number}`, planReview: req.planReview } };
     });
   }
 

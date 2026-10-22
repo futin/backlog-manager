@@ -115,7 +115,8 @@ describe('the agents POST guard', () => {
         reason: 'stopped',
         ifUpdatedAt: '2026-09-18T10:00:00Z',
         queued: true,
-        inReview: true
+        inReview: true,
+        planReview: true
       };
     }
     const verb = route.slice('/api/agents/'.length);
@@ -132,7 +133,7 @@ describe('the agents POST guard', () => {
   // actually lives — the agents routes (`pause` is task-17's, `stop` is
   // bug-39's), the seven item-write routes task-46 added, `queue`, the
   // eighth (the orchestrator:queued spec, §2), `abort`, the ninth (#225) — the one item write that lives in `agents/`, because it calls the
-  // dashboard — and `review`, the tenth (the execute pr-mode spec, decision 9).
+  // dashboard — `review`, the tenth (the execute pr-mode spec, decision 9) — and `plan-review`, the eleventh (backlog-tick).
   // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop.
   const GUARDED = [
     '/api/agents/plan',
@@ -153,7 +154,8 @@ describe('the agents POST guard', () => {
     '/api/items/comment',
     '/api/items/queue',
     '/api/items/abort',
-    '/api/items/review'
+    '/api/items/review',
+    '/api/items/plan-review'
   ];
 
   for (const route of GUARDED) {

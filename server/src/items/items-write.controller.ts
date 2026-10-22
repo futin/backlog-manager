@@ -15,8 +15,8 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
 export { answer };
 
 /**
- * items-write.controller.ts — nine of a tracker project's ten item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
- * spec's §2), and the tenth, `review` (the execute pr-mode spec's decision 9).
+ * items-write.controller.ts — ten of a tracker project's eleven item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
+ * spec's §2), the tenth, `review` (the execute pr-mode spec's decision 9), and the eleventh, `plan-review` (backlog-tick).
  * The ninth item write, `POST /api/items/abort` (#225), is NOT here: it calls the dashboard, so it lives in
  * `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this file.
  *
@@ -112,6 +112,8 @@ export class ItemsWriteController {
         // Strictly `=== true`, the same parse rule `remoteControl` follows on
         // the dispatch route: anything else means off.
         runnerFix: raw.runnerFix === true,
+        // `=== true` for the same reason, and the label rides this create call — see `GithubSource.create`.
+        planReview: raw.planReview === true,
         from
       })
     );
@@ -222,9 +224,15 @@ export class ItemsWriteController {
       throw new HttpException({ error: 'runnerFix must be a boolean' }, 400);
     }
     const runnerFix = raw.runnerFix as boolean | undefined;
+    // `planReview` is `runnerFix`'s twin in every respect, the 400 included: a tick's groom that sent `'yes'` meant to mark a plan for review, and dropping
+    // it would leave an unattended plan looking approved to every gate.
+    if (raw.planReview !== undefined && typeof raw.planReview !== 'boolean') {
+      throw new HttpException({ error: 'planReview must be a boolean' }, 400);
+    }
+    const planReview = raw.planReview as boolean | undefined;
 
     const w = writable(this.items.writerFor(project));
-    return answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix }));
+    return answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix, planReview }));
   }
 
   /** Append a comment. Execute's failure path: the Outcome is recorded and the
@@ -280,6 +288,25 @@ export class ItemsWriteController {
 
     const w = writable(this.items.writerFor(project));
     return answer(await w.writer.review(w.project, w.marker, { project, id, inReview }));
+  }
+
+  /**
+   * The eleventh route (backlog-tick): add or remove the `plan-review` label that marks a plan written unattended and not yet approved. A tick's groom adds
+   * it (`backlog.mjs plan-review <id> on`); a person approving the plan removes it. `review`'s twin.
+   *
+   * `planReview` must be a literal boolean, a 400 otherwise, for `review`'s reason: coercing `'false'` to truthy would add the hold somebody was trying to
+   * lift, and coercing `'true'` the other way would leave an unreviewed plan looking approved.
+   */
+  @Post('plan-review')
+  async planReview(@Body() body: Record<string, unknown> | undefined): Promise<{ id: string; planReview: boolean }> {
+    const raw = body ?? {};
+    const project = required(raw.project, 'project');
+    const id = required(raw.id, 'id');
+    if (typeof raw.planReview !== 'boolean') throw new HttpException({ error: 'planReview must be a boolean' }, 400);
+    const planReview = raw.planReview;
+
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.planReview(w.project, w.marker, { project, id, planReview }));
   }
 }
 

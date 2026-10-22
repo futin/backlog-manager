@@ -259,6 +259,20 @@ describe('create', () => {
     expect(gh.matching('/issues', 'POST')[0].body).toMatchObject({ labels: ['type:task'] });
   });
 
+  /* The label rides the create call itself — one request, so an issue is never born unlabelled and then, on a failed second call, left looking approved
+     to every gate (backlog-tick: a plan awaiting review must never be briefly ready). */
+  it('creates the issue already labelled plan-review for planReview: true, in the create call and not a second request', async () => {
+    await sync();
+    await post('create', { project: trackerPath, section: 'tasks', title: 't', body: 'b', planReview: true }).expect(201);
+    expect(gh.matching('/issues', 'POST')).toHaveLength(1);
+    expect(gh.matching('/issues', 'POST')[0].body).toMatchObject({ labels: ['type:task', 'plan-review'] });
+    expect(gh.matching('/labels', 'POST')).toEqual([]);
+
+    gh.calls.length = 0;
+    await post('create', { project: trackerPath, section: 'tasks', title: 't', body: 'b', planReview: 'yes' }).expect(201);
+    expect(gh.matching('/issues', 'POST')[0].body).toMatchObject({ labels: ['type:task'] });
+  });
+
   it('prepends the from line to the body', async () => {
     await sync();
     await post('create', { project: trackerPath, section: 'tasks', title: 't', body: '## Goal\n\ng\n', from: '#12' }).expect(201);
@@ -683,6 +697,76 @@ describe('review', () => {
     expect(add).toBeGreaterThanOrEqual(0);
     expect(add).toBeLessThan(del);
     expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('in-review');
+  });
+});
+
+/* =========================================================================
+ * plan-review — the eleventh write route (backlog-tick): `review`'s twin for the `plan-review` label
+ * ========================================================================= */
+
+describe('plan-review', () => {
+  it('adds the plan-review label for planReview: true, and answers the id and the flag', async () => {
+    gh.issue();
+    await sync();
+    const res = await post('plan-review', { project: trackerPath, id: '#31', planReview: true }).expect(201);
+    expect(res.body).toEqual({ id: '#31', planReview: true });
+
+    const adds = gh.matching('/issues/31/labels', 'POST');
+    expect(adds).toHaveLength(1);
+    expect(adds[0].body).toEqual({ labels: ['plan-review'] });
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('plan-review');
+  });
+
+  it('removes the label for planReview: false, and a removal that 404s is still a success', async () => {
+    gh.issue({ labels: [{ name: 'type:bug' }, { name: 'plan-review' }] });
+    await sync();
+    const res = await post('plan-review', { project: trackerPath, id: '#31', planReview: false }).expect(201);
+    expect(res.body).toEqual({ id: '#31', planReview: false });
+    expect(gh.matching('/issues/31/labels/plan-review', 'DELETE')).toHaveLength(1);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toEqual(['type:bug']);
+
+    gh.calls.length = 0;
+    const again = await post('plan-review', { project: trackerPath, id: '#31', planReview: false }).expect(201);
+    expect(again.body).toEqual({ id: '#31', planReview: false });
+    expect(gh.matching('/labels/plan-review', 'DELETE')).toHaveLength(1);
+  });
+
+  it('refuses a non-boolean planReview, and a missing id, reaching GitHub not at all', async () => {
+    gh.issue();
+    await sync();
+    const bad = await post('plan-review', { project: trackerPath, id: '#31', planReview: 'true' }).expect(400);
+    expect(bad.body).toEqual({ error: 'planReview must be a boolean' });
+    await post('plan-review', { project: trackerPath, id: '#31' }).expect(400);
+    const noId = await post('plan-review', { project: trackerPath, planReview: true }).expect(400);
+    expect(noId.body.error).toMatch(/id/);
+    expect(gh.calls).toEqual([]);
+  });
+
+  it('is refused for a files project the way review is, and makes no request', async () => {
+    const res = await post('plan-review', { project: filesPath, id: '#31', planReview: true }).expect(400);
+    expect(res.body.error).toMatch(/files/);
+    expect(gh.calls).toEqual([]);
+  });
+
+  it('serialises a concurrent add and remove on one item, in the order they were fired', async () => {
+    gh.issue();
+    await sync();
+    const source = app.get(GithubSource);
+    const project = registryEntry();
+    const marker = { kind: 'github', repo: REPO };
+
+    const [on, off] = await Promise.all([
+      source.planReview(project, marker, { project: trackerPath, id: '#31', planReview: true }),
+      source.planReview(project, marker, { project: trackerPath, id: '#31', planReview: false })
+    ]);
+    expect(on.ok).toBe(true);
+    expect(off.ok).toBe(true);
+
+    const add = gh.calls.findIndex((c) => c.method === 'POST' && c.url.endsWith('/issues/31/labels'));
+    const del = gh.calls.findIndex((c) => c.method === 'DELETE' && c.url.includes('/issues/31/labels/plan-review'));
+    expect(add).toBeGreaterThanOrEqual(0);
+    expect(add).toBeLessThan(del);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('plan-review');
   });
 });
 
@@ -1712,6 +1796,42 @@ describe('body.runnerFix', () => {
     const issue = gh.issue();
     await sync();
     await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, runnerFix: 'yes' }).expect(400);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+  });
+});
+
+describe('body.planReview', () => {
+  it('adds the plan-review label in the same write as the body patch', async () => {
+    const issue = gh.issue();
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, planReview: true }).expect(201);
+    expect(gh.matching('/issues/31', 'PATCH')).toHaveLength(1);
+    expect(gh.matching('/issues/31/labels', 'POST')[0].body).toEqual({ labels: ['plan-review'] });
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('plan-review');
+  });
+
+  it('removes the label when asked, attempting the DELETE', async () => {
+    const issue = gh.issue({ labels: [{ name: 'type:task' }, { name: 'plan-review' }] });
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, planReview: false }).expect(201);
+    expect(gh.matching('/issues/31/labels/plan-review', 'DELETE')).toHaveLength(1);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('plan-review');
+  });
+
+  it('leaves the label alone when the key is absent', async () => {
+    const issue = gh.issue({ labels: [{ name: 'type:task' }, { name: 'plan-review' }] });
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at }).expect(201);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('plan-review');
+    expect(gh.matching('/issues/31/labels/plan-review', 'DELETE')).toEqual([]);
+    expect(gh.matching('/issues/31/labels', 'POST')).toEqual([]);
+  });
+
+  it('400s a planReview that is not a boolean, and patches nothing', async () => {
+    const issue = gh.issue();
+    await sync();
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, planReview: 'yes' }).expect(400);
+    expect(res.body).toEqual({ error: 'planReview must be a boolean' });
     expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
   });
 });
