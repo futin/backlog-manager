@@ -1,6 +1,6 @@
 // Cases for `tick-breaker.mjs` — the streak rule and the `tick.json` reader. The streak table below is PINNED: the server's copy of the rule
-// (`server/src/orchestrator/`, Task 3 of the tick-breaker plan) carries the same table in its own suite, so a drift on either side fails a suite rather than
-// letting `decide` and the board disagree about whether a project is halted. Every file case works in its own throwaway directory.
+// (`server/src/tick/tick-breaker.util.ts`, suite `test/tick-breaker.test.ts`) carries the same table in its own suite, so a drift on either side fails a suite
+// rather than letting `decide` and the board disagree about whether a project is halted. Every file case works in its own throwaway directory.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
