@@ -36,21 +36,19 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 [docs/subsystems/invariants.md](docs/subsystems/invariants.md). The doc map is [docs/overview.md](docs/overview.md).
 
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
-  adapters, and — since task-46 — the nine guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this
-  server makes to anybody's items), `agents/` (the
-  dashboard calls — #225's item `abort` among them — plus the run watchdog, and since Jira phase 5 `POST /api/agents/dispatch-jira` and `/jira-stop` with the
-  60 s reconciler that keeps the Jira live map honest), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap, the read-only
-  `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read routes under
-  `/api/jira` — phase 5's `GET /prompt` and the repo/branch work's `/refs` and `/worktrees` among them — and — since Jira phase 2 — `jira.json`'s six guarded
-  write routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the
-  two writes to Jira itself that phase 3 added, `POST /api/jira/issue/assign`
-  and `/issue/transition`, and phase 5's in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
-  → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three —
-  `orchestrator/` (a read-only view of the run-state directory, plus the
-  in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (#249 — three read-only
-  Lookout widgets at `/api/hub/widgets` via `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's
-  version chip — read-only, git only — not an outbound-calling module), `registry/`, `static.ts` (serves `client/dist` only when built),
-  `security.ts`, `allowed-hosts.ts` (the Host allowlist every route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
+  adapters, and the nine guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
+  anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira` and `/jira-stop`,
+  and the 60 s reconciler that keeps the Jira live map honest), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
+  the read-only `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
+  routes under `/api/jira` — `GET /prompt`, `/refs` and `/worktrees` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
+  `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
+  `POST /api/jira/issue/assign` and `/issue/transition`, and the in-memory live map `JiraLiveService` (a session per ticket key, forgotten on restart),
+  → [docs/subsystems/jira.md](docs/subsystems/jira.md)) — those three are the outbound-calling modules, and the ONLY three — `orchestrator/` (a read-only
+  view of the run-state directory, plus the in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the
+  server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (three read-only Lookout widgets at `/api/hub/widgets` via
+  `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's version chip — read-only, git only — not an
+  outbound-calling module), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
+  route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings) that ends in a version chip opening the What's new
   drawer ([releases](docs/subsystems/releases.md)), one run chip in the board's band, and the three-step
@@ -60,7 +58,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   Watchdog — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
   surface draws has one home in `components/ui/`. A connected tracker adds one shell-level chip — POLL and API meters in the strip above the well, or in
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
-  all derived in `lib/tracker.ts`, plus the `Trackers` card on Shared Settings, whose one control is each repo's sync interval. Jira (phase 2) is drawn only
+  all derived in `lib/tracker.ts`, plus the `Trackers` card on Shared Settings, whose one control is each repo's sync interval. Jira is drawn only
   while `GET /api/jira` says configured: a second shell chip beside the tracker's, and two pages under its rail entry — Board and Setup, switched by the tree
   alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
@@ -271,8 +269,8 @@ of them, and to be opened by hand before editing through any other route (`Write
 ## Conventions
 
 - Comments explain _why_, at length, and the existing density is deliberate — match it rather than stripping it.
-- **A PR title must pass `ci / pr-title`** (it becomes the squash commit once squash-only merges are applied): `feat|fix|perf` (`!` allowed) or
-  `docs|chore|test|refactor|ci|build`, optional lowercase `(scope)`, `: `, a description. `feat`/`fix`/`perf` cut a release once Phase C lands.
+- **A PR title must pass `ci / pr-title`** (it becomes the squash commit — `main` merges squash-only): `feat|fix|perf` (`!` allowed) or
+  `docs|chore|test|refactor|ci|build`, optional lowercase `(scope)`, `: `, a description. `feat`/`fix`/`perf` cut a release (`.github/workflows/release.yml`).
 - **A suite that hands an app to supertest listens once, on `127.0.0.1`, via `listenLoopback` (`test/helpers/app.ts`)**
   Why: [invariants.md](docs/subsystems/invariants.md#a-supertest-suite-listens-once-on-127001-through-listenloopback)
 - **A jsdom suite's fixture dates are relative to the clock the assertion runs under**
