@@ -1,8 +1,10 @@
 // Cases for `tick.mjs` — `decide`, `record`, `status` and `forget`, each run as the real CLI in a child process against a throwaway git repository.
 //
-// Every case pins the four things the tool reads from outside the repo: `BM_TICK_HOME` and `BM_ORCH_HOME` (temp dirs, so nothing here touches a real
-// `~/.backlog-manager`), `BM_API_PORT` (a local fake of the five routes the tool calls, or a port nothing listens on for "stack down"), and `PATH`, with a temp
-// dir holding a fake `gh` in front of the real one — a test must never ask GitHub how many PRs a scratch repo has.
+// Every case pins the five things the tool reads from outside the repo: `BM_TICK_HOME` and `BM_ORCH_HOME` (temp dirs, so nothing here touches a real
+// `~/.backlog-manager`), `BM_TICK_FILE` (a path inside the fixture that does not exist unless a case writes it — the harness spreads `process.env`, so an
+// unpinned case would read the developer's real `tick.json` and halt or not halt by what that machine happens to hold), `BM_API_PORT` (a local fake of the
+// five routes the tool calls, or a port nothing listens on for "stack down"), and `PATH`, with a temp dir holding a fake `gh` in front of the real one — a
+// test must never ask GitHub how many PRs a scratch repo has.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -47,6 +49,7 @@ function project(t, { tracker = false, backlog = true } = {}) {
   fx.lockDir = path.join(fx.tickHome, encodeURIComponent(root));
   fx.lockFile = path.join(fx.lockDir, 'lock');
   fx.stateFile = path.join(fx.lockDir, 'state.json');
+  fx.tickFile = path.join(base, 'tick.json');
   fs.mkdirSync(fx.ghDir);
   setGh(fx, []);
   return fx;
@@ -92,6 +95,7 @@ function tick(fx, args, { port, cwd = fx.root } = {}) {
         ...process.env,
         BM_TICK_HOME: fx.tickHome,
         BM_ORCH_HOME: fx.orchHome,
+        BM_TICK_FILE: fx.tickFile,
         BM_API_PORT: String(port ?? DEAD_PORT),
         PATH: `${fx.ghDir}${path.delimiter}${process.env.PATH}`,
       },
@@ -889,4 +893,165 @@ test('status --json lists newest first; forget lets the next decide pick the ite
   assert.equal(again.status, 1);
   assert.match(again.stderr, /bug-1/);
   assert.equal((await tick(fx, ['forget', 'bug-99'])).status, 1);
+});
+
+// --- the breaker ---------------------------------------------------------
+
+/** `n` failed outcomes at the newest end of `state.json`'s `recent` (stored oldest first, as `tick-state.mjs` writes it), the newest `ageMs` old. */
+function failures(fx, n, { ageMs = 10 * MIN, before = [] } = {}) {
+  const recent = [...before];
+  for (let i = 0; i < n; i++) {
+    recent.push({ id: `bug-${i + 1}`, outcome: 'failed', kind: 'execute', at: ago(ageMs + (n - 1 - i) * MIN) });
+  }
+  fs.mkdirSync(fx.lockDir, { recursive: true });
+  fs.writeFileSync(fx.stateFile, JSON.stringify({ items: {}, recent }));
+  return recent;
+}
+
+const writeTickFile = (fx, body) => fs.writeFileSync(fx.tickFile, typeof body === 'string' ? body : JSON.stringify(body));
+const HALTED = (streak, n) => `halted: ${streak} failures in a row (halt after ${n}) — reset on the board, Runs › Ticks`;
+
+test('breaker: below N the decide proceeds to its normal verdict', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-9', BUG_READY);
+  commitAll(fx.root);
+  failures(fx, 2);
+  const v = await decide(fx, ['--dry-run']);
+  assert.equal(v.verdict, 'execute');
+  assert.equal(v.id, 'bug-9');
+});
+
+test('breaker: N failures in a row with no settings file halts at the default 3', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-9', BUG_READY);
+  commitAll(fx.root);
+  failures(fx, 3);
+  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: HALTED(3, 3), root: fx.root, caps: CAPS, dryRun: false });
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('breaker: a file haltAfter is the N, and a streak above it reports its own length', async (t) => {
+  const fx = project(t);
+  failures(fx, 5);
+  writeTickFile(fx, { haltAfter: 3 });
+  assert.match((await decide(fx)).reason, /^halted: 5 failures in a row \(halt after 3\)/);
+});
+
+test('breaker: raising N un-halts with no new record; lowering it halts', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-9', BUG_READY);
+  commitAll(fx.root);
+  failures(fx, 1);
+  writeTickFile(fx, { haltAfter: 1 });
+  assert.equal((await decide(fx, ['--dry-run'])).reason, HALTED(1, 1));
+  writeTickFile(fx, { haltAfter: 2 });
+  assert.equal((await decide(fx, ['--dry-run'])).verdict, 'execute');
+  writeTickFile(fx, { haltAfter: 1 });
+  assert.equal((await decide(fx, ['--dry-run'])).verdict, 'idle');
+});
+
+test('breaker: haltAfter clamps into 1-10 on read', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-9', BUG_READY);
+  commitAll(fx.root);
+  failures(fx, 1);
+  writeTickFile(fx, { haltAfter: 0 });
+  assert.equal((await decide(fx, ['--dry-run'])).reason, HALTED(1, 1));
+  failures(fx, 9);
+  writeTickFile(fx, { haltAfter: 42 });
+  assert.equal((await decide(fx, ['--dry-run'])).verdict, 'execute');
+});
+
+test('breaker: a reset later than every record un-halts, and only for its own project', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-9', BUG_READY);
+  commitAll(fx.root);
+  failures(fx, 3);
+  writeTickFile(fx, { resetAt: { [fx.root]: ago(MIN) } });
+  assert.equal((await decide(fx, ['--dry-run'])).verdict, 'execute');
+  writeTickFile(fx, { resetAt: { '/some/other/project': new Date(Date.now() + MIN).toISOString() } });
+  assert.equal((await decide(fx, ['--dry-run'])).reason, HALTED(3, 3));
+});
+
+test('breaker: a tracker project with the stack down says stack down, not halted', async (t) => {
+  const fx = project(t, { tracker: true });
+  failures(fx, 3);
+  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: 'stack down', root: fx.root, caps: CAPS, dryRun: false });
+});
+
+test('breaker: an unreadable tick.json is idle naming the file, whatever the streak', async (t) => {
+  const fx = project(t);
+  writeTickFile(fx, 'not json {');
+  const v = await decide(fx);
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, `${fx.tickFile} unreadable — fix or remove it by hand`);
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('breaker: a held fresh lock is busy, not halted', async (t) => {
+  const fx = project(t);
+  failures(fx, 3);
+  writeLockFile(fx, { host: 'h', verdict: { kind: 'execute', id: 'bug-9' }, base: 'main', at: ago(MIN) });
+  assert.equal((await decide(fx)).reason, 'another tick');
+});
+
+test('breaker: a stale lock is still recovered; the record that completes the streak halts the next decide', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-3', BUG_READY);
+  commitAll(fx.root);
+  failures(fx, 2);
+  writeLockFile(fx, staleLock('execute', 'bug-3'));
+  const first = await decide(fx);
+  assert.equal(first.verdict, 'recover');
+  assert.equal(readJson(fx.stateFile).items['bug-3'].outcome, 'failed');
+  assert.equal((await decide(fx)).reason, HALTED(3, 3));
+});
+
+test('breaker: --dry-run reports the halted verdict', async (t) => {
+  const fx = project(t);
+  failures(fx, 3);
+  assert.deepEqual(await decide(fx, ['--dry-run']), { verdict: 'idle', reason: HALTED(3, 3), root: fx.root, caps: CAPS, dryRun: true });
+});
+
+test('breaker: an unreadable state.json fails decide as it does today and starts nothing', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-9', BUG_READY);
+  commitAll(fx.root);
+  fs.mkdirSync(fx.lockDir, { recursive: true });
+  fs.writeFileSync(fx.stateFile, 'not json');
+  const r = await tick(fx, ['decide']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /not valid JSON/);
+  assert.equal(r.stdout, '');
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('breaker: status prints the streak, the halted form and a reset', async (t) => {
+  const fx = project(t);
+  failures(fx, 1);
+  assert.match((await tick(fx, ['status'])).stdout, /^no lock\nbreaker: 1 of 3 failures in a row\n/);
+  const recent = failures(fx, 3);
+  const halted = (await tick(fx, ['status'])).stdout;
+  assert.ok(halted.includes(`breaker: HALTED — 3 failures in a row (halt after 3) since ${recent[0].at}\n`), halted);
+  const at = ago(MIN);
+  writeTickFile(fx, { resetAt: { [fx.root]: at } });
+  assert.ok((await tick(fx, ['status'])).stdout.includes(`breaker: 0 of 3 failures in a row (reset ${at})\n`));
+});
+
+test('breaker: status --json carries the five keys, and settings unreadable for a bad file', async (t) => {
+  const fx = project(t);
+  const recent = failures(fx, 3);
+  let s = await tick(fx, ['status', '--json']);
+  assert.deepEqual(s.v.breaker, { streak: 3, haltAfter: 3, halted: true, resetAt: null, settings: 'default' });
+  assert.equal(s.v.recent.length, recent.length);
+  const at = ago(MIN);
+  writeTickFile(fx, { haltAfter: 5, resetAt: { [fx.root]: at } });
+  s = await tick(fx, ['status', '--json']);
+  assert.deepEqual(s.v.breaker, { streak: 0, haltAfter: 5, halted: false, resetAt: at, settings: 'file' });
+  writeTickFile(fx, 'nope');
+  s = await tick(fx, ['status', '--json']);
+  assert.equal(s.status, 0);
+  assert.equal(s.v.breaker.settings, 'unreadable');
+  assert.equal(s.v.breaker.halted, false);
+  assert.deepEqual(Object.keys(s.v.breaker).sort(), ['haltAfter', 'halted', 'resetAt', 'settings', 'streak']);
 });
