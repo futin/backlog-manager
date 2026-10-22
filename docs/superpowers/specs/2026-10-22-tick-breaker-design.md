@@ -11,7 +11,7 @@ a row, a project's ticks stop until a person resets it. N is set once, on the bo
 - A project whose last N recorded tick outcomes are all `failed` stops ticking: `tick.mjs decide` answers `idle` with a `halted` reason and starts nothing.
 - N is configured on the board (Shared Settings), default 3, range 1–10, global to the machine.
 - A person sees which projects are halted, why, and the recent tick history, on Runs › Ticks — and clears a halt there with one Reset.
-- The breaker works with the stack down: `decide` reads files only.
+- The breaker works with the stack down: `decide` reads files only. (A tracker project still answers `idle: stack down` first, as today.)
 
 ## Non-goals
 
@@ -36,7 +36,7 @@ a row, a project's ticks stop until a person resets it. N is set once, on the bo
 ### Existing, unchanged: `~/.backlog-manager/tick/<encodeURIComponent(root)>/state.json`
 
 `{ items: {id → rec}, recent: [{at, id, kind, outcome, reason}, …] }`, `recent` capped at the last 50 (`RECENT_MAX`). Written only by `tick.mjs`
-(`recordOutcome`), including the `failed` / `killed at timeout` record `recover` writes for a stale lock. **This is the breaker's only input** — no new
+(`recordOutcome`), including the `failed` / `killed at timeout` record `recover` writes for a stale lock that named a unit. **This is the breaker's only input** — no new
 log, no new field.
 
 ### New: `~/.backlog-manager/settings/tick.json`
@@ -64,7 +64,7 @@ log, no new field.
 | --- | --- | --- | --- |
 | absent | N = 3, no resets | `source: "default"` | write it |
 | valid | as written (clamped) | `source: "file"` | merge and write |
-| unreadable / not JSON / not an object | `idle`, reason `tick.json unreadable — fix or remove it by hand`; no unit runs | `source: "unreadable"`, plus the error, `haltAfter: 3` for display | `409`, file untouched |
+| unreadable / not JSON / not an object | `idle`, reason `<path of tick.json> unreadable — fix or remove it by hand`; no unit runs | `source: "unreadable"`, plus the error, `haltAfter: 3` for display | `409`, file untouched |
 
 No unit runs on any project while the file is broken. Falling back to a default N would un-halt a project whose written N was 1 or 2, and dropping the
 resets would re-halt one a person just cleared; stopping is the only fallback that is never wrong in the unsafe direction — the `state.json` posture.
@@ -72,7 +72,7 @@ resets would re-halt one a person just cleared; stopping is the only fallback th
 ## The breaker
 
 **Streak** for a project = walk `recent` newest-first; count entries whose `outcome` is `failed` and whose `at` is later than the project's `resetAt` (if
-any); stop at the first `ok`, or the first entry at or before `resetAt`. Entries with an unparseable `at` stop the walk (treated as older than everything).
+any); stop at the first `ok`, or the first entry at or before `resetAt`. Entries with an unparseable `at` stop the walk (treated as older than everything); this test comes first, whatever the outcome.
 An entry whose `outcome` is neither `ok` nor `failed` neither counts nor stops the walk (none is written today; a future outcome must not silently reset a
 streak).
 
@@ -98,7 +98,7 @@ Consequences, all intended:
 After the lock step (3) and its `recover` branch, before the API reads (the runs and items) and the busy check (4). A stale lock is still recovered while
 halted — recovery is cleanup, and it releases the lock — but no unit is chosen. On a tracker project the stack check (2) still comes first, as today.
 
-So the order is: stack down (tracker) → `busy` "another tick" for a held lock → `recover` for a stale one (that call records `failed` and answers
+So the order is: stack down (tracker) → `busy` "another tick" for a held lock → `recover` for a stale one (that call records `failed` when the lock named a unit and answers
 `recover`, or `busy` when it loses the claim race — never `idle`) → `idle` halted → API reads → busy → execute/groom. The `recover` record can itself complete a streak; the NEXT `decide` is then
 `idle` halted.
 
@@ -108,13 +108,13 @@ un-halt a project. (My call.)
 
 Verdict when halted: `{"verdict":"idle","reason":"halted: 3 failures in a row (halt after 3) — reset on the board, Runs › Ticks", …}`. When `tick.json`
 is unreadable the verdict is `idle` with its own reason (the table above), at the same point in the order. `idle` keeps the skill's existing handling: no `record`, final message is the
-reason, so a halted tick spends one tool call and no session.
+reason, so a halted tick spends one tool call and no execute or groom session.
 
 `--dry-run` reports the same verdict.
 
 ### `tick.mjs status`
 
-Gains one line after the lock line: `breaker: 1 of 3 failures in a row` or `breaker: HALTED — 3 of 3 failures in a row since <at of the oldest counted>`,
+Gains one line after the lock line: `breaker: 1 of 3 failures in a row` or `breaker: HALTED — 5 failures in a row (halt after 3) since <at of the oldest counted>`,
 and `(reset <resetAt>)` when one is on file. `status --json` (today `{lock, recent}`) gains
 `breaker: { streak, haltAfter, halted, resetAt | null, settings: "default" | "file" | "unreadable" }`. (My call.)
 
@@ -125,20 +125,21 @@ A new module `server/src/tick/` — not an outbound-calling module. It only read
 - **`GET /api/ticks`** — read-only, unguarded like the other GETs. Answers:
   - `config`: `{ haltAfter, source: "default" | "file" | "unreadable", error? }`.
   - `projects`: one entry per directory under the tick home (`BM_TICK_HOME`, else `~/.backlog-manager/tick/`, read per request like `BM_ORCH_HOME`) whose
-    name decodes to an absolute path: `{ root, name, streak, halted, haltedSince?, resetAt?, lock?, recent, error? }`.
+    name decodes to an absolute path (a name `decodeURIComponent` throws on, or one that decodes to a relative path, is skipped): `{ root, name, streak, halted, haltedSince?, resetAt?, lock?, recent, error? }`.
     - `name`: the registry's display name for that root when registered, else the path's basename.
     - `lock`: `{ kind, id, host, at }` from the lock file when one exists — "a tick is running". Stale-or-not is not judged here (the TTL is a job flag the
       server cannot see); `at` is shown and the reader judges.
-    - `recent`: the file's `recent`, newest first, unchanged.
+    - `recent`: the file's `recent` (stored oldest first) reversed to newest first, entries unchanged.
     - `error`: set when `state.json` is unreadable; then `streak`/`halted` are absent, and the row says the file needs fixing by hand (the same message
       `tick.mjs` throws).
     - A directory with no `state.json` yet (a first tick holding the lock) is listed with `recent: []`, streak 0. A root that is gone from disk and the
       registry is still listed, by basename — its history is still true, and Reset still works on it. (My call.)
   - Read fresh on every request, cached nowhere — the `readWatchdogConfig` reasoning.
-- **`POST /api/ticks/config`** `{ haltAfter }` — `SameOriginPostGuard` (content-type + origin). Clamped, merged over the current file (keeping `resetAt`),
+- **`POST /api/ticks/config`** `{ haltAfter }` — `SameOriginPostGuard` (content-type + origin). `haltAfter` must be an integer (else `400`), then clamped to 1–10, merged over the current file (keeping `resetAt`),
   written atomically (tmp + rename). `400` for a non-object body; `409` when the file is unreadable. Answers the fresh `GET` payload.
 - **`POST /api/ticks/reset`** `{ project }` — same guard. `400` for a non-object body or a `project` that is not a string holding an absolute path; `404`
-  for a well-formed path with no entry under the tick home (no arbitrary keys in the file). Sets `resetAt[project]` to now, merged and written atomically. Reset is allowed in every state — halted or not, lock held or not —
+  for a well-formed path with no entry under the tick home (no arbitrary keys in the file). Sets `resetAt[project]` to now — or, if later, the newest `at` in that project's `recent`, so a container clock lagging the host's can never leave the
+  newest failure "after" the reset — merged and written atomically. Reset is allowed in every state — halted or not, lock held or not —
   zeroes the streak (every earlier record is now at or before `resetAt`) and touches no lock. A tick running across the Reset records after it, so its
   failure starts a new streak at 1. `409` when the file is unreadable. Answers the fresh `GET` payload. (My call.)
 
@@ -153,14 +154,14 @@ only, never an in-page control (the existing invariant). Built from the Watchdog
 `watchdog-table` / `watchdog-kind-*` table styles. Polls `GET /api/ticks` through `useCoalescedFetch` every 15 s while the page is mounted (my call:
 ticks are hourly; the Watchdog hook's armed 5 s buys nothing here, and 15 s is its idle cadence).
 
-- **Band:** "Runs · Ticks". Sub-line: "`<h>` halted · `<p>` with tick history" (halted part omitted at 0). Right: "Policy in Settings ›" chip, opening
-  Shared Settings (the Watchdog page's own chip and route).
+- **Band:** "Runs · Ticks". Sub-line: "`<h>` halted · `<p>` with tick history" (halted part omitted at 0). Right: "Policy in Settings ›" chip — flat and inert like the
+  Watchdog page's (`WatchdogMonitor.tsx`: no section setter reaches the Runs pages), title `Settings › Backlog tick`.
 - **Figures:**
   - *breaker* — "`<h>` halted" (bad ink when > 0, else "none halted"); line: the halted projects' names, or "after `<N>` failures in a row".
-  - *last 24 h* — "`<n>` ticks"; line: "`<ok>` ok · `<failed>` failed", counted from every project's `recent` with `at` in the last 24 h.
+  - *last 24 h* — "`<n>` ticks"; line: "`<ok>` ok · `<failed>` failed", counted from every project's `recent` with `at` in the last 24 h (bounded by the 50-entry cap; hourly ticks keep two days).
   - *policy* — "halt after `<N>` failures", "history on `<p>` projects"; line: "a reset clears the count, not the item records". When `source` is
     `unreadable`, the line instead says `tick.json` cannot be read and the board is showing the default.
-- **Projects sheet:** one row per project, halted first, then by last tick newest first, then projects with `recent: []`, then unreadable ones last;
+- **Projects sheet:** one row per project, halted first, then (halted rows among themselves too) by last tick newest first, then projects with `recent: []`, then unreadable ones last;
   ties by name.
   - Halted: bad tint, pill "halted", "`<streak>` failures in a row since `<time>` · last: `<reason>` on `<id>`", and a **Reset** button
     (`POST /api/ticks/reset`; disabled while in flight; an error shows inline under the row).
@@ -168,7 +169,7 @@ ticks are hourly; the Watchdog hook's armed 5 s buys nothing here, and 15 s is i
   - Unreadable `state.json`: muted row, the error text, no Reset.
 - **Activity sheet:** every project's `recent` merged newest first, at most 50 rows. Columns: time / outcome (`✓ ok` done-kind, `✕ failed` bad-kind) /
   project / did (`groom` | `execute`) / item / what happened (`reason`). No "skipped" or "halted" rows — those are not records (mock A showed both; dropped).
-- **Empty state:** `projects` is empty (a lock-only project with `recent: []` is not empty — it draws a row with the "ticking" pill) → one sheet: "No project has ticked yet. A tick starts from a scheduled job running `/backlog-tick`."
+- **Empty state:** `projects` is empty (a lock-only project with `recent: []` is not empty — it draws a row with the "ticking" pill) → the band and the three figures stay (so an unreadable `tick.json` still shows), and the sheets give way to one: "No project has ticked yet. A tick starts from a scheduled job running `/backlog-tick`."
 - **API unreachable:** the Watchdog page's pattern — band stays, one sheet: "Could not reach the tick history — `<error>`. This page will fill in once
   the API answers `GET /api/ticks` again."
 
@@ -208,7 +209,7 @@ reason"). One line in the skill's notes: a halted project is reset on the board,
 Node (beside the tool), `skills/backlog-tick/tools/`:
 
 - Streak table: `[]` → 0; `[failed]` → 1; `[failed, failed, ok]` (oldest→newest) → 0; `[ok, failed, failed]` → 2; three `failed` with `resetAt` between the
-  1st and 2nd → 2; `resetAt` after all → 0; `[failed, failed(at: "garbage"), failed]` → 1; `[failed, failed(outcome: "skipped"), failed]` → 2; mixed
+  1st and 2nd → 2; `resetAt` after all → 0; `[failed, failed(at: "garbage"), failed]` → 1; `[failed, failed(outcome: "skipped"), failed]` → 2; `[failed, (outcome: "skipped", at: "garbage"), failed]` → 1; mixed
   groom/execute failures count together.
 - `decide` halts at streak = N and not at N−1; N read from `tick.json`; absent file → 3; malformed file → `idle` with the unreadable reason even at streak
   0; out-of-range 0 → 1, 42 → 10; a stale lock while halted is still recovered (verdict `recover`), and the next `decide` is `idle` halted.
@@ -220,8 +221,8 @@ Jest (`test/`, flat):
 - The server's streak function against the same table.
 - `GET /api/ticks`: two projects (one halted, one not), distinct roots and distinct recents, so a swapped or unscoped read fails; an unreadable `state.json`
   row; a lock present; a registered name vs basename fallback; `source` in all three states.
-- `POST /api/ticks/config`: clamps; keeps `resetAt`; `409` and file byte-identical when unreadable; guard refuses a cross-origin POST and a non-JSON body.
-- `POST /api/ticks/reset`: non-object body and relative or non-string `project` `400`; unknown project `404`; known project writes `resetAt`, keeps `haltAfter`; `409` when unreadable.
+- `POST /api/ticks/config`: clamps 0 → 1 and 42 → 10; `"7"` and `2.5` → `400`; keeps `resetAt`; `409` and file byte-identical when unreadable; guard refuses a cross-origin POST and a non-JSON body.
+- `POST /api/ticks/reset`: non-object body and relative or non-string `project` `400`; unknown project `404`; known project writes `resetAt`, keeps `haltAfter`; a `recent` whose newest `at` is ahead of the server clock stamps that `at`; `409` when unreadable.
 - jsdom: the Ticks page renders halted-first order, the Reset click posts the right root and redraws from the answer, the empty state, the unreachable
   state; the rail tree shows Ticks and switches to it; the Settings card saves and disables on `unreadable`.
 
