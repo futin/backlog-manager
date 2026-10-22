@@ -860,11 +860,33 @@ export class GithubSource implements ItemSource, ItemWriter {
       if (req.runnerFix === true) await this.client.addLabels(repo, number, ['runner-fix'], { token });
       else if (req.runnerFix === false) await this.client.removeLabel(repo, number, 'runner-fix', { token });
 
-      /* The `plan-review` marker, moved by the same call and by `runner-fix`'s rules in every respect: after the body patch and after the `ifUpdatedAt`
-         check, neither result checked (a removal's 404 is the contract, an add is idempotent, and the body is already patched). Separate `if`s rather
-         than one chain, because the two markers are independent and a groom may set one and clear the other. */
-      if (req.planReview === true) await this.client.addLabels(repo, number, [PLAN_REVIEW_LABEL], { token });
-      else if (req.planReview === false) await this.client.removeLabel(repo, number, PLAN_REVIEW_LABEL, { token });
+      /* The `plan-review` marker, moved by the same call, after the body patch and after the `ifUpdatedAt` check like `runner-fix` — but, unlike it,
+         CHECKED and then ABSORBED (I2 of the backlog-tick final review). Separate `if`s rather than one chain, because the two markers are independent and a
+         groom may set one and clear the other.
+
+         Checked, because this mark is a hold, not a hint: a body that landed without it is a plan every gate reads as ready to execute, which is the one
+         thing an unattended groom must never leave behind. The body is already patched and cannot be taken back, so a failed add (or a failed removal other
+         than the contract's 404) is answered as a REFUSAL that says what landed and what did not — the groom's `body` exits non-zero, the tick reads the
+         plan back unmarked and records the groom `failed`, and nobody is told the write succeeded. A retry hits the `ifUpdatedAt` check, as `runner-fix`'s
+         comment says; that is the price of not reporting a hold that is not there.
+
+         Absorbed, by re-reading the issue: `patched.data` is the issue BEFORE the label call, and neither label endpoint answers the issue, so without the
+         read the cache — and with it `/api/items` and `show --json`, which a tick reads straight after the groom — says the plan is unmarked for up to a poll
+         interval. A failed re-read is not a refusal (both writes landed); the next poll catches the cache up. NOT `labels` in the PATCH instead: that
+         replaces the whole set, and would race a claim's `in-progress` and the driver's `orchestrator:queued` on the same issue. The `updatedAt` answered is
+         still the PATCH's, for the reason given above. */
+      if (typeof req.planReview === 'boolean') {
+        const marked = req.planReview
+          ? await this.client.addLabels(repo, number, [PLAN_REVIEW_LABEL], { token })
+          : await this.client.removeLabel(repo, number, PLAN_REVIEW_LABEL, { token });
+        if (!(marked.status === 200 || (!req.planReview && marked.status === 404))) {
+          const refusal = refusalFor(marked);
+          const error = `#${number}'s body was written, but the plan-review label was not ${req.planReview ? 'added' : 'removed'}: ${refusal.error}`;
+          return { ok: false as const, refusal: { ...refusal, error } };
+        }
+        const reread = await this.client.issue(repo, number, { token });
+        if (reread.status === 200 && reread.data !== null) this.poller.absorbIssue(repo, reread.data);
+      }
 
       return { ok: true as const, value: { id: `#${number}`, updatedAt: patched.data.updated_at } };
     });
@@ -959,6 +981,10 @@ export class GithubSource implements ItemSource, ItemWriter {
    * Add or remove `plan-review` — the eleventh write route (backlog-tick). `review`'s twin and deliberately the same shape: on the item's chain, no
    * `issueNow` first, a closed issue not refused, and a removal's 404 answered as success because the caller's contract is "the label is not there".
    * Here the removing caller is a person approving a plan, and an approval already given is the state they asked for.
+   *
+   * Unlike `review` and `queue`, a landed change is followed by a re-read of the issue into the poller's cache, so the board's Run and `show --json` see the
+   * hold (or the approval) at once rather than a poll interval later — the same reason `patchBody` re-reads after its own `plan-review` change. A failed
+   * re-read is not a refusal: the label write landed, and the next poll catches the cache up.
    */
   async planReview(
     project: RegistryProject,
@@ -978,6 +1004,8 @@ export class GithubSource implements ItemSource, ItemWriter {
         : await this.client.removeLabel(repo, number, PLAN_REVIEW_LABEL, { token });
       const ok = res.status === 200 || (!req.planReview && res.status === 404);
       if (!ok) return { ok: false as const, refusal: refusalFor(res) };
+      const reread = await this.client.issue(repo, number, { token });
+      if (reread.status === 200 && reread.data !== null) this.poller.absorbIssue(repo, reread.data);
       return { ok: true as const, value: { id: `#${number}`, planReview: req.planReview } };
     });
   }

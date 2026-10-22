@@ -748,6 +748,55 @@ describe('plan-review', () => {
     expect(gh.calls).toEqual([]);
   });
 
+  /* The read the tick's step 3 makes straight after a groom (I2 of the final review): `show --json` serves `planReview` off the poller's cache, so a label
+     the cache has not heard about reads as an unmarked plan and the tick records a good groom `failed`. The token is removed before the read for the reason
+     `create`'s absorption case gives — with no token no sweep can run, so the only way the label is in the payload is the cache the write itself filled. */
+  async function servedWithoutAPoll(): Promise<ItemsIndex['items'][number] | undefined> {
+    gh.calls.length = 0;
+    delete process.env[GITHUB_TOKEN_ENV];
+    const res = await request(app.getHttpServer()).get('/api/items').expect(200);
+    expect(gh.calls).toEqual([]);
+    return (res.body as ItemsIndex).items.find((i) => i.id === '#31');
+  }
+
+  it('serves planReview: true on the next /api/items straight after a body write that set it, with no poll tick', async () => {
+    const issue = gh.issue();
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'the plan', ifUpdatedAt: issue.updated_at, planReview: true }).expect(201);
+    expect(gh.matching('/issues/31', 'PATCH')[0].body).toEqual({ body: 'the plan' });
+    expect((await servedWithoutAPoll())?.planReview).toBe(true);
+  });
+
+  it('serves no planReview on the next /api/items straight after a body write that cleared it, with no poll tick', async () => {
+    const issue = gh.issue({ labels: [{ name: 'type:bug' }, { name: 'plan-review' }] });
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'the plan', ifUpdatedAt: issue.updated_at, planReview: false }).expect(201);
+    expect((await servedWithoutAPoll())?.planReview).toBeUndefined();
+  });
+
+  /* A plan that looks approved must not ship. The body is already patched when the label add fails, so the route cannot undo the write — but answering it as
+     a success would hand the groom a plan every gate reads as ready, with nothing said. The refusal names what landed and what did not. */
+  it('answers an error, not a success, when a body write-s plan-review add fails', async () => {
+    const issue = gh.issue();
+    await sync();
+    gh.failNext = { fragment: '/issues/31/labels', status: 502 };
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'the plan', ifUpdatedAt: issue.updated_at, planReview: true }).expect(502);
+    expect(res.body.error).toMatch(/plan-review/);
+    expect(gh.matching('/issues/31', 'PATCH')).toHaveLength(1);
+    expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('plan-review');
+  });
+
+  it('the plan-review route shows its label change on the next /api/items, with no poll tick', async () => {
+    gh.issue();
+    await sync();
+    await post('plan-review', { project: trackerPath, id: '#31', planReview: true }).expect(201);
+    expect((await servedWithoutAPoll())?.planReview).toBe(true);
+
+    process.env[GITHUB_TOKEN_ENV] = TOKEN;
+    await post('plan-review', { project: trackerPath, id: '#31', planReview: false }).expect(201);
+    expect((await servedWithoutAPoll())?.planReview).toBeUndefined();
+  });
+
   it('serialises a concurrent add and remove on one item, in the order they were fired', async () => {
     gh.issue();
     await sync();

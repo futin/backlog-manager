@@ -239,7 +239,8 @@ is `idle: stack down`, taken before the lock. A Jira live session is NOT a busy 
 **Never a plan nobody has read.** The tick writes plans unattended, and the user's review is the only check on them. Because `/git-sync` commits any uncommitted
 work, "the groom is uncommitted" cannot be that check — it would approve every plan overnight — so the gate is an explicit mark, `plan-review`: a label on a
 tracker project, a `plan-review: true` frontmatter line on a files project, written by groom in the SAME write that lands the plan (`backlog.mjs body|new
---plan-review`, or the frontmatter block groom prints), never as a second step, so there is no moment in which an approved-looking plan exists without it. A
+--plan-review`, or the frontmatter block groom prints), never as a second step, so no approved-looking plan is ever reported written without it — on a
+tracker the `body` route makes the label call itself, checks it and refuses when it fails, then re-reads the issue so the tick's read-back sees the mark. A
 person approves by removing it, and there is no `--no-plan-review` anywhere: approval is `backlog.mjs plan-review <id> off`, or deleting the line and
 committing. Every gate that could execute the item reads the one flag and refuses with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON` in
 `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents-shared.test.ts`): the board's Run
@@ -3630,7 +3631,11 @@ a removal's 404 answered as success. The label exists because a tick's groom wri
 without a mark the board's Run, the server's `plan`/`dispatch` and the orchestrator's queue would each execute it. A literal boolean for `review`'s reason, with
 a sharper edge: coercing `'false'` to truthy would add the hold somebody was trying to lift, and coercing `'true'` the other way would leave an unreviewed plan
 looking approved. `create` and `body` carry the same mark as an optional `planReview` (`runnerFix`'s twin, the 400 included), because `plan-review` has to land
-in the same write as the plan, never after it; the body route can only ADD it — approval is this route with `false`, said once, in one place (`backlog.mjs
+in the same write as the plan, never after it. In `body` that is a label call right after the patch, on the same chain — and unlike `runner-fix`'s, CHECKED (a
+failure is a refusal naming what landed: the body cannot be taken back, and a success would report a hold that is not there) and followed by a re-read of the
+issue into the cache, because a tick reads the item back at once and `patched.data` predates the label. Not `labels` in the PATCH: that replaces the set and
+would race a claim's `in-progress` and the driver's `orchestrator:queued`. This route re-reads after a landed change too.
+The body route can only ADD it — approval is this route with `false`, said once, in one place (`backlog.mjs
 plan-review <id> on|off`). Every per-item gate reads the mapped `planReview` flag through one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
 `shared/agent.ts`, with a hand-kept copy in `orchestrate.mjs`), always after `inReview`'s. A files project carries the mark as a `plan-review: true` frontmatter
 line instead, so this route, like `review`, is tracker-only.
