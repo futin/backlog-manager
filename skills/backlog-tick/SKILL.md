@@ -21,7 +21,9 @@ which, and keeps the lock and the memory of what failed; this session only carri
 - **Touch backlog items only through the two skills and the two tools named here, plus one read:** `backlog.mjs show` (step 3). Never edit an item file by hand,
   never commit, never merge, and never push yourself — an execute's own `--finish pr` pushes its own branch, and that is the skill's, not yours.
 - **A non-zero exit from `decide`, `record` or `forget` means stop:** report the stderr line as the final message. Never read it as "nothing to do". Exit `1`
-  is usage and exit `2` is runtime. If `decide` itself failed — or printed anything but one JSON line — there is no lock to release, so no `record` follows.
+  is usage and exit `2` is runtime. Exit `3` is `record` finding the lock held under ANOTHER id: the outcome was written, the lock was left, and the usual cause
+  is recording an id other than the verdict's (step 3) — stop all the same, so the stall reaches the run log. If `decide` itself failed — or printed anything
+  but one JSON line — there is no lock to release, so no `record` follows.
 - **Tracker ids start with `#`, so single-quote the id in the shell** (`record '#12' ok …`) — unquoted, the shell reads `#12` as a comment. The `--reason`
   text is single-quoted too, and is one line.
 
@@ -33,8 +35,8 @@ Pass the trigger's flags through unchanged — `--max-prs M`, `--max-plans N`, `
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" decide <the trigger's flags>
 ```
 
-It prints ONE JSON line: `verdict`, `reason`, `caps`, `dryRun`, and for `execute` / `groom` also `id`, `skill` and `args`; for `recover` also `stop`, and `id`
-when a lock was readable.
+It prints ONE JSON line: `verdict`, `reason`, `root`, `caps`, `dryRun`, and for `execute` / `groom` also `id`, `skill` and `args`; for `recover` also `stop`,
+and `id` when a lock was readable. `root` is the project's main checkout (`null` when the cwd is not one); step 3 runs from it.
 On `execute` and `groom` it has taken the lock; from here to step 3 the lock is held, and only `record` releases it.
 
 **`dryRun` is `true` — whatever the verdict, run nothing and record nothing:** no lock was taken and no `stop` is safe. The final message is the `verdict` and
@@ -61,22 +63,26 @@ Decide `ok` or `failed` from what the skill left behind, never from how confiden
 
 A groom is `ok` only when the item is groomed AND carries the `plan-review` mark: a **bug** has `## Cause` and `## Fix` filled, neither "unknown", and the
 mark; a **refactor** was promoted to a task that has a plan and the mark. Anything else is `failed` — a bug groom that ends still ungroomed, recorded `ok`,
-would be re-picked every tick, and an unmarked plan would be executed unseen. Read it back, read-only, on the bug's id, or on the new task id the groom printed:
+would be re-picked every tick, and an unmarked plan would be executed unseen. Read it back, read-only, on the bug's id, or on the new task id the groom printed
+— that new id is for this read-back ONLY:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show '<id>' --json
+cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show '<id or new task id>' --json
 ```
+
+Every step-3 command starts `cd '<root>' &&`, with `root` from step 1's JSON: an execute's `--finish pr` leaves this session's cwd inside its own worktree.
 
 In a tracker project the JSON carries `item.groomed` (`true` when Cause and Fix are filled and not "unknown", or the task has a plan) and `item.planReview`
 (`true`, or absent). In a files project `show` prints the path and frontmatter only — the `plan-review: true` line is in that block (any value but `false`
 counts) — so Read the file at the printed path for the `## Cause` / `## Fix` or `## Plan` text.
 
-Then run one of these in every case — after an error or a half-finished skill too, because the lock is released only here. Make the reason ONE line and write
-every apostrophe in it as `’` (or drop it), so the single quotes can never break and leave the lock held:
+Then run one of these in every case — after an error or a half-finished skill too, because the lock is released only here. **`record` always takes the
+verdict's `id` from step 1** — for a promote the refactor's, never the new task's; any other id leaves the lock held and exits `3`. Make the reason ONE line
+and write every apostrophe in it as `’` (or drop it), so the single quotes can never break and leave the lock held:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" record '<id>' ok --kind <execute|groom>
-node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" record '<id>' failed --kind <execute|groom> --reason '<one line>'
+cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" record '<verdict id>' ok --kind <execute|groom>
+cd '<root>' && node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" record '<verdict id>' failed --kind <execute|groom> --reason '<one line>'
 ```
 
 A `failed` outcome skips that item until its content changes, so one bad item cannot take every night's slot. There is no `blocked` outcome: a failure that was

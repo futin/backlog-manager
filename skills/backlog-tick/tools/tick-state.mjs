@@ -250,6 +250,11 @@ export function contentHash(text) {
 
 // A failed item is skipped only while its content still hashes to what it failed on. `ok` is never skipped (the item has left the queue by then and a re-appearance
 // is a new situation), and a `failed` record with no hash cannot prove the text is unchanged, so it does not skip.
-export function isSkipped(rec, currentHash) {
-  return rec !== undefined && rec.outcome === 'failed' && rec.hash !== undefined && rec.hash === currentHash;
+//
+// And only for the KIND of work that failed (`kind`, the candidate's: `execute` or `groom`). A failure is a judgement about one unit on those bytes, not about
+// the item. The case that forced it: a groom judged `failed` because its plan read back without the `plan-review` mark, which a person then approves — on a
+// tracker by removing a label, which does not move the body — would otherwise keep that groomed bug off every tick's execute queue until someone edited it or
+// ran `forget`. The record holds one entry per item, so the newest outcome of either kind is the one consulted.
+export function isSkipped(rec, currentHash, kind) {
+  return rec !== undefined && rec.outcome === 'failed' && rec.kind === kind && rec.hash !== undefined && rec.hash === currentHash;
 }

@@ -195,7 +195,7 @@ test('not a git repository, not a main checkout, no backlog store', async (t) =>
   const fx = project(t);
   const plain = path.join(fx.base, 'plain');
   fs.mkdirSync(plain);
-  assert.deepEqual(await decide(fx, [], { cwd: plain }), { verdict: 'idle', reason: 'not a git repository', caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx, [], { cwd: plain }), { verdict: 'idle', reason: 'not a git repository', root: null, caps: CAPS, dryRun: false });
 
   git(fx.root, 'worktree', 'add', '-q', path.join(fx.base, 'linked'), '-b', 'linked');
   assert.equal((await decide(fx, [], { cwd: path.join(fx.base, 'linked') })).reason, 'not a main checkout');
@@ -219,7 +219,7 @@ test('a subdirectory of the project resolves to the project root', async (t) => 
 test('tracker project with the stack down is idle before any lock', async (t) => {
   const fx = project(t, { tracker: true });
   writeLockFile(fx, { host: 'h', verdict: { kind: 'groom', id: '#3' }, base: 'main', at: ago(10 * 60 * MIN) });
-  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: 'stack down', caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: 'stack down', root: fx.root, caps: CAPS, dryRun: false });
   // the stale lock was not even looked at
   assert.ok(fs.existsSync(fx.lockFile));
   fs.rmSync(fx.lockFile);
@@ -238,6 +238,7 @@ test('files project decides with the stack down', async (t) => {
     id: 'bug-1',
     skill: 'backlog-execute',
     args: 'bug-1 --finish pr [backlog-tick]',
+    root: fx.root,
     caps: { openPrs: 0, maxPrs: 2, planReview: 0, maxPlans: 3 },
     dryRun: false,
   });
@@ -268,7 +269,7 @@ test('fresh lock → busy another tick', async (t) => {
   commitAll(fx.root);
   const lock = { host: 'h', verdict: { kind: 'execute', id: 'bug-9' }, base: 'main', at: ago(MIN) };
   writeLockFile(fx, lock);
-  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'another tick', caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'another tick', root: fx.root, caps: CAPS, dryRun: false });
   assert.deepEqual(readJson(fx.lockFile), lock);
 });
 
@@ -319,7 +320,7 @@ test('an orchestrator run file running or paused is busy; done is not', async (t
   item(fx, 'bug-1', BUG_READY);
   commitAll(fx.root);
   writeRun(fx, { status: 'running', project: fx.root });
-  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'orchestrator run running', caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'orchestrator run running', root: fx.root, caps: CAPS, dryRun: false });
   writeRun(fx, { status: 'paused', project: fx.root });
   assert.equal((await decide(fx)).reason, 'orchestrator run paused');
   writeRun(fx, { status: 'done', project: fx.root });
@@ -360,7 +361,7 @@ test('files: a started marker in the main checkout is busy', async (t) => {
   item(fx, 'bug-1', BUG_READY);
   item(fx, 'bug-2', BUG_RAW, { started: '2026-10-22T10:00:00Z' });
   commitAll(fx.root);
-  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'started marker on bug-2', caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'started marker on bug-2', root: fx.root, caps: CAPS, dryRun: false });
 });
 
 test('files: a started marker in a linked worktree is busy and names the tree', async (t) => {
@@ -497,6 +498,28 @@ test('failed record with the same hash skips; an edited item is eligible again',
   assert.equal((await decide(fx, ['--dry-run'])).verdict, 'idle');
   commitAll(fx.root);
   assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-1');
+});
+
+// A failure is a judgement about one KIND of work on those bytes. A groom judged failed (on a tracker, most often a plan the label never reached) must not keep
+// the same item off the execute queue once a person has approved it — on a tracker the approval moves a label, not the body, so the hash still matches.
+test('a failed groom with the same hash does not keep the item off the execute queue', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  commitAll(fx.root);
+  assert.equal((await tick(fx, ['record', 'bug-1', 'failed', '--kind', 'groom', '--reason', 'no mark'])).status, 0);
+  // the premise: the groom's hash (working tree) is the execute's hash (`<base>` blob)
+  assert.equal(readJson(fx.stateFile).items['bug-1'].hash, contentHash(git(fx.root, 'show', 'main:backlog/bugs/open/bug-1-thing.md')));
+  assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-1');
+});
+
+test('tracker: a failed groom with the same hash does not keep the issue off the execute queue', async (t) => {
+  const fx = project(t, { tracker: true });
+  const body = '## Cause\n\nc\n\n## Fix\n\nf\n';
+  fs.mkdirSync(fx.lockDir, { recursive: true });
+  const rec = { outcome: 'failed', kind: 'groom', reason: 'no mark', at: ago(MIN), hash: contentHash(body) };
+  fs.writeFileSync(fx.stateFile, JSON.stringify({ items: { '#12': rec }, recent: [] }));
+  const routes = trackerRoutes([apiItem(fx, 12)], { bodies: { 'gh:futin/x#12': body } });
+  assert.equal((await withApi(routes, (port) => decide(fx, ['--dry-run'], { port }))).id, '#12');
 });
 
 /** main has bug-1 as `mainBody`, develop as `developBody`; the checkout is left on main. */
@@ -639,6 +662,7 @@ test('nothing to do when both caps are full', async (t) => {
   assert.deepEqual(v, {
     verdict: 'idle',
     reason: 'nothing to do: 2 open execute PRs (cap 2); 3 plans awaiting review (cap 3)',
+    root: fx.root,
     caps: { openPrs: 2, maxPrs: 2, planReview: 3, maxPlans: 3 },
     dryRun: false,
   });
@@ -670,7 +694,7 @@ test('recover a killed groom: recorded failed, lock gone, stop when the marker i
   const file = item(fx, 'bug-3', BUG_RAW, { started: '2026-10-22T10:00:00Z', phase: 'groom' });
   writeLockFile(fx, staleLock('groom', 'bug-3'));
   const v = await decide(fx);
-  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, caps: CAPS, dryRun: false });
+  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, root: fx.root, caps: CAPS, dryRun: false });
   const rec = readJson(fx.stateFile).items['bug-3'];
   assert.equal(rec.outcome, 'failed');
   assert.equal(rec.kind, 'groom');
@@ -719,7 +743,7 @@ test('dry-run recover writes nothing', async (t) => {
   const lock = staleLock('groom', 'bug-3');
   writeLockFile(fx, lock);
   const v = await decide(fx, ['--dry-run']);
-  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, caps: CAPS, dryRun: true });
+  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, root: fx.root, caps: CAPS, dryRun: true });
   assert.deepEqual(readJson(fx.lockFile), lock);
   assert.deepEqual(fs.readdirSync(fx.lockDir), ['lock']);
 });
@@ -727,7 +751,7 @@ test('dry-run recover writes nothing', async (t) => {
 test('an unreadable lock is removed and nothing is recorded', async (t) => {
   const fx = project(t);
   writeLockFile(fx, 'not json');
-  assert.deepEqual(await decide(fx), { verdict: 'recover', reason: 'removed an unreadable lock', stop: false, caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'recover', reason: 'removed an unreadable lock', stop: false, root: fx.root, caps: CAPS, dryRun: false });
   assert.deepEqual(fs.readdirSync(fx.lockDir), []);
   // parseable JSON with no usable verdict is the same case
   writeLockFile(fx, { host: 'h', verdict: { kind: 'merge', id: 'bug-1' }, at: ago(4 * 60 * MIN) });
@@ -755,18 +779,48 @@ test('record failed stores the <base> blob hash and releases its own lock', asyn
   assert.equal(fs.existsSync(fx.lockFile), false);
 });
 
-test('record leaves another id\'s lock in place and says so', async (t) => {
+// Exit 3, not 0: a lock naming another id is almost always the skill recording the wrong id (a promote's new task id instead of the refactor's), and an
+// exit 0 would leave that lock held for the whole `--lock-ttl` with nothing in the run log. The record is still written — it is the outcome the caller saw.
+test('record leaves another id\'s lock in place, says so and exits 3', async (t) => {
   const fx = project(t);
   item(fx, 'bug-2', BUG_RAW);
   const lock = staleLock('execute', 'bug-1', ago(MIN));
   writeLockFile(fx, lock);
   const r = await tick(fx, ['record', 'bug-2', 'ok', '--kind', 'groom']);
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 3, r.stderr);
   assert.match(r.stderr, /bug-1/);
   assert.deepEqual(readJson(fx.lockFile), lock);
   const rec = readJson(fx.stateFile).items['bug-2'];
   assert.equal(rec.outcome, 'ok');
   assert.equal(rec.hash, undefined);
+});
+
+// C1 of the final review: `backlog-execute --finish pr` leaves the session's cwd inside `.worktrees/execute-<id>`, and the step-3 `record` that follows must
+// still find the main checkout's lock — refused there, the lock was held for the whole `--lock-ttl` and the PR recorded `failed: killed at timeout`.
+test('record, status and forget run inside a linked worktree act on the main checkout; decide still refuses one', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  commitAll(fx.root);
+  const v = await decide(fx);
+  assert.equal(v.id, 'bug-1');
+  assert.equal(v.root, fx.root);
+  const tree = path.join(fx.root, '.worktrees', 'execute-bug-1');
+  git(fx.root, 'worktree', 'add', '-q', tree, '-b', 'execute/bug-1');
+
+  const r = await tick(fx, ['record', 'bug-1', 'ok', '--kind', 'execute'], { cwd: tree });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /lock released/);
+  assert.equal(fs.existsSync(fx.lockFile), false);
+  assert.equal(readJson(fx.stateFile).items['bug-1'].outcome, 'ok');
+
+  const s = await tick(fx, ['status', '--json'], { cwd: path.join(tree, 'backlog') });
+  assert.equal(s.status, 0, s.stderr);
+  assert.deepEqual(s.v.recent.map((e) => e.id), ['bug-1']);
+  const f = await tick(fx, ['forget', 'bug-1'], { cwd: tree });
+  assert.equal(f.status, 0, f.stderr);
+  assert.deepEqual(readJson(fx.stateFile).items, {});
+
+  assert.equal((await decide(fx, ['--dry-run'], { cwd: tree })).reason, 'not a main checkout');
 });
 
 test('record with no lock hashes at the default base and says so', async (t) => {

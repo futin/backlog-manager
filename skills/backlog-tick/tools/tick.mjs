@@ -9,8 +9,8 @@
 //
 // `decide` prints ONE JSON line and exits 0 for every verdict — `execute`, `groom`, `recover`, `busy`, `idle` — because a verdict is an answer, not a
 // failure: the `backlog-tick` skill reads it and acts. Exit 1 is a usage error; exit 2 is the tool itself failing (an unreadable `state.json`, say), which
-// the skill must stop on rather than read as "nothing to do". The design is docs/superpowers/specs/2026-10-22-backlog-tick-design.md; this header keeps
-// only what the code needs.
+// the skill must stop on rather than read as "nothing to do"; exit 3 is `record` finding the lock held under another id — the outcome written, the lock left
+// (see `cmdRecord`). The design is docs/superpowers/specs/2026-10-22-backlog-tick-design.md; this header keeps only what the code needs.
 //
 // What this file never does, each for a reason worth keeping:
 //   - **It never writes git.** Every git call is a read (`rev-parse`, `show`, `ls-tree`, `show-ref`, `symbolic-ref`, `worktree list`). The tick's
@@ -106,16 +106,29 @@ function findRoot(start) {
   }
 }
 
-// The four ways a cwd is not a project a tick may work, in the brief's order, or `{ root, source }`. A linked worktree is refused rather than resolved to its
-// main tree: a tick's state, lock and run-state key are the MAIN checkout's, and a tick fired inside a linked worktree is a misconfigured job, not a request to
-// work somewhere else.
-function resolveProject(cwd) {
+// The four ways a cwd is not a project a tick may work, in the brief's order, or `{ root, source }`. For `decide` a linked worktree is refused rather than
+// resolved to its main tree: a tick's state, lock and run-state key are the MAIN checkout's, and a tick fired inside a linked worktree is a misconfigured job,
+// not a request to work somewhere else.
+//
+// `followLinked` is the other three verbs' answer (C1 of the final review). `record` runs at the end of a tick whose execute ran `--finish pr`, and that skill
+// runs every command as `cd <tree> && …` — in a main session the Bash tool's cwd persists, so the session comes back sitting in `.worktrees/execute-<id>`.
+// Refused there, `record` exited 2, the lock stayed held for the whole `--lock-ttl` and the recovery then recorded the PR it opened as `killed at timeout`.
+// The refusal's reason is about where a tick is FIRED, not where it is recorded, so `record`, `status` and `forget` follow a linked worktree to its main
+// tree: the parent of the common git dir, which is what orchestrate.mjs's `linkedWorktreeInfo` names as `projectRoot` — and, like it, only when that
+// common dir is a `.git` directory, since a bare main repo's parent is not a checkout of anything. The main tree is then resolved from scratch, without
+// `followLinked`, so every other refusal still applies to it and a chain of pointers cannot loop. The path is git's own, not realpath'd here; `findRoot`'s
+// root comes from `process.cwd()`, which is already the physical path, so the two agree on the key `decide` wrote the lock under.
+function resolveProject(cwd, { followLinked = false } = {}) {
   const root = findRoot(cwd);
   if (root === null) return { idle: 'not a git repository' };
   const r = git(root, ['rev-parse', '--git-dir', '--git-common-dir']);
   if (!r.ok) return { idle: 'not a git repository' };
   const [gitDir, commonDir] = r.stdout.trim().split('\n');
-  if (path.resolve(root, gitDir) !== path.resolve(root, commonDir)) return { idle: 'not a main checkout' };
+  if (path.resolve(root, gitDir) !== path.resolve(root, commonDir)) {
+    const common = path.resolve(root, commonDir);
+    if (!followLinked || path.basename(common) !== '.git') return { idle: 'not a main checkout' };
+    return resolveProject(path.dirname(common));
+  }
   const backlog = path.join(root, 'backlog');
   if (!fs.existsSync(backlog) || !fs.statSync(backlog).isDirectory()) return { idle: 'no backlog store' };
   const source = projectSource(root);
@@ -328,15 +341,19 @@ function parseDecide(argv) {
 async function cmdDecide(argv) {
   const opts = parseDecide(argv);
   const caps = { openPrs: null, maxPrs: opts.maxPrs, planReview: null, maxPlans: opts.maxPlans };
+  // `root` rides every verdict — the main checkout this tick resolved, `null` before there is one — because the skill runs `record` and its `show` read-back
+  // as `cd '<root>' && …`: an execute's `--finish pr` leaves the session's cwd inside `.worktrees/execute-<id>`, and a path printed here is the one place that
+  // cwd can be undone from without the session reasoning about git.
+  let root = null;
   const say = (verdict, reason, extra = {}) => {
-    process.stdout.write(`${JSON.stringify({ verdict, reason, ...extra, caps, dryRun: opts.dryRun })}\n`);
+    process.stdout.write(`${JSON.stringify({ verdict, reason, ...extra, root, caps, dryRun: opts.dryRun })}\n`);
     return 0;
   };
 
   // 1. Not a project.
   const proj = resolveProject(process.cwd());
   if (proj.idle) return say('idle', proj.idle);
-  const { root } = proj;
+  root = proj.root;
   const tracker = proj.source === 'github';
   const ctx = { root, tracker, repo: tracker ? markerRepo(root) : null };
 
@@ -505,7 +522,7 @@ function filesExecuteCandidate({ root }, base, state) {
   for (const it of orderExecute(items)) {
     if (it.groomed !== true || it.planReview) continue;
     if (executeTaken(root, it.id)) continue;
-    if (isSkipped(state.items[it.id], contentHash(it.text))) continue;
+    if (isSkipped(state.items[it.id], contentHash(it.text), 'execute')) continue;
     return it;
   }
   return null;
@@ -522,7 +539,7 @@ async function trackerExecuteCandidate({ root }, mine, state) {
     if (executeTaken(root, it.id)) continue;
     const body = await issueBody(it.path);
     if (body === null) continue;
-    if (isSkipped(state.items[it.id], contentHash(body))) continue;
+    if (isSkipped(state.items[it.id], contentHash(body), 'execute')) continue;
     return it;
   }
   return null;
@@ -541,7 +558,7 @@ function filesGroomCandidate({ root }, state) {
     items.push({ ...it, text });
   }
   for (const it of orderGroom(items)) {
-    if (isSkipped(state.items[it.id], contentHash(it.text))) continue;
+    if (isSkipped(state.items[it.id], contentHash(it.text), 'groom')) continue;
     return it;
   }
   return null;
@@ -552,7 +569,7 @@ async function trackerGroomCandidate(mine, state) {
   for (const it of orderGroom(items)) {
     const body = await issueBody(it.path);
     if (body === null) continue;
-    if (isSkipped(state.items[it.id], contentHash(body))) continue;
+    if (isSkipped(state.items[it.id], contentHash(body), 'groom')) continue;
     return it;
   }
   return null;
@@ -629,8 +646,9 @@ function parseRecord(argv) {
 // for `12`, a key no `decide` ever reads — a failure recorded there would skip nothing, and a `forget` would find nothing to forget.
 const stateKey = ({ tracker }, id) => (tracker && /^\d+$/.test(id) ? `#${id}` : id);
 
+// `record`, `status` and `forget`: a linked worktree resolves to its main checkout (`followLinked`, above); only `decide` refuses one.
 function requireProject() {
-  const proj = resolveProject(process.cwd());
+  const proj = resolveProject(process.cwd(), { followLinked: true });
   if (proj.idle) throw new Error(`${proj.idle} — run this from the project's main checkout`);
   const tracker = proj.source === 'github';
   return { root: proj.root, tracker, repo: tracker ? markerRepo(proj.root) : null };
@@ -659,10 +677,15 @@ async function cmdRecord(argv) {
   recordOutcome(dir, id, { outcome, kind, reason, at: new Date().toISOString(), ...(hash === undefined ? {} : { hash }) });
 
   const released = releaseLock(dir, id);
+  process.stdout.write(`recorded ${id} ${outcome} (${kind})${released ? '; lock released' : ''}\n`);
+  // Exit 3 when the lock names ANOTHER id (I3 of the final review). The record above stands — it is the outcome the caller saw — and the lock stays, because
+  // it may be a live tick's. But the usual way here is the skill recording the wrong id: a promote prints a new task id, and recording that one left the
+  // refactor's lock held for the whole `--lock-ttl` with exit 0, so the skill's "non-zero means stop" rule never fired and nothing reached the run log. No lock
+  // at all (another tick already recovered it) and an unreadable one name no id, and stay 0.
   if (!released && lock && lock.verdict && typeof lock.verdict.id === 'string') {
     process.stderr.write(`tick.mjs: the lock is ${lock.verdict.id}'s, not ${id}'s; left in place\n`);
+    return 3;
   }
-  process.stdout.write(`recorded ${id} ${outcome} (${kind})${released ? '; lock released' : ''}\n`);
   return 0;
 }
 
