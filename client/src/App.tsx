@@ -7,6 +7,7 @@ import { SideRail } from './components/SideRail';
 import { JiraChip } from './components/JiraChip';
 import { TrackerChip } from './components/TrackerChip';
 import { SECTIONS, type Section } from './lib/sections';
+import { readDeepLink, withoutDeepLink } from './lib/deep-link';
 import type { JiraPage } from './lib/jira-page';
 import { JiraProvider, useJiraContext } from './hooks/JiraContext';
 import { setJiraPage } from './hooks/useJiraPage';
@@ -97,7 +98,25 @@ function AppShell() {
     renders is always a real section" true by construction here, instead of true
     only as long as two files keep agreeing about it.
   */
-  const [section, setSection] = useState<Section>(() => resolveSection(settings.landing === 'last' ? stored : settings.landing));
+  /*
+    A deep link (`lib/deep-link.ts`, Lookout's Orchestrator tile) beats both, and is read once, here, for the same no-flash reason. Its Runs page is written
+    inside the initializer rather than in an effect, because the lazy `RunsView` reads the stored page as it mounts and an effect could land after that. It
+    is the same `setRunsMode` the rail's tree calls, so StrictMode's second run of the initializer writes the same value again.
+  */
+  const [link] = useState(() => {
+    const read = readDeepLink(window.location.search);
+    if (read.runsMode !== null) setRunsMode(read.runsMode);
+    return read;
+  });
+  const [section, setSection] = useState<Section>(() => link.section ?? resolveSection(settings.landing === 'last' ? stored : settings.landing));
+  // Recorded as a click on the rail would record it, and taken out of the address bar so a reload inside the app reopens where the reader has gone since.
+  // Mount only: `link` never changes, and `setStored` is a fresh closure every render.
+  useEffect(() => {
+    if (link.section === null) return;
+    setStored(link.section);
+    const { pathname, search, hash } = window.location;
+    window.history.replaceState(window.history.state, '', withoutDeepLink(pathname, search, hash));
+  }, []);
 
   /*
     Whether a run on this machine is working, for the rail's wordmark cursor (§8.0). Reported up by whichever of Board, Runs and Archive is mounted
