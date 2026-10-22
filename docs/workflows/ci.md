@@ -46,12 +46,11 @@ way on 2026-10-15; the 946th is that git-wording case, re-run alone in the conta
 ## The ruleset
 
 The `main-pr-only` ruleset (PR required, the three contexts above, linear history, no force push or deletion, no bypass) and the squash-only merge settings
-are applied by release-kit's `scripts/apply-repo-settings.sh futin/backlog-manager`, dry run first. **State on 2026-10-15: not applied, deliberately** — unlike the
-dashboard, it waits for Phase B, the `pr` merge mode, rather than for the first green PR, because of the first bullet below. Until then CI is a signal on
-every PR, not a gate on `main`. The `pr` merge mode has now landed (`docs/superpowers/specs/2026-10-15-orchestrate-pr-mode-design.md`); once this machine's
-Settings default merge mode is `pr` and one PR-mode run has opened its PR here, the ruleset can be applied. Applying it stays the user's step.
+are applied by release-kit's `scripts/apply-repo-settings.sh futin/backlog-manager`, dry run first. **Applied 2026-10-19, enforcement `active`** — unlike the
+dashboard, it waited for Phase B, the `pr` merge mode (`docs/superpowers/specs/2026-10-15-orchestrate-pr-mode-design.md`), rather than for the first green PR,
+because of the first bullet below. CI is now a gate on `main`, not only a signal on every PR.
 
-Once it is applied, every direct push to `main` is refused, and in this repo that is more than habit:
+Every direct push to `main` is refused, and in this repo that is more than habit:
 
 - **`backlog-orchestrate` opens a PR instead of pushing `main`, but only in `pr` merge mode.** This repo's own backlog is tracker-backed, and a `merge`-mode run
   here pushes `main` after every merge, so under the ruleset it would merge locally and then park at the push. A `pr`-mode run drains onto its own
