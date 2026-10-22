@@ -433,6 +433,22 @@ test('uncommitted item is not a candidate', async (t) => {
   assert.equal((await decide(fx, ['--dry-run'])).verdict, 'idle');
 });
 
+// Review fix I1: candidates are LISTED off the working tree's `open/` and only READ at `<base>` — the shape of orchestrate.mjs's `listOpenItems`. A ready
+// bug rejected or archived on disk but not yet committed is still open at `<base>`, and a listing taken there would execute what was just decided against.
+test('a committed ready bug moved out of open/ in the working tree only is not a candidate', async (t) => {
+  for (const dest of [['out-of-scope'], ['bugs', 'done']]) {
+    const fx = project(t);
+    const file = item(fx, 'bug-1', BUG_READY);
+    commitAll(fx.root);
+    const dir = path.join(fx.root, 'backlog', ...dest);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.renameSync(file, path.join(dir, path.basename(file)));
+    const v = await decide(fx, ['--dry-run']);
+    assert.equal(v.verdict, 'idle', dest.join('/'));
+    assert.equal(v.reason, 'nothing to do: no ready bug or task; no ungroomed bug or refactor');
+  }
+});
+
 test('existing execute branch or worktree skips the item', async (t) => {
   const fx = project(t);
   item(fx, 'bug-1', BUG_READY);
@@ -782,6 +798,15 @@ test('record usage errors exit 1 and write nothing', async (t) => {
 });
 
 // --- status and forget ---------------------------------------------------
+
+// `decide` keys a tracker item as `#12`, so a bare `12` from a hand-typed `record` or `forget` must land on the same key, or the record skips nothing.
+test('tracker: record and forget take a bare issue number as #<n>', async (t) => {
+  const fx = project(t, { tracker: true });
+  assert.equal((await tick(fx, ['record', '12', 'ok', '--kind', 'groom'])).status, 0);
+  assert.deepEqual(Object.keys(readJson(fx.stateFile).items), ['#12']);
+  assert.equal((await tick(fx, ['forget', '12'])).status, 0);
+  assert.deepEqual(Object.keys(readJson(fx.stateFile).items), []);
+});
 
 test('status --json lists newest first; forget lets the next decide pick the item again', async (t) => {
   const fx = project(t);

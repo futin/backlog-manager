@@ -148,8 +148,9 @@ function blobAt(root, ref, rel) {
   return r.ok ? r.stdout : null;
 }
 
-// Every open item of `sections` as committed at `ref`: `{ id, section, rel }`. The listing is taken AT the ref, not off the working tree, so an item that is
-// only on disk is never a candidate and one committed on a base the checkout is not on still is — `<base>` is what execute's worktree is cut from.
+// Every open item of `sections` as committed at `ref`: `{ id, section, rel }`. Used only to FIND a files item's blob at a recorded base when hashing a
+// failure — `record` and a recovery have an id and a base, and the item may have moved on disk since. Never a candidate listing: `decide` lists off the
+// working tree (`filesExecuteCandidate`), so an item rejected or archived on disk is not executed just because the move is not committed yet.
 function itemsAtRef(root, ref, sections) {
   const dirs = sections.map((s) => `backlog/${s}/open`);
   const r = git(root, ['ls-tree', '-r', '-z', '--name-only', ref, '--', ...dirs]);
@@ -486,13 +487,16 @@ function isSkippedTree(root, tree) {
 
 const executeTaken = (root, id) => branchExists(root, `execute/${executeId(id)}`) || fs.existsSync(path.join(root, '.worktrees', `execute-${executeId(id)}`));
 
-// Files: every open bug and task COMMITTED at `<base>`, read off its blob there — `groomed`, `runner-fix`, `plan-review` and the hash all come off those bytes,
-// because they are what execute's worktree will hold. A `plan-review:` line deleted only in the working tree is not an approval yet. There is no files
-// `in-review` marker; that guard is a tracker label.
+// Files: LISTED off the working tree's `open/`, READ at `<base>` — the shape of orchestrate.mjs's `listOpenItems` plus its `<base>` read. Both halves are a
+// veto. The listing is the working tree's because a groom's rejection or archive is uncommitted by design: an item moved out of `open/` on disk is decided
+// against, and listing at `<base>` would execute it anyway. The bytes are `<base>`'s because they are what execute's worktree will hold — `groomed`,
+// `runner-fix`, `plan-review` and the hash all come off that blob, so a `plan-review:` line deleted only on disk is not an approval yet, and an item with no
+// blob at `<base>` (never committed there) is not a candidate. There is no files `in-review` marker; that guard is a tracker label.
 function filesExecuteCandidate({ root }, base, state) {
   const items = [];
-  for (const it of itemsAtRef(root, base, ['bugs', 'tasks'])) {
-    const text = blobAt(root, base, it.rel);
+  for (const it of itemsOnDisk(root, ['bugs', 'tasks'])) {
+    const rel = path.relative(root, it.file).split(path.sep).join('/');
+    const text = blobAt(root, base, rel);
     if (text === null) continue;
     const { fields, body } = readFrontmatter(text);
     const groomed = deriveGroomed(it.section, body);
@@ -621,6 +625,10 @@ function parseRecord(argv) {
   return { id, outcome, kind, reason };
 }
 
+// The key `decide` reads an item's record under: its API id, `#12`, for a tracker issue. A hand-typed `record 12` or `forget 12` would otherwise write or look
+// for `12`, a key no `decide` ever reads — a failure recorded there would skip nothing, and a `forget` would find nothing to forget.
+const stateKey = ({ tracker }, id) => (tracker && /^\d+$/.test(id) ? `#${id}` : id);
+
 function requireProject() {
   const proj = resolveProject(process.cwd());
   if (proj.idle) throw new Error(`${proj.idle} — run this from the project's main checkout`);
@@ -631,8 +639,10 @@ function requireProject() {
 // Writes the outcome — with the hash, for `failed`, taken NOW — and releases the lock if it is this id's. The `<base>` a files execute is hashed at is the one
 // the lock recorded; with no lock for this id (another tick already recovered it), it is resolved as `decide` resolves it without `--base`, and stderr says so.
 async function cmdRecord(argv) {
-  const { id, outcome, kind, reason } = parseRecord(argv);
+  const parsed = parseRecord(argv);
   const ctx = requireProject();
+  const { outcome, kind, reason } = parsed;
+  const id = stateKey(ctx, parsed.id);
   const dir = projectDir(tickHome(), ctx.root);
   const lock = lockSnapshot(dir, Date.now(), Number.POSITIVE_INFINITY).lock;
   const ours = Boolean(lock && lock.verdict && lock.verdict.id === id);
@@ -683,9 +693,9 @@ function cmdStatus(argv) {
 // The escape hatch for a failure that was the environment's fault: the item's record goes, so the next tick may pick it again. History stays.
 function cmdForget(argv) {
   if (argv.length !== 1 || argv[0].startsWith('--')) throw new UsageError('forget needs exactly one item id');
-  const { root } = requireProject();
-  const [id] = argv;
-  if (!forgetItem(projectDir(tickHome(), root), id)) {
+  const ctx = requireProject();
+  const id = stateKey(ctx, argv[0]);
+  if (!forgetItem(projectDir(tickHome(), ctx.root), id)) {
     process.stderr.write(`tick.mjs: nothing recorded for ${id}\n`);
     return 1;
   }
