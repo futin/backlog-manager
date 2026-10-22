@@ -4851,6 +4851,107 @@ test('files mode: review is refused as tracker-only', () => {
   assert.match(out.stderr, /review is for tracker projects/)
 })
 
+// `plan-review <id> on|off` — the unattended-groom guard's writer. A plan a tick wrote while nobody watched carries the `plan-review` label until a person
+// approves it, and approval is the verb's `off`: there is deliberately no `--no-plan-review`. The wire shape is the route's `{ project, id, planReview }`,
+// a real boolean, never the word.
+test('API mode: plan-review on posts planReview true', async () => {
+  const { dir } = trackerFixture()
+  const routes = { '/api/items/plan-review': (body) => ({ status: 201, body: { id: body.id, planReview: body.planReview } }) }
+
+  const on = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'plan-review', '7', 'on'))
+  assert.equal(on.out.status, 0, on.out.stderr)
+  assert.equal(on.requests.length, 1)
+  assert.equal(on.requests[0].method, 'POST')
+  assert.equal(on.requests[0].path, '/api/items/plan-review')
+  assert.deepEqual(on.requests[0].body, { project: dir, id: '#7', planReview: true })
+  assert.equal(on.out.stdout.trim(), 'gh:futin/x#7 awaiting plan review')
+})
+
+test('API mode: plan-review off posts planReview false', async () => {
+  const { dir } = trackerFixture()
+  const routes = { '/api/items/plan-review': (body) => ({ status: 201, body: { id: body.id, planReview: body.planReview } }) }
+
+  const off = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'plan-review', '#7', 'off'))
+  assert.equal(off.out.status, 0, off.out.stderr)
+  assert.deepEqual(off.requests[0].body, { project: dir, id: '#7', planReview: false })
+  assert.equal(off.out.stdout.trim(), 'gh:futin/x#7 plan approved')
+})
+
+test('API mode: plan-review with a bad state prints usage and makes no request', async () => {
+  const { dir } = trackerFixture()
+  for (const args of [['#3', 'maybe'], ['7'], []]) {
+    const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'plan-review', ...args))
+    assert.equal(out.status, 1, JSON.stringify(args))
+    assert.match(out.stderr, /usage: backlog\.mjs plan-review <id> on\|off/, JSON.stringify(args))
+    assert.deepEqual(requests, [], JSON.stringify(args))
+  }
+})
+
+test('API mode: plan-review with the stack down is exit 5', async () => {
+  const { dir } = trackerFixture()
+  const out = await runNode(dir, apiEnv(1), 'plan-review', '7', 'on')
+  assert.equal(out.status, 5)
+})
+
+test('files mode: plan-review is refused, and the sentence names the frontmatter line', () => {
+  const { dir } = backlogFixture()
+  run(dir, 'init')
+  const out = run(dir, 'plan-review', 'task-1', 'on')
+  assert.equal(out.status, 1)
+  assert.equal(
+    out.stderr.trim(),
+    'plan-review is for tracker projects: in a files project the mark is a `plan-review: true` frontmatter line — delete it and commit to approve',
+  )
+})
+
+test('API mode: body --plan-review sends planReview true, and the key is absent without it', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Plan\n\nreal work\n')
+  const routes = { '/api/items/body': { status: 201, body: { id: '#7', updatedAt: '2026-09-19T10:00:00Z' } } }
+
+  const marked = await withApi(routes, async (port) =>
+    await runNode(dir, apiEnv(port), 'body', '7', '--body', bodyFile, '--if-updated-at', '2026-09-19T09:00:00Z', '--plan-review'),
+  )
+  assert.equal(marked.out.status, 0, marked.out.stderr)
+  assert.equal(marked.requests[0].body.planReview, true)
+
+  // Approval is `plan-review <id> off`, so a body patch that says nothing leaves the label exactly as it is.
+  const plain = await withApi(routes, async (port) =>
+    await runNode(dir, apiEnv(port), 'body', '7', '--body', bodyFile, '--if-updated-at', '2026-09-19T09:00:00Z'),
+  )
+  assert.equal(plain.out.status, 0, plain.out.stderr)
+  assert.equal('planReview' in plain.requests[0].body, false)
+})
+
+test('API mode: new --plan-review sends planReview true, and the key is absent without it', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Goal\n\npromoted unattended\n')
+  const routes = { '/api/items/create': { status: 201, body: { id: '#77', urn: 'gh:futin/x#77', url: 'u', number: 77 } } }
+
+  const marked = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'new', 'tasks', 't', '--body', bodyFile, '--plan-review'))
+  assert.equal(marked.out.status, 0, marked.out.stderr)
+  assert.equal(marked.requests[0].body.planReview, true)
+
+  const plain = await withApi(routes, async (port) => await runNode(dir, apiEnv(port), 'new', 'tasks', 't', '--body', bodyFile))
+  assert.equal(plain.out.status, 0, plain.out.stderr)
+  assert.equal('planReview' in plain.requests[0].body, false)
+})
+
+test('files mode: new --plan-review is refused by name, and makes no request', async () => {
+  const { dir, backlog } = backlogFixture()
+  init(backlog)
+  const { out, requests } = await withApi({}, async (port) => await runNode(dir, apiEnv(port), 'new', 'tasks', 'a title', '--plan-review'))
+
+  assert.equal(out.status, 1)
+  assert.equal(
+    out.stderr.trim(),
+    '--plan-review is a tracker flag: in a files project the mark is a `plan-review: true` frontmatter line, written into the item file',
+  )
+  assert.deepEqual(requests, [])
+})
+
 test('files mode: the three tracker-only verbs are each refused with their own reason', async () => {
   const { dir } = backlogFixture()
   run(dir, 'init')

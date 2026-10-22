@@ -449,8 +449,8 @@ export function init(backlog) {
 //   - it does not touch `~/.backlog-manager/registry.json`. That file's one-writer relationship with this tool stands, but registration answers "does this
 //     machine's board know about this project at all", which is per machine and unchanged by connecting; the marker answers "where do this project's items
 //     come from", which is per project and committed. Conflating the two would make connecting a project on one machine silently re-register it there;
-//   - it makes no network call and needs no server running. The ten labels the issue→item mapping depends on are created by the board's poller on its first
-//     successful sync (spec §5.2), so a `connect` run on a laptop with no token still produces a correct, committable marker;
+//   - it makes no network call and needs no server running. The eleven labels the issue→item mapping depends on are created by the board's poller on its
+//     first successful sync (spec §5.2), so a `connect` run on a laptop with no token still produces a correct, committable marker;
 //   - it does not create the labels' issue forms' *labels*, only forms that REQUEST them. A form naming a label that does not exist yet is not an error on
 //     GitHub's side — the label is applied once it exists, and the poller creates it before anyone can file through the form in anger.
 const SOURCE_MARKER = 'source.json'
@@ -2182,12 +2182,16 @@ tracker projects only (backlog/source.json names github):
   abort       release a live claim this machine's own dead session left behind
   comment     append a comment to an item
   body        replace an item's body (groom's only write)
-  review      mark an item as having an open PR (on), or clear it (off)`
+  review      mark an item as having an open PR (on), or clear it (off)
+  plan-review mark an item's plan as written unattended and awaiting a person (on), or approve it (off)`
 
 const REVIEW_USAGE = `usage: backlog.mjs review <id> on|off`
+// `review`'s sibling for the other label a tracker item can carry about a human step: `in-review` says a PR waits on a reviewer, `plan-review` says a plan
+// written unattended waits on a person. There is deliberately no `--no-plan-review` flag anywhere — approval is this verb's `off`, said once, in one place.
+const PLAN_REVIEW_USAGE = `usage: backlog.mjs plan-review <id> on|off`
 
 const NEW_USAGE = `usage: backlog.mjs new <section> <title> [--from <id>]
-       backlog.mjs new <section> <title> --body <file> [--from <id>] [--kind chore|debt] [--runner-fix]   (tracker projects)
+       backlog.mjs new <section> <title> --body <file> [--from <id>] [--kind chore|debt] [--runner-fix] [--plan-review]   (tracker projects)
 
 sections: bugs, ideas, tasks, refactors, out-of-scope`
 
@@ -2237,7 +2241,7 @@ const HEARTBEAT_USAGE = `usage: backlog.mjs heartbeat <id>`
 // bug-46 exists to stop being persuasive.
 const ABORT_USAGE = `usage: backlog.mjs abort <id>`
 const COMMENT_USAGE = `usage: backlog.mjs comment <id> --body <file>`
-const BODY_USAGE = `usage: backlog.mjs body <id> --body <file> --if-updated-at <iso> [--runner-fix | --no-runner-fix]`
+const BODY_USAGE = `usage: backlog.mjs body <id> --body <file> --if-updated-at <iso> [--runner-fix | --no-runner-fix] [--plan-review]`
 
 // `async` since task-46: a tracker project routes every command through the local API, and `fetch` is asynchronous. `files` mode makes no call at all, so a
 // project with no marker runs exactly the synchronous code it always did — the `await`s below are never reached.
@@ -2306,6 +2310,7 @@ export async function main(argv) {
     let kind
     // Valueless, so it consumes no argv slot — unlike the three above, which all take the `argv[i + 1]` step.
     let runnerFix = false
+    let planReview = false
     for (let i = 3; i < argv.length; i++) {
       if (argv[i] === '--from') {
         from = argv[i + 1]
@@ -2318,6 +2323,8 @@ export async function main(argv) {
         i++
       } else if (argv[i] === '--runner-fix') {
         runnerFix = true
+      } else if (argv[i] === '--plan-review') {
+        planReview = true
       }
     }
 
@@ -2356,6 +2363,10 @@ export async function main(argv) {
            strict `=== true`, so an absent key and `false` mean the same thing there, and sending `false` on every unmarked capture would put a field in
            every request body for a fact the absence already states. */
         if (runnerFix) payload.runnerFix = true
+        /* The `plan-review` mark, which a files promotion writes as a `plan-review: true` frontmatter line and a tracker carries as a label. A flag for the
+           same reason `--runner-fix` is one, and sent only when set for the same reason: the route reads it with a strict `=== true`, so `false` on every
+           ordinary promotion would be a field stating what its absence already says. There is no negative flag — approval is `plan-review <id> off`. */
+        if (planReview) payload.planReview = true
         const created = await apiPost('create', payload)
         console.log(created.id)
         console.log(created.url)
@@ -2380,6 +2391,12 @@ export async function main(argv) {
        is what composes a files item's frontmatter. Saying so is more use than reprinting two call shapes neither of which mentions frontmatter. */
     if (runnerFix) {
       console.error('--runner-fix is a tracker flag: in a files project the marker is a `runner-fix: true` frontmatter line, written into the item file')
+      return 1
+    }
+    // The same mistake as `--runner-fix` above, so the same shape of answer: the mark is a frontmatter line, and `backlog-capture`/groom compose it, not this
+    // tool.
+    if (planReview) {
+      console.error('--plan-review is a tracker flag: in a files project the mark is a `plan-review: true` frontmatter line, written into the item file')
       return 1
     }
 
@@ -3031,6 +3048,9 @@ export async function main(argv) {
     // neither.
     let wantRunnerFix = false
     let wantNoRunnerFix = false
+    // One-way on purpose: approving a plan is `plan-review <id> off`, so a body patch can only ever ADD the mark (a re-groom that writes a fresh unattended
+    // plan) or say nothing, which leaves the label exactly as it is.
+    let wantPlanReview = false
     for (let i = 2; i < argv.length; i++) {
       if (argv[i] === '--body') {
         bodyFile = argv[i + 1]
@@ -3042,6 +3062,8 @@ export async function main(argv) {
         wantRunnerFix = true
       } else if (argv[i] === '--no-runner-fix') {
         wantNoRunnerFix = true
+      } else if (argv[i] === '--plan-review') {
+        wantPlanReview = true
       }
     }
     if ((cmd === 'comment' || cmd === 'body') && !bodyFile) {
@@ -3129,6 +3151,8 @@ export async function main(argv) {
            whether the item repairs the runner. */
         if (wantRunnerFix) payload.runnerFix = true
         else if (wantNoRunnerFix) payload.runnerFix = false
+        // Sent only when the flag was passed (`ItemBodyRequest.planReview`: true adds the label, absent leaves it). `false` is never sent from here.
+        if (wantPlanReview) payload.planReview = true
         const patched = await apiPost('body', payload)
         console.log(patched.updatedAt)
       } catch (e) {
@@ -3679,6 +3703,40 @@ export async function main(argv) {
       const inReview = state === 'on'
       await apiPost('review', { project, id: wanted, inReview })
       console.log(`gh:${r.mode.repo}${wanted} ${inReview ? 'in review' : 'not in review'}`)
+      return 0
+    } catch (e) {
+      if (!(e instanceof BacklogError)) throw e
+      console.error(e.message)
+      return e.code
+    }
+  }
+
+  // `plan-review <id> on|off` — `review`'s twin for the plan-review label, copied line for line. `on` marks a plan a tick wrote unattended as awaiting a
+  // person, which every gate reads as "do not execute this yet"; `off` is the person's approval, and the only way this tool offers to give it. Tracker-only
+  // for the same reason `review` is, and the usage check likewise runs before `requireStore` so a malformed call makes no request on any path. In a files
+  // project the mark is a frontmatter line, so the refusal says how to approve there instead.
+  if (cmd === 'plan-review') {
+    const [, id, state] = argv
+    if (!id || (state !== 'on' && state !== 'off') || argv.length !== 3) {
+      console.error(PLAN_REVIEW_USAGE)
+      return 1
+    }
+
+    const r = requireStore()
+    if (!r.ok) return r.code
+    if (r.mode.kind !== 'api') {
+      console.error(
+        'plan-review is for tracker projects: in a files project the mark is a `plan-review: true` frontmatter line — delete it and commit to approve',
+      )
+      return 1
+    }
+
+    try {
+      const project = registryRoot(r.resolved.root)
+      const wanted = trackerId(id, r.mode.repo)
+      const planReview = state === 'on'
+      await apiPost('plan-review', { project, id: wanted, planReview })
+      console.log(`gh:${r.mode.repo}${wanted} ${planReview ? 'awaiting plan review' : 'plan approved'}`)
       return 0
     } catch (e) {
       if (!(e instanceof BacklogError)) throw e
