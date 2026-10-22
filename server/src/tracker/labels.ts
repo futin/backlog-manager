@@ -1,5 +1,5 @@
 /**
- * The ten labels a connected repo must carry (task-45, spec §5.2), and the
+ * The eleven labels a connected repo must carry (task-45, spec §5.2), and the
  * one home for that list.
  *
  * Four of them ARE the mapping: `section` is read off the one `type:*` label
@@ -74,7 +74,13 @@ export const QUEUED_LABEL = 'orchestrator:queued';
  */
 export const IN_REVIEW_LABEL = 'in-review';
 
-/** The ten, in the order spec §5.2 lists them, `orchestrator:queued` and then `in-review` last. */
+/**
+ * The one spelling of the plan-review label's name (backlog-tick), for the reason `QUEUED_LABEL` and `IN_REVIEW_LABEL` have one: the mapper, the write route and
+ * the tick's own label calls import it, so a rename is one edit and a typo is a compile error rather than a label GitHub silently creates on first use.
+ */
+export const PLAN_REVIEW_LABEL = 'plan-review';
+
+/** The eleven, in the order spec §5.2 lists them, then `orchestrator:queued`, `in-review` and `plan-review` appended last, each so a bootstrapped repo's diff is one create. */
 export const TRACKER_LABELS: readonly TrackerLabel[] = [
   { name: 'type:bug', color: 'd73a4a', description: 'A defect — backlog section: bugs' },
   { name: 'type:idea', color: '0e8a16', description: 'Something new — backlog section: ideas' },
@@ -85,7 +91,8 @@ export const TRACKER_LABELS: readonly TrackerLabel[] = [
   { name: 'runner-fix', color: 'b60205', description: 'Executing this repairs machinery the orchestrator run itself depends on' },
   { name: 'in-progress', color: 'ededed', description: 'A session holds this item (set by the claim protocol)' },
   { name: QUEUED_LABEL, color: 'bfdadc', description: "In a live orchestrator run's queue, not yet picked up — a plan, not a claim" },
-  { name: IN_REVIEW_LABEL, color: 'fef2c0', description: 'A PR for this item is open — the work lands when it merges' }
+  { name: IN_REVIEW_LABEL, color: 'fef2c0', description: 'A PR for this item is open — the work lands when it merges' },
+  { name: PLAN_REVIEW_LABEL, color: 'f9d0c4', description: 'A plan written unattended — remove this label to approve it for execution' }
 ];
 
 /**
@@ -107,7 +114,7 @@ export const TRACKER_LABELS: readonly TrackerLabel[] = [
  */
 export const KIND_NAMES: readonly string[] = TRACKER_LABELS.filter((l) => l.name.startsWith('kind:')).map((l) => l.name.slice('kind:'.length));
 
-/** The ten names alone — what the bootstrap compares the repo's existing
+/** The eleven names alone — what the bootstrap compares the repo's existing
  *  labels against. Case-insensitive on purpose: GitHub label names are
  *  case-preserving but collide case-insensitively, so a repo that already has
  *  `Type:Bug` has the label, and creating it again is a 422. */

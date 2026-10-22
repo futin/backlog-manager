@@ -323,6 +323,16 @@ export interface BacklogItem {
    */
   inReview?: true;
   /**
+   * A plan written unattended (backlog-tick) that a human has not yet approved: a tracker issue carrying the `plan-review` label, or a files item whose
+   * frontmatter has a `plan-review: true` line. Removing the label, or the line, is the approval. Gates will read it — the dispatch ladders, the queue
+   * builders and execute's refusal skip such an item, with the reason `this plan awaits review` — but this field only reports it.
+   *
+   * **Optional, `true` or absent, and never `false`,** by the same rule as `inReview`, `queued` and `runnerFix`. **Unlike `inReview` it has TWO writers:**
+   * `server/src/tracker/map-issue.ts` for a tracker item (from the label) and `server/src/items/scan.util.ts` for a files item (from the frontmatter line,
+   * read by presence the way `runner-fix:` is). Each arranges the absence itself, by the same conditional spread, so `'planReview' in item` means what it says.
+   */
+  planReview?: true;
+  /**
    * Who holds this TRACKER item's claim right now (#225) — the newest claim, when it is unreleased, which is the same claim `started` and `phase` are read
    * from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
    *

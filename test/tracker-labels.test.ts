@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { IN_REVIEW_LABEL, QUEUED_LABEL, TRACKER_LABELS, TRACKER_LABEL_NAMES, TYPE_LABELS } from '../server/src/tracker/labels';
+import { IN_REVIEW_LABEL, PLAN_REVIEW_LABEL, QUEUED_LABEL, TRACKER_LABELS, TRACKER_LABEL_NAMES, TYPE_LABELS } from '../server/src/tracker/labels';
 
 /**
  * The label set has one home — `server/src/tracker/labels.ts` — and one place
@@ -29,8 +29,8 @@ function formLabels(): string[] {
   return [...CONNECT_SOURCE.matchAll(/label:\s*'(type:[a-z]+)'/g)].map((m) => m[1]).sort();
 }
 
-describe('the ten labels', () => {
-  it('names exactly the set spec §5.2 lists, plus orchestrator:queued and in-review last', () => {
+describe('the eleven labels', () => {
+  it('names exactly the set spec §5.2 lists, plus orchestrator:queued, in-review and plan-review last', () => {
     expect(TRACKER_LABEL_NAMES).toEqual([
       'type:bug',
       'type:idea',
@@ -41,9 +41,10 @@ describe('the ten labels', () => {
       'runner-fix',
       'in-progress',
       'orchestrator:queued',
-      'in-review'
+      'in-review',
+      'plan-review'
     ]);
-    expect(TRACKER_LABELS).toHaveLength(10);
+    expect(TRACKER_LABELS).toHaveLength(11);
   });
 
   /* The ninth label arrived with the orchestrator:queued spec (§1), appended
@@ -52,7 +53,7 @@ describe('the ten labels', () => {
      route and the Stop sweep import it instead of repeating the string. */
   it('carries orchestrator:queued, exported as QUEUED_LABEL with the description the spec fixes', () => {
     expect(QUEUED_LABEL).toBe('orchestrator:queued');
-    expect(TRACKER_LABELS[TRACKER_LABELS.length - 2]).toEqual({
+    expect(TRACKER_LABELS[TRACKER_LABELS.length - 3]).toEqual({
       name: QUEUED_LABEL,
       color: expect.stringMatching(/^[0-9a-f]{6}$/),
       description: "In a live orchestrator run's queue, not yet picked up — a plan, not a claim"
@@ -62,13 +63,25 @@ describe('the ten labels', () => {
   /* The tenth arrived with the execute pr-mode spec (decision 9), appended for
      the same reason the ninth was: the bootstrap's diff against an existing
      repo is exactly one create. Unlike the queued label it IS read by gates. */
-  it('ends with in-review, exported as IN_REVIEW_LABEL with the description the spec fixes', () => {
+  it('carries in-review, exported as IN_REVIEW_LABEL with the description the spec fixes', () => {
     expect(IN_REVIEW_LABEL).toBe('in-review');
-    expect(TRACKER_LABELS[TRACKER_LABELS.length - 1]).toEqual({
+    expect(TRACKER_LABELS[TRACKER_LABELS.length - 2]).toEqual({
       name: IN_REVIEW_LABEL,
       color: expect.stringMatching(/^[0-9a-f]{6}$/),
       description: 'A PR for this item is open — the work lands when it merges'
     });
+  });
+
+  /* The eleventh arrived with backlog-tick: a plan written unattended carries it until a human removes it. Appended, like the two before it, so the
+     bootstrap's diff against an existing repo is exactly one create. */
+  it('the last label is plan-review, after in-review', () => {
+    expect(PLAN_REVIEW_LABEL).toBe('plan-review');
+    expect(TRACKER_LABELS.at(-1)).toEqual({
+      name: 'plan-review',
+      color: expect.stringMatching(/^[0-9a-f]{6}$/),
+      description: 'A plan written unattended — remove this label to approve it for execution'
+    });
+    expect(TRACKER_LABELS.at(-2)?.name).toBe('in-review');
   });
 
   it('gives every label a colour and a description GitHub will accept', () => {

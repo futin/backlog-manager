@@ -177,6 +177,27 @@ describe('issue → BacklogItem', () => {
     expect('inReview' in (plain?.item ?? {})).toBe(false);
   });
 
+  /* plan-review (backlog-tick): the same `true | absent` shape as `inReview`, consumed for the same reason. The first case carries BOTH labels so a swapped
+     mapping fails; unlike `inReview` it has a second writer (the files scan), which is why the flag's doc comment says so. */
+  it('reads plan-review as planReview: true beside inReview: true, so a swapped mapping fails', () => {
+    const both = map({ labels: [{ name: 'type:task' }, { name: 'in-review' }, { name: 'plan-review' }] });
+    expect(both?.item.planReview).toBe(true);
+    expect(both?.item.inReview).toBe(true);
+
+    const planOnly = map({ labels: [{ name: 'type:task' }, { name: 'plan-review' }] });
+    expect(planOnly?.item.planReview).toBe(true);
+    expect('inReview' in (planOnly?.item ?? {})).toBe(false);
+  });
+
+  it('puts no planReview key at all on an issue without the label', () => {
+    const plain = map({ labels: [{ name: 'type:task' }] });
+    expect('planReview' in (plain?.item ?? {})).toBe(false);
+  });
+
+  it('never lets plan-review into tags', () => {
+    expect(map({ labels: [{ name: 'type:task' }, { name: 'plan-review' }, { name: 'frontend' }] })?.item.tags).toEqual(['frontend']);
+  });
+
   it('maps an open issue to open', () => {
     expect(map({ state: 'open' })?.item.status).toBe('open');
   });
