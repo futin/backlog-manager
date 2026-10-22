@@ -200,7 +200,16 @@ reports `record`. The skill never runs by hand and never decides anything itself
 open), `groom <id>` (an ungroomed bug's fix, or a refactor promoted to a task, while fewer than `--max-plans` items carry `plan-review`), `recover` (a lock
 older than `--lock-ttl` minutes was found and claimed), `busy` (the project is occupied — a `running` or `paused` run, a board-started run with no run file, a
 `started:` marker anywhere in the main checkout or a linked worktree, a live claim or a fresh remote run) or `idle` (nothing worth starting, or a tracker
-project whose stack is down). Execute wins over groom. `--dry-run` writes nothing, not even the lock. Defaults: 2 open PRs, 3 plans awaiting review, a
+project whose stack is down — or whose tracker cache the tool cannot trust yet, #332). Execute wins over groom.
+
+**A tracker project's index is believed only once the poller has read its repo.** The server's cache is in memory and per repo, so after every restart
+`/api/items` lists no rows for a project until that repo's first sync lands — and an empty list read as it stands is `nothing to do`. So `decide` also reads
+`GET /api/trackers` and finds the project's row by `path`: no row, or a `null` `polledAt`, is `idle: tracker not polled yet: <repo>`; an `access` other than
+`ok` is `idle: tracker <access>: <detail ?? repo>` (checked first, since a failed first sync leaves both); and a polled repo with not one row of any status for
+this project is `idle: tracker cache holds no items for <repo> (polled <polledAt>)`. All three come before the busy check, lock nothing and record nothing; the
+next tick is the retry. `trackerPolledAt` in `orchestrate.mjs` is the precedent, not a twin — the orchestrator re-reads on the stamp, the tick never waits.
+The server's half is one log line per repo per process, `tracker <repo>: cold sync <status> — <n> issues cached, <pages> page(s)`, at the end of its first
+successful sync, so an empty cache can be told from one that filled and was emptied. `--dry-run` writes nothing, not even the lock. Defaults: 2 open PRs, 3 plans awaiting review, a
 180-minute lock.
 
 **The breaker is `decide`'s step 3b.** After the lock step (`busy` for a held lock, `recover` for a stale one) and before any API read, `decide` derives a

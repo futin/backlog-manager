@@ -45,7 +45,10 @@ On `execute` and `groom` it has taken the lock; from here to step 3 the lock is 
 ## 2. Act on the verdict
 
 - **`idle` or `busy`** — nothing was taken. The final message is the `reason`. Done; do not `record`. `idle` covers `halted` — the breaker has stopped this
-  project after N failures in a row — and an unreadable `tick.json`; both are the `reason` as printed, with nothing to run.
+  project after N failures in a row — and an unreadable `tick.json`; both are the `reason` as printed, with nothing to run. On a tracker project it also
+  covers a cache the server has not filled yet — `tracker not polled yet: <repo>`, `tracker <access>: <detail>`, or
+  `tracker cache holds no items for <repo> (polled <time>)` — which is what a server restart looks like for a minute or so; the next scheduled tick is the
+  retry, and nothing here waits for it.
 - **`recover`** — a killed tick's lock was cleared and its failure recorded. When `stop` is `true`, run
   `node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop '<id>' --abandon` to clear the dead groom's `started:` marker. The final message is the
   `reason` plus one line saying whether the marker was cleared. Done; do not `record`.
