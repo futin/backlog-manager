@@ -156,7 +156,7 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
 
 **Files:**
 - Create: `server/src/agents/dashboards/dashboards.service.ts`, `server/src/agents/dashboards/dashboards.controller.ts`
-- Modify: `server/src/agents/config.util.ts` (export `AgentsConfig` if not already; add nothing else), the agents module (register both), `test/agents-origin-guard.test.ts`
+- Modify: `server/src/agents/agents.module.ts` (register both), `test/agents-origin-guard.test.ts`
 - Test: `test/dashboards-routes.test.ts`
 
 **Interfaces:**
@@ -313,8 +313,8 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
 
 **Files:**
 - Modify: `server/src/agents/agents.service.ts` (`orchestrate`), `server/src/agents/agents.controller.ts` (the orchestrate route: `watchdog.arm()` and
-  `starting.mark()` only for home; `remoteStarting.markProject` for remote), `server/src/orchestrator/remote-runs.util.ts` (`RemoteRun.host`), the runs
-  payload builder (`remoteStarting` sibling field), `shared/types.ts` (`AgentOrchestrateRequest.machine?`, `OrchestratorRunsPayload.remoteStarting`,
+  `starting.mark()` only for home; `remoteStarting.markProject` for remote), `server/src/orchestrator/remote-runs.util.ts` (`RemoteRun.host`),
+  `server/src/orchestrator/orchestrator.controller.ts` (beside `payload.remote = this.remoteRuns.list()`, set `payload.remoteStarting`), `shared/types.ts` (`AgentOrchestrateRequest.machine?`, `OrchestratorRunsPayload.remoteStarting`,
   `RemoteRun.host: string | null`)
 - Test: `test/agents-orchestrate-remote.test.ts`; extend `test/remote-runs.test.ts`, `test/orchestrator-starting.test.ts`
 
