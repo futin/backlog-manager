@@ -102,7 +102,8 @@ that verdict (steps 5-6). This keeps an idle tick to one tool call and one line 
    the API. So a tracker project with the stack down is verdict `idle: stack down`, exit 0, taken before the lock and before any other check. A files project
    never needs the stack.
 1. **Lock.** `decide` takes a per-project lock under `~/.backlog-manager/tick/<project-key>/lock`, holding host, the verdict it handed out and a timestamp —
-   not a pid, since `decide` exits at once. `record` (step 6) releases it. A lock older than a fixed ceiling (my call: 3 h, comfortably above any sane job
+   not a pid, since `decide` exits at once. `decide` reads the lock first and **writes it only when its verdict is `execute <id>` or `groom <id>`** — an
+   `idle` or `busy` verdict, and every `--dry-run`, leaves no lock behind, so an idle tick never blocks the next one. `record` (step 6) releases it. A lock older than a fixed ceiling (my call: 3 h, comfortably above any sane job
    `timeout:`, overridable with `--lock-ttl`) is a dead tick's and is replaced — see "A tick the dashboard killed" below. Held and fresh → verdict
    `busy: another tick`. This closes the window between a tick choosing an item and execute/groom writing its `started:` marker or claim. The lock is per machine (`~/.backlog-manager` is local); for a tracker project ticked from two
    machines the only cross-machine guard is the claim race at `start`, which the losing tick reports as `failed`.
@@ -115,22 +116,29 @@ that verdict (steps 5-6). This keeps an idle tick to one tool call and one line 
      checkout **and every linked worktree** in `git worktree list`, because an in-place groom or execute in a linked worktree writes its `started:` there.
      Two kinds of tree are skipped: the orchestrator's own `.worktrees/<id>` trees (the run file already speaks for them) and `.worktrees/execute-<id>`
      trees (the candidate exclusion in step 3 and the lock speak for them — and a killed execute there would otherwise block the project for good);
+   - on a tracker project, a **remote** orchestrator run on this repo — another machine draining it — whose entry in `GET /api/orchestrator/runs`'s
+     `remote` list is fresh and `running` or `paused` (`busy: remote run`). Between items such a run holds no claim, so the claim race alone would let a tick
+     slip an item in under it;
    - a Jira live session is **not** a busy signal (my call): Jira work happens in its own worktree on a ticket, not on a backlog item.
 3. **Execute candidate**, only if open execute PRs < M. Open execute PRs = every open PR in the repo whose head branch starts with `execute/`, read once with
-   `gh pr list --state open --json headRefName`. That deliberately counts hand-run `--finish pr` PRs too: they cut from the same base and conflict the same
+   `gh pr list --state open --limit 500 --json headRefName` (gh's default limit is 30; a result that reaches the limit is treated as `cannot count open
+   PRs`, below). That deliberately counts hand-run `--finish pr` PRs too: they cut from the same base and conflict the same
    way, and the cap is about the review pile, not who made it. Without a working
    `gh`, execute is treated as capped (step 3 contributes the reason `cannot count open PRs`; step 4 may still groom) — the repo squash-merges, so a branch's merged state cannot be read from git alone. The
    candidate is the first item, in the order orchestrate's queue already uses (a `runner-fix` item hoisted first), that is:
    - a bug or task, groomed (derived, as the board derives it);
    - **committed on the base** (files) — the same check orchestrate makes, `not committed on <base>`;
    - without `plan-review` and without `in-review`;
-   - without an `execute/<id>` branch or `.worktrees/execute-<id>` worktree (a failed or still-open execute leaves both; execute itself would refuse, but the
+   - without an `execute/<id>` branch or `.worktrees/execute-<id>` worktree (a killed, verification-failed or still-open execute leaves both — a refusal
+     before any work removes both, so a refused item is kept off by the failure record alone; execute itself would refuse, but the
      tick must not even pick it, or a files item that sits in `open/` until its PR merges would be picked every tick);
    - not skipped by the failure record.
    Drift is not checked here (my call): execute already re-checks a plan's drift before working it (#323), and a refusal there is recorded as `failed`.
    Found → verdict `execute <id>`.
 4. **Groom candidate**, only if items carrying `plan-review` < N (counted the same way on both sources). The candidate is the first open item, in board order,
-   that is an ungroomed bug or a refactor, and is not in the failure record. Found → verdict `groom <id>`. Otherwise → `idle: nothing to do`, with the reason
+   that is an ungroomed bug or a refactor, and is not in the failure record. **On a files project step 4 reads the working tree, while step 3 reads
+   `<base>`**: a tick's groom is uncommitted by design, so a `<base>` read would never see last night's `plan-review` lines (the N cap would never fill) and
+   would still see last night's bug as ungroomed (and groom it again). Step 3 reads `<base>` because that is what execute's worktree is cut from. Found → verdict `groom <id>`. Otherwise → `idle: nothing to do`, with the reason
    each cap or empty queue gave.
 5. **Act.** Before acting, `decide` has written the verdict into the lock (step 1).
    - `execute <id>` → run `backlog-execute <id> --finish pr` in this session via the Skill tool, with the tick marker (below). The PR it opens is the tick's
@@ -147,14 +155,17 @@ that verdict (steps 5-6). This keeps an idle tick to one tool call and one line 
 
 A job's `timeout:` kills the step mid-work: the lock stays, and the item may keep a `started:` marker (files) or a claim (tracker, which goes stale after 15
 minutes and is retired by the claim protocol when the next claimant's `start` runs). A step that runs out of `max-turns:` ends mid-work the same way and
-takes the same recovery path. The next tick that finds a lock older than the ceiling reads the verdict recorded in it. The proof
-that a marker is the dead tick's is exactly: the lock is stale, its verdict is `groom <id>`, and `<id>` in the main checkout carries `started:` with
-`phase: groom`. Liveness of a session cannot be read on a files project (`started:` records when, never who), so the proof rests on the lock alone. When it
-holds, the tick clears **that one marker** with `backlog.mjs stop <id> --abandon` (the interval was no one's work), records the item `failed`
-(`killed at timeout`), and releases the lock. An `execute <id>` verdict needs no clearing: its marker lives in `.worktrees/execute-<id>`, which the main
-checkout's busy check does not read. That is the only marker a tick ever clears: it is provably its own. Any
-other marker is a human's or another session's and blocks the project until they clear it. A `--finish pr` execute writes its marker inside
-`.worktrees/execute-<id>`, which the main checkout does not see; the `execute/<id>` worktree it leaves keeps that item off the candidate list anyway.
+takes the same recovery path. The next tick that finds a lock older than the ceiling reads the verdict recorded in it, and in **every** case records that
+item `failed` (`killed at timeout`, `groom` or `execute` as the verdict said) and releases the lock. What else it does depends on the source and the verdict:
+
+- **Files, `groom <id>`.** The proof that a marker is the dead tick's is exactly: the lock is stale, its verdict is `groom <id>`, and `<id>` in the main
+  checkout carries `started:` with `phase: groom`. Liveness of a session cannot be read on a files project (`started:` records when, never who), so the proof
+  rests on the lock alone. When it holds, the tick clears **that one marker** with `backlog.mjs stop <id> --abandon` (the interval was no one's work). That is
+  the only marker a tick ever clears: it is provably its own. Any other marker is a human's or another session's and blocks the project until they clear it.
+- **Tracker, either verdict.** No clearing: the proof above is frontmatter and a tracker item has none, and release is not the tick's to force. The dead
+  claim goes stale after 15 minutes and the next claimant's `start` retires it.
+- **`execute <id>`, either source.** No clearing: its marker lives in `.worktrees/execute-<id>`, which the busy check skips, and the `execute/<id>` worktree
+  and branch a killed execute leaves keep the item off the candidate list anyway.
 
 ### The tick marker
 
@@ -168,9 +179,11 @@ execute's `pr` finish must own its own git. Groom has no unattended mode at all:
   execute's escalations — is either decided alone (design questions, decision 8) or becomes "stop, leave nothing half-done, report it in the final message".
   The failure record then keeps later ticks off the item.
 - **Groom under the marker** may only plan a bug's fix or promote a refactor. A groom that concludes the item should be rejected, or that cannot find a bug's
-  cause with confidence, writes no verdict (its own `start`/`stop` bookkeeping still lands) and reports `failed` with its reason — the user sees that in the run log. Brainstorming and writing-plans still run
-  where groom calls for them, but every question they would put to the user is answered by the session and listed under `Assumptions (unattended)` in the
-  plan. On a files promote, groom keeps the printed frontmatter block exactly as printed; the marker text carves out the `plan-review: true` line the same
+  cause with confidence, writes no verdict (its own `start`/`stop` bookkeeping still lands) and reports `failed` with its reason — the user sees that in the run log.
+  **Under the marker groom does not invoke `superpowers:brainstorming` or `superpowers:writing-plans`** (my call): both are built to ask one question at a
+  time, and with `AskUserQuestion` disallowed a scheduled step would ask in prose and end its turn having done nothing. Groom settles the open questions
+  inline — the same inline path groom already takes for an idea whose questions are not real — and lists every one it settled, with the answer it chose,
+  under `Assumptions (unattended)` in the plan. On a files promote, groom keeps the printed frontmatter block exactly as printed; the marker text carves out the `plan-review: true` line the same
   way `runner-fix: true` is already carved out there.
 - **Markers:** on a files project, never take over another session's `started:` marker. On a tracker project the claim protocol already retires a claim stale
   past 15 minutes when `start` runs; that is the protocol's rule, not a takeover the tick decides, and stays as it is — the busy check has already treated a
@@ -240,7 +253,9 @@ so `tick.mjs status` can print what recent ticks did. Nothing under this directo
 - Drift is left to execute's own pre-check; the tick does not read `stale-plans.json` (only `orchestrate.mjs` may) or `backlog.mjs drift`.
 - `plan-review` lands in the same write as the plan, never after.
 - Ungroomed tasks are not tick-groom candidates: groom has no "plan an existing task" verdict, and tasks are normally born planned by a promote.
-- `--dry-run` prints the verdict without acting.
+- `--dry-run` prints the verdict without acting, and writes no lock.
+- Under the tick marker groom skips brainstorming and writing-plans and settles design questions inline, listed under `Assumptions (unattended)`.
+- A remote orchestrator run on a tracker repo is a busy signal.
 
 ## Left to the builder
 
@@ -255,4 +270,5 @@ so `tick.mjs status` can print what recent ticks did. Nothing under this directo
   should end with an error result on `failed` so the dashboard pushes is a judgment call — the builder should weigh noise against visibility and say which.
 - How the tick reads a headless permission refusal inside execute's `pr` finish — execute already stops and reports; recording `failed` keeps the item off
   until edited, which is wrong if the refusal was the environment's fault, not the item's. A distinct `blocked` outcome that does not key on the hash is one
-  answer.
+  answer — and if the builder takes it, `blocked` needs its own time-based cool-down (e.g. 24 h), or the item, no longer guarded by its hash or by a
+  worktree that a pre-work refusal removed, is retried every tick.
