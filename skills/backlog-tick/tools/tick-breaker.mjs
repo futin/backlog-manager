@@ -1,6 +1,6 @@
 // The tick's failure breaker: what counts as "N failures in a row", and the settings file that says what N is. Read-only — nothing here writes a byte.
 //
-// This is ONE OF TWO COPIES of the streak rule. The other lives in the server (`server/src/orchestrator/`, Task 3 of the tick-breaker plan), and they are two
+// This is ONE OF TWO COPIES of the streak rule. The other is `server/src/tick/tick-breaker.util.ts` (it cites this file back), and they are two
 // copies and not one import because a plugin skill's `tools/` may never import from `server/` or `shared/` (CLAUDE.md Invariants — an install is a copy of
 // whatever shipped). It is the `pauseRequestEffective` precedent exactly: `server/src/orchestrator/pause-control.util.ts` and `orchestrate.mjs` each carry a
 // byte-equivalent rule, and the guard against drift is a suite on each side. Here that guard is `tick-breaker.test.mjs`'s `streakOf` table; the server's suite
