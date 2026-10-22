@@ -150,7 +150,9 @@ describe('the tick breaker routes', () => {
       writeFileSync(file, '{ not json');
       const config = ((await request(server).get('/api/ticks').expect(200)).body as TicksPayload).config;
       expect(config).toMatchObject({ haltAfter: 3, source: 'unreadable' });
-      expect(config.error).toEqual(expect.any(String));
+      // The Settings card shows this verbatim as its hint, so it must name the file: the pinned BM_TICK_FILE path, then `: `, then the reason.
+      expect(config.error?.startsWith(`${file}: `)).toBe(true);
+      expect(config.error?.length).toBeGreaterThan(`${file}: `.length);
     });
 
     it('applies the file’s haltAfter and the project’s resetAt to the streak', async () => {

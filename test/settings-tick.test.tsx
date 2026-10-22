@@ -100,12 +100,15 @@ describe('TickGroup', () => {
   });
 
   it('disables the Select and names the file when tick.json is unreadable', async () => {
-    stubFetch({ get: payload(3, { source: 'unreadable', error: '/home/me/.backlog-manager/settings/tick.json unreadable' }) });
+    // The shape the server sends since fix round 1: `<path>: <reason>`.
+    stubFetch({ get: payload(3, { source: 'unreadable', error: '/home/me/.backlog-manager/settings/tick.json: Unexpected token } in JSON at position 12' }) });
     render(<TickGroup />);
 
     const select = await screen.findByRole('combobox', { name: 'Halt after' });
     expect(select).toBeDisabled();
-    expect(screen.getByText('/home/me/.backlog-manager/settings/tick.json unreadable — fix or remove the file by hand.')).toBeInTheDocument();
+    expect(
+      screen.getByText('/home/me/.backlog-manager/settings/tick.json: Unexpected token } in JSON at position 12 — fix or remove the file by hand.')
+    ).toBeInTheDocument();
     // The ordinary hint is replaced, not stacked beside it.
     expect(screen.queryByText(/A halted project stops ticking/)).toBeNull();
   });

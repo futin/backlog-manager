@@ -99,7 +99,9 @@ export class TickService {
     // while it is in that state, and `config.source` says so.
     const haltAfter = file.ok ? file.haltAfter : TICK_HALT_LIMITS.default;
     const resetAt = file.ok ? file.resetAt : {};
-    const config: TickConfig = file.ok ? { haltAfter, source: file.source } : { haltAfter, source: 'unreadable', error: file.error };
+    // `file.error` alone is a bare `e.message` ("Unexpected token …") with no path, and the Settings card shows this string as its hint — so name the file here,
+    // in the `<path>: <reason>` style this service already uses for a state.json error, and leave `readTickFile` returning the reason alone.
+    const config: TickConfig = file.ok ? { haltAfter, source: file.source } : { haltAfter, source: 'unreadable', error: `${file.file}: ${file.error}` };
 
     const names = new Map(this.registry.load().projects.map((p) => [p.path, p.name]));
     const projects: TickProject[] = [];
