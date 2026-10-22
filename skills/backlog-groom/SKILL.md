@@ -20,6 +20,16 @@ lands **on disk only**, and an orchestrator run reads each
 item at the commit its worktree is created from rather than off the working tree. An executable item that was never committed is therefore invisible to a run,
 which is why the two verdicts that produce one end by saying so out loud (see "Groomed on disk only" below).
 
+## Am I inside a tick?
+
+The token `[backlog-tick]` anywhere after the id means `backlog-tick` dispatched this session unattended, and this file is read narrowed. Only two verdicts
+exist — plan a bug's fix, or promote a refactor to a task — never a reject, an out-of-scope or an idea's promotion. Never ask: do not invoke
+`superpowers:brainstorming` or `superpowers:writing-plans`, settle each open question inline and list it, with the answer chosen, under `## Assumptions
+(unattended)` in the plan. The plan carries the `plan-review` mark, written in the same write as the plan and never after it. A cause you cannot find with
+confidence, an item that should be rejected, or any refusal writes no verdict, runs your own `stop` as usual and ends with one line starting `failed:` and the
+reason — and on a files project never takes over a `started:` marker you did not set. Read
+`${CLAUDE_PLUGIN_ROOT}/skills/backlog-groom/references/backlog-tick.md` in full, before `show`: it holds the mark's spelling per source and the stops.
+
 ## Pick an item
 
 If the trigger already named one ("plan idea 3", "reject task 5"), use that id directly. Otherwise show what's open first — run `/backlog`, or:
@@ -134,6 +144,7 @@ it into a task with a plan. That is why the board never shows a refactor as groo
 
 Say which verdict you think applies and why, then wait for the user to confirm or pick a different one. Don't infer a verdict silently and act on it — grooming
 is a decision made _with_ the user, not a classification you run on their behalf.
+Under `[backlog-tick]` the prompt is that confirmation and nobody is there to wait for (see "Am I inside a tick?").
 
 ### Mark it in progress
 
@@ -262,7 +273,8 @@ exactly one such place, step 1's headings.
    This prints the new task's path and frontmatter, already carrying `from: idea-N`. The title doesn't have to match the idea's own — use whatever fits the plan
    from step 2, whether or not writing-plans was the one that produced it.
 
-4. Write that file: keep the printed frontmatter block exactly as printed, then add all four task headings — `## Goal`, `## Plan`, `## Test cases`,
+4. Write that file: keep the printed frontmatter block exactly as printed — the only lines added to it are the mark lines, `runner-fix: true` below and, under
+   `[backlog-tick]`, `plan-review: true` — then add all four task headings — `## Goal`, `## Plan`, `## Test cases`,
    `## Done when` — filled in for real. `## Plan` is the one heading `backlog-execute` gates on, but a task that's actually executable needs all four answered,
    not just that one.
 

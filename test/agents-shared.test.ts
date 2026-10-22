@@ -1063,9 +1063,16 @@ describe('planReviewBlock', () => {
   });
 
   /* The in-review twin's twin: `orchestrate.mjs` cannot import this module, so its gate carries a hand-kept copy of the sentence, and this keeps the "one
-     string everywhere" constraint mechanical. (The SKILL.md sibling of this guard lands with the skill text that quotes the sentence.) */
+     string everywhere" constraint mechanical. */
   it('is the same sentence the orchestrator gate carries by hand', () => {
     const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
     expect(tool).toContain(`const PLAN_REVIEW_REASON = '${PLAN_REVIEW_REASON}';`);
+  });
+
+  /* The third copy, beside `inReviewBlock`'s: execute's refusal gate prints the same sentence, in prose a session says. Whitespace-collapsed because the
+     SKILL.md wraps at 160 columns and a reflow must not turn a green guard red. */
+  it('is the same sentence backlog-execute refuses with', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(PLAN_REVIEW_REASON);
   });
 });
