@@ -50,7 +50,7 @@ where there are no item files.
 
 #### The write side (task-46, spec §6.2)
 
-Nine POST routes under `/api/items/`, in `items-write.controller.ts`, each a thin pass-through to one `ItemWriter` method:
+Ten POST routes under `/api/items/`, in `items-write.controller.ts`, each a thin pass-through to one `ItemWriter` method:
 
 | Route       | Body                                                      | Does                                                                                                                                                 | Answers                                        |
 | ----------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
@@ -63,6 +63,7 @@ Nine POST routes under `/api/items/`, in `items-write.controller.ts`, each a thi
 | `comment`   | `project, id, body`                                       | appends a comment                                                                                                                                    | 201 `{ commentId, url }`                       |
 | `queue`     | `project, id, queued`                                     | adds (`true`) or removes (`false`) `orchestrator:queued` (task-52); `queued` must be a literal boolean or a 400, and a removal's GitHub 404 is SUCCESS — every `false` caller is a sweep | 201 `{ id, queued }`                           |
 | `review`    | `project, id, inReview`                                   | adds (`true`) or removes (`false`) `in-review` (execute `pr` mode, decision 9); `queue`'s twin — a literal boolean or a 400, a removal's 404 is SUCCESS | 201 `{ id, inReview }` |
+| `plan-review` | `project, id, planReview`                               | adds (`true`) or removes (`false`) `plan-review` (backlog-tick); `review`'s twin — a literal boolean or a 400, a removal's 404 is SUCCESS. `create` and `body` carry the same mark as an optional `planReview`, so it lands in the same write as the plan | 201 `{ id, planReview }` |
 
 Every one carries `@UseGuards(SameOriginPostGuard)`, imported from `agents/` — these create and close issues with a credential the browser never sees, which is
 a larger consequence than the dispatch route the guard was written for. A JSON POST with no `Origin` still passes, because `backlog.mjs` in API mode is exactly
@@ -82,10 +83,14 @@ it on a skip, at `finish` and at `--abort`, while two server paths remove it on 
 claimed, and `POST /api/agents/stop` sweeps the run's never-claimed items (below). Nothing on this side reads the label as exclusion: the claim is still the
 only lock.
 
-`review` is one of the ten item writes, and its label IS read as exclusion, unlike `queue`'s: `backlog.mjs review <id> on|off` is its one caller, run by
+`review` is one of the eleven item writes, and its label IS read as exclusion, unlike `queue`'s: `backlog.mjs review <id> on|off` is its one caller, run by
 `backlog-execute` in `pr` mode right after it pushes an item's branch (the claim is released then, and the issue stays open until the PR merges) and by a person
 when a PR closes unmerged. `plan`/`dispatch` refuse a mapped `inReview` item with `a PR is open for this item` (`inReviewBlock`, `shared/agent.ts`), and the
 orchestrator gate turns it `ungroomed` with the same sentence.
+
+`plan-review` is the label a tick's unattended groom leaves on the plan it writes, and it is read as exclusion exactly as `in-review` is: `planReviewBlock`
+(`shared/agent.ts`) makes `plan`/`dispatch` refuse a mapped `planReview` item with `this plan awaits review`, always AFTER `inReviewBlock`, and the orchestrator
+gate turns it `ungroomed` with the same sentence. `backlog.mjs plan-review <id> on|off` is the one caller of the route, and `off` is how a person approves.
 
 The ninth write route, `POST /api/items/abort` (#225, body `project, id`), is not in this file: it calls the dashboard, so it lives in
 `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this one. It releases a live, non-run claim with `reason: 'aborted'` and
@@ -110,7 +115,7 @@ listing is eventually consistent, so a `since` equal to the mark lost brickwrigh
 drops pull requests, and sleeps a rate-limited repo until its reset. Since bug-55 a tick also makes one conditional per-issue comments read for every issue the
 cache holds an UNRELEASED claim on — none at all when nothing is held — and lets that list be the truth for that issue, because the repo-wide `since` read can
 never report a deletion and a loser deleted by another machine's server otherwise stayed cached as a phantom claim. Every absorbed issue — polled or taken off a write — also records the sha256 of its body under its
-`updated_at` (32 stamps per issue, a stamp seen with two bodies poisoned), which is what lets `body` forgive a stamp a poll has moved past (bug #234). The ten labels in `labels.ts` are created on a repo's first successful sync if any is
+`updated_at` (32 stamps per issue, a stamp seen with two bodies poisoned), which is what lets `body` forgive a stamp a poll has moved past (bug #234). The eleven labels in `labels.ts` are created on a repo's first successful sync if any is
 missing — the module's one write to GitHub. `map-issue.ts` is the pure issue → `BacklogItem` mapping (spec §5.3). `GET /api/trackers` is read-only and carries
 the platform's `hasToken`/`login`, its rate limit, and one row per registered project — **never the token**, which is read per call from the environment and
 leaves this process in no payload, log line or URL.

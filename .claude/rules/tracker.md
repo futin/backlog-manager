@@ -77,7 +77,7 @@ paths: ["server/src/tracker/**"]
   (bug-55) — conditional on a per-issue ETag whose remembered ids a `304` is reconciled against, a comment younger than `RECONCILE_GRACE_MS` kept even when
   absent, `commentsHwm` never moved by it, a `404` read as an empty list — because the repo-wide `since` read can never see a deletion, and `forgetComment`
   only ever hears of the loser THIS process deleted.
-  Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The ten labels
+  Rate limits are values, never exceptions: a sleeping repo gets no request at all, and `detail` names the reset TIME. The eleven labels
   live in `server/src/tracker/labels.ts`, are created idempotently on a repo's first successful sync — phase 2's one write to GitHub — and agree with
   `connect`'s issue forms by a source-reading guard (`test/tracker-labels.test.ts`), never an import. **The Jira board caches are the second**
   (`JiraPollerService`, `server/src/jira/poller.service.ts`): in memory, one `JiraBoardCache` per board, lost on restart, replaced whole by a sweep or not at

@@ -16,6 +16,34 @@ paths: ["skills/**", "agents/**"]
   evidence, so `record` refuses to overwrite one (exit `2`): the fix for a wrong record is the next sweep, never an edit. `sweep` reads four homes and writes
   none of them — the run-state home, the retro home (for deltas), `registry.json` (for project names) and, by recorded lease id alone, one driver transcript per
   run. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
+- **`~/.backlog-manager/tick/` has exactly one writer, `tick.mjs`, and `backlog-tick` never writes the orchestrator's run-state directory.** The directory is
+  `<home>/<project-key>/` with a `lock` and a `state.json`, the key being `encodeURIComponent(<absolute main-checkout path>)` — the key `orchestrate.mjs`'s
+  `projectDir` computes — and `$BM_TICK_HOME` overrides the home for the reason `$BM_ORCH_HOME` and `$BM_RETRO_HOME` exist. Only `tick-state.mjs` writes there,
+  every write a temp file in the same directory plus a `rename`/`link`, never in place. `decide` opens the run-state home read-only, to see a `running` or
+  `paused` run, and nothing else: no `run.json`, no control file, no sidecar. The tool is self-contained by the same rule every skill's is: it imports nothing
+  from another skill's `tools/`, from `server/` or from `shared/`, and shells out to neither `orchestrate.mjs` nor `backlog.mjs`, so every rule it shares with
+  one of them is a TWIN whose comment names the original, and a prune of one skill never breaks another. It writes no git either — every git call is a read.
+  Why: [invariants.md](docs/subsystems/invariants.md#backlog-managertick-has-exactly-one-writer-and-the-tick-never-writes-run-state)
+- **A tick does at most one unit of work, only when the project is idle, and never executes a plan that still carries `plan-review`.** `tick.mjs decide` prints
+  ONE verdict — `execute`, `groom`, `recover`, `busy` or `idle` — and writes the lock only for the first two; the skill carries that verdict out in its own
+  session and ends with `record`, which releases it. Busy is any of: a `running` or `paused` orchestrator run, a board-started run with no run file yet (read
+  through the API, so skipped with the stack down), a `started:` marker on any open item in the main checkout or a linked worktree (the orchestrator's
+  `.worktrees/<id>` and execute's `.worktrees/execute-<id>` trees skipped), a live claim, or a fresh remote run. Execute is capped by the open PRs whose head
+  starts `execute/` (`gh pr list --state open --limit 500`; no `gh`, a failure, unparseable output or 500 results is `cannot count open PRs`) and groom by the
+  items carrying `plan-review`; a groom only plans an ungroomed bug or promotes a refactor. The mark is the label on a tracker project and a `plan-review: true`
+  frontmatter line on a files project, written in the SAME write as the plan — `backlog.mjs body|new --plan-review`, or the frontmatter groom prints — so no
+  moment exists where an approved-looking plan has no mark, and every gate refuses it with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
+  `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and the execute skill): the board's Run, the server's `plan`/`dispatch` ladder
+  (`planReviewBlock`, always after `inReviewBlock`), the orchestrator's queue and `backlog-execute`'s own refusal. A tick never merges, never commits a groom,
+  never promotes an idea, never rejects, never asks and never leaves anything running. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review)
+- **The only `started:` marker a tick clears is the one a killed tick left, identified by the verdict in its own stale lock.** A lock older than `--lock-ttl`
+  (default 180 minutes) is a tick the dashboard killed; `decide` claims it (`claimStaleLock` renames it aside and owns it only if the bytes are the ones judged
+  stale, so two ticks cannot both recover), records the item `failed` — `killed at timeout` — and answers `recover`. It sets `stop: true` only where the marker
+  is provably its own: a FILES project, the lock's verdict a `groom`, and that id's file in the main checkout carrying `started:` with `phase: groom`. The skill
+  then runs `backlog.mjs stop <id> --abandon` on that one id. A tracker claim is never cleared by a tick (it goes stale after 15 minutes and the next `start`
+  retires it), an execute's marker lives in `.worktrees/execute-<id>` and is never touched, and every other marker is a person's or another session's and keeps
+  blocking the project. Why: [invariants.md](docs/subsystems/invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)
 - **`backlog.mjs` in a tracker project and `jira.mjs` always need the stack up, and say so with exit `5` — save `jira.mjs worktree`.**
   The marker decides the mode — absent or `{"kind":"files"}` runs today's synchronous code byte for byte and makes no HTTP request on any verb;
   `{"kind":"github"}` with a valid repo routes every command through `http://127.0.0.1:${BM_API_PORT || 4322}`; anything else is exit `1` naming
@@ -27,7 +55,7 @@ paths: ["skills/**", "agents/**"]
   something else), and its other codes are `2` (a 4xx) and `3` (a 5xx). `worktree` makes no request — git only, so it works with the stack down — and exits `0`,
   `1` or `4` (git refused, or a re-check stopped the Run; nothing changed), never `2`, `3` or `5`. Why:
   [invariants.md](docs/subsystems/invariants.md#backlogmjs-in-a-tracker-project-needs-the-stack-up)
-- **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.** The ten write routes refuse a `files`
+- **`import` writes the marker first and deletes the files last, and the `bm:imported` footer is its idempotency key.** The eleven write routes refuse a `files`
   project, so no request `backlog.mjs import github [owner/repo] [--no-forms]` makes could precede the marker; the deletion is the transaction's commit and runs
   only after pass 2 has rewritten every cross-link. A re-run rebuilds `old id → #n` from the `<!-- bm:imported from=<id> … -->` footer on each indexed issue and
   skips those items — the footer is on the tracker, where a crash cannot lose it, and the readable `_Imported from …_` line beside it is never parsed. Counters
@@ -50,7 +78,10 @@ paths: ["skills/**", "agents/**"]
   an unattributable count writes no key, never `0`. `updated:` is stamped by every `start` and every `stop`, never by `move`. Written only by `start`/`stop`,
   which round-trip unknown keys and the body byte-for-byte; "in progress" is decided in the client. `groomed-at:` (#322) is an anchor, not a lifecycle key:
   `new` stamps `HEAD` for a bug or task (a tracker body's one `bm:groomed-at` footer, kept to one by `body`), a groom `stop` re-stamps it, and nothing else
-  writes it — `drift <id>` derives from it and stores nothing. Why:
+  writes it — `drift <id>` derives from it and stores nothing. `plan-review: true` (backlog-tick) is the other non-lifecycle key a tool-written item can carry,
+  `runner-fix:`'s family — a GATE, not a lifecycle key, and not a status: a tick's groom writes it in the same write as the plan, every execute gate refuses an
+  item that carries it, and a person approves by deleting the line and committing. It is read by PRESENCE, any value but `false` (trimmed, case-insensitive)
+  counting, so a hand-typed `plan-review: yes` still gates. Why:
   [invariants.md](docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status)
 - **Every skill CLI ends with `process.exitCode = main(...)`, never `process.exit(main(...))`.** Writing to a pipe is asynchronous, so `process.exit()`
   drops everything past 65,536 bytes of a `--json` payload while a `> file.json` redirect stays fine — which is why the shipped instance passed every hand

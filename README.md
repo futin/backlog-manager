@@ -1,8 +1,9 @@
 # backlog-manager
 
-A Claude Code plugin that homes six backlog skills and a `/jira` skill — `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`,
-`/backlog-orchestrate`, and `/backlog-retro`, which sweeps every orchestrator run on the machine into one report of what the pipeline cost, where the time went
-and how much of it was rework — plus a small local web app that collects every registered project's backlog, across every repo the skills have touched, into one
+A Claude Code plugin that homes seven backlog skills and a `/jira` skill — `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`,
+`/backlog-orchestrate`, `/backlog-tick`, which a scheduled dashboard job fires to do one unattended unit of work when the project is idle, and `/backlog-retro`,
+which sweeps every orchestrator run on the machine into one report of what the pipeline cost, where the time went and how much of it was rework — plus a small
+local web app that collects every registered project's backlog, across every repo the skills have touched, into one
 kanban-by-type board.
 
 The skills write items into whatever project they were run in, one Markdown file per item under that project's own `backlog/`. Every `init` or `new` call
@@ -197,9 +198,9 @@ The repo is its own plugin marketplace:
 /plugin install backlog-manager@backlog-manager-marketplace
 ```
 
-That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`, `/backlog-orchestrate` and `/backlog-retro`, plus the read-only
-reviewer agent `backlog-manager:backlog-reviewer` that `/backlog-orchestrate` dispatches before every merge. (An install carries `agents/` because a marketplace
-with no `sparsePaths` clones the whole repo; if your own declaration in `~/.claude/settings.json` pins that key, it has to list `agents` alongside `skills` or
+That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`, `/backlog-orchestrate`, `/backlog-tick` and `/backlog-retro`,
+plus the read-only reviewer agent `backlog-manager:backlog-reviewer` that `/backlog-orchestrate` dispatches before every merge. (An install carries `agents/`
+because a marketplace with no `sparsePaths` clones the whole repo; if your own declaration in `~/.claude/settings.json` pins that key, it has to list `agents` alongside `skills` or
 the reviewer is invisible in the install.) `init` and `new` both register the current project in the real registry, so a project appears on the board the first
 time a skill files or scaffolds an item in it — no separate registration step.
 
@@ -257,6 +258,7 @@ skills (backlog, backlog-capture,      ->  backlog.mjs   ->  ~/.backlog-manager/
                                                    read-only  orchestrator/runs/
                                                         v
       skill (backlog-retro)        ->  retro.mjs      ->  ~/.backlog-manager/retro/
+      skill (backlog-tick)         ->  tick.mjs       ->  ~/.backlog-manager/tick/
 ```
 
 A project connected to a tracker takes one detour through that picture and nothing else changes: its items are GitHub issues rather than files, so `backlog.mjs`

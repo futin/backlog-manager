@@ -117,7 +117,7 @@ export function DispatchButton({
    *
    * bug-13. `useAgents` refetches on mount and window focus only, and that
    * cadence is deliberate (see its own comment). It is also, for one of the
-   * four per-item blocks, unrecoverable: a board whose window never loses
+   * five per-item blocks, unrecoverable: a board whose window never loses
    * focus keeps whatever `projectPaths` it last fetched, and while a stale
    * *enable* self-corrects (the click opens the sheet, whose `plan()`
    * re-derives the block server-side), a stale *disable* cannot — the sheet
@@ -150,10 +150,10 @@ export function DispatchButton({
 
   /*
    * Order is the invariant, not a preference: ENVIRONMENT-level → per-item
-   * project visibility → in progress → in review → run claim. The first still returns
+   * project visibility → in progress → in review → plan review → run claim. The first still returns
    * `null` above (no control at all — see the file comment and `dispatchGate`
-   * for why), and the other four disable with a reason. The run claim reads
-   * LAST of the four because it is the most volatile and the least
+   * for why), and the other five disable with a reason. The run claim reads
+   * LAST of the five because it is the most volatile and the least
    * fundamental: with dispatch off or the project invisible there is nothing
    * to say about a run, and a reason naming a stage would send the reader to
    * watch a queue when what needs fixing is the dashboard.
@@ -166,10 +166,10 @@ export function DispatchButton({
    * no stamp at all — and when they do, the file wins.
    */
   const gateBlock = disabledReason(gate);
-  /* The three a click can never clear, in that same precedence — split out
+  /* The four a click can never clear, in that same precedence — split out
      from the gate's own block rather than folded into one string because
-     bug-13's re-ask has to know WHICH of the four is speaking. Kept as one
-     value because the answer it feeds is the same for all three: refuse, ask
+     bug-13's re-ask has to know WHICH of the five is speaking. Kept as one
+     value because the answer it feeds is the same for all four: refuse, ask
      nothing. */
   /* The in-review rung (spec decision 9) sits between them: a tracker issue whose PR is open carries the flag on the item this board renders, so it
      outranks the volatile run claim, while a live session's stamp still names the more immediate fact. */

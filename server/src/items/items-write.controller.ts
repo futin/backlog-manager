@@ -22,7 +22,7 @@ export { answer };
  *
  * ## What this file is, and what it deliberately is not
  *
- * Nine thin pass-throughs. Every route does the same four things in the same
+ * Ten thin pass-throughs. Every route does the same four things in the same
  * order and nothing else: rebuild the body field by field, ask
  * `ItemsService.writerFor` whether this project can be written to at all, call
  * one `ItemWriter` method, and turn its `WriteRefusal` into a status. No route
@@ -195,7 +195,7 @@ export class ItemsWriteController {
     const finished = claimFinishedOf(raw.finished);
 
     const w = writable(this.items.writerFor(project));
-    // `state` is the ONE field on these nine routes taken outright, and it is
+    // `state` is the ONE field on these ten routes taken outright, and it is
     // safe for the reason the dispatch route's `prompt` is not: no predicate
     // branches on it. It is the `ClaimState` task-47's driver publishes,
     // round-tripped into a comment this app wrote and back out again; its one
@@ -311,10 +311,10 @@ export class ItemsWriteController {
 }
 
 /**
- * The project gate, in one place for all ten (the second, third and fourth
+ * The project gate, in one place for all eleven (the second, third and fourth
  * refusals). Throws rather than returning a union, because every caller does
- * the identical thing with a failure and a tenth copy of that branch is
- * ten chances for one of them to answer 404 where the others answer 400.
+ * the identical thing with a failure and an eleventh copy of that branch is
+ * eleven chances for one of them to answer 404 where the others answer 400.
  *
  * Exported since #225, so the abort route in `agents/` gates a project exactly as these routes do.
  */
@@ -396,7 +396,7 @@ function commentIdOf(value: unknown): number {
 /**
  * `ItemClaimRequest.run`, or `undefined` when the caller sent none (task-47).
  *
- * Validated field by field, and it is the only nested object on these nine
+ * Validated field by field, and it is the only nested object on these ten
  * routes that is — `heartbeat`'s `state` is taken outright one route over, and
  * the difference between them is the whole rule: **the server BRANCHES on this
  * one.** `runId` decides whether a contesting claim is a takeover or a race

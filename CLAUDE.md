@@ -1,9 +1,10 @@
 # backlog-manager
 
-Claude Code plugin repo: seven skills, six of them backlog skills — `backlog`, `backlog-capture`, `backlog-groom`, `backlog-execute`, `backlog-orchestrate`
+Claude Code plugin repo: eight skills, seven of them backlog skills — `backlog`, `backlog-capture`, `backlog-groom`, `backlog-execute`, `backlog-orchestrate`
 (drains a project's groomed queue, one item per git worktree, each reviewed and verified before it merges), `backlog-retro` (sweeps every orchestrator run on
-the machine into a report, a pick-list of items and a record the next sweep is measured against) — and a seventh, `jira`, which reads and moves a Jira ticket
-through `/api/jira` — plus a local NestJS + React app that shows every registered project's backlog on one kanban-by-type board. No database: the registry file
+the machine into a report, a pick-list of items and a record the next sweep is measured against), `backlog-tick` (a dashboard job's one unattended unit per
+tick: an execute to a PR, or a groom into a plan a person must approve) — and an eighth, `jira`, which reads and moves a Jira ticket through `/api/jira` —
+plus a local NestJS + React app that shows every registered project's backlog on one kanban-by-type board. No database: the registry file
 and each project's `backlog/` directory are the data.
 
 ## Commands
@@ -36,7 +37,7 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 [docs/subsystems/invariants.md](docs/subsystems/invariants.md). The doc map is [docs/overview.md](docs/overview.md).
 
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
-  adapters, and the nine guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
+  adapters, and the ten guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
   anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira` and `/jira-stop`,
   and the 60 s reconciler that keeps the Jira live map honest), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
   the read-only `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
@@ -67,10 +68,12 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate` and the run/watchdog predicates both sides must agree on), `theme.css`
   (five theme palettes).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`, `skills/backlog-execute/`, `skills/backlog-orchestrate/`, `skills/backlog-retro/`,
-  `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer;
+  `skills/backlog-tick/`, `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer;
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state directory, the
   registry and — by recorded lease id — each run's driver transcript, and owns `~/.backlog-manager/retro/`
-  ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/jira/tools/jira.mjs` reads and moves one Jira ticket
+  ([spec](docs/superpowers/specs/2026-09-06-backlog-retro-design.md)). `skills/backlog-tick/tools/tick.mjs` decides one unattended unit of work per scheduled
+  tick (read-only against items, the run state and git) and owns `~/.backlog-manager/tick/`
+  ([spec](docs/superpowers/specs/2026-10-22-backlog-tick-design.md)). `skills/jira/tools/jira.mjs` reads and moves one Jira ticket
   through `/api/jira` and writes no file of its own; its one exception, `worktree`, is git only — it fetches and makes the ticket's worktree in a mapped repo.
   **Start orchestrator runs from the board, not by typing the trigger into a terminal.** →
   [docs/subsystems/skills.md](docs/subsystems/skills.md)
@@ -99,6 +102,12 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **Remote runs ride beside `runs`, never in it** Why: [invariants.md](docs/subsystems/invariants.md#remote-runs-ride-beside-runs-never-in-it)
 - **`~/.backlog-manager/retro/` has exactly one writer, `retro.mjs record`, and `backlog-retro` never writes under the run-state directory**
   Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
+- **`~/.backlog-manager/tick/` has exactly one writer, `tick.mjs`, and `backlog-tick` never writes the orchestrator's run-state directory.**
+  Why: [invariants.md](docs/subsystems/invariants.md#backlog-managertick-has-exactly-one-writer-and-the-tick-never-writes-run-state)
+- **A tick does at most one unit of work, only when the project is idle, and never executes a plan that still carries `plan-review`.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review)
+- **The only `started:` marker a tick clears is the one a killed tick left, identified by the verdict in its own stale lock.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)
 - **A run's sidecars are archived beside its run file, under a name derived from the archive path and stored nowhere.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-runs-sidecars-are-archived-beside-its-run-file-task-31)
 - **A stale-plan mark is keyed by the plan's hash, so a re-groom clears it and nothing else does.**
@@ -114,10 +123,10 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **The strip's height and the well's gap are one token, `--main-gap`, read by the strip and the Runs page — never a px literal.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-strips-height-and-the-wells-gap-are-one-token)
 - **Item files are read-only to the server and client**; every write goes through the skills. Dispatch writes no item files either — the spawned session runs
-  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the ten routes
+  the skills, which remain the only writers. **A TRACKER project's items are the one thing this server writes** (task-46), and only through the eleven routes
   below — never a file, on any path — **and a Jira issue's assignee and status, through `/api/jira/issue/assign` and `/issue/transition`.**
-- **The ten `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-ten-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
+- **The eleven `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
 - **`orchestrator:queued` is a plan, never a claim: the driver adds it, the claim and the Stop remove it, and no reader treats it as exclusion.**
