@@ -18,9 +18,10 @@ which, and keeps the lock and the memory of what failed; this session only carri
 
 - **Never ask the user anything.** Nobody is there; an unanswered question parks the whole tick.
 - **Never run anything in the background, and never end a turn with something still running.** This is `claude -p`: the process exits when the turn ends.
-- **Touch backlog items only through the two skills and the two tools named here.** Never edit an item file by hand, never commit, never merge, never push.
+- **Touch backlog items only through the two skills and the two tools named here, plus one read:** `backlog.mjs show` (step 3). Never edit an item file by hand,
+  never commit, never merge, and never push yourself — an execute's own `--finish pr` pushes its own branch, and that is the skill's, not yours.
 - **A non-zero exit from `decide`, `record` or `forget` means stop:** report the stderr line as the final message. Never read it as "nothing to do". Exit `1`
-  is usage and exit `2` is runtime. If `decide` itself failed there is no lock to release, so no `record` follows.
+  is usage and exit `2` is runtime. If `decide` itself failed — or printed anything but one JSON line — there is no lock to release, so no `record` follows.
 - **Tracker ids start with `#`, so single-quote the id in the shell** (`record '#12' ok …`) — unquoted, the shell reads `#12` as a comment. The `--reason`
   text is single-quoted too, and is one line.
 
@@ -32,8 +33,12 @@ Pass the trigger's flags through unchanged — `--max-prs M`, `--max-plans N`, `
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" decide <the trigger's flags>
 ```
 
-It prints ONE JSON line: `verdict`, `reason`, `caps`, `dryRun`, and for `execute` / `groom` also `id`, `skill` and `args`; for `recover` also `id` and `stop`.
+It prints ONE JSON line: `verdict`, `reason`, `caps`, `dryRun`, and for `execute` / `groom` also `id`, `skill` and `args`; for `recover` also `stop`, and `id`
+when a lock was readable.
 On `execute` and `groom` it has taken the lock; from here to step 3 the lock is held, and only `record` releases it.
+
+**`dryRun` is `true` — whatever the verdict, run nothing and record nothing:** no lock was taken and no `stop` is safe. The final message is the `verdict` and
+`reason` (plus `id` and `skill` when present). Done.
 
 ## 2. Act on the verdict
 
@@ -41,9 +46,9 @@ On `execute` and `groom` it has taken the lock; from here to step 3 the lock is 
 - **`recover`** — a killed tick's lock was cleared and its failure recorded. When `stop` is `true`, run
   `node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop '<id>' --abandon` to clear the dead groom's `started:` marker. The final message is the
   `reason` plus one line saying whether the marker was cleared. Done; do not `record`.
-- **`execute` or `groom`** — invoke the skill named in `skill` through the Skill tool, with `args` EXACTLY as printed (the `[backlog-tick]` marker at its end is
-  what tells that skill nobody is there). Run it to its end in this session, then go to step 3.
-  - **`dryRun` is `true`** — invoke nothing and `record` nothing; no lock was taken. The final message is the `reason`, `id` and `skill`.
+- **`execute` or `groom`** — invoke the skill named in `skill` through the Skill tool as `backlog-manager:<skill>` (plugin skills need the `plugin:skill` form;
+  prefix it unless `skill` already carries one), with `args` EXACTLY as printed — the `[backlog-tick]` marker at its end is what tells that skill nobody is
+  there. Run it to its end in this session, then go to step 3. If the Skill tool itself errors, that is a `failed` outcome with the error as the reason.
 
 ## 3. Judge the outcome, then always record
 
@@ -54,10 +59,20 @@ Decide `ok` or `failed` from what the skill left behind, never from how confiden
 | `execute` | the skill's final message ends with a PR URL on a line of its own | anything else — reason: its `failed:` line, or a one-line summary |
 | `groom` | the item is groomed afterwards (below) | anything else, a skill that wrote nothing included — same reason |
 
-Groomed means: a **bug** has `## Cause` and `## Fix` filled and neither is "unknown"; a **refactor** was promoted to a task whose plan carries its `plan-review`
-mark. A bug groom that ends with the bug still ungroomed is `failed` — recorded `ok`, that bug would be re-picked every tick.
+A groom is `ok` only when the item is groomed AND carries the `plan-review` mark: a **bug** has `## Cause` and `## Fix` filled, neither "unknown", and the
+mark; a **refactor** was promoted to a task that has a plan and the mark. Anything else is `failed` — a bug groom that ends still ungroomed, recorded `ok`, would be
+re-picked every tick, and an unmarked plan would be executed unseen. Read it back, read-only, on the bug's id, or on the new task id the groom printed:
 
-Then run one of these in every case — after an error or a half-finished skill too, because the lock is released only here:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" show '<id>' --json
+```
+
+In a tracker project the JSON carries `item.groomed` (`true` when Cause and Fix are filled and not "unknown", or the task has a plan) and `item.planReview`
+(`true`, or absent). In a files project `show` prints the path and frontmatter only — the `plan-review: true` line is in that block (any value but `false`
+counts) — so Read the file at the printed path for the `## Cause` / `## Fix` or `## Plan` text.
+
+Then run one of these in every case — after an error or a half-finished skill too, because the lock is released only here. Make the reason ONE line and write
+every apostrophe in it as `’` (or drop it), so the single quotes can never break and leave the lock held:
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" record '<id>' ok --kind <execute|groom>
