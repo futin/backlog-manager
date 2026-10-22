@@ -86,7 +86,8 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   [Jira integration](superpowers/specs/2026-10-15-jira-integration-design.md); [full doc](subsystems/jira.md).
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
-  package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog.
+  package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog. The run widget opens
+  `/?section=runs&runs=history`, the one URL the client reads (`client/src/lib/deep-link.ts`); the other two open `/`.
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins
   the inline theme script by hash; and every route, read or write, is gated by a `Host` allowlist, which is what a page that rebinds DNS onto loopback cannot
   pass.

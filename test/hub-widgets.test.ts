@@ -69,6 +69,16 @@ describe('hub widgets', () => {
     expect(catalog.widgets.map((w) => w.id)).toEqual(['open-total', 'projects', 'run']);
   });
 
+  it('opens the board from the two work widgets and Runs › History from the Orchestrator', async () => {
+    const reply = await hub([], payload()).handle({ method: 'GET', path: '/api/hub/widgets', query: new URLSearchParams() });
+    const catalog = reply?.json as { widgets: { id: string; open?: string }[] };
+    expect(Object.fromEntries(catalog.widgets.map((w) => [w.id, w.open]))).toEqual({
+      'open-total': '/',
+      projects: '/',
+      run: '/?section=runs&runs=history'
+    });
+  });
+
   describe('open-total', () => {
     it('sums bugs and tasks across projects, ignoring ideas and refactors, and warns on any bug', () => {
       const projects = [project('a', { bugs: 2, tasks: 3, ideas: 4, refactors: 1 }), project('b', { tasks: 1, ideas: 5 })];

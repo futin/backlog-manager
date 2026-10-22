@@ -128,7 +128,7 @@ export function createBacklogHub(sources: HubSources): HubHandler {
   const widgets: WidgetDecl[] = [
     { id: 'open-total', title: 'Open work', render: 'stat', refreshSeconds: 60, open: '/', load: async () => openTotal(await sources.projects()) },
     { id: 'projects', title: 'Projects', render: 'list', refreshSeconds: 60, open: '/', load: async () => projectRows(await sources.projects()) },
-    { id: 'run', title: 'Orchestrator', render: 'status', refreshSeconds: 15, open: '/', load: () => runStatus(sources.runs()) }
+    { id: 'run', title: 'Orchestrator', render: 'status', refreshSeconds: 15, open: '/?section=runs&runs=history', load: () => runStatus(sources.runs()) }
   ];
   return createHubHandler({ app: { name: 'backlog-manager' }, widgets });
 }
