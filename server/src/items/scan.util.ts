@@ -89,6 +89,11 @@ export async function scanProject(project: RegistryProject): Promise<{ items: Ba
           // value into.
           kind: fm.fields.kind ?? '',
           tags: fm.tags,
+          // `plan-review:` is read by PRESENCE, exactly as the tool reads `runner-fix:` — any value but `false` (trimmed, case-insensitive) counts — and
+          // mapped to `true` or NO key, never `false`, by the conditional spread `runnerFix` uses on the tracker side, so `'planReview' in item` means what it
+          // says. This is the working tree, deliberately: a line deleted but not yet committed still disables Run, the conservative direction (the tick and
+          // orchestrate read `<base>`). See BacklogItem.planReview in shared/types.ts for the other writer and the ladder it feeds.
+          ...(fm.fields['plan-review'] !== undefined && fm.fields['plan-review'].toLowerCase() !== 'false' ? { planReview: true as const } : {}),
           section: leaf.section,
           status: leaf.status,
           project: project.name,

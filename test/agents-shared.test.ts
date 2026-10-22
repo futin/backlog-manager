@@ -12,6 +12,8 @@ import {
   finishClause,
   IN_REVIEW_REASON,
   inReviewBlock,
+  PLAN_REVIEW_REASON,
+  planReviewBlock,
   isAgentAction,
   isExecuteFinish,
   isItemId,
@@ -1042,5 +1044,21 @@ describe('isExecuteFinish', () => {
 
   it('EXECUTE_FINISHES is exactly in-place then pr', () => {
     expect(EXECUTE_FINISHES).toEqual(['in-place', 'pr']);
+  });
+});
+
+/*
+ * The plan-review guard (backlog-tick): a plan written unattended carries `plan-review` until a person removes it, and every per-item gate reads the mapped
+ * flag. One sentence, shared by the board's button, the server's two ladders, and the orchestrator's and tick's hand-kept copies.
+ */
+describe('planReviewBlock', () => {
+  it('names the awaited review for an item carrying the flag', () => {
+    expect(planReviewBlock(fakeItem({ planReview: true }))).toBe('this plan awaits review');
+    expect(PLAN_REVIEW_REASON).toBe('this plan awaits review');
+  });
+
+  it('is null for an item without the flag', () => {
+    expect(planReviewBlock(fakeItem())).toBeNull();
+    expect(planReviewBlock(fakeItem({ source: 'github' }))).toBeNull();
   });
 });

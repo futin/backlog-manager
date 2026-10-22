@@ -313,6 +313,19 @@ describe('POST /api/agents/dispatch', () => {
     expect(res.body.error).toBe('nothing to dispatch for this item');
   });
 
+  /* The one end-to-end proof that `scan.util.ts` reads `plan-review:` from a files item's frontmatter and the dispatch re-check refuses it. Written into the
+     store at case time: the scan is per request, so no fixture has to carry the line for every other case. */
+  it('409s a files item whose frontmatter says plan-review: true, and spawns nothing', async () => {
+    const sent = stubDashboard();
+    writeFileSync(
+      bugPath('bug-3-plan-awaits.md'),
+      item('bug-3', 'plan awaits', '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n', 'plan-review: true\n')
+    );
+    const res = await post({ ...good, itemPath: bugPath('bug-3-plan-awaits.md') }).expect(409);
+    expect(res.body).toEqual({ error: 'this plan awaits review' });
+    expect(sent.some((s) => s.url.endsWith('/api/spawn'))).toBe(false);
+  });
+
   it("spawns a capture for an out-of-scope item — the rejection's way back", async () => {
     const sent = stubDashboard();
     await post({

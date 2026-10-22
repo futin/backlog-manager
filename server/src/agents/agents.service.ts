@@ -26,6 +26,7 @@ import {
   isMergeMode,
   isQuestionMode,
   modesUpTo,
+  planReviewBlock,
   pickFrom,
   projectDispatchGate,
   runClaimBlock,
@@ -417,8 +418,15 @@ export class AgentsService {
       // #17: a project whose sync is off is the third, after the run claim — the sheet must not offer what `dispatch` below would refuse.
       // The in-review rung (spec decision 9) sits between the dashboard ladder and the run claim, the client's order: a PR is open for this tracker
       // item, and `dispatch` below refuses it with the same sentence.
+      // The plan-review rung (backlog-tick) follows it, in the client's order: a plan written unattended and not yet approved, refused by `dispatch` below with
+      // the same sentence. In-review first, so an item holding both says the PR reason.
       blocked:
-        dispatchBlock(item, status) ?? inReviewBlock(item) ?? runClaimBlock(item, runs, starting) ?? this.poller.syncOffBlock(item.projectPath) ?? undefined
+        dispatchBlock(item, status) ??
+        inReviewBlock(item) ??
+        planReviewBlock(item) ??
+        runClaimBlock(item, runs, starting) ??
+        this.poller.syncOffBlock(item.projectPath) ??
+        undefined
     };
   }
 
@@ -502,6 +510,11 @@ export class AgentsService {
     // close the PR, or `backlog.mjs review <id> off`), with no upstream to blame.
     const inReview = inReviewBlock(item);
     if (inReview !== null) throw new HttpException({ error: inReview }, 409);
+
+    // The plan-review block (backlog-tick), re-checked for the same reason: a tick may have written a plan and marked the item since the sheet's plan was read.
+    // Same uncoded 409 — a person resolves it by removing the label (or the `plan-review:` line) once they have read the plan. After in-review, the ladder's order.
+    const planReview = planReviewBlock(item);
+    if (planReview !== null) throw new HttpException({ error: planReview }, 409);
 
     // The run-claim block, re-checked here rather than trusted from `plan()`.
     // This is the layer that actually holds: LaunchSheet fetches its plan once
