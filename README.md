@@ -273,7 +273,7 @@ Five seams, one doc each:
   thing here that can spawn a session, and only when `BM_AGENTS` says so.
 - [**The board**](docs/subsystems/board.md) — the React SPA: four lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
-- [**The skills**](docs/subsystems/skills.md) — the seven published skills, their four CLIs, and the reviewer agent the orchestrator dispatches before a merge.
+- [**The skills**](docs/subsystems/skills.md) — the eight published skills, their five CLIs, and the reviewer agent the orchestrator dispatches before a merge.
 - [**Jira**](docs/subsystems/jira.md) — the server half of the Jira Cloud integration: a client, a board poller and its caches, and read routes under
   `/api/jira` (seven), plus seven guarded POSTs: five config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`, `/skills`, `/skills/delete`) and, since
   phase 3, two writes to Jira itself (`/issue/assign` and `/issue/transition`) — the only writes this server makes to Jira; since phase 5a, the Run half in
@@ -307,7 +307,7 @@ Ports, binds, what the container mounts and the failure modes each of those has 
 
 | Path       | Contents                                                                                                                                                                                                                                 |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skills/`  | The seven published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                  |
+| `skills/`  | The eight published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                  |
 | `agents/`  | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md))                                                                                                                                       |
 | `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller ([doc](docs/subsystems/api.md)), the Jira read routes ([doc](docs/subsystems/jira.md))                               |
 | `client/`  | React SPA — side rail, board, run chip, runs, archive, settings ([doc](docs/subsystems/board.md))                                                                                                                                        |
