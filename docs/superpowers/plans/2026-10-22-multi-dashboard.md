@@ -301,20 +301,25 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
     has `machine: 'home'`.
   - `machine: 'Nope'` → 400 `unknown machine "Nope"`.
   - `machine: 'Pro'` on a files project → 400 `Pro runs tracker projects only — <project> is files-backed`.
-  - `machine: 'Pro'`, execute, `finish: 'in-place'` → 400 `finish must be pr on Pro`; `finish` absent → spawned with the pr finish clause.
+  - `machine: 'Pro'`, execute, `finish: 'in-place'` → 400 `finish must be pr on Pro`; `finish` absent with `base: 'main'` → spawned with the pr finish
+    clause `finishClause('pr', 'main')`; `finish` absent and no `base` → 400 `base is required with finish pr` (the existing rule, now reached because a
+    remote execute's finish is `pr`). The base is proved against this machine's clone.
   - Pro `models: ['opus', 'sonnet']`, body `model: 'haiku'` → 400 `model "haiku" is not in Pro's list (opus, sonnet)`; `model: 'gpt-9'` on Pro → 400 `model "gpt-9" is not in
     Pro's list (opus, sonnet)`; `model: 'gpt-9'` on home → dropped, spawn uses `DEFAULT_MODEL` (today's behaviour).
   - Pro not offered (board down) → 409 `Pro is not offered for <project>: board unreachable — …`, no spawn.
-  - success → spawn hits Pro's URL with `Authorization: Bearer tok-pro-456`, at Pro's `dirName` for the REMOTE path; record `machine: 'Pro'`; a second
+  - success (execute, `base: 'main'`, local path `/Users/me/bm`, Pro's remote path `/Users/p/bm`) → spawn hits Pro's URL with `Authorization: Bearer tok-pro-456`, at Pro's `dirName` for the REMOTE path; record `machine: 'Pro'`; a second
     dispatch of the same item to `home` → 409 `<id> is already starting on Pro`.
   - `list` with `claimedHost` returning `pro-mac` for that item → entry gone; at `RUN_STALE_MS + 1` → gone.
   - groom and capture on Pro → no finish clause, no 400 (finish only applies to execute).
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/agents-dispatch-remote.test.ts test/agents-dispatch.test.ts` → new cases FAIL.
-- [ ] **Step 3: Implement.** Order in `dispatch`: existing prompt/finish validation → machine resolve (`unknown machine` 400) → `findItem`/`deriveAction`
-  → remote 400s (files-backed, finish, model/effort — they need the item's project) → offers 409 → gates → `remoteStarting.itemBlock` (applies to EVERY
-  machine, home included) → `proveBaseBranch` → spawn → record → `markItem` (remote only). Gates for a REMOTE launch: `status()` / `projectDispatchGate` /
-  `dispatchBlock` / the `spawnMaxPermission` ceiling read the remote's `statusOf(m.cfg)`, not home's; `syncOffBlock`, `runClaimBlock` and `itemClaimBlock`
-  run unchanged (they read this machine's tracker cache and runs). Home keeps every gate exactly as today.
+- [ ] **Step 3: Implement.** Order in `dispatch`: prompt validation → machine resolve (`unknown machine` 400) → finish derived as `m.home ? (req.finish ??
+  'in-place') : 'pr'` (with `finish must be pr on <label>` when a remote body names another), then the existing finish/base shape rules run on that value →
+  `findItem`/`deriveAction` → remote 400s (files-backed, model/effort — they need the item's project) → offers 409 → gates → `remoteStarting.itemBlock`
+  (applies to EVERY machine, home included) → `proveBaseBranch` (this machine's clone) → spawn → record → `markItem` (remote only). Gates for a REMOTE
+  launch: the environment-level block and the `spawnMaxPermission` ceiling read the remote's `statusOf(m.cfg)`; the path check is
+  `projectDispatchGate(statusOf(m.cfg), remotePath)` with the path `OffersService.remotePath` returned — never `dispatchBlock(item, …)`, whose
+  `item.projectPath` is the LOCAL path the remote's `projectPaths` never lists. `syncOffBlock`, `runClaimBlock` and `itemClaimBlock` run unchanged (they read
+  this machine's tracker cache and runs). Home keeps every gate, `dispatchBlock(item, status())` included, exactly as today.
 - [ ] **Step 4: Run** → PASS; typecheck.
 - [ ] **Step 5: Commit** `feat(agents): dispatch a card to a remote machine`.
 
@@ -418,7 +423,8 @@ machine-cards group in both launch sheets, a Dashboards card on Shared Settings,
 - [ ] **Step 1: Write the failing tests** (stub `fetch`):
   - home-only offers → no "Run on" group, button text as today, request body has no `machine` key (Review Focus 1).
   - two machines, Pro suggested → Pro pressed; Finish (LaunchSheet, execute) / Merge mode (OrchestrateSheet) disabled at PR with hint `Required when running
-    on Pro`; Model options are exactly Pro's list with hint `Pro runs opus, sonnet`; the primary button reads `Start on Pro`; the body has `machine: 'Pro'`.
+    on Pro`; Model options are exactly Pro's list with hint `Pro runs opus, sonnet`; the primary button reads `Start on Pro`; the body has `machine: 'Pro'`, and a LaunchSheet execute on Pro also sends the picked `base` (the
+    base picker shows as it does for a pr finish today).
   - user had Finish `in-place` and model `haiku` (Settings default `opus`), picks Pro (finish locks to pr, haiku narrowed away → `opus`), then home → Finish
     back to `in-place`, model `opus` (Review Focus 5).
   - a 409 from the server shows its message in the sheet's existing error slot, sheet stays open.
