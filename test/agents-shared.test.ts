@@ -1061,4 +1061,11 @@ describe('planReviewBlock', () => {
     expect(planReviewBlock(fakeItem())).toBeNull();
     expect(planReviewBlock(fakeItem({ source: 'github' }))).toBeNull();
   });
+
+  /* The in-review twin's twin: `orchestrate.mjs` cannot import this module, so its gate carries a hand-kept copy of the sentence, and this keeps the "one
+     string everywhere" constraint mechanical. (The SKILL.md sibling of this guard lands with the skill text that quotes the sentence.) */
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const PLAN_REVIEW_REASON = '${PLAN_REVIEW_REASON}';`);
+  });
 });
