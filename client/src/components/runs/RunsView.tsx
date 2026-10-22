@@ -27,6 +27,7 @@ import { Segmented } from '../ui/Segmented';
 import { Sheet, SheetHead } from '../ui/Sheet';
 import { RunDetail } from './RunDetail';
 import { StageBars } from './StageBars';
+import { TickMonitor } from './TickMonitor';
 import { WatchdogMonitor } from './WatchdogMonitor';
 import type { RunRange } from '../../lib/run-range';
 import { resumeGate } from '../../../../shared/agent';
@@ -740,6 +741,16 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
     ]
       .filter((part) => part !== null)
       .join(' · ') || undefined;
+
+  if (mode === 'ticks') {
+    // The third page, and the first that needs nothing from this component: it reads `GET /api/ticks` through its own hook and takes no props, so
+    // switching to it adds one request and hands it no run.
+    return (
+      <div className="board runs-board">
+        <TickMonitor />
+      </div>
+    );
+  }
 
   if (mode === 'watchdog') {
     // Its own PAGE, with its own band — not a body swapped in under a shared

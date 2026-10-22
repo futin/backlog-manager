@@ -375,7 +375,8 @@ function RailIcon({ section }: { section: Section }) {
  */
 const RAIL_SUB_LABEL: Record<RunsMode, string> = {
   runs: 'History',
-  watchdog: 'Watchdog'
+  watchdog: 'Watchdog',
+  ticks: 'Ticks'
 };
 
 /**

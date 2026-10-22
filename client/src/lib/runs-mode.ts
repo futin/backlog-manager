@@ -29,10 +29,10 @@
  * key, the member list, and the guard.
  */
 
-export type RunsMode = 'runs' | 'watchdog';
+export type RunsMode = 'runs' | 'watchdog' | 'ticks';
 
 /** Declaration order is render order in the segmented control. */
-export const RUNS_MODES: readonly RunsMode[] = ['runs', 'watchdog'];
+export const RUNS_MODES: readonly RunsMode[] = ['runs', 'watchdog', 'ticks'];
 
 export const RUNS_MODE_KEY = 'backlog-manager.runs-mode';
 

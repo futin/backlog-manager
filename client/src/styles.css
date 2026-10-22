@@ -2015,6 +2015,16 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .watchdog-kind-warn { color: var(--amber-ink) }
 .watchdog-kind-muted { color: var(--ink3) }
 
+/* Runs › Ticks reuses the Watching sheet's row idiom (`.watchdog-row`, `.watchdog-card-head`, `.watchdog-row-project`) and the Activity ledger
+   (`.watchdog-table`, `.watchdog-kind-*`) as they stand — only what a tick row has and a watching row does not is declared here. The body is a column
+   because a failed Reset's line sits UNDER the row's reading, where the person just clicked, rather than in the page's one shared error slot. */
+.tick-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink2) }
+/* A halted project is the row that needs a hand, so it alone is tinted — the same 14 % `.ui-pill-bad` mixes, one step quieter (8 %) because it fills a
+   whole row rather than a pill. Side padding gives the tint somewhere to sit; without it the text would touch the tint's edge. */
+.tick-row-halted { background: color-mix(in srgb, var(--red) 8%, var(--strip)); padding-left: 12px; padding-right: 12px; border-radius: 8px }
+.tick-row-error { color: var(--ink3) }
+.tick-row-fail { font-size: 12px; color: var(--red) }
+
 /* ---------------------------------------------- Runs › History (task-38)
    RunsView.tsx, shape D of `03-runs-shape.html`: band, figure strip, then a
    420 px list column beside one always-visible detail sheet. Every cell, sheet
