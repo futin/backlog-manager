@@ -5,7 +5,21 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { contentHash, forgetItem, isSkipped, lockState, readState, recordOutcome, releaseLock, removeLock, writeLock } from './tick-state.mjs';
+import {
+  claimStaleLock,
+  contentHash,
+  dropClaim,
+  forgetItem,
+  isSkipped,
+  lockSnapshot,
+  lockState,
+  readState,
+  recordOutcome,
+  releaseLock,
+  removeLock,
+  restoreClaim,
+  writeLock,
+} from './tick-state.mjs';
 
 function fixture(t) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bm-tick-state-')));
@@ -142,4 +156,69 @@ test('isSkipped is true only for a failed record whose hash still matches', () =
   assert.equal(isSkipped({ ...failed, outcome: 'ok' }, 'h1'), false);
   assert.equal(isSkipped(undefined, 'h1'), false);
   assert.equal(isSkipped({ ...failed, hash: undefined }, 'h1'), false);
+});
+
+// A recovery claims a stale lock by an atomic rename and owns it only when the claimed bytes are the bytes it judged — controller ruling (b) on Task 7.
+test('claimStaleLock: a match is claimed, the lock path is emptied, and dropClaim ends it', (t) => {
+  const dir = fixture(t);
+  writeLock(dir, lock('bug-3'));
+  const snap = lockSnapshot(dir, Date.parse(AT) + 10_000, 1000);
+  assert.equal(snap.state, 'stale');
+  assert.equal(snap.raw, fs.readFileSync(path.join(dir, 'lock'), 'utf8'));
+  const claimed = claimStaleLock(dir, snap.raw);
+  assert.match(path.basename(claimed), /^lock\.recover-\d+-[0-9a-f]{8}$/);
+  assert.equal(fs.existsSync(path.join(dir, 'lock')), false);
+  assert.equal(fs.readFileSync(claimed, 'utf8'), snap.raw);
+  dropClaim(claimed);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('claimStaleLock: a lock another tick already took is null and creates nothing', (t) => {
+  const dir = fixture(t);
+  writeLock(dir, lock('bug-3'));
+  const snap = lockSnapshot(dir, Date.parse(AT) + 10_000, 1000);
+  removeLock(dir);
+  assert.equal(claimStaleLock(dir, snap.raw), null);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('claimStaleLock: a fresh lock written after the judge is put back, not claimed', (t) => {
+  const dir = fixture(t);
+  writeLock(dir, lock('bug-3'));
+  const snap = lockSnapshot(dir, Date.parse(AT) + 10_000, 1000);
+  // another tick recovered it and took a fresh lock of its own in the gap
+  removeLock(dir);
+  writeLock(dir, lock('bug-4', { at: '2026-10-22T12:00:00.000Z' }));
+  const fresh = fs.readFileSync(path.join(dir, 'lock'), 'utf8');
+  assert.equal(claimStaleLock(dir, snap.raw), null);
+  assert.deepEqual(fs.readdirSync(dir), ['lock']);
+  assert.equal(fs.readFileSync(path.join(dir, 'lock'), 'utf8'), fresh);
+});
+
+test('claimStaleLock: an unreadable lock is claimed on its own bytes', (t) => {
+  const dir = fixture(t);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'lock'), 'not json');
+  const snap = lockSnapshot(dir, Date.parse(AT), 1000);
+  assert.deepEqual(snap, { state: 'stale', lock: {}, raw: 'not json' });
+  const claimed = claimStaleLock(dir, snap.raw);
+  assert.notEqual(claimed, null);
+  dropClaim(claimed);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('restoreClaim: links back when the path is free, leaves a newer lock alone, and never leaves the claimed name', (t) => {
+  const dir = fixture(t);
+  writeLock(dir, lock('bug-3'));
+  const raw = fs.readFileSync(path.join(dir, 'lock'), 'utf8');
+  let claimed = claimStaleLock(dir, raw);
+  restoreClaim(dir, claimed);
+  assert.deepEqual(fs.readdirSync(dir), ['lock']);
+  assert.equal(fs.readFileSync(path.join(dir, 'lock'), 'utf8'), raw);
+  claimed = claimStaleLock(dir, raw);
+  writeLock(dir, lock('bug-9'));
+  const newer = fs.readFileSync(path.join(dir, 'lock'), 'utf8');
+  restoreClaim(dir, claimed);
+  assert.deepEqual(fs.readdirSync(dir), ['lock']);
+  assert.equal(fs.readFileSync(path.join(dir, 'lock'), 'utf8'), newer);
 });

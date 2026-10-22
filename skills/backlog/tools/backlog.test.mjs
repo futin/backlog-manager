@@ -3418,6 +3418,8 @@ const CLI_SOURCES = {
   // Jira phase 4's CLI, a skill of its own. Every command is a request to `/api/jira`, so its stdout — a whole ticket for `show` — is a pipe a caller reads
   // exactly as it reads the others'.
   'jira.mjs': fileURLToPath(new URL('../../jira/tools/jira.mjs', import.meta.url)),
+  // backlog-tick's CLI. `decide` prints one JSON line a scheduled step's skill reads off a pipe, and `status --json` grows with the outcome history.
+  'tick.mjs': fileURLToPath(new URL('../../backlog-tick/tools/tick.mjs', import.meta.url)),
 }
 
 // Comment lines are stripped before matching because retro.mjs's own note
@@ -3438,12 +3440,16 @@ const codeLines = (file) =>
 //
 // `jira.mjs` (Jira phase 4) takes it for backlog.mjs's reason: one awaited `fetch` per request, each with `connection: close`, nothing else asynchronous. Its
 // suite's children are expected to exit too, and its RF 5 case pipes a 200 000-byte ticket through stdout whole.
+//
+// `tick.mjs` (backlog-tick) takes it for the same reason: every `fetch` is awaited with `connection: close` and an `AbortSignal.timeout` (an unref'd timer),
+// every child is `spawnSync`, and its suite expects every child to exit — the stack-down cases among them, against a port nothing listens on.
 const ENTRY_SHAPES = {
   'backlog.mjs': ['process.exitCode = main(', 'process.exitCode = await main('],
   'orchestrate.mjs': ['process.exitCode = main('],
   'retro.mjs': ['process.exitCode = main('],
   'api-call.mjs': ['process.exitCode = await main('],
   'jira.mjs': ['process.exitCode = await main('],
+  'tick.mjs': ['process.exitCode = await main('],
 }
 
 test('every skill CLI ends through process.exitCode, never process.exit', () => {

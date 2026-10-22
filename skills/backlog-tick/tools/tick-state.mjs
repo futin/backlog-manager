@@ -47,23 +47,32 @@ function writeAtomic(file, text) {
 // is not an object, or has no parseable `at` is `stale` — NEVER free: a lock somebody (or a crash) left is evidence a tick was mid-flight, and reading it as free
 // would start a second tick on top of it. `lock` carries whatever fields did parse (`{}` when none did), so the caller can still name the host and verdict.
 export function lockState(dir, now, ttlMs) {
+  const answer = lockSnapshot(dir, now, ttlMs);
+  delete answer.raw;
+  return answer;
+}
+
+// `lockState`'s answer plus `raw`: the exact bytes it judged, or `null` when there was no file or it could not be read. The one reader `claimStaleLock` needs —
+// a recovery must compare what it claims against what was JUDGED stale, and a second read would open the very gap the claim exists to close. `lockState` is
+// this minus `raw`, so the two can never judge one file two ways.
+export function lockSnapshot(dir, now, ttlMs) {
   let raw;
   try {
     raw = fs.readFileSync(path.join(dir, LOCK_FILE), 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT') return { state: 'free' };
-    return { state: 'stale', lock: {} };
+    if (e.code === 'ENOENT') return { state: 'free', raw: null };
+    return { state: 'stale', lock: {}, raw: null };
   }
   let lock;
   try {
     lock = JSON.parse(raw);
   } catch {
-    return { state: 'stale', lock: {} };
+    return { state: 'stale', lock: {}, raw };
   }
-  if (lock === null || typeof lock !== 'object' || Array.isArray(lock)) return { state: 'stale', lock: {} };
+  if (lock === null || typeof lock !== 'object' || Array.isArray(lock)) return { state: 'stale', lock: {}, raw };
   const at = typeof lock.at === 'string' ? Date.parse(lock.at) : Number.NaN;
-  if (Number.isNaN(at)) return { state: 'stale', lock };
-  return now - at < ttlMs ? { state: 'held', lock } : { state: 'stale', lock };
+  if (Number.isNaN(at)) return { state: 'stale', lock, raw };
+  return now - at < ttlMs ? { state: 'held', lock, raw } : { state: 'stale', lock, raw };
 }
 
 // Exclusive create: `true` when this call made the lock, `false` when one was already there. The content is written to a tmp file first and then LINKED into place
@@ -105,6 +114,56 @@ export function releaseLock(dir, id) {
 // Unconditional — for a lock `lockState` has already called stale. Absent is fine.
 export function removeLock(dir) {
   fs.rmSync(path.join(dir, LOCK_FILE), { force: true });
+}
+
+// --- claiming a stale lock -----------------------------------------------
+
+// Recovery takes a stale lock by CLAIMING it, never by a blind remove-then-act. Two ticks can both judge one lock stale; a third can write a fresh lock in the
+// gap between a judge and a remove. `removeLock` there would delete the fresh one and let two ticks run. So the stale file is moved aside with ONE atomic
+// `rename` to a name only this process uses — exactly one claimant can win a rename of one name — and then its bytes are compared with the bytes that were
+// judged (`lockSnapshot`'s `raw`):
+//
+//   - the rename finds no file (`ENOENT`) → another tick already took it: `null`, and the caller answers `busy`;
+//   - the bytes differ → a fresh lock was written after the judge, and this claim took it by mistake: it is linked back to the lock path (a `link`, so the
+//     name reappears whole, and `EEXIST` means yet another lock is there now, which is left alone), the claimed name is removed, and `null`;
+//   - the bytes match → the path that names it is returned, the lock path is already empty, and the caller owns the recovery. `dropClaim` deletes the claimed
+//     file once the recovery is recorded, and `restoreClaim` puts it back if the recovery could not be.
+//
+// `judgedRaw` is `null` for a lock that could not be read when judged; it matches a claimed file that cannot be read either, since both mean "unreadable".
+export function claimStaleLock(dir, judgedRaw) {
+  const file = path.join(dir, LOCK_FILE);
+  const claimed = `${file}.recover-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    fs.renameSync(file, claimed);
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+  let raw = null;
+  try {
+    raw = fs.readFileSync(claimed, 'utf8');
+  } catch {
+    raw = null;
+  }
+  if (raw === judgedRaw) return claimed;
+  restoreClaim(dir, claimed);
+  return null;
+}
+
+// Puts a claimed lock back at the lock path, unless something is already there (`EEXIST`: a newer lock wins), and removes the claimed name either way.
+export function restoreClaim(dir, claimed) {
+  try {
+    fs.linkSync(claimed, path.join(dir, LOCK_FILE));
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  } finally {
+    fs.rmSync(claimed, { force: true });
+  }
+}
+
+// The end of a recovery: the claimed file is deleted. Absent is fine.
+export function dropClaim(claimed) {
+  fs.rmSync(claimed, { force: true });
 }
 
 // --- the outcome record --------------------------------------------------
