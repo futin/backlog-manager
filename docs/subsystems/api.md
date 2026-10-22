@@ -113,7 +113,8 @@ into an `access` state. `poller.service.ts` is a `setTimeout` chain in the watch
 each with its OWN high-water mark — sharing one mark was a task-46 defect that hid every claim older than the newest issue — the second had no reader at all in
 phase 2 and is what the claim protocol maps from since task-46), paginates the first sync to the end, upserts by issue number against an inclusive `since` sent five minutes behind each mark (`SINCE_OVERLAP_MS` — the
 listing is eventually consistent, so a `since` equal to the mark lost brickwright#28 for good),
-drops pull requests, and sleeps a rate-limited repo until its reset. Since bug-55 a tick also makes one conditional per-issue comments read for every issue the
+drops pull requests, and sleeps a rate-limited repo until its reset. A repo's first successful sync in a process logs one line,
+`tracker <repo>: cold sync <status> — <n> issues cached, <pages> page(s)`, and no later sync logs anything (#332). Since bug-55 a tick also makes one conditional per-issue comments read for every issue the
 cache holds an UNRELEASED claim on — none at all when nothing is held — and lets that list be the truth for that issue, because the repo-wide `since` read can
 never report a deletion and a loser deleted by another machine's server otherwise stayed cached as a phantom claim. Every absorbed issue — polled or taken off a write — also records the sha256 of its body under its
 `updated_at` (32 stamps per issue, a stamp seen with two bodies poisoned), which is what lets `body` forgive a stamp a poll has moved past (bug #234). The eleven labels in `labels.ts` are created on a repo's first successful sync if any is

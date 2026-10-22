@@ -681,6 +681,10 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     if (state.sleepUntil !== null && Date.now() < state.sleepUntil) return;
     state.sleepUntil = null;
 
+    // Cold: this process has never read the repo successfully. Taken before the request, because the branches below are what stamp `polledAt`.
+    const cold = state.polledAt === null;
+    let pages = 0;
+
     const first = await this.client.issues(repo, { token, since: sinceFor(state.hwm), etag: state.issuesEtag });
     if (this.handleFailure(state, first)) return;
 
@@ -709,6 +713,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       state.issuesEtag = first.etag;
       for (;;) {
         this.absorbIssues(state, page.data ?? []);
+        pages++;
         if (page.next === null) break;
         const nextPage = await this.client.page<GithubIssue[]>(page.next, { token });
         if (this.handleFailure(state, nextPage)) return;
@@ -718,6 +723,15 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
       state.polledAt = new Date().toISOString();
       state.access = 'ok';
       state.detail = null;
+    }
+
+    // One line per repo per process, at the end of its first successful issues read (#332). On 2026-10-22 the 5m repos read `polledAt` set and zero issues
+    // for minutes after a restart, and the code shows no path that stamps without absorbing — the process's logs went with its container, so nothing could
+    // say which half failed. This line does: a count of 0 here is "the read came back empty"; a real count here and an empty board later is "it filled and
+    // something emptied it". Only the cold sync logs — at a 15 s interval per repo, logging every sync would be the whole log. A cold sync that failed
+    // logs nothing and stays cold, so the next one to succeed is the one that logs.
+    if (cold && state.polledAt !== null) {
+      console.log(`tracker ${repo}: cold sync ${first.status} — ${state.issues.size} issues cached, ${pages} page(s)`);
     }
 
     // Made on EVERY tick that got past the issues read, including a 304 one

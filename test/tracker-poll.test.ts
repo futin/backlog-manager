@@ -194,6 +194,32 @@ describe('syncing', () => {
     p.disarm();
   });
 
+  // #332: one line per repo per process, at the end of its FIRST successful sync, so an empty cache after a restart can be told apart from one that filled
+  // and was emptied later. Nothing on any later sync — at 15 s per repo that would be the whole log.
+  it('logs one cold-sync line per repo with the count, and nothing on later syncs', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const page2 = 'https://api.github.com/repositories/1/issues?page=2';
+      const { poller: p, calls } = poller(registryOf(githubProject()), [
+        ['page=2', { status: 200, body: [issue(2, '2026-09-02T00:00:00Z')] }],
+        ['/issues?', { status: 200, body: [issue(1, '2026-09-01T00:00:00Z')], headers: { link: `<${page2}>; rel="next"` } }],
+        ['/labels', LABELS_PRESENT]
+      ]);
+      await p.tick();
+      const cold = log.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('cold sync'));
+      expect(cold).toEqual(['tracker futin/x: cold sync 200 — 2 issues cached, 2 page(s)']);
+
+      const before = calls.filter((c) => c.url.includes('/issues?state=all')).length;
+      await p.tick();
+      // The second tick did sync — otherwise "no second line" would prove nothing.
+      expect(calls.filter((c) => c.url.includes('/issues?state=all')).length).toBeGreaterThan(before);
+      expect(log.mock.calls.filter((c) => String(c[0]).includes('cold sync'))).toHaveLength(1);
+      p.disarm();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('upserts on an inclusive since rather than duplicating', async () => {
     const { poller: p, calls } = poller(registryOf(githubProject()), [
       ['/issues?', { status: 200, body: [issue(1, '2026-09-01T00:00:00Z')] }],

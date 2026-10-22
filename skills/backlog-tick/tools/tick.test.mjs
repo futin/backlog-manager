@@ -172,10 +172,15 @@ function apiItem(fx, number, over = {}) {
   return { ...base, source: 'github', ...over };
 }
 
-function trackerRoutes(items, { bodies = {}, runs = NO_RUNS } = {}) {
+/** This project's row as `GET /api/trackers` returns it — only the fields the tick reads — polled and healthy, so every case not about the poller gets past
+ *  the not-polled guard (#332). */
+const trackerRow = (fx, over = {}) => ({ name: 'x', path: fx.root, source: 'github', repo: 'futin/x', polledAt: ago(MIN), access: 'ok', detail: null, ...over });
+
+function trackerRoutes(fx, items, { bodies = {}, runs = NO_RUNS, trackers = [trackerRow(fx)] } = {}) {
   return {
     '/api/health': { body: { status: 'ok' } },
     '/api/items': { body: { items, errors: [] } },
+    '/api/trackers': { body: { platforms: [], projects: trackers } },
     '/api/items/body': (url) => {
       const p = url.searchParams.get('path');
       return { body: bodies[p] ?? `## Body\n\nof ${p}\n` };
@@ -228,6 +233,63 @@ test('tracker project with the stack down is idle before any lock', async (t) =>
   assert.ok(fs.existsSync(fx.lockFile));
   fs.rmSync(fx.lockFile);
   await decide(fx);
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+// #332: right after a server restart the tracker cache is empty until its first sync, and `/api/items` simply lists no rows for the project. Every one of
+// these is `idle` — nothing locked, nothing recorded — and only the reason says why, so a false "nothing to do" never reaches Runs › Ticks again.
+test('tracker: a repo the poller has not read yet is idle, never nothing to do', async (t) => {
+  const fx = project(t, { tracker: true });
+  const items = [apiItem(fx, 12)];
+  const run = (opts) => withApi(trackerRoutes(fx, items, opts), (port) => decide(fx, [], { port }));
+
+  let v = await run({ trackers: [trackerRow(fx, { path: `${fx.root}-other` })] });
+  assert.deepEqual(v, { verdict: 'idle', reason: 'tracker not polled yet: futin/x', root: fx.root, caps: CAPS, dryRun: false });
+  assert.equal(fs.existsSync(fx.lockFile), false);
+
+  v = await run({ trackers: [trackerRow(fx, { polledAt: null })] });
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, 'tracker not polled yet: futin/x');
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('tracker: a repo the poller cannot read says why, with its detail or its name', async (t) => {
+  const fx = project(t, { tracker: true });
+  const items = [apiItem(fx, 12)];
+  const run = (row) => withApi(trackerRoutes(fx, items, { trackers: [trackerRow(fx, row)] }), (port) => decide(fx, [], { port }));
+
+  const detail = 'rate limit reached — resets 2026-10-22T17:00:00.000Z';
+  let v = await run({ access: 'rate-limited', detail });
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, `tracker rate-limited: ${detail}`);
+  // A first sync that failed leaves `polledAt` null too; the access reason is the more useful of the two and wins.
+  v = await run({ access: 'forbidden', polledAt: null });
+  assert.equal(v.reason, 'tracker forbidden: futin/x');
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('tracker: a polled cache holding no row for this project is named, a done row proves it filled', async (t) => {
+  const fx = project(t, { tracker: true });
+  const polledAt = '2026-10-22T15:58:16.000Z';
+  const trackers = [trackerRow(fx, { polledAt })];
+  const run = (list) => withApi(trackerRoutes(fx, list, { trackers }), (port) => decide(fx, [], { port }));
+
+  let v = await run([apiItem(fx, 12, { projectPath: `${fx.root}-other` })]);
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, `tracker cache holds no items for futin/x (polled ${polledAt})`);
+  assert.equal(fs.existsSync(fx.lockFile), false);
+
+  v = await run([apiItem(fx, 12, { status: 'done' })]);
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, 'nothing to do: no ready bug or task; no ungroomed bug or refactor');
+});
+
+test('tracker: /api/trackers refusing is the stack going away, as for the other two reads', async (t) => {
+  const fx = project(t, { tracker: true });
+  const routes = { ...trackerRoutes(fx, [apiItem(fx, 12)]), '/api/trackers': { status: 500, body: { error: 'boom' } } };
+  const v = await withApi(routes, (port) => decide(fx, [], { port }));
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, 'stack down');
   assert.equal(fs.existsSync(fx.lockFile), false);
 });
 
@@ -351,10 +413,10 @@ test('tracker: a fresh remote run on this repo is busy, a stale one is not', asy
   const fx = project(t, { tracker: true });
   const remote = (fresh) => ({ status: 'running', fresh, remote: true, repo: 'futin/x', project: fx.root, queue: [] });
   const items = [apiItem(fx, 12)];
-  let v = await withApi(trackerRoutes(items, { runs: { ...NO_RUNS, remote: [remote(true)] } }), (port) => decide(fx, [], { port }));
+  let v = await withApi(trackerRoutes(fx, items, { runs: { ...NO_RUNS, remote: [remote(true)] } }), (port) => decide(fx, [], { port }));
   assert.equal(v.verdict, 'busy');
   assert.equal(v.reason, 'remote run');
-  v = await withApi(trackerRoutes(items, { runs: { ...NO_RUNS, remote: [remote(false)] } }), (port) => decide(fx, ['--dry-run'], { port }));
+  v = await withApi(trackerRoutes(fx, items, { runs: { ...NO_RUNS, remote: [remote(false)] } }), (port) => decide(fx, ['--dry-run'], { port }));
   assert.equal(v.verdict, 'execute');
   assert.equal(v.id, '#12');
   assert.equal(v.args, '#12 --finish pr [backlog-tick]');
@@ -402,10 +464,10 @@ test('files: the orchestrator and execute trees under .worktrees are skipped, an
 test('tracker: a live claim is busy, a stale one is not', async (t) => {
   const fx = project(t, { tracker: true });
   const claimed = (heartbeatAgo) => [apiItem(fx, 4, { section: 'tasks', holder: { session: 's', heartbeat: ago(heartbeatAgo) } }), apiItem(fx, 12)];
-  let v = await withApi(trackerRoutes(claimed(5 * MIN)), (port) => decide(fx, [], { port }));
+  let v = await withApi(trackerRoutes(fx, claimed(5 * MIN)), (port) => decide(fx, [], { port }));
   assert.equal(v.verdict, 'busy');
   assert.equal(v.reason, 'live claim on #4');
-  v = await withApi(trackerRoutes(claimed(20 * MIN)), (port) => decide(fx, ['--dry-run'], { port }));
+  v = await withApi(trackerRoutes(fx, claimed(20 * MIN)), (port) => decide(fx, ['--dry-run'], { port }));
   assert.equal(v.verdict, 'execute');
   assert.equal(v.id, '#12');
 });
@@ -470,7 +532,7 @@ test('existing execute branch or worktree skips the item', async (t) => {
 test('tracker: in-review, plan-review and an execute/<n> branch skip the issue', async (t) => {
   const fx = project(t, { tracker: true });
   const items = (over) => [apiItem(fx, 12, over), apiItem(fx, 13, { section: 'tasks' })];
-  const pick = (list) => withApi(trackerRoutes(list), (port) => decide(fx, ['--dry-run'], { port }));
+  const pick = (list) => withApi(trackerRoutes(fx, list), (port) => decide(fx, ['--dry-run'], { port }));
   assert.equal((await pick(items({}))).id, '#12');
   assert.equal((await pick(items({ inReview: true }))).id, '#13');
   assert.equal((await pick(items({ planReview: true }))).id, '#13');
@@ -524,10 +586,10 @@ test('tracker: a failed groom with the same hash keeps the issue off the execute
   fs.mkdirSync(fx.lockDir, { recursive: true });
   const rec = { outcome: 'failed', kind: 'groom', reason: 'no mark', at: ago(MIN), hash: contentHash(body) };
   fs.writeFileSync(fx.stateFile, JSON.stringify({ items: { '#12': rec }, recent: [] }));
-  const routes = trackerRoutes([apiItem(fx, 12)], { bodies: { 'gh:futin/x#12': body } });
+  const routes = trackerRoutes(fx, [apiItem(fx, 12)], { bodies: { 'gh:futin/x#12': body } });
   assert.equal((await withApi(routes, (port) => decide(fx, ['--dry-run'], { port }))).verdict, 'idle');
   // an edited body is a new situation
-  const edited = trackerRoutes([apiItem(fx, 12)], { bodies: { 'gh:futin/x#12': body + 'more\n' } });
+  const edited = trackerRoutes(fx, [apiItem(fx, 12)], { bodies: { 'gh:futin/x#12': body + 'more\n' } });
   assert.equal((await withApi(edited, (port) => decide(fx, ['--dry-run'], { port }))).id, '#12');
 });
 
@@ -685,11 +747,11 @@ test('tracker: groom counts planReview off the API and hashes the body', async (
     apiItem(fx, 2, { section: 'refactors', groomed: null }),
     apiItem(fx, 9, { section: 'tasks', planReview: true }),
   ];
-  let v = await withApi(trackerRoutes(items), (port) => decide(fx, ['--dry-run'], { port }));
+  let v = await withApi(trackerRoutes(fx, items), (port) => decide(fx, ['--dry-run'], { port }));
   assert.equal(v.verdict, 'groom');
   assert.equal(v.args, '#4, plan the fix [backlog-tick]');
   assert.equal(v.caps.planReview, 1);
-  v = await withApi(trackerRoutes(items), (port) => decide(fx, ['--dry-run', '--max-plans', '1'], { port }));
+  v = await withApi(trackerRoutes(fx, items), (port) => decide(fx, ['--dry-run', '--max-plans', '1'], { port }));
   assert.equal(v.verdict, 'idle');
   assert.equal(v.reason, 'nothing to do: no ready bug or task; 1 plans awaiting review (cap 1)');
 });
@@ -731,7 +793,7 @@ test('recover: a tracker groom never stops, and hashes the issue body', async (t
   const fx = project(t, { tracker: true });
   writeLockFile(fx, staleLock('groom', '#3'));
   const bodies = { 'gh:futin/x#3': '## Symptom\n\nthe body\n' };
-  const v = await withApi(trackerRoutes([apiItem(fx, 3, { groomed: false })], { bodies }), (port) => decide(fx, [], { port }));
+  const v = await withApi(trackerRoutes(fx, [apiItem(fx, 3, { groomed: false })], { bodies }), (port) => decide(fx, [], { port }));
   assert.equal(v.verdict, 'recover');
   assert.equal(v.id, '#3');
   assert.equal(v.stop, false);
