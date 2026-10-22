@@ -98,14 +98,14 @@ describe('SideRail · the sub-nav tree', () => {
     `MODE_BUTTON` pair with the in-page control it named, so there is no second
     wording to keep this one in agreement with.
   */
-  it('names the two views History and Watchdog', () => {
+  it('names the three views History, Watchdog and Ticks', () => {
     renderRail('runs');
 
     expect(
       within(tree() as HTMLElement)
         .getAllByRole('button')
         .map((b) => b.textContent)
-    ).toEqual(['History', 'Watchdog']);
+    ).toEqual(['History', 'Watchdog', 'Ticks']);
   });
 
   /*
@@ -126,6 +126,14 @@ describe('SideRail · the sub-nav tree', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'History' }));
     expect(JSON.parse(localStorage.getItem(RUNS_MODE_KEY) as string)).toBe('runs');
+  });
+
+  it('sets the mode to ticks when the Ticks row is clicked', async () => {
+    renderRail('runs');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ticks' }));
+
+    expect(JSON.parse(localStorage.getItem(RUNS_MODE_KEY) as string)).toBe('ticks');
   });
 
   it('marks the open view, and only while Runs is the open section', () => {

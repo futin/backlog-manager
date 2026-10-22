@@ -214,6 +214,10 @@ why each twin names its original and why the tool's own suite pins the behaviour
 because the tick's units do their own — an execute's `pr` finish owns its branch and its worktree — and a scheduler that also wrote git would be a second hand
 on the same refs.
 
+**The server reads this directory and writes none of it.** The tick breaker's board (`server/src/tick/`, `GET /api/ticks`) lists one row per project directory
+and derives each row's streak from `state.json`, so "exactly one writer" is a statement about writes, not about readers: `tick.mjs` writes the home, the server
+only reads it, and the one file the server does write for the breaker is `settings/tick.json`, outside the home (see the `tick.json` section below).
+
 ## A tick does one unit, only when idle, and never executes a plan that awaits review
 
 **backlog-tick.** The skill exists so that a dashboard job can fire as often as it likes — every half hour overnight — and the cost of an unnecessary firing is
@@ -281,6 +285,76 @@ branch and worktree a killed execute leaves keep the item off the candidate list
 process may still own. An unreadable lock is removed and nothing else is done, since there is no verdict to act on. The shape is a deliberate asymmetry: the
 tick recovers its own groom, because a groom writes into the main checkout the busy scan reads and a dead one would block the project for good, and it
 recovers nothing it cannot prove.
+
+## `tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced
+
+**The tick breaker** (spec: [2026-10-22-tick-breaker-design.md](../superpowers/specs/2026-10-22-tick-breaker-design.md)).
+`~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is `{ "haltAfter": <int>, "resetAt": { "<abs main-checkout path>": "<ISO>" } }` — how many
+failed ticks in a row halt a project, and when a person last Reset each one. It is the fourth file the server owns under `settings/` and it keeps the
+relationship the other three have with their reader: the server writes it (`writeTickFile`, the only write path, behind `POST /api/ticks/config` and `/reset`),
+and `tick.mjs` reads it (`readTickSettings`) for `decide` and `status`, while the server reads it only to answer `GET /api/ticks` and to merge its own write. It
+lives under `settings/` for the reason `watchdog.json` does, though it is not a watchdog setting: that directory is the one read-write mount the container has,
+and the tick home beside it is deliberately read-only to the server. One file holds both the number and the resets because they have the same writer and the
+same reader; `orchestrator-control/` is split per project only because its reader is per run.
+
+**A file that cannot be read is never replaced, and it is a stricter reading than `jira.json`'s.** `jira.json` reads a parsed non-object as empty, because there
+is nothing in it to lose. Here a person who has hand-edited their way to `[]` or `null` is an edit in flight, and reading it as "3, no resets" would silently
+re-arm a breaker they had just reset — so an I/O error that is not `ENOENT`, text that is not JSON, and JSON that is not a plain object are all UNREADABLE, and
+every surface says so rather than guessing. `POST /api/ticks/config` and `/reset` answer `409` naming the file and leave it byte-identical
+(`TickFileUnreadable`, thrown before any write: rewriting from defaults would turn a stray comma into "3, no resets" with nothing on disk left to recover the
+old values from); `GET /api/ticks` answers `source: "unreadable"` with the error and `haltAfter: 3` for display only, and the Settings Select is disabled with a
+hint that names the file; and `tick.mjs decide` answers `idle`, reason `<path> unreadable — fix or remove it by hand`, so NO project ticks until a person has
+looked. That last one is the point of the rule, and it is a stop rather than a fallback because each fallback is wrong in the unsafe direction: a default N
+would un-halt a project whose written N was 1 or 2, and dropping the resets would re-halt one a person had just cleared. Stopping is the `state.json` posture —
+nothing runs, and nothing is lost. The Ticks page's own figures are unaffected, because they read `state.json`.
+
+**The write is atomic, key-wise, and the server's only one into this system's state.** Temp file in the same directory plus `rename` — a `tick.mjs` reading
+concurrently sees the old complete file or the new complete one, and the rename is the cleanup, so no temp file survives a write — merged over the current file,
+`resetAt` key by key, so Resetting one project never forgets another's. Two concurrent POSTs are a read-merge-write with no serialisation and the later one
+wins; that is accepted, `jira.json`'s precedent: one person, one board. A hand-edited `resetAt` in the future masks every record until the clock passes it,
+which is a hand edit's own consequence. The server writes `resetAt` only as `max(now, the newest parseable at in that project's recent)`, because a container
+clock running behind the host's would otherwise leave the newest failure "after" the Reset it was meant to clear.
+
+**The server never writes the tick home.** `~/.backlog-manager/tick/` keeps exactly one writer, `tick.mjs` — the relationship the section above states — and a
+Reset is a timestamp in `tick.json` PRECISELY so that nothing in this server has to write there: no `halted` flag, no cleared `recent`, no lock touched. The
+server only reads the tick home, per request and cached nowhere (`$BM_TICK_HOME`, read per call so a test's override is seen), and a directory whose name no
+`tick.mjs` could have written — one `decodeURIComponent` throws on, a relative path, or a name that does not re-encode to itself — is skipped, never a 500 that
+blanks every project's row.
+
+## A tick halt is derived from the records and the reset time, never stored, and only a person's Reset clears it
+
+**The tick breaker.** A scheduled tick that keeps failing keeps spending: each failed execute or groom is a full headless session, and the per-item skip only
+stops the SAME item being retried, so when the cause is the environment — a red base branch, a broken toolchain, a lost token — the next tick picks the next
+item and fails the same way. After N failures in a row a project's ticks stop (`decide` answers `idle`, reason `halted: <streak> failures in a row (halt after
+<N>) — reset on the board, Runs › Ticks`, and starts nothing) until a person Resets it.
+
+**Nothing stores the halt.** The streak is derived from `state.json`'s `recent` on every read — groomed-ness and Board-versus-Archive are derived the same way,
+for the same reason: a stored flag is a second fact that drifts from the first. Walk `recent` newest first and, in this order: an `at` that does not parse stops
+the walk, checked FIRST whatever the outcome, so a corrupt record is "older than everything" and can neither extend a streak nor hide behind an `ok` it does not
+have; an `at` at or before the project's `resetAt` stops it; `ok` stops it; `failed` counts; any other outcome neither counts nor stops, because none is written
+today and a future one must not silently reset a streak. Halted is `streak >= haltAfter`. Consequences, each intended: lowering N below a streak halts the
+project at the next `decide` and raising it un-halts, with nothing written either way; groom and execute failures count together, since the breaker is about the
+project's environment and not the unit; `recover`'s `killed at timeout` is a `failed` record and counts; and `forget <id>` does not touch the streak, because it
+drops `items[id]` and leaves `recent` alone — `forget` is the per-item retry, Reset the per-project one. With 50 entries kept and N at most 10 the window can
+never be too short to see a streak.
+
+**The rule has two copies, pinned by one table.** `skills/backlog-tick/tools/tick-breaker.mjs` (`streakOf`) and `server/src/tick/tick-breaker.util.ts` each
+carry it, because a skill's `tools/` never imports from `server/` or `shared/` and the server never imports from `skills/` — the `pauseRequestEffective`
+precedent. The guard against drift is a suite on each side holding the SAME `streakOf` table row for row (`tick-breaker.test.mjs`, `test/tick-breaker.test.ts`),
+so changing the rule on one side fails the other side's tests instead of letting `decide` stop a project the board shows as healthy, or the reverse. "Parseable"
+is `Date.parse` not being `NaN` in both, for the same reason.
+
+**Only a person's Reset clears it.** There is no expiry: an environment that broke at 02:00 is still broken at 08:00 unless someone looked. Nothing clears it by
+restart — nothing is held in memory — and a malformed settings file stops the project rather than clearing it (the section above). Reset is `POST
+/api/ticks/reset`, a `resetAt` stamp for the project's main-checkout path, allowed in every state — halted or not, lock held or not — and it touches no lock: a
+tick running across the Reset records after it, and if it failed the new streak is 1. N is one global number on the board's Settings, not per project; a
+per-project override can come later without changing the file's shape much.
+
+**Where `decide` checks it** is after the lock step and its `recover` branch and before any read of the world: stack down (tracker) → `busy` for a held lock →
+`recover` for a stale one → `idle` halted → API reads → busy → execute or groom. A stale lock is still recovered while halted, because recovery is cleanup and
+releases the lock, but no unit is chosen; the `recover` record can itself complete a streak, and the NEXT `decide` is then `idle`. A halted project costs one
+tool call and no API traffic, and the check reads files only, so the breaker works with the stack down. `readState` moved up with the check, so an unreadable
+`state.json` throws exactly as it did before, only earlier — no unit runs either way, so a broken file can never un-halt a project.
 
 ## A pause request is a file the server writes and the tool reads
 
@@ -3005,7 +3079,7 @@ than no test at all.
 ### There is no in-page switch, at any width
 
 The dashboard this pattern was ported from draws a pill switch in its Settings band below 700 px. This board does not, and the difference is not an oversight:
-the rail's trees stand open at that width, so the tree is reachable in one tap on the phone exactly as it is on the desktop. Runs' two pages already establish
+the rail's trees stand open at that width, so the tree is reachable in one tap on the phone exactly as it is on the desktop. Runs' three pages already establish
 the rule — task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair along with the in-page control it named — and a second control here would be a second wording
 free to disagree with the tree's. `test/settings-view.test.tsx` pins the absence, because "add a switch on the phone" is exactly the improvement a later reader
 would make without knowing it was already decided against.
@@ -3049,7 +3123,7 @@ The Jira section's two pages are switched by the rail's tree, or a link threaded
 
 ### The tree rule is Runs' and Settings', applied a third time
 
-Board and Setup are two pages under one rail entry, which is the shape Runs (History, Watchdog) and Settings (Local, Shared) already have, and the rule those
+Board and Setup are two pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared) already have, and the rule those
 two settled is that the tree is the switch at every width: the rail's trees stand open below 700 px, so a segmented control on the page would be a second
 wording of the same choice, free to drift from the tree's and reached in the same number of taps. Task-38 deleted Runs' in-page pair for that reason and task-42
 never gave Settings one; a Jira page switch would have been the first thing a later reader removed, so it was never drawn.
@@ -4262,8 +4336,8 @@ host-run API the mount is not there to catch it, which is why this is a rule abo
 The other half of the same incident. While the server was stalled, the client's `setInterval` pollers kept ticking on the wall clock whether or not the last
 request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
 them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
-shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents` and — since
-#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those five enters through `hooks/useRefreshing.ts` (#285), which owns the
+shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents`, `useTicks` and — since
+#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six enters through `hooks/useRefreshing.ts` (#285), which owns the
 board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
 `useJiraBoard`, which triggers on its board id rather than on mount and focus.
 

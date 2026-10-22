@@ -203,6 +203,18 @@ older than `--lock-ttl` minutes was found and claimed), `busy` (the project is o
 project whose stack is down). Execute wins over groom. `--dry-run` writes nothing, not even the lock. Defaults: 2 open PRs, 3 plans awaiting review, a
 180-minute lock.
 
+**The breaker is `decide`'s step 3b.** After the lock step (`busy` for a held lock, `recover` for a stale one) and before any API read, `decide` derives a
+streak from `state.json`'s `recent` and answers `idle`, reason `halted: N failures in a row (halt after M) — reset on the board, Runs › Ticks`, once the streak
+reaches `haltAfter` (`~/.backlog-manager/settings/tick.json`, `$BM_TICK_FILE`; an integer 1–10, default 3). The walk is newest first: an unparseable `at` or one
+at or before the project's `resetAt` stops it, `ok` stops it, `failed` counts. A halt is never stored — lowering `haltAfter` below a streak halts at the next
+`decide`, raising it un-halts — and only a person's Reset clears it: the board stamps `resetAt` into `tick.json`, and the tool never writes that file. A halted
+project costs one call and no API traffic, a stale lock is still recovered while halted, and `forget <id>` leaves the streak alone. An unreadable `tick.json` is
+`idle` too, reason `<path> unreadable — fix or remove it by hand`, never a default. The streak rule is `tools/tick-breaker.mjs`;
+`server/src/tick/tick-breaker.util.ts` carries the second copy, and one `streakOf` table is pinned on each side
+([invariants.md](invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it)). `status` prints the
+reading as one line — `breaker: N of M failures in a row` or `breaker: HALTED — N failures in a row (halt after M) since <at>`, with ` (reset <resetAt>)`
+appended when a Reset is on file — and `status --json` carries it as `breaker: { streak, haltAfter, halted, resetAt, settings }`.
+
 **Unattended means a gate.** A groom a tick runs lands the plan in the same write as the `plan-review` mark (a label, or a `plan-review: true` frontmatter
 line), and every gate that could execute the item refuses it with `this plan awaits review` until a person removes the mark — `backlog.mjs plan-review <id>
 off`, or delete-and-commit on a files project. A tick's groom never promotes an idea, never rejects, never commits and never asks a question. Why it is built
@@ -248,7 +260,9 @@ needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-or
   an existing record; `retro.mjs sweep` only reads it back for the deltas. Nothing in the server or the client reads it at all — a board view over the newest
   record is a separate design, once records exist.
 - **The tick home** — `tick.mjs` writes `~/.backlog-manager/tick/` (`$BM_TICK_HOME`), one directory per project, and nothing else does; it reads the run-state
-  directory, the registry and the project's items to say `busy`, and writes none of them. Nothing in the server or the client reads it.
+  directory, the registry and the project's items to say `busy`, and writes none of them. The server reads it, per request and never writes it — `GET
+  /api/ticks` and the board's Runs › Ticks page ([api.md](api.md#tick--the-tick-breakers-board)); the one file the server writes for the breaker is
+  `settings/tick.json`, which `decide` and `status` read.
 - **The plugin install** — a run resolves its own skill files through the plugin-root path its skill text was loaded with,
   a copy of the pushed `HEAD`. Getting an edit there is
   [workflows/publishing.md](../workflows/publishing.md).

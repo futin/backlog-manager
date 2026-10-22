@@ -48,15 +48,16 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   view of the run-state directory, plus the in-memory watchdog and starting-run records, the remote-run derivation over the tracker cache, the two files the
   server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (three read-only Lookout widgets at `/api/hub/widgets` via
   `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's version chip — read-only, git only — not an
-  outbound-calling module), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
+  outbound-calling module), `tick/` (`tick.json`'s reader/writer and the three `/api/ticks` routes — read-only on `~/.backlog-manager/tick/`, not an
+  outbound-calling module either), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
   route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings) that ends in a version chip opening the What's new
   drawer ([releases](docs/subsystems/releases.md)), one run chip in the board's band, and the three-step
-Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
+Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
 
-  Watchdog — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
+  Watchdog, Ticks — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
   surface draws has one home in `components/ui/`. A connected tracker adds one shell-level chip — POLL and API meters in the strip above the well, or in
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
   all derived in `lib/tracker.ts`, plus the `Trackers` card on Shared Settings, whose one control is each repo's sync interval. Jira is drawn only
@@ -79,7 +80,7 @@ Orchestrate sheet. Runs is TWO pages under one rail entry — History (a figure 
   [docs/subsystems/skills.md](docs/subsystems/skills.md)
 - `agents/` — the plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention. Currently one:
   `backlog-reviewer.md`, the reviewer `backlog-orchestrate` dispatches before every merge, and `backlog-execute` before a `pr`-mode push.
-- `.claude/rules/` — ten path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
+- `.claude/rules/` — eleven path-scoped files, injected into a session the moment it reads a file under their `paths:` glob. Each is the ONE home of the
   mechanism text for the rules scoped to its paths; CLAUDE.md keeps each rule's headline, `docs/subsystems/invariants.md` its reasoning. Guarded by
   `test/claude-rules.test.ts`: bullets only, each anchored exactly once, one home per anchor, headlines byte-equal with the ones below.
 - `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
@@ -108,6 +109,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review)
 - **The only `started:` marker a tick clears is the one a killed tick left, identified by the verdict in its own stale lock.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)
+- **A tick halt is derived from `state.json`'s `recent` and the reset time, never stored, and only a person's Reset clears it.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it)
 - **A run's sidecars are archived beside its run file, under a name derived from the archive path and stored nowhere.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-runs-sidecars-are-archived-beside-its-run-file-task-31)
 - **A stale-plan mark is keyed by the plan's hash, so a re-groom clears it and nothing else does.**
@@ -147,6 +150,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-and-jira-caches-are-the-two-caches-in-this-server-whose-age-is-a-rendered-value)
 - **`~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
   Why: [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
+- **`~/.backlog-manager/settings/tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
+  Why: [invariants.md](docs/subsystems/invariants.md#tickjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)
 - **The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-only-while-a-board-syncs)
 - **Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map

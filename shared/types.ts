@@ -2153,6 +2153,69 @@ export interface WatchdogStatus {
 }
 
 /**
+ * The tick breaker's wire shapes (spec `2026-10-22-tick-breaker-design.md`, "Server"). `GET /api/ticks` answers one `TicksPayload`; nothing here is stored as
+ * such — `streak`, `halted` and `haltedSince` are derived from a project's `recent` on every read (the server's `tick-breaker.util.ts`, the second copy of the
+ * rule `skills/backlog-tick/tools/tick-breaker.mjs` carries), so there is no `halted` flag anywhere on disk to drift from the setting.
+ */
+
+/**
+ * The bounds on `haltAfter`, "halt a project's ticks after this many failures in a row". Out of range clamps to the nearest bound; a non-integer in the FILE
+ * reads as `default` (the `clampAttempts` rule), and in a POST body is a 400. Both the server and `tick-breaker.mjs` hold these three numbers.
+ */
+export const TICK_HALT_LIMITS = { min: 1, max: 10, default: 3 } as const;
+
+/** One finished tick, as `state.json`'s `recent` records it. Strings, not unions: the rule must survive a value a future `tick.mjs` writes that this build
+ *  has never heard of (an unknown `outcome` neither counts nor stops a streak). */
+export interface TickRecentEntry {
+  at: string;
+  id: string;
+  kind: string;
+  outcome: string;
+  reason: string;
+}
+
+/** The lock a running tick holds — "a tick is running now". Whether it is stale is the reader's call: the TTL is a job flag the server cannot see. */
+export interface TickLock {
+  kind: string;
+  id: string;
+  host: string;
+  at: string;
+}
+
+/**
+ * `tick.json`, as the board shows it. `source: 'unreadable'` carries `haltAfter` at its default for display only and the reason in `error`: the file is never
+ * replaced while it is in that state, so the number on screen is not a setting anyone can act on until a person has fixed the file by hand.
+ */
+export interface TickConfig {
+  haltAfter: number;
+  source: 'default' | 'file' | 'unreadable';
+  error?: string;
+}
+
+/**
+ * One project under the tick home. `streak`/`halted`/`haltedSince` are absent exactly when `error` is set (an unreadable `state.json` — nothing honest to
+ * derive them from). `resetAt` is the stamp the project's last Reset wrote, present only when one is on file. `recent` is NEWEST FIRST, the reverse of how
+ * `state.json` stores it.
+ */
+export interface TickProject {
+  root: string;
+  name: string;
+  streak?: number;
+  halted?: boolean;
+  haltedSince?: string;
+  resetAt?: string;
+  lock: TickLock | null;
+  recent: TickRecentEntry[];
+  error?: string;
+}
+
+/** `GET /api/ticks`. */
+export interface TicksPayload {
+  config: TickConfig;
+  projects: TickProject[];
+}
+
+/**
  * `RunVerification` with `tail` removed. `tail` is the last few lines of a
  * verify command's own output — useful for diagnosing one run in the live
  * drawer, but it is also ~90% of a run file's bytes (a real 19KB file is

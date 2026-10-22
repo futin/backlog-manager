@@ -8,10 +8,11 @@ import { BOARD_TRACKER_POLL_MS, useBoard } from '../client/src/hooks/useBoard';
 import { useOrchestratorArchive } from '../client/src/hooks/useOrchestratorArchive';
 import { POLL_MS, useOrchestratorRuns } from '../client/src/hooks/useOrchestratorRuns';
 import { useRefreshing } from '../client/src/hooks/useRefreshing';
+import { TICKS_POLL_MS, useTicks } from '../client/src/hooks/useTicks';
 import { useWatchdog, WATCHDOG_IDLE_POLL_MS, WATCHDOG_POLL_MS } from '../client/src/hooks/useWatchdog';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
-import type { AgentsStatus, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, WatchdogPhase, WatchdogStatus } from '../shared/types';
+import type { AgentsStatus, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary, TicksPayload, WatchdogPhase, WatchdogStatus } from '../shared/types';
 
 /**
  * #277 — the board's pollers never have two of their own requests in flight, and a focus / mount / refresh that lands mid-flight coalesces into exactly ONE
@@ -71,6 +72,10 @@ function watchdog(phase: WatchdogPhase): WatchdogStatus {
   return { phase, nextTickAt: null, config: DEFAULT_WATCHDOG_CONFIG, watching: [], events: [] };
 }
 
+// The tick breaker's page payload. Both `Kind`s answer the same body: `useTicks` has no arming condition beyond `live`, so there is no "quiet" world for the
+// answer to describe — see GATED below.
+const TICKS: TicksPayload = { config: { haltAfter: 3, source: 'default' }, projects: [] };
+
 const AGENTS: AgentsStatus = {
   enabled: true,
   reachable: true,
@@ -116,12 +121,23 @@ const SUBJECTS: Subject[] = [
     perRequest: 1,
     mount: () => renderHook(() => useOrchestratorArchive()),
     body: () => ({ runs: [] })
+  },
+  {
+    // Runs › Ticks and the Settings card. Armed by `live` alone, like the watchdog, so it is a POLLER but not GATED. Appended last so the index-based
+    // `SUBJECTS[n]` lookups below keep pointing at the hooks they name.
+    name: 'useTicks',
+    periodMs: TICKS_POLL_MS,
+    perRequest: 1,
+    mount: () => renderHook(() => useTicks()),
+    body: () => TICKS
   }
 ];
 const POLLERS = SUBJECTS.filter((s) => s.periodMs !== null);
 // The pollers whose arming condition can go false while they are mounted with defaults. Not the watchdog: since #270 a live monitor never stops — an
-// idle sweeper re-arms it on `WATCHDOG_IDLE_POLL_MS` instead of clearing the timer — so its case 9 is the period switch in its own describe below.
-const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog');
+// idle sweeper re-arms it on `WATCHDOG_IDLE_POLL_MS` instead of clearing the timer — so its case 9 is the period switch in its own describe below. Not
+// `useTicks` either: nothing in its answer can disarm it (it polls while `live`, which is the caller's choice and not the server's), so its case 9 is the
+// `live: false` describe below.
+const GATED = POLLERS.filter((s) => s.name !== 'useWatchdog' && s.name !== 'useTicks');
 
 /** A `fetch` whose every call hangs until the test answers it. `answer` settles everything outstanding with the subject's body for `kind`. */
 function controlledFetch(subject: Subject): { fn: jest.Mock; answer: (kind: Kind) => Promise<void>; fail: () => Promise<void> } {
@@ -376,6 +392,20 @@ describe('useWatchdog — live:false skips the clock and nothing else (#277 case
     renderHook(() => useWatchdog({ live: false }));
     await f.answer('live');
     await advance(10 * WATCHDOG_POLL_MS);
+    expect(f.fn).toHaveBeenCalledTimes(1);
+
+    focus();
+    expect(f.fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('useTicks — live:false skips the clock and nothing else (#277 case 9)', () => {
+  it('does not tick, but still refetches on focus — the Settings card is nothing live', async () => {
+    const subject = SUBJECTS.find((s) => s.name === 'useTicks')!;
+    const f = controlledFetch(subject);
+    renderHook(() => useTicks({ live: false }));
+    await f.answer('live');
+    await advance(10 * TICKS_POLL_MS);
     expect(f.fn).toHaveBeenCalledTimes(1);
 
     focus();

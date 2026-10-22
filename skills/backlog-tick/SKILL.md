@@ -44,7 +44,8 @@ On `execute` and `groom` it has taken the lock; from here to step 3 the lock is 
 
 ## 2. Act on the verdict
 
-- **`idle` or `busy`** — nothing was taken. The final message is the `reason`. Done; do not `record`.
+- **`idle` or `busy`** — nothing was taken. The final message is the `reason`. Done; do not `record`. `idle` covers `halted` — the breaker has stopped this
+  project after N failures in a row — and an unreadable `tick.json`; both are the `reason` as printed, with nothing to run.
 - **`recover`** — a killed tick's lock was cleared and its failure recorded. When `stop` is `true`, run
   `node "${CLAUDE_PLUGIN_ROOT}/skills/backlog/tools/backlog.mjs" stop '<id>' --abandon` to clear the dead groom's `started:` marker. The final message is the
   `reason` plus one line saying whether the marker was cleared. Done; do not `record`.
@@ -89,6 +90,7 @@ A `failed` outcome skips that item until its content changes, so one bad item ca
 the environment's fault — the stack down, `gh` signed out — is cleared with `tick.mjs forget '<id>'`, run by a person and never by this session.
 A `failed` groom also keeps that item off the execute queue until its content changes, since its plan may be one nobody reviewed; once a person has reviewed
 it, `tick.mjs forget '<id>'` makes the item eligible again.
+A halted project is reset on the board (Runs › Ticks), not by `forget`, which only clears one item.
 
 ## 4. Final message
 

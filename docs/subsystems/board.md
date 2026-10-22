@@ -35,7 +35,7 @@ The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks w
 Runs and Archive each already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the section that
 made it and drops it on a section change, so Settings, which reports nothing, always shows a solid cursor.
 
-THREE sections have a sub-nav tree under their row: Runs (History, Watchdog), Jira (Board, Setup) and Settings (Local, Shared). All three are drawn by one
+THREE sections have a sub-nav tree under their row: Runs (History, Watchdog, Ticks), Jira (Board, Setup) and Settings (Local, Shared). All three are drawn by one
 component, `RailTree`, because
 the markup carries three details that must not drift — the `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone
 menu on a pick. What each call site supplies is only what legitimately differs: the item list, which of them is current, and what a pick writes. In every case
@@ -196,8 +196,8 @@ spawned session does.
 
 ### Runs
 
-Two pages under one rail entry, both reading the one `useOrchestratorRuns` payload, so moving between them adds no request and neither owns a second copy of the
-run list.
+Three pages under one rail entry. History and Watchdog read the one `useOrchestratorRuns` payload, so moving between them adds no request and neither owns a
+second copy of the run list; Ticks reads its own `/api/ticks` through `useTicks` and joins nothing.
 
 **History** — the section's default, and named for what a reader arrives looking for rather than for its contents, which are three parts present and one part
 past. Its band counts all three states at once (`3 live · 1 starting · 28 past`) and carries the project select and the four-step range control (`RUN_RANGES`,
@@ -260,6 +260,18 @@ hidden, each with a heartbeat meter against `RUN_STALE_MS`, and on a crashed row
 `Resume now` chip drawn only when `watchdogStoodDown` allows. A row jumps to History with that run selected. Last, the activity ledger: the last
 `WATCHDOG_EVENT_CAP` events, held in the API process's memory and emptied by a restart, which its subtitle says rather than buries.
 
+**Ticks** — the tick breaker's page (`TickMonitor`, `RunsMode` `'ticks'`), the third Runs page, built as the Watchdog page is and reached only through the
+rail's tree. It mounts `useTicks({ live: true })` — the one source, a 15 s poll while the page is open — and takes no props. Its band (`Runs · Ticks`) carries
+`N halted · M with tick history` and the same flat `Policy in Settings ›` chip, since the threshold is edited in Settings and a Reset is the only write here.
+Three figures: the breaker (the halted count in the `bad` tone, naming the projects, or `none` over `after N failures in a row`), the last 24 hours
+(`ticksLast24h`, the one reading that moves with no new payload, so the page's clock ticks at a minute) and the policy (`halt after N failures`; `tick.json
+cannot be read — showing the default` when the server answers `source: "unreadable"`). Then a Projects sheet, one row per project the server listed, halted
+first (`sortTickProjects`) — the streak, the lock, the newest records and a `Reset` button — and an activity ledger of the newest records across projects
+(`tickActivity`). `streak`, `halted` and `haltedSince` arrive derived by the server (the rule is `server/src/tick/tick-breaker.util.ts`, never recomputed in the
+browser), so a row prints a verdict rather than computing one. Reset is guarded twice, both in the component: a ref-held in-flight set closes the button before
+the first POST settles, and the refusal (`saveError`, hook-wide) is shown under the one row last asked. A failed first read draws a notice, not an empty list,
+so a page that could not reach the server never says the breaker is quiet.
+
 ### Settings
 
 TWO pages, picked from the rail's tree and from nothing else — `settingsScope` is the setting, `local` the default. **The page is the scope**: Local is
@@ -269,11 +281,11 @@ everything in this browser's `localStorage`, Shared is what the API reads off th
 | Page       | Column 1              | Column 2      |
 | ---------- | --------------------- | ------------- |
 | **Local**  | Display, Board        | Orchestrator, Dispatch |
-| **Shared** | Orchestrator watchdog | Claude Agents, Trackers |
+| **Shared** | Orchestrator watchdog, Backlog tick | Claude Agents, Trackers |
 
 Each card is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether changing this
 affects anybody but the person changing it. Both pages draw the same two hand-placed columns, so a card does not move to the other side of the page when its
-neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card
+neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card, with the `Backlog tick` card under it,
 against two shorter reports stacked in one column (task-45 added `Trackers` under `Claude Agents`; both report on the host, and the one thing either sets is
 the Trackers card's per-repo sync interval since #17 — a row control, not a section of settings — which is what makes them one column rather than two halves of
 the page).
@@ -298,7 +310,13 @@ refetches, so the pill shows the server's value, never the one clicked; a refusa
 and puts the server's sentence in the row's hint until the next pick for that repo or a read in which its interval has moved — not any read, which would
 wipe it within a second. Two checkouts of one repo are one key, so both rows move.
 
-The watchdog card is one of the two places Settings writes to the server — the Trackers card's sync picker above is the other, since #17 — four knobs that
+The `Backlog tick` card (`TickGroup`) sits under the watchdog in the same column, because both are machine-wide controls — a value written to a file on the host
+— where the right column is host reports. It is one `Select` of 1–10, the number of failed ticks in a row that halt a project (`haltAfter`, default 3), written
+to `settings/tick.json` through `POST /api/ticks/config` and drawn from the POST's own answer; it mounts `useTicks({ live: false })`, so it never polls. When
+the server reports `source: "unreadable"` the `Select` is disabled and its hint names the file, because every write would be a 409; a refused save renders one
+red line under the control while the value shown stays the one the server holds.
+
+The watchdog card is one of three places Settings writes to the server — the Trackers card's sync picker above, since #17, and the `Backlog tick` card's threshold — four knobs that
 live in `settings/watchdog.json` beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the
 rail's tree calls. Because it writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while
 every knob keeps showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it, because a
@@ -393,9 +411,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `lib/board-sort.ts` (#258) — the Board's sort pipeline, pure: `SortKey`/`SortDir`, `NATURAL_DIR`, `COMPARATORS`, `resolveSortKey`, `liveRank` and
   `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns`,
-  `useWatchdog` and `useOrchestratorArchive`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
+  `useWatchdog`, `useTicks` and `useOrchestratorArchive`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
-- `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those five pollers go through.
+- `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those six pollers go through.
 - `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
   superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan, `OrchestrateSheet`'s merge-check,
   uncommitted flag and branch list, `RunDetail`'s archived run and `JiraIssueModal`'s detail all read through it.
@@ -409,6 +427,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop. Mount and window focus, plus a 5s poll
   while the sweeper reads `armed` and a 15s one otherwise (#270 — armed-only left an idle page blind to a run starting); Settings' `live: false` polls at
   neither.
+- `hooks/useTicks.ts` (`TICKS_POLL_MS`, 15 s) — the breaker's read: `{ data, error, saveError, save, reset }` over `lib/ticks.ts`. Mount and window focus, plus
+  the 15 s poll only while `live` — the Runs › Ticks page passes `true`, Settings' card `false`. A save or a reset redraws from the POST's own answer, never a
+  follow-up GET, and a refused write lands in `saveError`, beside the failed-GET `error`, so a refusal never blanks `data`.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
   (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no timer at all.
 - `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared

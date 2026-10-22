@@ -7,9 +7,10 @@ import { isRunsMode, RUNS_MODE_KEY, RUNS_MODES } from '../client/src/lib/runs-mo
  * one thing that must never happen is the section rendering neither surface.
  */
 describe('isRunsMode', () => {
-  it('accepts exactly the two modes', () => {
+  it('accepts exactly the three modes', () => {
     expect(isRunsMode('runs')).toBe(true);
     expect(isRunsMode('watchdog')).toBe(true);
+    expect(isRunsMode('ticks')).toBe(true);
   });
 
   it('rejects everything else, including the shapes localStorage can hand back', () => {
@@ -21,7 +22,7 @@ describe('isRunsMode', () => {
   });
 
   it('states the union and the storage key once', () => {
-    expect(RUNS_MODES).toEqual(['runs', 'watchdog']);
+    expect(RUNS_MODES).toEqual(['runs', 'watchdog', 'ticks']);
     expect(RUNS_MODE_KEY).toBe('backlog-manager.runs-mode');
   });
 });

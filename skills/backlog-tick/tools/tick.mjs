@@ -28,6 +28,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { HALT_DEFAULT, readTickSettings, streakOf } from './tick-breaker.mjs';
 import { apiBase, deriveGroomed, isMarked, orchHome, orderExecute, orderGroom, projectDir, projectSource, readFrontmatter, tickHome } from './tick-lib.mjs';
 import {
   claimStaleLock,
@@ -338,6 +339,12 @@ function parseDecide(argv) {
   return opts;
 }
 
+// The halted verdict's reason. The skill prints it as its final message and a person follows it to the board, so the em dash and the `Runs › Ticks` path are
+// exact — the tests pin the whole sentence.
+function haltedReason(streak, haltAfter) {
+  return `halted: ${streak} failures in a row (halt after ${haltAfter}) — reset on the board, Runs › Ticks`;
+}
+
 async function cmdDecide(argv) {
   const opts = parseDecide(argv);
   const caps = { openPrs: null, maxPrs: opts.maxPrs, planReview: null, maxPlans: opts.maxPlans };
@@ -370,6 +377,16 @@ async function cmdDecide(argv) {
     return say(r.verdict, r.reason, r.extra);
   }
 
+  // 3b. The breaker. After the lock step, so a held lock is still `busy` and a killed tick is still recovered (recovery is cleanup, and it releases the lock),
+  // and before any read of the world, so a halted project costs one tool call and no API traffic. `readState` moves up with it: a `state.json` that cannot
+  // be read throws here exactly as it did below, so a broken file can never un-halt a project — nothing runs either way. Nothing stores "halted": it is
+  // derived from `recent` and the settings on every call, which is why raising N or a Reset takes effect at the next tick with no record written.
+  const settings = readTickSettings();
+  if (!settings.ok) return say('idle', `${settings.file} unreadable — fix or remove it by hand`);
+  const state = readState(dir);
+  const { streak } = streakOf(state.recent, settings.resetAt[root]);
+  if (streak >= settings.haltAfter) return say('idle', haltedReason(streak, settings.haltAfter));
+
   // The tracker's two reads, taken once: the runs (busy) and the items (busy, execute, groom). Either failing after a healthy `/api/health` is the stack
   // going away mid-tick, and reads the same as it being down. A files project asks for the runs only to see a board-started run, and only if the API answers
   // — with the stack down there is no board to have started one.
@@ -386,7 +403,6 @@ async function cmdDecide(argv) {
   const busy = busyReason(ctx, runs, mine, now);
   if (busy !== null) return say('busy', busy);
 
-  const state = readState(dir);
   const base = opts.base ?? defaultBase(root);
 
   // The plan-review count, always taken so `caps` reports it whichever way the tick goes.
@@ -698,15 +714,30 @@ function cmdStatus(argv) {
   const dir = projectDir(tickHome(), root);
   const snap = lockSnapshot(dir, Date.now(), Number.POSITIVE_INFINITY);
   const lock = snap.state === 'free' ? null : Object.keys(snap.lock).length === 0 ? { unreadable: true } : snap.lock;
-  const recent = [...readState(dir).recent].reverse();
+  const state = readState(dir);
+  const recent = [...state.recent].reverse();
+  // The same two reads `decide` makes. An unreadable settings file does not fail `status` — it is the command a person runs to find out what is wrong — so
+  // it reports `settings: 'unreadable'`, with the default N and no reset, and never `halted` (the rule `decide` applies is "idle, name the file", not "halt").
+  const settings = readTickSettings();
+  const haltAfter = settings.ok ? settings.haltAfter : HALT_DEFAULT;
+  const resetAt = settings.ok ? (settings.resetAt[root] ?? null) : null;
+  const { streak, since } = streakOf(state.recent, resetAt);
+  const halted = settings.ok && streak >= haltAfter;
   if (json) {
-    process.stdout.write(`${JSON.stringify({ lock, recent })}\n`);
+    const breaker = { streak, haltAfter, halted, resetAt, settings: settings.ok ? settings.source : 'unreadable' };
+    process.stdout.write(`${JSON.stringify({ lock, recent, breaker })}\n`);
     return 0;
   }
   const lines = [];
   if (lock === null) lines.push('no lock');
   else if (lock.unreadable) lines.push('lock: unreadable');
   else lines.push(`lock: ${lock.verdict?.kind ?? '?'} ${lock.verdict?.id ?? '?'} on ${lock.host ?? '?'} since ${lock.at ?? '?'}`);
+  const reset = resetAt === null ? '' : ` (reset ${resetAt})`;
+  lines.push(
+    halted
+      ? `breaker: HALTED — ${streak} failures in a row (halt after ${haltAfter}) since ${since}${reset}`
+      : `breaker: ${streak} of ${haltAfter} failures in a row${reset}`,
+  );
   if (recent.length === 0) lines.push('no outcomes recorded');
   for (const e of recent) lines.push(`${e.at}  ${e.outcome.padEnd(6)}  ${e.kind.padEnd(7)}  ${e.id}${e.reason ? `  ${e.reason}` : ''}`);
   process.stdout.write(`${lines.join('\n')}\n`);
