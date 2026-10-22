@@ -99,13 +99,17 @@ when halted. The server reads the tick home read-only, owns `~/.backlog-manager/
 - Consumes: Task 1's `readTickSettings`, `streakOf`.
 - Produces: `status --json` gains `breaker: { streak, haltAfter, halted, resetAt: string | null, settings: 'default' | 'file' | 'unreadable' }`.
 
-- [ ] **Step 1: Write the failing tests** (use the file's existing fixtures for a files project, `BM_TICK_HOME` and a temp `BM_TICK_FILE`):
+- [ ] **Step 1: Write the failing tests** (use the file's existing fixtures for a files project and `BM_TICK_HOME`). First, the `tick()` harness
+  (`tick.test.mjs:87-97`) spreads `process.env`, so pin `BM_TICK_FILE` to a per-fixture path in its `env` for EVERY case — absent by default — or every
+  existing case reads the developer's real `tick.json`; update the header comment that counts the env vars the harness pins. Then:
   - streak 2, N 3 (absent file) → `decide` is NOT halted (proceeds to its normal verdict).
   - streak 3, absent file → `{verdict:"idle", reason:"halted: 3 failures in a row (halt after 3) — reset on the board, Runs › Ticks"}`.
   - streak 5, file `haltAfter: 3` → reason starts `halted: 5 failures in a row (halt after 3)`.
   - streak 1, file `haltAfter: 1` → halted; same records, file `haltAfter: 2` → not halted (raising N un-halts with no new record).
   - streak 1, file `haltAfter: 0` → halted (clamped to 1); streak 9, file `haltAfter: 42` → not halted (clamped to 10).
   - streak 3, file `resetAt[root]` later than every record → not halted.
+  - a tracker project, stack down, streak 3 → the existing `stack down` verdict, not `halted` (the stack check stays first).
+  - streak 3, file `resetAt` holding only a DIFFERENT root (later than every record) → still halted (the reset is per project).
   - file is not JSON, streak 0 → `idle`, reason = `<that path> unreadable — fix or remove it by hand`.
   - a held fresh lock and streak 3 → `busy` `another tick` (busy wins).
   - a stale lock naming a unit, streak 2, N 3 → first `decide` is `recover` and records `failed`; second `decide` is `idle` halted.
@@ -141,7 +145,7 @@ when halted. The server reads the tick home read-only, owns `~/.backlog-manager/
 - Produces (in `tick-breaker.util.ts`):
   - `tickFile(env = process.env): string`, `tickHome(env = process.env): string`
   - `streakOf(recent, resetAt): { streak: number; since: string | null }` — same rule and table as Task 1.
-  - `readTickFile(file = tickFile()): { ok: true; haltAfter: number; resetAt: Record<string,string>; source: 'default' | 'file' } | { ok: false; error: string }`
+  - `readTickFile(file = tickFile()): { ok: true; haltAfter: number; resetAt: Record<string,string>; source: 'default' | 'file' } | { ok: false; file: string; error: string }`
   - `writeTickFile(patch: { haltAfter?: number; resetAt?: Record<string,string> }, file = tickFile()): void` — throws `TickFileUnreadable` (exported
     class) when the current file is unreadable, without touching it; otherwise merges `resetAt` key-wise over the current one and writes tmp + rename.
 
@@ -175,13 +179,18 @@ when halted. The server reads the tick home read-only, owns `~/.backlog-manager/
   - A dir with a not-JSON `state.json` → entry with `error`, no `streak`/`halted`.
   - Dirs named `%E0%A4%A` and `foo` are skipped; the response is 200 (Review Focus 1).
   - `config.source` is `default` / `file` / `unreadable` (with `error`, `haltAfter: 3`) for absent / valid / not-JSON files.
-  - `POST /config`: `{haltAfter: 5}` → file has 5 and the old `resetAt`; 0 → 1; 42 → 10; `"7"`, `2.5`, `{}` → 400; array body → 400; unreadable file → 409
+  - `POST /config` (fixture file before each write: `haltAfter: 5`, `resetAt` with two roots A and B, distinct times): `{haltAfter: 7}` → file has 7 and
+    both `resetAt` keys byte-equal to before; 0 → 1; 42 → 10; `"7"`, `2.5`, `{}` → 400; array body → 400; unreadable file → 409
     and bytes unchanged; cross-origin and non-JSON content-type → refused by the guard.
   - `POST /reset`: non-object body, missing `project`, `project: 42`, `project: "rel/path"` → 400; an absolute path with no tick dir → 404; a known root →
-    `resetAt[root]` ≈ now and `haltAfter` kept, and the answer shows that project's `streak: 0`; a known root whose newest `at` is 10 min in the future →
-    `resetAt[root]` equals that `at` (Review Focus 3); unreadable file → 409.
+    `resetAt[root]` ≈ now, and the answer shows that project's `streak: 0`; with the fixture file at `haltAfter: 5` and a `resetAt` for B, resetting A keeps
+    `haltAfter: 5`, keeps B's `resetAt` byte-equal, and the answer's B row keeps its `streak`, `halted` and `haltedSince`; a known root whose newest `at` is
+    10 min in the future → `resetAt[root]` equals that `at` (Review Focus 3); a dir whose `state.json` is not JSON → 200, `resetAt[root]` ≈ now, and its row
+    still carries `error`; a dir with a lock and no `state.json` → 200, `resetAt[root]` ≈ now, and the `lock` file byte-identical after; unreadable
+    `tick.json` → 409.
 - [ ] **Step 2: Run** `pnpm run test:jest -- tick-routes` — expect FAIL.
-- [ ] **Step 3: Implement.** The service builds the payload on every call (no cache); the controller follows `agents.controller.ts`'s `watchdogConfig` for
+- [ ] **Step 3: Implement.** Reset's clock guard treats an absent or unreadable `state.json` as "no records" and stamps now — Reset is allowed in every
+  state (spec), so it never answers 500 for a broken history. The service builds the payload on every call (no cache); the controller follows `agents.controller.ts`'s `watchdogConfig` for
   guard, `@HttpCode(200)` and body checks; `TickFileUnreadable` → 409 with a message naming the file. Module header says: not an outbound-calling module;
   reads the tick home, writes only `settings/tick.json`.
 - [ ] **Step 4: Run** the same command plus `pnpm run test:jest -- vite-proxy agents-origin-guard` and `pnpm run typecheck` — expect PASS.
@@ -224,7 +233,7 @@ when halted. The server reads the tick home read-only, owns `~/.backlog-manager/
 - Test: `test/tick-monitor.test.tsx`; extend `test/runs-mode.test.ts` and `test/rail.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 5's `useTicks`, `sortTickProjects`, `tickActivity`, `ticksLast24h`; `Band`, `Sheet`, `FigureStrip`/`Figure`, `Chip` from `components/ui/`.
+- Consumes: Task 5's `useTicks`, `sortTickProjects`, `tickActivity`, `ticksLast24h`; `Band`, `Sheet`, `FigureStrip`/`Figure`, `Chip`, `Pill` from `components/ui/`.
 
 Copy, exact (from the spec):
 - Band title `Runs · Ticks`; sub `<h> halted · <p> with tick history` (`<h> halted · ` omitted at 0); chip `Policy in Settings ›`, flat, inert, `title`
@@ -244,7 +253,9 @@ Copy, exact (from the spec):
   halted; Reset click posts `{project: <that row's root>}` and redraws from the answer (the row loses `halted`); Reset is disabled while its POST is pending
   and a second click sends nothing (Review Focus 4); a failed Reset shows its error under that row; empty payload → the empty sheet AND the three figures;
   `source: "unreadable"` → the policy line names `tick.json` (Review Focus 5); `fetch` rejecting → the unreachable sheet; activity rows newest first with the
-  six columns. `runs-mode.test.ts`: `isRunsMode('ticks')` true, `RUNS_MODES` ends with `'ticks'`. `rail.test.tsx`: the Runs tree shows `Ticks` and
+  six columns. `runs-mode.test.ts`: `isRunsMode('ticks')` true; the existing `toEqual(['runs', 'watchdog'])` (line 24) becomes
+  `['runs', 'watchdog', 'ticks']`. `rail.test.tsx`: the existing tree-labels assertion (lines 101-108, `['History', 'Watchdog']`) becomes
+  `['History', 'Watchdog', 'Ticks']` with its test name updated; the Runs tree shows `Ticks` and
   clicking it sets the mode to `ticks`.
 - [ ] **Step 2: Run** `pnpm run test:jest -- tick-monitor runs-mode rail` — expect FAIL.
 - [ ] **Step 3: Implement** `TickMonitor` with `useTicks({ live: true })`; header comment cites the DESIGN.md subsections `WatchdogMonitor.tsx` cites.
