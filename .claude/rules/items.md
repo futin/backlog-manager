@@ -27,10 +27,11 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   answered as success. The eleventh, `plan-review` (backlog-tick), is `review`'s twin again: `{ project, id, planReview }` with `planReview` a literal boolean
   or a 400, adding or removing the `plan-review` label through `ItemWriter.planReview` on the same per-URN chain, a removal's 404 answered as success. It is the
   hold a tick's groom puts on a plan nobody has read, and `create` and `body` carry the same mark as an optional `planReview` (a literal boolean or a 400, like
-  `runnerFix`) so the label lands in the write that wrote the plan: in `create`'s own request, and in `body` as a label call on the same chain right after the
-  patch — CHECKED, a failure answered as a refusal naming what landed and never as success, then the issue re-read into the cache so `show --json` sees the
-  mark at once. Never `labels` in the PATCH, which replaces the set and would race the claim's and the queue's labels. The `plan-review` route re-reads and
-  absorbs too. Its label is `PLAN_REVIEW_LABEL` (`tracker/labels.ts`), the eleventh.
+  `runnerFix`) so the label lands in the write that wrote the plan: in `create`'s own request, and in `body` as a label call on the same chain — an ADD after
+  the `ifUpdatedAt` check and BEFORE the patch, CHECKED, a failure refused with nothing written, the patch's response (which then carries the label) absorbed
+  so `show --json` sees the mark at once; a REMOVAL after the patch, checked (a 404 is success), then the issue re-read into the cache. Never `labels` in the
+  PATCH, which replaces the set and would race the claim's and the queue's labels. The `plan-review` route re-reads and absorbs too.
+  Its label is `PLAN_REVIEW_LABEL` (`tracker/labels.ts`), the eleventh.
   The one READ beside them, `GET /api/items/claim`, is unguarded like every other GET and exists
   because `start` and `stop` are two processes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)

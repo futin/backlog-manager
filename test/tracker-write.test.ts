@@ -774,16 +774,37 @@ describe('plan-review', () => {
     expect((await servedWithoutAPoll())?.planReview).toBeUndefined();
   });
 
-  /* A plan that looks approved must not ship. The body is already patched when the label add fails, so the route cannot undo the write — but answering it as
-     a success would hand the groom a plan every gate reads as ready, with nothing said. The refusal names what landed and what did not. */
-  it('answers an error, not a success, when a body write-s plan-review add fails', async () => {
+  /* A plan that looks approved must not ship. The label is added BEFORE the body patch, so a failed add is refused with nothing written: the issue keeps its
+     old body, and no groomed-but-unmarked plan is left behind for the next tick to execute. */
+  it('refuses a body write whose plan-review add fails, and patches nothing', async () => {
     const issue = gh.issue();
     await sync();
     gh.failNext = { fragment: '/issues/31/labels', status: 502 };
     const res = await post('body', { project: trackerPath, id: '#31', body: 'the plan', ifUpdatedAt: issue.updated_at, planReview: true }).expect(502);
     expect(res.body.error).toMatch(/plan-review/);
-    expect(gh.matching('/issues/31', 'PATCH')).toHaveLength(1);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+    expect(gh.issues.get(31)?.body).not.toBe('the plan');
     expect(gh.issues.get(31)?.labels.map((l) => l.name)).not.toContain('plan-review');
+  });
+
+  /* The order the refusal above depends on, and the absorption that follows from it: the add lands first, so the PATCH's own response already carries the
+     label and is what the cache absorbs — no re-read after the patch. */
+  it('adds the plan-review label before the body patch, absorbs the patch, and reads the issue nowhere after it', async () => {
+    const issue = gh.issue();
+    await sync();
+    gh.calls.length = 0;
+    await post('body', { project: trackerPath, id: '#31', body: 'the plan', ifUpdatedAt: issue.updated_at, planReview: true }).expect(201);
+    const order = gh.calls.map((c) => `${c.method} ${new URL(c.url).pathname.replace(/^.*\/issues/, '/issues')}`);
+    expect(order).toEqual(['GET /issues/31', 'POST /issues/31/labels', 'PATCH /issues/31']);
+    expect((await servedWithoutAPoll())?.planReview).toBe(true);
+  });
+
+  it('adds no plan-review label when the body write loses the ifUpdatedAt race', async () => {
+    gh.issue();
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'the plan', ifUpdatedAt: '2000-01-01T00:00:00Z', planReview: true }).expect(409);
+    expect(gh.matching('/issues/31/labels', 'POST')).toEqual([]);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
   });
 
   it('the plan-review route shows its label change on the next /api/items, with no poll tick', async () => {

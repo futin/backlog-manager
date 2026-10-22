@@ -240,8 +240,9 @@ is `idle: stack down`, taken before the lock. A Jira live session is NOT a busy 
 work, "the groom is uncommitted" cannot be that check — it would approve every plan overnight — so the gate is an explicit mark, `plan-review`: a label on a
 tracker project, a `plan-review: true` frontmatter line on a files project, written by groom in the SAME write that lands the plan (`backlog.mjs body|new
 --plan-review`, or the frontmatter block groom prints), never as a second step, so no approved-looking plan is ever reported written without it — on a
-tracker the `body` route makes the label call itself, checks it and refuses when it fails, then re-reads the issue so the tick's read-back sees the mark. A
-person approves by removing it, and there is no `--no-plan-review` anywhere: approval is `backlog.mjs plan-review <id> off`, or deleting the line and
+tracker the `body` route adds the label itself BEFORE the patch and refuses with nothing written when the add fails, so the patch's own response carries
+the mark the tick's read-back sees.
+A person approves by removing it, and there is no `--no-plan-review` anywhere: approval is `backlog.mjs plan-review <id> off`, or deleting the line and
 committing. Every gate that could execute the item reads the one flag and refuses with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON` in
 `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents-shared.test.ts`): the board's Run
 button, the server's `plan` and `dispatch` ladder (an uncoded 409), the orchestrator's queue — which turns the item `ungroomed` with that reason, the way
@@ -3631,10 +3632,12 @@ a removal's 404 answered as success. The label exists because a tick's groom wri
 without a mark the board's Run, the server's `plan`/`dispatch` and the orchestrator's queue would each execute it. A literal boolean for `review`'s reason, with
 a sharper edge: coercing `'false'` to truthy would add the hold somebody was trying to lift, and coercing `'true'` the other way would leave an unreviewed plan
 looking approved. `create` and `body` carry the same mark as an optional `planReview` (`runnerFix`'s twin, the 400 included), because `plan-review` has to land
-in the same write as the plan, never after it. In `body` that is a label call right after the patch, on the same chain — and unlike `runner-fix`'s, CHECKED (a
-failure is a refusal naming what landed: the body cannot be taken back, and a success would report a hold that is not there) and followed by a re-read of the
-issue into the cache, because a tick reads the item back at once and `patched.data` predates the label. Not `labels` in the PATCH: that replaces the set and
-would race a claim's `in-progress` and the driver's `orchestrator:queued`. This route re-reads after a landed change too.
+in the same write as the plan, never after it. In `body` an ADD is a label call on the same chain after the `ifUpdatedAt` check and BEFORE the patch — and
+unlike `runner-fix`'s, CHECKED: a failed add is a refusal with nothing written, so no groomed-but-unmarked plan is ever left behind, and a patch that fails
+after a landed add leaves the hold on the old body, the safe direction. The patch's own response then carries the label and is what the cache absorbs, which a
+tick needs because it reads the item back at once. A REMOVAL stays after the patch, is checked the same way (a 404 is success), and is followed by a re-read,
+because neither label endpoint answers the issue. Not `labels` in the PATCH: that replaces the set and would race a claim's `in-progress` and the driver's
+`orchestrator:queued`. This route only moves the label, so it has no order to keep; it re-reads after a landed change too.
 The body route can only ADD it — approval is this route with `false`, said once, in one place (`backlog.mjs
 plan-review <id> on|off`). Every per-item gate reads the mapped `planReview` flag through one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
 `shared/agent.ts`, with a hand-kept copy in `orchestrate.mjs`), always after `inReview`'s. A files project carries the mark as a `plan-review: true` frontmatter
