@@ -277,6 +277,45 @@ describe('DispatchButton', () => {
     expect(btn.getAttribute('title')).not.toContain('reviewing');
   });
 
+  /* The plan-review rung (backlog-tick): a plan written unattended carries `plan-review` until a person removes it, and Run must not execute it first. It
+     follows the in-review rung in the same ladder, reusing its rendering — the reason is the button's title and its described-by text. */
+  it('disables with the plan-review reason when the plan awaits review', () => {
+    render(<DispatchButton item={fakeItem({ source: 'github', planReview: true })} status={READY} onDispatch={() => {}} />);
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('this plan awaits review'));
+    const describedBy = btn.getAttribute('aria-describedby');
+    expect(document.getElementById(String(describedBy))).toHaveTextContent('this plan awaits review');
+  });
+
+  it('dispatches nothing when a plan-review button is clicked', async () => {
+    const onDispatch = jest.fn();
+    render(<DispatchButton item={fakeItem({ source: 'github', planReview: true })} status={READY} onDispatch={onDispatch} />);
+    await userEvent.click(screen.getByRole('button', { name: 'execute' }));
+    expect(onDispatch).not.toHaveBeenCalled();
+  });
+
+  it('prefers the in-review reason over the plan-review one when an item carries both', () => {
+    render(<DispatchButton item={fakeItem({ source: 'github', inReview: true, planReview: true })} status={READY} onDispatch={() => {}} />);
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('title', expect.stringContaining('a PR is open for this item'));
+    expect(btn.getAttribute('title')).not.toContain('awaits review');
+  });
+
+  it("prefers the plan-review reason over a run's when an item carries both", () => {
+    render(
+      <DispatchButton
+        item={fakeItem({ source: 'github', planReview: true })}
+        status={READY}
+        onDispatch={() => {}}
+        runBlock="an orchestrator run is working this item (reviewing)"
+      />
+    );
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('title', expect.stringContaining('this plan awaits review'));
+    expect(btn.getAttribute('title')).not.toContain('orchestrator run');
+  });
+
   /* And the other half: project visibility still outranks it. A reason naming
      a running session would send the reader to look for a session when what
      actually needs fixing is which projects the dashboard can see. */

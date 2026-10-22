@@ -397,6 +397,56 @@ describe('GET /api/items and /api/projects', () => {
   });
 });
 
+/**
+ * `plan-review:` (backlog-tick): a files item's frontmatter line is read by PRESENCE, the way the tool reads `runner-fix:` — any value but `false` counts —
+ * and mapped to `planReview: true` or an absent key, never `false`. The scan reads the working tree, so this is also the board's view of an uncommitted edit.
+ */
+describe('planReview on a files item', () => {
+  let app: INestApplication;
+  const bug = (n: number, extra: string) => ({
+    leaf: 'bugs/open',
+    filename: `bug-${n}-x.md`,
+    content: item(`bug-${n}`, `bug ${n}`, '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n', extra)
+  });
+
+  beforeAll(async () => {
+    const root = makeProject('planreview', [bug(1, 'plan-review: true\n'), bug(2, 'plan-review: yes\n'), bug(3, 'plan-review: false\n'), bug(4, ''), bug(5, 'plan-review: FALSE\n')]);
+    const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
+      .overrideProvider(REGISTRY_FILE)
+      .useValue(makeRegistry([{ name: 'planreview', path: root }]))
+      .compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await listenLoopback(app);
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  async function find(id: string): Promise<BacklogItem> {
+    const index = (await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex;
+    return index.items.find((i) => i.id === id) as BacklogItem;
+  }
+
+  it('is true for `plan-review: true`', async () => {
+    expect((await find('bug-1')).planReview).toBe(true);
+  });
+
+  it('is true for any value but false — presence, like runner-fix', async () => {
+    expect((await find('bug-2')).planReview).toBe(true);
+  });
+
+  it('omits the key for `plan-review: false`, in any case, rather than carrying false', async () => {
+    expect('planReview' in (await find('bug-3'))).toBe(false);
+    expect('planReview' in (await find('bug-5'))).toBe(false);
+  });
+
+  it('omits the key when there is no line', async () => {
+    expect('planReview' in (await find('bug-4'))).toBe(false);
+  });
+});
+
 describe('malformed registry entries and unreadable item paths', () => {
   let app: INestApplication;
 

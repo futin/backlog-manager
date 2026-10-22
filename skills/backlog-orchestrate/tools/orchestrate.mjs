@@ -1326,12 +1326,20 @@ function readItemForGate(absPath) {
 // case-insensitive because `False` and `FALSE` are the same YAML boolean a
 // human meant to write, and reading one of them as "hoist" would be the
 // mistake in the direction that actually reorders a run.
+//
+// `planReview` is the backlog-tick marker — a plan written unattended that no
+// person has approved yet — and is read here for the same two reasons, by the
+// same presence rule: off the same bytes as the verdict, so `<base>` decides
+// it and a line sitting only in the working copy gates nothing, and with only
+// `false` opting out, because a `plan-review: yes` that silently did not gate
+// would let an unreviewed plan run, the failure the marker exists to prevent.
 function parseItemForGate(text) {
   const lines = text.split('\n');
-  if (lines[0] !== '---') return { title: '', body: '', runnerFix: false, frontmatter: {} };
+  if (lines[0] !== '---') return { title: '', body: '', runnerFix: false, planReview: false, frontmatter: {} };
   let i = 1;
   let title = '';
   let runnerFix = false;
+  let planReview = false;
   // The two keys `planDrift` anchors on (#322), read by this same narrow
   // splitter rather than a second parser: `groomed-at:` (written by
   // backlog.mjs) and `created:`, its fallback. Only `plan` uses them.
@@ -1349,9 +1357,15 @@ function parseItemForGate(text) {
           .slice(sep + 1)
           .trim()
           .toLowerCase() !== 'false';
+    else if (key === 'plan-review')
+      planReview =
+        lines[i]
+          .slice(sep + 1)
+          .trim()
+          .toLowerCase() !== 'false';
   }
-  if (i === lines.length) return { title, body: '', runnerFix, frontmatter };
-  return { title, body: lines.slice(i + 1).join('\n'), runnerFix, frontmatter };
+  if (i === lines.length) return { title, body: '', runnerFix, planReview, frontmatter };
+  return { title, body: lines.slice(i + 1).join('\n'), runnerFix, planReview, frontmatter };
 }
 
 // Finds one `## <heading>` section's own content: everything between that
@@ -1708,8 +1722,13 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
   });
   const gateEntry = (entry) => {
     if (readBlob === null) {
-      const { title, body, runnerFix, frontmatter } = readItemForGate(entry.path);
-      return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot), ...planFacts(entry, body, frontmatter) };
+      const { title, body, runnerFix, planReview, frontmatter } = readItemForGate(entry.path);
+      return {
+        title,
+        hoisted: runnerFix,
+        ...planReviewGate(planReview, gateItem(entry.section, body, projectRoot)),
+        ...planFacts(entry, body, frontmatter)
+      };
     }
     const relPath = path.relative(projectRoot, entry.path).split(path.sep).join('/');
     const committed = readBlob(relPath);
@@ -1728,8 +1747,13 @@ function buildGatedQueue(projectRoot, { ids, maxItems = null, base = BASE_REF_DE
         ...(drift ? { drift: { status: 'unknown', anchor: null, anchorSource: null, commits: 0, paths: [], reason: `not committed on ${base}` } } : {})
       };
     }
-    const { title, body, runnerFix, frontmatter } = parseItemForGate(committed);
-    return { title, hoisted: runnerFix, ...gateItem(entry.section, body, projectRoot), ...planFacts(entry, body, frontmatter) };
+    const { title, body, runnerFix, planReview, frontmatter } = parseItemForGate(committed);
+    return {
+      title,
+      hoisted: runnerFix,
+      ...planReviewGate(planReview, gateItem(entry.section, body, projectRoot)),
+      ...planFacts(entry, body, frontmatter)
+    };
   };
 
   // Gate everything first, THEN reorder, THEN count the cap. The marker is
@@ -2013,7 +2037,7 @@ function trackerCandidates(projectRoot, { ids, drift = false, base = BASE_REF_DE
       id,
       title: item.title,
       hoisted: item.runnerFix === true,
-      ...inReviewGate(item, gateItem(item.section, text, projectRoot)),
+      ...inReviewGate(item, planReviewGate(item.planReview === true, gateItem(item.section, text, projectRoot))),
       planHash: planHash(planSection(text, item.section) ?? ''),
       ...(drift ? { drift: planDrift({ projectRoot, body: text, frontmatter, section: item.section, base }) } : {})
     };
@@ -2034,6 +2058,23 @@ const IN_REVIEW_REASON = 'a PR is open for this item';
 function inReviewGate(item, verdict) {
   if (item.inReview !== true) return verdict;
   return { ...verdict, gate: 'ungroomed', reasons: [IN_REVIEW_REASON, ...verdict.reasons], questions: [] };
+}
+
+// The plan-review guard's sentence (backlog-tick) — the other HAND-KEPT copy, of `PLAN_REVIEW_REASON` in `shared/agent.ts`, for the same reason as the one
+// above: this file cannot import it. The board's Run button, the server's plan/dispatch ladder, this gate and backlog-tick's own skip reason all say it, and
+// `test/agents-shared.test.ts` pins this line to that constant, so a change there is a change here.
+const PLAN_REVIEW_REASON = 'this plan awaits review';
+
+// A groomed item whose plan the tick wrote unattended carries `plan-review` (a tracker label, a files frontmatter line) until a person removes it to approve
+// the plan; to every other gate it reads ready, so without this a run would execute a plan nobody has read. `inReviewGate`'s twin and shaped like it —
+// `ungroomed`, the reason first, `questions` emptied, membership untouched — so no new verdict reaches `RunStage`, the run file or anything that reads one,
+// and `--ids` naming such an item says why instead of running nothing. It takes the flag rather than the item because the files path reads the mark off a
+// parsed blob (`parseItemForGate`) where the tracker path reads it off the API item. Where an item carries both marks the caller applies this one FIRST and
+// `inReviewGate` over it, so the reasons read in-review, then plan-review: a PR is the stronger fact (the plan was already approved and executed), the same
+// order `planReviewBlock` sits behind `inReviewBlock` in `shared/agent.ts`.
+function planReviewGate(flag, verdict) {
+  if (flag !== true) return verdict;
+  return { ...verdict, gate: 'ungroomed', reasons: [PLAN_REVIEW_REASON, ...verdict.reasons], questions: [] };
 }
 
 // --- the claim, as this machine's state on a tracker item (task-47) ------

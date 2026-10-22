@@ -323,6 +323,16 @@ export interface BacklogItem {
    */
   inReview?: true;
   /**
+   * A plan written unattended (backlog-tick) that a human has not yet approved: a tracker issue carrying the `plan-review` label, or a files item whose
+   * frontmatter has a `plan-review: true` line. Removing the label, or the line, is the approval. Gates will read it — the dispatch ladders, the queue
+   * builders and execute's refusal skip such an item, with the reason `this plan awaits review` — but this field only reports it.
+   *
+   * **Optional, `true` or absent, and never `false`,** by the same rule as `inReview`, `queued` and `runnerFix`. **Unlike `inReview` it has TWO writers:**
+   * `server/src/tracker/map-issue.ts` for a tracker item (from the label) and `server/src/items/scan.util.ts` for a files item (from the frontmatter line,
+   * read by presence the way `runner-fix:` is). Each arranges the absence itself, by the same conditional spread, so `'planReview' in item` means what it says.
+   */
+  planReview?: true;
+  /**
    * Who holds this TRACKER item's claim right now (#225) — the newest claim, when it is unreleased, which is the same claim `started` and `phase` are read
    * from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
    *
@@ -2492,6 +2502,9 @@ export interface ItemCreateRequest extends ItemWriteRequest {
   /** `true` adds the `runner-fix` label. Strictly `=== true`, the same parse
    *  rule `remoteControl` follows. */
   runnerFix?: boolean;
+  /** `true` creates the issue already carrying `plan-review` (backlog-tick: a plan written unattended). Strictly `=== true`, `runnerFix`'s parse rule, and
+   *  riding the create call itself so the issue is never born unlabelled. */
+  planReview?: boolean;
   /** The item this one came from — a promotion or a revive. Prepended to the
    *  body as `_From #<n>._`, which is the GitHub-native cross-link; nothing
    *  derived reads it, exactly as nothing derived read `from:` in frontmatter. */
@@ -2681,6 +2694,12 @@ export interface ItemBodyRequest extends ItemWriteRequest {
    * labelled as one.
    */
   runnerFix?: boolean;
+  /**
+   * The `plan-review` label, moved by the same call that rewrote the body (backlog-tick) — `true` adds it, `false` removes it, ABSENT leaves it exactly as
+   * it is. `runnerFix`'s three states for `runnerFix`'s reason: a tick's groom says "this plan awaits review" in the one write that wrote the plan, and every
+   * other body patch — a person's re-groom, `import`'s second pass — must not silently clear (or set) a marker somebody else owns.
+   */
+  planReview?: boolean;
 }
 
 /** `POST /api/items/comment` — appends a comment and nothing else. Execute's
@@ -2716,6 +2735,15 @@ export interface ItemQueueRequest extends ItemWriteRequest {
 export interface ItemReviewRequest extends ItemWriteRequest {
   id: string;
   inReview: boolean;
+}
+
+/**
+ * `POST /api/items/plan-review` — the eleventh write route (backlog-tick). `review`'s twin for the `plan-review` label: `true` adds it, `false` removes
+ * it, no third state. The writer is a tick's groom saying "this plan was written unattended"; the remover is a person approving it.
+ */
+export interface ItemPlanReviewRequest extends ItemWriteRequest {
+  id: string;
+  planReview: boolean;
 }
 
 /** What `claim`, `release` and `heartbeat` answer on success: the comment that

@@ -188,6 +188,100 @@ caveat.
 
 Spec: [2026-09-06-backlog-retro-design.md](../superpowers/specs/2026-09-06-backlog-retro-design.md).
 
+## `~/.backlog-manager/tick/` has exactly one writer, and the tick never writes run state
+
+**backlog-tick** (spec: [2026-10-22-backlog-tick-design.md](../superpowers/specs/2026-10-22-backlog-tick-design.md)). The fourth directory under
+`~/.backlog-manager/` a tool owns outright, and it keeps the relationship the other three do: `registry.json` has `backlog.mjs`, `run.json` has
+`orchestrate.mjs`, `retro/` has `retro.mjs record`, and `tick/<project-key>/` has `tick.mjs` — in fact `tick-state.mjs`, the one file in the skill that writes.
+Two files live there per project, `lock` and `state.json`; the key is `encodeURIComponent` of the absolute main-checkout path, the key `orchestrate.mjs`'s
+`projectDir` computes, so one project is one name across both tools without either importing the other. `$BM_TICK_HOME` overrides the home, for the reason
+`$BM_ORCH_HOME` and `$BM_RETRO_HOME` exist: a test process, or somebody poking at the tool by hand, must never write into a real machine's tick history, and
+above all never into a lock a scheduled step is holding.
+
+**Nothing under the run-state directory is ever written, and what is read is read to say `busy`.** A tick runs beside an orchestrator, not inside one, and the
+one thing it needs from it is whether the project is occupied: a `run.json` that says `running` or `paused`. So `decide` opens that directory read-only, and
+the sidecars, the control file and the run file's every other field are none of its business. A tick that wrote there — a note on a run, a cleared lease —
+would be a second writer of the run file, and the whole reason `run.json` has one is that every reader of it has to be able to trust that a field it reads was
+written by the one place that knows what it means. The same line keeps the tick off the registry and off every item file: it asks `backlog.mjs` nothing and
+runs nothing of it itself — the session that carries the verdict out runs the skills, and those are the item files' only writers.
+
+**It is self-contained on purpose, and a twin is a copy with a named original.** `tick.mjs` imports nothing from another skill's `tools/`, from `server/` or
+from `shared/`, and shells out to neither `orchestrate.mjs` nor `backlog.mjs`, because an install is a copy of whatever shipped and a prune of one skill must
+never break another. Every function it needs that exists elsewhere — the project key, the gate's readiness and ordering, the live-claim window, the section
+prefixes, the Jira-free subset of the frontmatter reader — is a TWIN, with a comment naming each original, the pattern
+`skills/backlog-retro/tools/lib/paths.mjs` set. The cost is paid where a copy always costs: a rule changed in one home has to be changed in the other, which is
+why each twin names its original and why the tool's own suite pins the behaviours that must agree. Nor does it write git: every git call in the file is a read,
+because the tick's units do their own — an execute's `pr` finish owns its branch and its worktree — and a scheduler that also wrote git would be a second hand
+on the same refs.
+
+## A tick does one unit, only when idle, and never executes a plan that awaits review
+
+**backlog-tick.** The skill exists so that a dashboard job can fire as often as it likes — every half hour overnight — and the cost of an unnecessary firing is
+one tool call and one line. Three properties make that safe, and each is a refusal rather than a feature.
+
+**At most one unit.** `tick.mjs decide` prints ONE verdict: `execute <id>`, `groom <id>`, `recover`, `busy` or `idle`. Execute wins over groom, because a ready
+item is worth more than a plan for another; a groom runs only while fewer than N items carry `plan-review`, and an execute only while fewer than M `execute/*`
+pull requests are open. The caps are what stop the morning stack — twenty plans to read, a dozen PRs that conflict with each other — and they are trigger flags
+(`--max-plans`, `--max-prs`, defaults 3 and 2), not code, because the right number is a fact about one schedule. The open-PR count is the one read that can fail
+quietly, so every failure is a cap: no `gh`, a non-zero exit, output that does not parse, or a result that reaches the `--limit 500` ceiling (which may have
+been cut) reads `cannot count open PRs` and execute is skipped, never assumed zero. The lock is the other half: `decide` writes it only on `execute` or `groom`,
+so an `idle` or `busy` tick — and every `--dry-run` — leaves nothing behind that could block the next one, and `record` releases it. It closes the window
+between a tick choosing an item and the skill writing its `started:` marker or claim.
+
+**Only when idle.** Anything already happening to this project's pipeline is `busy`, and the tick exits: a `running` or `paused` orchestrator run; a
+board-started run that has no run file yet (server memory, so readable only while the stack is up — with it down there is no board to have started one, and the
+check is skipped); a `started:` marker on any open item in the main checkout or a linked worktree, since an in-place groom or execute in a linked worktree
+writes its marker there; a live claim; and, on a tracker project, a fresh remote run, because between items such a run holds no claim and the claim race alone
+would let a tick slip an item in under it. The orchestrator's own `.worktrees/<id>` trees and execute's `.worktrees/execute-<id>` trees are skipped, because the
+run file and the lock respectively speak for them, and a killed execute there would otherwise block the project for good. A tracker project with the stack down
+is `idle: stack down`, taken before the lock. A Jira live session is NOT a busy signal: Jira work happens in its own worktree on a ticket.
+
+**Never a plan nobody has read.** The tick writes plans unattended, and the user's review is the only check on them. Because `/git-sync` commits any uncommitted
+work, "the groom is uncommitted" cannot be that check — it would approve every plan overnight — so the gate is an explicit mark, `plan-review`: a label on a
+tracker project, a `plan-review: true` frontmatter line on a files project, written by groom in the SAME write that lands the plan (`backlog.mjs body|new
+--plan-review`, or the frontmatter block groom prints), never as a second step, so no approved-looking plan is ever reported written without it — on a
+tracker the `body` route adds the label itself BEFORE the patch and refuses with nothing written when the add fails, so the patch's own response carries
+the mark the tick's read-back sees.
+A person approves by removing it, and there is no `--no-plan-review` anywhere: approval is `backlog.mjs plan-review <id> off`, or deleting the line and
+committing. Every gate that could execute the item reads the one flag and refuses with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON` in
+`shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents-shared.test.ts`): the board's Run
+button, the server's `plan` and `dispatch` ladder (an uncoded 409), the orchestrator's queue — which turns the item `ungroomed` with that reason, the way
+`in-review` does, so no new verdict reaches the run's stages — and `backlog-execute`'s own refusal. The rung is `planReviewBlock`, always AFTER `inReviewBlock`:
+an item carrying both says the PR, the stronger fact, since a PR means the plan was already approved and executed. The mark is read as the tool reads
+`runner-fix:`, by PRESENCE: a `plan-review: yes` that silently did not gate would be the failure the mark exists to prevent. Where it is read matters on a files
+project — the board reads the working tree, so a line deleted but not yet committed still disables Run (the conservative direction), while the tick and the
+orchestrator read `<base>`, the tree an execute worktree is cut from, so approval there is delete-and-commit.
+
+**What a tick never does** is the same list the spec's non-goals make, and each is a rule about who owns the thing: it never merges (`backlog-orchestrate` is
+the only skill that merges), never commits a groom, never promotes an idea, never rejects, never asks a question (a scheduled step has nobody to answer, and an
+unanswered question parks the whole tick), and never runs anything in the background (`claude -p` exits when the turn does). An item a tick failed on is
+recorded by content hash and skipped until it changes, so one impossible item cannot take every night's slot; the hash covers the body and the keys a person
+edits, never `updated:`, `started:`, `phase:`, `groomed-at:` or the counters, which every attempt rewrites.
+
+## The only `started:` marker a tick clears is the one a killed tick left
+
+**backlog-tick.** A dashboard job's `timeout:` kills the step mid-work, and a step that runs out of turns ends the same way: the lock stays, and the item may
+keep a `started:` marker. The next tick that finds a lock older than `--lock-ttl` (default 180 minutes, comfortably above any sane job timeout) reads the
+verdict recorded in it and, in EVERY case, records that item `failed` with the reason `killed at timeout` and releases the lock. The release is a claim, not a
+delete: `claimStaleLock` renames the lock aside atomically and owns it only if the bytes it got are the bytes judged stale, so two ticks racing to recover one
+lock — or one recovering while another has just written a fresh one — cannot both act, and losing that race is `busy: another tick`. Whether it also clears a
+marker is a separate question with a narrow answer.
+
+**One marker is provably the dead tick's own.** A `started:` line records WHEN, never WHO — a files project has no heartbeat, so liveness of a session cannot
+be read at all — which is why, on a files project, ANY marker blocks the project, and why the exception has to be proved from the one thing the tick does hold,
+its own lock. The proof is exactly three facts: the lock is stale, its verdict is `groom <id>`, and `<id>` in the main checkout carries `started:` with `phase:
+groom`. Then, and only then, `decide` answers `recover` with `stop: true` and the skill runs `backlog.mjs stop <id> --abandon` on that one id, because the
+interval was no one's work. That is the ONLY marker a tick ever clears; every other marker is a person's or another session's, and the project stays blocked
+until they clear it. The tick would be making a decision it has no evidence for.
+
+**Everything else is left, each for its own reason.** A tracker claim is never cleared: the proof above is frontmatter and a tracker item has none, and release
+is not the tick's to force — the dead claim goes stale after 15 minutes (`CLAIM_LIVE_MS`) and the next claimant's `start` retires it, which is the claim
+protocol's rule, not a takeover the tick decides. An execute's marker lives in `.worktrees/execute-<id>`, which the busy scan skips, and the `execute/<id>`
+branch and worktree a killed execute leaves keep the item off the candidate list anyway; clearing a marker there would also be clearing it in a tree another
+process may still own. An unreadable lock is removed and nothing else is done, since there is no verdict to act on. The shape is a deliberate asymmetry: the
+tick recovers its own groom, because a groom writes into the main checkout the busy scan reads and a dead one would block the project for good, and it
+recovers nothing it cannot prove.
+
 ## A pause request is a file the server writes and the tool reads
 
 **task-17.** Everything else under `~/.backlog-manager/` travels tool → server: `backlog.mjs` writes `registry.json`, `orchestrate.mjs` writes `run.json`, and
@@ -469,8 +563,8 @@ validated field the way `--merge-mode` is (`AgentsService` appends `finishClause
 body that spells `--finish` or `--base` is a 400), and an unknown or doubled `--finish` stops execute rather than falling back to either mode, for the reason an
 `unsupported` source never falls back to `files`. A permission-layer
 denial of a git or `gh` step stops those steps and hands over the remaining commands; it is never retried another way. In a tracker project the pushed item then
-carries the `in-review` label, which every per-item gate reads as `a PR is open for this item` — see [the ten item-write
-routes](#the-ten-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item).
+carries the `in-review` label, which every per-item gate reads as `a PR is open for this item` — see [the eleven item-write
+routes](#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item).
 
 **A Jira Run's push is not a skill's, so it does not contradict this rule** (Jira repo/branch, spec §6). This rule is about this plugin's skills operating on
 backlog items. A Jira Run started with **Open MR when done** ticked is told by its prompt to push its branch and open one merge request once the work is done:
@@ -921,6 +1015,12 @@ of when work began — a `phase:` still naming an activity would misdescribe fin
 `started:` surviving is the whole point. `stop` never takes an `--as` of its own for this reason — it reads `phase:` back off the file instead, the one place
 that can't disagree with itself. Surfaced raw by the scanner; "in progress" is `started !== '' && status === 'open'`, decided in the client, because archiving
 deliberately keeps the value as history (see below).
+
+`plan-review:` (backlog-tick) is NOT a lifecycle key, and the invariant names it so nobody reads it as a third one. It is `runner-fix:`'s kind: a GATE on an
+item, beside `groomed` (which stays derived exactly as before) and in no sense a status — a second answer to "which directory holds this file" is what the
+`status:` ban refuses, and `plan-review: true` answers "may this be executed", a different question. A tick's groom writes it in the same write as the plan and
+a person deletes it to approve; neither `start` nor `stop` touches it, and both round-trip it with every other unknown key. It is read by presence, any value
+but `false` (trimmed, case-insensitive) counting, and on a tracker project it is the `plan-review` label instead.
 
 `groomed-at:` (#322) is the third key the tool writes on its own, and like the other two it is never hand-written. `new` stamps it with `HEAD`'s sha for a bug
 or task (a tracker body carries it as a `<!-- bm:groomed-at <sha> -->` footer line instead, which `body` keeps to exactly one), and a groom `stop` re-stamps it
@@ -3073,7 +3173,7 @@ So `off` refuses them all, with one sentence naming the repo and the fix — `sy
 composed in exactly one server place (`TrackerPollerService.syncOffBlock`) and pinned byte for byte against the client's copy (`syncOffReason`), since the
 client cannot import the server's composer.
 
-The nine `/api/items/*` writes refuse inside the per-item serialisation and before any request to GitHub; `dispatch`, `orchestrate` and `resume` refuse
+The ten `/api/items/*` writes refuse inside the per-item serialisation and before any request to GitHub; `dispatch`, `orchestrate` and `resume` refuse
 before any spawn; `abort` refuses before its dashboard stop, since a stop followed by a refused release would kill a session and leave its claim live; `plan()` names the same sentence as its block, so the launch sheet never offers what dispatch would refuse; and the board disables — never
 hides — the dispatch control and the Orchestrate chip, because it is a per-project block rather than an environment one. Resume is on the list as belt and
 braces for the route's own 409: a hand-edited file can still turn a repo off under a paused run.
@@ -3168,7 +3268,7 @@ records the reset TIME (not a duration, which goes stale the moment it is drawn)
 request at all, not even a conditional one: a `304` is free against the budget but a `403` is not, and asking again before the reset is how an app earns a
 secondary limit on top of the one it has.
 
-**The label set has one home and one cross-file guard.** `server/src/tracker/labels.ts` lists the ten labels — spec §5.2's eight, `orchestrator:queued` (task-52) and `in-review` (execute `pr` mode) — and the poller creates whichever
+**The label set has one home and one cross-file guard.** `server/src/tracker/labels.ts` lists the eleven labels — spec §5.2's eight, `orchestrator:queued` (task-52), `in-review` (execute `pr` mode) and `plan-review` (backlog-tick) — and the poller creates whichever
 are missing on the first successful sync of a repo — idempotently, case-insensitively (GitHub label names preserve case but collide without it), treating a 422
 as success because another machine's poller winning the race still leaves the label there. This is phase 2's ONE write to GitHub, and it is a bootstrap rather
 than a lifecycle write: the issue→item mapping cannot work without the set. `skills/backlog/tools/backlog.mjs`'s `connect` writes issue forms that pre-apply the
@@ -3445,7 +3545,7 @@ A closed issue's section can change while its labels never do: `completed` (or n
 intact, and any other reason is `terminal` in `out-of-scope`. The `type:*` label stays on the issue, so the original type is recoverable — which the file store
 cannot do, since a rejected item moves into a flat directory that forgets it.
 
-## The ten item-write routes are guarded, refused for `files`, and serialised per item
+## The eleven item-write routes are guarded, refused for `files`, and serialised per item
 
 Task-46, spec §6.2. Until this branch every route in this server either read something or spawned a session; these seven CREATE AND CLOSE ISSUES in somebody's
 repository, with a credential the browser never sees. That is a strictly larger consequence than the dispatch route the origin guard was written for, which is
@@ -3461,7 +3561,7 @@ registry's own `path` (deliberately not realpath — the `uncommitted` rule, and
 be a filesystem touch on a path this server was never given), then `resolveSource` per request, then the adapter's `writer`. It answers `unregistered` → 404,
 `files` → 400 `this project's items are files — the skills write them directly`, `unsupported` → 400 carrying `resolveSource`'s own path-prefixed reason, and
 otherwise the writer. `FilesSource` has NO `writer` field at all, and that absence is the rule rather than a gap: item files are written by the skills and by
-nothing else, and the one check that reads the field is what makes that true for all ten routes at once instead of ten routes each remembering to ask.
+nothing else, and the one check that reads the field is what makes that true for all eleven routes at once instead of eleven routes each remembering to ask.
 
 **Every refusal is a value.** `ItemWriter` answers `WriteOutcome`, never throws, and `GithubClient` beneath it answers a `GithubResponse` for every status —
 the same posture, one layer down. `answer` (`write-answer.util.ts` since #270, when the claim READ route
@@ -3526,7 +3626,24 @@ text): the board's Run button, the server's `plan`/`dispatch` ladder (an uncoded
 reason so no new verdict reaches the run's stages. A files project has no label to carry, so `review` is tracker-only and a files item's PR guard is a named
 known limitation, not a gap this route papers over.
 
-**Beside the ten there is one route that is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
+**The eleventh write route is `plan-review` (backlog-tick), and it is `review`'s twin.** `POST /api/items/plan-review`, body `{ project, id, planReview }`, adds
+or removes the `plan-review` label — the eleventh tracker label — with the class guard, the `writerFor` gate, the per-URN chain, a literal boolean or a 400, and
+a removal's 404 answered as success. The label exists because a tick's groom writes a plan nobody has read, and to every other gate a groomed item reads ready:
+without a mark the board's Run, the server's `plan`/`dispatch` and the orchestrator's queue would each execute it. A literal boolean for `review`'s reason, with
+a sharper edge: coercing `'false'` to truthy would add the hold somebody was trying to lift, and coercing `'true'` the other way would leave an unreviewed plan
+looking approved. `create` and `body` carry the same mark as an optional `planReview` (`runnerFix`'s twin, the 400 included), because `plan-review` has to land
+in the same write as the plan, never after it. In `body` an ADD is a label call on the same chain after the `ifUpdatedAt` check and BEFORE the patch — and
+unlike `runner-fix`'s, CHECKED: a failed add is a refusal with nothing written, so no groomed-but-unmarked plan is ever left behind, and a patch that fails
+after a landed add leaves the hold on the old body, the safe direction. The patch's own response then carries the label and is what the cache absorbs, which a
+tick needs because it reads the item back at once. A REMOVAL stays after the patch, is checked the same way (a 404 is success), and is followed by a re-read,
+because neither label endpoint answers the issue. Not `labels` in the PATCH: that replaces the set and would race a claim's `in-progress` and the driver's
+`orchestrator:queued`. This route only moves the label, so it has no order to keep; it re-reads after a landed change too.
+The body route ADDs it with `true` and removes it with `false`, but only as part of a plan write; approval on its own is this route with `false`, said once, in
+one place (`backlog.mjs plan-review <id> on|off`). Every per-item gate reads the mapped `planReview` flag through one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
+`shared/agent.ts`, with a hand-kept copy in `orchestrate.mjs`), always after `inReview`'s. A files project carries the mark as a `plan-review: true` frontmatter
+line instead, so this route, like `review`, is tracker-only.
+
+**Beside the eleven there is one route that is a read.** `GET /api/items/claim` answers who holds one item, out of the cache, with no network call — unguarded, like
 every other GET in this app, because it starts nothing and discloses strictly less than `/api/items` already does. It exists because `backlog.mjs start` and
 `backlog.mjs stop` are two PROCESSES: `claim` answers the comment id that identifies the claim, and the `stop` that must release it has no other way to
 rediscover it. Without it the CLI could take an item and never give it back. Spec §6.2 names seven routes and not this one; the deviation is recorded in
@@ -4064,7 +4181,7 @@ marker the stopped run wrote itself, while no commit carries it (`??` or `A `): 
 tool's own file (#218). A committed marker edited by hand is still refused.
 
 **Three things are lost, and saying which is the point.** A body over the cap keeps only its leading sections plus the link. `tags:` survive in the footer alone,
-because the tracker's label set is the closed ten of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the
+because the tracker's label set is the closed eleven of `labels.ts` and inventing a label per tag would break that. And an item's git history stays in the
 repository — the issue's date is its `created` frontmatter, not the commit that filed it. None of the three is recoverable from the tracker, which is why the
 files' history is worth keeping in git rather than deleting the whole `backlog/` directory.
 

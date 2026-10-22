@@ -12,6 +12,8 @@ import {
   finishClause,
   IN_REVIEW_REASON,
   inReviewBlock,
+  PLAN_REVIEW_REASON,
+  planReviewBlock,
   isAgentAction,
   isExecuteFinish,
   isItemId,
@@ -1042,5 +1044,35 @@ describe('isExecuteFinish', () => {
 
   it('EXECUTE_FINISHES is exactly in-place then pr', () => {
     expect(EXECUTE_FINISHES).toEqual(['in-place', 'pr']);
+  });
+});
+
+/*
+ * The plan-review guard (backlog-tick): a plan written unattended carries `plan-review` until a person removes it, and every per-item gate reads the mapped
+ * flag. One sentence, shared by the board's button, the server's two ladders, and the orchestrator's and tick's hand-kept copies.
+ */
+describe('planReviewBlock', () => {
+  it('names the awaited review for an item carrying the flag', () => {
+    expect(planReviewBlock(fakeItem({ planReview: true }))).toBe('this plan awaits review');
+    expect(PLAN_REVIEW_REASON).toBe('this plan awaits review');
+  });
+
+  it('is null for an item without the flag', () => {
+    expect(planReviewBlock(fakeItem())).toBeNull();
+    expect(planReviewBlock(fakeItem({ source: 'github' }))).toBeNull();
+  });
+
+  /* The in-review twin's twin: `orchestrate.mjs` cannot import this module, so its gate carries a hand-kept copy of the sentence, and this keeps the "one
+     string everywhere" constraint mechanical. */
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const PLAN_REVIEW_REASON = '${PLAN_REVIEW_REASON}';`);
+  });
+
+  /* The third copy, beside `inReviewBlock`'s: execute's refusal gate prints the same sentence, in prose a session says. Whitespace-collapsed because the
+     SKILL.md wraps at 160 columns and a reflow must not turn a green guard red. */
+  it('is the same sentence backlog-execute refuses with', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(PLAN_REVIEW_REASON);
   });
 });

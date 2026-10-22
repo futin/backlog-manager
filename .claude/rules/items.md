@@ -4,12 +4,12 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
 
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
 
-- **The ten `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
+- **The eleven `/api/items/*` write routes are guarded like the agents POSTs, refused for a `files` project, and serialised per item.** Every one of them is
   `@UseGuards(SameOriginPostGuard)` (`items-write.controller.ts`, one decorator on the class) and each is a thin pass-through to an `ItemWriter` method:
   `ItemsService.writerFor` gates the `project` against the registry by a RAW string compare, resolves the marker per request, and answers `unregistered` (404)
   / `files` (400, `this project's items are files — the skills write them directly`) / `unsupported` (400, carrying `resolveSource`'s own reason) / the call.
   None of those four makes a network request. `FilesSource` has no `writer` at all, and that absence IS the rule. The adapter answers a VALUE for every
-  failure (`WriteRefusal`), and `answer` (`write-answer.util.ts`, #270) is the only mapping from one to a status — the nine routes here, `abort` and the
+  failure (`WriteRefusal`), and `answer` (`write-answer.util.ts`, #270) is the only mapping from one to a status — the ten routes here, `abort` and the
   `GET /api/items/claim` read all go through it: `no-token` 503 · `not-found` 404 · `conflict` 409 · `rate-limited`
   429 · anything else 502. `heartbeat` also takes `finished: { at, status }` (task-48), validated field by field and accepted on a RELEASED claim, where it
   sets `finished` and nothing else — `finish` stamps a claim its terminal stage already released. `claim` takes an optional `host` (bug-46), validated by
@@ -24,9 +24,17 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   because it calls the dashboard — yet gates and maps through the same exported `writable`/`answer`, and releases with `authority: 'board'`, a field the
   `release` route never parses, so no HTTP body can set it. The tenth, `review` (execute `pr` mode), is `queue`'s twin: `{ project, id, inReview }` with
   `inReview` a literal boolean or a 400, adding or removing the `in-review` label through `ItemWriter.review` on the same per-URN chain, a removal's 404
-  answered as success. The one READ beside them, `GET /api/items/claim`, is unguarded like every other GET and exists
+  answered as success. The eleventh, `plan-review` (backlog-tick), is `review`'s twin again: `{ project, id, planReview }` with `planReview` a literal boolean
+  or a 400, adding or removing the `plan-review` label through `ItemWriter.planReview` on the same per-URN chain, a removal's 404 answered as success. It is the
+  hold a tick's groom puts on a plan nobody has read, and `create` and `body` carry the same mark as an optional `planReview` (a literal boolean or a 400, like
+  `runnerFix`) so the label lands in the write that wrote the plan: in `create`'s own request, and in `body` as a label call on the same chain — an ADD after
+  the `ifUpdatedAt` check and BEFORE the patch, CHECKED, a failure refused with nothing written, the patch's response (which then carries the label) absorbed
+  so `show --json` sees the mark at once; a REMOVAL after the patch, checked (a 404 is success), then the issue re-read into the cache. Never `labels` in the
+  PATCH, which replaces the set and would race the claim's and the queue's labels. The `plan-review` route re-reads and absorbs too.
+  Its label is `PLAN_REVIEW_LABEL` (`tracker/labels.ts`), the eleventh.
+  The one READ beside them, `GET /api/items/claim`, is unguarded like every other GET and exists
   because `start` and `stop` are two processes. Why:
-  [invariants.md](docs/subsystems/invariants.md#the-ten-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
+  [invariants.md](docs/subsystems/invariants.md#the-eleven-item-write-routes-are-guarded-refused-for-files-and-serialised-per-item)
 - **A project's source is a committed marker, resolved per request, and an `unsupported` one never falls back to `files`.** `resolveSource`
   (`server/src/items/sources/resolve.util.ts`) reads `backlog/source.json` per request, caches nothing, and answers `missing` / `files` / `tracker` /
   `unsupported`; `ItemsService` dispatches over the adapters registered under `ITEM_SOURCES` and **throws at boot** if two claim one kind. Absent means `files`;

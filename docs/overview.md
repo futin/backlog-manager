@@ -1,7 +1,7 @@
 # backlog-manager
 
-A Claude Code plugin that publishes six backlog skills — capture, groom, execute, orchestrate, retro and a read-only board printer — and a `jira` skill that
-reads and moves a Jira ticket through the local API, together with a local web app that shows every registered project's backlog on one board. There is no
+A Claude Code plugin that publishes seven backlog skills — capture, groom, execute, orchestrate, retro, tick and a read-only board printer — and a `jira` skill
+that reads and moves a Jira ticket through the local API, together with a local web app that shows every registered project's backlog on one board. There is no
 database: the registry file and each project's `backlog/` directory _are_ the data, and everything the app displays is derived from them on the way out.
 
 The plugin half and the app half share one rule that explains most of the design: **the skills write, everything else reads.** The server and the client never
@@ -19,7 +19,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [subsystems/board.md](subsystems/board.md)           | the client: the four surfaces, and what the browser derives rather than fetches                                         |
 | [subsystems/releases.md](subsystems/releases.md)     | the board's own versions: `GET /api/releases` from the checkout's tags, the rail's version chip and the What's new drawer |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
-| [subsystems/skills.md](subsystems/skills.md)         | the seven skills, the CLIs beneath them, and the reviewer agent                                                         |
+| [subsystems/skills.md](subsystems/skills.md)         | the eight skills, the CLIs beneath them, and the reviewer agent                                                         |
 | [subsystems/invariants.md](subsystems/invariants.md) | the rationale behind the rules whose "why" outruns one line — most encode a failure that already happened               |
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes                                 |
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
@@ -59,7 +59,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`items/`** — resolves which source owns each registered project's items (its committed `backlog/source.json`, read per request; absent means the files on
   disk), lists them through that source's adapter — `files` or, since task-45, `github` — parses frontmatter, derives what the board needs, and serves item
   bodies through a registry-built allowlist so a file outside every registered `backlog/` cannot be read; a `gh:<owner>/<repo>#<n>` URN goes to the tracker
-  adapter instead, gated on the registry the same way. Since task-46 it also holds the app's ONLY writes to anybody's items — ten guarded POST routes (one,
+  adapter instead, gated on the registry the same way. Since task-46 it also holds the app's ONLY writes to anybody's items — eleven guarded POST routes (one,
   `abort`, served from `agents/` because it calls the dashboard) that a tracker project's items go through, refused outright for a `files` project,
   whose credential never leaves the server. Two git-backed reads live here: the last
   commit touching an item file (memoised against the files git rewrites) and which items differ from the run's base, `main` by default (memoised nowhere — the edit it reports moves
@@ -73,7 +73,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   this machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
   while some run file says `running`.
 - **`tracker/`** — the second of three outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
-  the in-memory issue cache the `github` adapter answers from (one of the two caches in this server whose age is rendered, as `polledAt`), the ten-label
+  the in-memory issue cache the `github` adapter answers from (one of the two caches in this server whose age is rendered, as `polledAt`), the eleven-label
   bootstrap, the claim protocol's pure half (`claim.ts` — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for
   Settings. The token is read per call from the environment and reaches no payload.
 - **`jira/`** — the third outbound-calling module, and only while `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are all set: a Jira Cloud client on
@@ -102,7 +102,7 @@ rail ends in a version chip that opens a What's new drawer of every release, rea
 
 ### The skills — [full doc](subsystems/skills.md)
 
-Seven skills under `skills/`, four CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
+Eight skills under `skills/`, five CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
 retro home's only writer and the one of the three writers nothing else reads at runtime; `jira.mjs`, API-only, which writes no file and reaches Jira through
 `/api/jira`), and one agent under `agents/` that the orchestrator dispatches to review an item's branch before it merges (and execute, before a `pr`-mode
 push). `backlog-orchestrate` is the only skill that merges — it works one item per worktree and merges each into the run's base branch (`main` unless the run

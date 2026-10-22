@@ -7638,6 +7638,126 @@ test('an in-review issue that is also ungroomed keeps both reasons, the in-revie
   assert.ok(row.reasons.length > 1, 'the groom reason is kept behind it');
 });
 
+// --- the plan-review guard (backlog-tick) -----------------------------------
+//
+// A plan the tick wrote unattended carries `plan-review` (a tracker label, a files `plan-review:` frontmatter line) until a person approves it by removing
+// the mark. Without the guard a groomed item with an unreviewed plan reads `ready` here and a run would execute a plan nobody has read. The gate is the
+// in-review one's twin: `ungroomed`, the shared sentence first, no new verdict. The files mark is read off the same bytes as `runner-fix:` — at `<base>`.
+
+const PLAN_REVIEW_REASON = 'this plan awaits review';
+
+// Same shape and same reason as `markRunnerFix`: what these cases vary is one frontmatter line, so it is written into a seeded item rather than owned by a
+// seeder.
+function markPlanReview(file, value = 'true') {
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(text.startsWith('---\n'), `expected a frontmatter fence in ${file}`);
+  fs.writeFileSync(file, text.replace('---\n', `---\nplan-review: ${value}\n`));
+}
+
+const PLAN_REVIEW_TASK_1 = ['backlog', 'tasks', 'open', 'task-1-show-a-queue-preview-before-an-orchestrator-run-starts.md'];
+
+test('plan on a files project gates a plan-review item out of the ready queue', (t) => {
+  const { home, project } = planGitFixture(t);
+  markPlanReview(path.join(project, ...PLAN_REVIEW_TASK_1));
+  commitEverything(project, 'mark task-1 plan-review');
+
+  const out = plan(project, home, '--json');
+
+  assert.equal(out.status, 0, out.stderr);
+  const queue = JSON.parse(out.stdout);
+  const gated = queue.find((q) => q.id === 'task-1');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], PLAN_REVIEW_REASON);
+  assert.deepEqual(gated.questions, []);
+  assert.equal(queue.find((q) => q.id === 'bug-7').gate, 'ready', 'a sibling without the mark stays ready');
+});
+
+test('plan: plan-review: false does not gate, and any other value does', (t) => {
+  const { home, project } = planGitFixture(t);
+  markPlanReview(path.join(project, ...PLAN_REVIEW_TASK_1), 'False');
+  commitEverything(project, 'plan-review: False on task-1');
+  assert.equal(JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1').gate, 'ready');
+
+  fs.writeFileSync(path.join(project, ...PLAN_REVIEW_TASK_1), fs.readFileSync(path.join(project, ...PLAN_REVIEW_TASK_1), 'utf8').replace('plan-review: False', 'plan-review: yes'));
+  commitEverything(project, 'plan-review: yes on task-1');
+  const gated = JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], PLAN_REVIEW_REASON);
+});
+
+test('plan reads plan-review at base, not the working tree', (t) => {
+  const { home, project } = planGitFixture(t);
+  const file = path.join(project, ...PLAN_REVIEW_TASK_1);
+
+  // Absent at base, added only in the working tree: the worktree a run cuts from base would not hold it, so the item is still ready.
+  markPlanReview(file);
+  assert.equal(JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1').gate, 'ready');
+
+  // Committed, then deleted only in the working tree: base still holds it, so the item is still gated.
+  commitEverything(project, 'mark task-1 plan-review');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('plan-review: true\n', ''));
+  const gated = JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-1');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], PLAN_REVIEW_REASON);
+});
+
+test('plan: an uncommitted plan-review item keeps the not-committed verdict', (t) => {
+  const { home, project } = planGitFixture(t);
+  fs.writeFileSync(path.join(project, TASK_9_REL), TASK_9_BODY.replace('---\nid: task-9', '---\nplan-review: true\nid: task-9'));
+
+  const item = JSON.parse(plan(project, home, '--json').stdout).find((q) => q.id === 'task-9');
+
+  assert.equal(item.gate, 'ungroomed');
+  assert.ok(item.reasons[0].includes(TASK_9_REL), `reason should name ${TASK_9_REL}: ${item.reasons[0]}`);
+  assert.ok(!item.reasons.includes(PLAN_REVIEW_REASON), 'a mark on bytes the run cannot see is not read');
+});
+
+test('plan on a tracker project gates a planReview issue', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { planReview: true }), apiItem(project, 4)];
+  const bodies = { 3: GROOMED_TASK_BODY, 4: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.deepEqual(
+    rows.filter((r) => r.gate === 'ready').map((r) => r.id),
+    ['4'],
+  );
+  const gated = rows.find((r) => r.id === '3');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], PLAN_REVIEW_REASON);
+  assert.deepEqual(gated.questions, []);
+});
+
+test('--ids naming a planReview issue gates it rather than dropping it', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { planReview: true }), apiItem(project, 4)];
+  const bodies = { 3: GROOMED_TASK_BODY, 4: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '3', '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((r) => [r.id, r.gate, r.reasons[0]]),
+    [['3', 'ungroomed', PLAN_REVIEW_REASON]],
+  );
+});
+
+test('in-review and plan-review together list both reasons, in-review first', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { inReview: true, planReview: true })];
+
+  const { out } = await withApi(gateRoutes(items, { 3: UNGROOMED_TASK_BODY }), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const [row] = JSON.parse(out.stdout);
+  assert.equal(row.gate, 'ungroomed');
+  assert.deepEqual(row.reasons.slice(0, 2), [IN_REVIEW_REASON, PLAN_REVIEW_REASON]);
+  assert.ok(row.reasons.length > 2, 'the groom reason is kept behind both');
+});
+
 // --- G-2a … G-2e: the cache a tracker queue is built from (bug-41) ----------
 //
 // `GET /api/items` is served from the poller's cache for a tracker project,

@@ -495,6 +495,28 @@ export function inReviewBlock(item: BacklogItem): string | null {
 }
 
 /**
+ * The plan-review guard's one sentence, and — like `IN_REVIEW_REASON` — ONE string everywhere: the board's Run button, the server's plan/dispatch ladder, the
+ * orchestrator's gate reason and backlog-tick's own skip reason. `orchestrate.mjs` carries a hand-kept copy (a plugin skill's `tools/` is a standalone copy
+ * of what was pushed and cannot import this file), pinned to this constant by a jest twin test, so a change here is a change in that copy too.
+ */
+export const PLAN_REVIEW_REASON = 'this plan awaits review';
+
+/**
+ * Why this item cannot be dispatched because its plan was written unattended and no person has approved it yet, or null. A tracker issue carries
+ * `planReview` while its `plan-review` label is on, a files item while its frontmatter has a `plan-review:` line (read by presence, as `runner-fix:` is): the
+ * tick's groom adds the mark in the one write that wrote the plan, and a person removes it to approve the plan for execution. Without this rung a groomed
+ * item with an unreviewed plan reads ready to every gate, and a click would execute a plan nobody has read.
+ *
+ * Per-item, the second rung of the same ladder `inReviewBlock` sits on, in all three places that read it — the client's `DispatchButton`, and the server's
+ * `plan` and `dispatch` re-check — always AFTER `inReviewBlock`, so an item carrying both says the PR reason (a PR is the stronger fact: the plan was already
+ * approved and executed). Like it, this reads the flag alone and never re-checks the source: the board reads the files mark from the working tree, so a line
+ * deleted but not yet committed still disables Run, the conservative direction.
+ */
+export function planReviewBlock(item: BacklogItem): string | null {
+  return item.planReview === true ? PLAN_REVIEW_REASON : null;
+}
+
+/**
  * The queue entry a FRESH run in this item's project holds this item at, when
  * that stage is one of `stages` — or null.
  *

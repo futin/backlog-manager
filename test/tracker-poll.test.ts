@@ -446,12 +446,12 @@ describe('the label bootstrap', () => {
     p.disarm();
   });
 
-  /* A repo bootstrapped before orchestrator:queued and in-review existed
-     carries the other eight; its next sync must create exactly the two it
-     lacks, and by name — a count alone would pass with the wrong labels
-     created. */
-  it('creates exactly orchestrator:queued and in-review for a repo that has the earlier eight', async () => {
-    const eight = TRACKER_LABELS.filter((l) => l.name !== 'orchestrator:queued' && l.name !== 'in-review').map((l) => ({ name: l.name }));
+  /* A repo bootstrapped before orchestrator:queued, in-review and plan-review
+     existed carries the other eight; its next sync must create exactly the
+     three it lacks, and by name — a count alone would pass with the wrong
+     labels created. */
+  it('creates exactly orchestrator:queued, in-review and plan-review for a repo that has the earlier eight', async () => {
+    const eight = TRACKER_LABELS.filter((l) => l.name !== 'orchestrator:queued' && l.name !== 'in-review' && l.name !== 'plan-review').map((l) => ({ name: l.name }));
     expect(eight).toHaveLength(8);
     const { poller: p, calls } = poller(registryOf(githubProject()), [
       ['/issues?', { status: 200, body: [] }],
@@ -461,14 +461,14 @@ describe('the label bootstrap', () => {
     await p.tick();
 
     const created = calls.filter((c) => c.method === 'POST' && c.url.endsWith('/labels'));
-    expect(created.map((c) => (JSON.parse(c.body ?? '{}') as { name?: string }).name)).toEqual(['orchestrator:queued', 'in-review']);
+    expect(created.map((c) => (JSON.parse(c.body ?? '{}') as { name?: string }).name)).toEqual(['orchestrator:queued', 'in-review', 'plan-review']);
     p.disarm();
   });
 
-  /* A repo bootstrapped when `in-review` did not exist yet carries the other
-     nine; its next sync creates exactly the one it lacks, and by name. */
-  it('creates exactly in-review for a repo that has the earlier nine', async () => {
-    const nine = TRACKER_LABELS.filter((l) => l.name !== 'in-review').map((l) => ({ name: l.name }));
+  /* A repo bootstrapped when `in-review` and `plan-review` did not exist yet carries the other nine; its next sync creates exactly the two it lacks, and by
+     name. */
+  it('creates exactly in-review and plan-review for a repo that has the earlier nine', async () => {
+    const nine = TRACKER_LABELS.filter((l) => l.name !== 'in-review' && l.name !== 'plan-review').map((l) => ({ name: l.name }));
     expect(nine).toHaveLength(9);
     const { poller: p, calls } = poller(registryOf(githubProject()), [
       ['/issues?', { status: 200, body: [] }],
@@ -478,11 +478,27 @@ describe('the label bootstrap', () => {
     await p.tick();
 
     const created = calls.filter((c) => c.method === 'POST' && c.url.endsWith('/labels'));
-    expect(created.map((c) => (JSON.parse(c.body ?? '{}') as { name?: string }).name)).toEqual(['in-review']);
+    expect(created.map((c) => (JSON.parse(c.body ?? '{}') as { name?: string }).name)).toEqual(['in-review', 'plan-review']);
     p.disarm();
   });
 
-  it('creates none when the repo already has all ten', async () => {
+  /* A repo bootstrapped when `plan-review` did not exist yet carries the other ten; its next sync creates exactly the one it lacks, and by name. */
+  it('creates exactly plan-review for a repo that has the earlier ten', async () => {
+    const ten = TRACKER_LABELS.filter((l) => l.name !== 'plan-review').map((l) => ({ name: l.name }));
+    expect(ten).toHaveLength(10);
+    const { poller: p, calls } = poller(registryOf(githubProject()), [
+      ['/issues?', { status: 200, body: [] }],
+      ['POST /labels', { status: 201 }],
+      ['GET /labels', { status: 200, body: ten }]
+    ]);
+    await p.tick();
+
+    const created = calls.filter((c) => c.method === 'POST' && c.url.endsWith('/labels'));
+    expect(created.map((c) => (JSON.parse(c.body ?? '{}') as { name?: string }).name)).toEqual(['plan-review']);
+    p.disarm();
+  });
+
+  it('creates none when the repo already has all eleven', async () => {
     const { poller: p, calls } = poller(registryOf(githubProject()), [
       ['/issues?', { status: 200, body: [] }],
       ['/labels', LABELS_PRESENT]
@@ -523,8 +539,8 @@ describe('the label bootstrap', () => {
   it('retries on the next tick when a create fails, and stops once it succeeds', async () => {
     const { poller: p, calls } = poller(registryOf(githubProject()), [
       ['/issues?', { status: 200, body: [] }],
-      // Every create fails on the first tick and succeeds on the second: ten
-      // creates a tick, so the eleventh call onwards is the second tick's.
+      // Every create fails on the first tick and succeeds on the second: eleven
+      // creates a tick, so the twelfth call onwards is the second tick's.
       ['POST /labels', (n): Canned => (n <= TRACKER_LABELS.length ? { status: 500, body: { message: 'boom' } } : { status: 201 })],
       ['GET /labels', { status: 200, body: [] }]
     ]);

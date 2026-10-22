@@ -1,13 +1,14 @@
 # The skills
 
-Seven skills under `skills/` — six backlog skills and `jira` — one agent under `agents/`, and four CLIs beneath the skills — two of which do all the writing
-to items, the registry and the run file, a third that only reads them, and `jira.mjs`, which writes no file of its own and reaches Jira only through the local
+Eight skills under `skills/` — seven backlog skills and `jira` — one agent under `agents/`, and five CLIs beneath the skills — two of which do all the writing
+to items, the registry and the run file, a third that only reads them, `tick.mjs`, which owns the one directory a scheduled tick keeps its lock and its failure
+record in, and `jira.mjs`, which writes no file of its own and reaches Jira only through the local
 API, its one git command (`worktree`) aside — plus one single-purpose helper `orchestrate.mjs` runs as a child (`api-call.mjs`, task-47). This is the plugin's
 skill root — never duplicated under `.claude/skills/`, which would load the same skills twice and drift.
 
 ## Mechanism
 
-### The seven
+### The eight
 
 | skill                 | what it does                                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -17,6 +18,7 @@ skill root — never duplicated under `.claude/skills/`, which would load the sa
 | `backlog-execute`     | does the work on a groomed bug or task, then archives it once verification proves it worked — or, when its trigger says `--finish pr`, commits it in its own worktree, has it reviewed, pushes and opens a pull request |
 | `backlog-orchestrate` | drains a project's groomed queue unattended, one item per git worktree, each reviewed and verified before it merges                                                                                                                         |
 | `backlog-retro`       | sweeps every orchestrator run on the machine into a report of what the pipeline cost, where the time went and how much was rework, proposes backlog items from what it finds, and records the sweep for the next one to be measured against |
+| `backlog-tick`        | one unattended unit of work per scheduled tick, started by a dashboard job: only when the project is idle, it executes a ready bug or task to a PR, or grooms an ungroomed bug or a refactor into a plan marked `plan-review` |
 | `jira`                | reads one Jira ticket and moves it — prints it, lists and applies its transitions, assigns it to me, checks the connection — all through `/api/jira`; on a Jira Run, makes the ticket's git worktree in a mapped repo (git only)           |
 
 `backlog-orchestrate` is the largest of the seven and the only one that merges. Told to drain a queue, it works every ready bug and task one at a time —
@@ -54,6 +56,9 @@ make the server append the clause, and a typed trigger carries the same flag by 
   through the local API and deletes the files last. Since task-46 it has **two modes**, chosen by that marker and nothing else (see below).
 - `skills/backlog-orchestrate/tools/orchestrate.mjs` — `backlog-orchestrate`'s own CLI, and the run file's only writer. Since task-47 it has two modes of its
   own, chosen by the same committed marker `backlog.mjs` reads (see below).
+- `skills/backlog-tick/tools/tick.mjs` — `backlog-tick`'s own CLI, and the tick home's only writer (through `tick-state.mjs`, the one file that writes). Four
+  subcommands: `decide` (reads the project and prints ONE JSON verdict — `execute`, `groom`, `recover`, `busy` or `idle` — taking the lock only for the first
+  two), `record <id> ok|failed --kind groom|execute`, `status` and `forget <id>`. See [`backlog-tick`](#backlog-tick) below.
 - `skills/backlog-orchestrate/tools/api-call.mjs` — one HTTP request and nothing else, run by `orchestrate.mjs` with `spawnSync` (task-47). It exists so the
   parent can stay synchronous: `fetch` is asynchronous and `orchestrate.mjs`'s entry guard rests on nothing holding the event loop open, so the asynchrony is
   exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
@@ -112,6 +117,7 @@ What each verb does differently, and the five that exist only here:
 | `drift`          | both modes — files reads the item file, API mode the body and its footer; GET requests only (#322)                                               |
 | `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |
 | `review`         | new — `review <id> on\|off` sets or clears the `in-review` label through `POST /api/items/review` (execute `pr` mode). Files mode: exit `1`         |
+| `plan-review`    | new — `plan-review <id> on\|off` sets or clears the `plan-review` label through `POST /api/items/plan-review` (backlog-tick); `review`'s twin, and `off` is how a plan is approved. `new` and `body` also take `--plan-review`, so the mark lands in the same write as the plan. Files mode: exit `1`, naming the `plan-review: true` line to delete |
 
 Ids are `31`, `#31` or this project's own URN, all meaning one issue; a file-shaped id and another repo's URN are each refused with their own sentence. Session
 identity is `CLAUDE_CODE_SESSION_ID`, falling back to `<user>@<host>` — stable across the two processes `start` and `stop` run in. The MACHINE a claim records
@@ -184,6 +190,34 @@ A plan is written against one commit and executed against a later one. Four piec
   matches; a re-groom changes the hash and so clears it. `archiveSidecars` never moves the file. `docs/subsystems/invariants.md`'s "a stale-plan mark is keyed
   by the plan's hash" carries the reasoning.
 
+### `backlog-tick`
+
+Spec: [2026-10-22-backlog-tick-design.md](../superpowers/specs/2026-10-22-backlog-tick-design.md). A dashboard job fires the skill on a schedule, and every
+firing asks `tick.mjs decide` one question — is there a unit of work worth starting, and is the project idle? — and does exactly what the answer says, then
+reports `record`. The skill never runs by hand and never decides anything itself: the verdict is data from a tool, and the session only carries it out.
+
+**`decide` prints one JSON line.** `execute <id>` (the next ready bug or task, off the working tree, while fewer than `--max-prs` `execute/*` pull requests are
+open), `groom <id>` (an ungroomed bug's fix, or a refactor promoted to a task, while fewer than `--max-plans` items carry `plan-review`), `recover` (a lock
+older than `--lock-ttl` minutes was found and claimed), `busy` (the project is occupied — a `running` or `paused` run, a board-started run with no run file, a
+`started:` marker anywhere in the main checkout or a linked worktree, a live claim or a fresh remote run) or `idle` (nothing worth starting, or a tracker
+project whose stack is down). Execute wins over groom. `--dry-run` writes nothing, not even the lock. Defaults: 2 open PRs, 3 plans awaiting review, a
+180-minute lock.
+
+**Unattended means a gate.** A groom a tick runs lands the plan in the same write as the `plan-review` mark (a label, or a `plan-review: true` frontmatter
+line), and every gate that could execute the item refuses it with `this plan awaits review` until a person removes the mark — `backlog.mjs plan-review <id>
+off`, or delete-and-commit on a files project. A tick's groom never promotes an idea, never rejects, never commits and never asks a question. Why it is built
+this way: [invariants.md](invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review).
+
+**State lives in `~/.backlog-manager/tick/<project-key>/`** (`$BM_TICK_HOME`): a `lock` and a `state.json` recording each item the tick failed on by content
+hash, so an item that cannot be done is skipped until it changes — by the same kind of unit, except that a failed groom holds back execute too, because its
+plan may be one nobody reviewed; a person who has reviewed it runs `forget`. `decide` refuses a linked worktree; `record`, `status` and `forget` follow one
+to its main checkout, because an execute's `--finish pr` leaves the session inside its own tree, and `record` exits `3` when the lock names another id. The tool
+is self-contained — it imports from no other skill, `server/` or `shared/`, runs
+neither `orchestrate.mjs` nor `backlog.mjs`, and writes no git — and the twins it carries name their originals. A killed tick's lock is recovered by the next
+one, and the only marker it ever clears is the groom `started:` its own stale lock proves was its own
+([invariants.md](invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)); the ownership rule is
+[invariants.md](invariants.md#backlog-managertick-has-exactly-one-writer-and-the-tick-never-writes-run-state).
+
 ### `references/`
 
 `skills/backlog-orchestrate/references/` holds the parts its `SKILL.md` deliberately does **not** carry inline, because a run re-reads its whole body on
@@ -213,6 +247,8 @@ needed. Currently one: `backlog-reviewer.md`, the read-only reviewer `backlog-or
 - **The retro home** — `retro.mjs record` writes `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`) and nothing else does, once per sweep and refusing to overwrite
   an existing record; `retro.mjs sweep` only reads it back for the deltas. Nothing in the server or the client reads it at all — a board view over the newest
   record is a separate design, once records exist.
+- **The tick home** — `tick.mjs` writes `~/.backlog-manager/tick/` (`$BM_TICK_HOME`), one directory per project, and nothing else does; it reads the run-state
+  directory, the registry and the project's items to say `busy`, and writes none of them. Nothing in the server or the client reads it.
 - **The plugin install** — a run resolves its own skill files through the plugin-root path its skill text was loaded with,
   a copy of the pushed `HEAD`. Getting an edit there is
   [workflows/publishing.md](../workflows/publishing.md).

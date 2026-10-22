@@ -15,14 +15,14 @@ import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, Cl
 export { answer };
 
 /**
- * items-write.controller.ts — nine of a tracker project's ten item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
- * spec's §2), and the tenth, `review` (the execute pr-mode spec's decision 9).
+ * items-write.controller.ts — ten of a tracker project's eleven item write routes: task-46's seven (spec §6.2), the eighth, `queue` (the orchestrator:queued
+ * spec's §2), the tenth, `review` (the execute pr-mode spec's decision 9), and the eleventh, `plan-review` (backlog-tick).
  * The ninth item write, `POST /api/items/abort` (#225), is NOT here: it calls the dashboard, so it lives in
  * `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this file.
  *
  * ## What this file is, and what it deliberately is not
  *
- * Nine thin pass-throughs. Every route does the same four things in the same
+ * Ten thin pass-throughs. Every route does the same four things in the same
  * order and nothing else: rebuild the body field by field, ask
  * `ItemsService.writerFor` whether this project can be written to at all, call
  * one `ItemWriter` method, and turn its `WriteRefusal` into a status. No route
@@ -112,6 +112,8 @@ export class ItemsWriteController {
         // Strictly `=== true`, the same parse rule `remoteControl` follows on
         // the dispatch route: anything else means off.
         runnerFix: raw.runnerFix === true,
+        // `=== true` for the same reason, and the label rides this create call — see `GithubSource.create`.
+        planReview: raw.planReview === true,
         from
       })
     );
@@ -193,7 +195,7 @@ export class ItemsWriteController {
     const finished = claimFinishedOf(raw.finished);
 
     const w = writable(this.items.writerFor(project));
-    // `state` is the ONE field on these nine routes taken outright, and it is
+    // `state` is the ONE field on these ten routes taken outright, and it is
     // safe for the reason the dispatch route's `prompt` is not: no predicate
     // branches on it. It is the `ClaimState` task-47's driver publishes,
     // round-tripped into a comment this app wrote and back out again; its one
@@ -222,9 +224,15 @@ export class ItemsWriteController {
       throw new HttpException({ error: 'runnerFix must be a boolean' }, 400);
     }
     const runnerFix = raw.runnerFix as boolean | undefined;
+    // `planReview` is `runnerFix`'s twin in every respect, the 400 included: a tick's groom that sent `'yes'` meant to mark a plan for review, and dropping
+    // it would leave an unattended plan looking approved to every gate.
+    if (raw.planReview !== undefined && typeof raw.planReview !== 'boolean') {
+      throw new HttpException({ error: 'planReview must be a boolean' }, 400);
+    }
+    const planReview = raw.planReview as boolean | undefined;
 
     const w = writable(this.items.writerFor(project));
-    return answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix }));
+    return answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix, planReview }));
   }
 
   /** Append a comment. Execute's failure path: the Outcome is recorded and the
@@ -281,13 +289,32 @@ export class ItemsWriteController {
     const w = writable(this.items.writerFor(project));
     return answer(await w.writer.review(w.project, w.marker, { project, id, inReview }));
   }
+
+  /**
+   * The eleventh route (backlog-tick): add or remove the `plan-review` label that marks a plan written unattended and not yet approved. A tick's groom adds
+   * it (`backlog.mjs plan-review <id> on`); a person approving the plan removes it. `review`'s twin.
+   *
+   * `planReview` must be a literal boolean, a 400 otherwise, for `review`'s reason: coercing `'false'` to truthy would add the hold somebody was trying to
+   * lift, and coercing `'true'` the other way would leave an unreviewed plan looking approved.
+   */
+  @Post('plan-review')
+  async planReview(@Body() body: Record<string, unknown> | undefined): Promise<{ id: string; planReview: boolean }> {
+    const raw = body ?? {};
+    const project = required(raw.project, 'project');
+    const id = required(raw.id, 'id');
+    if (typeof raw.planReview !== 'boolean') throw new HttpException({ error: 'planReview must be a boolean' }, 400);
+    const planReview = raw.planReview;
+
+    const w = writable(this.items.writerFor(project));
+    return answer(await w.writer.planReview(w.project, w.marker, { project, id, planReview }));
+  }
 }
 
 /**
- * The project gate, in one place for all ten (the second, third and fourth
+ * The project gate, in one place for all eleven (the second, third and fourth
  * refusals). Throws rather than returning a union, because every caller does
- * the identical thing with a failure and a tenth copy of that branch is
- * ten chances for one of them to answer 404 where the others answer 400.
+ * the identical thing with a failure and an eleventh copy of that branch is
+ * eleven chances for one of them to answer 404 where the others answer 400.
  *
  * Exported since #225, so the abort route in `agents/` gates a project exactly as these routes do.
  */
@@ -369,7 +396,7 @@ function commentIdOf(value: unknown): number {
 /**
  * `ItemClaimRequest.run`, or `undefined` when the caller sent none (task-47).
  *
- * Validated field by field, and it is the only nested object on these nine
+ * Validated field by field, and it is the only nested object on these ten
  * routes that is — `heartbeat`'s `state` is taken outright one route over, and
  * the difference between them is the whole rule: **the server BRANCHES on this
  * one.** `runId` decides whether a contesting claim is a takeover or a race

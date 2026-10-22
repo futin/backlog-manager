@@ -83,6 +83,9 @@ The commands and flags that exist only here, one line each:
 - `review <id> on|off` sets or clears the issue's `in-review` label — the guard every gate reads as `a PR is open for this item`, so pushed work waiting on a
   reviewer is never executed twice. `backlog-execute` in `pr` mode runs `on` right after it pushes; run `off` yourself when the PR closes without merging.
   Refused in a files project, which has no label to carry it.
+- `plan-review <id> on|off` sets or clears the issue's `plan-review` label — the guard every gate reads as `this plan awaits review`, put there by an unattended
+  `backlog-tick` groom so a plan nobody has read is never executed. `off` is how a person approves it. Refused in a files project, where the mark is a
+  `plan-review: true` frontmatter line: delete it and commit.
 
 ## Print it as returned
 
@@ -154,7 +157,7 @@ carries it (untracked or staged), a resume leaves it out of the uncommitted-chan
 marker included — still refuses.
 
 Three things do not survive the move. A body over GitHub's 65,536-character cap is cut at a `## ` heading boundary and gains a line linking the full file at
-HEAD. `tags:` live in the footer only, since the tracker's label set is a closed ten. And the file's git history stays in the repository — the issue is dated
+HEAD. `tags:` live in the footer only, since the tracker's label set is a closed eleven. And the file's git history stays in the repository — the issue is dated
 by its `created` frontmatter, not by the commit that filed it.
 
 ## Next

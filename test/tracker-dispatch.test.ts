@@ -268,6 +268,47 @@ describe('an item whose PR is in review', () => {
 });
 
 /**
+ * The plan-review guard (backlog-tick): an issue labelled `plan-review` carries a plan written unattended, and the plan answers it as `blocked` with the one
+ * shared sentence while `dispatch` refuses it with the same uncoded 409. Driven through the real label and mapper. The in-review rung is checked first, so an
+ * issue holding both says the PR reason — pinned here so the ladder's order cannot drift on one side only.
+ */
+describe('an item whose plan awaits review', () => {
+  beforeEach(async () => {
+    gh.issues.get(31)!.labels.push({ name: 'plan-review' });
+    await app.get(TrackerPollerService).tick();
+  });
+
+  it('is blocked in the plan with the plan-review reason', async () => {
+    const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(res.body.action).toBe('execute');
+    expect(res.body.blocked).toBe('this plan awaits review');
+  });
+
+  it('409s dispatch with the plan-review reason, and spawns nothing', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
+      .expect(409);
+    expect(res.body).toEqual({ error: 'this plan awaits review' });
+    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it('says the in-review reason when the issue carries both labels — in-review first', async () => {
+    gh.issues.get(31)!.labels.push({ name: 'in-review' });
+    await app.get(TrackerPollerService).tick();
+
+    const plan = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(plan.body.blocked).toBe('a PR is open for this item');
+    const res = await request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
+      .expect(409);
+    expect(res.body).toEqual({ error: 'a PR is open for this item' });
+    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+});
+
+/**
  * #227 — the item-claim block, re-checked by `dispatch` for a tracker item the way `runClaimBlock` is. A live claim, a run's claim and a claim held by a
  * session the board itself dispatched all refuse; a STALE hand claim proceeds — the spawned session's `start` retires it — unless this machine can show
  * the holder is still running.

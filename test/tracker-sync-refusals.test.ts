@@ -141,7 +141,8 @@ describe('the item write routes', () => {
     ['body', () => ({ project: trackerPath, id: '#31', body: 'new text', ifUpdatedAt: '2026-09-02T10:00:00Z' })],
     ['comment', () => ({ project: trackerPath, id: '#31', body: 'hello' })],
     ['queue', () => ({ project: trackerPath, id: '#31', queued: true })],
-    ['review', () => ({ project: trackerPath, id: '#31', inReview: true })]
+    ['review', () => ({ project: trackerPath, id: '#31', inReview: true })],
+    ['plan-review', () => ({ project: trackerPath, id: '#31', planReview: true })]
   ];
 
   it.each(ROUTES)('%s answers 409 with the sentence and makes no request to GitHub', async (route, body) => {

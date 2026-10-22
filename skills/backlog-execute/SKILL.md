@@ -62,6 +62,14 @@ that channel** — under the marker, every one of those exits reports to the run
 are the verification-failure path and the never-commits hard limit; they carry the exception themselves, because a session reading one of them is not
 necessarily re-reading this section.
 
+## Am I inside a tick?
+
+The token `[backlog-tick]` anywhere after the id means `backlog-tick` dispatched this session unattended — and it is **not** `[orchestrator-run`: no run owns
+the worktree, the branch or the push, so execute owns its git exactly as `--finish pr` says, typed as given and never overridden. Never ask the user anything,
+and run nothing in the background (the foreground-only rule above holds in full, its dev-server exception included). Every stop — a refusal at the gate, a
+lost claim race, a failed verification, a push or PR that did not happen — ends the final message with one line starting `failed:` and the reason; success
+ends it with the PR URL on its own line. Why, and the stops, are in `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/backlog-tick.md`.
+
 ## Finish mode: `in-place` or `pr`
 
 Under an `[orchestrator-run` marker skip this section entirely: the run owns every git step and no finish mode is read there. Otherwise read it from the
@@ -158,6 +166,10 @@ whole execute session spent on it. The section check is what makes the gate tota
   if all that's there is a placeholder like `unknown`. Tell the user: run `/backlog-groom` on `<id>` first.
 - **Bug:** look at `## Fix`. Refuse if its content is still exactly `unknown` — the placeholder `backlog-capture` writes for a bug nobody has diagnosed yet.
   Tell the user: run `/backlog-groom` on `<id>` first.
+- **Either, in either source and either finish mode:** refuse an item carrying the plan-review mark — a files item whose frontmatter has a `plan-review:` line
+  with any value but `false` (trimmed, case-insensitive), a tracker item whose `show <id> --json` carries `"planReview":true` —
+  with `this plan awaits review`. The mark is a plan written unattended and not yet read by a person; lifting it is the person's act (`plan-review <id> off` on a
+  tracker, deleting the line in a files project), never this skill's.
 - **Either, in a tracker project, in either finish mode:** refuse an item whose `show <id> --json` carries `"inReview":true`, with `a PR is open for this item`
   — naming the PR when `gh pr list --state open --head execute/<id> --json url` finds it. Its pushed work is waiting on a review; removing the label is the
   person's `review <id> off`, never this skill's.
