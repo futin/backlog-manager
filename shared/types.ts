@@ -1960,6 +1960,9 @@ export interface DashboardEntry {
   efforts?: string[];
 }
 
+/** What an entry POST may send: `bmUrl` and `host` may be left out, and the server stores their defaults (`validateEntry`); what it reads back is a `DashboardEntry`. */
+export type DashboardEntryInput = Omit<DashboardEntry, 'bmUrl' | 'host'> & { bmUrl?: string; host?: string };
+
 /** This machine's own presentation: everything optional, and home's URL and token stay `BM_AGENTS_URL` / `BM_AGENTS_TOKEN`, never in the file. */
 export interface HomeEntry {
   label?: string;

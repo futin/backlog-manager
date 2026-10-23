@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { EFFORTS, MODELS } from '../../../../shared/agent';
+import { EFFORTS, MODELS, defaultBoardUrl } from '../../../../shared/agent';
 import type { DashboardEntry, DashboardsFile, HomeEntry, SuggestStrategy } from '../../../../shared/types';
 
 /**
@@ -86,6 +86,9 @@ function originOf(v: unknown): string | null {
   }
 }
 
+// Absent, `null`, or a string of only whitespace: the shape a cleared form field arrives in, and the cue for `validateEntry` to store a default.
+const isBlank = (v: unknown): boolean => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+
 // A non-empty subset of `allowed`, deduplicated and in the order given; null when it is not one (not an array, empty, or holding a string outside the list).
 // Exported for the home POST (`DashboardsService.setHome`), which applies the same rule to a body that `normaliseHome` applies to a file.
 export function subsetOf(v: unknown, allowed: readonly string[]): string[] | null {
@@ -102,16 +105,22 @@ export function subsetOf(v: unknown, allowed: readonly string[]): string[] | nul
  * One remote entry's shape, and nothing about the list it sits in. Returns the entry as it is to be stored — urls reduced to origins, account trimmed — or the
  * message for a 400. The checks run in a fixed order so the first thing wrong is the one reported: name, reserved, url, bmUrl, host, account, models, efforts.
  * `null` for an optional key reads as absent, because a form that clears a field sends it that way.
+ *
+ * `bmUrl` and `host` may be left blank (absent, `null` or whitespace) and are then STORED as their defaults, not derived on every read: the board URL is
+ * `defaultBoardUrl(url)` — the same host on the board's default web port, which is what a tailnet with both apps on their defaults needs — and the machine
+ * name is the entry's own name. Storing them keeps the file saying what the server will call and what a claim's `host` is compared to, and a hand-edited entry
+ * that leaves either out is completed by the reader the same way. An explicit value that fails its rule is still the 400 it always was.
  */
 export function validateEntry(body: unknown): DashboardEntry | string {
   if (!isPlainObject(body)) return 'entry must be an object';
-  const { name, host } = body;
+  const { name } = body;
   if (typeof name !== 'string' || !NAME_RULE.test(name)) return 'name must match ^[A-Za-z][A-Za-z0-9]{0,23}$';
   if (name.toLowerCase() === HOME_ID) return `name "${HOME_ID}" is reserved`;
   const url = originOf(body.url);
   if (url === null) return 'url must be an http(s) origin';
-  const bmUrl = originOf(body.bmUrl);
+  const bmUrl = isBlank(body.bmUrl) ? defaultBoardUrl(url) : originOf(body.bmUrl);
   if (bmUrl === null) return 'bmUrl must be an http(s) origin';
+  const host = isBlank(body.host) ? name : body.host;
   if (typeof host !== 'string' || host.length < 1 || host.length > HOST_MAX || /\s/.test(host))
     return `host must be 1–${HOST_MAX} characters with no whitespace`;
   const entry: DashboardEntry = { name, url, bmUrl, host };

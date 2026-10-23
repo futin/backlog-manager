@@ -124,7 +124,7 @@ gets executed. The board calls this API, this API calls the dashboard's `POST /a
 can watch it, and answer its questions from a phone if its hooks are installed.
 
 Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, or `BM_AGENTS_DOCKER_URL` when the stack is doing the calling, and `BM_AGENTS_TOKEN` if the dashboard
-sets `ANSWER_TOKEN`). **Settings ▸ Shared ▸ Claude Agents** reports exactly which gate is closed and what to do about it. The action is derived from the item file, not
+sets `ANSWER_TOKEN`). **Settings ▸ Shared ▸ Dashboards** (its Home row) reports exactly which gate is closed and what to do about it. The action is derived from the item file, not
 from the click, so an ungroomed bug cannot be executed by asking nicely — and nothing here ever writes an item: the spawned session runs the skills, which
 remain the only writers.
 

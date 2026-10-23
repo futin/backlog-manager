@@ -1,12 +1,14 @@
 import { useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { useAgents } from '../../hooks/useAgents';
 import { useDashboards } from '../../hooks/useDashboards';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { deleteEntry, saveEntry, saveHome, saveSuggestion } from '../../lib/dashboards';
-import { EFFORTS, MODELS } from '../../../../shared/agent';
-import type { DashboardEntry, DashboardsView, SuggestStrategy } from '../../../../shared/types';
+import { EFFORTS, MODELS, defaultBoardUrl } from '../../../../shared/agent';
+import type { AgentsStatus, DashboardEntryInput, DashboardsView, SuggestStrategy } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
+import { AgentsStatusLines, DispatchSetupSteps } from './DispatchStatus';
 import { Confirm } from '../ui/Confirm';
 import { NumberField } from '../ui/NumberField';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
@@ -22,8 +24,13 @@ import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
  * its token `BM_AGENTS_TOKEN`: the env var's NAME and, for the URL, its value are shown and neither is editable here; a remote's URL and token var are
  * `BM_AGENTS_TOKEN_<NAME>`. Under the machines: the three suggestion strategies as a radio group and the threshold.
  *
- * **A token is never on this page, in any form.** The payload carries a boolean (`tokenSet`) and the var's name, and the line says `✓ set` or `✗ not set — add
- * it to .env and restart`. There is no field to enter one, because a value typed into a browser would have to be stored somewhere the server reads it from,
+ * **Home's first line is this machine's dispatch report** (`DispatchStatus.tsx`) — the status that was the `Claude Agents` card before the two were folded
+ * into this one, since that card reported the very dashboard this one lists as Home — and the setup steps open under the Home row while it is unhealthy. It
+ * is read by `useAgents`, not from the dashboards view, so it is drawn even while `GET /api/dashboards` has not answered or has failed.
+ *
+ * **A token is never on this page, in any form.** The payload carries a boolean (`tokenSet`) and the var's name, and the line says `✓ set` or `not set —
+ * needed only if that dashboard does not trust this machine`: a dashboard that trusts its tailnet (or, for home, loopback) takes a call with no token at all,
+ * so an unset one is the common, working case and is not drawn as a fault. There is no field to enter one, because a value typed into a browser would have to be stored somewhere the server reads it from,
  * and the env var is that place already; rows are drawn from named fields, never by spreading an entry, so a field a future payload grows cannot reach the
  * DOM by accident.
  *
@@ -31,7 +38,9 @@ import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
  * home entry reads like the others; home's own launch sheets behave exactly as before (the server drops an unknown model on home silently), so this card
  * puts no hint beside them that suggests otherwise.
  *
- * **One form at a time**, open under the row it edits (or after the list for `Add dashboard`). Models and efforts are checkboxes; every box ticked is sent as
+ * **One form at a time**, open under the row it edits (or after the list for `Add dashboard`). Only Name and Dashboard URL are required: a blank Board URL or
+ * Machine name is sent as absent and the server stores its default (`validateEntry`), which the field shows as its placeholder — `defaultBoardUrl` of the
+ * URL typed so far, and the name — so what the form promises is what the file gets. Models and efforts are checkboxes; every box ticked is sent as
  * NO list (home: `null`, which clears it), because absent means "the whole list" on the server and a stored full list would silently stop following `MODELS`
  * the day it grows. None ticked disables Save with the reason — the server would refuse an empty list, and a button that can only fail is the silent no-op
  * this page avoids. A new entry whose name already exists is held at the form too: the server treats a same-name POST as an UPDATE (that is how Save on an
@@ -69,6 +78,7 @@ function ticked(list: string[], all: readonly string[]): string[] {
 
 export function DashboardsGroup() {
   const { view: loaded, error } = useDashboards();
+  const { status } = useAgents();
   // A write answers the whole fresh view; the hook reads once on mount, so the latest answer simply outranks it.
   const [written, setWritten] = useState<DashboardsView | null>(null);
   const view = written ?? loaded;
@@ -84,6 +94,15 @@ export function DashboardsGroup() {
   if (view === null) {
     return (
       <SettingsGroup title="Dashboards" scope="this machine">
+        <SettingsRow
+          name="Dispatch"
+          hint={
+            <>
+              dispatch <AgentsStatusLines status={status} />
+            </>
+          }
+        />
+        <DispatchSetupSteps status={status} />
         <SettingsRow
           name={error === null ? 'Dashboards' : 'Unavailable'}
           hint={
@@ -234,10 +253,11 @@ export function DashboardsGroup() {
           <div key={id} className="dash-machine">
             <SettingsRow
               name={remote === null ? view.home.label : remote.name}
-              hint={remote === null ? <HomeLines view={view} /> : <RemoteLines entry={remote} />}
+              hint={remote === null ? <HomeLines view={view} status={status} /> : <RemoteLines entry={remote} />}
             >
               {machineControls(id)}
             </SettingsRow>
+            {remote === null && <DispatchSetupSteps status={status} />}
             {isEditing &&
               (remote === null ? (
                 <HomeForm
@@ -342,17 +362,20 @@ function Line({ children }: { children: ReactNode }) {
 
 /** The token's line: the var's NAME and whether it is set, and nothing of its value (the payload never carries one). */
 function tokenLine(tokenVar: string, set: boolean): string {
-  return set ? `${tokenVar} ✓ set` : `${tokenVar} ✗ not set — add it to .env and restart`;
+  return set ? `${tokenVar} ✓ set` : `${tokenVar} not set — needed only if that dashboard does not trust this machine; then add it to .env and restart`;
 }
 
 function listLine(label: string, list: string[], all: readonly string[]): string {
   return `${label}: ${ticked(list, all).join(', ')}`;
 }
 
-function HomeLines({ view }: { view: DashboardsView }) {
+function HomeLines({ view, status }: { view: DashboardsView; status: AgentsStatus | null }) {
   const { home } = view;
   return (
     <>
+      <Line>
+        dispatch <AgentsStatusLines status={status} />
+      </Line>
       <Line>
         <code>BM_AGENTS_URL</code> {home.url}
       </Line>
@@ -550,7 +573,7 @@ function RemoteForm({
   /** The OTHER entries' names — the ones this form's name may not repeat. */
   taken: string[];
   busy: boolean;
-  onSave: (entry: DashboardEntry) => void;
+  onSave: (entry: DashboardEntryInput) => void;
   onCancel: () => void;
   error: ReactNode;
 }) {
@@ -573,7 +596,7 @@ function RemoteForm({
       : efforts.length === 0
         ? 'tick at least one effort'
         : null;
-  const complete = trimmed !== '' && url.trim() !== '' && bmUrl.trim() !== '' && host.trim() !== '';
+  const complete = trimmed !== '' && url.trim() !== '';
 
   return (
     <div className="set-row set-row-stacked dash-form">
@@ -594,27 +617,27 @@ function RemoteForm({
         hint="The claude-agents-dashboard on that machine."
         value={url}
         onChange={setUrl}
-        placeholder="http://pro-mac:4310"
+        placeholder="http://pro.tailnet.ts.net:4173"
         disabled={busy}
       />
       <Field
         label="Board URL"
-        hint="The backlog-manager on that machine."
+        hint="Optional — the backlog-manager on that machine. Blank is the dashboard's host on the board's default port."
         value={bmUrl}
         onChange={setBmUrl}
-        placeholder="http://pro-mac:4322"
+        placeholder={defaultBoardUrl(url.trim()) ?? 'http://pro.tailnet.ts.net:5177'}
         disabled={busy}
       />
       <Field
         label="Machine name"
         hint={
           <>
-            Must equal <code>BM_MACHINE_NAME</code> in that machine's shell environment — it is how a claim says where it runs.
+            Optional — blank is the name. Must equal <code>BM_MACHINE_NAME</code> in that machine's shell environment — it is how a claim says where it runs.
           </>
         }
         value={host}
         onChange={setHost}
-        placeholder="pro-mac"
+        placeholder={trimmed === '' ? 'Pro' : trimmed}
         disabled={busy}
       />
       <Field
@@ -633,7 +656,10 @@ function RemoteForm({
         error={error}
         onCancel={onCancel}
         onSave={() => {
-          const entry: DashboardEntry = { name: trimmed, url: url.trim(), bmUrl: bmUrl.trim(), host: host.trim() };
+          // A blank Board URL or Machine name is left out, and the server stores the default the placeholder shows.
+          const entry: DashboardEntryInput = { name: trimmed, url: url.trim() };
+          if (bmUrl.trim() !== '') entry.bmUrl = bmUrl.trim();
+          if (host.trim() !== '') entry.host = host.trim();
           if (account.trim() !== '') entry.account = account.trim();
           // Every box ticked is NO list: absent means the whole list, and follows `MODELS` when it grows.
           if (models.length !== MODELS.length) entry.models = models;

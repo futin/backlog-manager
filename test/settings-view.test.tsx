@@ -208,14 +208,14 @@ describe('SettingsView', () => {
 
       for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch']) expect(groupTitles()).toContain(title);
       expect(groupTitles()).not.toContain('Orchestrator watchdog');
-      expect(groupTitles()).not.toContain('Claude Agents');
+      expect(groupTitles()).not.toContain('Dashboards');
     });
 
     it('renders only the host-backed cards on Shared', async () => {
       renderView('shared');
       await screen.findByText(/connected/);
 
-      for (const title of ['Orchestrator watchdog', 'Claude Agents']) expect(groupTitles()).toContain(title);
+      for (const title of ['Orchestrator watchdog', 'Dashboards']) expect(groupTitles()).toContain(title);
       for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch']) expect(groupTitles()).not.toContain(title);
     });
 
@@ -301,7 +301,9 @@ describe('SettingsView', () => {
   // (see the last lines of client/src/hooks/useSettings.tsx) and never
   // touches localStorage at all, so a bare `render(<SettingsView />)` could
   // never observe the edited-link case below.
-  describe('the Claude Agents group · Shared', () => {
+  // The status that was the `Claude Agents` card is now the Dashboards card's dispatch report. These cases answer every fetch with an agents status, so the
+  // dashboards read fails its shape check and the card draws its fallback, which keeps the dispatch row — the cases still hold as they were written.
+  describe('the dispatch report · Shared', () => {
     it('does not show the setup steps before the first answer lands', () => {
       // A promise that never resolves keeps `status` at `null` for the
       // whole test — the "not answered yet" frame every real load briefly
@@ -700,7 +702,7 @@ describe('SettingsView', () => {
       `this device`, and the day a card on this page says anything else it is a
       card on the wrong page.
     */
-    it("renders the Shared page's five cards, each with its own scope", async () => {
+    it("renders the Shared page's four cards, each with its own scope", async () => {
       renderView('shared');
       await screen.findByText(/connected/);
       // `Trackers` joined the pair in task-45: a third host-backed report, in
@@ -709,9 +711,9 @@ describe('SettingsView', () => {
       // comment above gives — a build that lost one card outright would pass
       // the looser check.
       // `Backlog tick` joined in the tick breaker, under the watchdog in the left column (the two controls), so it renders second.
-      // `Dashboards` joined in multi-dashboard task 11, right after `Claude Agents` — the card that reports this host's own dispatch environment.
-      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Claude Agents', 'Dashboards', 'Trackers']);
-      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine', 'this machine', 'this machine']);
+      // `Dashboards` joined in multi-dashboard task 11 and then absorbed `Claude Agents`, whose dispatch report is now its Home row.
+      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Dashboards', 'Trackers']);
+      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine', 'this machine']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.
@@ -730,10 +732,10 @@ describe('SettingsView', () => {
       expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Dashboard link']);
     });
 
-    it('leaves the Shared Agents card its status row alone', async () => {
+    it('puts the dispatch status row in the Dashboards card', async () => {
       renderView('shared');
       await screen.findByText(/connected/);
-      expect(rowNamesIn('Claude Agents')).toEqual(['Dispatch']);
+      expect(rowNamesIn('Dashboards')[0]).toBe('Dispatch');
     });
 
     /**

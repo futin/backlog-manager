@@ -3129,7 +3129,9 @@ card that mixes backends makes the band's scope pill a lie about half its own co
 
 So the card divides. `Dispatch · this device` is the Local card holding the three per-device rows; `Claude Agents · this machine` stays on Shared carrying the
 status row and the conditional setup block, and its status row has **no control in its right slot at all** — which is why `SettingsRow`'s `children` is
-optional, and why the empty `.set-control` is not rendered rather than rendered hollow.
+optional, and why the empty `.set-control` is not rendered rather than rendered hollow. Since multi-dashboard the Shared half is no longer a card of its own:
+its status line and setup block are the Home row of `Dashboards · this machine` (`client/src/components/settings/DispatchStatus.tsx`), the card that already
+listed this machine's dashboard as Home — the same subject, still the host's, so the split above is unchanged.
 
 `open dashboard ↗` moved with the value that supplies its href, onto the `Dashboard link` row itself. A link driven by a per-device field has no business on the
 page that promises everything on it is the host's; and beside the field that sets it, the link stops needing an explanation.

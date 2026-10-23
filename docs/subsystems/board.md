@@ -303,15 +303,15 @@ everything in this browser's `localStorage`, Shared is what the API reads off th
 | Page       | Column 1              | Column 2      |
 | ---------- | --------------------- | ------------- |
 | **Local**  | Display, Board        | Orchestrator, Dispatch |
-| **Shared** | Orchestrator watchdog, Backlog tick | Claude Agents, Dashboards, Trackers |
+| **Shared** | Orchestrator watchdog, Backlog tick | Dashboards, Trackers |
 
 Each card is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether changing this
 affects anybody but the person changing it. Both pages draw the same two hand-placed columns, so a card does not move to the other side of the page when its
 neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card, with the `Backlog tick` card under it,
-against three shorter cards stacked in one column (task-45 added `Trackers` under `Claude Agents`, and multi-dashboard put `Dashboards` between them; both
-report on the host, and the one thing either sets is
-the Trackers card's per-repo sync interval since #17 — a row control, not a section of settings — which is what makes them one column rather than two halves of
-the page).
+against two cards stacked in one column (task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and `Dashboards` then
+absorbed `Claude Agents`: its dispatch status is the first line of the Home row and its setup steps open under that row, because the card reported the very
+dashboard `Dashboards` lists as Home; both report on the host, and the Trackers card sets only its per-repo sync interval since #17 — a row control, not a
+section of settings — which is what makes them one column rather than two halves of the page).
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
 model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
