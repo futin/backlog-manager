@@ -4,6 +4,7 @@ import { AgentsController } from './agents.controller';
 import { AgentsService } from './agents.service';
 import { DashboardsController } from './dashboards/dashboards.controller';
 import { DashboardsService } from './dashboards/dashboards.service';
+import { UsageService } from './dashboards/usage.service';
 import { ItemsAbortController } from './items-abort.controller';
 import { ItemsAbortService } from './items-abort.service';
 import { JiraAgentsController } from './jira-agents.controller';
@@ -65,12 +66,13 @@ import { JiraModule } from '../jira/jira.module';
  *
  * `DashboardsController` / `DashboardsService` (multi-dashboard task 2) are here for the same reason `ItemsAbortController` is: the machine list they own is what
  * every launch resolves a dashboard through, and the calling-out code that will consume it lives in this module. The service reads `dashboards.json` and the
- * environment and calls nothing itself.
+ * environment and calls nothing itself. `UsageService` (task 3) is the one place a dashboard's usage is read, cached 60 s per dashboard; it is a provider here so
+ * the offers (task 4) inject it, and it is the first outbound caller in `dashboards/`.
  */
 @Module({
   // `TrackerModule` for the poller's `syncOffBlock` (#17) — no cycle: it imports only `RegistryModule`.
   imports: [RegistryModule, ItemsModule, OrchestratorModule, TrackerModule, JiraModule],
   controllers: [AgentsController, DashboardsController, ItemsAbortController, JiraAgentsController],
-  providers: [AgentsService, DashboardsService, ItemsAbortService, JiraDispatchService, JiraLiveReconciler, SameOriginPostGuard, WatchdogService]
+  providers: [AgentsService, DashboardsService, ItemsAbortService, JiraDispatchService, JiraLiveReconciler, SameOriginPostGuard, UsageService, WatchdogService]
 })
 export class AgentsModule {}
