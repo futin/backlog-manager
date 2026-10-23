@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<!-- tutor-deck -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backlog Tick</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1d1f; --muted: #5f6368; --line: #d9d7d0;
+    --accent: #2f6f4f; --accent-soft: #e3efe8; --code-bg: #f1efe8; --good: #2f6f4f; --bad: #a33a2a;
+    --good-soft: #e3efe8; --bad-soft: #f6e4e0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141516; --card: #1d1f21; --ink: #ebeae6; --muted: #a3a6aa; --line: #34373a;
+      --accent: #7cc4a0; --accent-soft: #22342b; --code-bg: #26292b; --good: #7cc4a0; --bad: #e58a7a;
+      --good-soft: #22342b; --bad-soft: #3a2522;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px; line-height: 1.55;
+  }
+  .wrap { max-width: 100%; padding: 12px 16px 96px; }
+  .progress { position: sticky; top: 0; height: 4px; background: var(--line); z-index: 2; }
+  .progress-fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .card { display: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 18px; margin-top: 12px; }
+  .card.on { display: block; }
+  .eyebrow { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1, h2 { margin: 0 0 12px; line-height: 1.25; }
+  h1 { font-size: 24px; } h2 { font-size: 20px; }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 22px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+  pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; background: var(--code-bg); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; white-space: pre; }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 12px; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  details { margin: 0 0 10px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details[open] summary { margin-bottom: 8px; }
+  .diagram { margin: 4px 0 14px; color: var(--ink); }
+  .diagram svg { width: 100%; height: auto; display: block; }
+  .quiz-prompt { font-weight: 600; }
+  .quiz-option { margin: 0 0 8px; }
+  .quiz-option-btn {
+    width: 100%; min-height: 48px; text-align: left; font: inherit; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; cursor: pointer;
+  }
+  .quiz-option-btn:disabled { cursor: default; }
+  .quiz-feedback { display: none; margin: 6px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 15px; }
+  .quiz-option.revealed .quiz-feedback { display: block; }
+  .quiz-option.revealed[data-correct="true"] .quiz-feedback { background: var(--good-soft); border-left: 3px solid var(--good); }
+  .quiz-option.revealed[data-correct="false"] .quiz-feedback { background: var(--bad-soft); border-left: 3px solid var(--bad); }
+  .quiz-option.revealed .quiz-option-btn { border-color: var(--accent); }
+  .card-divider { text-align: center; padding: 40px 18px; }
+  .card-divider .from { color: var(--muted); }
+  .recap-list { list-style: none; padding: 0; }
+  .recap-list li { margin: 0 0 8px; }
+  .recap-btn { width: 100%; min-height: 44px; text-align: left; font: inherit; color: var(--ink); background: var(--accent-soft); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+  .score { font-size: 28px; font-weight: 700; color: var(--accent); }
+  .muted { color: var(--muted); font-size: 14px; }
+  .nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 12px; padding: 12px 16px; background: var(--bg); border-top: 1px solid var(--line); z-index: 2; }
+  .nav button { flex: 1; min-height: 48px; font: inherit; font-weight: 600; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  .nav button#next { background: var(--accent); color: var(--card); border-color: var(--accent); }
+  .nav button:disabled { opacity: .4; cursor: default; }
+  @media (min-width: 760px) {
+    .wrap { max-width: 760px; margin: 0 auto; }
+    .card { padding: 28px 32px; }
+    pre { font-size: 13px; }
+    .nav { max-width: 760px; margin: 0 auto; }
+  }
+</style>
+</head>
+<body>
+<div class="progress"><div class="progress-fill" id="bar"></div></div>
+<div class="wrap">
+
+<!-- ───────────── Mental model ───────────── -->
+<div class="card card-mental">
+  <p class="eyebrow">The mental model</p>
+  <h1>A night-shift worker with a dispatcher</h1>
+  <p>Every half hour a dashboard job wakes a fresh, headless Claude session in one repo and types <code>/backlog-tick</code>. The session doesn't look around and pick
+    something itself. It asks the <strong>dispatcher</strong>, <code>tick.mjs decide</code>. That's a plain Node script: it reads the backlog, git, the orchestrator's
+    run state and, on a tracker project, the API, then prints <strong>one JSON line</strong>, the verdict. On most nights most ticks hear "busy" or "idle" and
+    go straight home, at a cost of one tool call and one line. When the verdict is work, it's exactly <strong>one unit</strong>. Either it executes one ready bug or
+    task into a PR, or it grooms one ungroomed bug or refactor into a plan stamped <code>plan-review</code> for you to approve. The dispatcher hands out that job
+    with a <strong>lock on the door</strong>. The worker does it, then signs the log with <code>tick.mjs record</code>, which writes down the outcome and takes the
+    lock off. The rest of this deck is about keeping that loop safe with nobody watching:</p>
+  <ul>
+    <li>never two workers on one project;</li>
+    <li>never an unreviewed plan executed;</li>
+    <li>never the same impossible item retried every night;</li>
+    <li>a hard stop when a project keeps failing.</li>
+  </ul>
+</div>
+
+<!-- ───────────── Section 1 ───────────── -->
+<section id="s1">
+
+<div class="card card-concept">
+  <p class="eyebrow">1 · One tick, one verdict</p>
+  <h2>A tool decides; the session carries it out</h2>
+  <p>The skill has three steps (<code>SKILL.md:30-90</code>):</p>
+  <ul>
+    <li><strong>Decide:</strong> run <code>tick.mjs decide</code>, passing the trigger's flags through unchanged.</li>
+    <li><strong>Act:</strong> do what the verdict it prints says.</li>
+    <li><strong>Record:</strong> run <code>tick.mjs record</code> with the outcome. That writes it to the failure record and releases the lock.</li>
+  </ul>
+  <p>Why split it this way? The spec gives the reason. Putting the decision in a deterministic tool "keeps an idle tick to one tool call and one line of output, and makes
+    the rules testable with <code>node --test</code> beside the tool" (<code>spec:98-99</code>). A schedule may fire every 30 minutes across every pinned repo, so an idle
+    tick has to cost almost nothing.</p>
+  <p>The beginner's version would let the model read the backlog and choose. That means a full exploration on every tick, and different answers on the same input from
+    one run to the next. The rules would live in prose that no test can pin. Worse, a model weighing an ambiguous case is the one that ends its turn on a question nobody
+    will answer.</p>
+  <p>The trade-off is duplication. The tool imports nothing from <code>server/</code>, <code>shared/</code> or another skill's <code>tools/</code>. So every rule it shares
+    with <code>orchestrate.mjs</code>, such as the run-file path and the queue order, is a hand-kept <em>twin</em> whose comment names the original
+    (<code>.claude/rules/skills.md</code>).</p>
+  <pre>// tick.mjs:355-358
+  const say = (verdict, reason, extra = {}) =&gt; {
+    process.stdout.write(`${JSON.stringify({ verdict, reason, ...extra, root, caps, dryRun: opts.dryRun })}\n`);
+    return 0;
+  };</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">1 · One tick, one verdict</p>
+  <h2>Five verdicts, and only two take the lock</h2>
+  <ul>
+    <li><code>idle</code>: there's nothing to do, or nothing safe to do. Examples: no backlog here, the stack is down, the project is halted, or the queues are empty or capped.</li>
+    <li><code>busy</code>: someone else is working. That could be another tick, an orchestrator run, a <code>started:</code> marker or a live claim.</li>
+    <li><code>recover</code>: this tick found a killed tick's lock and cleaned up after it. That cleanup is its one unit.</li>
+    <li><code>execute</code> / <code>groom</code>: the only verdicts that take the lock. They carry <code>id</code>, <code>skill</code> and <code>args</code>. The session invokes
+      <code>backlog-manager:&lt;skill&gt;</code> with <code>args</code> exactly as printed.</li>
+  </ul>
+  <p>Every line also carries <code>root</code>, <code>caps</code> and <code>dryRun</code>. When <code>dryRun</code> is true, the session runs nothing and records nothing,
+    whatever the verdict (<code>SKILL.md:42-43</code>).</p>
+  <div class="diagram" aria-label="Verdict flow from decide to record">
+    <svg viewBox="0 0 340 412" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="70" y="8" width="200" height="44" rx="8"/>
+        <rect x="10" y="94" width="100" height="40" rx="8"/>
+        <rect x="120" y="94" width="100" height="40" rx="8"/>
+        <rect x="230" y="94" width="100" height="40" rx="8"/>
+        <rect x="10" y="164" width="100" height="60" rx="8"/>
+        <rect x="120" y="164" width="100" height="60" rx="8"/>
+        <rect x="230" y="164" width="100" height="40" rx="8"/>
+        <rect x="230" y="232" width="100" height="48" rx="8"/>
+        <rect x="230" y="308" width="100" height="40" rx="8"/>
+        <rect x="230" y="372" width="100" height="34" rx="8"/>
+        <line x1="170" y1="52" x2="62" y2="92" marker-end="url(#ar)"/>
+        <line x1="170" y1="52" x2="170" y2="92" marker-end="url(#ar)"/>
+        <line x1="170" y1="52" x2="278" y2="92" marker-end="url(#ar)"/>
+        <line x1="60" y1="134" x2="60" y2="162" marker-end="url(#ar)"/>
+        <line x1="170" y1="134" x2="170" y2="162" marker-end="url(#ar)"/>
+        <line x1="280" y1="134" x2="280" y2="162" marker-end="url(#ar)"/>
+        <line x1="280" y1="204" x2="280" y2="230" marker-end="url(#ar)"/>
+        <line x1="280" y1="280" x2="280" y2="306" marker-end="url(#ar)"/>
+        <line x1="280" y1="348" x2="280" y2="370" marker-end="url(#ar)"/>
+      </g>
+      <g fill="currentColor" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="11" text-anchor="middle">
+        <text x="170" y="27" font-weight="700">tick.mjs decide</text>
+        <text x="170" y="43">one JSON line, exit 0</text>
+        <text x="60" y="118" font-weight="700">idle / busy</text>
+        <text x="170" y="118" font-weight="700">recover</text>
+        <text x="280" y="118" font-weight="700">execute / groom</text>
+        <text x="60" y="184">final message:</text>
+        <text x="60" y="199">the reason,</text>
+        <text x="60" y="214">no record</text>
+        <text x="170" y="184">stop: true →</text>
+        <text x="170" y="199">backlog.mjs stop</text>
+        <text x="170" y="214">--abandon</text>
+        <text x="280" y="188">lock written</text>
+        <text x="280" y="252">Skill tool runs</text>
+        <text x="280" y="268">execute or groom</text>
+        <text x="280" y="332">judge ok / failed</text>
+        <text x="280" y="393">record → unlock</text>
+      </g>
+    </svg>
+  </div>
+  <p>Why does only work take the lock? If an idle or busy tick left a lock, the next tick would read <code>busy: another tick</code>, and a quiet night would keep
+    blocking itself. The alternative, locking at the start of every <code>decide</code>, would turn every crash in the middle of <code>decide</code> into a stale lock
+    that lasts three hours. The trade-off is a gap between reading the world and writing the lock. <code>writeLock</code> covers that gap by refusing to replace a lock
+    that's already there (section 2).</p>
+  <pre>// tick.mjs:465-473 (compacted here)
+function act(dir, ctx, base, now, opts, say, unit) {
+  if (!opts.dryRun) {
+    const lock = { host: os.hostname(), verdict: { kind: unit.kind, id: unit.id }, base: commitOf(ctx.root, base) ?? base, at: new Date(now).toISOString() };
+    if (!writeLock(dir, lock)) return say('busy', 'another tick');
+  }
+  return say(unit.kind, unit.reason, { id: unit.id, skill: unit.skill, args: unit.args });
+}</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">1 · One tick, one verdict</p>
+  <h2>Nobody is there</h2>
+  <p>A tick runs as <code>claude -p</code> with <code>AskUserQuestion</code> disallowed. The skill's rules (<code>SKILL.md:19-28</code>) are about getting through a run
+    with nobody to ask:</p>
+  <ul>
+    <li><strong>Never ask.</strong> "An unanswered question parks the whole tick." The <code>[backlog-tick]</code> marker at the end of <code>args</code> tells execute and
+      groom the same thing. Wherever they would normally ask, they either decide alone or stop and report (<code>spec:178-182</code>).</li>
+    <li><strong>Never run anything in the background.</strong> The process exits when the turn ends, and a background job dies with it.</li>
+    <li><strong>A non-zero exit from <code>decide</code>, <code>record</code> or <code>forget</code> means stop.</strong> The stderr line becomes the final message. It is never
+      read as "nothing to do".</li>
+    <li><strong>Quote tracker ids:</strong> <code>record '#12' ok …</code>. Without the quotes, the shell reads <code>#12</code> as a comment.</li>
+  </ul>
+  <p>A beginner's instinct after a failure is to be helpful: retry, wait for the stack, or guess the right id. Each of those either keeps a session hanging with nobody
+    watching or hides a stall. Treating an exit code as "nothing to do" would leave the lock held for the whole TTL, with no line in the run log.</p>
+  <p>The trade-off is quiet failure. A failed tick ends as an ordinary result and is not escalated: "the run log is the signal, and a push per failed night would be noise"
+    (<code>SKILL.md:100-101</code>). You find out by reading the log or the board's Runs › Ticks page.</p>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">1 · Check</p>
+  <p class="quiz-prompt"><code>decide</code> prints <code>{"verdict":"busy","reason":"another tick",…,"dryRun":false}</code>. What does the session do next?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Run <code>record</code> with <code>ok</code>, so the other tick's lock is released and tonight's slot isn't wasted</button>
+      <p class="quiz-feedback">A <code>busy</code> verdict takes no lock and names no id, so this tick has nothing to record. Also, <code>releaseLock</code> only removes a lock whose
+        verdict id matches (<code>tick-state.mjs:101-112</code>). Another tick's lock is never this one's to release.</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn">End with <code>another tick</code> as the final message, and run no <code>record</code></button>
+      <p class="quiz-feedback">Correct. <code>idle</code> and <code>busy</code> take nothing, so the reason is the whole result, and no <code>record</code> follows
+        (<code>SKILL.md:47</code>). The next scheduled tick is the retry.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Wait a few minutes in the background, then run <code>decide</code> again once the other tick is done</button>
+      <p class="quiz-feedback">That breaks two rules. Under <code>claude -p</code> nothing runs in the background, and a tick never waits: the next scheduled tick is the
+        retry. The other tick's lock may also be held for hours.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Run <code>tick.mjs forget</code> on the held item, so the next tick can pick it up straight away</button>
+      <p class="quiz-feedback"><code>forget</code> is a person's command for clearing one item's failure record (<code>SKILL.md:92-93</code>). It never touches the lock, and a
+        <code>busy</code> verdict doesn't name an item to forget.</p>
+    </div>
+  </div>
+</div>
+
+<div class="card card-qa">
+  <p class="eyebrow">Questions you might ask</p>
+  <details class="qa-item">
+    <summary>Why does every verdict carry <code>root</code>?</summary>
+    <p>Step 3 has to run from the main checkout, and the session may no longer be in it. An execute's <code>--finish pr</code> leaves the session's cwd inside
+      <code>.worktrees/execute-&lt;id&gt;</code>. So <code>decide</code> prints the path it resolved, and every step-3 command starts <code>cd '&lt;root&gt;' &amp;&amp;</code>
+      (<code>tick.mjs:351-353</code>, <code>SKILL.md:77</code>). The session never has to work out from git where to go back to.</p>
+  </details>
+  <details class="qa-item">
+    <summary>Can I run a tick by hand?</summary>
+    <p>Yes. A typed <code>/backlog-tick</code> in a normal session behaves the same way. <code>--dry-run</code> prints the decision without acting on it: no lock is taken
+      and nothing is recorded (<code>spec:92-94</code>, <code>SKILL.md:42-43</code>). It's the safe way to see what tonight's tick would pick.</p>
+  </details>
+  <details class="qa-item">
+    <summary>Why not just schedule <code>backlog-orchestrate</code>?</summary>
+    <p>Orchestrate drains a whole queue in one long run, and it merges. A tick does one unit and stops at a PR or a plan. It never merges, so
+      <code>backlog-orchestrate</code> stays the only skill that does (<code>spec:16-17</code>, <code>spec:33</code>).</p>
+  </details>
+  <details class="qa-item">
+    <summary>What does a tick do when the pinned repo is a linked worktree?</summary>
+    <p>Nothing: it answers <code>idle: not a main checkout</code>. Execute's <code>pr</code> finish reuses a clean linked worktree on its own branch, so a tick working there
+      would commit and push its work onto your feature branch (<code>spec:88-90</code>).</p>
+  </details>
+</div>
+
+</section>
+
+<!-- ───────────── Section 2 ───────────── -->
+<section id="s2">
+
+<div class="card card-divider">
+  <p class="from">Finished: One tick, one verdict</p>
+  <h2>Next: The idle gate</h2>
+  <p class="muted">How decide refuses cheaply, the lock, and what counts as busy.</p>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">2 · The idle gate</p>
+  <h2>Cheapest refusal first</h2>
+  <p><code>cmdDecide</code> is a ladder of early returns (<code>tick.mjs:360-421</code>), and each rung costs more than the one before it:</p>
+  <ol>
+    <li><strong>Not a project</strong> → <code>idle</code>. This covers no backlog, not registered, or a linked worktree.</li>
+    <li><strong>Tracker only:</strong> <code>/api/health</code> with a 2 s timeout → <code>idle: stack down</code>. This runs before the lock, because every read and every
+      unit on a tracker project needs the API (<code>tick.mjs:367-368</code>).</li>
+    <li><strong>The lock:</strong> held → <code>busy: another tick</code>; stale → <code>recover</code> (section 5).</li>
+    <li><strong>The breaker:</strong> a halted project → <code>idle</code>, still before any API read (section 5).</li>
+    <li><strong>Tracker reads:</strong> the runs, the items, and the poller's row for this repo.</li>
+    <li><strong><code>busyReason</code></strong>.</li>
+  </ol>
+  <p>This order keeps the common case cheap: a halted or locked project costs one call and no network traffic.</p>
+  <p>The tracker rung has one trap. After a server restart the in-memory tracker cache is empty, so <code>/api/items</code> lists no rows, without any error. Read naively,
+    that looks like "nothing to do". On 2026-10-22 an ixray tick wasted its slot on exactly that false idle (#332). So <code>decide</code> checks with
+    <code>/api/trackers</code> that this repo has actually been polled before it trusts an empty list. The trade-off: a repo with genuinely no issues also gets a slightly
+    alarming reason. That costs nothing, because the verdict is <code>idle</code> either way.</p>
+  <pre>// tick.mjs:409-416 (compacted here)
+    const row = trackers.projects.find((p) =&gt; p &amp;&amp; p.path === root);
+    if (!row) return say('idle', `tracker not polled yet: ${ctx.repo}`);
+    if (row.access !== 'ok') return say('idle', `tracker ${row.access}: ${row.detail ?? ctx.repo}`);
+    if (typeof row.polledAt !== 'string') return say('idle', `tracker not polled yet: ${ctx.repo}`);
+    if (mine.length === 0) return say('idle', `tracker cache holds no items for ${ctx.repo} (polled ${row.polledAt})`);</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">2 · The idle gate</p>
+  <h2>The lock: free, held or stale, made by a link</h2>
+  <p>The lock is one file, <code>~/.backlog-manager/tick/&lt;project-key&gt;/lock</code>. It holds the host, the verdict that was handed out, the base commit and a
+    timestamp. It holds no pid: <code>decide</code> exits as soon as it prints, so a pid would name a process that's already gone. <code>lockSnapshot</code> reads the lock
+    in one of three states (<code>tick-state.mjs:58-75</code>):</p>
+  <ul>
+    <li><strong>free</strong>: there's no file;</li>
+    <li><strong>held</strong>: the lock is younger than <code>--lock-ttl</code>, 180 minutes by default;</li>
+    <li><strong>stale</strong>: the lock is older than that, or the file can't be read or parsed. An unreadable lock is never treated as free. It is "evidence a tick was
+      mid-flight" (<code>tick-state.mjs:46-48</code>).</li>
+  </ul>
+  <p>The interesting part is how <code>writeLock</code> creates it. It writes the bytes to a temp file, then <em>links</em> that file into place. A <code>link</code> fails
+    with <code>EEXIST</code> when the name already exists, so only one of two racing ticks can win. The obvious alternative is to open with <code>'wx'</code> and then
+    write. That's exclusive too, but it creates the name before the bytes are in it. A second tick reading in that gap would find an empty file, judge it stale and
+    remove it, and then two ticks would run (<code>tick-state.mjs:78-80</code>).</p>
+  <p>The trade-off: <code>~/.backlog-manager</code> is local, so the lock only protects one machine. When two machines tick the same tracker project, the claim race at
+    <code>start</code> is the guard, and the tick that loses reports <code>failed</code> (<code>spec:108-109</code>).</p>
+  <pre>// tick-state.mjs:81-97 (compacted here)
+export function writeLock(dir, lock) {
+  const file = path.join(dir, LOCK_FILE);
+  const tmp = tmpPath(file);
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(lock, null, 2) + '\n');
+    try {
+      fs.linkSync(tmp, file);
+    } catch (e) {
+      if (e.code === 'EEXIST') return false;
+      throw e;
+    }
+    return true;
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">2 · The idle gate</p>
+  <h2>What counts as busy</h2>
+  <p><code>busyReason</code> returns the first reason that matches, or <code>null</code> (<code>tick.mjs:476-500</code>). The project is busy when any of these holds:</p>
+  <ul>
+    <li>the orchestrator's <code>run.json</code> for this project says <code>running</code> or <code>paused</code>. A run file that can't be parsed counts as busy too:
+      it's written atomically, so garbage in it means something needs looking at;</li>
+    <li>a board-started run is in the API's <code>starting</code> list but has no run file yet;</li>
+    <li><strong>tracker:</strong> a fresh remote run, another machine, is draining this repo. Between items that run holds no claim, so the claim race alone wouldn't stop a
+      tick (<code>spec:119-121</code>);</li>
+    <li><strong>files:</strong> any open item carries a <code>started:</code> marker, in the main checkout or in any linked worktree;</li>
+    <li><strong>tracker:</strong> any claim's heartbeat is under 15 minutes old.</li>
+  </ul>
+  <p>The marker scan skips exactly two kinds of tree. One is the orchestrator's <code>.worktrees/&lt;id&gt;</code>, where the run file already speaks for the work. The
+    other is execute's <code>.worktrees/execute-&lt;id&gt;</code>: a killed execute leaves its marker there, and counting it would block the project for good
+    (<code>tick.mjs:502-504</code>). Scanning only the main checkout would be the beginner's mistake, since it misses an in-place groom running in a linked worktree.</p>
+  <p>The trade-off lands on files projects. A <code>started:</code> marker records when work began, never who started it, and it has no heartbeat. So a marker someone
+    forgot blocks every tick until a person clears it. A Jira session is deliberately <em>not</em> a busy signal: it works on a ticket in its own worktree, not on a
+    backlog item (<code>spec:122</code>).</p>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">2 · Check</p>
+  <p class="quiz-prompt">On a files project, this project's <code>run.json</code> under <code>~/.backlog-manager/orchestrator/</code> exists, but it holds half-written,
+    unparseable JSON. What does <code>decide</code> answer?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">It carries on as if no run exists, because a file that won't parse can't say <code>running</code></button>
+      <p class="quiz-feedback">That's the dangerous reading. A tick that treated a broken file as "no run" could start work under a live run. The code treats it as "a run
+        until proven otherwise" (<code>tick.mjs:477-478</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">It exits <code>2</code> with the parse error, because it couldn't read a file it depends on</button>
+      <p class="quiz-feedback"><code>busyReason</code> catches the parse failure itself (<code>tick.mjs:482-486</code>) and turns it into a reason. The result is an ordinary
+        verdict on exit 0, not a runtime error.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>idle</code>, reason <code>stack down</code>, because a broken run file means the server is unhealthy</button>
+      <p class="quiz-feedback">That's the wrong source. <code>orchestrate.mjs</code> writes the run file and the tick reads it straight off disk. A files project never checks
+        the stack at all (<code>tick.mjs:367-368</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn"><code>busy</code>, reason <code>orchestrator run file unreadable</code></button>
+      <p class="quiz-feedback">Correct. The file is written atomically, so garbage in it means something is wrong there. Waiting one tick costs little
+        (<code>tick.mjs:479-486</code>).</p>
+    </div>
+  </div>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">2 · Check</p>
+  <p class="quiz-prompt">Which of these <code>decide</code> outcomes leaves a lock file behind?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>idle</code>, <code>nothing to do: no ready bug or task; no ungroomed bug or refactor</code></button>
+      <p class="quiz-feedback"><code>idle</code> never takes the lock. Only <code>act()</code> writes it, and <code>act()</code> runs only for execute and groom
+        (<code>tick.mjs:465-473</code>). If an idle tick left a lock, the next tick would read busy.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>execute bug-4</code>, printed by a run with <code>--dry-run</code> that reported <code>dryRun: true</code></button>
+      <p class="quiz-feedback"><code>act()</code> skips <code>writeLock</code> when <code>opts.dryRun</code> is set (<code>tick.mjs:466</code>). That's why a dry-run session
+        must run nothing and record nothing: it has no lock to release.</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn"><code>groom ref-2</code>, from an ordinary scheduled run without flags</button>
+      <p class="quiz-feedback">Correct. A real groom or execute verdict is the only case that writes the lock, and <code>record</code> is the only thing that releases it
+        (<code>SKILL.md:40</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>busy</code>, <code>started marker on task-3</code>, found in the main checkout</button>
+      <p class="quiz-feedback"><code>busy</code> returns at step 4, before <code>act()</code> is ever reached (<code>tick.mjs:420-421</code>). The marker blocks the project, but
+        it doesn't make this tick hold anything.</p>
+    </div>
+  </div>
+</div>
+
+</section>
+
+<!-- ───────────── Section 3 ───────────── -->
+<section id="s3">
+
+<div class="card card-divider">
+  <p class="from">Finished: The idle gate</p>
+  <h2>Next: Choosing the unit</h2>
+  <p class="muted">Execute first under a PR cap, then groom under a plan cap, and which item wins.</p>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">3 · Choosing the unit</p>
+  <h2>Execute first, under the open-PR cap</h2>
+  <p>Once the gate passes, <code>decide</code> tries execute before groom. That's decision 4 in the spec: execute wins (<code>spec:61</code>). Execute is capped by
+    the number of open execute PRs, meaning open PRs whose head branch starts with <code>execute/</code>, counted once with
+    <code>gh pr list --state open --limit 500</code>. Only while that count is under <code>--max-prs</code> (default 2) does it look for a candidate.</p>
+  <p>The count deliberately includes PRs from a typed <code>--finish pr</code> run. Those are cut from the same base and conflict the same way, and the cap exists to limit
+    the review pile, whoever made it (<code>spec:125-126</code>). Counting only tick-made PRs would let a busy afternoon of hand runs, plus a night of ticks, build the
+    "morning stack" the spec lists as an anti-goal (<code>spec:52</code>).</p>
+  <p>Look at what happens when <code>gh</code> can't answer: it's signed out, it fails, or it returns all 500 results. <code>caps.openPrs</code> is <code>null</code>,
+    so execute is treated as capped, with the reason <code>cannot count open PRs</code>. The repo squash-merges, so git alone can't tell whether an <code>execute/</code>
+    branch was merged (<code>spec:126-127</code>). The tick doesn't stop there. It falls through to groom, carrying that reason. The trade-off: with <code>gh</code> broken,
+    ticks keep grooming and never execute, until someone reads the reason.</p>
+  <pre>// tick.mjs:431-443
+  caps.openPrs = openExecutePrs(root);
+  let executeWhy;
+  let pick = null;
+  if (caps.openPrs === null) executeWhy = 'cannot count open PRs';
+  else if (caps.openPrs &gt;= opts.maxPrs) executeWhy = `${caps.openPrs} open execute PRs (cap ${opts.maxPrs})`;
+  else {
+    pick = tracker ? await trackerExecuteCandidate(ctx, mine, state) : filesExecuteCandidate(ctx, base, state);
+    if (pick === null) executeWhy = 'no ready bug or task';
+  }
+  if (pick !== null) {
+    const args = `${pick.id} --finish pr${opts.base === null ? '' : ` --base ${opts.base}`} ${MARKER}`;
+    return act(dir, ctx, base, now, opts, say, { kind: 'execute', id: pick.id, reason: `execute ${pick.id}`, skill: 'backlog-execute', args });
+  }</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">3 · Choosing the unit</p>
+  <h2>The execute candidate: listed on disk, read at &lt;base&gt;</h2>
+  <p>On a files project, the candidate scan uses two sources, and either one can rule an item out (<code>tick.mjs:540-562</code>). It <em>lists</em> items from the
+    working tree's <code>open/</code> directories, and it <em>reads</em> their bytes at <code>&lt;base&gt;</code> through git. To qualify, an item must be:</p>
+  <ul>
+    <li>a bug or task, and groomed (derived from its text, the same way the board derives it);</li>
+    <li>committed on <code>&lt;base&gt;</code>: an item with no blob there is skipped;</li>
+    <li>free of <code>plan-review</code>, and on a tracker project free of <code>in-review</code> too;</li>
+    <li>not already taken: no <code>execute/&lt;id&gt;</code> branch and no <code>.worktrees/execute-&lt;id&gt;</code> tree;</li>
+    <li>not skipped by the failure record (section 4).</li>
+  </ul>
+  <p>Why two sources? The bytes come from <code>&lt;base&gt;</code> because execute's worktree is cut from <code>&lt;base&gt;</code>. That way the groomed check, the
+    plan-review check and the hash all describe what execute will actually see. It also means a <code>plan-review</code> line deleted only on disk isn't an approval yet.
+    The listing comes from the working tree because a groom's reject or archive is left uncommitted by design. An item moved out of <code>open/</code> on disk has been
+    decided against, and a listing at <code>&lt;base&gt;</code> would execute it anyway.</p>
+  <p>The "not taken" rule exists because a files item stays in <code>open/</code> until its PR merges. Without that rule, every tick would pick the item already sitting in
+    a PR. The trade-off: when an execute is killed, its leftover branch and worktree keep that item off the list until someone removes them.</p>
+  <pre>// tick.mjs:555-561
+  for (const it of orderExecute(items)) {
+    if (it.groomed !== true || it.planReview) continue;
+    if (executeTaken(root, it.id)) continue;
+    if (isSkipped(state.items[it.id], contentHash(it.text), 'execute')) continue;
+    return it;
+  }
+  return null;</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">3 · Choosing the unit</p>
+  <h2>The groom candidate, and queue order</h2>
+  <p>When nothing executes, <code>decide</code> grooms, but only while fewer than <code>--max-plans</code> plans are awaiting review (default 3,
+    <code>tick.mjs:448</code>). A plan is awaiting review when its item carries <code>plan-review</code>. Only two kinds of item qualify. An ungroomed bug gets its fix
+    planned. A refactor gets promoted to a planned task. A tick never promotes an idea and never rejects anything: those decisions stay yours (<code>spec:36</code>,
+    <code>spec:64</code>).</p>
+  <p>On a files project the groom scan reads the <em>working tree</em>, the opposite of execute (<code>tick.mjs:581-598</code>). A tick's groom is left uncommitted by
+    design. A read at <code>&lt;base&gt;</code> would still see last night's bug as ungroomed and groom it a second time. It would also never see last night's
+    <code>plan-review</code> lines, so the plan cap would never fill up.</p>
+  <p>The <code>args</code> name both the item and the verdict, for example <code>bug-3, plan the fix [backlog-tick]</code> or
+    <code>ref-2, promote it to a task [backlog-tick]</code> (<code>tick.mjs:454</code>). Groom normally states a verdict and waits for you to confirm it. A prompt
+    that already names both counts as that confirmation (<code>spec:173-176</code>).</p>
+  <p>The order is the orchestrator's. Execute takes bugs, then tasks, oldest first, and puts <code>runner-fix:</code> items ahead of everything, because a runner fix
+    repairs the machinery that later items run on. Groom takes bugs, then refactors, with no hoist: <code>runner-fix</code> is about the order work <em>runs</em> in, and a
+    groom only writes a plan (<code>tick-lib.mjs:162-172</code>).</p>
+  <pre>// tick-lib.mjs:165-172 (compacted here)
+export function orderExecute(items) {
+  return orderBy(items, ['bugs', 'tasks'], true);
+}
+
+export function orderGroom(items) {
+  return orderBy(items, ['bugs', 'refactors'], false);
+}</pre>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">3 · Check</p>
+  <p class="quiz-prompt">Files project. Last night's tick groomed bug-7: its Cause and Fix are filled in and <code>plan-review: true</code> is set, all uncommitted. What
+    stops tonight's tick from grooming bug-7 again?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">The groom scan reads <code>&lt;base&gt;</code>, and last night's plan is already there</button>
+      <p class="quiz-feedback">The plan was never committed, so <code>&lt;base&gt;</code> still holds the ungroomed bug. Reading <code>&lt;base&gt;</code> is exactly what
+        would groom it twice (<code>tick.mjs:581-582</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn">The groom scan reads the working tree, where bug-7 is now groomed</button>
+      <p class="quiz-feedback">Correct. <code>filesGroomCandidate</code> reads the file on disk and skips a bug whose derived <code>groomed</code> isn't
+        <code>false</code> (<code>tick.mjs:586-590</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">The failure record, which keeps a hash of every item a tick has groomed</button>
+      <p class="quiz-feedback">The record only skips items whose outcome was <code>failed</code>. An <code>ok</code> never skips anything
+        (<code>tick-state.mjs:259-261</code>), and last night's groom was recorded <code>ok</code>.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">The lock, which still names bug-7 from last night's groom verdict</button>
+      <p class="quiz-feedback">Last night's <code>record</code> released that lock (<code>SKILL.md:83</code>). If it hadn't, tonight's tick would answer busy or recover,
+        not groom anything.</p>
+    </div>
+  </div>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">3 · Check</p>
+  <p class="quiz-prompt"><code>gh</code> is signed out. There's a groomed, ready bug-2, an ungroomed ref-4, and 1 plan awaiting review (cap 3). What does
+    <code>decide</code> answer?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>idle</code>, reason <code>cannot count open PRs</code>, since nothing can run safely</button>
+      <p class="quiz-feedback">A broken <code>gh</code> only caps execute. Groom doesn't depend on any PR count, so the tick carries on to step 6
+        (<code>tick.mjs:434</code>, <code>445-457</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>execute bug-2</code>, since a failing <code>gh</code> just means there are no open PRs to count</button>
+      <p class="quiz-feedback">That's the reading the code refuses. Without a count the cap can't be checked, and because the repo squash-merges, git can't count those PRs
+        instead (<code>spec:126-127</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn"><code>groom ref-4</code>, reason <code>groom ref-4 (execute: cannot count open PRs)</code></button>
+      <p class="quiz-feedback">Correct. Execute is treated as capped, and its reason rides along on the groom verdict (<code>tick.mjs:455</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>busy</code>, reason <code>cannot count open PRs</code>, until someone signs <code>gh</code> back in</button>
+      <p class="quiz-feedback"><code>busy</code> means someone else is working, and here nobody is. The PR count caps execute, and it's checked after the busy rung has
+        already passed.</p>
+    </div>
+  </div>
+</div>
+
+</section>
+
+<!-- ───────────── Section 4 ───────────── -->
+<section id="s4">
+
+<div class="card card-divider">
+  <p class="from">Finished: Choosing the unit</p>
+  <h2>Next: The review gate and the failure record</h2>
+  <p class="muted">How a 3 a.m. plan waits for you, and how a failed item stays failed until it changes.</p>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">4 · The review gate and the failure record</p>
+  <h2>The <code>plan-review</code> mark</h2>
+  <p>A plan written at 3 a.m. by a session nobody watched mustn't be executed until you've read it. The <code>plan-review</code> mark enforces that. On a files project
+    it's a frontmatter line, <code>plan-review: true</code>. On a tracker project it's a label. Groom writes the mark <strong>in the same write that lands the plan</strong>,
+    through <code>backlog.mjs body|new --plan-review</code> or the frontmatter it prints. So there's never a moment when an approved-looking plan has no mark
+    (<code>spec:146-149</code>). A promote puts the mark on the new task, not on the refactor.</p>
+  <p>Every execute gate refuses a marked item with the same sentence, <code>this plan awaits review</code>. The gates are the board's Run button, the server's dispatch
+    ladder, the orchestrator's queue, <code>backlog-execute</code>'s own refusal and the tick's candidate scan. You approve a plan by removing its mark. On a files project
+    that means deleting the line <em>and committing</em>, because the tick reads the mark at <code>&lt;base&gt;</code>. On a tracker project, you remove the label.</p>
+  <p>The rejected alternative is on record. The first design said "the uncommitted groom is the gate". That changed because <code>/git-sync</code> commits any uncommitted
+    work, so it would silently approve every tick plan (<code>spec:58-60</code>). The mark is read by presence: any value except <code>false</code> counts, so a
+    hand-typed <code>plan-review: yes</code> still blocks (<code>isMarked</code>, <code>tick-lib.mjs:96</code>). The trade-off is a manual step, since the board has no
+    one-click approve yet (<code>spec:38-39</code>).</p>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">4 · The review gate and the failure record</p>
+  <h2>The failure record and its hash</h2>
+  <p><code>record</code> writes <code>~/.backlog-manager/tick/&lt;key&gt;/state.json</code>, and <code>tick-state.mjs</code> is the only thing that writes it. The file keeps one
+    entry per item (outcome, kind, reason, time) plus a bounded <code>recent</code> list. A <code>failed</code> entry also stores a <code>contentHash</code> of the item as it
+    stood. As long as the item still hashes to the same value, later ticks skip it. That's the spec's "skip until the item changes" (<code>spec:67-68</code>).</p>
+  <p>The hash is careful about what counts as a change. It covers the body plus every frontmatter line except the bookkeeping ones: <code>updated</code>,
+    <code>started</code>, <code>phase</code>, <code>groomed-at</code>, and any <code>*-elapsed</code> or <code>*-tokens</code> counter. <code>start</code> and
+    <code>stop</code> rewrite those on every attempt. If they counted, a failed attempt's own bookkeeping would change the hash, and the item would come straight back.
+    On a tracker project the hash covers the issue <em>body</em>, not <code>updated_at</code>, because the tick's own label and comment writes bump
+    <code>updated_at</code> (<code>spec:226-227</code>).</p>
+  <p>There are two bad alternatives. Retrying every tick burns tokens every night on an impossible item (<code>spec:48</code>). A retry counter has no idea whether anyone
+    fixed the item. The trade-off of the hash: there's no "blocked" outcome. A failure caused by the environment also skips the item until a person runs
+    <code>tick.mjs forget '&lt;id&gt;'</code> (<code>SKILL.md:92-93</code>).</p>
+  <pre>// tick-state.mjs:229-236
+const BOOKKEEPING = new Set(['updated', 'started', 'phase', 'groomed-at']);
+
+function isBookkeeping(line) {
+  const sep = line.indexOf(':');
+  if (sep === -1) return false;
+  const key = line.slice(0, sep).trim();
+  return BOOKKEEPING.has(key) || key.endsWith('-elapsed') || key.endsWith('-tokens');
+}</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">4 · The review gate and the failure record</p>
+  <h2>Judging <code>ok</code>, and why a failed groom blocks execute</h2>
+  <p><code>record</code> is only as honest as the outcome the session hands it. So step 3 judges by what the skill left behind, "never from how confident its last sentence
+    sounded" (<code>SKILL.md:61</code>).</p>
+  <ul>
+    <li>An execute is <code>ok</code> only if its final message ends with a PR URL on a line of its own.</li>
+    <li>A groom is <code>ok</code> only if the item reads back groomed <strong>and</strong> marked. For a bug, that means Cause and Fix are filled in and neither says
+      "unknown". For a refactor, it means a promoted task with a plan. The session checks with a read-only <code>backlog.mjs show</code> (<code>SKILL.md:68-75</code>).</li>
+  </ul>
+  <p>A groom wrongly recorded <code>ok</code> causes one of two problems: the bug comes back every tick, still ungroomed, or an unmarked plan gets executed unseen.</p>
+  <p>That second risk explains an asymmetry in <code>isSkipped</code>. A failure normally skips only the same kind of work, so a failed execute never keeps a later groom
+    away. A failed <em>groom</em>, though, skips execute too. A groom usually fails because its plan read back without the mark, which means the plan has never been reviewed.
+    Executing it on the next tick is exactly what the mark exists to stop.</p>
+  <p>The trade-off shows on a tracker project. Approving there by removing the label doesn't change the body hash. Once you've reviewed a failed groom's plan,
+    <code>tick.mjs forget '&lt;id&gt;'</code> is the only thing that makes the item eligible again (<code>SKILL.md:94-95</code>).</p>
+  <pre>// tick-state.mjs:259-261
+export function isSkipped(rec, currentHash, kind) {
+  return rec !== undefined &amp;&amp; rec.outcome === 'failed' &amp;&amp; (rec.kind === kind || rec.kind === 'groom') &amp;&amp; rec.hash !== undefined &amp;&amp; rec.hash === currentHash;
+}</pre>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">4 · Check</p>
+  <p class="quiz-prompt">Tracker project. A tick's groom on #40 was recorded <code>failed</code>: the plan was written, but the <code>plan-review</code> label was missing. You
+    read the plan and it's fine. What makes #40 executable by a later tick?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Nothing extra: the next tick sees #40 groomed and unlabelled, so it executes it</button>
+      <p class="quiz-feedback"><code>isSkipped</code> lets a failed groom block execute for as long as the body hash is unchanged
+        (<code>tick-state.mjs:259-261</code>). Reading a plan doesn't change its body.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Pressing Reset on Runs › Ticks, which clears the project's failure records</button>
+      <p class="quiz-feedback">Reset stamps <code>resetAt</code> in <code>settings/tick.json</code>, and that only ends a breaker halt. Clearing one item is
+        <code>forget</code>'s job (<code>SKILL.md:96</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn">Running <code>tick.mjs forget '#40'</code>, since the body hash hasn't moved</button>
+      <p class="quiz-feedback">Correct. On a tracker project, nothing you do to approve the plan changes the body. <code>forget</code> is the per-item retry
+        (<code>SKILL.md:94-95</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Adding and removing the <code>plan-review</code> label, so the issue's <code>updated_at</code> moves</button>
+      <p class="quiz-feedback">The tracker hash covers the body, not <code>updated_at</code>, precisely because label writes bump <code>updated_at</code>
+        (<code>spec:226-227</code>).</p>
+    </div>
+  </div>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">4 · Check</p>
+  <p class="quiz-prompt">A files item failed last night. Which of these changes makes it eligible for a tick again?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">A <code>backlog.mjs start</code> then <code>stop</code> on it, which rewrites <code>updated:</code> and <code>started:</code></button>
+      <p class="quiz-feedback">Both keys are bookkeeping and get filtered out before hashing (<code>tick-state.mjs:229-236</code>). If they counted, every failed attempt
+        would un-skip itself the moment <code>stop</code> ran.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">A groom <code>stop</code> on it, which re-stamps the item's <code>groomed-at:</code> anchor</button>
+      <p class="quiz-feedback"><code>groomed-at</code> is in the <code>BOOKKEEPING</code> set too. A tool re-stamping an anchor isn't a person changing the item.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">More <code>execute-tokens:</code> billed to it by a later session's <code>stop</code></button>
+      <p class="quiz-feedback">Any key ending in <code>-tokens</code> or <code>-elapsed</code> is a billing counter, and <code>isBookkeeping</code> skips it, so the hash
+        doesn't move.</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn">An edit to its <code>title:</code> line or any body sentence</button>
+      <p class="quiz-feedback">Correct. Every non-bookkeeping line, and the whole body, is hashed as written, so changing <code>title:</code> moves the hash
+        (<code>tick-state.mjs:238-240</code>).</p>
+    </div>
+  </div>
+</div>
+
+<div class="card card-qa">
+  <p class="eyebrow">Questions you might ask</p>
+  <details class="qa-item">
+    <summary>Does a <code>/git-sync</code> commit approve a tick's plan?</summary>
+    <p>No. Committing carries the <code>plan-review: true</code> line onto <code>&lt;base&gt;</code>, and the tick reads the mark at <code>&lt;base&gt;</code>. A plan
+      committed with the line still in it isn't approved (<code>spec:196-198</code>). Approval is deleting the line, then committing that deletion.</p>
+  </details>
+  <details class="qa-item">
+    <summary>Why is there no one-click approve on the board?</summary>
+    <p>It was left out of this version on purpose. You delete the frontmatter line, or remove the label on GitHub or through <code>backlog.mjs</code>. A board control is
+      listed as a follow-up (<code>spec:38-39</code>).</p>
+  </details>
+  <details class="qa-item">
+    <summary>Do groom and execute failures share one record?</summary>
+    <p>Yes. The record holds one entry per item, so the newest outcome, of either kind, is the one consulted (<code>tick-state.mjs:258</code>). For example, a later
+      <code>ok</code> execute replaces an older failed groom.</p>
+  </details>
+</div>
+
+</section>
+
+<!-- ───────────── Section 5 ───────────── -->
+<section id="s5">
+
+<div class="card card-divider">
+  <p class="from">Finished: The review gate and the failure record</p>
+  <h2>Next: When a tick dies or keeps failing</h2>
+  <p class="muted">Stale locks, the one marker a tick may clear, record's exit 3, and the breaker.</p>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">5 · When a tick dies or keeps failing</p>
+  <h2>A killed tick: claim the stale lock</h2>
+  <p>A dashboard job's <code>timeout:</code> kills a tick mid-work, and so does running out of <code>max-turns</code>. Either way, the lock stays behind. The next tick finds
+    it older than <code>--lock-ttl</code> (180 minutes, well above any sane job timeout) and recovers instead of working (<code>tick.mjs:375-378</code>). That recovery
+    is the tick's one unit.</p>
+  <p>The tricky part is taking the lock safely. Two ticks can both judge the same lock stale, and a third can write a fresh lock between a judgement and a delete. A blind
+    delete could remove that fresh lock and let two ticks run. So <code>claimStaleLock</code> <em>renames</em> the file to a name only this process uses. A rename of one
+    name has exactly one winner. It then compares the claimed bytes with the bytes it judged stale (<code>tick-state.mjs:121-151</code>):</p>
+  <ul>
+    <li>the rename finds nothing → another tick got there first → <code>busy</code>;</li>
+    <li>the bytes differ → it grabbed a fresh lock by mistake, so it links that lock back and answers <code>busy</code>;</li>
+    <li>the bytes match → it owns the recovery.</li>
+  </ul>
+  <p>Next it records the dead verdict's item as <code>failed</code>, with the reason <code>killed at timeout</code>. If that write throws, <code>restoreClaim</code> puts the
+    lock back, so the next tick tries again instead of losing the recovery (<code>tick.mjs:641-653</code>). The trade-off is speed: a killed tick can leave its project doing
+    nothing for up to three hours.</p>
+  <pre>// tick-state.mjs:133-151
+export function claimStaleLock(dir, judgedRaw) {
+  const file = path.join(dir, LOCK_FILE);
+  const claimed = `${file}.recover-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    fs.renameSync(file, claimed);
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+  let raw = null;
+  try {
+    raw = fs.readFileSync(claimed, 'utf8');
+  } catch {
+    raw = null;
+  }
+  if (raw === judgedRaw) return claimed;
+  restoreClaim(dir, claimed);
+  return null;
+}</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">5 · When a tick dies or keeps failing</p>
+  <h2>The only marker a tick clears</h2>
+  <p>On a files project, a killed groom leaves a <code>started:</code> marker on its item, and that marker blocks every later tick (section 2). Someone has to clear it. But a
+    <code>started:</code> marker records only when work began, never who began it, so a tick can't tell whether a person is behind it. That's why <code>recover</code> sets
+    <code>stop: true</code> only when the marker is provably the dead tick's own. That takes three conditions: a files project, a <code>groom</code> verdict in the stale lock,
+    and that item in the main checkout carrying <code>started:</code> together with <code>phase: groom</code> (<code>tick.mjs:636-640</code>). The session then runs
+    <code>backlog.mjs stop '&lt;id&gt;' --abandon</code> on that one id, because the interval was no one's work (<code>spec:163</code>).</p>
+  <p>Every other case is left alone:</p>
+  <ul>
+    <li>a tracker claim goes stale after 15 minutes, and the next claimant's <code>start</code> retires it;</li>
+    <li>an execute's marker lives in <code>.worktrees/execute-&lt;id&gt;</code>, which the busy scan skips. Its branch also keeps the item off the candidate list;</li>
+    <li>any other marker belongs to a person or another session, and it keeps blocking the project.</li>
+  </ul>
+  <p>The bad alternative is "there's a stale lock, so clear whatever markers turn up". That would wipe a person's in-progress groom just because it looked like the dead
+    tick's. The trade-off: a stranded marker from anywhere else needs a person to clear it.</p>
+  <pre>// tick.mjs:636-640
+  if (!ctx.tracker &amp;&amp; kind === 'groom') {
+    const file = fileOnDisk(ctx.root, id);
+    const fields = file === null ? {} : readFrontmatter(readText(file) ?? '').fields;
+    stop = Boolean(fields.started) &amp;&amp; fields.phase === 'groom';
+  }</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">5 · When a tick dies or keeps failing</p>
+  <h2><code>record</code>'s exit 3</h2>
+  <p><code>record</code> releases the lock only when the lock's verdict id equals the id it was given (<code>tick-state.mjs:101-112</code>). That protects against a tick
+    that outlived its TTL: it must not delete a newer tick's lock. But it also opens a quiet failure. A promote prints a new task id. If the session records that new id
+    instead of the refactor's, the refactor's lock stays held for the whole TTL.</p>
+  <p>The first version exited 0 in that case. The skill's "non-zero means stop" rule never fired, and nothing reached the run log. Now <code>record</code> exits
+    <code>3</code> when the lock names another id (<code>tick.mjs:714-721</code>). The outcome is still written, since it's what the caller saw. The lock stays, since it
+    might belong to a live tick. The skill stops and prints the stderr line. When there's no lock at all, because another tick already recovered it, <code>record</code>
+    exits 0.</p>
+  <p>That's also why the skill insists that <code>record</code> always takes the verdict's id from step 1, never the new task's (<code>SKILL.md:83-85</code>). It also
+    wants the reason on one line, with each apostrophe written as <code>’</code>, so a stray single quote can't break the shell command and leave the lock held. The
+    trade-off: <code>record</code> trusts the session to pass the right id, and only catches a wrong one after the fact.</p>
+  <pre>// tick.mjs:718-721
+  if (!released &amp;&amp; lock &amp;&amp; lock.verdict &amp;&amp; typeof lock.verdict.id === 'string') {
+    process.stderr.write(`tick.mjs: the lock is ${lock.verdict.id}'s, not ${id}'s; left in place\n`);
+    return 3;
+  }</pre>
+</div>
+
+<div class="card card-concept">
+  <p class="eyebrow">5 · When a tick dies or keeps failing</p>
+  <h2>The breaker</h2>
+  <p>Skipping failed items stops one bad item from taking every night's slot. It doesn't help a project where <em>everything</em> fails, such as one with a broken test suite or
+    a misconfigured repo. The breaker handles that. <code>streakOf</code> walks <code>state.json</code>'s <code>recent</code> list newest first and counts consecutive
+    <code>failed</code> entries. It stops at an <code>ok</code>, at an entry stamped at or before the Reset time, or at a timestamp it can't parse
+    (<code>tick-breaker.mjs:82-99</code>). When the streak reaches <code>haltAfter</code> (1–10, default 3, set in <code>settings/tick.json</code>), <code>decide</code>
+    answers <code>idle: halted: … — reset on the board, Runs › Ticks</code>.</p>
+  <p>Nothing stores "halted". It's derived on every call from <code>recent</code> and the settings, so raising N un-halts the project at the next tick and lowering N
+    halts it. A Reset is a <code>resetAt</code> stamp that the server writes; the tool never writes <code>tick.json</code>. The check sits at step 3b, after the lock and
+    recover steps and before any API read (<code>tick.mjs:380-388</code>). So a halted project still recovers a stale lock, and the check works even with the stack down.</p>
+  <p><code>forget</code> leaves <code>recent</code> alone. It's the per-item retry, and Reset is the per-project one (<code>SKILL.md:96</code>). Groom and execute failures
+    count toward the same streak, and so does a recovery's <code>killed at timeout</code>. The trade-off: one bad night can halt a healthy project, and only a person can
+    restart it.</p>
+  <pre>// tick-breaker.mjs:87-97
+  for (let i = entries.length - 1; i &gt;= 0; i--) {
+    const entry = entries[i];
+    const ms = atMs(entry &amp;&amp; typeof entry === 'object' ? entry.at : undefined);
+    if (Number.isNaN(ms)) break;
+    if (!Number.isNaN(resetMs) &amp;&amp; ms &lt;= resetMs) break;
+    if (entry.outcome === 'ok') break;
+    if (entry.outcome === 'failed') {
+      streak++;
+      since = entry.at;
+    }
+  }</pre>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">5 · Check</p>
+  <p class="quiz-prompt">A groom on ref-5 promotes it to task-12. The session then runs <code>record 'task-12' ok --kind groom</code>. What happens?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">The outcome is written under task-12 and the lock is released, since groom printed that id itself</button>
+      <p class="quiz-feedback"><code>releaseLock</code> only removes a lock whose verdict id matches. This lock names ref-5, so it stays where it is
+        (<code>tick-state.mjs:109</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn">The outcome is written under task-12, ref-5's lock stays, and <code>record</code> exits 3</button>
+      <p class="quiz-feedback">Correct. The record stands, the lock stays in case it belongs to a live tick, and exit 3 makes the skill stop and report
+        (<code>tick.mjs:714-721</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn"><code>record</code> refuses with a usage error on exit 1, and writes nothing at all</button>
+      <p class="quiz-feedback">Usage errors are only for a malformed command line (<code>tick.mjs:660-675</code>). <code>task-12</code> is a well-formed id, so the outcome
+        is written before the lock is even checked.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">The lock is released, but the outcome is dropped because task-12 is an unknown id</button>
+      <p class="quiz-feedback">It's the other way round. <code>recordOutcome</code> runs first and writes no matter what (<code>tick.mjs:710</code>). The lock is the
+        part that stays put.</p>
+    </div>
+  </div>
+</div>
+
+<div class="card card-quiz">
+  <p class="eyebrow">5 · Check</p>
+  <p class="quiz-prompt"><code>haltAfter</code> is 3. <code>recent</code>, oldest to newest: failed (Mon), ok (Tue), failed (Wed), failed (Thu), failed (Fri 10:00). A
+    Reset was stamped at Fri 09:00. What does <code>streakOf</code> return?</p>
+  <div class="quiz-options">
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Streak 3, counted since Wednesday, so the project is halted</button>
+      <p class="quiz-feedback">That ignores the Reset. Wednesday and Thursday are stamped before <code>resetAt</code>, and the walk stops at the first entry at or before it
+        (<code>tick-breaker.mjs:91</code>).</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Streak 4, since <code>failed</code> entries count across the whole list</button>
+      <p class="quiz-feedback">The walk counts consecutive entries, newest first. Even without a Reset, Tuesday's <code>ok</code> would stop it, so Monday can never
+        count.</p>
+    </div>
+    <div class="quiz-option" data-correct="false">
+      <button class="quiz-option-btn">Streak 0, since a Reset clears every failure recorded that day</button>
+      <p class="quiz-feedback">A Reset only covers entries at or before its stamp. Friday 10:00 comes after 09:00, so that failure still counts.</p>
+    </div>
+    <div class="quiz-option" data-correct="true">
+      <button class="quiz-option-btn">Streak 1, so the project is not halted</button>
+      <p class="quiz-feedback">Correct. Friday 10:00 counts. Thursday is at or before the Reset, so it stops the walk, and 1 &lt; 3.</p>
+    </div>
+  </div>
+</div>
+
+<div class="card card-qa">
+  <p class="eyebrow">Questions you might ask</p>
+  <details class="qa-item">
+    <summary>What does <code>recover</code> do with a lock it can't read at all?</summary>
+    <p>It claims the lock and drops it, then answers <code>recover</code> with <code>removed an unreadable lock</code> and <code>stop: false</code>. It records nothing,
+      because there's no verdict naming an item (<code>tick.mjs:626-633</code>).</p>
+  </details>
+  <details class="qa-item">
+    <summary>Does a halted project still clean up after a killed tick?</summary>
+    <p>Yes. The lock step runs before the breaker (step 3 before 3b), so a stale lock is still recovered while the project is halted. Its <code>killed at timeout</code> adds
+      one more failure to the streak (<code>tick.mjs:380-383</code>).</p>
+  </details>
+  <details class="qa-item">
+    <summary>Why does the lock store a base <em>commit</em> instead of a branch name?</summary>
+    <p><code>record</code> and a recovery hash the item's blob at the commit <code>decide</code> read. So an item committed between <code>decide</code> and
+      <code>record</code> can't make a failure look like a failure on the new text (<code>tick.mjs:467-468</code>, <code>tick-state.mjs:41-42</code>).</p>
+  </details>
+</div>
+
+</section>
+
+<!-- ───────────── Recap ───────────── -->
+<div class="card card-recap">
+  <p class="eyebrow">Recap</p>
+  <h2>Score</h2>
+  <p class="score"><span id="score-correct">0</span> / <span id="score-total">0</span></p>
+  <h2>Sections</h2>
+  <ul class="recap-list">
+    <li><button class="recap-btn" data-target="s1">1 · One tick, one verdict</button></li>
+    <li><button class="recap-btn" data-target="s2">2 · The idle gate</button></li>
+    <li><button class="recap-btn" data-target="s3">3 · Choosing the unit</button></li>
+    <li><button class="recap-btn" data-target="s4">4 · The review gate and the failure record</button></li>
+    <li><button class="recap-btn" data-target="s5">5 · When a tick dies or keeps failing</button></li>
+  </ul>
+  <p>There's no written reference guide to <code>backlog-tick</code> yet, and one could be generated as a follow-up. Until then, the closest references are the design spec,
+    <code>docs/superpowers/specs/2026-10-22-backlog-tick-design.md</code>, and <code>skills/backlog-tick/SKILL.md</code>. <code>spec:N</code> in this deck means a line
+    of that spec.</p>
+  <p class="muted">Built at <code>d2de92b</code>.</p>
+</div>
+
+</div>
+
+<div class="nav">
+  <button id="back" type="button">Back</button>
+  <button id="next" type="button">Next</button>
+</div>
+
+<script type="application/json" id="provenance">
+{
+  "commit": "d2de92b4e408b87f4aef12c95897572e838c6357",
+  "generated": "2026-10-23",
+  "sources": [
+    "skills/backlog-tick/SKILL.md",
+    "skills/backlog-tick/tools/tick.mjs",
+    "skills/backlog-tick/tools/tick-state.mjs",
+    "skills/backlog-tick/tools/tick-lib.mjs",
+    "skills/backlog-tick/tools/tick-breaker.mjs",
+    "docs/superpowers/specs/2026-10-22-backlog-tick-design.md",
+    ".claude/rules/skills.md"
+  ],
+  "sections": [
+    { "id": "s1", "title": "One tick, one verdict", "sources": ["skills/backlog-tick/SKILL.md", "skills/backlog-tick/tools/tick.mjs", "docs/superpowers/specs/2026-10-22-backlog-tick-design.md", ".claude/rules/skills.md"] },
+    { "id": "s2", "title": "The idle gate", "sources": ["skills/backlog-tick/tools/tick.mjs", "skills/backlog-tick/tools/tick-state.mjs", "docs/superpowers/specs/2026-10-22-backlog-tick-design.md"] },
+    { "id": "s3", "title": "Choosing the unit", "sources": ["skills/backlog-tick/tools/tick.mjs", "skills/backlog-tick/tools/tick-lib.mjs", "docs/superpowers/specs/2026-10-22-backlog-tick-design.md"] },
+    { "id": "s4", "title": "The review gate and the failure record", "sources": ["skills/backlog-tick/SKILL.md", "skills/backlog-tick/tools/tick-state.mjs", "skills/backlog-tick/tools/tick-lib.mjs", "docs/superpowers/specs/2026-10-22-backlog-tick-design.md"] },
+    { "id": "s5", "title": "When a tick dies or keeps failing", "sources": ["skills/backlog-tick/SKILL.md", "skills/backlog-tick/tools/tick.mjs", "skills/backlog-tick/tools/tick-state.mjs", "skills/backlog-tick/tools/tick-breaker.mjs", "docs/superpowers/specs/2026-10-22-backlog-tick-design.md"] }
+  ]
+}
+</script>
+<script>
+(function () {
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+  var idx = 0;
+  var score = { correct: 0, total: 0 };
+  var back = document.getElementById('back');
+  var next = document.getElementById('next');
+  var bar = document.getElementById('bar');
+
+  function unansweredQuiz(card) {
+    return card.classList.contains('card-quiz') && !card.hasAttribute('data-answered');
+  }
+  function show(i) {
+    if (i < 0 || i >= cards.length) return;
+    cards[idx].classList.remove('on');
+    idx = i;
+    cards[idx].classList.add('on');
+    back.disabled = idx === 0;
+    next.disabled = idx === cards.length - 1 || unansweredQuiz(cards[idx]);
+    bar.style.width = (cards.length > 1 ? (idx / (cards.length - 1)) * 100 : 100) + '%';
+    window.scrollTo(0, 0);
+  }
+  function go(d) { show(idx + d); }
+
+  back.addEventListener('click', function () { go(-1); });
+  next.addEventListener('click', function () { if (!next.disabled) go(1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' && !next.disabled) go(1);
+    if (e.key === 'ArrowLeft' && !back.disabled) go(-1);
+  });
+
+  document.querySelectorAll('.card-quiz').forEach(function (card) {
+    card.querySelectorAll('.quiz-option-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (card.hasAttribute('data-answered')) return;
+        card.setAttribute('data-answered', '');
+        var opt = btn.closest('.quiz-option');
+        opt.classList.add('revealed');
+        card.querySelectorAll('.quiz-option-btn').forEach(function (b) { b.disabled = true; });
+        score.total += 1;
+        if (opt.getAttribute('data-correct') === 'true') score.correct += 1;
+        document.getElementById('score-correct').textContent = score.correct;
+        document.getElementById('score-total').textContent = score.total;
+        if (cards[idx] === card) next.disabled = idx === cards.length - 1;
+      });
+    });
+  });
+
+  document.querySelectorAll('.recap-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var sec = document.getElementById(b.getAttribute('data-target'));
+      var first = sec && sec.querySelector('.card');
+      var i = cards.indexOf(first);
+      if (i >= 0) show(i);
+    });
+  });
+
+  cards[0].classList.add('on');
+  show(0);
+})();
+</script>
+</body>
+</html>
