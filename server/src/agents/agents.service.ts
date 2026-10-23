@@ -12,7 +12,10 @@ import { resolveSource } from '../items/sources/resolve.util';
 import { proveBaseBranch, resolveBaseBranch } from '../items/base-branch.util';
 import { parseUrn } from '../tracker/map-issue';
 import { runGit } from '../git-run.util';
-import { readAgentsConfig, type AgentsConfig } from './config.util';
+import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
+// Re-exported so every importer from before multi-dashboard task 4 moved them into config.util.ts (to break a module cycle) is untouched.
+export { authHeaders, dashboardError, message } from './config.util';
+import { DashboardStatusService } from './dashboard-status.service';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
   clampMode,
@@ -32,8 +35,7 @@ import {
   runClaimBlock,
   EFFORTS,
   MODELS,
-  DEFAULT_MODEL,
-  PERMISSION_LADDER
+  DEFAULT_MODEL
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
@@ -60,31 +62,11 @@ import type {
  * (cheap, per request), GET /api/configs (a full scan of every project's
  * Claude config — cached), and POST /api/spawn. This app has no other network
  * dependency and should not grow one.
+ *
+ * Multi-dashboard task 4 moved the first two reads, and the cache behind the second, into `dashboard-status.service.ts` so that one copy of them can
+ * read any machine's dashboard; this class still makes every one of those calls for home, through that service.
  */
 
-/** Health is a few fields off a warm process; a slow one means unreachable. */
-const HEALTH_TIMEOUT_MS = 4_000;
-/** /api/configs walks every recent project's .claude tree. It earns more. */
-const MANAGEMENT_TIMEOUT_MS = 15_000;
-/**
- * How long a path→dirName map stays good. The list only changes when a Claude
- * session starts somewhere new, and the call behind it is the expensive one in
- * this feature — a minute of staleness costs a disabled button that would have
- * worked.
- *
- * That cost used to be argued away with "which the sheet's own re-check then
- * corrects", and that held in one direction only: a stale ENABLE is corrected
- * by the sheet (clicking opens it and `plan()` re-derives the block here),
- * while a stale DISABLE never reached the sheet at all, because the control
- * the stale answer disabled is what opens it. That was bug-13; the board now
- * re-asks on a click against a project-visibility block (`DispatchButton`'s
- * `reverify`) rather than swallowing it, which is what makes the staleness
- * this constant permits recoverable in both directions. A re-ask inside the
- * same minute can still be answered from this map — the bound is deliberate
- * and unchanged, and one more click a moment later is the whole remaining
- * cost.
- */
-const PROJECT_TTL_MS = 60_000;
 /** The spawn call forks a process on the other side; the health probe's 4s is
  *  the wrong budget for it, and a constant named for the health probe governing
  *  the launch would be a misnomer besides. */
@@ -274,25 +256,8 @@ export interface AgentOrchestrateRequest {
   ids?: unknown;
 }
 
-/** Shape we rely on from the dashboard's /api/health. Everything optional: it
- *  is a different app's response and an older build may omit fields. */
-interface DashboardHealth {
-  remoteAnswer?: unknown;
-  spawnAvailable?: unknown;
-  spawnMaxPermission?: unknown;
-}
-
-interface DashboardManagement {
-  projects?: { dirName?: unknown; path?: unknown }[];
-}
-
 @Injectable()
 export class AgentsService {
-  /** Keyed by url so a changed BM_AGENTS_URL cannot be answered from the old
-   *  dashboard's map — which in tests is the difference between a pass and a
-   *  silent cross-contamination between cases. */
-  private cache: { at: number; url: string; map: Map<string, string> } | null = null;
-
   constructor(
     private readonly registry: RegistryService,
     private readonly orchestrator: OrchestratorService,
@@ -324,49 +289,20 @@ export class AgentsService {
      * #17 — for `syncOffBlock` alone: dispatch, orchestrate and resume refuse a project whose repo's sync is `off`, because every one of them starts a
      * session that writes through the item routes, and those refuse too. `TrackerModule` imports only `RegistryModule`, so the edge opens no cycle.
      */
-    private readonly poller: TrackerPollerService
+    private readonly poller: TrackerPollerService,
+    /**
+     * Multi-dashboard task 4 — the health probe and the path→dirName map, moved out of this class so the offers can read ANY machine's dashboard through
+     * the same code without injecting this service (task 5 makes this service inject the offers, and the reverse edge would be a cycle Nest cannot
+     * construct). Every call here still goes through it with home's config, so home's reads, budgets and cache behave exactly as before the move.
+     */
+    private readonly dashboardStatus: DashboardStatusService
   ) {}
 
+  /** Home's dashboard, as Settings and every launch gate read it. The body is `DashboardStatusService.statusOf`, which can read any machine's. */
   async status(): Promise<AgentsStatus> {
-    const cfg = readAgentsConfig();
-    const off: AgentsStatus = {
-      enabled: false,
-      reachable: false,
-      remoteAnswer: false,
-      spawnAvailable: false,
-      spawnMaxPermission: null,
-      projectPaths: []
-    };
-    // The short-circuit is the feature's off switch: no fetch, so no egress,
-    // so nothing to report about a dashboard we never contacted.
-    if (!cfg.enabled) return off;
-
-    let health: DashboardHealth;
-    try {
-      health = await this.get<DashboardHealth>(cfg, '/api/health', HEALTH_TIMEOUT_MS);
-    } catch (e) {
-      return { ...off, enabled: true, error: message(e) };
-    }
-
-    let projectPaths: string[] = [];
-    try {
-      projectPaths = [...(await this.projectMap(cfg)).keys()];
-    } catch {
-      // Swallowed on purpose: health already told us the dashboard is up, and
-      // reporting `reachable: false` because the *heavy* call timed out would
-      // send the reader to fix a connection that works. An empty list disables
-      // the buttons, which is the honest consequence.
-    }
-
-    return {
-      enabled: true,
-      reachable: true,
-      remoteAnswer: health.remoteAnswer === true,
-      spawnAvailable: health.spawnAvailable === true,
-      spawnMaxPermission: asMode(health.spawnMaxPermission),
-      projectPaths
-    };
+    return this.dashboardStatus.statusOf(readAgentsConfig());
   }
+
 
   /**
    * Everything the launch sheet needs. `blocked` is filled rather than thrown
@@ -594,7 +530,7 @@ export class AgentsService {
     opts: { prompt: string; name: string; permissionMode: string; maxPermission: PermissionMode | null; model?: unknown; effort?: unknown; remoteControl: boolean }
   ): Promise<AgentDispatchResult> {
     const cfg = readAgentsConfig();
-    const dirName = (await this.projectMap(cfg)).get(projectPath);
+    const dirName = (await this.dashboardStatus.projectMap(cfg)).get(projectPath);
     if (dirName === undefined) {
       // The caller's gate already covers this from the same map, so reaching
       // here means the cache expired between the two reads. Refuse rather than
@@ -784,7 +720,7 @@ export class AgentsService {
     if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
 
     const cfg = readAgentsConfig();
-    const dirName = (await this.projectMap(cfg)).get(req.project);
+    const dirName = (await this.dashboardStatus.projectMap(cfg)).get(req.project);
     if (dirName === undefined) {
       // Same race dispatch()'s identical line guards against: the membership
       // check above and this lookup read the same cache, and only a TTL
@@ -1147,7 +1083,7 @@ export class AgentsService {
     origin: 'watchdog' | 'board',
     status: AgentsStatus
   ): Promise<AgentDispatchResult> {
-    const dirName = (await this.projectMap(cfg)).get(project);
+    const dirName = (await this.dashboardStatus.projectMap(cfg)).get(project);
     if (dirName === undefined) {
       // The same TTL-race guard orchestrate() and dispatch() both carry:
       // projectDispatchGate's visibility check and this lookup read the same
@@ -1406,7 +1342,7 @@ export class AgentsService {
       }
 
       const cfg = readAgentsConfig();
-      const dirName = (await this.projectMap(cfg)).get(project);
+      const dirName = (await this.dashboardStatus.projectMap(cfg)).get(project);
       if (dirName === undefined) {
         // The same TTL-race guard every other spawn path carries — never
         // derive a dirName from the path to route around it.
@@ -1491,48 +1427,6 @@ export class AgentsService {
       throw new HttpException({ error: 'spawn returned no session id' }, 502);
     }
     return { sessionId: body.sessionId };
-  }
-
-  /** Absolute project path → the dashboard's own dirName key. */
-  private async projectMap(cfg: AgentsConfig): Promise<Map<string, string>> {
-    const now = Date.now();
-    if (this.cache && this.cache.url === cfg.url && now - this.cache.at < PROJECT_TTL_MS) {
-      return this.cache.map;
-    }
-    // The second escaping seam bug-26 names, and wider than the spawn one:
-    // `get()` rejects on a connection failure or a timeout AND throws a plain
-    // Error for a non-ok answer, so a dashboard that merely 500s its own
-    // /api/configs inside the TTL window reached the same unmapped 500.
-    //
-    // Caught here rather than at the three post-gate call sites for the same
-    // reason it is one function at all: one seam, three identical callers.
-    // The 409 sitting under each of those calls stays untouched and stays
-    // right — it means "the dashboard answered and this project was not in
-    // the list", where this means "we never got to ask", which is the same
-    // split `dispatch()` and `orchestrate()` already make between an
-    // unreachable dashboard and one that said no.
-    //
-    // `status()`'s bare `catch {}` swallows this HttpException exactly as it
-    // swallowed the raw error before, so GET /api/agents/status is unchanged:
-    // an empty project list, not a 502.
-    let data: DashboardManagement;
-    try {
-      // `/api/configs` was `/api/management` until the dashboard's dc3ade0 (2026-10-01) renamed it with no alias. The old path then fell through to
-      // the dashboard's SPA fallback — a 200 carrying index.html — whose JSON parse threw, the status route swallowed that, and every project
-      // showed as unseen, which disabled dispatch everywhere with no error on screen. A rename over there has to be followed here.
-      data = await this.get<DashboardManagement>(cfg, '/api/configs', MANAGEMENT_TIMEOUT_MS);
-    } catch (e) {
-      throw new HttpException({ error: dashboardError(e, 'the dashboard project list', MANAGEMENT_TIMEOUT_MS) }, 502);
-    }
-    const map = new Map<string, string>();
-    for (const p of data.projects ?? []) {
-      // Both fields or neither: a half-shaped entry is one we cannot spawn
-      // into, and dropping it is the same posture RegistryService takes on a
-      // mis-shaped project — a bad entry, not a bad response.
-      if (typeof p.path === 'string' && typeof p.dirName === 'string') map.set(p.path, p.dirName);
-    }
-    this.cache = { at: now, url: cfg.url, map };
-    return map;
   }
 
   /**
@@ -2053,17 +1947,6 @@ export class AgentsService {
     return this.items.find(requestPath);
   }
 
-  private async get<T>(cfg: AgentsConfig, path: string, timeoutMs: number): Promise<T> {
-    const res = await fetch(`${cfg.url}${path}`, {
-      headers: authHeaders(cfg),
-      // Without this an unreachable-but-routable host hangs the board's status
-      // call for the OS connect timeout — minutes, on a tailnet address whose
-      // peer is asleep.
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!res.ok) throw new Error(`${path} answered ${res.status}`);
-    return (await res.json()) as T;
-  }
 }
 
 /** The dashboard's session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
@@ -2142,10 +2025,6 @@ export async function itemClaimBlock(id: string, holder: { session: string; host
   return staleClaimProbe(holder);
 }
 
-export function authHeaders(cfg: AgentsConfig): Record<string, string> {
-  return cfg.token ? { authorization: `Bearer ${cfg.token}` } : {};
-}
-
 /**
  * The `-n` name an orchestrate run's dashboard row is labelled with —
  * `sessionName`'s (prompt.util.ts) counterpart for a whole project rather
@@ -2207,66 +2086,4 @@ export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'boa
  */
 export function stopSessionName(projectPath: string): string {
   return `stop ${basename(projectPath)}`.slice(0, 60);
-}
-
-/**
- * A ceiling we do not recognise is a dashboard newer than this client. Read as
- * null, which `modesUpTo` turns into "plan only" — the safe reading, since we
- * cannot know where an unknown string sits on the ladder.
- */
-function asMode(value: unknown): PermissionMode | null {
-  return typeof value === 'string' && (PERMISSION_LADDER as readonly string[]).includes(value) ? (value as PermissionMode) : null;
-}
-
-export function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-/**
- * What to tell a reader about an outbound call to the dashboard that did not
- * come back at all — `message()`'s counterpart for the *rejection* shapes,
- * which say nothing useful on their own.
- *
- * Both shapes were measured on Node 22 for bug-26, and both are why relaying
- * the raw message is not enough:
- *
- * - a connection failure is a `TypeError` whose own message is the flat
- *   literal `fetch failed`. Everything that identifies it — `ECONNREFUSED`,
- *   the address — lives on `.cause` and nowhere else.
- * - the `AbortSignal.timeout` path is a `DOMException` reading `The operation
- *   was aborted due to timeout`, which names neither the call that timed out
- *   nor the budget it blew. A reader cannot tell a 4s health probe from a 10s
- *   spawn from that sentence, and the budget is the one number that tells
- *   them whether to retry or go looking at the dashboard.
- *
- * `what` names the call so the two are distinguishable; `timeoutMs` is that
- * call's own budget, passed in rather than looked up here because this
- * function has no way to know which of the three constants applied.
- *
- * The abort branch is duck-typed on `.name` rather than `instanceof
- * DOMException` for the reason `resumeErrorMessage` (watchdog.service.ts)
- * already records for its own probe: jest's node environment can put a realm
- * boundary between where an object was constructed and where it is tested,
- * and `instanceof` silently reads false across one. `AbortError` is accepted
- * beside `TimeoutError` because a caller-side abort arrives as the former and
- * means the same thing to a reader — nothing came back in time.
- *
- * The fall-through to `message(e)` is load-bearing rather than a default:
- * `status()`'s own failures already report a readable string (a plain
- * `Error('connect ECONNREFUSED …')` from `get()`, whose wording a test pins),
- * and anything that is not a fetch rejection at all — a bug in our own code —
- * must still read as itself rather than be dressed up as an upstream fault.
- */
-export function dashboardError(e: unknown, what: string, timeoutMs: number): string {
-  const name = (e as { name?: unknown } | null)?.name;
-  if (name === 'TimeoutError' || name === 'AbortError') {
-    return `${what} timed out after ${timeoutMs}ms`;
-  }
-  const cause = (e as { cause?: unknown } | null)?.cause;
-  if (cause !== null && typeof cause === 'object') {
-    const { code, message: detail } = cause as { code?: unknown; message?: unknown };
-    const named = typeof code === 'string' ? code : typeof detail === 'string' ? detail : null;
-    if (named !== null) return `${what} failed: ${named}`;
-  }
-  return message(e);
 }

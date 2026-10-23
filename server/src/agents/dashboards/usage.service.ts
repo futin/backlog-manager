@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import type { MachineUsage } from '../../../../shared/types';
-import { authHeaders } from '../agents.service';
-import type { AgentsConfig } from '../config.util';
+import { authHeaders, type AgentsConfig } from '../config.util';
 import type { Machine } from './dashboards.service';
 
 /** Per outbound request, not per `read`: the account and profile fetches run side by side, so a hung dashboard costs one timeout, not two. */

@@ -1,9 +1,11 @@
-import { Body, Controller, Get, HttpCode, HttpException, Post, UseGuards } from '@nestjs/common';
+import { isAbsolute } from 'node:path';
+import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards } from '@nestjs/common';
 
-import type { DashboardsView } from '../../../../shared/types';
+import type { DashboardsView, ProjectOffers } from '../../../../shared/types';
 import { SameOriginPostGuard } from '../origin.guard';
 import { DashboardsFileUnreadable } from './dashboards-file.util';
 import { DashboardsService } from './dashboards.service';
+import { OffersService } from './offers.service';
 
 /**
  * The machine list's settings routes (spec 2026-10-22-multi-dashboard-design.md, "Settings"). `GET /api/dashboards` is read-only and unguarded like every
@@ -17,11 +19,25 @@ import { DashboardsService } from './dashboards.service';
  */
 @Controller('api/dashboards')
 export class DashboardsController {
-  constructor(private readonly dashboards: DashboardsService) {}
+  constructor(
+    private readonly dashboards: DashboardsService,
+    private readonly offersService: OffersService
+  ) {}
 
   @Get()
   list(): DashboardsView {
     return this.dashboards.view();
+  }
+
+  /**
+   * Which machines `project` can run on, and the suggestion (multi-dashboard task 4, `OffersService`). Read-only and unguarded like every GET; always a 200
+   * once the query is well formed, because a machine that cannot be reached is an answer (not offered, with its reason), never an error. The path is the
+   * project's registry path, compared raw like every membership check here — an unregistered path is simply a project no remote can know.
+   */
+  @Get('offers')
+  offers(@Query('project') project: unknown): Promise<ProjectOffers> {
+    if (typeof project !== 'string' || !isAbsolute(project)) throw new HttpException({ error: 'project must be an absolute path' }, 400);
+    return this.offersService.offers(project);
   }
 
   @UseGuards(SameOriginPostGuard)
