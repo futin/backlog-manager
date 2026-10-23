@@ -125,7 +125,7 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
         <Pill tone="neutral">{scope === 'local' ? 'this browser' : 'this machine'}</Pill>
       </Band>
 
-      {/* One of two card sets, never both — the page IS the scope (§8.6), so a
+      {/* One of three card sets, never both — the page IS the scope (§8.6), so a
           card that mixed backends would make the pill above a lie. That is why
           the old `Claude Agents` card was split: its status lines report the
           HOST's environment (now the Home row of `Dashboards`) while its model,
@@ -133,7 +133,7 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
           `Dispatch` on Local), and the split is what let each half sit under a
           truthful heading.
 
-          There is no in-page control that moves between these two, at any
+          There is no in-page control that moves between these three, at any
           width. The rail's tree is the only one, the same rule Runs' three pages
           follow since task-38; a second control here would be a second wording
           free to disagree with the tree's. */}

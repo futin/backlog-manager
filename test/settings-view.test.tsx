@@ -78,7 +78,7 @@ describe('SettingsView', () => {
   });
 
   /**
-   * Renders one of Settings' two pages (task-42).
+   * Renders one of Settings' three pages (task-42 made it two; Dashboards is the third).
    *
    * The scope is written to storage rather than passed as a prop, because the
    * page genuinely reads it from there: `settingsScope` is a settings field,
@@ -87,7 +87,7 @@ describe('SettingsView', () => {
    * provider reads localStorage once on mount — which is why this takes a
    * parameter rather than offering a switch to click afterwards. There is no
    * in-page switch to click; the rail is the only thing that moves between
-   * these two pages, at every width.
+   * these three pages, at every width.
    */
   function renderView(scope: SettingsScope = 'local') {
     if (scope !== 'local') localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ settingsScope: scope }));
@@ -215,9 +215,8 @@ describe('SettingsView', () => {
   });
 
   /*
-   * task-42 — the split itself. What these cases pin is the claim the whole
-   * feature rests on: the PAGE is the scope, so no card can mix backends and
-   * no card appears on both pages.
+   * task-42 — the split itself (Local and Shared; Dashboards joined later as a third page). What these cases pin is the claim the whole feature rests on:
+   * the PAGE is the scope, so no card can mix backends and no card appears on both pages.
    *
    * Asserted both ways round on purpose. A presence check alone would pass on
    * a build that rendered every card on every page and merely added a band
@@ -309,7 +308,7 @@ describe('SettingsView', () => {
 
     /*
       No in-page switch, at any width — the rail's tree is the only thing that
-      moves between these two pages, the same rule Runs' three pages follow since
+      moves between the three pages, the same rule Runs' three pages follow since
       task-38. The dashboard this pattern was ported from DOES show a pill
       switch in the band below 700 px; this board does not, because the rail's
       trees stand open at that width and a second control here would be a

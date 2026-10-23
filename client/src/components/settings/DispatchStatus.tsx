@@ -4,9 +4,9 @@ import { Dot } from '../ui/Dot';
 
 /**
  * This machine's dispatch report — the status line and the setup steps — drawn in Home's detail on the Dashboards page (`.claude/DESIGN.md` §8.6), which
- * is where it has lived since the `Claude Agents` card was folded into the Dashboards card and that card became a page: both answered "what can this machine's own dashboard do", one as a status
- * and one as a list entry, and two cards for one subject read as two subjects. A module of its own because `DashboardsPage` draws it and `SettingsView`
- * imports `DashboardsPage`, so it cannot live in either without a cycle.
+ * is where it has lived since the `Claude Agents` card was folded into the Dashboards card and that card became a page: both answered "what can this
+ * machine's own dashboard do", one as a status and one as a list entry, and two cards for one subject read as two subjects. A module of its own because
+ * `DashboardsPage` draws it and `SettingsView` imports `DashboardsPage`, so it cannot live in either without a cycle.
  *
  * Read-only, like the card it came from: every gate named here lives on a host — in this API's env or in the dashboard's — and a switch that wrote to a
  * browser's localStorage would be a lie about where the setting is. The bearer token is not here and never was: it must never be in a browser at all.

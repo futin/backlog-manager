@@ -35,7 +35,7 @@ The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks w
 Runs and Archive each already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the section that
 made it and drops it on a section change, so Settings, which reports nothing, always shows a solid cursor.
 
-THREE sections have a sub-nav tree under their row: Runs (History, Watchdog, Ticks), Jira (Board, Setup) and Settings (Local, Shared). All three are drawn by one
+THREE sections have a sub-nav tree under their row: Runs (History, Watchdog, Ticks), Jira (Board, Setup) and Settings (Local, Shared, Dashboards). All three are drawn by one
 component, `RailTree`, because
 the markup carries three details that must not drift — the `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone
 menu on a pick. What each call site supplies is only what legitimately differs: the item list, which of them is current, and what a pick writes. In every case
@@ -179,7 +179,7 @@ home, with a warning note (`OFFERS_FAILED_TEXT`), because blocking a local launc
 on them. Jira's launch sheet has no picker: its Start stays home-only ([jira.md](jira.md)).
 
 Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, since the release chip the What's new drawer, and since Jira
-phase 5 the Jira launch sheet, and since the Dashboards card stopped editing in place its add/edit sheet — are the eight dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
+phase 5 the Jira launch sheet, and since the Dashboards form stopped editing in place its add/edit sheet — are the eight dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
 whatever they wrap, and `ReleasesDrawer` calls it itself, since its shell is ui-kit's (#298) and is handed `closeOnEscape={false}`. Two further entries join the same stack
 while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
 Filters and Sort, and Jira's chip, board picker, roots search and `Run ▾` panel — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
@@ -296,41 +296,50 @@ so a page that could not reach the server never says the breaker is quiet.
 
 ### Settings
 
-TWO pages, picked from the rail's tree and from nothing else — `settingsScope` is the setting, `local` the default. **The page is the scope**: Local is
-everything in this browser's `localStorage`, Shared is what the API reads off the host. The band states which in a `Pill` at `neutral` (`this browser` /
-`this machine`) and its subtitle is the page's own one-line summary; there is no in-page switch at any width.
+THREE pages, picked from the rail's tree and from nothing else — `settingsScope` (`local | shared | dashboards`) is the setting, `local` the default. **The page is
+the scope**: Local is everything in this browser's `localStorage`, Shared and Dashboards are what the API reads off the host. The band states which in a `Pill` at
+`neutral` (`this browser` / `this machine`, the latter on both host pages) and its subtitle is the page's own one-line summary; there is no in-page switch at any
+width.
 
-| Page       | Column 1              | Column 2      |
-| ---------- | --------------------- | ------------- |
-| **Local**  | Display, Board        | Orchestrator, Dispatch |
-| **Shared** | Orchestrator watchdog, Backlog tick | Dashboards, Trackers |
+| Page           | Column 1                            | Column 2                |
+| -------------- | ----------------------------------- | ----------------------- |
+| **Local**      | Display, Board                      | Orchestrator, Dispatch  |
+| **Shared**     | Orchestrator watchdog, Backlog tick | Trackers                |
 
-Each card is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether changing this
-affects anybody but the person changing it. Both pages draw the same two hand-placed columns, so a card does not move to the other side of the page when its
-neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card, with the `Backlog tick` card under it,
-against two cards stacked in one column (task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and `Dashboards` then
-absorbed `Claude Agents`: its dispatch status is the first line of the Home row and its setup steps open under that row, because the card reported the very
-dashboard `Dashboards` lists as Home; both report on the host, and the Trackers card sets only its per-repo sync interval since #17 — a row control, not a
-section of settings — which is what makes them one column rather than two halves of the page).
+**Dashboards** is not a two-column page; it is described below the cards.
+
+Each card on Local and Shared is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether
+changing this affects anybody but the person changing it. Both draw the same two hand-placed columns, so a card does not move to the other side of the page when
+its neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones; Shared is the watchdog's long card,
+with the `Backlog tick` card under it (both machine-wide controls), against `Trackers`, the one host report. Shared once held `Dashboards` in that column too
+(task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and `Dashboards` absorbed `Claude Agents`) until the machine list
+outgrew a card and became its own page; Shared draws no dispatch line now.
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
 model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
 from. That card is what the old `Claude Agents` card's per-device half became: that card mixed backends, and a page that promises a scope cannot carry one that
-does. What stayed on Shared is genuinely the host's — the dispatch status lines and the conditional `Setting it up` block — on a status row with no control in
-its right slot at all. `Trackers · this machine` is the other Shared report and is read-only by design, not by phase: a project is connected by committing
-`backlog/source.json`, so what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with the repo
-read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is.
+does. `Trackers · this machine` is the Shared report and is read-only by design, not by phase: a project is connected by committing `backlog/source.json`, so
+what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with the repo read off that project's
+`origin` per request, and the one control it has is each repo's sync interval (#17). It never shows the token — only whether one is set, and whose login it is.
 
-`Dashboards · this machine` is the one Shared card that writes: it lists the machines a launch can run on, in prefer order with home first until moved, each as
-a row of URLs, the `BM_MACHINE_NAME` a claim's `host` must equal, the account, the models and efforts it may run, and one token line, with the suggestion
-strategy as a radio group and the threshold beneath. `DashboardsGroup` reads `useDashboards` once on mount (no poll, no focus trigger: the file changes only
-when a person edits it) and every write — `POST /api/dashboards/entries`, `/entries/delete`, `/home`, `/settings` — answers the whole fresh view, which the card
-draws rather than an optimistic copy. **A token is never on the page in any form**: the payload carries `tokenSet` and the env var's name, and the line says `✓
-set` or `✗ not set — add it to .env and restart`; there is no field to type one into, because the env var is the only place the server reads it from. Add and Edit open `DashboardSheet` (a `FormSheet`, one at a time) rather than a form in place under the row; Remove stays an inline `Confirm`. A same-name
-Add is held at the sheet (the server treats it as an update), every box ticked is sent as no list, and an unreadable
-`dashboards.json` answers 409 on every write with the file left byte-identical, which the card prints verbatim
+**Dashboards** is the one page that writes the machine list (`DashboardsPage`, drawn to `.claude/DESIGN.md` §8.6): the Suggest card (`SuggestCard` — the three
+strategies as a radio group, the threshold beneath) on top, then `DashboardsList` (360 px) beside `DashboardDetail`, and a footer, folding to one column at
+1100 px. The list is the machines in prefer order with home first until moved; each row is its place, a health dot, its name, its account and two usage meters.
+The detail is the selected machine's URLs, the `BM_MACHINE_NAME` a claim's `host` must equal, the models and efforts it may run and one token fact. Home's detail
+also carries the dispatch status line (`DispatchStatus.tsx`, read by `useAgents`, so it draws even while the list has not loaded) and the `Setting it up` steps
+while it is unhealthy. **Two reads, and neither waits on the other.** `useDashboards` reads the file once on mount (no poll, no focus trigger: the file changes
+only when a person edits it) and every write — `POST /api/dashboards/entries`, `/entries/delete`, `/home`, `/settings` — answers the whole fresh view, which the
+page draws rather than an optimistic copy. `useMachines` reads `GET /api/dashboards/machines` — health and usage per machine, up to two outbound budgets on the
+server — on mount, on focus, every minute through `useRefreshing`, and at once after each write; the dots stay quiet and the meters absent (`checking…`) until it
+answers, so a slow or dead remote can never hold the config. Its answer is matched to the list by machine id and its own order ignored; a failed read keeps the
+previous answer. Selection is page state, never stored: the picked id is drawn while it is listed and the first machine otherwise.
+**A token is never on the page in any form**: the payload carries `tokenSet` and the env var's name, and the fact says `✓ set` or `not set — needed only if that
+dashboard does not trust this machine` (a tailnet-trusting dashboard takes a call with no token, so unset is the common case, not a fault); there is no field to
+type one into, because the env var is the only place the server reads it from. Add and Edit open `DashboardSheet` (a `FormSheet`, one at a time) rather than a form
+in place; Remove stays an inline `Confirm`. A same-name Add is held at the sheet (the server treats it as an update), every box ticked is sent as no list, and an
+unreadable `dashboards.json` answers 409 on every write with the file left byte-identical — the page then disables every control and says so in a banner
 ([invariants.md](invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)). The RunOn group's Settings
-link and the deep link `/?section=settings&settings=shared` both land on this page: `settings=shared|local` is read only beside `section=settings`.
+link and the deep link `/?section=settings&settings=dashboards` land on this page: `settings=local|shared|dashboards` is read only beside `section=settings`.
 
 Daylight is the default theme and the first one listed (`THEMES` and `DEFAULT_SETTINGS.theme` in `lib/settings.ts`); Midnight, the default until 2026-10-14,
 is second. The default only reaches a browser that has no valid stored theme: `clampSettings` keeps any theme it recognises, so anyone who had already picked
@@ -452,9 +461,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `lib/board-sort.ts` (#258) — the Board's sort pipeline, pure: `SortKey`/`SortDir`, `NATURAL_DIR`, `COMPARATORS`, `resolveSortKey`, `liveRank` and
   `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns`,
-  `useWatchdog`, `useTicks` and `useOrchestratorArchive`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
+  `useWatchdog`, `useTicks`, `useOrchestratorArchive` and `useMachines`: one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
-- `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those six pollers go through.
+- `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines` among them.
 - `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
   superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan, `OrchestrateSheet`'s merge-check,
   uncommitted flag and branch list, `RunDetail`'s archived run and `JiraIssueModal`'s detail all read through it.
@@ -471,6 +480,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useTicks.ts` (`TICKS_POLL_MS`, 15 s) — the breaker's read: `{ data, error, saveError, save, reset }` over `lib/ticks.ts`. Mount and window focus, plus
   the 15 s poll only while `live` — the Runs › Ticks page passes `true`, Settings' card `false`. A save or a reset redraws from the POST's own answer, never a
   follow-up GET, and a refused write lands in `saveError`, beside the failed-GET `error`, so a refusal never blanks `data`.
+- `hooks/useMachines.ts` (`MACHINES_POLL_MS`, 60 s) — `GET /api/dashboards/machines`, health and usage per machine, for Settings › Dashboards only: `{ machines,
+  reload }`, entered through `useRefreshing` with `armed` constant `true` (the page's mount is the arming), and a failed read keeps the previous answer silently.
 - `hooks/useDashboards.ts`, `hooks/useOffers.ts`, `hooks/useRunOn.ts` — the configured machines (one read on mount, `refresh` for a write's caller), one
   project's offers (asked when a sheet passes a project, dropped by sequence number and by project tag so no frame shows the previous project's cards), and the
   sheets' shared pick-lock-narrow state over both. `lib/dashboards.ts` is the one home of the wire calls, `machineLabelByHost` / `machineLabelById`,
@@ -497,7 +508,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the four per-item dispatch blocks
 (the in-review rung, `a PR is open for this item`, the newest) and which one lets a click through, the dialog escape stack and its eight dialogs, a crashed
 run rendering as crashed, "queue wait is not work",
-[Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope),
+[Settings being three pages whose page IS the scope](invariants.md#settings-is-three-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
 row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that
 the CSP hash travels with](invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it) — are in [invariants.md](invariants.md),

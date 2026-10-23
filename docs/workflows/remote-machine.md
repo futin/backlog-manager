@@ -59,7 +59,7 @@ port, a dashboard that does not trust the tailnet, a machine name that differs f
 
 ## Verification
 
-- The Dashboards card draws the new row. Its token line reads `✓ set` if you did step 4; if you did and it reads `not set`, step 4 did not reach the server —
+- The Dashboards page (Settings › Dashboards) draws the new row, with a health dot once the status read lands. Its token line reads `✓ set` if you did step 4; if you did and it reads `not set`, step 4 did not reach the server —
   check the variable's exact name and that the stack was restarted.
 - Open any launch sheet for a tracker project that is registered on both boards: a `Run on` group appears at the top with a card per machine. The remote card is
   enabled and shows its usage; if it is disabled the reason is printed in the card — that is the one place the refusal is read.

@@ -2111,7 +2111,7 @@ oldest case mounts.
 The Dashboards sheet makes it eight, the same construction a fifth time: Settings' Dashboards card used to open its add and edit forms in place under the
 row, where a seven-field form inside the list of machines read as more of the list, and `DashboardSheet` now composes `FormSheet` instead — its fifth
 composer. It opens over nothing but the Settings page, so it ranks above no other dialog in practice, and the suite gains no case for it: it runs through
-the shell code the existing cases already cover. The card's row-level `Remove` stays an inline `Confirm`.
+the shell code the existing cases already cover. The page's row-level `Remove` stays an inline `Confirm`.
 
 One entry on the stack is not a dialog, and it is not counted among them. `ui/Confirm.tsx` (bug-53) is the confirmation the run's Stop opens — and, since #225, the item modal's claim release — drawn inline in
 the row the click came from rather than over it — §8.7 of `.claude/DESIGN.md` keeps `Modal` to its two composers and nothing else floating but `Popover`'s
@@ -3116,16 +3116,16 @@ guard" but "every rule's mechanism is missing", and the same-set guard says so, 
 red on an empty `.claude/rules/`; the others still pass on it, and `ruleFilesIn` still answers `[]` for an absent directory, pinned by one case, so an absent
 directory fails at the guard that has something to say and not at a crash in the ones that do not.
 
-## Settings is two pages, the page is the scope
+## Settings is three pages, the page is the scope
 
-`settingsScope` (`client/src/lib/settings.ts`) is `local | shared`, per device, defaulting to `local`. **Local is everything in this browser's `localStorage`;
-Shared is what the API reads off the host** — the watchdog's settings file beside the registry, and the environment the server was started with. No card mixes
-the two, and the rail's sub-nav tree is the only thing that switches them, at every width.
+`settingsScope` (`client/src/lib/settings.ts`) is `local | shared | dashboards`, per device, defaulting to `local`. **Local is everything in this browser's
+`localStorage`; Shared and Dashboards are what the API reads off the host** — the watchdog's settings file beside the registry, `dashboards.json`, and the
+environment the server was started with. No card mixes local and host, and the rail's sub-nav tree is the only thing that switches the pages, at every width.
 
 ### The rule is "the page is the scope", and one card had to split to satisfy it
 
 Settings has carried a scope subtitle per card since task-39 — `this device`, `this machine`, `this server` — because the scope answers a different question
-from the name: whether changing a setting affects anybody but the person changing it. Two pages are that same answer moved up a level, and the move is worth
+from the name: whether changing a setting affects anybody but the person changing it. Pages are that same answer moved up a level, and the move is worth
 something only if it is true without exceptions. One card was not.
 
 `Claude Agents` mixed backends. Its status lines and its `Setting it up` block report the HOST's environment — `BM_AGENTS`, `CLAUDE_BIN`, the dashboard's
@@ -3137,7 +3137,8 @@ So the card divides. `Dispatch · this device` is the Local card holding the thr
 status row and the conditional setup block, and its status row has **no control in its right slot at all** — which is why `SettingsRow`'s `children` is
 optional, and why the empty `.set-control` is not rendered rather than rendered hollow. Since multi-dashboard the Shared half is no longer a card of its own:
 its status line and setup block are the Home row of `Dashboards · this machine` (`client/src/components/settings/DispatchStatus.tsx`), the card that already
-listed this machine's dashboard as Home — the same subject, still the host's, so the split above is unchanged.
+listed this machine's dashboard as Home — the same subject, still the host's, so the split above is unchanged. When that card outgrew a card and became the
+Dashboards page, the status line moved with it, into Home's detail, and Shared stopped drawing a dispatch line at all.
 
 `open dashboard ↗` moved with the value that supplies its href, onto the `Dashboard link` row itself. A link driven by a per-device field has no business on the
 page that promises everything on it is the host's; and beside the field that sets it, the link stops needing an explanation.
@@ -3153,6 +3154,18 @@ cards, and after the split neither page can be asked the question. It was restat
 is on Local and still holds its own two rows — because the adjacency is gone by design, and a test asserting a layout the design deliberately dropped is worse
 than no test at all.
 
+### Dashboards is the third page, and it is the host's scope like Shared
+
+The machine list started as a Shared card, grew a per-machine detail (URLs, the claim `host`, models, efforts, a token fact), then a health dot and two usage
+meters per machine, and a card holding a list beside a detail beside a Suggest control stopped being a card. It is a page of its own, so the pair the first
+split argued from — local against host — is unchanged: Dashboards writes `dashboards.json` on the API host, so its pill reads `this machine` and nothing on it is
+per device. Not a sub-section of Shared, because the rail's tree is the only switch and a second in-page level would be a second wording free to disagree with it.
+
+What the page reads is two requests that never wait on each other. `GET /api/dashboards` is the file (cheap, no outbound call) and draws the list and the detail
+at once; `GET /api/dashboards/machines` is a health probe of every remote plus each machine's usage, up to two outbound budgets, and only colours the dots and
+fills the meters when it lands (`checking…` until then). Folding the second into the first would let one dead remote hold the config page for 10 s; keeping them
+apart is why a slow machine can only ever leave a dot quiet.
+
 ### There is no in-page switch, at any width
 
 The dashboard this pattern was ported from draws a pill switch in its Settings band below 700 px. This board does not, and the difference is not an oversight:
@@ -3161,9 +3174,9 @@ the rule — task-38 deleted `runs-mode.ts`'s `MODE_BUTTON` pair along with the 
 free to disagree with the tree's. `test/settings-view.test.tsx` pins the absence, because "add a switch on the phone" is exactly the improvement a later reader
 would make without knowing it was already decided against.
 
-### The scope pill is the existing primitive, at `neutral`, on both pages
+### The scope pill is the existing primitive, at `neutral`, on every page
 
-`Band`'s right slot holds one `Pill` — `this browser` on Local, `this machine` on Shared — and the WORD carries the distinction, not a tone. `PillTone`'s five
+`Band`'s right slot holds one `Pill` — `this browser` on Local, `this machine` on Shared and on Dashboards — and the WORD carries the distinction, not a tone. `PillTone`'s five
 members each name a *reading* (`live`, `warn`, `bad`, `done`, `neutral`); none of them means "shared", and minting a sixth look inside the settings block would
 be a second home for a primitive, which `test/design-guards.test.ts`'s guard 7 exists to refuse.
 
@@ -3200,7 +3213,7 @@ The Jira section's two pages are switched by the rail's tree, or a link threaded
 
 ### The tree rule is Runs' and Settings', applied a third time
 
-Board and Setup are two pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared) already have, and the rule those
+Board and Setup are two pages under one rail entry, which is the shape Runs (History, Watchdog, Ticks) and Settings (Local, Shared, Dashboards) already have, and the rule those
 two settled is that the tree is the switch at every width: the rail's trees stand open below 700 px, so a segmented control on the page would be a second
 wording of the same choice, free to drift from the tree's and reached in the same number of taps. Task-38 deleted Runs' in-page pair for that reason and task-42
 never gave Settings one; a Jira page switch would have been the first thing a later reader removed, so it was never drawn.
@@ -4414,7 +4427,7 @@ The other half of the same incident. While the server was stalled, the client's 
 request had come back, so each one stacked a fresh duplicate on every tick; when the server recovered it had a queue of identical questions to answer, most of
 them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure of React and tested directly with fake timers) and its React
 shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents`, `useTicks` and — since
-#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six enters through `hooks/useRefreshing.ts` (#285), which owns the
+#285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open — enters through `hooks/useRefreshing.ts` (#285), which owns the
 board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
 `useJiraBoard`, which triggers on its board id rather than on mount and focus.
 

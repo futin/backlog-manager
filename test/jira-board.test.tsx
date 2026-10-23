@@ -482,7 +482,7 @@ describe('the shapes that are not a board', () => {
   });
 });
 
-// The section's two pages are switched by the rail's tree alone (spec §6.1, CLAUDE.md "Settings is two pages…"): the real Board page, drawn through the
+// The section's two pages are switched by the rail's tree alone (spec §6.1, CLAUDE.md "Settings is three pages…"): the real Board page, drawn through the
 // real `JiraView` inside a `main`, holds no control that restates that choice.
 it('draws no page switch inside main', async () => {
   render(
