@@ -266,6 +266,10 @@ describe('settingsScope', () => {
     expect(clampSettings({ settingsScope: 'shared' }).settingsScope).toBe('shared');
   });
 
+  it('keeps the dashboards page when it is the stored one', () => {
+    expect(clampSettings({ settingsScope: 'dashboards' }).settingsScope).toBe('dashboards');
+  });
+
   /*
     A view position is still worth clamping: the value picks which of two card
     sets renders, so an unrecognised one would render neither and leave the
@@ -273,6 +277,7 @@ describe('settingsScope', () => {
   */
   it('clamps an unrecognised value, a number and a null to local', () => {
     expect(clampSettings({ settingsScope: 'nonsense' }).settingsScope).toBe('local');
+    expect(clampSettings({ settingsScope: 'bogus' }).settingsScope).toBe('local');
     expect(clampSettings({ settingsScope: 7 }).settingsScope).toBe('local');
     expect(clampSettings({ settingsScope: null }).settingsScope).toBe('local');
   });
@@ -316,8 +321,8 @@ it('keeps both new keys when a sibling is bad', () => {
  * place only — the failure that leaves a picker offering an option the
  * validator throws away on the next load.
  */
-it('holds exactly two settings scopes and two content widths', () => {
-  expect(SETTINGS_SCOPES).toEqual(['local', 'shared']);
+it('holds exactly three settings scopes and two content widths', () => {
+  expect(SETTINGS_SCOPES).toEqual(['local', 'shared', 'dashboards']);
   expect(CONTENT_WIDTHS).toEqual(['fixed', 'full']);
 });
 

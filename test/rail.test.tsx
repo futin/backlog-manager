@@ -215,19 +215,19 @@ describe('SideRail · the Settings tree', () => {
   });
 
   /*
-    Local and Shared, and these are the ONLY labels these two pages have —
+    Local, Shared and Dashboards, and these are the ONLY labels these three pages have —
     Settings draws no in-page switch at any width (§8.6), the same rule Runs'
-    two pages follow since task-38. A second control would be a second wording
+    pages follow since task-38. A second control would be a second wording
     free to disagree with this one.
   */
-  it('names the two pages Local and Shared', () => {
+  it('names the three pages Local, Shared and Dashboards, in that order', () => {
     renderRail('settings');
 
     expect(
       within(settingsTree() as HTMLElement)
         .getAllByRole('button')
         .map((b) => b.textContent)
-    ).toEqual(['Local', 'Shared']);
+    ).toEqual(['Local', 'Shared', 'Dashboards']);
   });
 
   it('marks Local by default and moves the mark on a pick', async () => {
@@ -239,6 +239,16 @@ describe('SideRail · the Settings tree', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Shared' }));
 
     expect(screen.getByRole('button', { name: 'Shared' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('button', { name: 'Local' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('persists Dashboards as the third page and marks it', async () => {
+    renderRail('settings');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Dashboards' }));
+
+    expect(storedScope()).toBe('dashboards');
+    expect(screen.getByRole('button', { name: 'Dashboards' })).toHaveAttribute('aria-current', 'true');
     expect(screen.getByRole('button', { name: 'Local' })).not.toHaveAttribute('aria-current');
   });
 

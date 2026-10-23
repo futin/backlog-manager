@@ -143,8 +143,6 @@ describe('the Backlog tick card, by page', () => {
     stubFetch({ get: payload(3) });
     renderView('shared');
     await screen.findByRole('combobox', { name: 'Halt after' });
-    // Settle the Agents card's own fetch too (as `settings-view.test.tsx` does), so its state update lands inside act().
-    await screen.findByText(/connected/);
 
     expect(titles()).toContain('Backlog tick');
     expect(titles().indexOf('Backlog tick')).toBe(titles().indexOf('Orchestrator watchdog') + 1);

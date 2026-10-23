@@ -7,8 +7,8 @@ import { SETTINGS_SCOPES, type SettingsScope } from './settings';
  * (`server/src/hub/hub-widgets.ts`) opens `/?section=runs&runs=history`, and before this the viewer always landed on whatever section was stored.
  *
  * `section` names a section by its id. `runs` names a Runs page by its rail label, `history` or `watchdog`, never by the stored `'runs'` that means
- * History, and only next to `section=runs`. `settings` names a Settings page by its scope, `shared` or `local`, and only next to `section=settings`: the viewer's
- * stored scope defaults to `local`, so a link that means Shared Settings (the Run on card's Settings link, which points at the Dashboards card) has to say so.
+ * History, and only next to `section=runs`. `settings` names a Settings page by its scope, `local`, `shared` or `dashboards`, and only next to `section=settings`: the viewer's
+ * stored scope defaults to `local`, so a link that means another page (the Run on card's Settings link, which points at the Dashboards page) has to say so.
  * Anything unrecognised is ignored rather than clamped, so a bad link opens the app the way a plain load does.
  */
 export interface DeepLink {

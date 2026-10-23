@@ -35,9 +35,13 @@ export type Density = 'comfortable' | 'compact';
 export type Landing = Section | 'last';
 
 /**
- * Which of Settings' two pages is showing: `local` is everything in this
+ * Which of Settings' three pages is showing: `local` is everything in this
  * browser's localStorage, `shared` is what the API reads off the host — the
- * watchdog's settings file and the environment the server was started with.
+ * watchdog's settings file and the environment the server was started with — and
+ * `dashboards` is the machines a launch can run on (`dashboards.json` on the API
+ * host, plus each machine's health and usage). Dashboards is a page of its own
+ * rather than a Shared card because its list, its selection and its detail need
+ * the whole width, and it is host-backed like Shared, so its scope pill reads the same.
  *
  * A setting rather than a module-level store like `useRunsMode`, because both
  * readers — the rail's tree and `SettingsView` itself — already sit inside
@@ -46,7 +50,7 @@ export type Landing = Section | 'last';
  * preference about the work: the laptop left on Shared and the phone opening
  * on Local cost nothing and mean nothing to each other.
  */
-export type SettingsScope = 'local' | 'shared';
+export type SettingsScope = 'local' | 'shared' | 'dashboards';
 
 /**
  * The page's measure. `fixed` keeps the drawn one (820 px, or 1280 px for
@@ -283,7 +287,7 @@ const DENSITIES = ['comfortable', 'compact'] as const;
  * home each, so a third member cannot be added in one place only and leave a
  * control offering an option the validator throws away on the next load.
  */
-export const SETTINGS_SCOPES: readonly SettingsScope[] = ['local', 'shared'];
+export const SETTINGS_SCOPES: readonly SettingsScope[] = ['local', 'shared', 'dashboards'];
 export const CONTENT_WIDTHS: readonly ContentWidth[] = ['fixed', 'full'];
 /**
  * Every value `landing` may hold: the rail's own sections, plus `last`.

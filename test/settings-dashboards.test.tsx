@@ -235,6 +235,30 @@ describe('DashboardsPage', () => {
       expect(within(detail()).getByText('Setting it up')).toBeInTheDocument();
       expect(screen.getByText(/BM_AGENTS=on/)).toBeInTheDocument();
     });
+    // The three dot tones the old card's dispatch row drew (`dispatchDotTone`), now on Home's detail head — the same dot the list row reads.
+    it('draws an unreachable dashboard as a crashed dot', async () => {
+      stubFetch({ agents: { ...HEALTHY, reachable: false, remoteAnswer: false, spawnAvailable: false, spawnMaxPermission: null, projectPaths: [], error: 'ECONNREFUSED' } });
+      await renderPage();
+      expect(await within(detail()).findByText(/unreachable/)).toBeInTheDocument();
+      expect(toneOf(detail())).toBe('ui-dot-crashed');
+    });
+    it('draws a reachable dashboard with no CLAUDE_BIN as a paused dot and shows the setup steps', async () => {
+      // The case the old three-colour dot drew green: every launch to this dashboard is a 404, and nothing on the row said so.
+      stubFetch({ agents: { ...HEALTHY, spawnAvailable: false, projectPaths: ['/a'] } });
+      await renderPage();
+      expect(await within(detail()).findByText(/no CLAUDE_BIN/)).toBeInTheDocument();
+      expect(toneOf(detail())).toBe('ui-dot-paused');
+      expect(screen.getByText(/BM_AGENTS=on/)).toBeInTheDocument();
+    });
+    it('draws a healthy dashboard as a live dot, with the project count and the ceiling', async () => {
+      stubFetch({ agents: { ...HEALTHY, projectPaths: ['/a', '/b'] } });
+      await renderPage();
+      expect(await within(detail()).findByText(/connected/)).toBeInTheDocument();
+      expect(within(detail()).getByText(/ceiling: auto/)).toBeInTheDocument();
+      expect(within(detail()).getByText(/2 projects/)).toBeInTheDocument();
+      expect(toneOf(detail())).toBe('ui-dot-live');
+      expect(screen.queryByText(/BM_AGENTS=on/)).not.toBeInTheDocument();
+    });
     it('still reports dispatch while GET /api/dashboards fails', async () => {
       stubFetch({ get: 'reject' });
       render(<DashboardsPage />);

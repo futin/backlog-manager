@@ -33,6 +33,13 @@ describe('the Settings page', () => {
   it('reads a scope beside the Settings section', () => {
     expect(readDeepLink('?section=settings&settings=shared')).toEqual({ section: 'settings', runsMode: null, settingsScope: 'shared' });
     expect(readDeepLink('?section=settings&settings=local')).toEqual({ section: 'settings', runsMode: null, settingsScope: 'local' });
+    expect(readDeepLink('?section=settings&settings=dashboards')).toEqual({ section: 'settings', runsMode: null, settingsScope: 'dashboards' });
+  });
+
+  it('ignores `machines`, a name the page never had, and a Dashboards scope beside no Settings section', () => {
+    expect(readDeepLink('?section=settings&settings=machines')).toEqual({ section: 'settings', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?settings=dashboards')).toEqual({ section: null, runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=board&settings=dashboards')).toEqual({ section: 'board', runsMode: null, settingsScope: null });
   });
 
   it('ignores a scope beside any other section, or beside none', () => {

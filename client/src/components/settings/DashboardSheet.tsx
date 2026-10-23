@@ -13,9 +13,9 @@ import { FormSheet } from '../ui/FormSheet';
  * the next row's lines. A sheet puts the whole entry in one place with the list out of the way behind the scrim, and its Save and Cancel pinned in a footer
  * that never scrolls off.
  *
- * The sheet owns the fields' state and nothing else: every write still goes through `DashboardsGroup`'s one-at-a-time `write`, which answers the fresh view,
- * and the group closes the sheet only when the server stored it. A refusal stays open with what was typed, and the server's sentence (`error`, drawn by the
- * group) sits under the footer's buttons. Escape and the scrim are the shell's (`useDialogEscape`, one of the stack's eight dialogs).
+ * The sheet owns the fields' state and nothing else: every write still goes through `DashboardsPage`'s one-at-a-time `write`, which answers the fresh view,
+ * and the page closes the sheet only when the server stored it. A refusal stays open with what was typed, and the server's sentence (`error`, drawn by the
+ * page) sits under the footer's buttons. Escape and the scrim are the shell's (`useDialogEscape`, one of the stack's eight dialogs).
  *
  * Only Name and Dashboard URL are required: a blank Board URL or Machine name is sent as absent and the server stores its default (`validateEntry`), which the
  * field shows as its placeholder — `defaultBoardUrl` of the URL typed so far, and the name — so what the form promises is what the file gets. Models and

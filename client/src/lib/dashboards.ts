@@ -27,8 +27,8 @@ import type {
 
 export const HOME_MACHINE = 'home';
 
-/** Where the picker's "change it" link goes: this app's own deep link (`lib/deep-link.ts`) to the Settings section, where the dashboards card lives. */
-export const SETTINGS_HREF = '/?section=settings&settings=shared';
+/** Where the picker's "change it" link goes: this app's own deep link (`lib/deep-link.ts`) to the Settings section's Dashboards page, where the machines list lives. */
+export const SETTINGS_HREF = '/?section=settings&settings=dashboards';
 
 /** The line a picker draws when no machine is suggested and none is offered — the one state where every card is disabled and a launch has nowhere to go. */
 export const NO_MACHINE_TEXT = 'No machine can run this project right now';

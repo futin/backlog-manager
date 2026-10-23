@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -99,6 +99,28 @@ describe('SettingsView', () => {
       </SettingsProvider>
     );
   }
+
+  /** A fetch that answers the machines read with a minimal valid view, so the page draws its list and detail rather than its fallback. */
+  const answerDashboards = () => {
+    const view = {
+      source: 'file',
+      file: '/h/.backlog-manager/settings/dashboards.json',
+      home: { label: 'Home', url: 'http://127.0.0.1:4310', account: null, models: ['opus'], efforts: ['low'], tokenVar: 'BM_AGENTS_TOKEN', tokenSet: true },
+      dashboards: [],
+      order: ['home'],
+      strategy: 'prefer',
+      threshold: 80
+    };
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = url.endsWith('/api/dashboards/machines')
+        ? { machines: [] }
+        : url.endsWith('/api/dashboards')
+          ? view
+          : DEFAULT_AGENTS_STATUS;
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
+    }) as jest.Mock;
+  };
 
   it('offers the five themes and persists a pick under the backlog-manager key', async () => {
     renderView();
@@ -211,12 +233,26 @@ describe('SettingsView', () => {
       expect(groupTitles()).not.toContain('Dashboards');
     });
 
-    it('renders only the host-backed cards on Shared', async () => {
+    it('renders only the host-backed cards on Shared — and not the Dashboards card, which is a page of its own', () => {
       renderView('shared');
-      await screen.findByText(/connected/);
 
-      for (const title of ['Orchestrator watchdog', 'Dashboards']) expect(groupTitles()).toContain(title);
-      for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch']) expect(groupTitles()).not.toContain(title);
+      for (const title of ['Orchestrator watchdog', 'Backlog tick', 'Trackers']) expect(groupTitles()).toContain(title);
+      for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Dashboards']) expect(groupTitles()).not.toContain(title);
+    });
+
+    /*
+      The third page draws the machines list's own sheets (`.dash-page-*`), never a `SettingsGroup`: a card from Local or Shared on it would make the
+      band's pill a lie, and a `Dashboards` card on Shared would be the page twice. Asserted by what is absent as well as by what is present, for the
+      reason the two cases above give.
+    */
+    it('renders only the Dashboards page on Dashboards: the Suggest group and the machine list, none of Local’s or Shared’s cards', async () => {
+      answerDashboards();
+      renderView('dashboards');
+      await waitFor(() => expect(document.querySelectorAll('.dash-page-row').length).toBeGreaterThan(0));
+
+      expect(groupTitles()).toContain('Suggest');
+      for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Orchestrator watchdog', 'Backlog tick', 'Trackers'])
+        expect(groupTitles()).not.toContain(title);
     });
 
     /*
@@ -242,11 +278,33 @@ describe('SettingsView', () => {
       expect(scopePill()).toHaveClass('ui-pill-neutral');
     });
 
-    it('states the Shared scope as this machine', async () => {
+    it('states the Shared scope as this machine', () => {
       renderView('shared');
-      await screen.findByText(/connected/);
       expect(scopePill()).toHaveTextContent('this machine');
       expect(scopePill()).toHaveClass('ui-pill-neutral');
+    });
+
+    it('states the Dashboards scope as this machine too, in the same neutral pill', () => {
+      renderView('dashboards');
+      expect(scopePill()).toHaveTextContent('this machine');
+      expect(scopePill()).toHaveClass('ui-pill-neutral');
+    });
+
+    // The title is the page's own name and does not change with the scope; the subtitle is the sentence that says what is on the page, so it must differ.
+    it('titles every page Settings and gives each its own subtitle', () => {
+      const sub = (): string | null => document.querySelector('.ui-band-sub')?.textContent ?? null;
+      const subs: Array<string | null> = [];
+      for (const scope of ['local', 'shared', 'dashboards'] as const) {
+        renderView(scope);
+        expect(screen.getByRole('heading', { name: 'Settings' })).toHaveClass('ui-band-title');
+        subs.push(sub());
+        cleanup();
+        localStorage.clear();
+      }
+      expect(new Set(subs).size).toBe(3);
+      expect(subs[2]).toBe(
+        'The machines a launch can run on, in prefer order, and how the launch sheet picks one. Saved on the API host — change it here and it changes for everyone.'
+      );
     });
 
     /*
@@ -268,9 +326,13 @@ describe('SettingsView', () => {
 
       cleanup();
       renderView('shared');
-      await screen.findByText(/connected/);
       expect(screen.queryByRole('button', { name: 'Local' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Shared' })).toBeNull();
+
+      cleanup();
+      renderView('dashboards');
+      await screen.findByText(/connected/);
+      for (const name of ['Local', 'Shared', 'Dashboards']) expect(screen.queryByRole('button', { name })).toBeNull();
     });
 
     /*
@@ -287,10 +349,13 @@ describe('SettingsView', () => {
       expect(within(dispatch as HTMLElement).getByRole('link', { name: /open dashboard/ })).toHaveAttribute('href', 'http://127.0.0.1:5174');
     });
 
-    it('leaves the Shared status row with no control beside it', async () => {
+    it('leaves the Shared and Dashboards pages with no dashboard-link control', async () => {
       renderView('shared');
-      await screen.findByText(/connected/);
+      expect(screen.queryByRole('link', { name: /open dashboard/ })).toBeNull();
 
+      cleanup();
+      renderView('dashboards');
+      await screen.findByText(/connected/);
       expect(screen.queryByRole('link', { name: /open dashboard/ })).toBeNull();
     });
   });
@@ -301,9 +366,9 @@ describe('SettingsView', () => {
   // (see the last lines of client/src/hooks/useSettings.tsx) and never
   // touches localStorage at all, so a bare `render(<SettingsView />)` could
   // never observe the edited-link case below.
-  // The status that was the `Claude Agents` card is now the Dashboards card's dispatch report. These cases answer every fetch with an agents status, so the
-  // dashboards read fails its shape check and the card draws its fallback, which keeps the dispatch row — the cases still hold as they were written.
-  describe('the dispatch report · Shared', () => {
+  // The status that was the `Claude Agents` card is now Home's dispatch report on the Dashboards page. These cases answer every fetch with an agents status,
+  // so the dashboards read fails its shape check and the page draws its fallback, which keeps the dispatch row — the cases still hold as they were written.
+  describe('the dispatch report · Dashboards (Home’s detail)', () => {
     it('does not show the setup steps before the first answer lands', () => {
       // A promise that never resolves keeps `status` at `null` for the
       // whole test — the "not answered yet" frame every real load briefly
@@ -314,7 +379,7 @@ describe('SettingsView', () => {
       // still (correctly) says "checking…".
       global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
 
-      renderView('shared');
+      renderView('dashboards');
       // `getAllBy`, not `getBy`: the Trackers card beside this one (task-45)
       // says `checking…` in the same frame and for the same reason — its own
       // fetch has not answered either. What this case is about is the SETUP
@@ -341,7 +406,7 @@ describe('SettingsView', () => {
         } as Response)
       ) as jest.Mock;
 
-      renderView('shared');
+      renderView('dashboards');
       expect(await screen.findByText(/connected/)).toBeInTheDocument();
       expect(screen.getByText(/ceiling: auto/)).toBeInTheDocument();
       expect(screen.getByText(/2 projects/)).toBeInTheDocument();
@@ -366,7 +431,7 @@ describe('SettingsView', () => {
         } as Response)
       ) as jest.Mock;
 
-      renderView('shared');
+      renderView('dashboards');
       expect(await screen.findByText(/BM_AGENTS=on/)).toBeInTheDocument();
       expect(screen.getByText(/hooks:install/)).toBeInTheDocument();
     });
@@ -380,7 +445,7 @@ describe('SettingsView', () => {
     it('draws an unreachable dashboard as a crashed dot', async () => {
       answerWith({ enabled: true, reachable: false, remoteAnswer: false, spawnAvailable: false, spawnMaxPermission: null, projectPaths: [], error: 'ECONNREFUSED' });
 
-      renderView('shared');
+      renderView('dashboards');
       await screen.findByText(/unreachable/);
       expect(dispatchLine().querySelector('.ui-dot-crashed')).not.toBeNull();
     });
@@ -389,7 +454,7 @@ describe('SettingsView', () => {
       // The case the old three-colour dot drew green: every launch to this dashboard is a 404, and nothing on the row said so.
       answerWith({ enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: false, spawnMaxPermission: 'auto', projectPaths: ['/a'] });
 
-      renderView('shared');
+      renderView('dashboards');
       await screen.findByText(/no CLAUDE_BIN/);
       expect(dispatchLine().querySelector('.ui-dot-paused')).not.toBeNull();
       expect(screen.getByText(/BM_AGENTS=on/)).toBeInTheDocument();
@@ -398,7 +463,7 @@ describe('SettingsView', () => {
     it('draws a healthy dashboard as a live dot', async () => {
       answerWith({ enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto', projectPaths: ['/a'] });
 
-      renderView('shared');
+      renderView('dashboards');
       await screen.findByText(/connected/);
       expect(dispatchLine().querySelector('.ui-dot-live')).not.toBeNull();
     });
@@ -734,18 +799,18 @@ describe('SettingsView', () => {
       `this device`, and the day a card on this page says anything else it is a
       card on the wrong page.
     */
-    it("renders the Shared page's four cards, each with its own scope", async () => {
+    it("renders the Shared page's three cards, each with its own scope", () => {
       renderView('shared');
-      await screen.findByText(/connected/);
       // `Trackers` joined the pair in task-45: a third host-backed report, in
       // the same column as `Claude Agents` because both report and neither
       // sets. An exact list rather than a `toContain` for the reason the
       // comment above gives — a build that lost one card outright would pass
       // the looser check.
       // `Backlog tick` joined in the tick breaker, under the watchdog in the left column (the two controls), so it renders second.
-      // `Dashboards` joined in multi-dashboard task 11 and then absorbed `Claude Agents`, whose dispatch report is now its Home row.
-      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Dashboards', 'Trackers']);
-      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine', 'this machine']);
+      // `Dashboards` joined in multi-dashboard task 11, absorbed `Claude Agents` (whose dispatch report became its Home row) and then left for a
+      // Settings page of its own, which is why Shared draws no dispatch line at all.
+      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Trackers']);
+      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.
@@ -764,10 +829,16 @@ describe('SettingsView', () => {
       expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Dashboard link']);
     });
 
-    it('puts the dispatch status row in the Dashboards card', async () => {
+    it('puts the dispatch status line in Home’s detail on the Dashboards page, and none on Shared', async () => {
+      answerDashboards();
+      renderView('dashboards');
+      await waitFor(() => expect(document.querySelector('.dash-page-detail')).not.toBeNull());
+      const detail = document.querySelector('.dash-page-detail') as HTMLElement;
+      expect(within(detail).getByText(/^dispatch/, { selector: '.dash-page-status' })).toBeInTheDocument();
+
+      cleanup();
       renderView('shared');
-      await screen.findByText(/connected/);
-      expect(rowNamesIn('Dashboards')[0]).toBe('Dispatch');
+      expect(screen.queryByText('Dispatch', { selector: '.set-name' })).toBeNull();
     });
 
     /**
