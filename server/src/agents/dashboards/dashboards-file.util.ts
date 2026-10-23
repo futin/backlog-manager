@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -21,8 +21,8 @@ import type { DashboardEntry, DashboardsFile, HomeEntry, SuggestStrategy } from 
  *
  * Reading NORMALISES, writing does not: `readDashboardsFile` repairs what a hand edit can get wrong (clamps the threshold, drops an entry or a key that fails its
  * rule, completes the order) so every caller sees one shape, while `writeDashboardsFile` stores exactly what a route hands it — the routes validate a POST
- * body strictly (a 400, not a repair) before they get here. What this file does NOT check, because it belongs to a route that sees the whole list: duplicate
- * names (case-insensitively) and the cap of 8 remotes.
+ * body strictly (a 400, not a repair) before they get here. The reader also enforces list-level rules by dropping (first name wins
+ * case-insensitively, at most 8 remotes); a POST that breaks them is a 400 at the route, not here.
  */
 
 export const DEFAULT_STRATEGY: SuggestStrategy = 'prefer';
@@ -34,6 +34,7 @@ const HOME_ID = 'home';
 const LABEL_MAX = 24;
 const ACCOUNT_MAX = 40;
 const HOST_MAX = 64;
+export const MAX_REMOTES = 8;
 
 /** `$BM_DASHBOARDS_FILE`, else `~/.backlog-manager/settings/dashboards.json`. `env` is a parameter so a test can hand a plain object — the `tickFile()` shape. */
 export function dashboardsFile(env: NodeJS.ProcessEnv = process.env): string {
@@ -159,11 +160,18 @@ function clampThreshold(v: unknown): number {
 
 function normalise(obj: Record<string, unknown>): DashboardsFile {
   // An entry that fails `validateEntry` is dropped, not repaired and not fatal: one bad row in a hand-edited list must not take the good ones with it, and a
-  // dropped remote is the fail-closed direction (work goes to home, never to a machine the rule did not vouch for).
+  // dropped remote is the fail-closed direction (work goes to home, never to a machine the rule did not vouch for). Two more rules, for the same reason: the
+  // FIRST entry per lowercased name wins and a later one is dropped (names are machine ids and, uppercased, token env vars, so `Pro` and `pro` would share a
+  // token and be indistinguishable on the wire), and only the first MAX_REMOTES valid entries are kept. Both run before `order` is normalised, so it sees
+  // only the ids that survived. The routes refuse both as a 400 on a POST; this is the reader's repair for a file a person edited by hand.
   const dashboards: DashboardEntry[] = [];
+  const seen = new Set<string>();
   for (const raw of Array.isArray(obj.dashboards) ? obj.dashboards : []) {
+    if (dashboards.length >= MAX_REMOTES) break;
     const entry = validateEntry(raw);
-    if (typeof entry !== 'string') dashboards.push(entry);
+    if (typeof entry === 'string' || seen.has(entry.name.toLowerCase())) continue;
+    seen.add(entry.name.toLowerCase());
+    dashboards.push(entry);
   }
   const value: DashboardsFile = { dashboards };
   const home = normaliseHome(obj.home);
@@ -212,6 +220,12 @@ export function writeDashboardsFile(next: DashboardsFile, file: string = dashboa
   const dir = dirname(file);
   mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.dashboards.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
-  writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
-  renameSync(tmp, file);
+  try {
+    writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+    renameSync(tmp, file);
+  } catch (e) {
+    // A write or rename that fails must not strand its temp file: "no temp file is left behind" holds on the failure path too.
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }

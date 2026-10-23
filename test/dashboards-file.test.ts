@@ -13,6 +13,20 @@ import {
 } from '../server/src/agents/dashboards/dashboards-file.util';
 import type { DashboardsFile } from '../shared/types';
 
+// `renameSync` is swapped for a switchable wrapper (default: the real one) so a case can force the failure after the temp file was written; everything else in
+// `node:fs` stays real. Assigning onto the module object is not possible — its exports are read-only getters — hence the factory.
+let failRename = false;
+jest.mock('node:fs', () => {
+  const real = jest.requireActual('node:fs');
+  return {
+    ...real,
+    renameSync: (...args: unknown[]) => {
+      if (failRename) throw new Error('boom');
+      return real.renameSync(...args);
+    }
+  };
+});
+
 let dir: string;
 let file: string;
 beforeEach(() => {
@@ -86,6 +100,25 @@ describe('readDashboardsFile', () => {
     writeFileSync(file, JSON.stringify({ dashboards: [entry('Pro'), { name: '2bad' }, 'junk', entry('Studio')] }));
     const v = (readDashboardsFile(file) as { value: DashboardsFile }).value;
     expect(v.dashboards.map((d) => d.name)).toEqual(['Pro', 'Studio']);
+  });
+
+  it('keeps the first entry per lowercased name and drops the rest', () => {
+    writeFileSync(
+      file,
+      JSON.stringify({ dashboards: [entry('Pro'), entry('Studio'), { ...entry('pro'), host: 'other' }, entry('Pro')], order: ['pro', 'Studio'] })
+    );
+    const v = (readDashboardsFile(file) as { value: DashboardsFile }).value;
+    expect(v.dashboards.map((d) => d.name)).toEqual(['Pro', 'Studio']);
+    expect(v.dashboards[0].host).toBe('pro-mac');
+    expect(v.order).toEqual(['Studio', 'home', 'Pro']);
+  });
+
+  it('keeps at most the first 8 valid entries', () => {
+    const names = ['A1', 'B1', 'C1', 'D1', 'E1', 'F1', 'G1', 'H1', 'I1'];
+    writeFileSync(file, JSON.stringify({ dashboards: [{ name: '2bad' }, ...names.map((n) => entry(n))] }));
+    const v = (readDashboardsFile(file) as { value: DashboardsFile }).value;
+    expect(v.dashboards.map((d) => d.name)).toEqual(names.slice(0, 8));
+    expect(v.order).toEqual(['home', ...names.slice(0, 8)]);
   });
 
   it('normalises home: label trimmed, empty account absent', () => {
@@ -211,6 +244,16 @@ describe('writeDashboardsFile', () => {
     const nested = join(dir, 'a', 'b', 'dashboards.json');
     writeDashboardsFile({ dashboards: [], strategy: 'prefer', threshold: 80 }, nested);
     expect(readDashboardsFile(nested).source).toBe('file');
+  });
+
+  it('removes its temp file and rethrows when the rename fails', () => {
+    failRename = true;
+    try {
+      expect(() => writeDashboardsFile({ dashboards: [], strategy: 'prefer', threshold: 80 }, file)).toThrow('boom');
+    } finally {
+      failRename = false;
+    }
+    expect(readdirSync(dir)).toEqual([]);
   });
 
   it('refuses over an unreadable file and leaves its bytes unchanged', () => {
