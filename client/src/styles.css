@@ -952,11 +952,6 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    unrelated rows. */
 .set-row + .set-error-row { padding-top: 0; border-top: 0 }
 .set-error { font-size: 13px; line-height: 1.45; color: var(--red) }
-/* The two coloured dots are MARKS drawn as a `●` glyph, so they read the mark tokens: as text tokens daylight drew them in `--green` and `--amber-ink`, a
-   luminance ratio of ~1.1 — two dark blobs told apart by hue alone. Identical to the old values on every dark board. */
-.set-dot-green { color: var(--green-solid) }
-.set-dot-amber { color: var(--amber-solid) }
-.set-dot-gray { color: var(--ink3) }
 .set-control { display: flex; align-items: center; gap: 8px; flex: none }
 
 /* The two members of §8.6's 36 px control family that are NOT `ui/` primitives:

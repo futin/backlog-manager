@@ -1989,6 +1989,33 @@ export interface MachineUsage {
   fetchedAt: string;
 }
 
+/**
+ * What one dashboard's health probe answered — `AgentsStatus` minus `projectPaths`, which is a per-project fact about the HOME dashboard and has no meaning for a
+ * remote machine's row. Kept as its own shape so the Dashboards page can draw one dot per machine from one predicate (`dispatchDotTone`, shared/agent.ts) with no
+ * machine special-cased; `AgentsStatus` stays as it is and is assignable to this, so Home's existing status feeds the same reader unchanged.
+ */
+export interface MachineHealth {
+  enabled: boolean;
+  reachable: boolean;
+  remoteAnswer: boolean;
+  spawnAvailable: boolean;
+  spawnMaxPermission: PermissionMode | null;
+  /** Why `reachable` is false. Rendered verbatim. */
+  error?: string;
+}
+
+/** One machine's health plus its usage and how old that usage is; `usage` is `null` past the freshness limit, `usageAgeMs` is `null` only when never obtained. */
+export interface MachineStatus extends MachineHealth {
+  machine: string;
+  usage: MachineUsage | null;
+  usageAgeMs: number | null;
+}
+
+/** The machines route's answer: one entry per machine, in the page's order. */
+export interface MachinesStatus {
+  machines: MachineStatus[];
+}
+
 /** One machine as a launch surface sees it for one project: offered or not (with the reason it is not), its usage, and what it can run. */
 export interface MachineOffer {
   machine: string;

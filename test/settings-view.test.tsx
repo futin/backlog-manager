@@ -370,6 +370,38 @@ describe('SettingsView', () => {
       expect(await screen.findByText(/BM_AGENTS=on/)).toBeInTheDocument();
       expect(screen.getByText(/hooks:install/)).toBeInTheDocument();
     });
+
+    /** Answers every fetch with one agents status, so the dispatch row is the only thing under test. */
+    const answerWith = (status: Record<string, unknown>) => {
+      global.fetch = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(status) } as Response)) as jest.Mock;
+    };
+    const dispatchLine = () => screen.getByText('Dispatch', { selector: '.set-name' }).closest('.set-row') as HTMLElement;
+
+    it('draws an unreachable dashboard as a crashed dot', async () => {
+      answerWith({ enabled: true, reachable: false, remoteAnswer: false, spawnAvailable: false, spawnMaxPermission: null, projectPaths: [], error: 'ECONNREFUSED' });
+
+      renderView('shared');
+      await screen.findByText(/unreachable/);
+      expect(dispatchLine().querySelector('.ui-dot-crashed')).not.toBeNull();
+    });
+
+    it('draws a reachable dashboard with no CLAUDE_BIN as a paused dot and shows the setup steps', async () => {
+      // The case the old three-colour dot drew green: every launch to this dashboard is a 404, and nothing on the row said so.
+      answerWith({ enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: false, spawnMaxPermission: 'auto', projectPaths: ['/a'] });
+
+      renderView('shared');
+      await screen.findByText(/no CLAUDE_BIN/);
+      expect(dispatchLine().querySelector('.ui-dot-paused')).not.toBeNull();
+      expect(screen.getByText(/BM_AGENTS=on/)).toBeInTheDocument();
+    });
+
+    it('draws a healthy dashboard as a live dot', async () => {
+      answerWith({ enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: 'auto', projectPaths: ['/a'] });
+
+      renderView('shared');
+      await screen.findByText(/connected/);
+      expect(dispatchLine().querySelector('.ui-dot-live')).not.toBeNull();
+    });
   });
 
   /*

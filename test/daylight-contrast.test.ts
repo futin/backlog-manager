@@ -242,9 +242,7 @@ describe('daylight status tokens hold AA', () => {
    */
   it('every token client/src/styles.css sets text in clears 4.5:1 on each surface, unless it paints its own ground, is a mark glyph or a project hue', () => {
     const MARK_GLYPHS: Record<string, string> = {
-      '.rail-caret': '--green-solid',
-      '.set-dot-green': '--green-solid',
-      '.set-dot-amber': '--amber-solid'
+      '.rail-caret': '--green-solid'
     };
     const sites = textSites();
     // Guards the parser, not the palette: these must be found, or the loop below passes on nothing. `.rail-link` declares `background: none` and must be
