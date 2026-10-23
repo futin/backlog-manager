@@ -1902,7 +1902,7 @@ describe('OrchestrateSheet', () => {
       expect(calls[0].body).not.toHaveProperty('machine');
     });
 
-    it('starts on the suggested machine, locked: Merge mode at PR with its hint, Model and Effort narrowed with theirs, the button naming the machine', async () => {
+    it('starts on the suggested machine, locked: Merge mode at PR with its hint, Model and Effort narrowed with no hint of their own, the button naming the machine', async () => {
       const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
       renderSheet();
       await toModes();
@@ -1917,9 +1917,9 @@ describe('OrchestrateSheet', () => {
       expect(screen.getByText('Required when running on Pro')).toBeInTheDocument();
       // '' first: the "default" option stays drawable on a remote (final-review I4), the machine's own list after it.
       expect(options('Model')).toEqual(['', 'opus', 'sonnet']);
-      expect(screen.getByText('Pro runs opus, sonnet')).toBeInTheDocument();
+      expect(screen.queryByText('Pro runs opus, sonnet')).not.toBeInTheDocument();
       expect(options('Effort')).toEqual(['', 'low', 'high']);
-      expect(screen.getByText('Pro runs low, high')).toBeInTheDocument();
+      expect(screen.queryByText('Pro runs low, high')).not.toBeInTheDocument();
 
       await userEvent.click(start);
       await waitFor(() => expect(calls).toHaveLength(1));

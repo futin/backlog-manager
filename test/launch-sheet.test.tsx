@@ -484,7 +484,7 @@ describe('LaunchSheet', () => {
       expect(body).not.toHaveProperty('machine');
     });
 
-    it('starts on the suggested machine, locked: Finish at PR with its hint, Model and Effort narrowed with theirs, the button naming the machine', async () => {
+    it('starts on the suggested machine, locked: Finish at PR with its hint, Model and Effort narrowed with no hint of their own, the button naming the machine', async () => {
       const calls = stub({ offers: proSuggested(), branches: ['main', 'develop'] });
       renderSheet({ item: ITEM, onClose: () => {} });
       const start = await screen.findByRole('button', { name: 'Start on Pro' });
@@ -499,9 +499,9 @@ describe('LaunchSheet', () => {
       expect(screen.getByText('Required when running on Pro')).toBeInTheDocument();
       // '' first: the "default" option stays drawable on a remote (final-review I4), the machine's own list after it.
       expect(options('Model')).toEqual(['', 'opus', 'sonnet']);
-      expect(screen.getByText('Pro runs opus, sonnet')).toBeInTheDocument();
+      expect(screen.queryByText('Pro runs opus, sonnet')).not.toBeInTheDocument();
       expect(options('Effort')).toEqual(['', 'low', 'high']);
-      expect(screen.getByText('Pro runs low, high')).toBeInTheDocument();
+      expect(screen.queryByText('Pro runs low, high')).not.toBeInTheDocument();
       // The Base select shows exactly as it does for a PR finish today, and the clause line follows it.
       const base = screen.getByLabelText('Base') as HTMLSelectElement;
       await waitFor(() => expect([...base.options].map((o) => o.value)).toEqual(['main', 'develop']));
