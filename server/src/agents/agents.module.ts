@@ -5,6 +5,7 @@ import { AgentsService } from './agents.service';
 import { DashboardStatusService } from './dashboard-status.service';
 import { DashboardsController } from './dashboards/dashboards.controller';
 import { DashboardsService } from './dashboards/dashboards.service';
+import { MachinesService } from './dashboards/machines.service';
 import { OffersService } from './dashboards/offers.service';
 import { UsageService } from './dashboards/usage.service';
 import { ItemsAbortController } from './items-abort.controller';
@@ -74,6 +75,9 @@ import { JiraModule } from '../jira/jira.module';
  * `DashboardStatusService` (task 4) is any dashboard's health probe and project map, moved out of `AgentsService` so that `OffersService` — which reads
  * every machine's, and which task 5 makes `AgentsService` inject — can have them without injecting `AgentsService` back: that edge would be a cycle Nest
  * cannot construct. Both inject it; `OffersService` never injects `AgentsService`, and nothing under `dashboards/` imports `agents.service.ts`.
+ *
+ * `MachinesService` (Settings › Dashboards page, task 3) is `GET /api/dashboards/machines`: each machine's health (`DashboardStatusService.healthOf`, health only)
+ * and, for a reachable one, its usage (`UsageService`). Nothing injects it back, so it adds no edge to the graph above.
  */
 @Module({
   // `TrackerModule` for the poller's `syncOffBlock` (#17) — no cycle: it imports only `RegistryModule`.
@@ -86,6 +90,7 @@ import { JiraModule } from '../jira/jira.module';
     ItemsAbortService,
     JiraDispatchService,
     JiraLiveReconciler,
+    MachinesService,
     OffersService,
     SameOriginPostGuard,
     UsageService,
