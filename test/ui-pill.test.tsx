@@ -24,6 +24,35 @@ describe('Pill', () => {
   });
 
   /*
+    `off` is a state on top of a tone, not a sixth tone: the tone class stays
+    (so a palette swap still moves the colour) and `ui-pill-off` is added beside
+    it. A machine's disallowed models and efforts are drawn this way.
+  */
+  it('adds ui-pill-off on top of the neutral tone when off', () => {
+    render(<Pill off>opus</Pill>);
+
+    expect(screen.getByText('opus')).toHaveClass('ui-pill', 'ui-pill-neutral', 'ui-pill-off');
+  });
+
+  it('is not off unless asked', () => {
+    render(<Pill>opus</Pill>);
+
+    expect(screen.getByText('opus')).not.toHaveClass('ui-pill-off');
+  });
+
+  it('keeps its tone class and title when off', () => {
+    render(
+      <Pill off tone="live" title="t">
+        opus
+      </Pill>
+    );
+
+    const pill = screen.getByText('opus');
+    expect(pill).toHaveClass('ui-pill-live', 'ui-pill-off');
+    expect(pill).toHaveAttribute('title', 't');
+  });
+
+  /*
     A pill states a fact and is never clickable — §7 gives the chip the stroke
     and the pointer. Pinned as the absence of a role rather than left implicit:
     the first composer that wants a clickable pill should reach for `Chip`, and
