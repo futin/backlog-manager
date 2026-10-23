@@ -9,6 +9,7 @@ import BoardView from '../client/src/components/board/BoardView';
 import { ItemModal } from '../client/src/components/board/ItemModal';
 import { buildProjectHues } from '../client/src/lib/project-hue';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
+import { pickProject } from './helpers/filter-bar';
 import { CLAIM_STALE_MS } from '../shared/types';
 import type { AgentsStatus, BacklogItem, DashboardsView, ItemHolder, OrchestratorRunsPayload, ProjectSummary, RemoteStarting } from '../shared/types';
 
@@ -167,6 +168,25 @@ describe('a launch still starting on another machine', () => {
     await renderBoard();
     await waitFor(() => expect(within(markersOf('a bug')!).getByText('Starting on Pro')).toBeInTheDocument());
     expect(screen.queryByTestId('run-chip')).toBeNull();
+  });
+
+  // The bug-57 guard, client side (final-review I3). A remote orchestrate's entry is the board's to SHOW — the chip, the Runs rows — and never this
+  // machine's to OBEY: it rides in `remoteStarting`, never in `starting`, so neither the local Orchestrate gate nor `runClaimBlock` behind every card's
+  // dispatch control may see it. The code holds today; this pins it, so a refactor that folds `remoteStarting` into `starting` turns this red.
+  it('a remote orchestrate starting on Pro leaves local Orchestrate and card dispatch enabled, and draws no local starting segment', async () => {
+    stub([{ ...bug('#31', 'ready bug'), groomed: true }], [{ ...orchestrate, requestedAt: new Date().toISOString() }]);
+    await renderBoard();
+    await waitFor(() => expect(screen.getByTestId('run-chip')).toHaveTextContent('Starting on Pro'));
+    expect(screen.getByTestId('run-chip')).not.toHaveTextContent(/\d+ starting/);
+
+    const dispatch = within(screen.getByText('ready bug').closest('.board-card') as HTMLElement).getByRole('button', { name: 'execute' });
+    expect(dispatch).toHaveAttribute('aria-disabled', 'false');
+    expect(dispatch).toHaveAttribute('title', 'dispatch execute to a Claude session');
+
+    await pickProject('alpha');
+    const orchestrateBtn = await screen.findByRole('button', { name: 'Orchestrate' });
+    expect(orchestrateBtn).not.toHaveAttribute('aria-disabled', 'true');
+    expect(orchestrateBtn.getAttribute('title') ?? '').not.toMatch(/starting|run/i);
   });
 
   it('falls back to the machine id when it is not a configured remote', async () => {
