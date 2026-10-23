@@ -1864,7 +1864,8 @@ exhaustiveness site, where a separate field reaches only what opts in.
 
 An entry dies on any of **three** rules: a run in the same payload matches the project AND its `startedAt` parses to at or after `requestedAt` — **`startedAt`,
 not "a run.json exists"**, since `cmdInit` archives the old file and writes a new one, so a project that has ever run always has one. "A run in the same
-payload" means `runs` alone, never `remote` (bug-57, withdrawing bug-51's widening): a board spawn can only land on THIS machine — the mark follows the local
+payload" means `runs` alone, never `remote` (bug-57, withdrawing bug-51's widening): a `starting` mark is home's alone, because a board spawn into it can only
+land on THIS machine (a launch sent elsewhere is `remoteStarting`'s, the next section) — the mark follows the local
 dashboard's acceptance, the dashboard spawns in a path on this host, and `init` writes a local run file before anything is claimed — and `deriveRemoteRuns`
 excludes every run id this machine holds a file for, so no remote run is ever the landing a mark waits for. Counting one evicted the placeholder of a live spawn
 whenever another machine happened to start inside its boot, and a slow start then read as a launch that silently failed. Or the entry is older than
@@ -1947,19 +1948,41 @@ NOT freshness-gated: `runChipReading` (`RunChip.tsx`) counts a stale `running` r
 as crashed, never as nothing" is that control's whole job. So the rule to carry forward is per-question rather than per-surface — **a claim about one ITEM is
 freshness-gated; a count of what the RUNS are doing is not** — and a future session widening one must not read this section as licence to widen the other.
 
+## A launch sent to another machine rides in `remoteStarting`, never in `starting`
+
+A launch sent to another machine rides in `remoteStarting`, never in `starting`. `RemoteStartingService` (`server/src/orchestrator/remote-starting.service.ts`)
+is the remote counterpart of `StartingRunsService` and deliberately a SEPARATE map in its own payload field, not a second kind of entry in that one: `starting`
+is read by `runClaimBlock` and by the local expiry rules (bug-21, bug-57), so an entry for a launch on another machine riding in it would block this machine's
+own Orchestrate for a run that can never land here, and would be judged against local runs it can never match. It rides beside `starting` the way `remote` rides
+beside `runs`, and for the reason bug-57 gave: what a mark waits for must be something only this machine's `init` can produce.
+
+It is memory only, for `StartingRunsService`'s reason — an entry records a request THIS process made, which no file can answer, and the claim the remote session
+writes is the durable trace; a restart costs only the `Starting on` badge for the rest of one launch. It adds no writer to anything.
+
+It has TWO keys because the two launches block different things. A card dispatch is keyed by (project, item) and blocks a second launch of THAT ITEM on ANY
+machine, home included: until the remote session's first claim lands nothing on the tracker says the item is taken, so every claim check a home dispatch reads
+would wave a second session onto the same issue. That is intended — the block is the item's, not the machine's. A remote orchestrate is keyed by (project,
+machine) and blocks only a second remote orchestrate of that project to that machine, never another machine and never home, because two machines may drain one
+tracker project at once (the claim protocol keeps their items disjoint). So what a remote launch never blocks is a local RUN; what it does block is one ITEM,
+for the minutes before its claim shows.
+
+An entry dies on the first of: the item is claimed by a session on the entry's `host` (a copy of the machine's `host` taken at mark time, because the machine
+list is re-read per request and an entry edited away must not be answered for by a lookup made later); a remote run of that project on that host started at or
+after `requestedAt`; or `RUN_STALE_MS`. Only `list`, which holds the tracker cache and the remote runs, can apply the first two, and it deletes what they
+retire, so the map is swept on every runs read; the launch-time `itemBlock` and `projectBlock` apply age alone, because the launch reads its own claim gates
+first and an entry the sweep would have retired but no read has yet refuses nothing those gates would not.
+
 ## `dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced
 
 **The machine list** (spec: [2026-10-22-multi-dashboard-design.md](../superpowers/specs/2026-10-22-multi-dashboard-design.md)). One board can start work on this
 machine ("home", id `home`, the dashboard `BM_AGENTS_URL` names) or on another machine's dashboard (a "remote", id = its `name`).
 `~/.backlog-manager/settings/dashboards.json` (`$BM_DASHBOARDS_FILE` to override, read per call and cached nowhere) lists the remotes and carries the person's
 own presentation: `{ home?, dashboards: [{ name, url, bmUrl, host, account?, models?, efforts? }], order?, strategy?, threshold? }`. It is the sixth file the
-server
-owns under `settings/` and it keeps the relationship `jira.json` and `tick.json` have with their reader, with one difference that matters: NO skill and no tool
-reads it. The server writes it (`writeDashboardsFile`, the only write path, behind `POST /api/dashboards/entries`, `/entries/delete`, `/home` and `/settings`)
-and
-the server reads it (`readDashboardsFile`) for `GET /api/dashboards`, the offers, the launch routes and the stop route — so what the file decides is where THIS
-server will send a prompt that starts a Claude Code session, and that is why the four POSTs are guarded like every other agents POST and why a name is held to
-`^[A-Za-z][A-Za-z0-9]{0,23}$`, unique case-insensitively, never `home`, at most eight.
+server owns under `settings/` and it keeps the relationship `jira.json` and `tick.json` have with their reader, with one difference that matters: NO skill and
+no tool reads it. The server writes it (`writeDashboardsFile`, the only write path, behind `POST /api/dashboards/entries`, `/entries/delete`, `/home` and
+`/settings`) and the server reads it (`readDashboardsFile`) for `GET /api/dashboards`, the offers, the launch routes and the stop route — so what the file
+decides is where THIS server will send a prompt that starts a Claude Code session, and that is why the four POSTs are guarded like every other agents POST and
+why a name is held to `^[A-Za-z][A-Za-z0-9]{0,23}$`, unique case-insensitively, never `home`, at most eight.
 
 **A file that cannot be read is never replaced, and a file that does not exist is the product as it was.** A MISSING file (ENOENT) is `source: "default"`: home
 alone, no remote, and every surface the feature adds stays out of sight — `GET /api/dashboards/offers` answers home without fetching any usage, the client draws

@@ -119,11 +119,9 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   overridden), takes `model`/`effort` only from that machine's `models`/`efforts` (outside the list is a `400`; no model sent means `DEFAULT_MODEL` if listed,
   else the first listed), re-judges the offer at launch time rather than trusting the picker's answer, and spawns at the path `remotePath` read from that
   machine's own board. The `409`s a remote launch or stop answers: `<id> is already starting on <label>`, `<project> is already starting on <label>`, `a run of
-  <repo> is live on <label>`, `<id> was dispatched to <machine>, which is no longer configured`, and `<label> is not offered for <project>: <reason>`. A remote
-  run never blocks a local one; a remote live run blocks only a second REMOTE orchestrate to that machine. `RemoteStartingService` is memory only, rides in the
-  runs payload's `remoteStarting` and NEVER in `starting` (bug-57), clears on the host's first claim, on a remote run of that project on that host at or after
-  `requestedAt`, or past `RUN_STALE_MS`, and is swept when the payload is read. Stop and release route by a ladder: a dispatch record names its machine; no
-  record plus a claim `host` equal to a configured remote's `host` stops there, then releases; otherwise today's path. Every NEW outbound read of a remote
-  (offers, usage, board, status) is held to 5 s (`OFFERS_TIMEOUT_MS`, `USAGE_TIMEOUT_MS`, `BOARD_TIMEOUT_MS`); home keeps its 4 s health and 15 s management
-  budgets, and spawn and stop keep 10 s. `agents/dashboards/` is part of the `agents/` outbound module, not a fourth one. Why:
-  [invariants.md](docs/subsystems/invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)
+  <repo> is live on <label>`, `<id> was dispatched to <machine>, which is no longer configured`, and `<label> is not offered for <project>: <reason>`. What a
+  remote launch blocks, and the memory-only map that marks it in flight, are `orchestrator.md`'s `remoteStarting` rule. Stop and release route by a ladder: a
+  dispatch record names its machine; no record plus a claim `host` equal to a configured remote's `host` stops there, then releases; otherwise today's path.
+  Every NEW outbound read of a remote (offers, usage, board, status) is held to 5 s (`OFFERS_TIMEOUT_MS`, `USAGE_TIMEOUT_MS`, `BOARD_TIMEOUT_MS`); home keeps
+  its 4 s health and 15 s management budgets, and spawn and stop keep 10 s. `agents/dashboards/` is part of the `agents/` outbound module, not a fourth one.
+  Why: [invariants.md](docs/subsystems/invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)

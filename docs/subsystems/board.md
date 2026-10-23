@@ -326,9 +326,9 @@ when a person edits it) and every write — `POST /api/dashboards/entries`, `/en
 draws rather than an optimistic copy. **A token is never on the page in any form**: the payload carries `tokenSet` and the env var's name, and the line says `✓
 set` or `✗ not set — add it to .env and restart`; there is no field to type one into, because the env var is the only place the server reads it from. One form
 is open at a time, a same-name Add is held at the form (the server treats it as an update), every box ticked is sent as no list, and an unreadable
-`dashboards.json` answers 409 on every write with the file left byte-identical, which the card prints verbatim ([invariants.md](invariants.md#dashboardsjson-
-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)). The RunOn group's Settings link and the deep link
-`/?section=settings&settings=shared` both land on this page: `settings=shared|local` is read only beside `section=settings`.
+`dashboards.json` answers 409 on every write with the file left byte-identical, which the card prints verbatim
+([invariants.md](invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)). The RunOn group's Settings
+link and the deep link `/?section=settings&settings=shared` both land on this page: `settings=shared|local` is read only beside `section=settings`.
 
 Daylight is the default theme and the first one listed (`THEMES` and `DEFAULT_SETTINGS.theme` in `lib/settings.ts`); Midnight, the default until 2026-10-14,
 is second. The default only reaches a browser that has no valid stored theme: `clampSettings` keeps any theme it recognises, so anyone who had already picked
@@ -470,10 +470,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   the 15 s poll only while `live` — the Runs › Ticks page passes `true`, Settings' card `false`. A save or a reset redraws from the POST's own answer, never a
   follow-up GET, and a refused write lands in `saveError`, beside the failed-GET `error`, so a refusal never blanks `data`.
 - `hooks/useDashboards.ts`, `hooks/useOffers.ts`, `hooks/useRunOn.ts` — the configured machines (one read on mount, `refresh` for a write's caller), one
-  project's offers
-  (asked when a sheet passes a project, dropped by sequence number and by project tag so no frame shows the previous project's cards), and the sheets' shared
-  pick-lock-narrow state over both. `lib/dashboards.ts` is the one home of the wire calls, `machineLabelByHost` / `machineLabelById`, `lockedFor`, `narrowTo`,
-  `defaultMachine` and the usage wording; `lib/remote-starting.ts` the `Starting on` readings.
+  project's offers (asked when a sheet passes a project, dropped by sequence number and by project tag so no frame shows the previous project's cards), and the
+  sheets' shared pick-lock-narrow state over both. `lib/dashboards.ts` is the one home of the wire calls, `machineLabelByHost` / `machineLabelById`,
+  `lockedFor`, `narrowTo`, `defaultMachine` and the usage wording; `lib/remote-starting.ts` the `Starting on` readings.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
   (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no timer at all.
 - `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared

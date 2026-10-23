@@ -254,11 +254,10 @@ the run `stop` stay home-only: they act on a run file, and a remote run has none
 Every new outbound read — the offers' dashboard and board reads, usage, and a remote's status — is held to 5 s. Home keeps its 4 s health and 15 s management
 reads, and every spawn and stop keeps 10 s.
 
-`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` answers 409 with the same
-sentence). `status` exists to report that gate, so it answers either way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard
-at all: two read this process's own state, one writes its own settings file, one looks at local git. `pause` being independent of the switch is deliberate
-rather than incidental — a pause is a fact on this machine's own disk about a run that is already going, so gating it would mean a run started while dispatch
-was on could never be stopped after somebody turned it off.
+`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` answers 409 with the same sentence). `status` exists to report that gate, so it answers either
+way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard at all: two read this process's own state, one writes its own
+settings file, one looks at local git. `pause` being independent of the switch is deliberate rather than incidental — a pause is a fact on this machine's own
+disk about a run that is already going, so gating it would mean a run started while dispatch was on could never be stopped after somebody turned it off.
 
 The run watchdog lives here too (`watchdog.service.ts`), armed only while some `run.json` says `running`.
 
@@ -277,10 +276,9 @@ A read-only view of the orchestrator's run-state directory:
 `orchestrate.mjs` is that directory's only writer; this module never writes it and never caches it. Beside those endpoints sit three pieces of state this module
 owns: `watchdog-state.service.ts` (in memory — what the watchdog did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs only),
 `remote-starting.service.ts` (in memory — a launch sent to a remote machine's dashboard — a card dispatch keyed by (project, item), blocking that item on every
-machine, a remote orchestrate keyed by (project, machine), blocking only a second one to that machine — surfaced as `remoteStarting` and NEVER in
-`starting`, because `starting` blocks home's own lock and a remote launch must block none of it; it clears on the host's first claim, on a remote run of that
-project
-on that host starting at or after `requestedAt`, or past `RUN_STALE_MS`, and is swept whenever the payload is read), `remote-runs.service.ts` with its pure half
+machine, a remote orchestrate keyed by (project, machine), blocking only a second one to that machine — surfaced as `remoteStarting` and NEVER in `starting`,
+because `starting` blocks home's own lock and a remote launch must block none of it; it clears on the host's first claim, on a remote run of that project on
+that host starting at or after `requestedAt`, or past `RUN_STALE_MS`, and is swept whenever the payload is read), `remote-runs.service.ts` with its pure half
 `remote-runs.util.ts` (no state at all — other machines' runs, re-derived per request from the poller's cached
 claim comments into the payload's separate `remote` array), `starting-runs.service.ts` (in memory — a spawn this server itself requested, surfaced as the payload's separate `starting` array so a board-started run is
 visible before `init` writes a run file), and two files it genuinely writes: `watchdog-config.util.ts`, the first file the server ever wrote, and

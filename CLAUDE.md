@@ -121,6 +121,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **A starting entry blocks what a run file blocks, on every surface**
   Why: [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
+- **A launch sent to another machine rides in `remoteStarting`, never in `starting`, and blocks only the item or machine it names.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-launch-sent-to-another-machine-rides-in-remotestarting-never-in-starting)
 - **Escape has one owner, and the topmost dialog is the only one that closes.**
   Why: [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip.**

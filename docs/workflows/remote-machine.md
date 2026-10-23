@@ -26,10 +26,13 @@ in [api.md](../subsystems/api.md#launching-on-another-machine).
 1. **On the remote, set the name** in `~/.zshenv` and in its board's `.env` (`BM_MACHINE_NAME=pro`), then restart its stack so the server reads it.
 2. **On the remote, publish the web port to the tailnet:** `pnpm run tailnet` (it serves the port in that board's `.env`, `BM_WEB_PORT`, on the same number).
    That is the `bmUrl` — `http://<name>.<tailnet>.ts.net:<web port>` — and the dashboard's own port (4173 by default) is the `url`.
-3. **Let this board in.** A `.ts.net` name, an IP or a single-label name is always admitted by a dashboard's Host check and by a board's; anything else is
-   refused as possible DNS rebinding. For a name that is none of those, add it to the dashboard's `ALLOWED_HOSTS` and the remote board's `BM_ALLOWED_HOSTS`. The
-   dashboard's write gate admits this machine, and a tailnet device while its "Trust tailnet devices" setting is on; a client it does not trust needs the
-   dashboard's `ANSWER_TOKEN` — set one on the remote if you reach it any other way, and note its value for the next step.
+3. **Let this board in.** Both remote processes refuse a request whose `Host` is not one they recognise (DNS-rebinding defence), and the two do not accept the
+   same names. The remote **board's** `bmUrl` goes to its web port, whose Vite server admits only an IP, `localhost` and a `.ts.net` name — `BM_ALLOWED_HOSTS`
+   is read by the board's API port and does not widen it — so write `bmUrl` with the remote's `.ts.net` name (what `pnpm run tailnet` prints) or its IP, never a
+   bare machine name or a custom domain. The remote **dashboard's** `url` is judged by the dashboard's own rule, which also admits a single-label name,
+   `*.local` and `*.localhost`; anything beyond those goes in that dashboard's `ALLOWED_HOSTS` (its `.env.example` documents the rule — it is the dashboard's
+   setting, not this board's). The dashboard's write gate admits this machine, and a tailnet device while its "Trust tailnet devices" setting is on; a client it
+   does not trust needs the dashboard's `ANSWER_TOKEN` — set one on the remote if you reach it any other way, and note its value for the next step.
 4. **On THIS board, put the token in `.env`:** `BM_AGENTS_TOKEN_<NAME>=<the remote's ANSWER_TOKEN>` with the NAME the entry will have, upper-cased
    (`BM_AGENTS_TOKEN_PRO` for `pro`). Home's own token is `BM_AGENTS_TOKEN`. Then restart the stack — compose's container reads the bind-mounted `.env`, not
    your shell, and compose passes `BM_MACHINE_NAME` through but no token. The token is never typed into the board: Settings only reports `✓ set` or `✗ not set`.
