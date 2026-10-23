@@ -119,6 +119,13 @@ describe('the agents POST guard', () => {
         planReview: true
       };
     }
+    // The four `/api/dashboards` POSTs (multi-dashboard task 2) take bodies their controller would accept, so a 403 here is the guard's alone.
+    if (route === '/api/dashboards/entries') {
+      return { entry: { name: 'Pro', url: 'http://pro.test:4173', bmUrl: 'http://pro.test:4322', host: 'pro-mac' } };
+    }
+    if (route === '/api/dashboards/entries/delete') return { name: 'Pro' };
+    if (route === '/api/dashboards/home') return { label: 'Max' };
+    if (route === '/api/dashboards/settings') return { threshold: 70 };
     const verb = route.slice('/api/agents/'.length);
     // dispatch-jira (Jira phase 5) names a ticket and a repo, not an item: a body its controller would accept, so a 403 here is the guard's alone.
     if (verb === 'dispatch-jira') {
@@ -133,7 +140,8 @@ describe('the agents POST guard', () => {
   // actually lives — the agents routes (`pause` is task-17's, `stop` is
   // bug-39's), the seven item-write routes task-46 added, `queue`, the
   // eighth (the orchestrator:queued spec, §2), `abort`, the ninth (#225) — the one item write that lives in `agents/`, because it calls the
-  // dashboard — `review`, the tenth (the execute pr-mode spec, decision 9) — and `plan-review`, the eleventh (backlog-tick).
+  // dashboard — `review`, the tenth (the execute pr-mode spec, decision 9) — and `plan-review`, the eleventh (backlog-tick) — and the four `/api/dashboards` settings POSTs
+  // (multi-dashboard task 2), which change which machine a launch may be sent to and so are as guarded as the launch itself.
   // `dispatch-jira` is Jira phase 5's Start, the second session-starting POST; `jira-stop` is its Stop.
   const GUARDED = [
     '/api/agents/plan',
@@ -155,7 +163,11 @@ describe('the agents POST guard', () => {
     '/api/items/queue',
     '/api/items/abort',
     '/api/items/review',
-    '/api/items/plan-review'
+    '/api/items/plan-review',
+    '/api/dashboards/entries',
+    '/api/dashboards/entries/delete',
+    '/api/dashboards/home',
+    '/api/dashboards/settings'
   ];
 
   for (const route of GUARDED) {

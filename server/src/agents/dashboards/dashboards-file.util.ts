@@ -29,10 +29,10 @@ export const DEFAULT_STRATEGY: SuggestStrategy = 'prefer';
 export const DEFAULT_THRESHOLD = 80;
 
 const NAME_RULE = /^[A-Za-z][A-Za-z0-9]{0,23}$/;
-const STRATEGIES: readonly string[] = ['prefer', 'headroom', 'runway'];
-const HOME_ID = 'home';
-const LABEL_MAX = 24;
-const ACCOUNT_MAX = 40;
+export const STRATEGIES: readonly string[] = ['prefer', 'headroom', 'runway'];
+export const HOME_ID = 'home';
+export const LABEL_MAX = 24;
+export const ACCOUNT_MAX = 40;
 const HOST_MAX = 64;
 export const MAX_REMOTES = 8;
 
@@ -87,7 +87,8 @@ function originOf(v: unknown): string | null {
 }
 
 // A non-empty subset of `allowed`, deduplicated and in the order given; null when it is not one (not an array, empty, or holding a string outside the list).
-function subsetOf(v: unknown, allowed: readonly string[]): string[] | null {
+// Exported for the home POST (`DashboardsService.setHome`), which applies the same rule to a body that `normaliseHome` applies to a file.
+export function subsetOf(v: unknown, allowed: readonly string[]): string[] | null {
   if (!Array.isArray(v) || v.length === 0) return null;
   const out: string[] = [];
   for (const x of v) {
