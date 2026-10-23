@@ -26,16 +26,21 @@ import type { RemoteStarting } from '../../../shared/types';
  * looking it up again at sweep time could answer for an entry edited away since.
  *
  * An entry dies on the first of:
- *   1. an item entry — the item is claimed by a session on that machine's host (`claimedHost`). A `capture` claims nothing (it files a NEW item), so for
- *      one only rule 3 applies;
+ *   1. an item entry — a claim by that machine's host is on the item whose comment id is above the entry's `floor`, live OR released (`claimsOn`). The
+ *      floor is the highest claim comment id the tracker cache held for the issue when the launch was marked, so a claim already there (an earlier
+ *      session's) is never read as this launch's landing. Released counts because a release is an edit, not a delete: a groom claims and releases inside
+ *      one or two poll intervals, and when retirement needed the claim LIVE a sweep that missed that window left the entry to rule 3, refusing the item's
+ *      natural next step (`execute` on the freshly groomed item) for the full `RUN_STALE_MS` (final-review I2). A `capture` is never marked at all: it
+ *      files a NEW item and never claims the one it was launched from, so its entry could only ever age out;
  *   2. a project entry — a remote run of that project on that host started at or after `requestedAt`. "At or after" for `StartingRunsService` rule 1's
  *      reason: a run that started before this launch is not its landing;
  *   3. age past `RUN_STALE_MS`, the app's one freshness number — a launch that never claimed in that long is a broken session, diagnosed at its dashboard.
  *
- * Only `list` can apply rules 1 and 2 (they need the tracker cache and the remote runs, which only its caller holds), and it deletes what they retire, so the
- * map is swept on every runs read. `itemBlock` / `projectBlock` apply rule 3 alone: they are asked by a launch, which reads its own claim gates first —
- * `itemClaimBlock` already refuses an item a live claim holds, and a live remote run is task 6's own 409 — so an entry rules 1–2 would have retired but no
- * read has swept yet refuses nothing those gates would not.
+ * Only `list` can apply rule 2 (it needs the remote runs, which only its caller holds), and it deletes what rules 1–3 retire, so the map is swept on every
+ * runs read. `projectBlock` applies rule 3 alone: it is asked by a launch, which reads its own gates first — a live remote run is task 6's own 409 — so an
+ * entry rule 2 would have retired but no read has swept yet refuses nothing those gates would not. `itemBlock` applies rule 1 as well, given the dispatch
+ * route's `claimsOn`: once rule 1 retires on a RELEASED claim, an unswept entry would otherwise refuse what no claim gate does — the execute after a remote
+ * groom that has already finished, clicked before the board's next runs read.
  */
 
 /** Who a launch went to: the machine id the entry is shown under, and the claim `host` that retires it. A structural `Machine` (agents/dashboards), so this
@@ -51,13 +56,21 @@ interface Entry {
   machine: string;
   host: string | null;
   itemId: string | null;
+  /** An item entry's floor: the highest claim comment id on the issue at mark time, `0` when it had none. A project entry has none (`0`), unread. */
+  floor: number;
   requestedAt: number;
+}
+
+/** One claim on an item as rule 1 reads it: the comment it lives in, and the host that wrote it (`null` when the claim recorded none). */
+export interface ItemClaim {
+  commentId: number;
+  host: string | null;
 }
 
 export interface RemoteStartingListInput {
   nowMs: number;
-  /** The `host` of the live claim on `itemId` in `project`, or `null` when nothing claims it — read off this machine's tracker cache. */
-  claimedHost: (project: string, itemId: string) => string | null;
+  /** Every claim on `itemId` in `project`, live and released alike — read off this machine's tracker cache; empty for a non-tracker item. */
+  claimsOn: (project: string, itemId: string) => readonly ItemClaim[];
   remoteRuns: Array<{ project: string; host: string | null; startedAt: string }>;
 }
 
@@ -66,8 +79,9 @@ export class RemoteStartingService {
   /** Keyed `item\0<project>\0<itemId>` or `project\0<project>\0<machine>` — one entry per key, so a repeat launch overwrites rather than accumulates. */
   private readonly entries = new Map<string, Entry>();
 
-  markItem(project: string, itemId: string, machine: RemoteTarget, nowMs: number = Date.now()): void {
-    this.entries.set(itemKey(project, itemId), { kind: 'dispatch', project, machine: machine.id, host: machine.host, itemId, requestedAt: nowMs });
+  /** `floor` is the highest claim comment id on the item at this moment (`RemoteRunsService.claimFloor`) — rule 1 waits for a claim above it. */
+  markItem(project: string, itemId: string, machine: RemoteTarget, floor: number, nowMs: number = Date.now()): void {
+    this.entries.set(itemKey(project, itemId), { kind: 'dispatch', project, machine: machine.id, host: machine.host, itemId, floor, requestedAt: nowMs });
   }
 
   markProject(project: string, machine: RemoteTarget, nowMs: number = Date.now()): void {
@@ -77,14 +91,16 @@ export class RemoteStartingService {
       machine: machine.id,
       host: machine.host,
       itemId: null,
+      floor: 0,
       requestedAt: nowMs
     });
   }
 
-  /** The launch of `itemId` still starting on some machine, or `null`. Rule 3 only — see the class comment for why that is enough at a launch. */
-  itemBlock(project: string, itemId: string, nowMs: number = Date.now()): RemoteStarting | null {
+  /** The launch of `itemId` still starting on some machine, or `null`. Rule 3, and rule 1 when `claimsOn` is given — see the class comment for why. */
+  itemBlock(project: string, itemId: string, nowMs: number = Date.now(), claimsOn?: RemoteStartingListInput['claimsOn']): RemoteStarting | null {
     const entry = this.entries.get(itemKey(project, itemId));
-    return entry === undefined || stale(entry, nowMs) ? null : toPayload(entry);
+    if (entry === undefined || stale(entry, nowMs)) return null;
+    return claimsOn !== undefined && landed(entry, claimsOn) ? null : toPayload(entry);
   }
 
   /** The remote orchestrate of `project` still starting on `machine`, or `null`. Rule 3 only, as `itemBlock`. */
@@ -130,9 +146,15 @@ function stale(entry: Entry, nowMs: number): boolean {
 function retired(entry: Entry, input: RemoteStartingListInput): boolean {
   if (stale(entry, input.nowMs)) return true;
   if (entry.host === null) return false;
-  if (entry.itemId !== null) return input.claimedHost(entry.project, entry.itemId) === entry.host;
+  if (entry.itemId !== null) return landed(entry, input.claimsOn);
   // `Date.parse` of an unreadable `startedAt` is NaN, and NaN >= anything is false: a run this reader cannot date cannot prove it is this launch's.
   return input.remoteRuns.some((run) => run.project === entry.project && run.host === entry.host && Date.parse(run.startedAt) >= entry.requestedAt);
+}
+
+/** Rule 1: a claim by the entry's host, newer than its floor, is on the item — live or released. A `null` host on either side matches nothing. */
+function landed(entry: Entry, claimsOn: RemoteStartingListInput['claimsOn']): boolean {
+  if (entry.itemId === null || entry.host === null) return false;
+  return claimsOn(entry.project, entry.itemId).some((c) => c.commentId > entry.floor && c.host === entry.host);
 }
 
 function toPayload(entry: Entry): RemoteStarting {

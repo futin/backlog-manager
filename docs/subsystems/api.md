@@ -244,7 +244,8 @@ be on that machine's list (else `400`; no model sent means `DEFAULT_MODEL` if it
 and the session starts at the project's path on THAT machine, read from its board. The `409`s, in the order a launch meets them: `<id> is already starting on
 <label>`, `<project> is already starting on <label>`, `a run of <repo> is live on <label>` and `<label> is not offered for <project>: <reason>`. A remote run
 never blocks a local one, and a live remote run blocks only a second orchestrate to the same machine. A launch is remembered in `RemoteStartingService` (see
-`orchestrator/`) until that machine's first claim shows it.
+`orchestrator/`) until that machine shows it landed: a card dispatch, once a claim by its host newer than the launch is on the item, released or not (a capture
+is never remembered); an orchestrate, once a run on its host shows.
 
 `POST /api/items/abort` routes by where the work is: a dispatch record names its machine and the stop goes to that dashboard; with no record, a claim whose
 `host` equals a configured remote's `host` stops there; otherwise the stop is today's, checked against `BM_MACHINE_NAME`. Either way the release follows the
@@ -277,7 +278,8 @@ A read-only view of the orchestrator's run-state directory:
 owns: `watchdog-state.service.ts` (in memory — what the watchdog did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs only),
 `remote-starting.service.ts` (in memory — a launch sent to a remote machine's dashboard — a card dispatch keyed by (project, item), blocking that item on every
 machine, a remote orchestrate keyed by (project, machine), blocking only a second one to that machine — surfaced as `remoteStarting` and NEVER in `starting`,
-because `starting` blocks home's own lock and a remote launch must block none of it; it clears on the host's first claim, on a remote run of that project on
+because `starting` blocks home's own lock and a remote launch must block none of it; it clears on a claim by the host above the floor recorded at mark time
+(live or released), on a remote run of that project on
 that host starting at or after `requestedAt`, or past `RUN_STALE_MS`, and is swept whenever the payload is read), `remote-runs.service.ts` with its pure half
 `remote-runs.util.ts` (no state at all — other machines' runs, re-derived per request from the poller's cached
 claim comments into the payload's separate `remote` array), `starting-runs.service.ts` (in memory — a spawn this server itself requested, surfaced as the payload's separate `starting` array so a board-started run is

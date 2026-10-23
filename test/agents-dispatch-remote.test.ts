@@ -17,7 +17,7 @@ import { GithubClient } from '../server/src/tracker/github.client';
 import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { COMMIT_RULE, DEFAULT_MODEL, finishClause } from '../shared/agent';
-import { RUN_STALE_MS } from '../shared/types';
+import { RUN_STALE_MS, type ClaimRecord } from '../shared/types';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
@@ -96,6 +96,22 @@ async function deadUrl(): Promise<string> {
 }
 
 const spawnsOf = (s: Stub): Seen[] => s.seen.filter((r) => r.path === '/api/spawn');
+
+/** A claim Pro's session wrote — host `pro-mac`, the machine's `BM_MACHINE_NAME` — already released, as a groom that finished between two polls leaves it. */
+const proClaim = (over: Partial<ClaimRecord> = {}): ClaimRecord => {
+  const now = new Date().toISOString();
+  return {
+    v: 1,
+    session: 'sess-pro',
+    host: 'pro-mac',
+    phase: 'groom',
+    at: now,
+    heartbeat: now,
+    counters: { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 },
+    released: { at: now, reason: 'done', by: 'sess-pro' },
+    ...over
+  };
+};
 
 describe('POST /api/agents/dispatch with a machine', () => {
   let app: INestApplication | undefined;
@@ -349,6 +365,59 @@ describe('POST /api/agents/dispatch with a machine', () => {
     expect(spawnsOf(home)).toEqual([]);
   });
 
+  // Final-review I2 (T5). Retirement used to need a sweep to see the claim LIVE, and a groom claims and releases inside one or two poll intervals, so the
+  // entry outlived it by up to RUN_STALE_MS and refused the item's natural next step. A release is an edit, so the comment stays in the cache: any claim
+  // by the machine's host newer than the launch (a comment id above the floor taken at mark time) is its landing, live or released.
+  describe('remoteStarting item entries (final-review I2)', () => {
+    const runsRead = async () => (await request(app!.getHttpServer()).get('/api/orchestrator/runs').expect(200)).body as { remoteStarting: unknown[] };
+    const sync = () => app!.get(TrackerPollerService).tick();
+    const groom32 = () =>
+      post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32. ' + COMMIT_RULE, permissionMode: 'acceptEdits', machine: 'Pro' }).expect(201);
+
+    it('a groom on Pro that claims and releases between two sweeps: the next runs read retires its entry', async () => {
+      await start();
+      await groom32();
+      expect((await runsRead()).remoteStarting).toEqual([
+        { kind: 'dispatch', project: trackerPath, machine: 'Pro', itemId: '#32', requestedAt: expect.any(String) }
+      ]);
+      // Pro's groom claimed #32 and released it before this machine's poller looked again: no sweep ever saw the claim live.
+      gh.claim(proClaim(), 32);
+      await sync();
+      expect((await runsRead()).remoteStarting).toEqual([]);
+      expect(app!.get(RemoteStartingService).itemBlock(trackerPath, '#32', Date.now())).toBeNull();
+    });
+
+    it("the item's next launch is not refused as starting once the landing is cached, even before any runs read sweeps the entry", async () => {
+      await start();
+      await groom32();
+      gh.claim(proClaim(), 32);
+      await sync();
+      // No runs read in between: the launch's own block has to see the landing.
+      await post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32. ' + COMMIT_RULE, permissionMode: 'acceptEdits' }).expect(201, { sessionId: 'sess-home' });
+    });
+
+    it("a claim by Pro's host at or below the floor does not retire the entry; another host's does not either; Pro's next one does", async () => {
+      // Already on the issue when the launch is sent — an earlier session's, not this launch's landing.
+      gh.claim(proClaim(), 32, 500);
+      await start();
+      await groom32();
+      expect((await runsRead()).remoteStarting).toHaveLength(1);
+      gh.claim(proClaim({ session: 'sess-other', host: 'a@x', released: { at: new Date().toISOString(), reason: 'done', by: 'sess-other' } }), 32, 501);
+      await sync();
+      expect((await runsRead()).remoteStarting).toHaveLength(1);
+      gh.claim(proClaim(), 32, 502);
+      await sync();
+      expect((await runsRead()).remoteStarting).toEqual([]);
+    });
+
+    it('a capture on Pro marks no entry: it files a new item and never claims the one it was launched from', async () => {
+      await start();
+      await post({ itemPath: urn(33), action: 'capture', prompt: 'Capture from #33.', permissionMode: 'acceptEdits', machine: 'Pro' }).expect(201);
+      expect(app!.get(RemoteStartingService).itemBlock(trackerPath, '#33', Date.now())).toBeNull();
+      expect((await runsRead()).remoteStarting).toEqual([]);
+    });
+  });
+
   it('groom and capture on Pro: no finish clause, no base, no 400', async () => {
     await start();
     await post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32. ' + COMMIT_RULE, permissionMode: 'acceptEdits', machine: 'Pro' }).expect(201);
@@ -362,11 +431,12 @@ describe('POST /api/agents/dispatch with a machine', () => {
 describe('RemoteStartingService', () => {
   const PRO = { id: 'Pro', host: 'pro-mac' };
   const T0 = Date.parse('2026-10-23T10:00:00.000Z');
-  const none = { claimedHost: () => null, remoteRuns: [] };
+  const none = { claimsOn: () => [], remoteRuns: [] };
+  const by = (host: string | null, commentId: number) => ({ commentId, host });
 
-  it('an item entry: listed, blocks the item on any machine, and dies when the item is claimed on its host', () => {
+  it('an item entry: listed, blocks the item on any machine, and dies when a claim by its host above the floor is on the item', () => {
     const s = new RemoteStartingService();
-    s.markItem('/p', '#31', PRO, T0);
+    s.markItem('/p', '#31', PRO, 100, T0);
     expect(s.itemBlock('/p', '#31', T0 + 1)).toEqual({
       kind: 'dispatch',
       project: '/p',
@@ -375,15 +445,22 @@ describe('RemoteStartingService', () => {
       requestedAt: '2026-10-23T10:00:00.000Z'
     });
     expect(s.itemBlock('/p', '#32', T0 + 1)).toBeNull();
-    // A claim by some OTHER host is not this launch's landing.
-    expect(s.list({ nowMs: T0 + 1, claimedHost: () => 'a@x', remoteRuns: [] })).toHaveLength(1);
-    expect(s.list({ nowMs: T0 + 1, claimedHost: (p, id) => (p === '/p' && id === '#31' ? 'pro-mac' : null), remoteRuns: [] })).toEqual([]);
+    // A claim by some OTHER host is not this launch's landing, nor is Pro's claim on another item.
+    expect(s.list({ nowMs: T0 + 1, claimsOn: () => [by('a@x', 101)], remoteRuns: [] })).toHaveLength(1);
+    expect(s.list({ nowMs: T0 + 1, claimsOn: (_p, id) => (id === '#32' ? [by('pro-mac', 101)] : []), remoteRuns: [] })).toHaveLength(1);
+    expect(s.list({ nowMs: T0 + 1, claimsOn: (p, id) => (p === '/p' && id === '#31' ? [by('pro-mac', 101)] : []), remoteRuns: [] })).toEqual([]);
     expect(s.itemBlock('/p', '#31', T0 + 1)).toBeNull();
+  });
+
+  it('a claim by its host at or below the floor does not retire an item entry — it was on the issue before the launch', () => {
+    const s = new RemoteStartingService();
+    s.markItem('/p', '#31', PRO, 100, T0);
+    expect(s.list({ nowMs: T0 + 1, claimsOn: () => [by('pro-mac', 99), by('pro-mac', 100), by(null, 101)], remoteRuns: [] })).toHaveLength(1);
   });
 
   it('any entry is gone at RUN_STALE_MS + 1, and still there at RUN_STALE_MS', () => {
     const s = new RemoteStartingService();
-    s.markItem('/p', '#31', PRO, T0);
+    s.markItem('/p', '#31', PRO, 0, T0);
     s.markProject('/p', PRO, T0);
     expect(s.itemBlock('/p', '#31', T0 + RUN_STALE_MS)).not.toBeNull();
     expect(s.list({ nowMs: T0 + RUN_STALE_MS, ...none })).toHaveLength(2);
@@ -399,7 +476,7 @@ describe('RemoteStartingService', () => {
     expect(s.projectBlock('/p', 'Max', T0 + 1)).toBeNull();
     const run = (host: string | null, startedAt: number) => ({ project: '/p', host, startedAt: new Date(startedAt).toISOString() });
     // Started before the launch, or on another host: not its landing.
-    expect(s.list({ nowMs: T0 + 1, claimedHost: () => null, remoteRuns: [run('pro-mac', T0 - 1), run('a@x', T0 + 1)] })).toHaveLength(1);
-    expect(s.list({ nowMs: T0 + 1, claimedHost: () => null, remoteRuns: [run('pro-mac', T0)] })).toEqual([]);
+    expect(s.list({ nowMs: T0 + 1, claimsOn: () => [], remoteRuns: [run('pro-mac', T0 - 1), run('a@x', T0 + 1)] })).toHaveLength(1);
+    expect(s.list({ nowMs: T0 + 1, claimsOn: () => [], remoteRuns: [run('pro-mac', T0)] })).toEqual([]);
   });
 });

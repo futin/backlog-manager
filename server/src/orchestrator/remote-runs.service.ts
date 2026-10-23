@@ -2,9 +2,10 @@ import { Injectable } from '@nestjs/common';
 
 import { OrchestratorService } from './orchestrator.service';
 import { deriveRemoteRuns } from './remote-runs.util';
+import type { ItemClaim } from './remote-starting.service';
 import { RegistryService } from '../registry/registry.service';
 import { resolveSource } from '../items/sources/resolve.util';
-import { claimsFor, liveClaims, winner } from '../tracker/claim';
+import { claimsFor } from '../tracker/claim';
 import { isRepo } from '../tracker/github.client';
 import { intervalFor } from '../tracker/sync-config.util';
 import { TrackerPollerService } from '../tracker/poller.service';
@@ -74,20 +75,26 @@ export class RemoteRunsService {
   }
 
   /**
-   * The `host` of the live claim holding `itemId` in `project`, or `null` when nothing holds it — read off the poller's cached comments, like `list`
-   * (multi-dashboard task 6). `RemoteStartingService.list`'s `claimedHost`: a remote card dispatch's "starting on <machine>" retires the moment the item is
-   * held by a session on that machine's host. The holder is the claim protocol's own (`winner` of the live claims, lowest comment id), so a race loser's
-   * still-standing comment never reads as the landing.
+   * Every claim on `itemId` in `project` — live and released alike, oldest comment first — read off the poller's cached comments, like `list`
+   * (multi-dashboard task 6, reworked by final-review I2). `RemoteStartingService.list`'s `claimsOn`: a remote card dispatch's "starting on <machine>"
+   * retires once a claim by that machine's host newer than the launch is on the item. Released claims are included on purpose — a release edits the
+   * comment rather than deleting it (`map-issue.ts` reads the newest claim "released or not" for the same reason), and a groom that claims and releases
+   * between two polls is otherwise never seen to land. Not `winner`: a race loser's comment is still that host's session reaching the item, and the
+   * entry only ever asks "has this launch landed", never "who holds it".
    *
-   * `null` for anything that is not a tracker item id (`#<n>`, the id a GitHub item carries) or not a tracker project — a files item never has a remote
+   * Empty for anything that is not a tracker item id (`#<n>`, the id a GitHub item carries) or not a tracker project — a files item never has a remote
    * entry to retire, because a remote launch of one is a 400.
    */
-  claimedHost(project: string, itemId: string, nowMs: number = Date.now()): string | null {
+  claimsOn(project: string, itemId: string): ItemClaim[] {
     const number = /^#(\d+)$/.exec(itemId);
-    if (number === null) return null;
+    if (number === null) return [];
     const resolved = resolveSource(project, KNOWN);
-    if (resolved.kind !== 'tracker' || !isRepo(resolved.marker.repo)) return null;
-    const holder = winner(liveClaims(claimsFor(Number(number[1]), this.poller.comments(resolved.marker.repo)), nowMs));
-    return holder?.record.host ?? null;
+    if (resolved.kind !== 'tracker' || !isRepo(resolved.marker.repo)) return [];
+    return claimsFor(Number(number[1]), this.poller.comments(resolved.marker.repo)).map((c) => ({ commentId: c.commentId, host: c.record.host ?? null }));
+  }
+
+  /** The floor `RemoteStartingService.markItem` records: the highest claim comment id on the item right now, `0` when it has none. */
+  claimFloor(project: string, itemId: string): number {
+    return this.claimsOn(project, itemId).reduce((max, c) => Math.max(max, c.commentId), 0);
   }
 }

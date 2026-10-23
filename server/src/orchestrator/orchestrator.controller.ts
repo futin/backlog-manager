@@ -77,7 +77,7 @@ export class OrchestratorController {
     // service deletes what it retires as it lists), so it runs on every runs read; the launch-time blocks apply only the age rule and need none.
     payload.remoteStarting = this.remoteStarting.list({
       nowMs: now,
-      claimedHost: (project, itemId) => this.remoteRuns.claimedHost(project, itemId, now),
+      claimsOn: (project, itemId) => this.remoteRuns.claimsOn(project, itemId),
       remoteRuns: payload.remote
     });
     return payload;

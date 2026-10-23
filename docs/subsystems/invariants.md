@@ -1966,11 +1966,16 @@ machine) and blocks only a second remote orchestrate of that project to that mac
 tracker project at once (the claim protocol keeps their items disjoint). So what a remote launch never blocks is a local RUN; what it does block is one ITEM,
 for the minutes before its claim shows.
 
-An entry dies on the first of: the item is claimed by a session on the entry's `host` (a copy of the machine's `host` taken at mark time, because the machine
-list is re-read per request and an entry edited away must not be answered for by a lookup made later); a remote run of that project on that host started at or
-after `requestedAt`; or `RUN_STALE_MS`. Only `list`, which holds the tracker cache and the remote runs, can apply the first two, and it deletes what they
-retire, so the map is swept on every runs read; the launch-time `itemBlock` and `projectBlock` apply age alone, because the launch reads its own claim gates
-first and an entry the sweep would have retired but no read has yet refuses nothing those gates would not.
+An entry dies on the first of: a claim by the entry's `host` (a copy of the machine's `host` taken at mark time, because the machine list is re-read per request
+and an entry edited away must not be answered for by a lookup made later) is on the item, live or released, with a comment id above the entry's floor — the
+highest claim comment id the tracker cache held for the issue at mark time; a remote run of that project on that host started at or after `requestedAt`; or
+`RUN_STALE_MS`. The floor is what keeps an earlier session's claim from reading as this launch's landing. Released counts because a release edits the comment
+and never deletes it, and a groom claims and releases inside one or two poll intervals: when the rule needed the claim LIVE, a sweep that missed that window
+left the entry to age out, and for those 15 minutes it refused the item's natural next step, the execute of the item just groomed. A capture is never marked,
+because it files a new item and never claims the one it was launched from, so nothing but age could retire its entry. Only `list`, which holds the remote runs,
+can apply the second rule, and it deletes what all three retire, so the map is swept on every runs read. The launch-time `itemBlock` applies the first rule and
+age — once a released claim retires an entry, an unswept one would refuse what no claim gate does — and `projectBlock` age alone, because the launch reads its
+own live-run gate first and an entry the sweep would have retired but no read has yet refuses nothing that gate would not.
 
 ## `dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced
 

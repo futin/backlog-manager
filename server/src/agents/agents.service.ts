@@ -553,7 +553,8 @@ export class AgentsService {
     // A remote launch of this item that has not claimed it yet — on ANY machine, home included. Until that session's first claim lands nothing on the
     // tracker says the item is taken, so every claim check above waves a second launch through onto the same issue; this is the one record that it is
     // not free. Uncoded 409, the claim refusals' status. In a home-only setup nothing ever marks it, so home's path is unchanged.
-    const startingOn = this.remoteStarting.itemBlock(item.projectPath, item.id, Date.now());
+    // `claimsOn` lets the block see a landing the board's runs read has not swept yet — a remote groom that claimed and released since (final-review I2).
+    const startingOn = this.remoteStarting.itemBlock(item.projectPath, item.id, Date.now(), (p, id) => this.remoteRuns.claimsOn(p, id));
     if (startingOn !== null) throw new HttpException({ error: `${item.id} is already starting on ${startingOn.machine}` }, 409);
 
     // Proved last of the checks, and always asked of git — `main` included (`proveBaseBranch`, which says why `resolveBase`'s `'main'` carve-out is wrong
@@ -580,8 +581,12 @@ export class AgentsService {
     // `machine` is which dashboard holds the session — `home` for this machine's — so Stop & release can be sent where the session actually runs.
     this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, machine: m.id, at: Date.now() });
     // Marked only after the spawn came back with an id, as `StartingRunsService` is: a refused spawn started nothing to wait for. Remote only — a home
-    // session is this machine's, and its claim is visible to the gates above the moment it lands.
-    if (!m.home) this.remoteStarting.markItem(item.projectPath, item.id, m, Date.now());
+    // session is this machine's, and its claim is visible to the gates above the moment it lands. Never for a capture (final-review I2): it files a NEW
+    // item and never claims this one, so nothing could retire the entry but age, and the card would read "Starting on" for the full RUN_STALE_MS. The
+    // floor is the newest claim already on the issue, so only a claim this launch's session writes retires the entry (see `RemoteStartingService`).
+    if (!m.home && action !== 'capture') {
+      this.remoteStarting.markItem(item.projectPath, item.id, m, this.remoteRuns.claimFloor(item.projectPath, item.id), Date.now());
+    }
     return spawned;
   }
 

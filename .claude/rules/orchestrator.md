@@ -23,9 +23,10 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   remote session's claim is the durable trace. Two keys: a card dispatch is (project, item) — `markItem`/`itemBlock`, `kind: 'dispatch'` — and blocks a second
   launch of THAT ITEM to any machine, home included; a remote orchestrate is (project, machine) — `markProject`/`projectBlock`, `kind: 'orchestrate'` — and
   blocks only a second remote orchestrate of that project to that machine, never home and never another machine. So a remote launch never blocks a local RUN; it
-  does block one ITEM until its claim shows. Each entry copies the machine's claim `host` at mark time. It dies on the first of: the item claimed by a session
-  on that host, a remote run of that project on that host started at or after `requestedAt`, or `RUN_STALE_MS`; only `list` applies the first two and deletes
-  what they retire, while `itemBlock` and `projectBlock` apply age alone. Why:
+  does block one ITEM until its claim shows. Each entry copies the machine's claim `host` at mark time, and an item entry the highest claim comment id on the
+  issue then (its floor); a capture marks none. It dies on the first of: a claim by that host on the item, live or released, above the floor; a remote run of
+  that project on that host started at or after `requestedAt`; or `RUN_STALE_MS`. Only `list` applies the second and deletes what all three retire;
+  `itemBlock` applies the first and age, `projectBlock` age alone. Why:
   [invariants.md](docs/subsystems/invariants.md#a-launch-sent-to-another-machine-rides-in-remotestarting-never-in-starting)
 - **A run's sidecars are archived beside its run file, under a name derived from the archive path and stored nowhere.** One `archiveStem` names both
   `runs/<stem>.json` and `runs/<stem>/`; there is no `sidecarDir` field. The mover is a denylist of three (`run.json`, `runs/`, `stale-plans.json` —
