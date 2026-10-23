@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { DashboardsGroup } from '../client/src/components/settings/DashboardsGroup';
-import type { DashboardsView } from '../shared/types';
+import type { AgentsStatus, DashboardsView } from '../shared/types';
 
 /**
  * Task 11 of multi-dashboard: the `Dashboards` card on Shared Settings. Rendered bare — the page-level question (which page, which column) is
@@ -70,10 +70,23 @@ function respond(status: number, body: unknown): Promise<Response> {
 type Answer = { status: number; body: unknown };
 
 /** `get` answers the read (`'reject'` for a failed one); `post` answers a write by route name and parsed body, defaulting to the same view. */
-function stubFetch(opts: { get?: DashboardsView | 'reject'; post?: (route: string, body: Record<string, unknown>) => Answer | undefined } = {}): jest.Mock {
+const HEALTHY: AgentsStatus = {
+  enabled: true,
+  reachable: true,
+  remoteAnswer: true,
+  spawnAvailable: true,
+  spawnMaxPermission: 'auto',
+  projectPaths: ['/a', '/b', '/c']
+};
+
+function stubFetch(
+  opts: { get?: DashboardsView | 'reject'; post?: (route: string, body: Record<string, unknown>) => Answer | undefined; agents?: AgentsStatus } = {}
+): jest.Mock {
   const get = opts.get ?? viewOf();
   const fn = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    // The Home row's dispatch line (`useAgents`), answered healthy unless a case says otherwise.
+    if (url.endsWith('/api/agents/status')) return respond(200, opts.agents ?? HEALTHY);
     const route = url.replace(/^.*\/api\/dashboards\/?/, '');
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
@@ -112,6 +125,29 @@ async function renderCard() {
 describe('DashboardsGroup', () => {
   afterEach(() => cleanup());
 
+  describe('this machine’s dispatch report on the Home row (was the Claude Agents card)', () => {
+    it('draws the dispatch line as Home’s first line and no setup steps while healthy', async () => {
+      stubFetch();
+      await renderCard();
+      const home = within(rowOf('Home'));
+      expect(await home.findByText(/dispatch.*connected · spawn on · ceiling: auto · 3 projects/)).toBeInTheDocument();
+      expect(screen.queryByText('Setting it up')).toBeNull();
+    });
+    it('opens the setup steps under the Home row when dispatch is off', async () => {
+      stubFetch({ agents: { ...HEALTHY, enabled: false, reachable: false } });
+      await renderCard();
+      expect(await within(rowOf('Home')).findByText(/off — dispatch is not enabled on the API/)).toBeInTheDocument();
+      expect(screen.getByText('Setting it up')).toBeInTheDocument();
+      expect(screen.getByText(/BM_AGENTS=on/)).toBeInTheDocument();
+    });
+    it('still reports dispatch while GET /api/dashboards fails', async () => {
+      stubFetch({ get: 'reject' });
+      render(<DashboardsGroup />);
+      expect(await screen.findByText(/connected · spawn on/)).toBeInTheDocument();
+      expect(await screen.findByText('Unavailable')).toBeInTheDocument();
+    });
+  });
+
   describe('the machines', () => {
     it('titles the card Dashboards, scoped to this machine, and lists every machine in the view’s order', async () => {
       stubFetch();
@@ -135,7 +171,7 @@ describe('DashboardsGroup', () => {
       expect(home.queryByRole('button', { name: /^Remove/ })).toBeNull();
     });
 
-    it('draws a remote’s URLs, machine name, account and lists, and says an unset token is not set and how to fix it', async () => {
+    it('draws a remote’s URLs, machine name, account and lists, and says an unset token is not set and when it is needed', async () => {
       stubFetch();
       await renderCard();
       const pro = within(rowOf('Pro'));
@@ -144,7 +180,9 @@ describe('DashboardsGroup', () => {
       expect(pro.getByText('machine name pro-mac')).toBeInTheDocument();
       expect(pro.getByText('account: Pro plan')).toBeInTheDocument();
       expect(pro.getByText('models: sonnet, haiku')).toBeInTheDocument();
-      expect(pro.getByText('BM_AGENTS_TOKEN_PRO ✗ not set — add it to .env and restart')).toBeInTheDocument();
+      expect(
+        pro.getByText('BM_AGENTS_TOKEN_PRO not set — needed only if that dashboard does not trust this machine; then add it to .env and restart')
+      ).toBeInTheDocument();
       expect(within(rowOf('Max')).getByText('BM_AGENTS_TOKEN_MAX ✓ set')).toBeInTheDocument();
     });
 
@@ -248,17 +286,28 @@ describe('DashboardsGroup', () => {
       expect(screen.getByText('BM_AGENTS_TOKEN_TEAM')).toBeInTheDocument();
     });
 
-    it('keeps Save disabled until the four required fields hold something', async () => {
+    it('keeps Save disabled until Name and Dashboard URL hold something — Board URL and Machine name are optional', async () => {
       stubFetch();
       await renderCard();
       await openAdd();
       expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
       await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Team');
-      await userEvent.type(screen.getByRole('textbox', { name: 'Dashboard URL' }), 'http://team:4310');
-      await userEvent.type(screen.getByRole('textbox', { name: 'Board URL' }), 'http://team:4322');
       expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-      await userEvent.type(screen.getByRole('textbox', { name: 'Machine name' }), 'team-mac');
+      await userEvent.type(screen.getByRole('textbox', { name: 'Dashboard URL' }), 'http://team:4310');
       expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    });
+
+    it('shows the defaults as placeholders and leaves blank optional fields out of the POST', async () => {
+      const fn = stubFetch();
+      await renderCard();
+      await openAdd();
+      await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Team');
+      await userEvent.type(screen.getByRole('textbox', { name: 'Dashboard URL' }), 'http://team.tail1.ts.net:4173/');
+      expect(screen.getByRole('textbox', { name: 'Board URL' })).toHaveAttribute('placeholder', 'http://team.tail1.ts.net:5177');
+      expect(screen.getByRole('textbox', { name: 'Machine name' })).toHaveAttribute('placeholder', 'Team');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(posts(fn)).toHaveLength(1));
+      expect(posts(fn)[0]).toEqual({ route: 'entries', body: { entry: { name: 'Team', url: 'http://team.tail1.ts.net:4173/' } } });
     });
 
     it('posts the entry with no lists when every box is ticked, and with the ticked ones when not', async () => {

@@ -878,7 +878,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* Two hand-balanced columns (§8.6). An explicit two-track grid rather than
    `auto-fit` or a masonry pass: which side a card sits on is a placement this
    page makes once, in `SettingsView`'s markup, so that a reader who learnt
-   where `Claude Agents` is does not find it on the other side of the page after
+   where `Dashboards` is does not find it on the other side of the page after
    a knob above it grew a row.
    1100 px is Settings' OWN breakpoint and is deliberately NOT the 700 px phone
    break every other split on this board uses (`.board-columns`, `.runs-split`,
