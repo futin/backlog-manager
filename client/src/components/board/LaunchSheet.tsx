@@ -12,7 +12,7 @@ import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import { useRunOn } from '../../hooks/useRunOn';
 import { useSettings } from '../../hooks/useSettings';
-import { prRequiredText, runsText } from '../../lib/dashboards';
+import { prRequiredText } from '../../lib/dashboards';
 import { staleTakeover } from '../../lib/tracker';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
@@ -250,13 +250,11 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <label className="sheet-field">
               <span className="set-name">Model</span>
               <Select label="Model" value={model} onChange={setModel} options={runOn.modelOptions} />
-              {runOn.remote && runOn.lock.models.length > 0 && <span className="sheet-note">{runsText(runOn.label!, runOn.lock.models)}</span>}
             </label>
 
             <label className="sheet-field">
               <span className="set-name">Effort</span>
               <Select label="Effort" value={effort} onChange={setEffort} options={runOn.effortOptions} />
-              {runOn.remote && runOn.lock.efforts.length > 0 && <span className="sheet-note">{runsText(runOn.label!, runOn.lock.efforts)}</span>}
             </label>
           </div>
 

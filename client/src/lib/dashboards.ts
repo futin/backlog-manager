@@ -159,11 +159,6 @@ export function prRequiredText(label: string): string {
   return `Required when running on ${label}`;
 }
 
-/** The hint under Model and Effort while a remote is picked: `Pro runs opus, sonnet`, the machine's own list in the order the offer carries it. */
-export function runsText(label: string, list: string[]): string {
-  return `${label} runs ${list.join(', ')}`;
-}
-
 /** What a sheet says when the machine list could not be read and it falls back to running here, which is what the sheet did before there was a picker. */
 export const OFFERS_FAILED_TEXT = 'Could not load the machine list — this will run here.';
 

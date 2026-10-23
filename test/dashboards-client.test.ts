@@ -11,7 +11,6 @@ import {
   machineLabelByHost,
   narrowTo,
   prRequiredText,
-  runsText,
   saveEntry,
   saveHome,
   saveSuggestion
@@ -288,9 +287,7 @@ describe('narrowTo', () => {
 });
 
 describe('hint text', () => {
-  it('names the machine and lists its values in the order the offer carries them', () => {
+  it('names the machine', () => {
     expect(prRequiredText('Pro')).toBe('Required when running on Pro');
-    expect(runsText('Pro', ['opus', 'sonnet'])).toBe('Pro runs opus, sonnet');
-    expect(runsText('Pro', ['high'])).toBe('Pro runs high');
   });
 });
