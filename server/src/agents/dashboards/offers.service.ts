@@ -102,9 +102,10 @@ export class OffersService {
   }
 
   private async judgeRemote(project: string, repo: string, m: Machine): Promise<Judged> {
+    // `remoteStatusOf`, not `statusOf`: a remote whose project list cannot be read is unreachable (rung 1), never "does not list" (rung 5) — see there.
     // `BM_AGENTS` off is the whole feature's off switch, remotes included: no egress at all, so the board is not asked either.
     const [status, board] = await Promise.all([
-      this.status.statusOf(m.cfg, REMOTE_BUDGET),
+      this.status.remoteStatusOf(m.cfg, REMOTE_BUDGET),
       m.cfg.enabled ? remoteProject(m.bmUrl as string, repo) : Promise.resolve(null)
     ]);
     if (!status.enabled || !status.reachable) return { reason: gateReason(status, m.label, project) };

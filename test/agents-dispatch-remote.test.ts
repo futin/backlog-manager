@@ -60,7 +60,7 @@ interface Stub {
 const servers: Server[] = [];
 const dirs: string[] = [];
 
-/** A route's answer is its JSON body (200). Every request is recorded, its body included, once it has been read in full. */
+/** A route's answer is its JSON body (200), or a bare status code. Every request is recorded, its body included, once it has been read in full. */
 async function stub(routes: Record<string, unknown>): Promise<Stub> {
   const seen: Seen[] = [];
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -72,6 +72,10 @@ async function stub(routes: Record<string, unknown>): Promise<Stub> {
       const answer = routes[path];
       if (answer === undefined) {
         res.writeHead(404).end();
+        return;
+      }
+      if (typeof answer === 'number') {
+        res.writeHead(answer).end();
         return;
       }
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer));
@@ -296,6 +300,19 @@ describe('POST /api/agents/dispatch with a machine', () => {
     const res = await execute({ base: 'main', machine: 'Pro' });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(new RegExp(`^Pro is not offered for ${trackerPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: board unreachable — `));
+    expect(spawnsOf(pro)).toEqual([]);
+    expect(spawnsOf(home)).toEqual([]);
+  });
+
+  // T4 / final-review I1, at launch time: Pro's health answers and its project list does not, so the 409 names the dashboard as unreachable rather than
+  // telling the person Pro has never seen the project.
+  it("409s with 'dashboard unreachable' when Pro's /api/configs answers 500, and spawns nothing", async () => {
+    gitInit();
+    pro = await stub({ '/api/health': HEALTH, '/api/configs': 500, '/api/account': ACCOUNT, '/api/usage/profile': PROFILE, '/api/spawn': { sessionId: 'sess-pro' } });
+    await start();
+    const res = await execute({ base: 'main', machine: 'Pro' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe(`Pro is not offered for ${trackerPath}: dashboard unreachable — /api/configs answered 500`);
     expect(spawnsOf(pro)).toEqual([]);
     expect(spawnsOf(home)).toEqual([]);
   });

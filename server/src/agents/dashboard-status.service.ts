@@ -74,6 +74,25 @@ export class DashboardStatusService {
    * for a remote, whose reads are new outbound calls and are held to the 5 s every new read gets.
    */
   async statusOf(cfg: AgentsConfig, budget: StatusBudget = HOME_BUDGET): Promise<AgentsStatus> {
+    return this.judge(cfg, budget, false);
+  }
+
+  /**
+   * A REMOTE dashboard, judged as `statusOf` judges one in every respect but the project map: a failed map read (a timeout, a non-ok answer, a body that
+   * is not JSON) is `reachable: false` carrying that read's error, where `statusOf` swallows it into an empty list.
+   *
+   * Why the two differ (final-review I1). On home the swallow is the right reading and is kept byte for byte: `GET /api/agents/status` drives a board
+   * where an empty list disables the buttons, and Settings is where home's dashboard is fixed. On a remote, an empty list lands on the offers' rung 5,
+   * `<name>'s dashboard does not list <path>` — which tells the person to go and open a Claude session in that project on that machine, when the project
+   * may well be listed and it is the dashboard's own heavy call that is failing. Surfacing the error puts it on rung 1, `dashboard unreachable — <error>`,
+   * in the same words a dead health check already gets. Called only from the offers' remote judge and the remote arms of dispatch and orchestrate.
+   */
+  async remoteStatusOf(cfg: AgentsConfig, budget: StatusBudget): Promise<AgentsStatus> {
+    return this.judge(cfg, budget, true);
+  }
+
+  /** `statusOf`'s body as it stood, with the one switch `remoteStatusOf` needs: what a failed project-map read means. */
+  private async judge(cfg: AgentsConfig, budget: StatusBudget, mapFailureIsUnreachable: boolean): Promise<AgentsStatus> {
     const off: AgentsStatus = {
       enabled: false,
       reachable: false,
@@ -96,11 +115,15 @@ export class DashboardStatusService {
     let projectPaths: string[] = [];
     try {
       projectPaths = [...(await this.projectMap(cfg, budget.managementMs)).keys()];
-    } catch {
-      // Swallowed on purpose: health already told us the dashboard is up, and
+    } catch (e) {
+      // Swallowed on purpose for home: health already told us the dashboard is up, and
       // reporting `reachable: false` because the *heavy* call timed out would
       // send the reader to fix a connection that works. An empty list disables
       // the buttons, which is the honest consequence.
+      //
+      // Not for a remote (`remoteStatusOf`): there the empty list would be read as "never seen the project", the worse lie of the two. `projectMap`
+      // wraps every failure in an HttpException whose `error` is already `dashboardError`'s wording, so that text is relayed as it stands.
+      if (mapFailureIsUnreachable) return { ...off, enabled: true, error: mapError(e) };
     }
 
     return {
@@ -173,7 +196,14 @@ export class DashboardStatusService {
     return (await res.json()) as T;
   }
 }
-
+/** The text of a `projectMap` failure: the HttpException's own `error` (`dashboardError`'s wording), else the raw message. */
+function mapError(e: unknown): string {
+  if (e instanceof HttpException) {
+    const body = e.getResponse() as { error?: unknown };
+    if (typeof body === 'object' && body !== null && typeof body.error === 'string') return body.error;
+  }
+  return message(e);
+}
 
 /**
  * A ceiling we do not recognise is a dashboard newer than this client. Read as

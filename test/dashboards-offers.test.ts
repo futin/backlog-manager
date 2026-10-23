@@ -319,6 +319,46 @@ describe('GET /api/dashboards/offers', () => {
     expect(askedForUsage(proDash)).toBe(false);
   });
 
+  // T4 / final-review I1: health answered, the heavy project-list read did not. On a remote that is a dashboard failing, not a dashboard that has never
+  // seen the project, so the reason is rung 1's — never rung 5's "does not list", which would send the person to open a session on a machine whose
+  // dashboard is the thing that is broken.
+  it("Pro's /api/configs answers 500 → dashboard unreachable with that error, not 'does not list'", async () => {
+    const home = await homeDashboard(tracker);
+    const proDash = await stub({ '/api/health': HEALTH, '/api/configs': 500, '/api/account': ACCOUNT(5, 5), '/api/usage/profile': PROFILE() });
+    const board = await proBoard();
+    process.env.BM_AGENTS_URL = home.url;
+    await start([{ url: proDash.url, bmUrl: board.url }]);
+    const body = await offers(tracker);
+    expect(byId(body, 'Pro')).toMatchObject({ offered: false, reason: 'dashboard unreachable — /api/configs answered 500', usage: null });
+    expect(askedForUsage(proDash)).toBe(false);
+    expect(byId(body, 'home')).toMatchObject({ offered: true, reason: null });
+  });
+
+  it("Pro's /api/configs hangs past the 5 s read limit → dashboard unreachable, timed out", async () => {
+    const home = await homeDashboard(tracker);
+    const proDash = await stub({ '/api/health': HEALTH, '/api/configs': 'hang' });
+    const board = await proBoard();
+    process.env.BM_AGENTS_URL = home.url;
+    await start([{ url: proDash.url, bmUrl: board.url }]);
+    const t0 = Date.now();
+    const body = await offers(tracker);
+    expect(Date.now() - t0).toBeLessThan(7_000);
+    expect(byId(body, 'Pro')).toMatchObject({ offered: false, reason: 'dashboard unreachable — the dashboard project list timed out after 5000ms' });
+    expect(byId(body, 'home')).toMatchObject({ offered: true, reason: null });
+  }, 15_000);
+
+  // Home keeps the swallow (Review Focus 1): `GET /api/agents/status` has always read a failed project list as an empty one, and the offers judge home
+  // through that same read, so home's reason stays rung 5's.
+  it("home's /api/configs answering 500 still reads as 'does not list' — home's swallow is unchanged", async () => {
+    const home = await stub({ '/api/health': HEALTH, '/api/configs': 500 });
+    process.env.BM_AGENTS_URL = home.url;
+    await start(null);
+    expect(byId(await offers(tracker), 'home')).toMatchObject({ offered: false, reason: `Home's dashboard does not list ${tracker}` });
+    const status = await request(app!.getHttpServer()).get('/api/agents/status').expect(200);
+    expect(status.body).toMatchObject({ enabled: true, reachable: true, projectPaths: [] });
+    expect(status.body.error).toBeUndefined();
+  });
+
   it('Pro board hangs → offers answers within the timeout, Pro not offered, home offered and suggested (Review Focus 2)', async () => {
     const home = await homeDashboard(tracker);
     const proDash = await proDashboard();

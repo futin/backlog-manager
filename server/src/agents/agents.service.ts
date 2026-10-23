@@ -484,8 +484,9 @@ export class AgentsService {
     // Home: `dispatchBlock` against home's status, exactly as before. A remote: the same gate (`projectDispatchGate`, which `dispatchBlock` is a one-line
     // delegate to) against THAT machine's status and THAT machine's path — never `dispatchBlock(item, …)`, whose `item.projectPath` is this machine's
     // path, which a remote dashboard's project list never holds. Its status is read under the 5 s every remote read gets, and its ceiling clamps the
-    // spawn below, so a stricter remote is never widened by home's.
-    const status = m.home ? await this.status() : await this.dashboardStatus.statusOf(m.cfg, REMOTE_BUDGET);
+    // spawn below, so a stricter remote is never widened by home's. `remoteStatusOf`, so a project list that fails between the offer and here is the 502
+    // "unreachable" below, not a 409 saying Pro has never seen the project (final-review I1).
+    const status = m.home ? await this.status() : await this.dashboardStatus.remoteStatusOf(m.cfg, REMOTE_BUDGET);
     const blocked = m.home ? dispatchBlock(item, status) : remoteGateBlock(status, remotePath as string);
     if (blocked !== null) {
       // 502 only when the feature is on and we genuinely failed to reach the
@@ -679,8 +680,9 @@ export class AgentsService {
     }
 
     // Home's status as before; a remote's read under the 5 s every remote read gets. Its `enabled` is home's own flag (`DashboardsService` copies it into
-    // every machine's config), so the 404 below means the same thing on either.
-    const status = m.home ? await this.status() : await this.dashboardStatus.statusOf(m.cfg, REMOTE_BUDGET);
+    // every machine's config), so the 404 below means the same thing on either. `remoteStatusOf`, as dispatch reads it: a remote's failed project list
+    // is unreachable (the 502 below), never "does not list" (final-review I1).
+    const status = m.home ? await this.status() : await this.dashboardStatus.remoteStatusOf(m.cfg, REMOTE_BUDGET);
     if (!status.enabled) {
       // 404, not dispatch's 409-with-a-reason. dispatch's off case still has
       // a sheet open for one specific item, and plan()/dispatchBlock exist
