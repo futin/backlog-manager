@@ -329,7 +329,7 @@ export class OrchestratorService {
       // is the exact shape a first-ever run takes. `[]` as the real runs,
       // because there genuinely are none — which also means rule 1 cannot
       // match and only the RUN_STALE_MS rule can retire an entry here.
-      return { runs: [], starting: this.starting.list([]), remote: [] };
+      return { runs: [], starting: this.starting.list([]), remote: [], remoteStarting: [] };
     }
 
     const runs: OrchestratorRunsPayload['runs'] = [];
@@ -396,7 +396,7 @@ export class OrchestratorService {
     // list would leave every placeholder alive until its RUN_STALE_MS
     // expiry, i.e. a card claiming a run is still starting for fifteen
     // minutes after it started.
-    return { runs, starting: this.starting.list(runs), remote: [] };
+    return { runs, starting: this.starting.list(runs), remote: [], remoteStarting: [] };
   }
 
   /**

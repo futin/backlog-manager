@@ -443,7 +443,7 @@ async function renderRunsView(
   remote: OrchestratorRunsPayload['remote'] = []
 ): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
-  mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote } satisfies OrchestratorRunsPayload);
+  mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote, remoteStarting: [] } satisfies OrchestratorRunsPayload);
   const result = render(<RunsView />);
   if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0 && remote.length === 0) {
     await screen.findByText('no runs yet');
@@ -1029,7 +1029,7 @@ describe('RunsView', () => {
       };
 
       mockArchive.mockResolvedValue({ runs: [archiveAlpha] } satisfies OrchestratorArchivePayload);
-      mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [], remote: [] } satisfies OrchestratorRunsPayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
 
       render(<RunsView />);
       // Flushes the mount-time fetches (both hooks') and whatever effects
@@ -1066,7 +1066,7 @@ describe('RunsView', () => {
         pauseRequested: false,
         stopRequested: false
       };
-      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [], remote: [] } satisfies OrchestratorRunsPayload);
+      mockRuns.mockResolvedValue({ runs: [liveAlpha, liveBeta], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
 
       await act(async () => {
         await jest.advanceTimersByTimeAsync(5_000);
@@ -1766,7 +1766,7 @@ describe('RunsView history paging (task-16)', () => {
     // Not `renderRunsView`: that helper waits on `runs-list`, which is
     // exactly what this page does not render.
     mockArchive.mockResolvedValue({ runs: ARCHIVE_RUNS } satisfies OrchestratorArchivePayload);
-    mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [], remote: [] } satisfies OrchestratorRunsPayload);
+    mockRuns.mockResolvedValue({ runs: LIVE_RUNS, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
     render(<RunsView />);
 
     // `watchdog-phase`, not `watchdog-state`: the page renders a
@@ -1958,7 +1958,8 @@ describe('RunsView · a running run whose heartbeat has gone stale', () => {
           }
         ],
         starting: [],
-        remote: []
+        remote: [],
+        remoteStarting: []
       });
 
       mockArchive.mockResolvedValue({ runs: [archiveEntry] } satisfies OrchestratorArchivePayload);
@@ -2632,7 +2633,8 @@ describe('RunsView · a remote run (task-48)', () => {
       attention: [],
       fresh,
       remote: true,
-      repo: 'futin/x'
+      repo: 'futin/x',
+      host: null
     };
   }
 

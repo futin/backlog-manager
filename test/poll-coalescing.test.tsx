@@ -46,7 +46,7 @@ const run = rawFixture as OrchestratorRun;
 function runsPayload(kind: Kind): OrchestratorRunsPayload {
   const live = kind === 'live';
   const entry = { ...run, status: live ? ('running' as const) : ('done' as const), fresh: live, pastRuns: 0, pauseRequested: false, stopRequested: false };
-  return { runs: [entry], starting: [], remote: [] };
+  return { runs: [entry], starting: [], remote: [], remoteStarting: [] };
 }
 
 function projects(kind: Kind): ProjectSummary[] {

@@ -189,6 +189,22 @@ describe('deriveRemoteRuns and the pr merge mode', () => {
   });
 });
 
+/**
+ * Multi-dashboard task 6 — which machine a remote run is on: the `host` its claims carry (the remote's `BM_MACHINE_NAME`), read off the NEWEST claim in the
+ * run that carries one, so the orchestrate route can refuse a second launch to the machine already draining the repo.
+ */
+describe('deriveRemoteRuns and the host', () => {
+  it('R-14: claims with hosts a@x then pro-mac — the newer claim’s host, pro-mac', () => {
+    const [run] = derive([claimComment(3, { host: 'a@x' }, 2001), claimComment(5, { host: 'pro-mac' }, 2002)]);
+    expect(run.host).toBe('pro-mac');
+  });
+
+  it('R-14: no claim in the run carries a host — null, never a guess', () => {
+    const [run] = derive([claimComment(3), claimComment(5)]);
+    expect(run.host).toBeNull();
+  });
+});
+
 describe('readClaimState', () => {
   it('R-8: drops mis-shaped fields and never throws', () => {
     expect(readClaimState({ stage: 'reviewing', fixLoops: 'two', usage: 5, extra: {} })).toEqual({ stage: 'reviewing' });

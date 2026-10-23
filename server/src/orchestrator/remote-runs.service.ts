@@ -4,6 +4,7 @@ import { OrchestratorService } from './orchestrator.service';
 import { deriveRemoteRuns } from './remote-runs.util';
 import { RegistryService } from '../registry/registry.service';
 import { resolveSource } from '../items/sources/resolve.util';
+import { claimsFor, liveClaims, winner } from '../tracker/claim';
 import { isRepo } from '../tracker/github.client';
 import { intervalFor } from '../tracker/sync-config.util';
 import { TrackerPollerService } from '../tracker/poller.service';
@@ -70,5 +71,23 @@ export class RemoteRunsService {
       );
     }
     return out;
+  }
+
+  /**
+   * The `host` of the live claim holding `itemId` in `project`, or `null` when nothing holds it — read off the poller's cached comments, like `list`
+   * (multi-dashboard task 6). `RemoteStartingService.list`'s `claimedHost`: a remote card dispatch's "starting on <machine>" retires the moment the item is
+   * held by a session on that machine's host. The holder is the claim protocol's own (`winner` of the live claims, lowest comment id), so a race loser's
+   * still-standing comment never reads as the landing.
+   *
+   * `null` for anything that is not a tracker item id (`#<n>`, the id a GitHub item carries) or not a tracker project — a files item never has a remote
+   * entry to retire, because a remote launch of one is a 400.
+   */
+  claimedHost(project: string, itemId: string, nowMs: number = Date.now()): string | null {
+    const number = /^#(\d+)$/.exec(itemId);
+    if (number === null) return null;
+    const resolved = resolveSource(project, KNOWN);
+    if (resolved.kind !== 'tracker' || !isRepo(resolved.marker.repo)) return null;
+    const holder = winner(liveClaims(claimsFor(Number(number[1]), this.poller.comments(resolved.marker.repo)), nowMs));
+    return holder?.record.host ?? null;
   }
 }

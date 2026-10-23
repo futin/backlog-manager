@@ -137,7 +137,7 @@ describe('BoardView: card live strips', () => {
       const payload: unknown = url.includes('/api/agents/status')
         ? AGENTS_STATUS
         : url.includes('/api/orchestrator/runs')
-          ? ({ runs, starting: [], remote: [] } satisfies OrchestratorRunsPayload)
+          ? ({ runs, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload)
           : url.includes('/api/projects')
             ? projects
             : { items, errors: [] };

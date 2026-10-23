@@ -5,6 +5,7 @@ import type { MergeCheckResult } from './merge-check.util';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
+import { RemoteStartingService } from '../orchestrator/remote-starting.service';
 import { writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { isAgentAction } from '../../../shared/agent';
 import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
@@ -19,7 +20,9 @@ export class AgentsController {
   constructor(
     private readonly agents: AgentsService,
     private readonly watchdog: WatchdogService,
-    private readonly starting: StartingRunsService
+    private readonly starting: StartingRunsService,
+    /** Multi-dashboard task 6 — a remote orchestrate's "starting on <machine>" mark, the remote counterpart of `starting` above. */
+    private readonly remoteStarting: RemoteStartingService
   ) {}
 
   /**
@@ -136,14 +139,22 @@ export class AgentsController {
    * does not exist yet, which is the whole 1–5 minutes the board currently
    * spends looking like the click did nothing (StartingRunsService's own
    * class comment has the full gap).
+   *
+   * Multi-dashboard task 6 — a REMOTE orchestrate (`machine` names a remote) takes neither home side effect and one of its own. No `arm()`: the run's
+   * file lives on that machine, which this sweeper never reads, so arming it here would only start a chain with nothing to watch. No `mark()`: a local
+   * starting entry is home's lock and home's run chip, and a remote run never retires one (bug-57), so it would block home's own drain for its full
+   * age-out window. Instead `remoteStarting.markProject` — "starting on <machine>" until the remote's first claim lands — for the same layering reason
+   * `mark()` lives here. Both branches act on the machine the service judged and returned, never on a second resolution of `body.machine`.
    */
   @UseGuards(SameOriginPostGuard)
   @Post('orchestrate')
   async orchestrate(@Body() body: Partial<AgentOrchestrateRequest> | undefined): Promise<AgentDispatchResult> {
     const project = typeof body?.project === 'string' ? body.project.trim() : '';
     if (project === '') throw new HttpException({ error: 'project is required' }, 400);
-    const result = await this.agents.orchestrate({
+    const { result, machine } = await this.agents.orchestrate({
       project,
+      // Unvalidated here, as dispatch leaves it: `DashboardsService.machine` (in the service) is the one place a name becomes a machine or a 400.
+      machine: body?.machine,
       // Unvalidated here for the same reason dispatch leaves these alone:
       // pickFrom (in the service) is the one place a name off the list — or
       // a non-string, which this Partial type cannot actually rule out —
@@ -195,6 +206,11 @@ export class AgentsController {
       // rebuild keeps.
       ids: body?.ids
     });
+    if (!machine.home) {
+      // AFTER the await for the reason `mark()` below gives: a refused spawn throws out of the call above and never reaches here.
+      this.remoteStarting.markProject(project, machine);
+      return result;
+    }
     // See this method's own doc comment above (RULING R3) for why this
     // call lives here rather than inside AgentsService, and why it is
     // fire-and-forget with no accompanying tick().

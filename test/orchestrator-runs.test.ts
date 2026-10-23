@@ -8,12 +8,14 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
 import { RemoteRunsService } from '../server/src/orchestrator/remote-runs.service';
+import { RemoteStartingService } from '../server/src/orchestrator/remote-starting.service';
 import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
-import type { OrchestratorRun, RemoteRun } from '../shared/types';
+import { runClaimBlock } from '../shared/agent';
+import type { BacklogItem, OrchestratorRun, RemoteRun } from '../shared/types';
 
 // Same translation orchestrator-shapes.test.ts already does: the fixture is
 // plain JSON (no `as const`), so TS would otherwise widen its string fields
@@ -134,7 +136,7 @@ describe('GET /api/orchestrator/runs', () => {
 
   it('returns an empty list when the state dir does not exist yet', async () => {
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
-    expect(res.body).toEqual({ runs: [], starting: [], remote: [] });
+    expect(res.body).toEqual({ runs: [], starting: [], remote: [], remoteStarting: [] });
   });
 
   it('reports a fresh running fixture with its queue passed through intact', async () => {
@@ -439,7 +441,9 @@ describe('GET /api/orchestrator/runs', () => {
       starting: [{ project: '/abs/first-ever', requestedAt: expect.any(String) }],
       // The service's own `remote` is always empty — the controller fills it
       // (task-48), so the agents lock that calls this directly never sees one.
-      remote: []
+      // `remoteStarting` likewise (multi-dashboard task 6).
+      remote: [],
+      remoteStarting: []
     });
   });
 
@@ -578,7 +582,10 @@ describe('GET /api/orchestrator/runs', () => {
         startedAt: new Date(requestedAt + 1_000).toISOString(),
         fresh: status === 'running',
         remote: true,
-        repo: 'owner/repo'
+        repo: 'owner/repo',
+        // Multi-dashboard task 6: a remote run now says which machine it is on. A host a configured remote's launch is waiting for changes nothing
+        // here — bug-57's rule is that NO remote run retires a local placeholder, whatever host it carries.
+        host: 'pro-mac'
       };
       jest.spyOn(app.get(RemoteRunsService), 'list').mockReturnValue([remote]);
 
@@ -597,4 +604,48 @@ describe('GET /api/orchestrator/runs', () => {
       expect(starting.list([])).toEqual([]);
     }
   );
+
+  /**
+   * Multi-dashboard task 6 — a remote orchestrate's "starting on <machine>" rides in its own `remoteStarting` field, never in `starting`: `starting` is what
+   * `runClaimBlock` and the local expiry read, and a remote launch must block neither this machine's Orchestrate nor its card launches (spec, "Starting on
+   * <machine> between a remote launch and its first claim").
+   */
+  describe('remoteStarting (multi-dashboard task 6)', () => {
+    const PRO = { id: 'Pro', host: 'pro-mac' };
+
+    it('a remote orchestrate entry is listed in remoteStarting, never in starting, so runClaimBlock never sees it', async () => {
+      app.get(RemoteStartingService).markProject(fixture.project, PRO);
+
+      const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+      expect(res.body.remoteStarting).toEqual([
+        { kind: 'orchestrate', project: fixture.project, machine: 'Pro', itemId: null, requestedAt: expect.any(String) }
+      ]);
+      expect(res.body.starting).toEqual([]);
+      expect(app.get(OrchestratorService).runs().starting).toEqual([]);
+      const item = { id: 'bug-1', projectPath: fixture.project } as BacklogItem;
+      expect(runClaimBlock(item, res.body.runs, res.body.starting)).toBeNull();
+    });
+
+    it("a remote run with host pro-mac retires the remote entry waiting on pro-mac, and NEVER the local starting entry (bug-57's rule)", async () => {
+      const starting = app.get(StartingRunsService);
+      starting.mark(fixture.project);
+      app.get(RemoteStartingService).markProject(fixture.project, PRO);
+      const requestedAt = Date.parse(starting.list([])[0].requestedAt);
+      const remote: RemoteRun = {
+        ...fixture,
+        status: 'running',
+        startedAt: new Date(requestedAt + 1_000).toISOString(),
+        fresh: true,
+        remote: true,
+        repo: 'owner/repo',
+        host: 'pro-mac'
+      };
+      jest.spyOn(app.get(RemoteRunsService), 'list').mockReturnValue([remote]);
+
+      const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+      expect(res.body.remoteStarting).toEqual([]);
+      expect(res.body.starting).toEqual([{ project: fixture.project, requestedAt: new Date(requestedAt).toISOString() }]);
+      expect(app.get(OrchestratorService).runs().starting).toHaveLength(1);
+    });
+  });
 });

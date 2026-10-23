@@ -2,6 +2,7 @@ import { Controller, Get, HttpException, Query } from '@nestjs/common';
 
 import { OrchestratorService } from './orchestrator.service';
 import { RemoteRunsService } from './remote-runs.service';
+import { RemoteStartingService } from './remote-starting.service';
 import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 import type { OrchestratorArchivePayload, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
@@ -18,7 +19,8 @@ export class OrchestratorController {
     private readonly orchestrator: OrchestratorService,
     private readonly watchdogState: WatchdogStateService,
     private readonly starting: StartingRunsService,
-    private readonly remoteRuns: RemoteRunsService
+    private readonly remoteRuns: RemoteRunsService,
+    private readonly remoteStarting: RemoteStartingService
   ) {}
 
   @Get('runs')
@@ -67,7 +69,17 @@ export class OrchestratorController {
     const now = Date.now();
     payload.starting = this.starting.list(payload.runs, now);
     this.starting.sweep(payload.runs, now);
-    payload.remote = this.remoteRuns.list();
+    payload.remote = this.remoteRuns.list(now);
+    // Multi-dashboard task 6 — the remote launches still on their way, beside `remote` and never in `starting`, for the reason the comment above keeps
+    // the starting pair off `remote`: this pair and that one are deliberately blind to each other. `starting` stays local-only (bug-57: no remote run
+    // ever retires a local placeholder), and a remote entry retires only on its OWN machine's landing — the claim or the run carrying that machine's
+    // `host` — read off the same `remote` list this response carries and the same tracker cache it was derived from. This read IS the sweep (the
+    // service deletes what it retires as it lists), so it runs on every runs read; the launch-time blocks apply only the age rule and need none.
+    payload.remoteStarting = this.remoteStarting.list({
+      nowMs: now,
+      claimedHost: (project, itemId) => this.remoteRuns.claimedHost(project, itemId, now),
+      remoteRuns: payload.remote
+    });
     return payload;
   }
 

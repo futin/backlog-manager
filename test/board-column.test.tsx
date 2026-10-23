@@ -52,7 +52,7 @@ const AGENTS_STATUS: AgentsStatus = {
   projectPaths: ['/abs/alpha']
 };
 
-const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [] };
+const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [], remoteStarting: [] };
 
 function fakeItem(over: Partial<BacklogItem>): BacklogItem {
   const base: BacklogItem = {

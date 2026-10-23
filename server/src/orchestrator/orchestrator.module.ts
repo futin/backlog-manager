@@ -38,6 +38,8 @@ import { TrackerModule } from '../tracker/tracker.module';
  *
  * `RemoteStartingService` (multi-dashboard task 5) is provided and exported on the same footing: `AgentsService.dispatch` marks and asks it, and the runs
  * controller here lists (and so sweeps) it into the payload — one singleton reached from both modules, which `AgentsModule` importing this one gives for free.
+ * `RemoteRunsService` is exported beside it (task 6) for `AgentsService.orchestrate`'s live-remote-run 409: `OrchestratorService.runs()` always answers
+ * `remote: []`, so the claim-derived runs are only reachable through this service.
  *
  * `TrackerSyncController` (#17, `POST /api/trackers/sync`) is here rather than in `TrackerModule` because its off-under-a-live-run 409 needs the two
  * services above, and `TrackerModule` providing them would be a module cycle — see the controller's header. `SameOriginPostGuard` is provided for it on the
@@ -50,6 +52,6 @@ import { TrackerModule } from '../tracker/tracker.module';
   imports: [RegistryModule, TrackerModule],
   controllers: [OrchestratorController, TrackerSyncController],
   providers: [OrchestratorService, RemoteRunsService, RemoteStartingService, StartingRunsService, WatchdogStateService, SameOriginPostGuard],
-  exports: [OrchestratorService, RemoteStartingService, StartingRunsService, WatchdogStateService]
+  exports: [OrchestratorService, RemoteRunsService, RemoteStartingService, StartingRunsService, WatchdogStateService]
 })
 export class OrchestratorModule {}

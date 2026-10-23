@@ -43,6 +43,7 @@ import { composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
+import { RemoteRunsService } from '../orchestrator/remote-runs.service';
 import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentDispatchRequest,
@@ -257,6 +258,13 @@ export interface AgentOrchestrateRequest {
    *  same distinction `parseIdsArg` keeps in orchestrate.mjs, for the same
    *  reason, one layer down. */
   ids?: unknown;
+  /**
+   * Multi-dashboard task 6 — which machine runs the drain: absent (the client omits it for home) or `home` in any case is this machine, and such a body
+   * walks today's path gate for gate to a byte-identical spawn; anything else is a remote's name from the settings file, resolved per request by
+   * `DashboardsService.machine`. Typed `string` as dispatch's twin is, and checked with `typeof` all the same, because the controller forwards it
+   * unvalidated: a non-string is a 400, never a quiet fallback to home.
+   */
+  machine?: string;
 }
 
 @Injectable()
@@ -309,7 +317,13 @@ export class AgentsService {
      * "Starting on <machine>" between a remote launch and its first claim — provided and exported by `OrchestratorModule`, which this module already
      * imports, so the runs controller there lists the same singleton this marks.
      */
-    private readonly remoteStarting: RemoteStartingService
+    private readonly remoteStarting: RemoteStartingService,
+    /**
+     * Multi-dashboard task 6 — the remote runs the tracker cache derives, for the one refusal no other record can give: a drain of this repo already
+     * live on the machine a remote orchestrate is aimed at. `OrchestratorService.runs()` answers `remote: []` by design (remote runs ride beside `runs`,
+     * never in it), so this reads the derivation itself. Exported by `OrchestratorModule`; it injects nothing from this module, so no cycle.
+     */
+    private readonly remoteRuns: RemoteRunsService
   ) {}
 
   /** Home's dashboard, as Settings and every launch gate read it. The body is `DashboardStatusService.statusOf`, which can read any machine's. */
@@ -658,9 +672,47 @@ export class AgentsService {
    * whole groomed queue rather than one file, so there is nothing here to
    * call findItem/deriveAction on. See ORCHESTRATE_PROMPT for why the prompt
    * is a constant rather than a request field.
+   *
+   * Multi-dashboard task 6 — `req.machine` aims the drain at a remote machine. Returns the resolved machine beside the result because the run's
+   * spawn-success side effects live in the controller (`watchdog.arm()`, `starting.mark()` for home; `remoteStarting.markProject` for a remote — see that
+   * route's comment for why there), and the controller must act on the machine THIS call judged, not on a second resolution of the body that a settings
+   * edit in between could answer differently.
    */
-  async orchestrate(req: AgentOrchestrateRequest): Promise<AgentDispatchResult> {
-    const status = await this.status();
+  async orchestrate(req: AgentOrchestrateRequest): Promise<{ result: AgentDispatchResult; machine: Machine }> {
+    // The machine first, as dispatch resolves it (multi-dashboard task 5) and for the same reason: every rule below depends on it. Absent and `home` in any
+    // case are this machine, and from here on a home body walks exactly the path it walked before this field existed, to a byte-identical spawn — the
+    // `m.home` branches below are the whole of the difference, and each one's home arm is the line that stood there before.
+    const m = req.machine === undefined || typeof req.machine === 'string' ? this.dashboards.machine(req.machine) : null;
+    if (m === null) throw new HttpException({ error: `unknown machine "${String(req.machine)}"` }, 400);
+
+    // A remote drain always ends in a PR (spec, Goals) — the remote's merge would land on a clone this machine never sees, and a branch would leave work
+    // nobody here is shown. An absent or empty `mergeMode` IS `pr` there; any other value is refused rather than overridden, because the Orchestrate
+    // sheet locks its picker to PR for a remote, so a body that disagrees came from somewhere that expects a merge or a branch and would be surprised.
+    if (!m.home && req.mergeMode !== undefined && req.mergeMode !== '' && req.mergeMode !== 'pr') {
+      throw new HttpException({ error: `merge mode must be pr on ${m.label}` }, 400);
+    }
+
+    // A remote's two 400s and its offer, in dispatch's order (task 5's comments there carry the full reasoning): a files project cannot run remotely at all
+    // — the remote session writes items through that machine's own backlog-manager, which only a tracker project has — and a model or effort outside
+    // the machine's list is a 400 where home's `pickFrom` drops. Then offered NOW rather than when the picker drew, and the project's path on that
+    // machine asked again, so the gate below judges the path that is true at this moment. Uncoded 409s — states a reader can go and change.
+    let remotePath: string | undefined;
+    if (!m.home) {
+      if (this.items.sourceOf(req.project) !== 'github') throw new HttpException({ error: filesBackedReason(m.label, req.project) }, 400);
+      const choice = machineChoiceBlock(m, req.model, req.effort);
+      if (choice !== null) throw new HttpException({ error: choice }, 400);
+      const notOffered = (reason: string): HttpException => new HttpException({ error: `${m.label} is not offered for ${req.project}: ${reason}` }, 409);
+      const offer = (await this.offers.offers(req.project)).machines.find((o) => o.machine === m.id);
+      if (offer === undefined) throw notOffered('no longer configured');
+      if (offer.reason !== null) throw notOffered(offer.reason);
+      const there = await this.offers.remotePath(req.project, m);
+      if ('reason' in there) throw notOffered(there.reason);
+      remotePath = there.path;
+    }
+
+    // Home's status as before; a remote's read under the 5 s every remote read gets. Its `enabled` is home's own flag (`DashboardsService` copies it into
+    // every machine's config), so the 404 below means the same thing on either.
+    const status = m.home ? await this.status() : await this.dashboardStatus.statusOf(m.cfg, REMOTE_BUDGET);
     if (!status.enabled) {
       // 404, not dispatch's 409-with-a-reason. dispatch's off case still has
       // a sheet open for one specific item, and plan()/dispatchBlock exist
@@ -695,7 +747,10 @@ export class AgentsService {
     // `projectDispatchGate`'s own first check (via environmentBlock) can
     // never produce `hidden` for THAT specific reason here — only its other
     // three environment reasons, or `disabled` for project visibility, can.
-    const gate = projectDispatchGate(status, req.project);
+    //
+    // A remote is asked about the project's path ON that machine (task 5's `remoteGateBlock` does the same for dispatch): `req.project` is this
+    // machine's path, which a remote dashboard's project list never holds.
+    const gate = projectDispatchGate(status, m.home ? req.project : (remotePath as string));
     if (gate.control === 'hidden') {
       // Same split dispatch() makes for the identical situation via
       // dispatchBlock: 502 only when there is a genuine upstream to blame
@@ -745,8 +800,35 @@ export class AgentsService {
     // booted, and whichever reached `init` second exited `4` (lock held) and
     // died, having burned a session and told its user "never retry, go to
     // `--resume`" for a run that never crashed.
+    //
+    // Multi-dashboard task 6 — home only. Both of these records are THIS machine's: a local run.json and a local starting entry say nothing about a
+    // remote's clone, so a local run does not block a remote drain, and the remote's own pair (`remoteOrchestrateLocks`) does not block a local one.
+    if (m.home) this.homeOrchestrateLocks(req.project);
+    else this.remoteOrchestrateLocks(req.project, m);
+
+    // #17 — after both run-in-progress locks, before the spawn. A drain on a repo whose sync is off would park at its first claim.
+    const syncOff = this.poller.syncOffBlock(req.project);
+    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
+
+    // Home's config and map exactly as before; a remote's from its own settings entry, read under the management budget, and looked up by the path the
+    // offer resolved on that machine.
+    const cfg = m.home ? readAgentsConfig() : m.cfg;
+    const map = m.home ? await this.dashboardStatus.projectMap(cfg) : await this.dashboardStatus.projectMap(cfg, REMOTE_BUDGET.managementMs);
+    const dirName = map.get(m.home ? req.project : (remotePath as string));
+    if (dirName === undefined) {
+      // Same race dispatch()'s identical line guards against: the membership
+      // check above and this lookup read the same cache, and only a TTL
+      // expiry between the two reads reaches here. Refuse rather than derive
+      // a dirName from the path, for the reason named above.
+      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+    }
+    return { result: await this.spawnOrchestrate(req, m, status, cfg, dirName), machine: m };
+  }
+
+  /** `orchestrate`'s two home locks, unchanged since bug-21 — extracted only so the remote's pair can sit beside them under one `m.home` branch. */
+  private homeOrchestrateLocks(project: string): void {
     const { runs, starting } = this.orchestrator.runs();
-    const activeRun = runs.find((r) => r.project === req.project && r.fresh);
+    const activeRun = runs.find((r) => r.project === project && r.fresh);
     if (activeRun) {
       throw new HttpException(
         {
@@ -805,24 +887,32 @@ export class AgentsService {
        requestedAt and nothing else — there is no runId until `init` mints
        one. That is also why the block it produces everywhere else is
        project-wide rather than per-item (see `runClaimBlock`). */
-    if (starting.some((s) => s.project === req.project)) {
+    if (starting.some((s) => s.project === project)) {
       throw new HttpException({ error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE }, 409);
     }
+  }
 
-    // #17 — after both run-in-progress locks, before the spawn. A drain on a repo whose sync is off would park at its first claim.
-    const syncOff = this.poller.syncOffBlock(req.project);
-    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
-
-    const cfg = readAgentsConfig();
-    const dirName = (await this.dashboardStatus.projectMap(cfg)).get(req.project);
-    if (dirName === undefined) {
-      // Same race dispatch()'s identical line guards against: the membership
-      // check above and this lookup read the same cache, and only a TTL
-      // expiry between the two reads reaches here. Refuse rather than derive
-      // a dirName from the path, for the reason named above.
-      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+  /**
+   * A remote orchestrate's two locks — the same pair home has, one window apart, read from the records that describe THAT machine. Both uncoded:
+   * `RUN_IN_PROGRESS_CODE` tells OrchestrateSheet to close and hand the screen to the board's run chip, which counts home's runs, so a remote refusal
+   * carrying it would close the sheet onto a chip that shows nothing.
+   *
+   * 1. Starting on that machine — keyed (project, machine), so a drain starting on Pro blocks a second one to Pro and nothing else. Until the remote's
+   *    first claim lands no other record says a run is coming, which is the bug-21 gap one machine over.
+   * 2. Live on that machine — a remote run of this project whose host is the machine's own. `status === 'running'`, fresh or not: `orchestrate.mjs init`
+   *    on that machine refuses any `running` run file, crashed included, so a spawn here would only boot a session that dies at `init`. A run on
+   *    another host, or one whose claims carry no host, is not this machine's and does not block.
+   */
+  private remoteOrchestrateLocks(project: string, m: Machine): void {
+    if (this.remoteStarting.projectBlock(project, m.id, Date.now()) !== null) {
+      throw new HttpException({ error: `${project} is already starting on ${m.label}` }, 409);
     }
+    const live = this.remoteRuns.list().find((r) => r.project === project && r.host === m.host && r.status === 'running');
+    if (live !== undefined) throw new HttpException({ error: `a run of ${live.repo} is live on ${m.label}` }, 409);
+  }
 
+  /** `orchestrate`'s tail: what the run should contain, then the spawn. Split off with the locks above, its body otherwise as it stood. */
+  private async spawnOrchestrate(req: AgentOrchestrateRequest, m: Machine, status: AgentsStatus, cfg: AgentsConfig, dirName: string): Promise<AgentDispatchResult> {
     // Last, deliberately: every gate above answers a question about whether
     // this project can be orchestrated at all, and this one answers what the
     // run should contain. Ordering matters for the two locks above — they are
@@ -839,7 +929,8 @@ export class AgentsService {
     // (task-4-brief.md) pins the lock winning over it, same as it wins over
     // an ids problem.
     const ids = await this.resolveIds(req.project, req.ids);
-    const mergeMode = this.resolveMergeMode(req.mergeMode, req.project);
+    // A remote's is always `pr` — the 400 at the top of `orchestrate` already refused any other value — so it appends `--merge-mode pr`.
+    const mergeMode = m.home ? this.resolveMergeMode(req.mergeMode, req.project) : 'pr';
     // Beside resolveMergeMode, after the lock, for the identical reason the
     // comment directly above gives: a malformed `questionMode` is a problem
     // with what the run should contain, not with whether it may start, so
@@ -924,8 +1015,9 @@ export class AgentsService {
       // The ceiling still clamps this down on a stricter dashboard, so this
       // can never widen what a host permits.
       permissionMode: clampMode(req.permissionMode === undefined || req.permissionMode === '' ? 'auto' : req.permissionMode, status.spawnMaxPermission),
-      model: pickFrom(req.model, MODELS) ?? DEFAULT_MODEL,
-      effort: pickFrom(req.effort, EFFORTS)
+      // A remote picks off its own lists, already proved by `machineChoiceBlock`, and defaults the way `spawnInProject` does for a remote dispatch.
+      model: m.home ? (pickFrom(req.model, MODELS) ?? DEFAULT_MODEL) : (pickFrom(req.model, m.models) ?? remoteDefaultModel(m)),
+      effort: pickFrom(req.effort, m.home ? EFFORTS : m.efforts)
       // No `remoteControl`. That flag is what gives a spawned session's
       // AskUserQuestion a channel to a human's phone when it hits a
       // preflight question it cannot resolve alone — see

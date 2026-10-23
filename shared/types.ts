@@ -1891,6 +1891,15 @@ export interface OrchestratorRunsPayload {
    * lock, `resume()`) sees none.
    */
   remote: RemoteRun[];
+  /**
+   * Launches this server sent to a REMOTE machine's dashboard that no claim on the tracker shows yet (multi-dashboard task 6) — `RemoteStartingService`'s
+   * live entries, listed by the controller, which is also what sweeps that map. See `RemoteStarting` for one entry.
+   *
+   * **A sibling of `starting`, never members of it**, for the reason `remote` is not in `runs`: `starting` is what `runClaimBlock`, the orchestrate lock and
+   * the local expiry rules (bug-21, bug-57) read, and a remote launch must block none of them — remote runs never block this machine's own (spec, "Starting
+   * on <machine>"). Required like `remote` so the compiler finds every fixture; `OrchestratorService.runs()` fills `[]`, so its direct callers see none.
+   */
+  remoteStarting: RemoteStarting[];
 }
 
 /**
@@ -1914,7 +1923,17 @@ export interface OrchestratorRunsPayload {
  * reached yet has no comment and cannot be seen from here, which the Runs page
  * says rather than hiding.
  */
-export type RemoteRun = OrchestratorRun & { fresh: boolean; remote: true; repo: string };
+export type RemoteRun = OrchestratorRun & {
+  fresh: boolean;
+  remote: true;
+  repo: string;
+  /**
+   * The machine the run is on (multi-dashboard task 6): the `host` of the NEWEST claim in the run that carries one — the remote's `BM_MACHINE_NAME`, or
+   * `<user>@<hostname>` where that is unset — and `null` when none does, a claim written before `ClaimRecord.host` existed saying nothing about where it
+   * was taken. Read by the orchestrate route, which refuses a second launch to the machine already draining the repo (`a run of <repo> is live on <label>`).
+   */
+  host: string | null;
+};
 
 /**
  * Multi-dashboard (spec 2026-10-22-multi-dashboard-design.md). One board can start work on this machine ("home", id `home`, the dashboard `BM_AGENTS_URL` names)
