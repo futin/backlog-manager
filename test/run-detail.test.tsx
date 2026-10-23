@@ -1137,3 +1137,26 @@ describe('RunDetail · body order (2026-09-17)', () => {
     expect(precedes(screen.getByTestId('run-detail-machine'), empty)).toBe(true);
   });
 });
+
+/*
+  Multi-dashboard task 10: a remote run's sheet says which machine it is on, in the facts strip beside started / finished / status. The sentence in the controls'
+  slot is untouched — it says where the controls are, this says whose run it is. A local run, and a remote one the caller has no label for, draw no such fact.
+*/
+describe('RunDetail — the machine a remote run is on', () => {
+  it('draws the machine as a fact for a remote run, beside the unchanged controls sentence', () => {
+    render(<RunDetail summary={primarySummary()} live={primaryFull()} remote machine="Pro" {...CONTROL_PROPS} />);
+
+    expect(screen.getByTestId('run-detail-on-machine')).toHaveTextContent('Pro');
+    expect(screen.getByTestId('run-detail-facts')).toContainElement(screen.getByTestId('run-detail-on-machine'));
+    expect(screen.getByTestId('run-detail-remote')).toHaveTextContent('Remote run: its controls are on the machine that ran it.');
+  });
+
+  it('draws no machine fact for a local run, nor for a remote run with no machine', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+    const { rerender } = render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
+    expect(screen.queryByTestId('run-detail-on-machine')).toBeNull();
+
+    rerender(<RunDetail summary={primarySummary()} live={primaryFull()} remote machine={null} {...CONTROL_PROPS} />);
+    expect(screen.queryByTestId('run-detail-on-machine')).toBeNull();
+  });
+});

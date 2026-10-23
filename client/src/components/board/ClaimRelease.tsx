@@ -18,6 +18,9 @@ import type { BacklogItem } from '../../../../shared/types';
  * Release claim too (#227): before it, a claim past its heartbeat window drew nothing here and left the item reading as held with no way to let go of it
  * but a new `start`. Its confirm is its own sentence — what the user is weighing there is not "has it ended" but "is it really dead".
  *
+ * `remoteHosts` (multi-dashboard task 10) is the hosts the configured remotes own: a live claim held on one of them offers **Stop & release** — the server
+ * routes the stop to that machine's dashboard by the holder's host — where it would otherwise offer a plain Release that leaves the remote's session running.
+ *
  * Both are confirm-gated, because both end somebody's claim on work in flight. The Release claim confirm says the one thing the server cannot see for it:
  * a board-dispatched session waiting on a reply has no process between turns, so it reads as stopped to the dashboard too. The server re-checks every
  * condition at click time and its refusal is printed verbatim — it is the only side that can see the dispatch record and the dashboard.
@@ -25,7 +28,7 @@ import type { BacklogItem } from '../../../../shared/types';
  * `onReleased` lets the board re-read its payload; the chip is replaced by a `claim released` note meanwhile, because the item this modal holds is the
  * snapshot it was opened with and would otherwise still offer the control.
  */
-export function ClaimRelease({ item, onReleased }: { item: BacklogItem; onReleased?: () => void }) {
+export function ClaimRelease({ item, onReleased, remoteHosts }: { item: BacklogItem; onReleased?: () => void; remoteHosts: ReadonlySet<string> }) {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'done'>('idle');
   // The in-flight guard, `busy` and the refusal's message are `useAction`'s (#286). `busy` was a stage here once, which the second click of one tick never
   // saw — both clicks sent `abortClaim`.
@@ -38,7 +41,7 @@ export function ClaimRelease({ item, onReleased }: { item: BacklogItem; onReleas
       </p>
     );
   }
-  const control = claimControl(item, Date.now());
+  const control = claimControl(item, Date.now(), remoteHosts);
   if (control === null || item.holder === undefined) return null;
 
   const session = shortSession(item.holder.session);

@@ -25,10 +25,12 @@ import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type {
   AgentsStatus,
   ArchiveQueueItem,
+  DashboardsView,
   OrchestratorArchivePayload,
   OrchestratorArchiveRun,
   OrchestratorRun,
   OrchestratorRunsPayload,
+  RemoteStarting,
   RunQueueItem,
   RunSessionUsage,
   RunStage,
@@ -80,6 +82,16 @@ jest.mock('../client/src/lib/agents', () => ({
       this.name = 'ApiError';
     }
   }
+}));
+
+/*
+  Multi-dashboard task 10: `RunsView` reads the dashboards view for the machine labels. The real hook reaches `fetch` through the mocked `lib/agents` module above
+  (`unwrap` is `undefined` here), so it is replaced by a holder a case fills — `null` is the view-less state every pre-existing case already ran in.
+*/
+const mockDashboardsView: { current: DashboardsView | null } = { current: null };
+jest.mock('../client/src/hooks/useDashboards', () => ({
+  __esModule: true,
+  useDashboards: () => ({ view: mockDashboardsView.current, error: null, refresh: () => Promise.resolve() })
 }));
 
 const mockArchive = fetchOrchestratorArchive as jest.Mock;
@@ -440,12 +452,13 @@ async function renderRunsView(
   archiveRuns: OrchestratorArchiveRun[],
   liveRuns: OrchestratorRunsPayload['runs'] = [],
   starting: OrchestratorRunsPayload['starting'] = [],
-  remote: OrchestratorRunsPayload['remote'] = []
+  remote: OrchestratorRunsPayload['remote'] = [],
+  remoteStarting: OrchestratorRunsPayload['remoteStarting'] = []
 ): Promise<RenderResult> {
   mockArchive.mockResolvedValue({ runs: archiveRuns } satisfies OrchestratorArchivePayload);
-  mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote, remoteStarting: [] } satisfies OrchestratorRunsPayload);
+  mockRuns.mockResolvedValue({ runs: liveRuns, starting, remote, remoteStarting } satisfies OrchestratorRunsPayload);
   const result = render(<RunsView />);
-  if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0 && remote.length === 0) {
+  if (archiveRuns.length === 0 && liveRuns.length === 0 && starting.length === 0 && remote.length === 0 && remoteStarting.length === 0) {
     await screen.findByText('no runs yet');
   } else {
     await screen.findByTestId('runs-list');
@@ -488,6 +501,7 @@ function isLiveRow(runId: string): boolean {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockDashboardsView.current = null;
   // The Runs view persists (see `lib/runs-mode.ts`), so a case that switches
   // it would otherwise leak its choice into every case that runs after it.
   localStorage.clear();
@@ -2659,6 +2673,94 @@ describe('RunsView · a remote run (task-48)', () => {
     expect(isLiveRow(remote.runId)).toBe(false);
     expect(historyRowIds(container)).toEqual([`runs-row-${remote.runId}`]);
     expect(screen.getByTestId(`runs-row-remote-${remote.runId}`)).toBeInTheDocument();
+  });
+
+  /*
+    Multi-dashboard task 10. `host` is what the claims carry, `DashboardsView.dashboards[].host` is what ties it to a configured remote, and the row and the sheet
+    both say the remote's NAME — `Pro`, not `pro-mac`. A host nobody configured is printed raw (a name the person did not choose is still better than nothing), and
+    a run with no claim host yet prints no machine at all.
+  */
+  const PRO_VIEW: DashboardsView = {
+    source: 'file',
+    file: '/x/dashboards.json',
+    home: { label: 'Home', url: 'http://127.0.0.1:4310', account: null, models: [], efforts: [], tokenVar: 'BM_AGENTS_TOKEN', tokenSet: false },
+    dashboards: [
+      { name: 'Pro', url: 'http://pro:4310', bmUrl: 'http://pro:4322', host: 'pro-mac', tokenVar: 'BM_AGENTS_TOKEN_PRO', tokenSet: true, models: [], efforts: [] }
+    ],
+    order: ['home', 'Pro'],
+    strategy: 'prefer',
+    threshold: 80
+  };
+
+  it('names the machine on a remote run row and on its sheet', async () => {
+    mockDashboardsView.current = PRO_VIEW;
+    const remote = { ...remoteRun('running', true), host: 'pro-mac' };
+    await renderRunsView([], [], [], [remote]);
+
+    expect(screen.getByTestId(`runs-row-machine-${remote.runId}`)).toHaveTextContent('Pro');
+    await userEvent.click(screen.getByTestId(`runs-row-${remote.runId}`));
+    expect(await screen.findByTestId('run-detail-on-machine')).toHaveTextContent('Pro');
+  });
+
+  it('prints the raw host when no remote owns it, and no machine for a run with no host', async () => {
+    mockDashboardsView.current = PRO_VIEW;
+    const unmapped = { ...remoteRun('running', true), runId: 'run-unmapped', host: 'box-7' };
+    const hostless = { ...remoteRun('done', false), runId: 'run-hostless', host: null };
+    await renderRunsView([], [], [], [unmapped, hostless]);
+
+    expect(screen.getByTestId('runs-row-machine-run-unmapped')).toHaveTextContent('box-7');
+    expect(screen.queryByTestId('runs-row-machine-run-hostless')).toBeNull();
+  });
+
+  it('draws no machine on a local row', async () => {
+    mockDashboardsView.current = PRO_VIEW;
+    await renderRunsView(ARCHIVE_RUNS, LIVE_RUNS);
+    expect(document.querySelector('[data-testid^="runs-row-machine-"]')).toBeNull();
+  });
+
+  describe('Starting on <machine> (remoteStarting)', () => {
+    const entry = (over: Partial<RemoteStarting> = {}): RemoteStarting => ({
+      kind: 'orchestrate',
+      project: '/abs/gamma',
+      machine: 'Pro',
+      itemId: null,
+      requestedAt: new Date(Date.now() - 20_000).toISOString(),
+      ...over
+    });
+
+    it('draws an orchestrate launch as a Live row that says where, with no control and nothing to select', async () => {
+      mockDashboardsView.current = PRO_VIEW;
+      await renderRunsView([], [], [], [], [entry()]);
+
+      const row = screen.getByTestId('runs-starting-remote-Pro-/abs/gamma');
+      expect(row).toHaveTextContent('Starting on Pro');
+      expect(within(row).queryByRole('button')).toBeNull();
+      expect(screen.getByTestId('runs-live-rows')).toContainElement(row);
+    });
+
+    it('counts it in the Live sheet and the band without ever touching the local starting count', async () => {
+      await renderRunsView([], [], [], [], [entry()]);
+      expect(screen.getByTestId('runs-live-rows')).toHaveTextContent('Starting on Pro');
+      expect(screen.queryByText(/\b1 starting\b/)).toBeNull();
+    });
+
+    it('leaves a card dispatch to the card — the Live list lists launches of a run only', async () => {
+      // A run beside it so the page has a list to look in: a dispatch entry alone draws nothing here, which is the very thing asserted.
+      await renderRunsView(ARCHIVE_RUNS, [], [], [], [entry({ kind: 'dispatch', itemId: '#7' })]);
+      expect(document.querySelector('[data-testid^="runs-starting-remote-"]')).toBeNull();
+    });
+
+    it('falls back to the machine id when the dashboards view is not loaded', async () => {
+      mockDashboardsView.current = null;
+      await renderRunsView([], [], [], [], [entry({ machine: 'Mini' })]);
+      expect(screen.getByTestId('runs-starting-remote-Mini-/abs/gamma')).toHaveTextContent('Starting on Mini');
+    });
+
+    it('stays beside a local starting placeholder rather than replacing it', async () => {
+      await renderRunsView([], [], [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }], [], [entry()]);
+      expect(screen.getByTestId('runs-starting-/abs/alpha')).toBeInTheDocument();
+      expect(screen.getByTestId('runs-starting-remote-Pro-/abs/gamma')).toBeInTheDocument();
+    });
   });
 
   describe('U-3: a local run that has claimed nothing', () => {

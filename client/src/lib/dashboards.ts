@@ -118,6 +118,16 @@ export function machineLabelByHost(view: DashboardsView | null, host: string | u
 }
 
 /**
+ * A machine id as a label (multi-dashboard task 10) — what `RemoteStarting.machine` carries, unlike a claim's `host`: `'home'` is this machine's own label
+ * (Home's stored one, or `Home` before the view lands), a remote is its name, and an id nothing here owns is itself, so a launch on a machine since removed
+ * from Settings still says where it went rather than nothing.
+ */
+export function machineLabelById(view: DashboardsView | null, id: string): string {
+  if (id === HOME_MACHINE) return view?.home.label ?? 'Home';
+  return view?.dashboards.find((d) => d.name === id)?.name ?? id;
+}
+
+/**
  * What picking a machine locks on the launch sheet: a remote machine takes PR mode only (merge mode / Finish) and runs only its own account's models and
  * efforts.
  * Empty lists mean "no narrowing" — callers treat them so. Home returns empty lists although its own offer carries some: a home launch is the request it always

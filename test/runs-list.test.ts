@@ -108,6 +108,29 @@ describe('mergeRuns', () => {
     expect(last.isLive).toBe(false);
   });
 
+  /*
+    Multi-dashboard task 10: a remote row names the machine it ran on. `host` is what the claims carry; `labelByHost` is the caller's `machineLabelByHost` over
+    the dashboards view, so this module stays a pure fold. A local row has no machine at all — the key is absent, not null, because a run on the machine you
+    are looking at is never labelled.
+  */
+  it('carries the machine label on a remote row, the raw host when no remote owns it, and nothing when the run has no host', () => {
+    const labelByHost = (host?: string): string | null => (host === 'pro-mac' ? 'Pro' : null);
+    const rows = mergeRuns(
+      [],
+      [],
+      [remote({ runId: 'r-1', host: 'pro-mac' }), remote({ runId: 'r-2', host: 'unmapped-box' }), remote({ runId: 'r-3', host: null })],
+      labelByHost
+    );
+    expect(rows.map((r) => r.machine)).toEqual(['Pro', 'unmapped-box', null]);
+  });
+
+  it('leaves the machine off a local row, and off a remote row when no label function is passed', () => {
+    const [local] = mergeRuns([archive()], [], []);
+    expect('machine' in local).toBe(false);
+    const [r] = mergeRuns([], [], [remote({ host: 'pro-mac' })]);
+    expect(r.machine).toBe('pro-mac');
+  });
+
   it('drops a remote run whose project and runId an archive row already holds', () => {
     const rows = mergeRuns([archive({ project: '/p/r', runId: 'remote-1' })], [], [remote()]);
     expect(rows).toHaveLength(1);

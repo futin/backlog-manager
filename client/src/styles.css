@@ -2205,6 +2205,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    for the window in which there is no run file to take a wall time from. */
 .runs-row-starting-age { flex: none; font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
 .runs-row-starting:hover { background: none }
+/* Multi-dashboard task 10: the machine a remote row ran on, beside its `remote` tag (§8.4). */
+.runs-row-machine { flex: none; font-size: 12px; color: var(--ink3) }
 
 /* `load more` at the foot of the History sheet, INSIDE its scroll box — it is
    the end of the list, not a fixture beside it, so it arrives under the last
@@ -3052,6 +3054,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The Jira card's F1 marker (grouped-board spec §5). `--amber-text`, the amber word set on paper: the card's 2 px `--amber-solid` ring beside it
    already carries the hue, and bare `--amber` fails daylight contrast as type (test/daylight-contrast.test.ts). */
 .ui-marker-match { color: var(--amber-text) }
+/* Multi-dashboard task 10: `running on <machine>` / `Starting on <machine>`. A place, not a warning — `--ink3`, the same ink as `kind` (§8.3). */
+.ui-marker-machine { color: var(--ink3) }
 
 /* JiraTypeIcon — a Jira issue's type glyph (DESIGN.md §8.9.1), 14 px outline strokes in --ink3. One home because the card and the modal's Children tree
    both draw it; the card's `.jira-card-type` keeps only its layout. */

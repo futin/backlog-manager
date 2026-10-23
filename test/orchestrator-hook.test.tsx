@@ -519,6 +519,53 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  /*
+    Multi-dashboard task 10: a launch sent to another machine has no claim yet, and `RemoteStartingService` is swept only when this payload is read — so a poll that
+    stood down while `remoteStarting` was non-empty would leave the entry on screen until something else woke the hook. It keeps polling exactly as long as the
+    array holds an entry, and the one-in-flight coalescing is untouched: the follow-up fetch is armed by the answer, never by the timer alone.
+  */
+  const remoteStartingEntry = { kind: 'orchestrate', project: '/abs/alpha', machine: 'Pro', itemId: null, requestedAt: '2026-09-19T11:00:00.000Z' } as const;
+
+  it('polls while only a remote launch is starting, and surfaces the array', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [], remoteStarting: [remoteStartingEntry] });
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.remoteStarting).toEqual([remoteStartingEntry]);
+    expect(result.current.starting).toEqual([]);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops polling once the remote starting entry is swept', async () => {
+    const fetchMock = stubFetchSequence([
+      { runs: [], starting: [], remote: [], remoteStarting: [remoteStartingEntry] },
+      { runs: [], starting: [], remote: [], remoteStarting: [] }
+    ]);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.remoteStarting).toEqual([]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('treats a payload with no remoteStarting key as an empty one', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [] } as unknown as OrchestratorRunsPayload);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(result.current.remoteStarting).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   it('stops polling once the starting entry is replaced by a finished run', async () => {
     // The whole point of the widening: the placeholder's own poll is what
     // notices the real run landing, and the timer chain has to stand back down

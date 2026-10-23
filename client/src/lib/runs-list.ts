@@ -51,6 +51,11 @@ export interface MergedRun {
    */
   live: LiveRun | null;
   /**
+   * The machine a REMOTE run ran on (multi-dashboard task 10): its configured name, else the raw host, `null` when the run recorded none. Absent — the key is
+   * not there at all — on a local row, so a row's own shape says whether the run is this machine's.
+   */
+  machine?: string | null;
+  /**
    * The PRESENTATION gate: `live?.fresh === true`, i.e. "is the board still
    * hearing from this process right now". Read by the pinned region
    * (`splitLive` until task-38 moved the split off it) and the breathing dot,
@@ -118,7 +123,12 @@ export function runKey(project: string, runId: string): string {
  * endpoint's own per-project descending order) is a safer failure than
  * rendering the same run twice in one list.
  */
-export function mergeRuns(archiveRuns: readonly OrchestratorArchiveRun[], liveRuns: readonly LiveRun[], remoteRuns: readonly RemoteRun[]): MergedRun[] {
+export function mergeRuns(
+  archiveRuns: readonly OrchestratorArchiveRun[],
+  liveRuns: readonly LiveRun[],
+  remoteRuns: readonly RemoteRun[],
+  labelByHost?: (host?: string) => string | null
+): MergedRun[] {
   // bug-29: EVERY live entry, not `liveRuns.filter((r) => r.fresh)`. The
   // freshness question moved down one line, onto `isLive` alone — see both
   // fields' own doc comments for the split and why it is the whole fix.
@@ -143,7 +153,16 @@ export function mergeRuns(archiveRuns: readonly OrchestratorArchiveRun[], liveRu
     if (seen.has(key)) continue;
     seen.add(key);
     const live = remoteAsLive(remote);
-    merged.push({ run: remoteAsArchive(remote), live, isLive: live.fresh, remote: true });
+    // Multi-dashboard task 10: the machine the run ran on. A remote's configured name when one owns the host, else the raw host — a person still sees WHERE
+    // the run was even for a host no entry names — and `null` when the claims recorded no host at all. Set on remote rows only: a local row's shape is exactly
+    // what it was, because a run on the machine you are looking at is never labelled.
+    merged.push({
+      run: remoteAsArchive(remote),
+      live,
+      isLive: live.fresh,
+      remote: true,
+      machine: remote.host === null ? null : (labelByHost?.(remote.host) ?? remote.host)
+    });
   }
   return merged;
 }

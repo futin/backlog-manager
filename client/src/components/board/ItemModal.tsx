@@ -22,6 +22,9 @@ function groupDigits(n: number): string {
   return n.toLocaleString('en-US');
 }
 
+/** The default `remoteHosts`: one shared set, so an omitted prop is not a new object on every render. */
+const NO_REMOTE_HOSTS: ReadonlySet<string> = new Set();
+
 /**
  * ItemModal — the item's detail, and the ONE modal this app draws
  * (.claude/DESIGN.md §8.7, the design spec's §6.1 and §12.3).
@@ -54,7 +57,8 @@ export function ItemModal({
   runBlock,
   reverify,
   trackerLine,
-  onReleased
+  onReleased,
+  remoteHosts = NO_REMOTE_HOSTS
 }: {
   item: BacklogItem;
   hues: ProjectHues;
@@ -97,6 +101,9 @@ export function ItemModal({
   /** #225 — the board's re-read after the claim control released this item's claim. Its presence is also what draws the control at all, so a render
    *  site with no payload to re-read (a test, a future read-only view) offers no write. */
   onReleased?: () => void;
+  /** Multi-dashboard task 10 — the hosts the configured remotes own, for the claim control: a claim held on one offers Stop & release. Absent means no
+   *  remotes. */
+  remoteHosts?: ReadonlySet<string>;
 }) {
   // Keyed on the path: opening another item reads pending — no body — on the very render that carries it, never the previous item's text
   // (`useFetched`). A non-OK answer throws, so it lands as failed.
@@ -204,7 +211,7 @@ export function ItemModal({
           <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} />
         </div>
       )}
-      {onReleased && <ClaimRelease item={item} onReleased={onReleased} />}
+      {onReleased && <ClaimRelease item={item} onReleased={onReleased} remoteHosts={remoteHosts} />}
     </div>
   );
 

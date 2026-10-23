@@ -212,7 +212,8 @@ export function ItemCard({
   run,
   runBlock,
   reverify,
-  queued
+  queued,
+  machine
 }: {
   item: BacklogItem;
   hues: ProjectHues;
@@ -292,6 +293,12 @@ export function ItemCard({
    * card that has left the Board is not in anyone's queue worth reading.
    */
   queued?: 'live' | 'stale' | null;
+  /**
+   * Which remote machine holds or is starting this card (multi-dashboard task 10): `running on Pro` or `Starting on Pro`, decided by BoardView (`remoteBadge`
+   * over the dashboards view, else the item's own `remoteStarting` entry) and handed down for the reason `queued` is — it needs the dashboards view, the run
+   * payload and the clock, and this component owns none. Drawn as a marker (§8.3). Absent and `null` draw nothing, and ArchiveView passes nothing.
+   */
+  machine?: string | null;
 }) {
   const at = now ?? Date.now();
   /* One derivation for the whole strip — see `liveBarFor` above for the
@@ -346,7 +353,8 @@ export function ItemCard({
       /* No `queued` marker: the orchestrator:queued label is drawn as the card's top band now (`queuedStripFor` above), and a word here as well would
        draw one fact twice. */
       item.status === 'done' ? { tone: 'done' as const, word: 'done' } : null,
-      stale ? { tone: 'stale' as const, word: 'stale' } : null
+      stale ? { tone: 'stale' as const, word: 'stale' } : null,
+      machine ? { tone: 'machine' as const, word: machine } : null
     ] as (CardMarker | null)[]
   ).filter((m): m is CardMarker => m !== null);
 
