@@ -4,8 +4,6 @@ import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
 import {
   ApiError,
-  EFFORT_OPTIONS,
-  MODEL_OPTIONS,
   fetchBranches,
   fetchMergeCheck,
   fetchUncommitted,
@@ -15,11 +13,14 @@ import {
   type UncommittedItems
 } from '../../lib/agents';
 import { actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
+import { useRunOn } from '../../hooks/useRunOn';
 import { useSettings } from '../../hooks/useSettings';
+import { prRequiredText, runsText } from '../../lib/dashboards';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 import { Pill } from '../ui/Pill';
+import { RunOn } from '../ui/RunOn';
 import { Select } from '../ui/Select';
 import { MERGE_MODES, QUESTION_MODES, RUN_IN_PROGRESS_CODE } from '../../../../shared/types';
 import type { BacklogItem, MergeMode, PermissionMode, ProjectSummary, QuestionMode } from '../../../../shared/types';
@@ -176,8 +177,11 @@ export function OrchestrateSheet({
   // `dispatchDefaultEffort` rather than adding project-scoped defaults means
   // one Settings row governs every launch surface in the app, this one
   // included.
-  const [model, setModel] = useState(settings.dispatchDefaultModel);
-  const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
+  //
+  // Both live in `useRunOn` now (multi-dashboard task 9): picking a remote machine narrows them to its lists and writes the narrowed value back, which is
+  // state the hook owns. Still seeded from Settings and from nowhere else.
+  const runOn = useRunOn(project);
+  const { model, setModel, effort, setEffort } = runOn;
   /**
    * The merge-mode picker (Task 8; design §2.2) — seeded from Settings and
    * overridable for this launch only, the identical rule `model`/`effort`
@@ -197,7 +201,9 @@ export function OrchestrateSheet({
    * an open sheet cannot leave a `pr` pick standing on a source that no longer offers it.
    */
   const prOffered = source === 'github';
-  const mergeMode: MergeMode = pickedMergeMode === 'pr' && !prOffered ? 'merge' : pickedMergeMode;
+  // A remote machine takes PR only (the server's 400 `merge mode must be pr on <label>`), so the mode is DERIVED from the pick the way the source rule above
+  // derives it: the person's own choice stays in `pickedMergeMode` and comes back untouched on a switch to home (Review Focus 5).
+  const mergeMode: MergeMode = runOn.lock.prOnly ? 'pr' : pickedMergeMode === 'pr' && !prOffered ? 'merge' : pickedMergeMode;
   /**
    * The question-mode picker (task-20; design §7) — seeded from Settings and
    * overridable for this launch only, the identical rule `mergeMode` above
@@ -306,7 +312,8 @@ export function OrchestrateSheet({
    * — a failed merge-check must never block or blemish a launch that
    * otherwise works.
    */
-  const fetchedCoverage = useFetched(mergeMode === 'branch' ? null : () => fetchMergeCheck(project), [mergeMode, project]);
+  // Skipped for a remote pick as well: the hint is about THIS machine's `settings.local.json`, and the run is going somewhere else.
+  const fetchedCoverage = useFetched(mergeMode === 'branch' || runOn.remote ? null : () => fetchMergeCheck(project), [mergeMode, project, runOn.remote]);
   const mergeCoverage: MergeCheckResult | null = fetchedCoverage.status === 'ok' ? fetchedCoverage.value : null;
   /**
    * Which of this project's item files differ from the picked `base` (task-32; `main` by default, #254) — the
@@ -611,6 +618,9 @@ export function OrchestrateSheet({
           // server-side from an absent field would put that one decision in two
           // places (design §2.2).
           mergeMode,
+          // Only a remote pick names its machine; home sends no key at all, so a home-only board's body is byte-identical to what it was before the picker
+          // existed (Review Focus 1).
+          ...runOn.request,
           // Unconditional for exactly `mergeMode`'s reason, restated in this
           // field's terms: absent means `park` server-side, so an omitted field
           // would resolve to the same value the untouched sheet is showing — but
@@ -761,8 +771,8 @@ export function OrchestrateSheet({
             </Chip>
           )}
           {step === 3 && (
-            <Chip size={28} variant="ink" onClick={start} disabled={busy || emptySelection}>
-              {busy ? 'starting…' : 'start'}
+            <Chip size={28} variant="ink" onClick={start} disabled={busy || emptySelection || runOn.blocked}>
+              {busy ? 'starting…' : runOn.remote ? `Start on ${runOn.label}` : 'start'}
             </Chip>
           )}
         </>
@@ -1042,6 +1052,11 @@ export function OrchestrateSheet({
 
           {step === 3 && (
             <div className="orchestrate-step-body" data-testid="orchestrate-step-modes">
+              {/* The picker leads the step (spec "The picker's look"): where the run goes decides what Merge mode, Model and Effort below can be. `RunOn` draws
+                  nothing below two machines, so a home-only board's step is unchanged. */}
+              {runOn.offers !== null && <RunOn offers={runOn.offers} value={runOn.machine} onChange={runOn.pick} />}
+              {runOn.note !== null && <div className="sheet-note">{runOn.note}</div>}
+
               {/* Same one-row grouping LaunchSheet's own `.sheet-row` uses for
                   the identical three controls — "how should this run" is one
                   decision there and stays one decision here. */}
@@ -1053,12 +1068,14 @@ export function OrchestrateSheet({
 
                 <label className="sheet-field">
                   <span className="set-name">Model</span>
-                  <Select label="Model" value={model} onChange={setModel} options={MODEL_OPTIONS} />
+                  <Select label="Model" value={model} onChange={setModel} options={runOn.modelOptions} />
+                  {runOn.remote && runOn.lock.models.length > 0 && <span className="sheet-note">{runsText(runOn.label!, runOn.lock.models)}</span>}
                 </label>
 
                 <label className="sheet-field">
                   <span className="set-name">Effort</span>
-                  <Select label="Effort" value={effort} onChange={setEffort} options={EFFORT_OPTIONS} />
+                  <Select label="Effort" value={effort} onChange={setEffort} options={runOn.effortOptions} />
+                  {runOn.remote && runOn.lock.efforts.length > 0 && <span className="sheet-note">{runsText(runOn.label!, runOn.lock.efforts)}</span>}
                 </label>
 
                 <label className="sheet-field">
@@ -1074,8 +1091,10 @@ export function OrchestrateSheet({
                     label="Merge mode"
                     value={mergeMode}
                     onChange={setMergeMode}
-                    options={MERGE_MODES.filter((m) => m !== 'pr' || prOffered).map((m) => ({ value: m, label: mergeModeLabels[m] }))}
+                    disabled={runOn.lock.prOnly}
+                    options={MERGE_MODES.filter((m) => m !== 'pr' || prOffered || runOn.remote).map((m) => ({ value: m, label: mergeModeLabels[m] }))}
                   />
+                  {runOn.remote && <span className="sheet-note">{prRequiredText(runOn.label!)}</span>}
                 </label>
 
                 <label className="sheet-field">

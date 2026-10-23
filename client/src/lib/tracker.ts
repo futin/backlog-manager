@@ -301,13 +301,35 @@ export function shortSession(session: string): string {
  * claim is a crashed run, which the watchdog and `--resume` own — stop the run, not the item. `release-stale` is its own answer rather than `release` because
  * the two confirms say different things: a live claim's release needs proof the session ended, a stale one is already forfeit by protocol (any `start`, on
  * any machine, retires it). The server re-decides every one of these at click time (`ItemsAbortService`); this only decides whether to offer the click.
+ *
+ * A holder on a REMOTE dashboard's machine (`remoteHosts`, the hosts the configured remotes own) is `stop-release` too, though this server never spawned it:
+ * the session this board's click started is that machine's, and the server routes the stop there by the holder's host (`byHost`, task 7). Without it a card
+ * the remote is working would offer a plain Release, which only retires the comment and leaves the remote's session running. `remoteHosts` is required, for
+ * the reason `now` is: an omitted set would silently be "no remotes" and a remote card would offer the wrong control.
  */
-export function claimControl(item: Pick<BacklogItem, 'source' | 'holder'>, now: number): 'stop-release' | 'release' | 'release-stale' | null {
+export function claimControl(
+  item: Pick<BacklogItem, 'source' | 'holder'>,
+  now: number,
+  remoteHosts: ReadonlySet<string>
+): 'stop-release' | 'release' | 'release-stale' | null {
   const reading = claimReading(item, now);
   const holder = item.holder;
   if (reading === null || holder === undefined || holder.run !== undefined) return null;
-  if (holder.dispatched === true) return 'stop-release';
+  if (holder.dispatched === true || (holder.host !== undefined && remoteHosts.has(holder.host))) return 'stop-release';
   return reading === 'live' ? 'release' : 'release-stale';
+}
+
+/**
+ * The card's `running on <machine>` badge (task 10), or `null`: a LIVE hand claim — one with no `run`, since a run's claims already say so through the run
+ * chip and the Runs page — whose host a configured remote owns. `labelByHost` is `machineLabelByHost` closed over the dashboards view, so this module stays
+ * ignorant of where remotes come from. A stale claim reads nothing: a heartbeat gone quiet is no evidence the remote is still working it, and the card's own
+ * stale marker already says that much. Home is never named (`labelByHost` answers `null` for it), the same rule the run rows follow.
+ */
+export function remoteBadge(item: Pick<BacklogItem, 'source' | 'holder'>, labelByHost: (host?: string) => string | null, now: number): string | null {
+  const holder = item.holder;
+  if (claimReading(item, now) !== 'live' || holder === undefined || holder.run !== undefined) return null;
+  const label = labelByHost(holder.host);
+  return label === null ? null : `running on ${label}`;
 }
 
 /**

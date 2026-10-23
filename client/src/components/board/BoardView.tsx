@@ -2,8 +2,11 @@ import { useMemo, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
+import { useDashboards } from '../../hooks/useDashboards';
 import { useNow } from '../../hooks/useNow';
-import { hasTracker, itemSyncOff, queuedReading, syncOffReason, trackerLine } from '../../lib/tracker';
+import { machineLabelByHost, machineLabelById } from '../../lib/dashboards';
+import { orchestrateStarting, startingOnForItem } from '../../lib/remote-starting';
+import { hasTracker, itemSyncOff, queuedReading, remoteBadge, syncOffReason, trackerLine } from '../../lib/tracker';
 import { remoteAsLive } from '../../lib/remote-run';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { useReportWorking } from '../../hooks/useReportWorking';
@@ -135,7 +138,10 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
   // resume is the Runs section's now (§8.4.1's moved-rules table), and this
   // view has no control that can start one. The hook still exports both for
   // that surface; what it no longer has on this page is a second caller.
-  const { runs, starting, remote, refresh: refreshRuns } = useOrchestratorRuns();
+  const { runs, starting, remote, remoteStarting, refresh: refreshRuns } = useOrchestratorRuns();
+  // Multi-dashboard task 10: the remotes' names and hosts. `null` until the first answer, which every reader below treats as "no remotes" — a card draws no
+  // machine badge and offers no Stop & release for a remote claim for that one fetch, rather than guessing.
+  const { view: dashboards } = useDashboards();
   useReportWorking(runs, starting, onWorking);
   /* Separate from `open`: the sheet can be opened from a card (modal closed)
      or from inside the modal (the modal stays open behind it), so one piece of
@@ -506,6 +512,15 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
   const queueHolders = [...runs, ...remote.map(remoteAsLive)];
   const queuedFor = (item: BacklogItem): 'live' | 'stale' | null => queuedReading(item, queueHolders, now);
 
+  /* Multi-dashboard task 10: where a card's work is, when that is another machine. `running on Pro` for a live hand claim a remote's host owns, else
+     `Starting on Pro` for a card dispatch sent there that has not claimed yet — the claim, once it lands, replaces the starting entry rather than doubling it.
+     `remoteHosts` is the same set the item modal's claim control reads, so the badge and Stop & release agree about which claims are remote. */
+  const remoteHosts: ReadonlySet<string> = new Set((dashboards?.dashboards ?? []).map((d) => d.host));
+  const machineFor = (item: BacklogItem): string | null =>
+    remoteBadge(item, (host) => machineLabelByHost(dashboards, host), now) ?? startingOnForItem(item, remoteStarting, dashboards);
+  /* The chip's entries: orchestrate launches only, already labelled. A card dispatch is the card's marker; the chip is about runs. */
+  const remoteStartingChip = orchestrateStarting(remoteStarting).map((e) => ({ machine: e.machine, label: machineLabelById(dashboards, e.machine) }));
+
   /*
    * Task 12 fix round 1 paired the item drawer with `RunDrawer` here: two
    * role="dialog" `.drawer` asides, neither with a focus trap of its own, so
@@ -584,7 +599,7 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
         {/* Left of the controls (spec §3.2). Everything the Board still says
             about runs, in one control that opens Runs; absent entirely when
             the payload carries no run and no starting entry. */}
-        <RunChip runs={runs} starting={starting} onOpen={() => onOpenRuns?.()} />
+        <RunChip runs={runs} starting={starting} remoteStarting={remoteStartingChip} onOpen={() => onOpenRuns?.()} />
         <input
           type="search"
           className="board-band-search"
@@ -702,6 +717,7 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
                     runBlock={runBlockFor(item)}
                     reverify={reverifyAgents}
                     queued={queuedFor(item)}
+                    machine={machineFor(item)}
                   />
                 ))}
               </BoardColumn>
@@ -729,6 +745,7 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
           trackerLine={trackerLineFor(open)}
           // #225 — a released claim reads on the next payload, not on the next poll tick.
           onReleased={refetch}
+          remoteHosts={remoteHosts}
         />
       )}
       {dispatching !== null && (

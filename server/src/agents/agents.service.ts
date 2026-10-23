@@ -12,7 +12,12 @@ import { resolveSource } from '../items/sources/resolve.util';
 import { proveBaseBranch, resolveBaseBranch } from '../items/base-branch.util';
 import { parseUrn } from '../tracker/map-issue';
 import { runGit } from '../git-run.util';
-import { readAgentsConfig, type AgentsConfig } from './config.util';
+import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
+// Re-exported so every importer from before multi-dashboard task 4 moved them into config.util.ts (to break a module cycle) is untouched.
+export { authHeaders, dashboardError, message } from './config.util';
+import { DashboardStatusService } from './dashboard-status.service';
+import { DashboardsService, type Machine } from './dashboards/dashboards.service';
+import { filesBackedReason, OffersService, REMOTE_BUDGET } from './dashboards/offers.service';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
   clampMode,
@@ -32,12 +37,13 @@ import {
   runClaimBlock,
   EFFORTS,
   MODELS,
-  DEFAULT_MODEL,
-  PERMISSION_LADDER
+  DEFAULT_MODEL
 } from '../../../shared/agent';
 import { composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
+import { RemoteStartingService } from '../orchestrator/remote-starting.service';
+import { RemoteRunsService } from '../orchestrator/remote-runs.service';
 import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentDispatchRequest,
@@ -60,31 +66,11 @@ import type {
  * (cheap, per request), GET /api/configs (a full scan of every project's
  * Claude config — cached), and POST /api/spawn. This app has no other network
  * dependency and should not grow one.
+ *
+ * Multi-dashboard task 4 moved the first two reads, and the cache behind the second, into `dashboard-status.service.ts` so that one copy of them can
+ * read any machine's dashboard; this class still makes every one of those calls for home, through that service.
  */
 
-/** Health is a few fields off a warm process; a slow one means unreachable. */
-const HEALTH_TIMEOUT_MS = 4_000;
-/** /api/configs walks every recent project's .claude tree. It earns more. */
-const MANAGEMENT_TIMEOUT_MS = 15_000;
-/**
- * How long a path→dirName map stays good. The list only changes when a Claude
- * session starts somewhere new, and the call behind it is the expensive one in
- * this feature — a minute of staleness costs a disabled button that would have
- * worked.
- *
- * That cost used to be argued away with "which the sheet's own re-check then
- * corrects", and that held in one direction only: a stale ENABLE is corrected
- * by the sheet (clicking opens it and `plan()` re-derives the block here),
- * while a stale DISABLE never reached the sheet at all, because the control
- * the stale answer disabled is what opens it. That was bug-13; the board now
- * re-asks on a click against a project-visibility block (`DispatchButton`'s
- * `reverify`) rather than swallowing it, which is what makes the staleness
- * this constant permits recoverable in both directions. A re-ask inside the
- * same minute can still be answered from this map — the bound is deliberate
- * and unchanged, and one more click a moment later is the whole remaining
- * cost.
- */
-const PROJECT_TTL_MS = 60_000;
 /** The spawn call forks a process on the other side; the health probe's 4s is
  *  the wrong budget for it, and a constant named for the health probe governing
  *  the launch would be a misnomer besides. */
@@ -272,27 +258,17 @@ export interface AgentOrchestrateRequest {
    *  same distinction `parseIdsArg` keeps in orchestrate.mjs, for the same
    *  reason, one layer down. */
   ids?: unknown;
-}
-
-/** Shape we rely on from the dashboard's /api/health. Everything optional: it
- *  is a different app's response and an older build may omit fields. */
-interface DashboardHealth {
-  remoteAnswer?: unknown;
-  spawnAvailable?: unknown;
-  spawnMaxPermission?: unknown;
-}
-
-interface DashboardManagement {
-  projects?: { dirName?: unknown; path?: unknown }[];
+  /**
+   * Multi-dashboard task 6 — which machine runs the drain: absent (the client omits it for home) or `home` in any case is this machine, and such a body
+   * walks today's path gate for gate to a byte-identical spawn; anything else is a remote's name from the settings file, resolved per request by
+   * `DashboardsService.machine`. Typed `string` as dispatch's twin is, and checked with `typeof` all the same, because the controller forwards it
+   * unvalidated: a non-string is a 400, never a quiet fallback to home.
+   */
+  machine?: string;
 }
 
 @Injectable()
 export class AgentsService {
-  /** Keyed by url so a changed BM_AGENTS_URL cannot be answered from the old
-   *  dashboard's map — which in tests is the difference between a pass and a
-   *  silent cross-contamination between cases. */
-  private cache: { at: number; url: string; map: Map<string, string> } | null = null;
-
   constructor(
     private readonly registry: RegistryService,
     private readonly orchestrator: OrchestratorService,
@@ -324,49 +300,37 @@ export class AgentsService {
      * #17 — for `syncOffBlock` alone: dispatch, orchestrate and resume refuse a project whose repo's sync is `off`, because every one of them starts a
      * session that writes through the item routes, and those refuse too. `TrackerModule` imports only `RegistryModule`, so the edge opens no cycle.
      */
-    private readonly poller: TrackerPollerService
+    private readonly poller: TrackerPollerService,
+    /**
+     * Multi-dashboard task 4 — the health probe and the path→dirName map, moved out of this class so the offers can read ANY machine's dashboard through
+     * the same code without injecting this service (task 5 makes this service inject the offers, and the reverse edge would be a cycle Nest cannot
+     * construct). Every call here still goes through it with home's config, so home's reads, budgets and cache behave exactly as before the move.
+     */
+    private readonly dashboardStatus: DashboardStatusService,
+    /**
+     * Multi-dashboard task 5 — which machines a launch may go to (`machine(id)`), whether the picked one is offered for the project right now, and the
+     * project's path on it. Neither service injects this one (both read dashboards through `DashboardStatusService`), so the edge opens no cycle.
+     */
+    private readonly dashboards: DashboardsService,
+    private readonly offers: OffersService,
+    /**
+     * "Starting on <machine>" between a remote launch and its first claim — provided and exported by `OrchestratorModule`, which this module already
+     * imports, so the runs controller there lists the same singleton this marks.
+     */
+    private readonly remoteStarting: RemoteStartingService,
+    /**
+     * Multi-dashboard task 6 — the remote runs the tracker cache derives, for the one refusal no other record can give: a drain of this repo already
+     * live on the machine a remote orchestrate is aimed at. `OrchestratorService.runs()` answers `remote: []` by design (remote runs ride beside `runs`,
+     * never in it), so this reads the derivation itself. Exported by `OrchestratorModule`; it injects nothing from this module, so no cycle.
+     */
+    private readonly remoteRuns: RemoteRunsService
   ) {}
 
+  /** Home's dashboard, as Settings and every launch gate read it. The body is `DashboardStatusService.statusOf`, which can read any machine's. */
   async status(): Promise<AgentsStatus> {
-    const cfg = readAgentsConfig();
-    const off: AgentsStatus = {
-      enabled: false,
-      reachable: false,
-      remoteAnswer: false,
-      spawnAvailable: false,
-      spawnMaxPermission: null,
-      projectPaths: []
-    };
-    // The short-circuit is the feature's off switch: no fetch, so no egress,
-    // so nothing to report about a dashboard we never contacted.
-    if (!cfg.enabled) return off;
-
-    let health: DashboardHealth;
-    try {
-      health = await this.get<DashboardHealth>(cfg, '/api/health', HEALTH_TIMEOUT_MS);
-    } catch (e) {
-      return { ...off, enabled: true, error: message(e) };
-    }
-
-    let projectPaths: string[] = [];
-    try {
-      projectPaths = [...(await this.projectMap(cfg)).keys()];
-    } catch {
-      // Swallowed on purpose: health already told us the dashboard is up, and
-      // reporting `reachable: false` because the *heavy* call timed out would
-      // send the reader to fix a connection that works. An empty list disables
-      // the buttons, which is the honest consequence.
-    }
-
-    return {
-      enabled: true,
-      reachable: true,
-      remoteAnswer: health.remoteAnswer === true,
-      spawnAvailable: health.spawnAvailable === true,
-      spawnMaxPermission: asMode(health.spawnMaxPermission),
-      projectPaths
-    };
+    return this.dashboardStatus.statusOf(readAgentsConfig());
   }
+
 
   /**
    * Everything the launch sheet needs. `blocked` is filled rather than thrown
@@ -443,6 +407,19 @@ export class AgentsService {
       throw new HttpException({ error: 'prompt is too long' }, 400);
     }
 
+    // Multi-dashboard task 5 — the machine, resolved ahead of every other rule because the finish below depends on it. Absent (the client omits it for home)
+    // and `home` in any case are this machine, which is the whole of the home-only promise: such a body walks exactly the path it walked before, gate for
+    // gate, to a byte-identical spawn. Anything that names no machine is a 400 — `resolveMachine`, shared with orchestrate, says why.
+    const m = this.resolveMachine(req.machine);
+
+    // Work sent to a remote machine always comes back as a PR (spec, Goals): a remote execute's finish IS `pr`, whatever the body says — and a body that
+    // names another finish is refused rather than overridden, because the sheet locks the picker to PR for a remote, so a body that disagrees came from
+    // somewhere that would be surprised by a push. Execute only: finish is not a thing a groom or a capture has, on any machine, and rules 1–2 below
+    // answer a body that gives one exactly as they always have.
+    if (!m.home && req.action === 'execute' && req.finish !== undefined && req.finish !== 'pr') {
+      throw new HttpException({ error: `finish must be pr on ${m.label}` }, 400);
+    }
+
     // The execute finish — the sheet's picker, validated here and appended as `finishClause` below. `req.finish` and `req.base` are typed, but the
     // controller forwards them unvalidated (as `model` is, and `pickFrom` checks that), so every rule below runs on what the wire actually carried. A body
     // from before this field sends neither and is `in-place`: no 400, which is what keeps an open tab working across the deploy.
@@ -456,7 +433,9 @@ export class AgentsService {
     if (req.finish !== undefined && req.action !== 'execute') {
       throw new HttpException({ error: 'finish applies only to execute' }, 400);
     }
-    const finish = req.finish ?? 'in-place';
+    // Rules 3–4 run on the DERIVED finish, so a remote execute with no `finish` is held to `pr`'s own rule — a base is required — rather than to a
+    // second copy of it.
+    const finish = !m.home && req.action === 'execute' ? 'pr' : (req.finish ?? 'in-place');
     if (req.base !== undefined && finish !== 'pr') {
       throw new HttpException({ error: 'base applies only to finish pr' }, 400);
     }
@@ -494,8 +473,21 @@ export class AgentsService {
       throw new HttpException({ error: `this item's next step is ${action}, not ${req.action}` }, 409);
     }
 
-    const status = await this.status();
-    const blocked = dispatchBlock(item, status);
+    // A remote's two 400s (`remoteChoiceChecks`, shared with orchestrate), here because both need the item: its source and the machine's model/effort
+    // lists. Home keeps its `pickFrom` drop untouched.
+    if (!m.home) this.remoteChoiceChecks(m, item.source === 'github', item.projectPath, req.model, req.effort);
+
+    // Offered NOW and the project's path on that machine asked again (`remoteLaunchPath`, shared with orchestrate) — uncoded 409s, with the 502 left to
+    // the gate below for the one case with an upstream to blame.
+    const remotePath = m.home ? undefined : await this.remoteLaunchPath(item.projectPath, m);
+
+    // Home: `dispatchBlock` against home's status, exactly as before. A remote: the same gate (`projectDispatchGate`, which `dispatchBlock` is a one-line
+    // delegate to) against THAT machine's status and THAT machine's path — never `dispatchBlock(item, …)`, whose `item.projectPath` is this machine's
+    // path, which a remote dashboard's project list never holds. Its status is read under the 5 s every remote read gets, and its ceiling clamps the
+    // spawn below, so a stricter remote is never widened by home's. `remoteStatusOf`, so a project list that fails between the offer and here is the 502
+    // "unreachable" below, not a 409 saying Pro has never seen the project (final-review I1).
+    const status = m.home ? await this.status() : await this.dashboardStatus.remoteStatusOf(m.cfg, REMOTE_BUDGET);
+    const blocked = m.home ? dispatchBlock(item, status) : remoteGateBlock(status, remotePath as string);
     if (blocked !== null) {
       // 502 only when the feature is on and we genuinely failed to reach the
       // dashboard — the one case with an upstream to blame. BM_AGENTS off is
@@ -558,8 +550,16 @@ export class AgentsService {
       if (refusal !== null) throw new HttpException({ error: refusal }, 409);
     }
 
+    // A remote launch of this item that has not claimed it yet — on ANY machine, home included. Until that session's first claim lands nothing on the
+    // tracker says the item is taken, so every claim check above waves a second launch through onto the same issue; this is the one record that it is
+    // not free. Uncoded 409, the claim refusals' status. In a home-only setup nothing ever marks it, so home's path is unchanged.
+    // `claimsOn` lets the block see a landing the board's runs read has not swept yet — a remote groom that claimed and released since (final-review I2).
+    const startingOn = this.remoteStarting.itemBlock(item.projectPath, item.id, Date.now(), (p, id) => this.remoteRuns.claimsOn(p, id));
+    if (startingOn !== null) throw new HttpException({ error: `${item.id} is already starting on ${startingOn.machine}` }, 409);
+
     // Proved last of the checks, and always asked of git — `main` included (`proveBaseBranch`, which says why `resolveBase`'s `'main'` carve-out is wrong
-    // here). `item.projectPath` is the registry's own path for the project, resolved from the item, never from the body.
+    // here). `item.projectPath` is the registry's own path for the project, resolved from the item, never from the body — and it is THIS machine's clone
+    // for a remote launch too (the plan's "Base proof" decision): the server never fetches, and the PR the remote opens targets the shared repo's branch.
     const base = finish === 'pr' ? await proveBaseBranch(req.base, item.projectPath) : '';
 
     const spawned = await this.spawnInProject(item.projectPath, {
@@ -571,12 +571,22 @@ export class AgentsService {
       maxPermission: status.spawnMaxPermission,
       model: req.model,
       effort: req.effort,
-      remoteControl: req.remoteControl
+      remoteControl: req.remoteControl,
+      machine: m,
+      remotePath
     });
     // #225 — remembered, because this id is the one the spawned session claims its issue under (`claude -p --session-id`), and without it nothing on
     // the board can later tell "the board started the session holding this claim" from "somebody at a terminal did". Only after a spawn that came
     // back with an id: a refused spawn started nothing to remember.
-    this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, at: Date.now() });
+    // `machine` is which dashboard holds the session — `home` for this machine's — so Stop & release can be sent where the session actually runs.
+    this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, machine: m.id, at: Date.now() });
+    // Marked only after the spawn came back with an id, as `StartingRunsService` is: a refused spawn started nothing to wait for. Remote only — a home
+    // session is this machine's, and its claim is visible to the gates above the moment it lands. Never for a capture (final-review I2): it files a NEW
+    // item and never claims this one, so nothing could retire the entry but age, and the card would read "Starting on" for the full RUN_STALE_MS. The
+    // floor is the newest claim already on the issue, so only a claim this launch's session writes retires the entry (see `RemoteStartingService`).
+    if (!m.home && action !== 'capture') {
+      this.remoteStarting.markItem(item.projectPath, item.id, m, this.remoteRuns.claimFloor(item.projectPath, item.id), Date.now());
+    }
     return spawned;
   }
 
@@ -588,13 +598,33 @@ export class AgentsService {
    *
    * `maxPermission` is the caller's `status().spawnMaxPermission`, passed in rather than re-read: each caller has just read the status for its own gate,
    * and a second read here would be a second `/api/health` call per launch, and a ceiling that could differ from the one the gate was judged against.
+   *
+   * Multi-dashboard task 5: `machine` + `remotePath` send the launch to a REMOTE dashboard — its `cfg` (url and token), its dirName for the project's path
+   * on THAT machine, and its own model/effort lists. Absent, or home, is today's path line for line: home's config read the way it always was, this
+   * project's own path, `pickFrom` over the mirrored lists — which is what keeps a home spawn byte-identical (Review Focus 1). The body's keys are built in
+   * one literal for both, in the same order, so the two can never drift into differently shaped requests. The caller has already 400'd a remote model or
+   * effort outside the machine's lists, so `pickFrom` against those lists only ever keeps a pick or fills the default here.
    */
   async spawnInProject(
     projectPath: string,
-    opts: { prompt: string; name: string; permissionMode: string; maxPermission: PermissionMode | null; model?: unknown; effort?: unknown; remoteControl: boolean }
+    opts: {
+      prompt: string;
+      name: string;
+      permissionMode: string;
+      maxPermission: PermissionMode | null;
+      model?: unknown;
+      effort?: unknown;
+      remoteControl: boolean;
+      machine?: Machine;
+      remotePath?: string;
+    }
   ): Promise<AgentDispatchResult> {
-    const cfg = readAgentsConfig();
-    const dirName = (await this.projectMap(cfg)).get(projectPath);
+    const remote = opts.machine !== undefined && !opts.machine.home ? opts.machine : null;
+    const cfg = remote === null ? readAgentsConfig() : remote.cfg;
+    const map = remote === null ? await this.dashboardStatus.projectMap(cfg) : await this.dashboardStatus.projectMap(cfg, REMOTE_BUDGET.managementMs);
+    // A remote with no path is refused below like an unseen one — never sent this machine's path, which names nothing on that disk.
+    const path = remote === null ? projectPath : opts.remotePath;
+    const dirName = path === undefined ? undefined : map.get(path);
     if (dirName === undefined) {
       // The caller's gate already covers this from the same map, so reaching
       // here means the cache expired between the two reads. Refuse rather than
@@ -614,8 +644,8 @@ export class AgentsService {
       // `--effort`. Validated here rather than trusted because the sheet is
       // not the only possible caller; the dashboard would drop a bad value
       // too, but that is its check, not ours.
-      model: pickFrom(opts.model, MODELS) ?? DEFAULT_MODEL,
-      effort: pickFrom(opts.effort, EFFORTS),
+      model: remote === null ? (pickFrom(opts.model, MODELS) ?? DEFAULT_MODEL) : (pickFrom(opts.model, remote.models) ?? remoteDefaultModel(remote)),
+      effort: pickFrom(opts.effort, remote === null ? EFFORTS : remote.efforts),
       // Strictly `=== true`, matching the dashboard's own parse rule for this
       // field: anything else means off.
       remoteControl: opts.remoteControl === true
@@ -628,9 +658,36 @@ export class AgentsService {
    * whole groomed queue rather than one file, so there is nothing here to
    * call findItem/deriveAction on. See ORCHESTRATE_PROMPT for why the prompt
    * is a constant rather than a request field.
+   *
+   * Multi-dashboard task 6 — `req.machine` aims the drain at a remote machine. Returns the resolved machine beside the result because the run's
+   * spawn-success side effects live in the controller (`watchdog.arm()`, `starting.mark()` for home; `remoteStarting.markProject` for a remote — see that
+   * route's comment for why there), and the controller must act on the machine THIS call judged, not on a second resolution of the body that a settings
+   * edit in between could answer differently.
    */
-  async orchestrate(req: AgentOrchestrateRequest): Promise<AgentDispatchResult> {
-    const status = await this.status();
+  async orchestrate(req: AgentOrchestrateRequest): Promise<{ result: AgentDispatchResult; machine: Machine }> {
+    // The machine first, through dispatch's own `resolveMachine` (multi-dashboard task 5) and for the same reason: every rule below depends on it. Absent and `home` in any
+    // case are this machine, and from here on a home body walks exactly the path it walked before this field existed, to a byte-identical spawn — the
+    // `m.home` branches below are the whole of the difference, and each one's home arm is the line that stood there before.
+    const m = this.resolveMachine(req.machine);
+
+    // A remote drain always ends in a PR (spec, Goals) — the remote's merge would land on a clone this machine never sees, and a branch would leave work
+    // nobody here is shown. An absent or empty `mergeMode` IS `pr` there; any other value is refused rather than overridden, because the Orchestrate
+    // sheet locks its picker to PR for a remote, so a body that disagrees came from somewhere that expects a merge or a branch and would be surprised.
+    if (!m.home && req.mergeMode !== undefined && req.mergeMode !== '' && req.mergeMode !== 'pr') {
+      throw new HttpException({ error: `merge mode must be pr on ${m.label}` }, 400);
+    }
+
+    // A remote's two 400s and its offer, in dispatch's order and through dispatch's own helpers, so the sheet and the card refuse in the same words.
+    let remotePath: string | undefined;
+    if (!m.home) {
+      this.remoteChoiceChecks(m, this.items.sourceOf(req.project) === 'github', req.project, req.model, req.effort);
+      remotePath = await this.remoteLaunchPath(req.project, m);
+    }
+
+    // Home's status as before; a remote's read under the 5 s every remote read gets. Its `enabled` is home's own flag (`DashboardsService` copies it into
+    // every machine's config), so the 404 below means the same thing on either. `remoteStatusOf`, as dispatch reads it: a remote's failed project list
+    // is unreachable (the 502 below), never "does not list" (final-review I1).
+    const status = m.home ? await this.status() : await this.dashboardStatus.remoteStatusOf(m.cfg, REMOTE_BUDGET);
     if (!status.enabled) {
       // 404, not dispatch's 409-with-a-reason. dispatch's off case still has
       // a sheet open for one specific item, and plan()/dispatchBlock exist
@@ -665,7 +722,10 @@ export class AgentsService {
     // `projectDispatchGate`'s own first check (via environmentBlock) can
     // never produce `hidden` for THAT specific reason here — only its other
     // three environment reasons, or `disabled` for project visibility, can.
-    const gate = projectDispatchGate(status, req.project);
+    //
+    // A remote is asked about the project's path ON that machine (task 5's `remoteGateBlock` does the same for dispatch): `req.project` is this
+    // machine's path, which a remote dashboard's project list never holds.
+    const gate = projectDispatchGate(status, m.home ? req.project : (remotePath as string));
     if (gate.control === 'hidden') {
       // Same split dispatch() makes for the identical situation via
       // dispatchBlock: 502 only when there is a genuine upstream to blame
@@ -715,8 +775,35 @@ export class AgentsService {
     // booted, and whichever reached `init` second exited `4` (lock held) and
     // died, having burned a session and told its user "never retry, go to
     // `--resume`" for a run that never crashed.
+    //
+    // Multi-dashboard task 6 — home only. Both of these records are THIS machine's: a local run.json and a local starting entry say nothing about a
+    // remote's clone, so a local run does not block a remote drain, and the remote's own pair (`remoteOrchestrateLocks`) does not block a local one.
+    if (m.home) this.homeOrchestrateLocks(req.project);
+    else this.remoteOrchestrateLocks(req.project, m);
+
+    // #17 — after both run-in-progress locks, before the spawn. A drain on a repo whose sync is off would park at its first claim.
+    const syncOff = this.poller.syncOffBlock(req.project);
+    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
+
+    // Home's config and map exactly as before; a remote's from its own settings entry, read under the management budget, and looked up by the path the
+    // offer resolved on that machine.
+    const cfg = m.home ? readAgentsConfig() : m.cfg;
+    const map = m.home ? await this.dashboardStatus.projectMap(cfg) : await this.dashboardStatus.projectMap(cfg, REMOTE_BUDGET.managementMs);
+    const dirName = map.get(m.home ? req.project : (remotePath as string));
+    if (dirName === undefined) {
+      // Same race dispatch()'s identical line guards against: the membership
+      // check above and this lookup read the same cache, and only a TTL
+      // expiry between the two reads reaches here. Refuse rather than derive
+      // a dirName from the path, for the reason named above.
+      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+    }
+    return { result: await this.spawnOrchestrate(req, m, status, cfg, dirName), machine: m };
+  }
+
+  /** `orchestrate`'s two home locks, unchanged since bug-21 — extracted only so the remote's pair can sit beside them under one `m.home` branch. */
+  private homeOrchestrateLocks(project: string): void {
     const { runs, starting } = this.orchestrator.runs();
-    const activeRun = runs.find((r) => r.project === req.project && r.fresh);
+    const activeRun = runs.find((r) => r.project === project && r.fresh);
     if (activeRun) {
       throw new HttpException(
         {
@@ -775,24 +862,74 @@ export class AgentsService {
        requestedAt and nothing else — there is no runId until `init` mints
        one. That is also why the block it produces everywhere else is
        project-wide rather than per-item (see `runClaimBlock`). */
-    if (starting.some((s) => s.project === req.project)) {
+    if (starting.some((s) => s.project === project)) {
       throw new HttpException({ error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE }, 409);
     }
+  }
 
-    // #17 — after both run-in-progress locks, before the spawn. A drain on a repo whose sync is off would park at its first claim.
-    const syncOff = this.poller.syncOffBlock(req.project);
-    if (syncOff !== null) throw new HttpException({ error: syncOff }, 409);
+  /**
+   * A launch body's `machine`, resolved — dispatch's and orchestrate's one copy (multi-dashboard tasks 5–6), so the card and the sheet refuse in the same
+   * words. Absent and `home` in any case are this machine; a remote is found by its name in the settings file as read for THIS request. Anything else — a
+   * name edited away since the sheet opened, or a non-string the controller forwarded unvalidated — is a 400, never a quiet fallback to home, which would
+   * run the work on a machine the reader did not pick.
+   */
+  private resolveMachine(raw: unknown): Machine {
+    const m = raw === undefined || typeof raw === 'string' ? this.dashboards.machine(raw) : null;
+    if (m === null) throw new HttpException({ error: `unknown machine "${String(raw)}"` }, 400);
+    return m;
+  }
 
-    const cfg = readAgentsConfig();
-    const dirName = (await this.projectMap(cfg)).get(req.project);
-    if (dirName === undefined) {
-      // Same race dispatch()'s identical line guards against: the membership
-      // check above and this lookup read the same cache, and only a TTL
-      // expiry between the two reads reaches here. Refuse rather than derive
-      // a dirName from the path, for the reason named above.
-      throw new HttpException({ error: 'the dashboard cannot see this project' }, 409);
+  /**
+   * A remote launch's two 400s, shared by dispatch and orchestrate. A files project cannot run remotely at all (the remote session writes its items
+   * through the remote's own backlog-manager, which only a tracker project has); a model or effort outside the machine's list is a 400 where home's
+   * `pickFrom` drops, because the remote dashboard would drop an unknown name just as silently and the session would then run on that account's default
+   * with no error anywhere (spec, "Models and efforts are per machine"). `tracker` is the caller's own reading of the source — the item's for dispatch,
+   * the project's for orchestrate — because each has a different thing in hand. Never called for home.
+   */
+  private remoteChoiceChecks(m: Machine, tracker: boolean, projectPath: string, model: unknown, effort: unknown): void {
+    if (!tracker) throw new HttpException({ error: filesBackedReason(m.label, projectPath) }, 400);
+    const choice = machineChoiceBlock(m, model, effort);
+    if (choice !== null) throw new HttpException({ error: choice }, 400);
+  }
+
+  /**
+   * The project's path on remote `m`, or the uncoded 409 `<label> is not offered for <project>: <reason>` — dispatch's and orchestrate's one copy. Offered
+   * NOW, not when the picker drew: the offers are minutes old by the time Start is clicked, and a remote that has since gone down, lost the repo or had its
+   * sync turned off is refused with the same reason the picker would now show. Then the path ON that machine, asked again rather than lifted from the
+   * offer, so the gate and the spawn after it judge the path that is true at this moment. 409, a state a reader can go and change; the 502 is left to the
+   * caller's gate for the one case with an upstream to blame.
+   */
+  private async remoteLaunchPath(projectPath: string, m: Machine): Promise<string> {
+    const notOffered = (reason: string): HttpException => new HttpException({ error: `${m.label} is not offered for ${projectPath}: ${reason}` }, 409);
+    const offer = (await this.offers.offers(projectPath)).machines.find((o) => o.machine === m.id);
+    if (offer === undefined) throw notOffered('no longer configured');
+    if (offer.reason !== null) throw notOffered(offer.reason);
+    const there = await this.offers.remotePath(projectPath, m);
+    if ('reason' in there) throw notOffered(there.reason);
+    return there.path;
+  }
+
+  /**
+   * A remote orchestrate's two locks — the same pair home has, one window apart, read from the records that describe THAT machine. Both uncoded:
+   * `RUN_IN_PROGRESS_CODE` tells OrchestrateSheet to close and hand the screen to the board's run chip, which counts home's runs, so a remote refusal
+   * carrying it would close the sheet onto a chip that shows nothing.
+   *
+   * 1. Starting on that machine — keyed (project, machine), so a drain starting on Pro blocks a second one to Pro and nothing else. Until the remote's
+   *    first claim lands no other record says a run is coming, which is the bug-21 gap one machine over.
+   * 2. Live on that machine — a remote run of this project whose host is the machine's own. `status === 'running'`, fresh or not: `orchestrate.mjs init`
+   *    on that machine refuses any `running` run file, crashed included, so a spawn here would only boot a session that dies at `init`. A run on
+   *    another host, or one whose claims carry no host, is not this machine's and does not block.
+   */
+  private remoteOrchestrateLocks(project: string, m: Machine): void {
+    if (this.remoteStarting.projectBlock(project, m.id, Date.now()) !== null) {
+      throw new HttpException({ error: `${project} is already starting on ${m.label}` }, 409);
     }
+    const live = this.remoteRuns.list().find((r) => r.project === project && r.host === m.host && r.status === 'running');
+    if (live !== undefined) throw new HttpException({ error: `a run of ${live.repo} is live on ${m.label}` }, 409);
+  }
 
+  /** `orchestrate`'s tail: what the run should contain, then the spawn. Split off with the locks above, its body otherwise as it stood. */
+  private async spawnOrchestrate(req: AgentOrchestrateRequest, m: Machine, status: AgentsStatus, cfg: AgentsConfig, dirName: string): Promise<AgentDispatchResult> {
     // Last, deliberately: every gate above answers a question about whether
     // this project can be orchestrated at all, and this one answers what the
     // run should contain. Ordering matters for the two locks above — they are
@@ -809,7 +946,8 @@ export class AgentsService {
     // (task-4-brief.md) pins the lock winning over it, same as it wins over
     // an ids problem.
     const ids = await this.resolveIds(req.project, req.ids);
-    const mergeMode = this.resolveMergeMode(req.mergeMode, req.project);
+    // A remote's is always `pr` — the 400 at the top of `orchestrate` already refused any other value — so it appends `--merge-mode pr`.
+    const mergeMode = m.home ? this.resolveMergeMode(req.mergeMode, req.project) : 'pr';
     // Beside resolveMergeMode, after the lock, for the identical reason the
     // comment directly above gives: a malformed `questionMode` is a problem
     // with what the run should contain, not with whether it may start, so
@@ -894,8 +1032,9 @@ export class AgentsService {
       // The ceiling still clamps this down on a stricter dashboard, so this
       // can never widen what a host permits.
       permissionMode: clampMode(req.permissionMode === undefined || req.permissionMode === '' ? 'auto' : req.permissionMode, status.spawnMaxPermission),
-      model: pickFrom(req.model, MODELS) ?? DEFAULT_MODEL,
-      effort: pickFrom(req.effort, EFFORTS)
+      // A remote picks off its own lists, already proved by `machineChoiceBlock`, and defaults the way `spawnInProject` does for a remote dispatch.
+      model: m.home ? (pickFrom(req.model, MODELS) ?? DEFAULT_MODEL) : (pickFrom(req.model, m.models) ?? remoteDefaultModel(m)),
+      effort: pickFrom(req.effort, m.home ? EFFORTS : m.efforts)
       // No `remoteControl`. That flag is what gives a spawned session's
       // AskUserQuestion a channel to a human's phone when it hits a
       // preflight question it cannot resolve alone — see
@@ -1147,7 +1286,7 @@ export class AgentsService {
     origin: 'watchdog' | 'board',
     status: AgentsStatus
   ): Promise<AgentDispatchResult> {
-    const dirName = (await this.projectMap(cfg)).get(project);
+    const dirName = (await this.dashboardStatus.projectMap(cfg)).get(project);
     if (dirName === undefined) {
       // The same TTL-race guard orchestrate() and dispatch() both carry:
       // projectDispatchGate's visibility check and this lookup read the same
@@ -1406,7 +1545,7 @@ export class AgentsService {
       }
 
       const cfg = readAgentsConfig();
-      const dirName = (await this.projectMap(cfg)).get(project);
+      const dirName = (await this.dashboardStatus.projectMap(cfg)).get(project);
       if (dirName === undefined) {
         // The same TTL-race guard every other spawn path carries — never
         // derive a dirName from the path to route around it.
@@ -1491,48 +1630,6 @@ export class AgentsService {
       throw new HttpException({ error: 'spawn returned no session id' }, 502);
     }
     return { sessionId: body.sessionId };
-  }
-
-  /** Absolute project path → the dashboard's own dirName key. */
-  private async projectMap(cfg: AgentsConfig): Promise<Map<string, string>> {
-    const now = Date.now();
-    if (this.cache && this.cache.url === cfg.url && now - this.cache.at < PROJECT_TTL_MS) {
-      return this.cache.map;
-    }
-    // The second escaping seam bug-26 names, and wider than the spawn one:
-    // `get()` rejects on a connection failure or a timeout AND throws a plain
-    // Error for a non-ok answer, so a dashboard that merely 500s its own
-    // /api/configs inside the TTL window reached the same unmapped 500.
-    //
-    // Caught here rather than at the three post-gate call sites for the same
-    // reason it is one function at all: one seam, three identical callers.
-    // The 409 sitting under each of those calls stays untouched and stays
-    // right — it means "the dashboard answered and this project was not in
-    // the list", where this means "we never got to ask", which is the same
-    // split `dispatch()` and `orchestrate()` already make between an
-    // unreachable dashboard and one that said no.
-    //
-    // `status()`'s bare `catch {}` swallows this HttpException exactly as it
-    // swallowed the raw error before, so GET /api/agents/status is unchanged:
-    // an empty project list, not a 502.
-    let data: DashboardManagement;
-    try {
-      // `/api/configs` was `/api/management` until the dashboard's dc3ade0 (2026-10-01) renamed it with no alias. The old path then fell through to
-      // the dashboard's SPA fallback — a 200 carrying index.html — whose JSON parse threw, the status route swallowed that, and every project
-      // showed as unseen, which disabled dispatch everywhere with no error on screen. A rename over there has to be followed here.
-      data = await this.get<DashboardManagement>(cfg, '/api/configs', MANAGEMENT_TIMEOUT_MS);
-    } catch (e) {
-      throw new HttpException({ error: dashboardError(e, 'the dashboard project list', MANAGEMENT_TIMEOUT_MS) }, 502);
-    }
-    const map = new Map<string, string>();
-    for (const p of data.projects ?? []) {
-      // Both fields or neither: a half-shaped entry is one we cannot spawn
-      // into, and dropping it is the same posture RegistryService takes on a
-      // mis-shaped project — a bad entry, not a bad response.
-      if (typeof p.path === 'string' && typeof p.dirName === 'string') map.set(p.path, p.dirName);
-    }
-    this.cache = { at: now, url: cfg.url, map };
-    return map;
   }
 
   /**
@@ -2053,17 +2150,6 @@ export class AgentsService {
     return this.items.find(requestPath);
   }
 
-  private async get<T>(cfg: AgentsConfig, path: string, timeoutMs: number): Promise<T> {
-    const res = await fetch(`${cfg.url}${path}`, {
-      headers: authHeaders(cfg),
-      // Without this an unreachable-but-routable host hangs the board's status
-      // call for the OS connect timeout — minutes, on a tailnet address whose
-      // peer is asleep.
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!res.ok) throw new Error(`${path} answered ${res.status}`);
-    return (await res.json()) as T;
-  }
 }
 
 /** The dashboard's session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
@@ -2126,6 +2212,36 @@ export async function staleClaimProbe(holder: { session: string; host?: string }
 }
 
 /**
+ * A remote launch's model/effort refusal (multi-dashboard task 5), `null` to proceed. On a REMOTE machine any value outside that machine's list is a 400,
+ * unknown names included: the remote dashboard drops a name outside its own fixed list without a word, and a name inside that list but outside what the
+ * account can run would start a session that fails — either way nobody would hear about it (spec, "Models and efforts are per machine"). `undefined` and
+ * `''` are "no pick" — the two spellings `pickFrom` documents as the sheet's Default — and are not refused. Never called for home, whose `pickFrom` drop
+ * is unchanged. Exported for `orchestrate`'s remote launch to share one wording with this one.
+ */
+export function machineChoiceBlock(m: Machine, model: unknown, effort: unknown): string | null {
+  const outside = (value: unknown, list: readonly string[]): boolean =>
+    value !== undefined && value !== '' && !(typeof value === 'string' && list.includes(value));
+  if (outside(model, m.models)) return `model "${String(model)}" is not in ${m.label}'s list (${m.models.join(', ')})`;
+  if (outside(effort, m.efforts)) return `effort "${String(effort)}" is not in ${m.label}'s list (${m.efforts.join(', ')})`;
+  return null;
+}
+
+/**
+ * The model a remote launch with no pick runs on: `DEFAULT_MODEL`, as home's does, when the machine lists it — otherwise the machine's first listed model,
+ * because sending `DEFAULT_MODEL` to an account whose list leaves it out is exactly the silent failure the list exists to prevent. Never `undefined`: home
+ * never sends a spawn without a model either (`DEFAULT_MODEL`'s own comment), and a remote must not fall to the CLI's own default instead.
+ */
+function remoteDefaultModel(m: Machine): string {
+  return m.models.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : (m.models[0] ?? DEFAULT_MODEL);
+}
+
+/** `dispatchBlock`'s flattening of the gate, for a remote: the same `projectDispatchGate`, asked about the project's path on THAT machine. */
+function remoteGateBlock(status: AgentsStatus, remotePath: string): string | null {
+  const gate = projectDispatchGate(status, remotePath);
+  return gate.control === 'enabled' ? null : gate.reason;
+}
+
+/**
  * The dispatch route's item-claim refusal for a tracker item (#227), `null` to proceed. The server half of the client's `progressBlock`
  * (`client/src/lib/item-progress.ts`), in the same order:
  *
@@ -2140,10 +2256,6 @@ export async function itemClaimBlock(id: string, holder: { session: string; host
   const beat = Date.parse(holder.heartbeat);
   if (!Number.isNaN(beat) && Date.now() - beat < CLAIM_STALE_MS) return `${id} is in progress — session ${holder.session} holds its claim`;
   return staleClaimProbe(holder);
-}
-
-export function authHeaders(cfg: AgentsConfig): Record<string, string> {
-  return cfg.token ? { authorization: `Bearer ${cfg.token}` } : {};
 }
 
 /**
@@ -2207,66 +2319,4 @@ export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'boa
  */
 export function stopSessionName(projectPath: string): string {
   return `stop ${basename(projectPath)}`.slice(0, 60);
-}
-
-/**
- * A ceiling we do not recognise is a dashboard newer than this client. Read as
- * null, which `modesUpTo` turns into "plan only" — the safe reading, since we
- * cannot know where an unknown string sits on the ladder.
- */
-function asMode(value: unknown): PermissionMode | null {
-  return typeof value === 'string' && (PERMISSION_LADDER as readonly string[]).includes(value) ? (value as PermissionMode) : null;
-}
-
-export function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-/**
- * What to tell a reader about an outbound call to the dashboard that did not
- * come back at all — `message()`'s counterpart for the *rejection* shapes,
- * which say nothing useful on their own.
- *
- * Both shapes were measured on Node 22 for bug-26, and both are why relaying
- * the raw message is not enough:
- *
- * - a connection failure is a `TypeError` whose own message is the flat
- *   literal `fetch failed`. Everything that identifies it — `ECONNREFUSED`,
- *   the address — lives on `.cause` and nowhere else.
- * - the `AbortSignal.timeout` path is a `DOMException` reading `The operation
- *   was aborted due to timeout`, which names neither the call that timed out
- *   nor the budget it blew. A reader cannot tell a 4s health probe from a 10s
- *   spawn from that sentence, and the budget is the one number that tells
- *   them whether to retry or go looking at the dashboard.
- *
- * `what` names the call so the two are distinguishable; `timeoutMs` is that
- * call's own budget, passed in rather than looked up here because this
- * function has no way to know which of the three constants applied.
- *
- * The abort branch is duck-typed on `.name` rather than `instanceof
- * DOMException` for the reason `resumeErrorMessage` (watchdog.service.ts)
- * already records for its own probe: jest's node environment can put a realm
- * boundary between where an object was constructed and where it is tested,
- * and `instanceof` silently reads false across one. `AbortError` is accepted
- * beside `TimeoutError` because a caller-side abort arrives as the former and
- * means the same thing to a reader — nothing came back in time.
- *
- * The fall-through to `message(e)` is load-bearing rather than a default:
- * `status()`'s own failures already report a readable string (a plain
- * `Error('connect ECONNREFUSED …')` from `get()`, whose wording a test pins),
- * and anything that is not a fetch rejection at all — a bug in our own code —
- * must still read as itself rather than be dressed up as an upstream fault.
- */
-export function dashboardError(e: unknown, what: string, timeoutMs: number): string {
-  const name = (e as { name?: unknown } | null)?.name;
-  if (name === 'TimeoutError' || name === 'AbortError') {
-    return `${what} timed out after ${timeoutMs}ms`;
-  }
-  const cause = (e as { cause?: unknown } | null)?.cause;
-  if (cause !== null && typeof cause === 'object') {
-    const { code, message: detail } = cause as { code?: unknown; message?: unknown };
-    const named = typeof code === 'string' ? code : typeof detail === 'string' ? detail : null;
-    if (named !== null) return `${what} failed: ${named}`;
-  }
-  return message(e);
 }

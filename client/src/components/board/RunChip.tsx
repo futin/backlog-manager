@@ -40,6 +40,15 @@ const STATES: { key: 'crashed' | 'paused' | 'starting' | 'live'; word: string; t
 ];
 
 /**
+ * One launch sent to a remote dashboard, as the chip reads it: `machine` is the id the server recorded, `label` what to print for it. The caller maps one to
+ * the other (`machineLabelById`, `lib/dashboards.ts`), so this module stays a pure fold and never learns where machines come from.
+ */
+export interface RemoteStartingEntry {
+  machine: string;
+  label: string;
+}
+
+/**
  * The count line the chip prints, e.g. `2 runs · 1 live ›`, `1 run · crashed ›`,
  * `1 starting ›` — the design's own three worked examples (spec §3.2,
  * DESIGN.md §8.3), which this function reproduces exactly.
@@ -61,7 +70,8 @@ const STATES: { key: 'crashed' | 'paused' | 'starting' | 'live'; word: string; t
  */
 export function runChipReading(
   runs: readonly RunChipState[],
-  starting: readonly StartingRun[]
+  starting: readonly StartingRun[],
+  remoteStarting: readonly RemoteStartingEntry[] = []
 ): { tone: DotTone | null; line: string; counts: Record<'crashed' | 'paused' | 'starting' | 'live', number> } | null {
   const counts = {
     /* `isCrashed` (lib/run-watchdog.ts) rather than a second `status ===
@@ -75,7 +85,7 @@ export function runChipReading(
     live: runs.filter((r) => r.status === 'running' && r.fresh).length
   };
 
-  if (runs.length === 0 && starting.length === 0) return null;
+  if (runs.length === 0 && starting.length === 0 && remoteStarting.length === 0) return null;
 
   const segments: string[] = [];
   if (runs.length > 0) segments.push(`${runs.length} ${runs.length === 1 ? 'run' : 'runs'}`);
@@ -87,6 +97,13 @@ export function runChipReading(
     // twice. `starting` is never one of those (see `isRunState` above).
     segments.push(state.isRunState && n === runs.length ? state.word : `${n} ${state.word}`);
   }
+
+  // Multi-dashboard task 10: launches sent to another machine, appended after every local segment and named by machine, one segment per machine in first-seen
+  // order — `Starting on Pro`, or `2 starting on Pro`. Never `1 starting`: that would claim the run is starting HERE, and never folded into `counts.starting`,
+  // which is the local number (and `breathe` reads `counts.live`, so a remote launch never makes the dot breathe either — nothing HERE is moving).
+  const perMachine = new Map<string, number>();
+  for (const entry of remoteStarting) perMachine.set(entry.label, (perMachine.get(entry.label) ?? 0) + 1);
+  for (const [label, n] of perMachine) segments.push(n === 1 ? `Starting on ${label}` : `${n} starting on ${label}`);
 
   /* The first state present in worst-first order IS the dot, so the colour and
      the words are one derivation rather than two agreeing expressions.
@@ -101,7 +118,8 @@ export function runChipReading(
      nothing running would have drawn the same green as one mid-run, told apart
      only by a missing word and an absent `breathe` ring. A dot that says "no
      state" has to look like no state. */
-  const worst = STATES.find((s) => counts[s.key] > 0);
+  // A remote launch holds the `starting` rung for the tone alone, so it paints over a live run exactly as a local starting one does and under a crashed one.
+  const worst = STATES.find((s) => counts[s.key] > 0 || (s.key === 'starting' && remoteStarting.length > 0));
 
   return { tone: worst?.tone ?? null, line: segments.join(' · '), counts };
 }
@@ -128,8 +146,19 @@ export function runChipReading(
  * same section setter the rail's own Runs entry calls (`App.tsx`'s `change`),
  * so the two cannot drift about what "open Runs" means.
  */
-export function RunChip({ runs, starting, onOpen }: { runs: readonly RunChipState[]; starting: readonly StartingRun[]; onOpen: () => void }) {
-  const reading = runChipReading(runs, starting);
+export function RunChip({
+  runs,
+  starting,
+  remoteStarting = [],
+  onOpen
+}: {
+  runs: readonly RunChipState[];
+  starting: readonly StartingRun[];
+  /** Launches sent to another machine that have not claimed yet (multi-dashboard task 10), already labelled. Absent means none. */
+  remoteStarting?: readonly RemoteStartingEntry[];
+  onOpen: () => void;
+}) {
+  const reading = runChipReading(runs, starting, remoteStarting);
   // Nothing at all, rather than an empty chip: a control that says "0 runs" is
   // a permanent invitation to read a page with nothing on it.
   if (reading === null) return null;

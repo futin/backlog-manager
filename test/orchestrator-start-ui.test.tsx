@@ -11,8 +11,10 @@ import { SettingsProvider } from '../client/src/hooks/useSettings';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { daysAgoDate } from './helpers/dates';
 import { pickProject } from './helpers/filter-bar';
+import { homeOffer, homeOnly, proOffer, proSuggested } from './helpers/offers';
+import { NO_MACHINE_TEXT } from '../client/src/lib/dashboards';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
-import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectSummary } from '../shared/types';
+import type { AgentsStatus, BacklogItem, OrchestratorRun, OrchestratorRunsPayload, ProjectOffers, ProjectSummary } from '../shared/types';
 
 // Same translation every other orchestrator suite (Task 8/10/11/12) already
 // applies: the fixture is plain JSON, so without this cast its string fields
@@ -160,7 +162,7 @@ describe('toolbar Orchestrate button', () => {
       const payload: unknown = url.includes('/api/agents/status')
         ? AGENTS
         : url.includes('/api/orchestrator/runs')
-          ? ({ runs, starting: [], remote: [] } satisfies OrchestratorRunsPayload)
+          ? ({ runs, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload)
           : url.includes('/api/agents/merge-check')
             ? { covered: true, source: null }
             : // task-32: the sheet fires this on mount, unconditionally (unlike
@@ -610,11 +612,19 @@ describe('OrchestrateSheet', () => {
     // task-44. Defaulted to 'ok' so every case above is untouched; 'fail'
     // is what lets one case prove a failed branch read still launches.
     // 'nomain' (#285) answers a list without `main`, for the union-in-front case.
-    branches: 'ok' | 'fail' | 'nomain' = 'ok'
+    branches: 'ok' | 'fail' | 'nomain' = 'ok',
+    // Multi-dashboard task 9. The sheet reads the machine offers on open; answered here and kept OUT of `calls` for the reason the three reads above are.
+    // Home-only by default, which draws no picker and so leaves every case written before it untouched; 'pending' never answers, 'reject' fails.
+    offers: ProjectOffers | 'reject' | 'pending' = homeOnly()
   ): { url: string; body: unknown }[] {
     const calls: { url: string; body: unknown }[] = [];
     global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes('/api/dashboards/offers')) {
+        if (offers === 'reject') return Promise.reject(new Error('network down'));
+        if (offers === 'pending') return new Promise(() => {});
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(offers) } as Response);
+      }
       if (url.includes('/api/agents/merge-check')) {
         return mergeCheck === 'fail'
           ? Promise.reject(new Error('network down'))
@@ -1436,7 +1446,10 @@ describe('OrchestrateSheet', () => {
     // actually makes is unchanged: merge-check, and only merge-check, is
     // gated on merge mode.
     const urls = fetchSpy.mock.calls.map(([input]) => String(input));
-    const ungated = (url: string): boolean => url.includes('/api/items/uncommitted') || url.includes('/api/agents/branches');
+    //
+    // Multi-dashboard task 9 is the fourth such accounting: the machine offers are a fact about the project's dashboards, which no mode on this sheet changes.
+    const ungated = (url: string): boolean =>
+      url.includes('/api/items/uncommitted') || url.includes('/api/agents/branches') || url.includes('/api/dashboards/offers');
     expect(urls.filter((url) => url.includes('/api/agents/merge-check'))).toEqual([]);
     expect(urls.filter((url) => !ungated(url))).toEqual([]);
     expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
@@ -1463,6 +1476,10 @@ describe('OrchestrateSheet', () => {
         return new Promise<Response>((_resolve, rej) => {
           reject = rej;
         });
+      }
+      // Multi-dashboard task 9's on-mount read, home-only and kept out of `calls` for the same reason as the reads below.
+      if (url.includes('/api/dashboards/offers')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(homeOnly()) } as Response);
       }
       // task-32's own on-mount read, answered clean and kept out of `calls`
       // for `stubOrchestrate`'s reason: `calls` is this case's evidence that
@@ -1863,5 +1880,163 @@ describe('OrchestrateSheet', () => {
     await userEvent.selectOptions(screen.getByLabelText('Base branch'), 'feature/x');
 
     expect(screen.getByText(/is never written/i)).toBeInTheDocument();
+  });
+  // --- Multi-dashboard task 9 ----------------------------------------------------------------------------------------------------------------------------
+  // The "Run on" group sits at the top of step 3, beside the pickers it locks. Home-only offers draw nothing and send the body this sheet always sent
+  // (Review Focus 1); a remote pick forces Merge mode to PR, narrows Model and Effort to the machine's lists and renames Start; switching back to home gives
+  // Merge mode back as the person had it (Review Focus 5) and leaves a narrowed-away model on the Settings default.
+  describe('run on', () => {
+    const OK = { ok: true, status: 201, body: { sessionId: 'sess-9' } };
+    const covered = { covered: true, source: null };
+    const options = (label: string): string[] => [...(screen.getByLabelText(label) as HTMLSelectElement).options].map((o) => o.value);
+
+    it('draws no group for home-only offers and sends the body it always sent, with no machine key', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', homeOnly());
+      renderSheet();
+      await toModes();
+      expect(screen.queryByRole('group', { name: 'Run on' })).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'start' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).toEqual({ project: '/abs/alpha', permissionMode: 'acceptEdits', mergeMode: 'merge', questionMode: 'park', base: 'main' });
+      expect(calls[0].body).not.toHaveProperty('machine');
+    });
+
+    it('starts on the suggested machine, locked: Merge mode at PR with its hint, Model and Effort narrowed with theirs, the button naming the machine', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      const start = await screen.findByRole('button', { name: 'Start on Pro' });
+      await waitFor(() => expect(start).toBeEnabled());
+      expect(screen.queryByRole('button', { name: 'start' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Pro\b/ })).toHaveAttribute('aria-pressed', 'true');
+
+      const merge = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+      expect(merge.value).toBe('pr');
+      expect(merge).toBeDisabled();
+      expect(screen.getByText('Required when running on Pro')).toBeInTheDocument();
+      // '' first: the "default" option stays drawable on a remote (final-review I4), the machine's own list after it.
+      expect(options('Model')).toEqual(['', 'opus', 'sonnet']);
+      expect(screen.getByText('Pro runs opus, sonnet')).toBeInTheDocument();
+      expect(options('Effort')).toEqual(['', 'low', 'high']);
+      expect(screen.getByText('Pro runs low, high')).toBeInTheDocument();
+
+      await userEvent.click(start);
+      await waitFor(() => expect(calls).toHaveLength(1));
+      // Default Settings: no model and no effort key (final-review I4) — the default is never narrowed into Pro's first value; the server fills the model.
+      expect(calls[0].body).toEqual({
+        project: '/abs/alpha',
+        permissionMode: 'acceptEdits',
+        mergeMode: 'pr',
+        questionMode: 'park',
+        base: 'main',
+        machine: 'Pro'
+      });
+    });
+
+    it('puts the group above every other field of the step', async () => {
+      stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      const group = await screen.findByRole('group', { name: 'Run on' });
+      const permission = screen.getByLabelText('Permission mode');
+      expect(group.compareDocumentPosition(permission) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    // Review Focus 5.
+    it('gives Merge mode back and keeps the narrowed model on the Settings default when the person switches back to home', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ dispatchDefaultModel: 'opus', orchestrateDefaultMergeMode: 'branch' }));
+      const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect(screen.getByRole('button', { name: 'start' })).toBeEnabled();
+      await userEvent.selectOptions(screen.getByLabelText('Model'), 'haiku');
+      expect((screen.getByLabelText('Merge mode') as HTMLSelectElement).value).toBe('branch');
+
+      await userEvent.click(screen.getByRole('button', { name: /^Pro\b/ }));
+      expect((screen.getByLabelText('Merge mode') as HTMLSelectElement).value).toBe('pr');
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('opus');
+
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      const merge = screen.getByLabelText('Merge mode') as HTMLSelectElement;
+      expect(merge.value).toBe('branch');
+      expect(merge).toBeEnabled();
+      expect(screen.queryByText('Required when running on Pro')).not.toBeInTheDocument();
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('opus');
+      expect(options('Model')).toContain('haiku');
+
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).toMatchObject({ mergeMode: 'branch', model: 'opus' });
+      expect(calls[0].body).not.toHaveProperty('machine');
+    });
+
+    it('sends no model or effort on home after the suggested Pro, with default Settings (final-review I4)', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('');
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('');
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).not.toHaveProperty('machine');
+      expect(calls[0].body).not.toHaveProperty('model');
+      expect(calls[0].body).not.toHaveProperty('effort');
+    });
+
+    it('does not ask for the local merge-check while a remote machine is picked', async () => {
+      const calls = stubOrchestrate(OK, { covered: false, source: null }, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      expect(screen.queryByText(/settings\.local\.json/)).not.toBeInTheDocument();
+      expect(calls).toHaveLength(0);
+    });
+
+    it("shows the server's 409 in the error slot and stays open", async () => {
+      const refusal = 'Pro is not offered for alpha: dashboard unreachable — connect ECONNREFUSED';
+      stubOrchestrate({ ok: false, status: 409, body: { error: refusal } }, covered, 'ok', proSuggested());
+      const { onClose } = renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: 'Start on Pro' }));
+      expect(await screen.findByText(refusal)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('keeps start disabled while the offers load', async () => {
+      stubOrchestrate(OK, covered, 'ok', 'pending');
+      renderSheet();
+      await toModes();
+      expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    });
+
+    it('keeps start disabled, and says why, when no machine is offered', async () => {
+      stubOrchestrate(OK, covered, 'ok', {
+        project: '/abs/alpha',
+        machines: [homeOffer({ offered: false, reason: 'dashboard unreachable — down', usage: null }), proOffer({ offered: false, reason: 'sync is off for o/r on Pro', usage: null })],
+        suggestion: null
+      });
+      renderSheet();
+      await toModes();
+      await screen.findByText(NO_MACHINE_TEXT);
+      expect(screen.getByRole('button', { name: 'start' })).toBeDisabled();
+    });
+
+    it('runs here, and says so, when the machine list cannot be read', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', 'reject');
+      renderSheet();
+      await toModes();
+      expect(await screen.findByText(/could not load the machine list/i)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).not.toHaveProperty('machine');
+    });
   });
 });

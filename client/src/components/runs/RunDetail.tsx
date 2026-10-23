@@ -99,6 +99,7 @@ export function RunDetail({
   summary,
   live,
   remote = false,
+  machine = null,
   invisibleElsewhere = false,
   gate,
   resuming,
@@ -119,6 +120,10 @@ export function RunDetail({
    *  and the watchdog are all local mechanisms on the machine that holds the
    *  run file — and no file fetch, because there is no file here. */
   remote?: boolean;
+  /** Multi-dashboard task 10: the machine a remote run ran on (`MergedRun.machine` — a remote's name, else the raw host). Drawn as a fact beside started /
+   *  finished / status; absent for a local run and for a remote run whose claims recorded no host. Says whose run this is, where the sentence in the controls'
+   *  slot says where its controls are. */
+  machine?: string | null;
   /** task-48: a LOCAL run of a tracker project that has claimed no issue yet,
    *  and so has posted nothing another machine could find it by
    *  (`runInvisibleElsewhere`, lib/remote-run.ts). Decided by the caller, which
@@ -314,6 +319,14 @@ export function RunDetail({
             <span className="run-fact-label">{wallLabel}</span>
             <span className="run-fact-value" data-testid="run-detail-time">
               {formatSpanCompact(wall)}
+            </span>
+          </div>
+        )}
+        {remote && machine !== null && machine !== '' && (
+          <div className="run-fact">
+            <span className="run-fact-label">machine</span>
+            <span className="run-fact-value" data-testid="run-detail-on-machine">
+              {machine}
             </span>
           </div>
         )}

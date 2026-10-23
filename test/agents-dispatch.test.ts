@@ -11,6 +11,8 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
+import homeSpawnFixture from './fixtures/dispatch-home-spawn.json';
+import { DispatchRecordsService } from '../server/src/items/dispatch-records.service';
 import type { BacklogItem, OrchestratorRun, RunStage } from '../shared/types';
 import { COMMIT_RULE, DEFAULT_MODEL, finishClause } from '../shared/agent';
 import { composePrompt } from '../server/src/agents/prompt.util';
@@ -185,6 +187,40 @@ describe('POST /api/agents/dispatch', () => {
     // A path must never be sent — dirName membership is the dashboard's own
     // contract and this is the assertion that keeps us inside it.
     expect(JSON.stringify(body)).not.toContain(projectPath);
+  });
+
+  /**
+   * Multi-dashboard Review Focus 1 — the home-only setup (no `dashboards.json`, no `machine` field) must send the dashboard the spawn body it sent before the
+   * feature, BYTE for byte. `fixtures/dispatch-home-spawn.json` was captured from a run of the unchanged code (the commit before task 5), so these compare
+   * against what the old code actually put on the wire rather than against a re-statement of it a refactor could drift along with. `machine: 'home'` is
+   * the same launch spelled out, and must be the same bytes too. The settings file is pointed at a path that does not exist, so the developer's own
+   * `~/.backlog-manager/settings/dashboards.json` cannot leak into the case.
+   */
+  describe('home dispatch is byte-identical to before multi-dashboard', () => {
+    const recorded = homeSpawnFixture as { default: string; picked: string };
+    const cases = [
+      ['default', {}],
+      ['picked', { model: 'sonnet', effort: 'high' }]
+    ] as const;
+
+    beforeEach(() => {
+      process.env.BM_DASHBOARDS_FILE = join(tmpRoot, 'settings', 'dashboards.json');
+    });
+
+    for (const [key, extra] of cases) {
+      for (const machine of [undefined, 'home']) {
+        it(`${key} pick, machine ${machine ?? 'absent'}: the exact recorded /api/spawn body, to home's dashboard, recorded as machine home`, async () => {
+          const sent = stubDashboard();
+          const body = { ...good, itemPath: bugPath('bug-2-a-known-bug.md'), ...extra, ...(machine === undefined ? {} : { machine }) };
+          await post(body).expect(201, { sessionId: 'sess-1' });
+          const spawns = sent.filter((s) => s.url.endsWith('/api/spawn'));
+          expect(spawns.map((s) => s.url)).toEqual(['http://dash.test:4173/api/spawn']);
+          expect((spawns[0].init?.headers as Record<string, string>).authorization).toBe('Bearer s3cret');
+          expect(spawns[0].init?.body).toBe(recorded[key]);
+          expect(app.get(DispatchRecordsService).get('sess-1')?.machine).toBe('home');
+        });
+      }
+    }
   });
 
   it('refuses to execute an ungroomed bug and names the step it does have', async () => {

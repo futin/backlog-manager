@@ -339,6 +339,18 @@ export function deriveRemoteRuns(input: DeriveRemoteRunsInput): RemoteRun[] {
     // a mode change (`mergeMode` is the EFFECTIVE mode, which can degrade).
     const lead = all.reduce((a, b) => (b.commentId > a.commentId ? b : a));
     const run = lead.record.run!;
+    // The machine the run is on (multi-dashboard task 6), off the newest claim that NAMES one rather than off `lead`: a claim written by a build from
+    // before `ClaimRecord.host` carries none, and a run whose driver was upgraded mid-run must not read as hostless because its newest claim is old-style.
+    // Newest, not first, because a run's claims are all its driver's, and the newest is the one least likely to predate a `BM_MACHINE_NAME` change.
+    // An empty string is no host: `hostIdentity` never writes one, so it can only be a hand edit, and it names no machine.
+    let host: string | null = null;
+    let hostOn = -1;
+    for (const { commentId, record } of all) {
+      if (isString(record.host) && record.host !== '' && commentId > hostOn) {
+        host = record.host;
+        hostOn = commentId;
+      }
+    }
 
     let updated = -Infinity;
     let updatedAt = run.startedAt;
@@ -383,7 +395,8 @@ export function deriveRemoteRuns(input: DeriveRemoteRunsInput): RemoteRun[] {
       attention: notes,
       fresh,
       remote: true,
-      repo
+      repo,
+      host
     });
   }
   // Newest run first, the order every other run list on the page uses.

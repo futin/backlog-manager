@@ -16,6 +16,18 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   machine's registry path; status is the newest `finished` stamp unless ANOTHER claim heartbeated after it, else `running` — a crashed remote run stays
   crashed. A remote row is read-only: no `RunControls`, no `archive/run` fetch. Why:
   [invariants.md](docs/subsystems/invariants.md#remote-runs-ride-beside-runs-never-in-it)
+- **A launch sent to another machine rides in `remoteStarting`, never in `starting`, and blocks only the item or machine it names.**
+  `RemoteStartingService` (`server/src/orchestrator/remote-starting.service.ts`) is a SEPARATE memory-only map, never a second kind of entry in
+  `StartingRunsService`'s `starting`, because `runClaimBlock` and the local expiry (bug-21, bug-57) read `starting` and would let a launch on another machine
+  block home's own Orchestrate. It rides in the runs payload's `remoteStarting` beside `starting`, as `remote` rides beside `runs`, and is lost on restart; the
+  remote session's claim is the durable trace. Two keys: a card dispatch is (project, item) — `markItem`/`itemBlock`, `kind: 'dispatch'` — and blocks a second
+  launch of THAT ITEM to any machine, home included; a remote orchestrate is (project, machine) — `markProject`/`projectBlock`, `kind: 'orchestrate'` — and
+  blocks only a second remote orchestrate of that project to that machine, never home and never another machine. So a remote launch never blocks a local RUN; it
+  does block one ITEM until its claim shows. Each entry copies the machine's claim `host` at mark time, and an item entry the highest claim comment id on the
+  issue then (its floor); a capture marks none. It dies on the first of: a claim by that host on the item, live or released, above the floor; a remote run of
+  that project on that host started at or after `requestedAt`; or `RUN_STALE_MS`. Only `list` applies the second and deletes what all three retire;
+  `itemBlock` applies the first and age, `projectBlock` age alone. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-launch-sent-to-another-machine-rides-in-remotestarting-never-in-starting)
 - **A run's sidecars are archived beside its run file, under a name derived from the archive path and stored nowhere.** One `archiveStem` names both
   `runs/<stem>.json` and `runs/<stem>/`; there is no `sidecarDir` field. The mover is a denylist of three (`run.json`, `runs/`, `stale-plans.json` —
   project-level state, not a sidecar), never an allowlist; sidecars move first, `run.json` renames last; nothing already present is overwritten; the move

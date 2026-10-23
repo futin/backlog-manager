@@ -59,7 +59,7 @@ function routedFetch(): jest.Mock {
       releaseCalls += 1;
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(releases) } as Response);
     }
-    const payload = url.includes('/api/orchestrator/runs') ? { runs: [], starting: [], remote: [] } : url.includes('/api/projects') ? [] : { items: [], errors: [] };
+    const payload = url.includes('/api/orchestrator/runs') ? { runs: [], starting: [], remote: [], remoteStarting: [] } : url.includes('/api/projects') ? [] : { items: [], errors: [] };
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(payload) } as Response);
   }) as jest.Mock;
 }

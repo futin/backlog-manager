@@ -453,7 +453,9 @@ section (seven dialogs). The browser still never talks to Jira or the dashboard:
   repository through `useFetched`), the ticket's transitions and assignee (`GET /issue/:key`, on open) and the agents status (`useAgents`, on open — never the
   Board's copy). `Start` is drawn only for a `disabled` or `enabled` `projectDispatchGate` answer and sends `dispatchJira` (`POST /api/agents/dispatch-jira`);
   `Copy prompt` needs the preview and a clipboard. The permission mode is derived — the pick, else `defaultModeFor(action)`, clamped to the host's ceiling —
-  and model and effort seed from Settings. A landed Start calls `onStarted`, which reloads the shell's status (the strip) and nudges the board. The server
+  and model and effort seed from Settings. Start stays HOME-ONLY under multi-dashboard: the sheet draws no machine picker and `dispatch-jira` takes no
+  `machine`, because the mapped repository is a path in this machine's `jira.json` and means nothing on another. A landed Start calls `onStarted`, which reloads
+  the shell's status (the strip) and nudges the board. The server
   applies `Assign to me` and `Move to` BEFORE the spawn, so a Start refused after a write landed ends its sentence `— the assign stands` or `— the Jira writes
   stand`; the sheet reads that (`jiraWritesStand`) as `onWrote` — the same reload and nudge — and puts `Move to` back to `leave as is`, the refusal staying on
   screen. A refusal before any write changes nothing.

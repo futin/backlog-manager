@@ -125,7 +125,7 @@ const AGENTS_STATUS: AgentsStatus = {
   projectPaths: [FILES_PATH, TRACKER_PATH]
 };
 
-const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [] };
+const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [], remoteStarting: [] };
 
 let bodyCalls: string[];
 
@@ -274,7 +274,8 @@ describe('the orchestrator:queued strip', () => {
         } as OrchestratorRunsPayload['runs'][number]
       ],
       starting: [],
-      remote: []
+      remote: [],
+      remoteStarting: []
     };
   }
 
@@ -312,8 +313,8 @@ describe('the orchestrator:queued strip', () => {
     // `queuedReading` the REMOTE runs too, or every other machine's live queue
     // reads stale here.
     const local = trackerRun({});
-    const remote = { ...local.runs[0], repo: 'futin/x', remote: true as const };
-    await renderBoard([issueItem({ queued: true })], projects(), { runs: [], starting: [], remote: [remote] });
+    const remote = { ...local.runs[0], repo: 'futin/x', remote: true as const, host: null };
+    await renderBoard([issueItem({ queued: true })], projects(), { runs: [], starting: [], remote: [remote], remoteStarting: [] });
     await waitFor(() => expect(strip('an issue')).toHaveAttribute('data-state', 'live'));
   });
 

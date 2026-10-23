@@ -110,6 +110,7 @@ export function useOrchestratorRuns(): {
   runs: OrchestratorRunsPayload['runs'];
   starting: OrchestratorRunsPayload['starting'];
   remote: OrchestratorRunsPayload['remote'];
+  remoteStarting: OrchestratorRunsPayload['remoteStarting'];
   refresh: () => void;
   noteResume: (project: string) => void;
   resuming: ReadonlySet<string>;
@@ -120,6 +121,9 @@ export function useOrchestratorRuns(): {
   // never folded into `runs`: every reader of `runs` here and on the board
   // assumes one run file per project on THIS machine.
   const [remote, setRemote] = useState<OrchestratorRunsPayload['remote']>([]);
+  // Launches sent to a REMOTE dashboard that have not shown up in its claims yet (multi-dashboard task 10). Their own state for bug-57's reason: `starting`
+  // feeds `runClaimBlock` and the local expiry, and a launch on another machine blocks neither.
+  const [remoteStarting, setRemoteStarting] = useState<OrchestratorRunsPayload['remoteStarting']>([]);
   /**
    * project → the moment its resume mark expires (task-17).
    *
@@ -162,6 +166,8 @@ export function useOrchestratorRuns(): {
           setStarting(payload.starting ?? []);
           // Same fallback, same reason, for task-48's array.
           setRemote(payload.remote ?? []);
+          // And again for `remoteStarting`: an older server omits it, and `.length` below would throw on undefined.
+          setRemoteStarting(payload.remoteStarting ?? []);
           // task-17: drop marks this payload has answered or that have simply
           // run out. Purely housekeeping — `resuming` below re-applies both
           // rules on every render, so an unpruned map never lies, it only
@@ -231,8 +237,15 @@ export function useOrchestratorRuns(): {
   // task-48 ORs a remote `running` run in too: this machine cannot see it
   // progress any other way than by asking again, and a run another machine is
   // draining is live in exactly the sense this poll exists for.
+  //
+  // Multi-dashboard task 10 ORs `remoteStarting` in as well: the server sweeps those entries only when this payload is read, so a board that stopped asking
+  // would show `Starting on Pro` until something else woke it. It arms the same single coalesced poll — never a second request in flight.
   const anyLive =
-    runs.some((run) => run.fresh || run.status === 'running') || remote.some((run) => run.status === 'running') || starting.length > 0 || resuming.size > 0;
+    runs.some((run) => run.fresh || run.status === 'running') ||
+    remote.some((run) => run.status === 'running') ||
+    starting.length > 0 ||
+    remoteStarting.length > 0 ||
+    resuming.size > 0;
 
   /**
    * The point of this hook: a poll that exists only while it has something to
@@ -295,5 +308,5 @@ export function useOrchestratorRuns(): {
     [refresh]
   );
 
-  return { runs, starting, remote, refresh, noteResume, resuming };
+  return { runs, starting, remote, remoteStarting, refresh, noteResume, resuming };
 }

@@ -1865,7 +1865,8 @@ exhaustiveness site, where a separate field reaches only what opts in.
 
 An entry dies on any of **three** rules: a run in the same payload matches the project AND its `startedAt` parses to at or after `requestedAt` — **`startedAt`,
 not "a run.json exists"**, since `cmdInit` archives the old file and writes a new one, so a project that has ever run always has one. "A run in the same
-payload" means `runs` alone, never `remote` (bug-57, withdrawing bug-51's widening): a board spawn can only land on THIS machine — the mark follows the local
+payload" means `runs` alone, never `remote` (bug-57, withdrawing bug-51's widening): a `starting` mark is home's alone, because a board spawn into it can only
+land on THIS machine (a launch sent elsewhere is `remoteStarting`'s, the next section) — the mark follows the local
 dashboard's acceptance, the dashboard spawns in a path on this host, and `init` writes a local run file before anything is claimed — and `deriveRemoteRuns`
 excludes every run id this machine holds a file for, so no remote run is ever the landing a mark waits for. Counting one evicted the placeholder of a live spawn
 whenever another machine happened to start inside its boot, and a slow start then read as a launch that silently failed. Or the entry is older than
@@ -1947,6 +1948,70 @@ surface uses — the run strip renders nothing for a stale run", and the strip's
 NOT freshness-gated: `runChipReading` (`RunChip.tsx`) counts a stale `running` run through `isCrashed` and draws a chip for it, because "a crashed run renders
 as crashed, never as nothing" is that control's whole job. So the rule to carry forward is per-question rather than per-surface — **a claim about one ITEM is
 freshness-gated; a count of what the RUNS are doing is not** — and a future session widening one must not read this section as licence to widen the other.
+
+## A launch sent to another machine rides in `remoteStarting`, never in `starting`
+
+A launch sent to another machine rides in `remoteStarting`, never in `starting`. `RemoteStartingService` (`server/src/orchestrator/remote-starting.service.ts`)
+is the remote counterpart of `StartingRunsService` and deliberately a SEPARATE map in its own payload field, not a second kind of entry in that one: `starting`
+is read by `runClaimBlock` and by the local expiry rules (bug-21, bug-57), so an entry for a launch on another machine riding in it would block this machine's
+own Orchestrate for a run that can never land here, and would be judged against local runs it can never match. It rides beside `starting` the way `remote` rides
+beside `runs`, and for the reason bug-57 gave: what a mark waits for must be something only this machine's `init` can produce.
+
+It is memory only, for `StartingRunsService`'s reason — an entry records a request THIS process made, which no file can answer, and the claim the remote session
+writes is the durable trace; a restart costs only the `Starting on` badge for the rest of one launch. It adds no writer to anything.
+
+It has TWO keys because the two launches block different things. A card dispatch is keyed by (project, item) and blocks a second launch of THAT ITEM on ANY
+machine, home included: until the remote session's first claim lands nothing on the tracker says the item is taken, so every claim check a home dispatch reads
+would wave a second session onto the same issue. That is intended — the block is the item's, not the machine's. A remote orchestrate is keyed by (project,
+machine) and blocks only a second remote orchestrate of that project to that machine, never another machine and never home, because two machines may drain one
+tracker project at once (the claim protocol keeps their items disjoint). So what a remote launch never blocks is a local RUN; what it does block is one ITEM,
+for the minutes before its claim shows.
+
+An entry dies on the first of: a claim by the entry's `host` (a copy of the machine's `host` taken at mark time, because the machine list is re-read per request
+and an entry edited away must not be answered for by a lookup made later) is on the item, live or released, with a comment id above the entry's floor — the
+highest claim comment id the tracker cache held for the issue at mark time; a remote run of that project on that host started at or after `requestedAt`; or
+`RUN_STALE_MS`. The floor is what keeps an earlier session's claim from reading as this launch's landing. Released counts because a release edits the comment
+and never deletes it, and a groom claims and releases inside one or two poll intervals: when the rule needed the claim LIVE, a sweep that missed that window
+left the entry to age out, and for those 15 minutes it refused the item's natural next step, the execute of the item just groomed. A capture is never marked,
+because it files a new item and never claims the one it was launched from, so nothing but age could retire its entry. Only `list`, which holds the remote runs,
+can apply the second rule, and it deletes what all three retire, so the map is swept on every runs read. The launch-time `itemBlock` applies the first rule and
+age — once a released claim retires an entry, an unswept one would refuse what no claim gate does — and `projectBlock` age alone, because the launch reads its
+own live-run gate first and an entry the sweep would have retired but no read has yet refuses nothing that gate would not.
+
+## `dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced
+
+**The machine list** (spec: [2026-10-22-multi-dashboard-design.md](../superpowers/specs/2026-10-22-multi-dashboard-design.md)). One board can start work on this
+machine ("home", id `home`, the dashboard `BM_AGENTS_URL` names) or on another machine's dashboard (a "remote", id = its `name`).
+`~/.backlog-manager/settings/dashboards.json` (`$BM_DASHBOARDS_FILE` to override, read per call and cached nowhere) lists the remotes and carries the person's
+own presentation: `{ home?, dashboards: [{ name, url, bmUrl, host, account?, models?, efforts? }], order?, strategy?, threshold? }`. It is the sixth file the
+server owns under `settings/` and it keeps the relationship `jira.json` and `tick.json` have with their reader, with one difference that matters: NO skill and
+no tool reads it. The server writes it (`writeDashboardsFile`, the only write path, behind `POST /api/dashboards/entries`, `/entries/delete`, `/home` and
+`/settings`) and the server reads it (`readDashboardsFile`) for `GET /api/dashboards`, the offers, the launch routes and the stop route — so what the file
+decides is where THIS server will send a prompt that starts a Claude Code session, and that is why the four POSTs are guarded like every other agents POST and
+why a name is held to `^[A-Za-z][A-Za-z0-9]{0,23}$`, unique case-insensitively, never `home`, at most eight.
+
+**A file that cannot be read is never replaced, and a file that does not exist is the product as it was.** A MISSING file (ENOENT) is `source: "default"`: home
+alone, no remote, and every surface the feature adds stays out of sight — `GET /api/dashboards/offers` answers home without fetching any usage, the client draws
+no machine picker, and a request without `machine` is the launch it has always been, byte for byte. That is the promise the whole feature is built around: a
+person who never creates the file never sees it. An UNREADABLE file — an I/O error that is not ENOENT, text that is not JSON, or JSON that is not a plain object
+(`tick.json`'s strictness, not `jira.json`'s: a hand-edit in flight is not "no machines") — is `source: "unreadable"`: the reader answers home only and ignores
+every remote it might have held, and the four POSTs answer `409` naming the file (`DashboardsFileUnreadable`, thrown before any write) and leave it
+byte-identical. The stop is the point: rewriting from defaults would turn a stray comma into "no remotes" with nothing on disk left to recover the entries from,
+and falling back to the last good read would send a launch somewhere the file on disk no longer says. A readable file is read forgivingly entry by entry — an
+invalid entry, a case-insensitive duplicate (the first wins) and anything past the eighth is dropped, never an error — because a remote that cannot be
+launched to is a card the person can see and fix, where a thrown error would blank the whole list.
+
+**Tokens are env-only, and no response carries one.** A remote's token is `BM_AGENTS_TOKEN_<NAME uppercased>`, home's is `BM_AGENTS_TOKEN`, and neither is in
+the file, the view or any error: `DashboardsView` carries `tokenSet` (a boolean) and `tokenVar` (the variable's NAME, so the card can say which one to set), and
+an offer is built field by field from the machine so a machine's config, which holds the token, is never spread into it. This is the GitHub and Jira tokens'
+rule applied to a third secret; the file is plain text a person edits and may paste into a bug report, and the variable is what a process manager already
+keeps out of one.
+
+**The write is atomic and the file's own.** A temp file in the same directory, then `rename`, the `tick-breaker.util.ts` shape — a reader concurrently sees the
+old complete file or the new complete one — with the temp file removed when the write fails. Each POST is a read-modify-write of one field family (an entry, the
+home block, the strategy), so editing one machine never forgets another; two concurrent POSTs are the later one wins, the precedent `jira.json` set: one person,
+one board. The file never holds anything a machine owns: a remote's `host` is the value that machine's claims carry (its `BM_MACHINE_NAME`), recorded here only
+so a stop after a restart can route by it.
 
 ## Every agents POST is guarded by content-type and origin
 
@@ -2456,6 +2521,9 @@ five-status line still counts a crashed run under `running`, because that is a t
 
 `useOrchestratorRuns` polls while any run is `running`, fresh or not. Widened from "any run is fresh" — a crashed run's attempt counter, error text and the
 moment it goes fresh again would otherwise wait for a window focus, and the crashed row would read as a screenshot instead of something live.
+It also polls while the payload's `remoteStarting` is non-empty (multi-dashboard): a `Starting on <machine>` row is cleared by the SERVER's rules, with no run
+file of this machine's to tell the client, so without the poll the row would sit until something else woke it. It arms the same single coalesced request, never
+a second one in flight.
 
 #### Which object describes a run right now — the three tiers behind `pickAuthority`
 

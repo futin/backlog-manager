@@ -8,6 +8,7 @@ import '@testing-library/jest-dom';
 import { OrchestrateSheet } from '../client/src/components/board/OrchestrateSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoDate } from './helpers/dates';
+import { homeOnly } from './helpers/offers';
 import type { BacklogItem } from '../shared/types';
 
 /**
@@ -127,6 +128,10 @@ function stub(answer: UncommittedAnswer): { url: string; body: unknown }[] {
     // picker's own cases live in orchestrator-start-ui.test.tsx.
     if (url.includes('/api/agents/branches')) {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ branches: ['main'] }) } as Response);
+    }
+    // Multi-dashboard task 9's on-mount read, home-only, kept out of `calls` for the same reason.
+    if (url.includes('/api/dashboards/offers')) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(homeOnly()) } as Response);
     }
     if (url.includes('/api/agents/merge-check')) {
       return Promise.resolve({
@@ -586,6 +591,7 @@ describe('OrchestrateSheet — the uncommitted flag', () => {
           : json({ paths: [TASK_2.path], absent: [TASK_2.path], known: true });
       }
       if (url.includes('/api/agents/branches')) return json({ branches: ['main', 'feature/x'] });
+      if (url.includes('/api/dashboards/offers')) return json(homeOnly());
       if (url.includes('/api/agents/merge-check')) return json({ covered: true, source: null });
       return json({});
     }) as jest.Mock;

@@ -1,0 +1,4 @@
+{
+  "default": "{\"project\":\"-abs-alpha\",\"prompt\":\"Use the backlog-manager:backlog-execute skill on bug-2. When the job is done, commit the work: stage only the files this session changed, never `git add -A` or `git add .` — the tree may hold unrelated uncommitted work of the user's. Do not push.\",\"name\":\"bl alpha bug-2\",\"permissionMode\":\"acceptEdits\",\"model\":\"opus\",\"remoteControl\":true}",
+  "picked": "{\"project\":\"-abs-alpha\",\"prompt\":\"Use the backlog-manager:backlog-execute skill on bug-2. When the job is done, commit the work: stage only the files this session changed, never `git add -A` or `git add .` — the tree may hold unrelated uncommitted work of the user's. Do not push.\",\"name\":\"bl alpha bug-2\",\"permissionMode\":\"acceptEdits\",\"model\":\"sonnet\",\"effort\":\"high\",\"remoteControl\":true}"
+}

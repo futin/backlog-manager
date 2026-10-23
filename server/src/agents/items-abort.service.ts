@@ -8,6 +8,7 @@ import { TrackerPollerService } from '../tracker/poller.service';
 import { readAgentsConfig } from './config.util';
 import { dashboardSessionStatus, staleClaimProbe } from './agents.service';
 import { stopDashboardSession } from './session-stop.util';
+import { DashboardsService, type Machine } from './dashboards/dashboards.service';
 import type { ItemAbortResult } from '../../../shared/types';
 
 /**
@@ -37,6 +38,22 @@ import type { ItemAbortResult } from '../../../shared/types';
  *   the same as not running. What this cannot see is a board-dispatched `claude -p` between turns on a record this server lost — it reads `idle` like a
  *   finished session — which is why the client's confirm for this case says so.
  *
+ * ## Which machine (multi-dashboard task 7)
+ *
+ * The card may have been dispatched to a REMOTE dashboard, whose session this machine's dashboard has never heard of — so the stop has to go to the dashboard
+ * the session runs on, before the claim is released. The ladder, in order:
+ *
+ * 1. **A dispatch record** names its machine (`DispatchRecord.machine`): stop on it. A name the machine file no longer holds is a 409 and the claim stays —
+ *    the session may still be running on a machine this server can no longer reach, and guessing "home" would answer "no live session" for a process that is
+ *    alive. A record stays this case A on any machine: the board started the session, so the board may stop it, wherever it runs.
+ * 2. **No record** (this server restarted) and the claim's `host` is a configured remote's `host` (exact match): that remote's dashboard is where the session
+ *    is, so stop there and release. Only the stop's own answer is the proof here — a remote's session list is NOT consulted — so this is case A's rule applied
+ *    to a session whose record was lost, and a failed stop is a 502 with the claim untouched. Review Focus 4.
+ * 3. **Otherwise** case B exactly as before: the `BM_MACHINE_NAME` and host-equality refusals, then the home session list. A host that matches no machine at
+ *    all keeps today's `held on <host>, not this one` refusal.
+ *
+ * The remote's `cfg` carries its own URL and token, and its stop keeps `STOP_TIMEOUT_MS` and its 502s — one stop function, one `cfg` argument.
+ *
  * The release is `reason: 'aborted'`, `by: 'board'`, and carries `authority: 'board'` — the release rule's fifth clause, which no HTTP body can set.
  *
  * ## A stale claim (#227)
@@ -59,7 +76,9 @@ export class ItemsAbortService {
     private readonly items: ItemsService,
     private readonly dispatches: DispatchRecordsService,
     /** For `syncOffBlock` alone (#17) — see the first check in `abort`. */
-    private readonly poller: TrackerPollerService
+    private readonly poller: TrackerPollerService,
+    /** Which machine's dashboard a stop is sent to (multi-dashboard task 7) — see "Which machine" above. Reads the machine file per call, nothing cached. */
+    private readonly dashboards: DashboardsService
   ) {}
 
   async abort(project: string, id: string): Promise<ItemAbortResult> {
@@ -90,8 +109,18 @@ export class ItemsAbortService {
     }
 
     let stopped = false;
-    if (this.dispatches.get(holder.session) !== null) {
-      stopped = await stopDashboardSession(cfg, holder.session, 'the claim is untouched');
+    const record = this.dispatches.get(holder.session);
+    let target: Machine | null = null;
+    if (record !== null) {
+      target = this.dashboards.machine(record.machine);
+      if (target === null) {
+        throw new HttpException({ error: `${id} was dispatched to ${record.machine}, which is no longer configured` }, 409);
+      }
+    } else {
+      target = this.dashboards.byHost(holder.host);
+    }
+    if (target !== null) {
+      stopped = await stopDashboardSession(target.cfg, holder.session, 'the claim is untouched');
     } else {
       const machine = (process.env.BM_MACHINE_NAME ?? '').trim();
       if (machine === '') {

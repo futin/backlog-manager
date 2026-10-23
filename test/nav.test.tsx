@@ -339,7 +339,7 @@ describe('the wordmark cursor', () => {
 
   beforeEach(() => {
     localStorage.clear();
-    global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: [], starting: [], remote: [] }) } as Response)) as jest.Mock;
+    global.fetch = jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ runs: [], starting: [], remote: [], remoteStarting: [] }) } as Response)) as jest.Mock;
   });
 
   it('blinks on the Board’s report and stops the moment the section switches to Settings', async () => {

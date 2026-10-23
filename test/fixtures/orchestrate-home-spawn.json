@@ -1,0 +1,4 @@
+{
+  "default": "{\"project\":\"-local-bm\",\"prompt\":\"/backlog-orchestrate\",\"name\":\"orchestrate bm\",\"permissionMode\":\"auto\",\"model\":\"opus\"}",
+  "picked": "{\"project\":\"-local-bm\",\"prompt\":\"/backlog-orchestrate --merge-mode pr --question-mode decide\",\"name\":\"orchestrate bm\",\"permissionMode\":\"acceptEdits\",\"model\":\"sonnet\",\"effort\":\"high\"}"
+}

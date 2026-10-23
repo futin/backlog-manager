@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useWhatsNew } from 'ui-kit';
 
 import { SectionBoundary } from './components/SectionBoundary';
@@ -81,7 +81,7 @@ export function App() {
  * landing preference has to be readable before the first section paints.
  */
 function AppShell() {
-  const { settings } = useSettings();
+  const { settings, update } = useSettings();
   // Remembered across loads: reopening on the section you left is what you want
   // from a board you come back to.
   const [stored, setStored] = usePersistedState<Section>('backlog-manager.section', FALLBACK_SECTION);
@@ -109,6 +109,15 @@ function AppShell() {
     return read;
   });
   const [section, setSection] = useState<Section>(() => link.section ?? resolveSection(settings.landing === 'last' ? stored : settings.landing));
+  /*
+    A deep link's Settings page (`&settings=shared`) goes through `update({ settingsScope })`, the setter the rail's scope switch calls — never an in-page control.
+    It cannot sit in the initializer above as the Runs page does: `update` is a state setter on the provider, and calling one while this component renders is a
+    React error. A layout effect is the nearest point that is still before first paint, and the Settings view is lazy, so it mounts after this has landed.
+    Mount only, like the effect below: `link` never changes.
+  */
+  useLayoutEffect(() => {
+    if (link.settingsScope !== null) update({ settingsScope: link.settingsScope });
+  }, []);
   // Recorded as a click on the rail would record it, and taken out of the address bar so a reload inside the app reopens where the reader has gone since.
   // Mount only: `link` never changes, and `setStored` is a fresh closure every render.
   useEffect(() => {

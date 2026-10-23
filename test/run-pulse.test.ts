@@ -52,7 +52,7 @@ describe('runsWorking', () => {
      `remoteAsLive`, which keeps the `remote: true` literal at run time — so the derivation asks `isRemoteRun` rather than trusting which array a caller
      happened to hand it. */
   it('is false when the only running run is a remote one', () => {
-    const remote = remoteAsLive({ ...fixture, status: 'running', fresh: true, remote: true, repo: 'octo/alpha' });
+    const remote = remoteAsLive({ ...fixture, status: 'running', fresh: true, remote: true, repo: 'octo/alpha', host: null });
     expect(runsWorking([remote], [])).toBe(false);
   });
 

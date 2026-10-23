@@ -23,7 +23,7 @@ const fixture = rawFixture as OrchestratorRun;
  * parameter nobody would vary.
  */
 function payload(fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [] };
+  return { runs: [{ ...fixture, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [], remoteStarting: [] };
 }
 
 /**
@@ -35,7 +35,7 @@ function payload(fresh: boolean): OrchestratorRunsPayload {
  * lib/run-watchdog.ts) — the poll must still be running for it.
  */
 function payloadWith(status: OrchestratorRun['status'], fresh: boolean): OrchestratorRunsPayload {
-  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [] };
+  return { runs: [{ ...fixture, status, fresh, pastRuns: 0, pauseRequested: false, stopRequested: false }], starting: [], remote: [], remoteStarting: [] };
 }
 
 /** Same shape as test/agents-client.test.ts's own `stub`: every call answers
@@ -44,7 +44,7 @@ function payloadWith(status: OrchestratorRun['status'], fresh: boolean): Orchest
 /** task-48: one `remote` entry — another machine's run, as the server derives
  *  it from claim comments. */
 function remoteEntry(status: OrchestratorRun['status']): OrchestratorRunsPayload['remote'][number] {
-  return { ...fixture, runId: 'run-20260919-110000', status, fresh: status === 'running', remote: true, repo: 'futin/x' };
+  return { ...fixture, runId: 'run-20260919-110000', status, fresh: status === 'running', remote: true, repo: 'futin/x', host: null };
 }
 
 function stubFetch(body: OrchestratorRunsPayload): jest.Mock {
@@ -469,7 +469,8 @@ describe('useOrchestratorRuns', () => {
     const fetchMock = stubFetch({
       runs: [],
       starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }],
-      remote: []
+      remote: [],
+      remoteStarting: []
     });
     renderHook(() => useOrchestratorRuns());
     await flush();
@@ -485,7 +486,7 @@ describe('useOrchestratorRuns', () => {
   // `running` remote entry keeps the poll going on its own — and a finished
   // one does not, or every Runs page with a tracker history would poll forever.
   it('U-4: polls while only a remote run is running', async () => {
-    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('running')] });
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('running')], remoteStarting: [] });
     const { result } = renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -498,7 +499,7 @@ describe('useOrchestratorRuns', () => {
   });
 
   it('U-4: does not poll for a remote run that has finished', async () => {
-    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('done')] });
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [remoteEntry('done')], remoteStarting: [] });
     renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -506,7 +507,7 @@ describe('useOrchestratorRuns', () => {
   });
 
   it('does not poll when runs, starting and remote are all empty', async () => {
-    const fetchMock = stubFetch({ runs: [], starting: [], remote: [] });
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [], remoteStarting: [] });
     renderHook(() => useOrchestratorRuns());
     await flush();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -518,12 +519,59 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  /*
+    Multi-dashboard task 10: a launch sent to another machine has no claim yet, and `RemoteStartingService` is swept only when this payload is read — so a poll that
+    stood down while `remoteStarting` was non-empty would leave the entry on screen until something else woke the hook. It keeps polling exactly as long as the
+    array holds an entry, and the one-in-flight coalescing is untouched: the follow-up fetch is armed by the answer, never by the timer alone.
+  */
+  const remoteStartingEntry = { kind: 'orchestrate', project: '/abs/alpha', machine: 'Pro', itemId: null, requestedAt: '2026-09-19T11:00:00.000Z' } as const;
+
+  it('polls while only a remote launch is starting, and surfaces the array', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [], remoteStarting: [remoteStartingEntry] });
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.remoteStarting).toEqual([remoteStartingEntry]);
+    expect(result.current.starting).toEqual([]);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops polling once the remote starting entry is swept', async () => {
+    const fetchMock = stubFetchSequence([
+      { runs: [], starting: [], remote: [], remoteStarting: [remoteStartingEntry] },
+      { runs: [], starting: [], remote: [], remoteStarting: [] }
+    ]);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(jest.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.remoteStarting).toEqual([]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('treats a payload with no remoteStarting key as an empty one', async () => {
+    const fetchMock = stubFetch({ runs: [], starting: [], remote: [] } as unknown as OrchestratorRunsPayload);
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(result.current.remoteStarting).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   it('stops polling once the starting entry is replaced by a finished run', async () => {
     // The whole point of the widening: the placeholder's own poll is what
     // notices the real run landing, and the timer chain has to stand back down
     // once that run is over rather than outliving both shapes.
     const fetchMock = stubFetchSequence([
-      { runs: [], starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }], remote: [] },
+      { runs: [], starting: [{ project: '/abs/alpha', requestedAt: new Date().toISOString() }], remote: [], remoteStarting: [] },
       payloadWith('done', false)
     ]);
     renderHook(() => useOrchestratorRuns());
@@ -540,7 +588,7 @@ describe('useOrchestratorRuns', () => {
   it('surfaces the starting array to its caller', async () => {
     const entry = { project: '/abs/alpha', requestedAt: new Date().toISOString() };
     const { result } = renderHook(() => useOrchestratorRuns());
-    stubFetch({ runs: [], starting: [entry], remote: [] });
+    stubFetch({ runs: [], starting: [entry], remote: [], remoteStarting: [] });
     result.current.refresh();
     await flush();
 

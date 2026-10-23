@@ -171,7 +171,7 @@ const AGENTS_STATUS: AgentsStatus = {
  * once the Board/Archive split does.
  */
 type RunPayload = OrchestratorRunsPayload['runs'][number];
-const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [] };
+const NO_RUNS: OrchestratorRunsPayload = { runs: [], starting: [], remote: [], remoteStarting: [] };
 
 /** One fresh run for `/abs/alpha` holding exactly `id` at `stage`. Built off
  *  the contract fixture, like every other suite that needs a run payload, so
@@ -237,7 +237,7 @@ function stubItems(items: BacklogItem[], runs: RunPayload[] = [], projects: Proj
     const payload: unknown = url.includes('/api/agents/status')
       ? AGENTS_STATUS
       : url.includes('/api/orchestrator/runs')
-        ? ({ runs, starting: [], remote: [] } satisfies OrchestratorRunsPayload)
+        ? ({ runs, starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload)
         : url.includes('/api/projects')
           ? projects
           : { items, errors: [] };

@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -13,6 +13,7 @@ import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { writeSyncInterval } from '../server/src/tracker/sync-config.util';
 import { parseClaim } from '../server/src/tracker/claim';
+import { DispatchRecordsService } from '../server/src/items/dispatch-records.service';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
@@ -47,6 +48,8 @@ let trackerPath: string;
 type Answer = { status: number; body: unknown } | 'throw';
 let dash: { stop: Answer; sessions: Answer };
 let dashCalls: { method: string; url: string }[];
+/** The `authorization` header each call carried, keyed by URL — kept apart from `dashCalls` so the older `toEqual` assertions on it stay as they were. */
+let dashAuth: Map<string, string | undefined>;
 
 function project(name: string, marker?: string): string {
   const root = makeProject(name, [], marker);
@@ -61,10 +64,12 @@ function answer(a: Answer): Promise<Response> {
 
 function stubDashboard(): void {
   dashCalls = [];
+  dashAuth = new Map();
   dash = { stop: { status: 200, body: { stopped: true } }, sessions: { status: 200, body: { sessions: [] } } };
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     dashCalls.push({ method: init?.method ?? 'GET', url });
+    dashAuth.set(url, (init?.headers as Record<string, string> | undefined)?.authorization);
     if (/\/api\/sessions\/[^/]+\/stop$/.test(url)) return answer(dash.stop);
     if (url.endsWith('/api/sessions')) return answer(dash.sessions);
     if (url.endsWith('/api/configs')) {
@@ -365,6 +370,117 @@ describe('case B — no dispatch record', () => {
       expect(commentPatches()).toEqual([]);
     });
   }
+});
+
+/**
+ * Multi-dashboard task 7 — the stop goes to the machine the card was dispatched to. A remote's `dashboards.json` entry (`Pro`, host `pro-mac`) is read per
+ * request, so each case writes its own file. The ladder: a dispatch record names its machine; with none, the claim's `host` finds a remote; otherwise today's
+ * home-only path (and its refusals) runs unchanged — the two cases in `case B` above that name another machine and no host at all still land there.
+ */
+describe('stop routed to the machine', () => {
+  const PRO = 'http://pro.test:4173';
+
+  function writeDashboards(entries: unknown[]): void {
+    const root = mkdtempSync(join(tmpdir(), 'bm-abort-dash-'));
+    dirs.push(root);
+    const file = join(root, 'settings', 'dashboards.json');
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ dashboards: entries }));
+    process.env.BM_DASHBOARDS_FILE = file;
+  }
+
+  const pro = { name: 'Pro', url: PRO, bmUrl: 'http://pro.test:4322', host: 'pro-mac' };
+
+  beforeEach(() => {
+    process.env.BM_AGENTS_TOKEN = 'home-token';
+    process.env.BM_AGENTS_TOKEN_PRO = 'pro-token';
+    writeDashboards([pro]);
+  });
+
+  function recordFor(session: string, machine: string): void {
+    app.get(DispatchRecordsService).record(session, { projectPath: trackerPath, itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', machine, at: Date.now() });
+  }
+
+  it('stops a card dispatched to Pro on Pro, with Pro’s token, then releases the claim aborted', async () => {
+    await seed({ session: 'sess-pro', host: 'pro-mac' });
+    recordFor('sess-pro', 'Pro');
+
+    const res = await abort().expect(201);
+
+    expect(res.body).toEqual({ id: '#31', released: true, stopped: true });
+    expect(stopCalls()).toEqual([{ method: 'POST', url: `${PRO}/api/sessions/sess-pro/stop` }]);
+    expect(dashAuth.get(`${PRO}/api/sessions/sess-pro/stop`)).toBe('Bearer pro-token');
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'aborted', by: 'board' });
+  });
+
+  it('stops a record whose machine is home on home’s URL with home’s token, as before', async () => {
+    await seed({ session: 'sess-home' });
+    recordFor('sess-home', 'home');
+
+    await abort().expect(201);
+
+    expect(stopCalls()).toEqual([{ method: 'POST', url: 'http://dash.test:4173/api/sessions/sess-home/stop' }]);
+    expect(dashAuth.get('http://dash.test:4173/api/sessions/sess-home/stop')).toBe('Bearer home-token');
+  });
+
+  /* Review Focus 4: this server restarted, so there is no record. The claim's host is the only trace of where the session runs. */
+  it('with no record, finds Pro by the claim host, stops there, then releases', async () => {
+    await seed({ session: 'sess-pro', host: 'pro-mac' });
+
+    const res = await abort().expect(201);
+
+    expect(res.body).toEqual({ id: '#31', released: true, stopped: true });
+    expect(stopCalls()).toEqual([{ method: 'POST', url: `${PRO}/api/sessions/sess-pro/stop` }]);
+    expect(dashAuth.get(`${PRO}/api/sessions/sess-pro/stop`)).toBe('Bearer pro-token');
+    expect(dashCalls.some((c) => c.url.endsWith('/api/sessions'))).toBe(false);
+    expect(claimIn(100)?.released).toMatchObject({ reason: 'aborted', by: 'board' });
+  });
+
+  it('with no record and a host that matches no machine, keeps today’s refusal and asks nobody', async () => {
+    await seed({ host: 'ghost@box' });
+
+    const res = await abort().expect(409);
+
+    expect(res.body).toEqual({ error: `#31 is held on ghost@box, not this one (${HOST})` });
+    expect(dashCalls).toEqual([]);
+    expect(commentPatches()).toEqual([]);
+  });
+
+  it('with no record and the claim host equal to BM_MACHINE_NAME, runs today’s home path (working → 409)', async () => {
+    await seed();
+    dash.sessions = { status: 200, body: { sessions: [{ id: 'A', status: 'working' }] } };
+
+    const res = await abort().expect(409);
+
+    expect(res.body.error).toMatch(/working/);
+    expect(stopCalls()).toEqual([]);
+    expect(commentPatches()).toEqual([]);
+  });
+
+  it('502s when Pro’s stop fails, naming the untouched claim, and releases nothing', async () => {
+    await seed({ session: 'sess-pro', host: 'pro-mac' });
+    dash.stop = { status: 500, body: { error: 'boom' } };
+
+    const res = await abort().expect(502);
+
+    expect(res.body.error).toMatch(/the claim is untouched/);
+    expect(stopCalls()).toHaveLength(1);
+    expect(commentPatches()).toEqual([]);
+    expect(claimIn(100)?.released).toBeUndefined();
+  });
+
+  it('409s a record whose machine was since removed from the file, and leaves the claim untouched', async () => {
+    await seed({ session: 'sess-pro', host: 'pro-mac' });
+    recordFor('sess-pro', 'Pro');
+    writeDashboards([]);
+
+    const res = await abort().expect(409);
+
+    expect(res.body).toEqual({ error: '#31 was dispatched to Pro, which is no longer configured' });
+    expect(dashCalls).toEqual([]);
+    expect(commentPatches()).toEqual([]);
+    expect(claimIn(100)?.released).toBeUndefined();
+  });
 });
 
 describe('refusals before any dashboard call', () => {

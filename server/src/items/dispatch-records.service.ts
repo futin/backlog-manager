@@ -31,6 +31,11 @@ export interface DispatchRecord {
   /** `BacklogItem.path` — the URN for a tracker item, the file path otherwise. */
   itemPath: string;
   action: AgentAction;
+  /**
+   * Which machine's dashboard the session was spawned on (multi-dashboard task 5): `'home'` for this machine's, a remote's name otherwise. The abort route
+   * reads it to send the stop to the dashboard the session actually runs on — this machine's dashboard has never heard of a session Pro's spawned.
+   */
+  machine: string;
   /** Epoch ms of the spawn. */
   at: number;
 }

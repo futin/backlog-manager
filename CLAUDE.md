@@ -39,7 +39,9 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
   adapters, and the ten guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
   anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira` and `/jira-stop`,
-  and the 60 s reconciler that keeps the Jira live map honest), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
+  and the 60 s reconciler that keeps the Jira live map honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers and usage reads,
+  and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are part of THIS
+  module, not a fourth), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
   the read-only `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
   routes under `/api/jira` — `GET /prompt`, `/refs` and `/worktrees` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
   `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
@@ -119,6 +121,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **A starting entry blocks what a run file blocks, on every surface**
   Why: [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
+- **A launch sent to another machine rides in `remoteStarting`, never in `starting`, and blocks only the item or machine it names.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-launch-sent-to-another-machine-rides-in-remotestarting-never-in-starting)
 - **Escape has one owner, and the topmost dialog is the only one that closes.**
   Why: [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)
 - **ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip.**
@@ -152,6 +156,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
 - **`~/.backlog-manager/settings/tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
   Why: [invariants.md](docs/subsystems/invariants.md#tickjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)
+- **`~/.backlog-manager/settings/dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
+  Why: [invariants.md](docs/subsystems/invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)
 - **The Jira token never leaves the server: the browser and `jira.mjs` both go through `/api/jira`, and the poller is armed only while a board syncs.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-jira-token-never-leaves-the-server-and-the-poller-is-armed-only-while-a-board-syncs)
 - **Jira's Done column is a window, not a store: a done issue whose resolution — or, lacking one, whose last update — is older than 14 days is dropped at map

@@ -134,6 +134,43 @@ describe('runChipReading', () => {
   });
 });
 
+/*
+  Multi-dashboard task 10: a launch sent to another machine and not yet in its claims is a `remoteStarting` entry. The chip names the machine — `Starting on Pro` —
+  because "1 starting" would claim the run is starting HERE. The entries arrive already labelled (the caller maps machine id to label, `machineLabelById`), so this
+  reading stays a pure fold, and they never touch the `starting` argument that `runClaimBlock` and the local expiry read.
+*/
+describe('runChipReading — remote starting', () => {
+  const onPro = { machine: 'Pro', label: 'Pro' };
+
+  it('reads a lone remote launch as Starting on <machine>, with no run lead', () => {
+    expect(runChipReading([], [], [onPro])).toMatchObject({ line: 'Starting on Pro', tone: 'live' });
+  });
+
+  it('keeps counting local runs and local starting entries beside it', () => {
+    expect(runChipReading([live], [starting('/abs/alpha')], [onPro])?.line).toBe('1 run · 1 starting · live · Starting on Pro');
+  });
+
+  it('counts two launches to one machine, and names each machine once', () => {
+    expect(runChipReading([], [], [onPro, onPro])?.line).toBe('2 starting on Pro');
+    expect(runChipReading([], [], [onPro, { machine: 'Mini', label: 'Mini' }])?.line).toBe('Starting on Pro · Starting on Mini');
+  });
+
+  it('paints a remote launch over a live run, like a local starting one', () => {
+    expect(runChipReading([live], [], [onPro])?.tone).toBe('live');
+    expect(runChipReading([crashed], [], [onPro])?.tone).toBe('crashed');
+  });
+
+  it('is unchanged when there are none', () => {
+    expect(runChipReading([live], [], [])).toEqual(runChipReading([live], []));
+    expect(runChipReading([], [], [])).toBeNull();
+  });
+
+  it('renders as a chip that has no run behind it', () => {
+    render(<RunChip runs={[]} starting={[]} remoteStarting={[onPro]} onOpen={() => {}} />);
+    expect(screen.getByTestId('run-chip')).toHaveTextContent('Starting on Pro');
+  });
+});
+
 describe('RunChip', () => {
   it('renders nothing at all for an empty payload', () => {
     const { container } = render(<RunChip runs={[]} starting={[]} onOpen={() => {}} />);
@@ -276,7 +313,7 @@ describe('BoardView: the run chip', () => {
       const payload: unknown = url.includes('/api/agents/status')
         ? AGENTS_STATUS
         : url.includes('/api/orchestrator/runs')
-          ? ({ runs, starting: startingRuns, remote: [] } satisfies OrchestratorRunsPayload)
+          ? ({ runs, starting: startingRuns, remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload)
           : url.includes('/api/projects')
             ? PROJECTS
             : { items: [ITEM], errors: [] };

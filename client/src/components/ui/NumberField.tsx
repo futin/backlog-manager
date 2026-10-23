@@ -5,7 +5,9 @@
  * design spec's §12.1). A bounded integer input that commits on blur, so a
  * half-typed number never clamps mid-keystroke, and re-seeds from `value` via
  * the `key` when the value changes from somewhere else (a Reset, a server
- * refusal handing back the stored figure).
+ * refusal handing back the stored figure). `disabled` is for a card that can
+ * show its figure but cannot save one (the Dashboards card on an unreadable
+ * file); absent, the markup is what it always was.
  */
 export function NumberField({
   value,
@@ -13,7 +15,8 @@ export function NumberField({
   max,
   unit,
   onCommit,
-  label
+  label,
+  disabled
 }: {
   value: number;
   min: number;
@@ -21,6 +24,7 @@ export function NumberField({
   unit?: string;
   onCommit: (v: number) => void;
   label?: string;
+  disabled?: boolean;
 }) {
   return (
     <>
@@ -31,6 +35,7 @@ export function NumberField({
         defaultValue={value}
         min={min}
         max={max}
+        disabled={disabled}
         key={value} /* re-seed when the value changes from elsewhere (e.g. Reset) */
         onBlur={(e) => onCommit(Number(e.currentTarget.value))}
         onKeyDown={(e) => {

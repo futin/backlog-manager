@@ -1375,6 +1375,29 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-skill-add-name { width: 100%; max-width: 100% }
 .jira-skill-add-prompt { align-self: stretch; width: 100%; font-size: 12px; min-height: 64px }
 
+/* The Dashboards card (multi-dashboard, §8.6): a machine's facts are lines inside its row's hint, and the add/edit form is a stacked row of labelled 36 px
+   fields (`.set-text`, `.ui-number`'s family) under it. A form sits INSIDE its machine's wrapper so the hairline `.set-row + .set-row` draws between machines
+   and not between a machine and its own form. Checkboxes are the platform's own, in the card's accent — a model list is four short words, which a pill
+   track per word would only make taller. */
+.set-row + .dash-machine, .dash-machine + .dash-machine, .dash-machine + .set-row { border-top: 1px solid var(--hairline) }
+.dash-machine + .set-error-row { border-top: 0; padding-top: 0 }
+.dash-machine > .set-row { border-top: 0 }
+.dash-line { display: block; overflow-wrap: anywhere }
+.dash-form { gap: 16px }
+.dash-machine > .dash-form { padding-top: 0 }
+.dash-field { display: flex; flex-direction: column; gap: 4px }
+.dash-text { width: 100%; max-width: 420px }
+.dash-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; padding: 0; border: 0; min-width: 0 }
+.dash-checks legend { padding: 0; margin-bottom: 6px }
+.dash-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink) }
+.dash-check input, .dash-strategy input { accent-color: var(--ink) }
+.dash-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.dash-strategies { display: flex; flex-direction: column; gap: 10px }
+.dash-strategy { display: flex; align-items: flex-start; gap: 10px; cursor: pointer }
+.dash-strategy input { margin-top: 3px }
+.dash-strategy-text { display: flex; flex-direction: column; gap: 2px }
+.dash-threshold { display: inline-flex; align-items: center; gap: 8px }
+
 /* The roots search is its Popover's positioning parent (the panel hangs under it, right edges together), and the field takes the section's full width. */
 .jira-sheet-search { position: relative; display: flex; flex-direction: column; gap: 6px }
 .jira-sheet-search-field { width: 100% }
@@ -2205,6 +2228,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    for the window in which there is no run file to take a wall time from. */
 .runs-row-starting-age { flex: none; font-size: 12px; color: var(--ink3); font-variant-numeric: tabular-nums }
 .runs-row-starting:hover { background: none }
+/* Multi-dashboard task 10: the machine a remote row ran on, beside its `remote` tag (§8.4). */
+.runs-row-machine { flex: none; font-size: 12px; color: var(--ink3) }
 
 /* `load more` at the foot of the History sheet, INSIDE its scroll box — it is
    the end of the list, not a fixture beside it, so it arrives under the last
@@ -3052,6 +3077,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The Jira card's F1 marker (grouped-board spec §5). `--amber-text`, the amber word set on paper: the card's 2 px `--amber-solid` ring beside it
    already carries the hue, and bare `--amber` fails daylight contrast as type (test/daylight-contrast.test.ts). */
 .ui-marker-match { color: var(--amber-text) }
+/* Multi-dashboard task 10: `running on <machine>` / `Starting on <machine>`. A place, not a warning — `--ink3`, the same ink as `kind` (§8.3). */
+.ui-marker-machine { color: var(--ink3) }
 
 /* JiraTypeIcon — a Jira issue's type glyph (DESIGN.md §8.9.1), 14 px outline strokes in --ink3. One home because the card and the modal's Children tree
    both draw it; the card's `.jira-card-type` keeps only its layout. */
@@ -3348,6 +3375,37 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .chev-up { transform: rotate(180deg) }
 .chev-right { transform: rotate(-90deg) }
 @media (prefers-reduced-motion: reduce) { .chev-down { transition: none } .chev-up { transition: none } .chev-right { transition: none } }
+
+/* RunOn — the "Run on" machine-card group (spec "The picker's look"; §8.7 Overlays — the launch sheets it sits in, §7). One card-sized toggle per machine in an auto-fit grid, so two
+   cards sit side by side on a sheet and stack on a phone with no breakpoint of this family's own. The card wears the chip's skin — `--strip`, a `--hairline2`
+   stroke, `--ink3` when pressed — at the 12 px radius §4 gives chips, and a dashed stroke with `--ink3` type when disabled, for `.ui-chip[aria-disabled]`'s
+   reason: the stroke says "unavailable" in the shape's own language, and unlike opacity it keeps the reason's text at the contrast daylight-contrast measures.
+   The bars are `Meter`s and the tags `Pill`s; this block only lays them out. Nothing is under 11 px (guard 3). */
+.ui-run-on { display: flex; flex-direction: column; gap: 8px }
+.ui-run-on-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px }
+.ui-run-on-title { font-size: 13px; font-weight: 500; color: var(--ink) }
+.ui-run-on-age { font-size: 11px; font-weight: 400; color: var(--ink3); font-variant-numeric: tabular-nums }
+.ui-run-on-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px }
+.ui-run-on-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0;
+  padding: 12px; border-radius: 12px; text-align: left;
+  color: var(--ink2); background: var(--strip); border: 1px solid var(--hairline2); cursor: pointer;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.ui-run-on-card:hover:not(:disabled) { color: var(--ink); background: var(--strip-hi) }
+.ui-run-on-card.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
+.ui-run-on-card:disabled { color: var(--ink3); border-style: dashed; cursor: default }
+.ui-run-on-name { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px }
+.ui-run-on-label { font-size: 13px; font-weight: 500; color: var(--ink) }
+.ui-run-on-card:disabled .ui-run-on-label { color: var(--ink3) }
+.ui-run-on-account { font-size: 12px; font-weight: 400; color: var(--ink2); overflow-wrap: anywhere }
+.ui-run-on-bars { display: flex; flex-direction: column; gap: 6px }
+.ui-run-on-reset { font-size: 11px; font-weight: 400; color: var(--ink3); font-variant-numeric: tabular-nums }
+.ui-run-on-why { font-size: 12px; font-weight: 400; color: var(--ink3); overflow-wrap: anywhere }
+.ui-run-on-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px }
+.ui-run-on-reason { margin: 0; font-size: 12px; font-weight: 400; color: var(--ink2) }
+.ui-run-on-link { flex: none; font-size: 12px; font-weight: 500; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px }
+.ui-run-on-link:hover { color: var(--ink) }
 
 /* ── end ui primitives ────────────────────────────────────────────────────────
    A closing marker, not decoration. Guard 7 has to be able to say whether a

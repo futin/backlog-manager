@@ -9,6 +9,7 @@ import {
   pollAge,
   pollProgress,
   queuedReading,
+  remoteBadge,
   resetClock,
   staleTakeover,
   sweepProgress,
@@ -299,35 +300,78 @@ describe('claimControl', () => {
   const tracker = (holder?: ItemHolder) => ({ source: 'github' as const, ...(holder === undefined ? {} : { holder }) });
   const LIVE = beat(60_000);
   const STALE = beat(CLAIM_STALE_MS + 60_000);
+  const NONE: ReadonlySet<string> = new Set();
+  const PRO: ReadonlySet<string> = new Set(['pro-mac']);
 
   it('offers Stop & release for a claim the board dispatched, live or stale', () => {
-    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, dispatched: true }), NOW)).toBe('stop-release');
-    expect(claimControl(tracker({ session: 's', heartbeat: STALE, dispatched: true }), NOW)).toBe('stop-release');
+    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, dispatched: true }), NOW, NONE)).toBe('stop-release');
+    expect(claimControl(tracker({ session: 's', heartbeat: STALE, dispatched: true }), NOW, NONE)).toBe('stop-release');
   });
 
   it('offers Release claim for a live hand claim, and the stale release for a stale one', () => {
-    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: LIVE }), NOW)).toBe('release');
-    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: STALE }), NOW)).toBe('release-stale');
+    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: LIVE }), NOW, NONE)).toBe('release');
+    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: STALE }), NOW, NONE)).toBe('release-stale');
   });
 
   it('offers nothing for a run-held claim, live or stale, dispatched or not', () => {
-    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, run: 'run-9' }), NOW)).toBeNull();
-    expect(claimControl(tracker({ session: 's', heartbeat: STALE, run: 'run-9' }), NOW)).toBeNull();
-    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, run: 'run-9', dispatched: true }), NOW)).toBeNull();
+    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, run: 'run-9' }), NOW, NONE)).toBeNull();
+    expect(claimControl(tracker({ session: 's', heartbeat: STALE, run: 'run-9' }), NOW, NONE)).toBeNull();
+    expect(claimControl(tracker({ session: 's', heartbeat: LIVE, run: 'run-9', dispatched: true }), NOW, NONE)).toBeNull();
   });
 
   it('offers nothing for a files item, whatever it carries', () => {
-    expect(claimControl({ source: 'files', holder: { session: 's', heartbeat: beat(0), dispatched: true } }, NOW)).toBeNull();
+    expect(claimControl({ source: 'files', holder: { session: 's', heartbeat: beat(0), dispatched: true } }, NOW, NONE)).toBeNull();
   });
 
   it('offers nothing for an unheld item', () => {
-    expect(claimControl(tracker(), NOW)).toBeNull();
+    expect(claimControl(tracker(), NOW, NONE)).toBeNull();
   });
 
   it('turns release into release-stale at exactly CLAIM_STALE_MS, and for a heartbeat it cannot read', () => {
-    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS - 1) }), NOW)).toBe('release');
-    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS) }), NOW)).toBe('release-stale');
-    expect(claimControl(tracker({ session: 's', heartbeat: 'not a date' }), NOW)).toBe('release-stale');
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS - 1) }), NOW, NONE)).toBe('release');
+    expect(claimControl(tracker({ session: 's', heartbeat: beat(CLAIM_STALE_MS) }), NOW, NONE)).toBe('release-stale');
+    expect(claimControl(tracker({ session: 's', heartbeat: 'not a date' }), NOW, NONE)).toBe('release-stale');
+  });
+
+  /*
+    Multi-dashboard task 10: a claim a session on another machine holds carries no `dispatched` flag a reader here can trust, yet Stop & release is the right offer —
+    the server routes the stop to that machine's dashboard by the holder's host (task 7). `remoteHosts` is the set of hosts the configured remotes own, so a hand
+    claim from a machine nobody configured keeps the plain release.
+  */
+  it('offers Stop & release for a live or stale claim whose host a remote owns, dispatched flag or not', () => {
+    expect(claimControl(tracker({ session: 's', host: 'pro-mac', heartbeat: LIVE }), NOW, PRO)).toBe('stop-release');
+    expect(claimControl(tracker({ session: 's', host: 'pro-mac', heartbeat: STALE }), NOW, PRO)).toBe('stop-release');
+  });
+
+  it('leaves a claim from a host no remote owns on the plain release, and a run-held remote claim on nothing', () => {
+    expect(claimControl(tracker({ session: 's', host: 'laptop', heartbeat: LIVE }), NOW, PRO)).toBe('release');
+    expect(claimControl(tracker({ session: 's', host: 'pro-mac', heartbeat: LIVE }), NOW, NONE)).toBe('release');
+    expect(claimControl(tracker({ session: 's', host: 'pro-mac', heartbeat: LIVE, run: 'run-9' }), NOW, PRO)).toBeNull();
+  });
+});
+
+describe('remoteBadge', () => {
+  const beat = (msAgo: number): string => new Date(NOW - msAgo).toISOString();
+  const tracker = (holder?: ItemHolder) => ({ source: 'github' as const, ...(holder === undefined ? {} : { holder }) });
+  const label = (host?: string): string | null => (host === 'pro-mac' ? 'Pro' : null);
+
+  it('says which machine a live claim is running on', () => {
+    expect(remoteBadge(tracker({ session: 's', host: 'pro-mac', heartbeat: beat(60_000) }), label, NOW)).toBe('running on Pro');
+  });
+
+  it('is null for a stale claim — a stale claim is not running anywhere', () => {
+    expect(remoteBadge(tracker({ session: 's', host: 'pro-mac', heartbeat: beat(CLAIM_STALE_MS + 60_000) }), label, NOW)).toBeNull();
+  });
+
+  it('is null for a claim a run holds — the run chip and the run row name that machine', () => {
+    expect(remoteBadge(tracker({ session: 's', host: 'pro-mac', heartbeat: beat(60_000), run: 'run-9' }), label, NOW)).toBeNull();
+  });
+
+  it('is null for a host no remote owns, for a claim with no host, for an unheld item and for a files item', () => {
+    expect(remoteBadge(tracker({ session: 's', host: 'laptop', heartbeat: beat(60_000) }), label, NOW)).toBeNull();
+    expect(remoteBadge(tracker({ session: 's', heartbeat: beat(60_000) }), label, NOW)).toBeNull();
+    expect(remoteBadge(tracker(), label, NOW)).toBeNull();
+    expect(remoteBadge({ source: 'files', holder: { session: 's', host: 'pro-mac', heartbeat: beat(0) } }, label, NOW)).toBeNull();
   });
 });
 

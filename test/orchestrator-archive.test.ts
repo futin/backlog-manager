@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { HttpException } from '@nestjs/common';
 
 import type { RemoteRunsService } from '../server/src/orchestrator/remote-runs.service';
+import type { RemoteStartingService } from '../server/src/orchestrator/remote-starting.service';
 import { OrchestratorController } from '../server/src/orchestrator/orchestrator.controller';
 import { OrchestratorService } from '../server/src/orchestrator/orchestrator.service';
 import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
@@ -286,7 +287,9 @@ describe('OrchestratorController.archivedRun', () => {
       new WatchdogStateService(),
       new StartingRunsService(),
       // Never reached by archivedRun(); only runs() asks for remote runs.
-      {} as RemoteRunsService
+      {} as RemoteRunsService,
+      // Nor this one — only runs() lists the remote starting entries.
+      {} as RemoteStartingService
     );
   });
 

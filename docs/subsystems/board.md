@@ -74,7 +74,8 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `GatedChip`            | none (draws `.ui-chip`) | `gateBlock`, `otherBlock`, `idleTitle`, `reverify?`, `recheck`, `onActivate`, `variant?`, `size?`, `children` (a node, or a function of `blocked`) — the disabled half is `gateView` (`lib/gate-view.ts`) | `DispatchButton` (card and modal), the Board band's Orchestrate chip |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`                                                | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`        |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
-| `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped`, `children`, `title?`            | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
+| `RunOn`                | `.ui-run-on`      | `offers: ProjectOffers`, `value`, `onChange` (draws nothing below two machines)                  | `LaunchSheet`, `OrchestrateSheet` step 3                                        |
+| `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped\|machine`, `children`, `title?`    | `ItemCard`'s marker row (Board and Archive draw the same card)                  |
 | `ProgressRow`          | `.ui-progress`    | `name?`, `value`, `max`, `caption?`, `valueText?`, `hatch?`, `height?: 10\|6`, `fill?: progress\|ink\|warn` | the Watchdog page's sweep meter and per-row heartbeat meter                      |
 | `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block; `JiraChip`'s POLL and CALLS |
 | `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
@@ -125,7 +126,10 @@ out of `ItemModal` in Jira phase 2 so the Jira issue modal renders a ticket's de
 Beside the band's title sits the **run chip** (`RunChip`), the Board's whole account of orchestrator runs since the run strip, the starting strip and the run
 drawer left it: a `Dot` taking the worst state present and a count line naming every state in that same order — `2 runs · 1 live ›`, `1 run · crashed ›`,
 `1 starting ›`. Precedence is exact: crashed over paused or starting over live. It renders the payload's `starting` array with no client-side filter, it is
-absent entirely when there is no run and no starting entry, and clicking it switches the section to Runs, where the rest of the reading lives.
+absent entirely when there is no run and no starting entry, and clicking it switches the section to Runs, where the rest of the reading lives. A remote
+orchestrate launch adds a segment per machine after the local ones, `Starting on Pro` or `2 starting on Pro`, read off the payload's `remoteStarting` array
+(`orchestrateStarting` — a card dispatch is its card's alone). It is never folded into `starting`, which blocks local Orchestrate, and never reads `1 starting`,
+which would claim the run is starting here; it holds the `starting` tone for the dot and never makes it breathe, and counts toward the chip's presence rule.
 
 A dispatch control — on the card and again in the modal — opens a launch sheet onto `../claude-agents-dashboard`. An execute's sheet adds a **Finish**
 picker (`In place` / `PR`, seeded on every open from the `executeDefaultFinish` setting, default `In place`, never from the last launch) and, under PR, a
@@ -158,6 +162,21 @@ queue:
    prop that `BoardView` passes from the registered project's `ProjectSummary.source` — never off `items[0]`, which an empty queue does not have — and a `pr`
    Settings default (or a `pr` pick left over from another project) reads as `merge` on any project whose source is not `github` — `files`, `unsupported` or
    none. Settings is pre-project, so it lists `pr` for every project and leaves the refusal to the sheet and to the server's 400.
+
+**Run on, when more than one machine can take the launch.** `components/ui/RunOn.tsx` draws one toggle card per machine at the top of both the launch sheet and
+Orchestrate step 3 (`.ui-run-on`, declared once, because two surfaces draw it): the name, the account line, a 5 h and a weekly bar, and the 5 h reset time, with
+`Suggested` and `home` tags, a line saying which strategy suggested it, and the age of the usage readings at the top right. A machine the server did not offer
+is drawn disabled with its reason in the card. The group draws nothing below two machines, so a files project or a setup with no remote is the sheet it always
+was. `useRunOn(project)` owns the state: one `GET /api/dashboards/offers?project=` per sheet open (`useOffers`), the pick held as `null` until a person clicks
+and otherwise derived from the offers (`defaultMachine` — the suggestion, else the first offered, else home), so a sheet that opens before the answer lands is
+on home and moves to the suggestion when it arrives, and a person who has already clicked is never moved. A remote pick LOCKS Finish and Merge mode to `pr` (the
+controls read as PR with the reason beside them) and narrows model and effort to the machine's lists, each select keeping its "default" option first; a
+narrowed-away model or effort shows the Settings default (or the first listed) and switching back to home restores the Settings default — not the person's
+pre-lock pick — while Finish and Merge are derived and come back for free. `''`, the "default", is never narrowed: it goes out as no key on every machine,
+and the server fills a remote's model from that machine's list and sends no effort at all (final-review I4). The button reads `Start on
+<label>`, and the request carries `machine` only for a remote pick — a home pick sends today's body, byte for byte. A failed offers read with nothing to show is
+home, with a warning note (`OFFERS_FAILED_TEXT`), because blocking a local launch on a fan-out to other machines would make the board's only launch path depend
+on them. Jira's launch sheet has no picker: its Start stays home-only ([jira.md](jira.md)).
 
 Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, since the release chip the What's new drawer, and since Jira
 phase 5 the Jira launch sheet — are the seven dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
@@ -219,7 +238,10 @@ rail appears only with content width set to full. Watchdog renders no wrapper.
 
 - **The Live sheet** holds one row per run that is `running` or `paused`, plus one per `starting` entry — a dot, the project, `⚠ N` when the run carries
   attention entries, the two-tone `1 / 5`, elapsed, and a status pill only where one is earned. A starting row reads `starting… · <age>`, carries no controls
-  and cannot be selected: there is no run file for the detail sheet to show. A crashed run — `running`, heartbeat stale — is a two-line row carrying all three
+  and cannot be selected: there is no run file for the detail sheet to show. A remote orchestrate launch (`remoteStarting`) is a starting row of its own,
+  `Starting on <machine>`, equally unselectable; the `remote` pill on a remote run's
+  row gains a machine tag naming the dashboard the run is on, and the sheet's head and the page's count line say `N launching elsewhere`. A crashed run —
+  `running`, heartbeat stale — is a two-line row carrying all three
   of its readings together (`no heartbeat for <age>`; `last reported <id> at <stage>` or `all items at rest`; the `watchdogClause` sentence), and it is always a
   Live row, never a History one: which sheet a row belongs to is `splitLive`'s call on `running`/`paused` presence, with freshness deliberately excluded.
   A **remote** run (task-48 — another machine's run on a tracker project, from the payload's `remote` array) follows the same rule and carries a neutral
@@ -281,12 +303,13 @@ everything in this browser's `localStorage`, Shared is what the API reads off th
 | Page       | Column 1              | Column 2      |
 | ---------- | --------------------- | ------------- |
 | **Local**  | Display, Board        | Orchestrator, Dispatch |
-| **Shared** | Orchestrator watchdog, Backlog tick | Claude Agents, Trackers |
+| **Shared** | Orchestrator watchdog, Backlog tick | Claude Agents, Dashboards, Trackers |
 
 Each card is still a title plus a scope (`this device`, `this machine`, `this server`) answering a different question from the name: whether changing this
 affects anybody but the person changing it. Both pages draw the same two hand-placed columns, so a card does not move to the other side of the page when its
 neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones, Shared is the watchdog's long card, with the `Backlog tick` card under it,
-against two shorter reports stacked in one column (task-45 added `Trackers` under `Claude Agents`; both report on the host, and the one thing either sets is
+against three shorter cards stacked in one column (task-45 added `Trackers` under `Claude Agents`, and multi-dashboard put `Dashboards` between them; both
+report on the host, and the one thing either sets is
 the Trackers card's per-repo sync interval since #17 — a row control, not a section of settings — which is what makes them one column rather than two halves of
 the page).
 
@@ -297,6 +320,17 @@ does. What stayed on Shared is genuinely the host's — the dispatch status line
 its right slot at all. `Trackers · this machine` is the other Shared report and is read-only by design, not by phase: a project is connected by committing
 `backlog/source.json`, so what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with the repo
 read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is.
+
+`Dashboards · this machine` is the one Shared card that writes: it lists the machines a launch can run on, in prefer order with home first until moved, each as
+a row of URLs, the `BM_MACHINE_NAME` a claim's `host` must equal, the account, the models and efforts it may run, and one token line, with the suggestion
+strategy as a radio group and the threshold beneath. `DashboardsGroup` reads `useDashboards` once on mount (no poll, no focus trigger: the file changes only
+when a person edits it) and every write — `POST /api/dashboards/entries`, `/entries/delete`, `/home`, `/settings` — answers the whole fresh view, which the card
+draws rather than an optimistic copy. **A token is never on the page in any form**: the payload carries `tokenSet` and the env var's name, and the line says `✓
+set` or `✗ not set — add it to .env and restart`; there is no field to type one into, because the env var is the only place the server reads it from. One form
+is open at a time, a same-name Add is held at the form (the server treats it as an update), every box ticked is sent as no list, and an unreadable
+`dashboards.json` answers 409 on every write with the file left byte-identical, which the card prints verbatim
+([invariants.md](invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)). The RunOn group's Settings
+link and the deep link `/?section=settings&settings=shared` both land on this page: `settings=shared|local` is read only beside `section=settings`.
 
 Daylight is the default theme and the first one listed (`THEMES` and `DEFAULT_SETTINGS.theme` in `lib/settings.ts`); Midnight, the default until 2026-10-14,
 is second. The default only reaches a browser that has no valid stored theme: `clampSettings` keeps any theme it recognises, so anyone who had already picked
@@ -366,6 +400,13 @@ somehow still running is refused at its next heartbeat), posts `POST /api/items/
 verbatim, and on success shows `claim released` and calls `onReleased` so the Board re-reads its payload. It is drawn only where the modal is handed
 `onReleased` — the Board — and the card carries no claim control, because it carries no claim reading to hang one on.
 
+**Where a card's work is (multi-dashboard).** A card whose live claim names a remote host's `host`, or whose launch was sent to a remote and has not claimed
+yet, carries a `Marker` of tone `machine` — `running on <machine>` or `Starting on <machine>` (`--ink3`: it names a place, not a problem). The label is the
+configured dashboard's name through `machineLabelByHost` (`lib/dashboards.ts`), and `lib/remote-starting.ts` is the one home of the `Starting on` wording and of
+`startingOnForItem` (keyed by project path and id together), so the card, the run chip and the Runs page cannot word one launch three ways. `claimControl`
+treats a remote host's claim as a board-dispatched one: `ClaimRelease` offers Stop & release for it, and the server routes the stop to that dashboard
+([api.md](api.md#launching-on-another-machine)).
+
 **A stale claim reads stale (#227).** The mapper still fills `started`/`phase` from any unreleased claim, so every reader that means "is somebody on this"
 asks `claimReading` (`lib/tracker.ts`) — `'live' | 'stale' | null` by the reader's clock — as its second question. A stale holder draws the card's live strip as
 `stale · no heartbeat <age> · <host>` in the stale queued band's muted pair instead of the hatched `executing` one (`liveBarFor`); ranks 2 and drops out of the
@@ -421,7 +462,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useAction.ts` — the one home of a click-fired mutation's in-flight guard, `busy`, `error` and message mapping (#286, bug-19's layer 1): `RunControls`,
   `LaunchSheet`, `OrchestrateSheet` and `ClaimRelease` keep only their own success and refusal branches.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
-  `starting` entry is present, plus a grace window after a Resume click.
+  `starting` or `remoteStarting` entry is present, plus a grace window after a Resume click.
 - `hooks/useOrchestratorArchive.ts` — mount and window focus only; history moves at run boundaries, not on a heartbeat. Coalesced since #285: a focus or
   `refresh()` mid-flight folds into one follow-up.
 - `hooks/useWatchdog.ts` — mounted by the Watchdog page alone; the runs payload it annotates comes in as a prop. Mount and window focus, plus a 5s poll
@@ -430,6 +471,10 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useTicks.ts` (`TICKS_POLL_MS`, 15 s) — the breaker's read: `{ data, error, saveError, save, reset }` over `lib/ticks.ts`. Mount and window focus, plus
   the 15 s poll only while `live` — the Runs › Ticks page passes `true`, Settings' card `false`. A save or a reset redraws from the POST's own answer, never a
   follow-up GET, and a refused write lands in `saveError`, beside the failed-GET `error`, so a refusal never blanks `data`.
+- `hooks/useDashboards.ts`, `hooks/useOffers.ts`, `hooks/useRunOn.ts` — the configured machines (one read on mount, `refresh` for a write's caller), one
+  project's offers (asked when a sheet passes a project, dropped by sequence number and by project tag so no frame shows the previous project's cards), and the
+  sheets' shared pick-lock-narrow state over both. `lib/dashboards.ts` is the one home of the wire calls, `machineLabelByHost` / `machineLabelById`,
+  `lockedFor`, `narrowTo`, `defaultMachine` and the usage wording; `lib/remote-starting.ts` the `Starting on` readings.
 - `hooks/useBoard.ts` — mount and window focus, plus a 15s poll while any registered project's `source` is a tracker whose sync is not `off`
   (`hasSyncingTracker`, #17): a tracker's items move on the server's poll clock, which this tab has no event for. No syncing tracker means no timer at all.
 - `hooks/useTrackers.ts` — the shell's one instance, provided by `TrackersProvider` (`hooks/TrackersContext.tsx`) and read by the chip and by the Shared

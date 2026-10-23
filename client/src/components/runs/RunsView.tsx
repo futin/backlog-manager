@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
+import { useDashboards } from '../../hooks/useDashboards';
 import { elapsedSince } from '../../lib/item-age';
 import { useOrchestratorArchive } from '../../hooks/useOrchestratorArchive';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { useReportWorking } from '../../hooks/useReportWorking';
 import { useProjectSources } from '../../hooks/useProjectSources';
+import { machineLabelByHost } from '../../lib/dashboards';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { runInvisibleElsewhere } from '../../lib/remote-run';
+import { orchestrateStarting, startingOnText } from '../../lib/remote-starting';
 import { STATUS_ORDER, groupByDay, mergeRuns, queueCounts, runKey, splitLive } from '../../lib/runs-list';
 import type { MergedRun } from '../../lib/runs-list';
 import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
@@ -31,7 +34,7 @@ import { TickMonitor } from './TickMonitor';
 import { WatchdogMonitor } from './WatchdogMonitor';
 import type { RunRange } from '../../lib/run-range';
 import { resumeGate } from '../../../../shared/agent';
-import type { StartingRun } from '../../../../shared/types';
+import type { DashboardsView, RemoteStarting, StartingRun } from '../../../../shared/types';
 
 /**
  * Runs — the board's third surface: history of every backlog-orchestrate run
@@ -256,7 +259,7 @@ function LiveRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: numb
             would be an animation asserting something false. */}
         {tone === undefined ? <Dot size={10} /> : <Dot size={10} tone={tone} breathe={row.isLive} />}
         <span className="runs-row-project">{projectLabel(run.project)}</span>
-        {row.remote && <RemoteTag runId={run.runId} />}
+        {row.remote && <RemoteTag runId={run.runId} machine={row.machine} />}
         {attention > 0 && (
           <span className="runs-row-attn" data-testid={`runs-row-attn-${run.runId}`}>
             <span aria-hidden="true">⚠ </span>
@@ -395,7 +398,7 @@ function HistoryRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: n
           {status.label}
         </span>
         <span className="runs-row-project">{projectLabel(run.project)}</span>
-        {row.remote && <RemoteTag runId={run.runId} />}
+        {row.remote && <RemoteTag runId={run.runId} machine={row.machine} />}
         <CountPair completed={completed} total={total} />
         {/* The row's right-hand reading: wall time, and what the run cost.
             Either half can be known without the other — a run with a corrupt
@@ -412,6 +415,26 @@ function HistoryRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: n
     </button>
   );
 }
+/**
+ * A launch sent to another machine that has not claimed anything yet (multi-dashboard task 10) — `StartingRow`'s remote sibling, on the same terms: a plain
+ * `div`, not a button, because there is no run to select, no sheet to open and nothing here that could be stopped (the machine owns it; Stop is its own).
+ * Its own testid, keyed by machine AND project, because two machines can each be starting a run on one project. The words are `startingOnText`'s — the same
+ * `Starting on Pro` the card and the run chip print — and the age beside it is the same `elapsedSince` reading `StartingRow` gives, `—` when it will not
+ * parse.
+ * Only an orchestrate launch is drawn: a card dispatch has no run behind it and belongs to its card (`orchestrateStarting`, `lib/remote-starting.ts`).
+ */
+function RemoteStartingRow({ entry, view, now }: { entry: RemoteStarting; view: DashboardsView | null; now: number }): JSX.Element {
+  const age = elapsedSince(entry.requestedAt, now);
+  return (
+    <div className="runs-row runs-row-starting" data-testid={`runs-starting-remote-${entry.machine}-${entry.project}`}>
+      <span className="runs-row-head">
+        <Dot size={10} />
+        <span className="runs-row-project">{projectLabel(entry.project)}</span>
+        <span className="runs-row-starting-age">{`${startingOnText(view, entry)} · ${age ?? '—'}`}</span>
+      </span>
+    </div>
+  );
+}
 
 /**
  * The `remote` tag on a row (task-48) — `ui/Pill`'s neutral tone, .claude/
@@ -419,13 +442,22 @@ function HistoryRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: n
  * is never clickable, and "another machine ran this" is a fact, not a state
  * anyone is waiting on, so it takes the tone that carries no urgency.
  */
-function RemoteTag({ runId }: { runId: string }): JSX.Element {
+function RemoteTag({ runId, machine }: { runId: string; machine?: string | null }): JSX.Element {
   return (
-    <span data-testid={`runs-row-remote-${runId}`}>
-      <Pill tone="neutral" title="Driven from another machine — seen through its claim comments">
-        remote
-      </Pill>
-    </span>
+    <>
+      <span data-testid={`runs-row-remote-${runId}`}>
+        <Pill tone="neutral" title="Driven from another machine — seen through its claim comments">
+          remote
+        </Pill>
+      </span>
+      {/* Multi-dashboard task 10: WHICH other machine. A sibling of the tag, not text inside it, so `runs-row-remote-*` keeps meaning "this row is remote";
+          absent for a run whose claims recorded no host, because a blank would read as a machine called nothing. */}
+      {machine !== undefined && machine !== null && machine !== '' && (
+        <span className="runs-row-machine" data-testid={`runs-row-machine-${runId}`}>
+          {machine}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -466,7 +498,10 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // second expression agreeing with the first — the shape `watchdogStoodDown`
   // and `isStale` are each one function to avoid, and the one this repo has
   // already been bitten by twice.
-  const { runs: liveRuns, starting, remote: remoteRuns, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  const { runs: liveRuns, starting, remote: remoteRuns, remoteStarting, refresh: refreshRuns, noteResume, resuming } = useOrchestratorRuns();
+  // Multi-dashboard task 10: the remotes' names, for a remote row's machine and a remote launch's `Starting on <machine>`. `null` until the first answer, which
+  // both read as "no remote owns it" — a raw host or machine id is printed rather than nothing.
+  const { view: dashboards } = useDashboards();
   // `liveRuns`, never the merged rows below: those fold remote runs in, and another machine's run is not this cursor's to blink for.
   useReportWorking(liveRuns, starting, onWorking);
   // task-48: which projects are tracker-backed, for the one line a local run
@@ -578,7 +613,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // rather than let each derivation call Date.now() for itself.
   const now = Date.now();
 
-  const merged = mergeRuns(archiveRuns, liveRuns, remoteRuns);
+  const merged = mergeRuns(archiveRuns, liveRuns, remoteRuns, (host) => machineLabelByHost(dashboards, host));
 
   // Every project seen anywhere in the (unfiltered) merged list — computed
   // off `merged`, not off `inScope`/`filtered` below, so narrowing EITHER
@@ -612,6 +647,9 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // `aggregateRuns`/`sumStageTotals` and out of the `projects` option list
   // below. A window that showed a number for it would be inventing one.
   const startingRows = projectFilter === 'all' ? starting : starting.filter((s) => s.project === projectFilter);
+  // Multi-dashboard task 10: launches on other machines, a SECOND list beside `startingRows` and never merged into it — `startingRows.length` is the local
+  // `N starting` count, which a launch elsewhere is not. Same project filter, for the same reason: a filtered page lists nothing about other projects.
+  const remoteStartingRows = orchestrateStarting(remoteStarting).filter((e) => projectFilter === 'all' || e.project === projectFilter);
   // The split is computed AFTER filtering, not before: a project filter that
   // hides the only going run in scope must not leave a phantom Live sheet
   // over an empty rows list, and the design's own "newest VISIBLE run"
@@ -737,6 +775,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
     [
       liveRows.length === 0 ? null : `${liveRows.length} live`,
       startingRows.length === 0 ? null : `${startingRows.length} starting`,
+      remoteStartingRows.length === 0 ? null : `${remoteStartingRows.length} launching elsewhere`,
       history.length === 0 ? null : `${history.length} past`
     ]
       .filter((part) => part !== null)
@@ -785,7 +824,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
     );
   }
 
-  const empty = merged.length === 0 && startingRows.length === 0;
+  const empty = merged.length === 0 && startingRows.length === 0 && remoteStartingRows.length === 0;
 
   return (
     // `runs-frame` (2026-09-17, DESIGN.md §8.4.1 "Wide") is a measuring element and nothing else: no padding, no background, no border. It carries
@@ -944,13 +983,14 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
                     is already what its absence says. Starting placeholders sit
                     above every real row: a run nobody can see yet is the most
                     recent thing that happened by construction. */}
-                {(liveRows.length > 0 || startingRows.length > 0) && (
+                {(liveRows.length > 0 || startingRows.length > 0 || remoteStartingRows.length > 0) && (
                   <Sheet className="runs-live-sheet">
                     <SheetHead
                       title="Live"
                       sub={[
                         liveRows.length === 0 ? null : `${liveRows.length} ${liveRows.length === 1 ? 'run' : 'runs'}`,
-                        startingRows.length === 0 ? null : `${startingRows.length} starting`
+                        startingRows.length === 0 ? null : `${startingRows.length} starting`,
+                        remoteStartingRows.length === 0 ? null : `${remoteStartingRows.length} launching elsewhere`
                       ]
                         .filter((part) => part !== null)
                         .join(' · ')}
@@ -958,6 +998,9 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
                     <div className="runs-rows" data-testid="runs-live-rows">
                       {startingRows.map((entry) => (
                         <StartingRow key={`starting:${entry.project}`} starting={entry} now={now} />
+                      ))}
+                      {remoteStartingRows.map((entry) => (
+                        <RemoteStartingRow key={`starting-remote:${entry.machine}:${entry.project}`} entry={entry} view={dashboards} now={now} />
                       ))}
                       {renderRows(liveRows, LiveRow)}
                     </div>
@@ -1073,6 +1116,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
                       summary={selectedRow.run}
                       live={selectedRow.live}
                       remote={selectedRow.remote}
+                      machine={selectedRow.machine}
                       invisibleElsewhere={runInvisibleElsewhere(
                         pickAuthority([selectedRow.live], selectedRow.run),
                         projectSources.get(selectedRow.run.project)

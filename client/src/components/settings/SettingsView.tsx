@@ -3,6 +3,7 @@ import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
+import { DashboardsGroup } from './DashboardsGroup';
 import { TickGroup } from './TickGroup';
 import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
@@ -207,12 +208,16 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
  * see of each project's tracker — since task-45 — and, since the tick breaker,
  * the tick halt threshold under the watchdog.
  *
- * Four cards, and the hand-balanced columns hold up for a different reason
+ * Five cards, and the hand-balanced columns hold up for a different reason
  * here than on Local: the left column is the two machine-wide CONTROLS (the
  * watchdog's long card over the tick breaker's one-row card), the right the
- * two reports. Both of the right column's cards report on the HOST and neither
- * sets anything, which is what makes them one column rather than two halves of
- * the page.
+ * host's dispatch side — the `Claude Agents` report, then (multi-dashboard) the
+ * `Dashboards` card, then the `Trackers` report. `Dashboards` is the one card
+ * on the right that sets things, and it sits under `Claude Agents` because it
+ * is the same subject widened: that card reports this machine's own dashboard,
+ * this one lists the others a launch can run on. It is tall, which is why it
+ * goes right and not under the tick breaker — the left column is already the
+ * watchdog's long card.
  */
 function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   return (
@@ -226,6 +231,7 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
 
       <div className="set-col">
         <AgentsGroup />
+        <DashboardsGroup />
         {/* Beside Claude Agents (spec §5.6), under it in the same column: both
             report on the HOST — one on the dispatch environment, one on the
             tracker connection — and both are read-only reports rather than
