@@ -9,18 +9,18 @@ paths: ["client/src/**"]
   refuses a starting project with the same `RUN_IN_PROGRESS_CODE`. `runHoldsItem` deliberately does NOT gain the parameter. Why:
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
-  listener; seven dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet`, since the
-  release chip `ReleasesDrawer`, and since Jira phase 5 `JiraLaunchSheet` — and
+  listener; eight dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet`, since the
+  release chip `ReleasesDrawer`, since Jira phase 5 `JiraLaunchSheet`, and since the Dashboards card's add/edit sheet `DashboardSheet` — and
   none binds its own (bug-23 — four until task-37 took the run drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog
   again; three from then until Jira phase 2). Since task-40 the hook is called by the overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the
-  surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet` and `JiraLaunchSheet`,
-  so the three Jira surfaces joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is ui-kit's since #298, so the wrapper calls the hook itself
+  surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`, `JiraLaunchSheet` and `DashboardSheet`,
+  so the three Jira surfaces and the Dashboards sheet joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is ui-kit's since #298, so the wrapper calls the hook itself
   and passes `closeOnEscape={false}`, and ui-kit's drawer binds no key of its own. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
   item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`) and the Jira modal's `Stop session` open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with seven composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`), the board sheet's roots
   search (`components/jira/JiraBoardSheet.tsx`) and `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
-  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still seven dialogs counted.
+  only itself; its click-outside is its own `pointerdown` listener, since the stack owns the key and not the pointer. Still eight dialogs counted.
   Ranking is by mount order; entries are removed by identity, never popped.
   Why:
   [invariants.md](docs/subsystems/invariants.md#escape-has-one-owner-and-the-topmost-dialog-is-the-only-one-that-closes)

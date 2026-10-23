@@ -441,7 +441,7 @@ while some entry holds a session id; an unreadable list or agents off leaves the
 
 The look is DESIGN.md §8.9.1 (`Run ▾` and the strip), §8.9.2 (the modal's row), §8.9.3 (Skills) and §8.9.5 (the launch sheet). The rules are
 [invariants.md](invariants.md#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) (`Run ▾` is never hidden for the dashboard's sake) and the Escape
-section (seven dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
+section (eight dialogs). The browser still never talks to Jira or the dashboard: every request below is to this server.
 
 - **`Run ▾`** (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the issue modal's controls row. It decides nothing:
   `runChipState(issue, status)` (`lib/jira.ts`) answers `no-repo` (a dashed chip that opens nothing, its title naming `Jira › Setup › Repositories`), `live`

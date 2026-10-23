@@ -11,12 +11,13 @@ import { join } from 'node:path';
  * The What's new drawer moved it to six: `ReleasesDrawer` composed `ui/Drawer`, a third shell, and since #298 calls the hook itself over ui-kit's drawer.
  * Jira phase 5 moved it to seven — the same edit a third time: `JiraLaunchSheet` composes `ui/FormSheet`, `FormSheet`'s fourth composer, and joined the stack
  * through the shell with no line of the hook changed. (The Jira spec's §12 says "to six", written before the drawer made today's six.) `Run ▾`'s panel also
- * made `Popover`'s composers seven, which is the OTHER number the hook's comment carries and is pinned the same way.
+ * made `Popover`'s composers seven, which is the OTHER number the hook's comment carries and is pinned the same way. The Dashboards card's add/edit sheet
+ * moved the dialog count to eight, the same edit a fourth time: `DashboardSheet` composes `ui/FormSheet`, its fifth composer.
  *
  * Read as text, the way `test/claude-rules.test.ts` reads the rule files: these are prose, there is nothing to import, and the point is that the sentences a
  * reader arrives at say what the stack actually does.
  *
- * What is asserted is deliberately narrow — the count, the seven names, and that `RunDrawer`'s departure is EXPLAINED rather than merely erased — because
+ * What is asserted is deliberately narrow — the count, the eight names, and that `RunDrawer`'s departure is EXPLAINED rather than merely erased — because
  * a test that pinned whole paragraphs would fail on every rewording and teach the next person to delete it.
  */
 const ROOT = join(__dirname, '..');
@@ -41,14 +42,14 @@ function mechanismBullet(): string {
   return BOARD_RULES.slice(at, next === -1 ? undefined : next);
 }
 
-describe('the Escape rule reads seven dialogs, not three, four, five or six', () => {
-  const SEVEN = ['ItemModal', 'LaunchSheet', 'OrchestrateSheet', 'JiraIssueModal', 'JiraBoardSheet', 'ReleasesDrawer', 'JiraLaunchSheet'];
+describe('the Escape rule reads eight dialogs, not three, four, five, six or seven', () => {
+  const EIGHT = ['ItemModal', 'LaunchSheet', 'OrchestrateSheet', 'JiraIssueModal', 'JiraBoardSheet', 'ReleasesDrawer', 'JiraLaunchSheet', 'DashboardSheet'];
 
-  it("invariants.md names seven and says WHY the run drawer left, rather than dropping it", () => {
+  it('invariants.md names eight and says WHY the run drawer left, rather than dropping it', () => {
     const entry = escapeEntry();
-    expect(entry).toMatch(/all seven dialogs/);
-    expect(entry).not.toMatch(/all (three|four|five|six) dialogs/);
-    for (const name of SEVEN) expect(entry).toContain(name);
+    expect(entry).toMatch(/all eight dialogs/);
+    expect(entry).not.toMatch(/all (three|four|five|six|seven) dialogs/);
+    for (const name of EIGHT) expect(entry).toContain(name);
     // The rule survives every surface that has ever carried it: the entry is
     // edited in place, and the departure carries its reason — the content is
     // an inline sheet now, never a dialog.
@@ -57,16 +58,17 @@ describe('the Escape rule reads seven dialogs, not three, four, five or six', ()
     expect(entry).toMatch(/never a dialog/);
   });
 
-  it("the board rule file's bullet says the same seven and points at the same reason", () => {
+  it("the board rule file's bullet says the same eight and points at the same reason", () => {
     const bullet = mechanismBullet();
-    expect(bullet).toMatch(/seven dialogs/);
-    expect(bullet).not.toMatch(/(three|four|five|six) dialogs/);
+    expect(bullet).toMatch(/eight dialogs/);
+    expect(bullet).not.toMatch(/(three|four|five|six|seven) dialogs/);
     expect(bullet).toContain('LaunchSheet');
     expect(bullet).toContain('OrchestrateSheet');
     expect(bullet).toContain('JiraIssueModal');
     expect(bullet).toContain('JiraBoardSheet');
     expect(bullet).toContain('ReleasesDrawer');
     expect(bullet).toContain('JiraLaunchSheet');
+    expect(bullet).toContain('DashboardSheet');
     expect(bullet).toMatch(/item modal/);
     expect(bullet).toMatch(/never a dialog/);
   });
@@ -78,15 +80,17 @@ describe('the Escape rule reads seven dialogs, not three, four, five or six', ()
   /* The half a doc edit cannot state on its own: the hook's own doc comment is
      the third copy of this count, and it is the one a reader lands in from the
      code rather than from the docs. Its history sentence stays — three was true
-     from task-37 to Jira phase 2, and five until the What's new drawer, and six until the Jira launch sheet — and the seven is the sentence after them. The
+     from task-37 to Jira phase 2, and five until the What's new drawer, six until the Jira launch sheet and seven until the Dashboards sheet — and the eight
+     is the sentence after them. The
      Popover count (R6) is pinned beside it, because it is the other number in
      that comment and rots the same way. */
-  it("the hook's own comment keeps the three's and the five's and the six's history and says seven, with seven Popover composers", () => {
+  it("the hook's own comment keeps the three's, five's, six's and seven's history and says eight, with seven Popover composers", () => {
     const hook = readFileSync(join(ROOT, 'client', 'src', 'hooks', 'useDialogEscape.ts'), 'utf8');
     expect(hook).toMatch(/Three of them now, not four/);
     expect(hook).toMatch(/Five since Jira phase 2/);
     expect(hook).toMatch(/Six since the What's new drawer/);
     expect(hook).toMatch(/Seven since Jira phase 5/);
+    expect(hook).toMatch(/Eight since the Dashboards card's add\/edit sheet/);
     expect(hook).toMatch(/seven composers/);
   });
 });

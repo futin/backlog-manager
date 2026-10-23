@@ -1,13 +1,14 @@
-import { useId, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
 import { useDashboards } from '../../hooks/useDashboards';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { deleteEntry, saveEntry, saveHome, saveSuggestion } from '../../lib/dashboards';
-import { EFFORTS, MODELS, defaultBoardUrl } from '../../../../shared/agent';
-import type { AgentsStatus, DashboardEntryInput, DashboardsView, SuggestStrategy } from '../../../../shared/types';
+import { EFFORTS, MODELS } from '../../../../shared/agent';
+import type { AgentsStatus, DashboardsView, SuggestStrategy } from '../../../../shared/types';
 import { Chip } from '../ui/Chip';
+import { DashboardSheet, ticked } from './DashboardSheet';
 import { AgentsStatusLines, DispatchSetupSteps } from './DispatchStatus';
 import { Confirm } from '../ui/Confirm';
 import { NumberField } from '../ui/NumberField';
@@ -35,16 +36,12 @@ import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
  * DOM by accident.
  *
  * **Home's models and efforts are drawn and editable, and narrow nothing.** They are what a remote launch would be limited to if home were one, kept so a
- * home entry reads like the others; home's own launch sheets behave exactly as before (the server drops an unknown model on home silently), so this card
- * puts no hint beside them that suggests otherwise.
+ * home entry reads like the others; home's own launch sheets behave exactly as before (the server drops an unknown model on home silently), so neither this
+ * card nor the sheet puts a hint beside them that suggests otherwise.
  *
- * **One form at a time**, open under the row it edits (or after the list for `Add dashboard`). Only Name and Dashboard URL are required: a blank Board URL or
- * Machine name is sent as absent and the server stores its default (`validateEntry`), which the field shows as its placeholder — `defaultBoardUrl` of the
- * URL typed so far, and the name — so what the form promises is what the file gets. Models and efforts are checkboxes; every box ticked is sent as
- * NO list (home: `null`, which clears it), because absent means "the whole list" on the server and a stored full list would silently stop following `MODELS`
- * the day it grows. None ticked disables Save with the reason — the server would refuse an empty list, and a button that can only fail is the silent no-op
- * this page avoids. A new entry whose name already exists is held at the form too: the server treats a same-name POST as an UPDATE (that is how Save on an
- * edit works), so without the hold `Add dashboard` would overwrite a row in silence.
+ * **Add and Edit open a sheet** (`DashboardSheet`, §8.7) — one at a time, over the card rather than in place under a row, where a seven-field form inside
+ * the list read as more of the list. What each field sends, the placeholders that show the server's defaults and the same-name hold are that file's header.
+ * Remove stays inline: it is one question about one row, asked through `Confirm` in place of the row's controls.
  *
  * **Every write answers the whole fresh view** (`lib/dashboards.ts`) and the card draws that, never an optimistic copy; a refusal (400 with the field's
  * sentence, 404 for a row another tab removed, 409 for an unreadable file) is shown in the server's own words under the control that sent it and changes
@@ -70,11 +67,6 @@ const MAX_REMOTES = 8;
 type Scope = 'form' | 'list' | 'suggest';
 type Editing = { kind: 'home' } | { kind: 'new' } | { kind: 'edit'; name: string } | null;
 type Remote = DashboardsView['dashboards'][number];
-
-/** An empty list from a stub or an older server means "no narrowing" — the whole list, ticked. */
-function ticked(list: string[], all: readonly string[]): string[] {
-  return list.length === 0 ? [...all] : list;
-}
 
 export function DashboardsGroup() {
   const { view: loaded, error } = useDashboards();
@@ -152,7 +144,7 @@ export function DashboardsGroup() {
     if (await write('list', () => deleteEntry(name))) setEditing((cur) => (cur?.kind === 'edit' && cur.name === name ? null : cur));
   };
 
-  // `inForm` draws the sentence as a bare line under a form's buttons: a form is already a row, and a row inside a row would pad twice.
+  // `inForm` draws the sentence as a bare line under the sheet's buttons, where a padded row would sit oddly in a footer.
   const noticeFor = (scope: Scope, inForm = false): ReactNode =>
     notice?.scope === scope &&
     (inForm ? (
@@ -193,7 +185,6 @@ export function DashboardsGroup() {
         <Chip
           size={28}
           aria-label={`Edit ${label}`}
-          pressed={id === 'home' ? editing?.kind === 'home' : editing?.kind === 'edit' && editing.name === id}
           disabled={unreadable}
           onClick={() => {
             setNotice(null);
@@ -248,7 +239,6 @@ export function DashboardsGroup() {
 
       {ids.map((id) => {
         const remote = id === 'home' ? null : (remotes.get(id) as Remote);
-        const isEditing = id === 'home' ? editing?.kind === 'home' : editing?.kind === 'edit' && editing.name === id;
         return (
           <div key={id} className="dash-machine">
             <SettingsRow
@@ -258,45 +248,35 @@ export function DashboardsGroup() {
               {machineControls(id)}
             </SettingsRow>
             {remote === null && <DispatchSetupSteps status={status} />}
-            {isEditing &&
-              (remote === null ? (
-                <HomeForm
-                  view={view}
-                  busy={busy}
-                  onCancel={closeForm}
-                  onSave={async (patch) => {
-                    if (await write('form', () => saveHome(patch))) closeForm();
-                  }}
-                  error={noticeFor('form', true)}
-                />
-              ) : (
-                <RemoteForm
-                  initial={remote}
-                  taken={view.dashboards.map((d) => d.name).filter((n) => n !== remote.name)}
-                  busy={busy}
-                  onCancel={closeForm}
-                  onSave={async (entry) => {
-                    if (await write('form', () => saveEntry(entry, remote.name))) closeForm();
-                  }}
-                  error={noticeFor('form', true)}
-                />
-              ))}
           </div>
         );
       })}
-      {editing?.kind === 'new' && (
-        <RemoteForm
-          initial={null}
-          taken={view.dashboards.map((d) => d.name)}
+      {noticeFor('list')}
+      {editing?.kind === 'home' && (
+        <DashboardSheet
+          kind="home"
+          view={view}
           busy={busy}
-          onCancel={closeForm}
-          onSave={async (entry) => {
-            if (await write('form', () => saveEntry(entry))) closeForm();
+          onClose={closeForm}
+          onSave={async (patch) => {
+            if (await write('form', () => saveHome(patch))) closeForm();
           }}
           error={noticeFor('form', true)}
         />
       )}
-      {noticeFor('list')}
+      {(editing?.kind === 'new' || (editing?.kind === 'edit' && remotes.has(editing.name))) && (
+        <DashboardSheet
+          kind="remote"
+          initial={editing.kind === 'edit' ? (remotes.get(editing.name) as Remote) : null}
+          taken={view.dashboards.map((d) => d.name).filter((n) => editing.kind !== 'edit' || n !== editing.name)}
+          busy={busy}
+          onClose={closeForm}
+          onSave={async (entry) => {
+            if (await write('form', () => saveEntry(entry, editing.kind === 'edit' ? editing.name : undefined))) closeForm();
+          }}
+          error={noticeFor('form', true)}
+        />
+      )}
 
       <div className="set-row set-row-stacked">
         <div className="set-label">
@@ -398,275 +378,5 @@ function RemoteLines({ entry }: { entry: Remote }) {
       <Line>{listLine('models', entry.models, MODELS)}</Line>
       <Line>{listLine('efforts', entry.efforts, EFFORTS)}</Line>
     </>
-  );
-}
-
-/** A labelled text field and, under it, the sentence that says what to put in it. */
-function Field({
-  label,
-  hint,
-  value,
-  onChange,
-  placeholder,
-  disabled
-}: {
-  label: string;
-  hint?: ReactNode;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  disabled: boolean;
-}) {
-  const id = useId();
-  return (
-    <div className="dash-field">
-      <label className="set-name" htmlFor={id}>
-        {label}
-      </label>
-      <input
-        id={id}
-        className="set-text dash-text"
-        type="text"
-        value={value}
-        placeholder={placeholder}
-        disabled={disabled}
-        aria-describedby={hint ? `${id}-hint` : undefined}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {hint && (
-        <span className="set-hint" id={`${id}-hint`}>
-          {hint}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** A group of checkboxes over one fixed list (`MODELS` / `EFFORTS`). */
-function Checks({
-  legend,
-  all,
-  value,
-  onChange,
-  disabled
-}: {
-  legend: string;
-  all: readonly string[];
-  value: string[];
-  onChange: (v: string[]) => void;
-  disabled: boolean;
-}) {
-  return (
-    <fieldset className="dash-checks" disabled={disabled}>
-      <legend className="set-name">{legend}</legend>
-      {all.map((item) => (
-        <label key={item} className="dash-check">
-          <input
-            type="checkbox"
-            checked={value.includes(item)}
-            onChange={(e) => onChange(all.filter((x) => (x === item ? e.target.checked : value.includes(x))))}
-          />
-          {item}
-        </label>
-      ))}
-    </fieldset>
-  );
-}
-
-/** A form's footer: Save and Cancel, and the server's refusal under them (`error`, drawn by the group). */
-function FormActions({
-  canSave,
-  busy,
-  onSave,
-  onCancel,
-  error,
-  why
-}: {
-  canSave: boolean;
-  busy: boolean;
-  onSave: () => void;
-  onCancel: () => void;
-  error: ReactNode;
-  why: string | null;
-}) {
-  return (
-    <>
-      <div className="dash-actions">
-        <Chip size={28} variant="ink" disabled={!canSave || busy} onClick={onSave}>
-          Save
-        </Chip>
-        <Chip size={28} variant="flat" disabled={busy} onClick={onCancel}>
-          Cancel
-        </Chip>
-        {why && <span className="set-hint">{why}</span>}
-      </div>
-      {error}
-    </>
-  );
-}
-
-function HomeForm({
-  view,
-  busy,
-  onSave,
-  onCancel,
-  error
-}: {
-  view: DashboardsView;
-  busy: boolean;
-  onSave: (patch: { label: string | null; account: string | null; models: string[] | null; efforts: string[] | null }) => void;
-  onCancel: () => void;
-  error: ReactNode;
-}) {
-  const [label, setLabel] = useState(view.home.label);
-  const [account, setAccount] = useState(view.home.account ?? '');
-  const [models, setModels] = useState(ticked(view.home.models, MODELS));
-  const [efforts, setEfforts] = useState(ticked(view.home.efforts, EFFORTS));
-  const why = models.length === 0 ? 'tick at least one model' : efforts.length === 0 ? 'tick at least one effort' : null;
-
-  return (
-    <div className="set-row set-row-stacked dash-form">
-      <Field
-        label="Label"
-        hint="What a card and a launch sheet call this machine. Empty goes back to Home."
-        value={label}
-        onChange={setLabel}
-        disabled={busy}
-      />
-      <Field
-        label="Account"
-        hint="Optional — the plan or login this machine runs on, shown beside the label."
-        value={account}
-        onChange={setAccount}
-        disabled={busy}
-      />
-      <Checks legend="Models" all={MODELS} value={models} onChange={setModels} disabled={busy} />
-      <Checks legend="Efforts" all={EFFORTS} value={efforts} onChange={setEfforts} disabled={busy} />
-      <FormActions
-        canSave={why === null}
-        busy={busy}
-        why={why}
-        error={error}
-        onCancel={onCancel}
-        onSave={() =>
-          onSave({
-            label: label.trim() === '' ? null : label.trim(),
-            account: account.trim() === '' ? null : account.trim(),
-            models: models.length === MODELS.length ? null : models,
-            efforts: efforts.length === EFFORTS.length ? null : efforts
-          })
-        }
-      />
-    </div>
-  );
-}
-
-function RemoteForm({
-  initial,
-  taken,
-  busy,
-  onSave,
-  onCancel,
-  error
-}: {
-  initial: Remote | null;
-  /** The OTHER entries' names — the ones this form's name may not repeat. */
-  taken: string[];
-  busy: boolean;
-  onSave: (entry: DashboardEntryInput) => void;
-  onCancel: () => void;
-  error: ReactNode;
-}) {
-  const [name, setName] = useState(initial?.name ?? '');
-  const [url, setUrl] = useState(initial?.url ?? '');
-  const [bmUrl, setBmUrl] = useState(initial?.bmUrl ?? '');
-  const [host, setHost] = useState(initial?.host ?? '');
-  const [account, setAccount] = useState(initial?.account ?? '');
-  const [models, setModels] = useState(ticked(initial?.models ?? [], MODELS));
-  const [efforts, setEfforts] = useState(ticked(initial?.efforts ?? [], EFFORTS));
-
-  const trimmed = name.trim();
-  // A NEW entry that repeats an existing name would be an UPDATE of it on the server (the same-name POST is how Save on an edit works), so it is held here;
-  // a case-only clash with another entry the server refuses itself, with its own sentence, and that sentence is shown.
-  const clash = initial === null && taken.some((n) => n === trimmed);
-  const why = clash
-    ? `a dashboard named "${trimmed}" already exists`
-    : models.length === 0
-      ? 'tick at least one model'
-      : efforts.length === 0
-        ? 'tick at least one effort'
-        : null;
-  const complete = trimmed !== '' && url.trim() !== '';
-
-  return (
-    <div className="set-row set-row-stacked dash-form">
-      <Field
-        label="Name"
-        hint={
-          <>
-            Letters and digits, starting with a letter. Its token is <code>BM_AGENTS_TOKEN_{trimmed === '' ? '<NAME>' : trimmed.toUpperCase()}</code>.
-          </>
-        }
-        value={name}
-        onChange={setName}
-        placeholder="Pro"
-        disabled={busy}
-      />
-      <Field
-        label="Dashboard URL"
-        hint="The claude-agents-dashboard on that machine."
-        value={url}
-        onChange={setUrl}
-        placeholder="http://pro.tailnet.ts.net:4173"
-        disabled={busy}
-      />
-      <Field
-        label="Board URL"
-        hint="Optional — the backlog-manager on that machine. Blank is the dashboard's host on the board's default port."
-        value={bmUrl}
-        onChange={setBmUrl}
-        placeholder={defaultBoardUrl(url.trim()) ?? 'http://pro.tailnet.ts.net:5177'}
-        disabled={busy}
-      />
-      <Field
-        label="Machine name"
-        hint={
-          <>
-            Optional — blank is the name. Must equal <code>BM_MACHINE_NAME</code> in that machine's shell environment — it is how a claim says where it runs.
-          </>
-        }
-        value={host}
-        onChange={setHost}
-        placeholder={trimmed === '' ? 'Pro' : trimmed}
-        disabled={busy}
-      />
-      <Field
-        label="Account"
-        hint="Optional — the plan or login that machine runs on, shown beside its name."
-        value={account}
-        onChange={setAccount}
-        disabled={busy}
-      />
-      <Checks legend="Models" all={MODELS} value={models} onChange={setModels} disabled={busy} />
-      <Checks legend="Efforts" all={EFFORTS} value={efforts} onChange={setEfforts} disabled={busy} />
-      <FormActions
-        canSave={complete && why === null}
-        busy={busy}
-        why={why}
-        error={error}
-        onCancel={onCancel}
-        onSave={() => {
-          // A blank Board URL or Machine name is left out, and the server stores the default the placeholder shows.
-          const entry: DashboardEntryInput = { name: trimmed, url: url.trim() };
-          if (bmUrl.trim() !== '') entry.bmUrl = bmUrl.trim();
-          if (host.trim() !== '') entry.host = host.trim();
-          if (account.trim() !== '') entry.account = account.trim();
-          // Every box ticked is NO list: absent means the whole list, and follows `MODELS` when it grows.
-          if (models.length !== MODELS.length) entry.models = models;
-          if (efforts.length !== EFFORTS.length) entry.efforts = efforts;
-          onSave(entry);
-        }}
-      />
-    </div>
   );
 }

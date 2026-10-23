@@ -257,7 +257,7 @@ describe('DashboardsGroup', () => {
       stubFetch();
       await renderCard();
       await userEvent.click(screen.getByRole('button', { name: 'Edit Home' }));
-      expect(document.querySelector('.dash-form')?.textContent ?? '').not.toMatch(/narrow|limit|restrict|only offer/i);
+      expect(screen.getByRole('dialog', { name: 'Edit Home' }).textContent ?? '').not.toMatch(/narrow|limit|restrict|only offer/i);
     });
   });
 
@@ -388,6 +388,35 @@ describe('DashboardsGroup', () => {
       expect(posts(fn)).toHaveLength(0);
     });
 
+    it('opens as a dialog over the card, and Escape and the scrim close it without posting', async () => {
+      const fn = stubFetch();
+      await renderCard();
+      await openAdd();
+      expect(screen.getByRole('dialog', { name: 'Add dashboard' })).toBeInTheDocument();
+      await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Team');
+      await userEvent.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).toBeNull();
+
+      await openAdd();
+      // Re-opened, it starts empty: what was typed before the Escape went with the sheet.
+      expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('');
+      await userEvent.click(document.querySelector('.ui-form-sheet-scrim') as HTMLElement);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(posts(fn)).toHaveLength(0);
+    });
+
+    it('closes the sheet once the server stores the entry, and draws the answer', async () => {
+      const TEAM = { ...MAX, name: 'Team', url: 'http://team:4310', host: 'Team', tokenVar: 'BM_AGENTS_TOKEN_TEAM' };
+      stubFetch({ post: () => ({ status: 200, body: viewOf({ dashboards: [PRO, MAX, TEAM], order: ['home', 'Pro', 'Max', 'Team'] }) }) });
+      await renderCard();
+      await openAdd();
+      await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'Team');
+      await userEvent.type(screen.getByRole('textbox', { name: 'Dashboard URL' }), 'http://team:4310');
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(names()).toEqual(['Home', 'Pro', 'Max', 'Team']));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
     it('disables Add dashboard at eight remotes', async () => {
       const eight = Array.from({ length: 8 }, (_, i) => ({ ...MAX, name: `M${i}`, host: `m${i}` }));
       stubFetch({ get: viewOf({ dashboards: eight, order: ['home', ...eight.map((d) => d.name)] }) });
@@ -397,7 +426,7 @@ describe('DashboardsGroup', () => {
   });
 
   describe('editing and removing a dashboard', () => {
-    it('edits in place, pre-filled, and posts the entry with `replaces` naming the row it came from', async () => {
+    it('edits in a sheet, pre-filled, and posts the entry with `replaces` naming the row it came from', async () => {
       const fn = stubFetch();
       await renderCard();
       await userEvent.click(screen.getByRole('button', { name: 'Edit Pro' }));
@@ -408,8 +437,9 @@ describe('DashboardsGroup', () => {
       expect(screen.getByRole('textbox', { name: 'Account' })).toHaveValue('Pro plan');
       expect((screen.getByRole('checkbox', { name: 'opus' }) as HTMLInputElement).checked).toBe(false);
       expect((screen.getByRole('checkbox', { name: 'sonnet' }) as HTMLInputElement).checked).toBe(true);
-      // Under its own row, not at the foot of the card.
-      expect(rowOf('Pro').parentElement?.querySelector('.dash-form')).not.toBeNull();
+      // A sheet over the card, titled with the row it edits — not a form in place under the row.
+      expect(screen.getByRole('dialog', { name: 'Edit dashboard Pro' })).toBeInTheDocument();
+      expect(rowOf('Pro').parentElement?.querySelector('input[type="text"]')).toBeNull();
 
       await userEvent.clear(name);
       await userEvent.type(name, 'Pro2');
