@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import {
-  EFFORT_OPTIONS,
   EXECUTE_FINISH_OPTIONS,
-  MODEL_OPTIONS,
   dispatchAgent,
   fetchAgentPlan,
   fetchBranches,
@@ -12,10 +10,13 @@ import {
 } from '../../lib/agents';
 import { useAction } from '../../hooks/useAction';
 import { useFetched } from '../../hooks/useFetched';
+import { useRunOn } from '../../hooks/useRunOn';
 import { useSettings } from '../../hooks/useSettings';
+import { prRequiredText, runsText } from '../../lib/dashboards';
 import { staleTakeover } from '../../lib/tracker';
 import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
+import { RunOn } from '../ui/RunOn';
 import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 import { finishClause } from '../../../../shared/agent';
@@ -57,12 +58,18 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   // moves it behind your back. `clampSettings` has already dropped anything
   // outside MODELS/EFFORTS, so this can only ever seed a value the selects
   // below actually offer.
-  const [model, setModel] = useState(settings.dispatchDefaultModel);
-  const [effort, setEffort] = useState(settings.dispatchDefaultEffort);
+  //
+  // Both live in `useRunOn` now: picking a remote machine narrows them to its lists and writes the narrowed value back, which is state the hook owns. They are
+  // still seeded from Settings and from nowhere else.
+  const runOn = useRunOn(item.projectPath);
+  const { model, setModel, effort, setEffort } = runOn;
   const [remoteControl, setRemoteControl] = useState(true);
   // Execute's finish pick, seeded from Settings and from nowhere else, for the same reason as model/effort above. `clampSettings` has already dropped
   // anything outside EXECUTE_FINISHES, so the select can only be seeded with a value it offers. Only an `execute` plan draws or sends it.
-  const [finish, setFinish] = useState<ExecuteFinish>(settings.executeDefaultFinish);
+  const [pickedFinish, setFinish] = useState<ExecuteFinish>(settings.executeDefaultFinish);
+  // A remote machine takes PR only, so Finish is DERIVED from the pick rather than overwritten by it: the person's own choice stays in `pickedFinish` and
+  // comes back untouched when they switch to home (Review Focus 5). Derived in render, the way the Orchestrate sheet derives its merge mode.
+  const finish: ExecuteFinish = runOn.lock.prOnly ? 'pr' : pickedFinish;
   // Never stored, never seeded from a previous launch: a base is a fact about one repository's branches, so every open starts on `'main'`.
   const [base, setBase] = useState<string>('main');
   const { busy, error, run } = useAction();
@@ -114,7 +121,10 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           // Execute always names its finish, even untouched — the server appends the closing clause from it, so an absent key would read as in-place whatever
           // the sheet showed. `base` rides only under PR: a base picked and then abandoned must not reach an in-place launch, which the server refuses.
           // Groom and capture send neither key; the server 400s `finish` on any other action.
-          ...(isExecute ? (finish === 'pr' ? { finish, base } : { finish }) : {})
+          ...(isExecute ? (finish === 'pr' ? { finish, base } : { finish }) : {}),
+          // Only a remote pick names its machine; home sends no key at all, so a home-only board's request is byte-identical to what it was before the
+          // picker existed (Review Focus 1).
+          ...runOn.request
         }),
       { onSuccess: (r) => setSessionId(r.sessionId) }
     );
@@ -148,8 +158,8 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <Chip size={28} variant="flat" onClick={onClose}>
               cancel
             </Chip>
-            <Chip size={28} variant="ink" disabled={busy || prompt.trim() === ''} onClick={launch}>
-              {busy ? 'launching…' : 'launch'}
+            <Chip size={28} variant="ink" disabled={busy || prompt.trim() === '' || runOn.blocked} onClick={launch}>
+              {busy ? 'launching…' : runOn.remote ? `Start on ${runOn.label}` : 'launch'}
             </Chip>
           </>
         ) : null
@@ -171,6 +181,11 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
         <div className="drawer-empty">loading…</div>
       ) : (
         <>
+          {/* The picker leads the sheet (spec "The picker's look"): where this runs decides what Finish, Model and Effort below can be, so it is read first.
+              `RunOn` draws nothing below two machines, which is a home-only board's whole sheet unchanged. */}
+          {runOn.offers !== null && <RunOn offers={runOn.offers} value={runOn.machine} onChange={runOn.pick} />}
+          {runOn.note !== null && <div className="sheet-note">{runOn.note}</div>}
+
           <label className="sheet-field">
             <span className="set-name">Project</span>
             <span className="sheet-static">{plan.project}</span>
@@ -194,7 +209,8 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <div className="sheet-row">
               <label className="sheet-field">
                 <span className="set-name">Finish</span>
-                <Select<ExecuteFinish> label="Finish" value={finish} onChange={setFinish} options={EXECUTE_FINISH_OPTIONS} />
+                <Select<ExecuteFinish> label="Finish" value={finish} onChange={setFinish} options={EXECUTE_FINISH_OPTIONS} disabled={runOn.lock.prOnly} />
+                {runOn.remote && <span className="sheet-note">{prRequiredText(runOn.label!)}</span>}
               </label>
 
               {finish === 'pr' && (
@@ -233,12 +249,14 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 so an unknown name costs the flag, not the launch. */}
             <label className="sheet-field">
               <span className="set-name">Model</span>
-              <Select label="Model" value={model} onChange={setModel} options={MODEL_OPTIONS} />
+              <Select label="Model" value={model} onChange={setModel} options={runOn.modelOptions} />
+              {runOn.remote && runOn.lock.models.length > 0 && <span className="sheet-note">{runsText(runOn.label!, runOn.lock.models)}</span>}
             </label>
 
             <label className="sheet-field">
               <span className="set-name">Effort</span>
-              <Select label="Effort" value={effort} onChange={setEffort} options={EFFORT_OPTIONS} />
+              <Select label="Effort" value={effort} onChange={setEffort} options={runOn.effortOptions} />
+              {runOn.remote && runOn.lock.efforts.length > 0 && <span className="sheet-note">{runsText(runOn.label!, runOn.lock.efforts)}</span>}
             </label>
           </div>
 

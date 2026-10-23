@@ -8,8 +8,10 @@ import '@testing-library/jest-dom';
 import { LaunchSheet } from '../client/src/components/board/LaunchSheet';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { daysAgoDate } from './helpers/dates';
+import { homeOffer, homeOnly, proOffer, proSuggested } from './helpers/offers';
 import { COMMIT_RULE, finishClause } from '../shared/agent';
-import type { AgentPlan, BacklogItem } from '../shared/types';
+import { NO_MACHINE_TEXT } from '../client/src/lib/dashboards';
+import type { AgentPlan, BacklogItem, ProjectOffers } from '../shared/types';
 
 const ITEM: BacklogItem = {
   id: 'task-12',
@@ -45,8 +47,17 @@ const PLAN: AgentPlan = {
   defaultMode: 'acceptEdits'
 };
 
-/** `branches` is the list `GET /api/agents/branches` answers with, or `'reject'` for a network failure; absent, the route answers an empty list. */
-function stub(handlers: { plan?: unknown; dispatch?: { ok: boolean; body: unknown }; branches?: string[] | 'reject' }) {
+/**
+ * `branches` is the list `GET /api/agents/branches` answers with, or `'reject'` for a network failure; absent, the route answers an empty list. `offers` is what
+ * `GET /api/dashboards/offers` answers — home alone when absent, which is what every server without a remote configured says — or `'reject'` for a network
+ * failure, or `'pending'` for an answer that never comes.
+ */
+function stub(handlers: {
+  plan?: unknown;
+  dispatch?: { ok: boolean; body: unknown };
+  branches?: string[] | 'reject';
+  offers?: ProjectOffers | 'reject' | 'pending';
+}) {
   const calls: { url: string; body: unknown }[] = [];
   global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -54,6 +65,11 @@ function stub(handlers: { plan?: unknown; dispatch?: { ok: boolean; body: unknow
     calls.push({ url, body });
     if (url.endsWith('/plan')) {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handlers.plan ?? PLAN) } as Response);
+    }
+    if (url.includes('/api/dashboards/offers')) {
+      if (handlers.offers === 'reject') return Promise.reject(new Error('NetworkError'));
+      if (handlers.offers === 'pending') return new Promise(() => {});
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(handlers.offers ?? homeOnly()) } as Response);
     }
     if (url.includes('/api/agents/branches')) {
       if (handlers.branches === 'reject') return Promise.reject(new Error('NetworkError'));
@@ -192,8 +208,8 @@ describe('LaunchSheet', () => {
 
     doubleClick(screen.getByRole('button', { name: 'launch' }));
 
-    // The branch list the execute sheet reads on open is a read, not a launch — only the dispatch POST may land twice here.
-    expect(calls.filter((c) => !c.url.endsWith('/plan') && !c.url.includes('/api/agents/branches'))).toHaveLength(1);
+    // The branch list and the machine offers the sheet reads on open are reads, not launches — only the dispatch POST may land twice here.
+    expect(calls.filter((c) => !c.url.endsWith('/plan') && !c.url.includes('/api/agents/branches') && !c.url.includes('/api/dashboards/offers'))).toHaveLength(1);
   });
 
   it('offers no launch at all when the plan comes back blocked', async () => {
@@ -440,6 +456,152 @@ describe('LaunchSheet', () => {
       expect(body).not.toHaveProperty('finish');
       expect(body).not.toHaveProperty('base');
       expect(calls.some((c) => c.url.includes('/api/agents/branches'))).toBe(false);
+    });
+  });
+
+  /*
+   * Multi-dashboard task 9 — the "Run on" group at the top of the sheet. Home-only offers draw nothing and send the request this sheet always sent
+   * (Review Focus 1); a remote pick locks Finish to PR, narrows Model and Effort to that machine's lists and renames the button; switching back to home gives
+   * Finish back as the person had it (Review Focus 5) and leaves a narrowed-away model on the Settings default.
+   */
+  describe('run on', () => {
+    const dispatchCalls = (calls: { url: string; body: unknown }[]) => calls.filter((c) => c.url.endsWith('/dispatch'));
+    const launchBody = async (calls: { url: string; body: unknown }[], name: string): Promise<Record<string, unknown>> => {
+      await userEvent.click(screen.getByRole('button', { name }));
+      await waitFor(() => expect(dispatchCalls(calls)).toHaveLength(1));
+      return dispatchCalls(calls)[0].body as Record<string, unknown>;
+    };
+    const options = (label: string): string[] => [...(screen.getByLabelText(label) as HTMLSelectElement).options].map((o) => o.value);
+
+    it('draws no group for home-only offers, keeps the button text, and sends the request it always sent with no machine key', async () => {
+      const calls = stub({ offers: homeOnly() });
+      await openSheet();
+      expect(screen.queryByRole('group', { name: 'Run on' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Run on')).not.toBeInTheDocument();
+      expect(calls.filter((c) => c.url.includes('/api/dashboards/offers?project=%2Fabs%2Falpha'))).toHaveLength(1);
+      const body = await launchBody(calls, 'launch');
+      expect(body).toEqual({ itemPath: ITEM.path, action: 'execute', prompt: PLAN.prompt, permissionMode: 'acceptEdits', finish: 'in-place', remoteControl: true });
+      expect(body).not.toHaveProperty('machine');
+    });
+
+    it('starts on the suggested machine, locked: Finish at PR with its hint, Model and Effort narrowed with theirs, the button naming the machine', async () => {
+      const calls = stub({ offers: proSuggested(), branches: ['main', 'develop'] });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      const start = await screen.findByRole('button', { name: 'Start on Pro' });
+      await waitFor(() => expect(start).toBeEnabled());
+      expect(screen.queryByRole('button', { name: 'launch' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Pro\b/ })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('button', { name: /^Home\b/ })).toHaveAttribute('aria-pressed', 'false');
+
+      const finish = screen.getByLabelText('Finish') as HTMLSelectElement;
+      expect(finish.value).toBe('pr');
+      expect(finish).toBeDisabled();
+      expect(screen.getByText('Required when running on Pro')).toBeInTheDocument();
+      expect(options('Model')).toEqual(['opus', 'sonnet']);
+      expect(screen.getByText('Pro runs opus, sonnet')).toBeInTheDocument();
+      expect(options('Effort')).toEqual(['low', 'high']);
+      expect(screen.getByText('Pro runs low, high')).toBeInTheDocument();
+      // The Base select shows exactly as it does for a PR finish today, and the clause line follows it.
+      const base = screen.getByLabelText('Base') as HTMLSelectElement;
+      await waitFor(() => expect([...base.options].map((o) => o.value)).toEqual(['main', 'develop']));
+      await userEvent.selectOptions(base, 'develop');
+      expect(screen.getByText(finishClause('pr', 'develop'))).toBeInTheDocument();
+
+      const body = await launchBody(calls, 'Start on Pro');
+      expect(body).toMatchObject({ machine: 'Pro', finish: 'pr', base: 'develop' });
+    });
+
+    it('sends a remote groom with the machine and no finish', async () => {
+      const calls = stub({ offers: proSuggested(), plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' } });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      expect(screen.queryByLabelText('Finish')).not.toBeInTheDocument();
+      const body = await launchBody(calls, 'Start on Pro');
+      expect(body.machine).toBe('Pro');
+      expect(body).not.toHaveProperty('finish');
+    });
+
+    // Review Focus 5.
+    it('gives Finish back and keeps the narrowed model on the Settings default when the person switches back to home', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ dispatchDefaultModel: 'opus' }));
+      const calls = stub({ offers: proSuggested() });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+
+      // The person's own picks are made on home, where Finish and model are theirs to set.
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect(screen.getByRole('button', { name: 'launch' })).toBeEnabled();
+      await userEvent.selectOptions(screen.getByLabelText('Model'), 'haiku');
+      expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('in-place');
+
+      await userEvent.click(screen.getByRole('button', { name: /^Pro\b/ }));
+      expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('pr');
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('opus');
+
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      const finish = screen.getByLabelText('Finish') as HTMLSelectElement;
+      expect(finish.value).toBe('in-place');
+      expect(finish).toBeEnabled();
+      expect(screen.queryByText('Required when running on Pro')).not.toBeInTheDocument();
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('opus');
+      expect(options('Model')).toContain('haiku');
+      expect(screen.queryByText('Pro runs opus, sonnet')).not.toBeInTheDocument();
+
+      const body = await launchBody(calls, 'launch');
+      expect(body).toMatchObject({ finish: 'in-place', model: 'opus' });
+      expect(body).not.toHaveProperty('machine');
+      expect(body).not.toHaveProperty('base');
+    });
+
+    it('falls to the first listed model and effort when the Settings default is not among them', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ dispatchDefaultModel: 'opus', dispatchDefaultEffort: 'max' }));
+      const calls = stub({ offers: { ...proSuggested(), machines: [homeOffer(), proOffer({ models: ['sonnet', 'haiku'], efforts: ['medium'] })] } });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('sonnet');
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('medium');
+      const body = await launchBody(calls, 'Start on Pro');
+      expect(body).toMatchObject({ model: 'sonnet', effort: 'medium' });
+    });
+
+    it("shows the server's 409 in the error slot and stays open", async () => {
+      const refusal = 'Pro is not offered for alpha: dashboard unreachable — connect ECONNREFUSED';
+      stub({ offers: proSuggested(), dispatch: { ok: false, body: { error: refusal } } });
+      const onClose = jest.fn();
+      renderSheet({ item: ITEM, onClose });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: 'Start on Pro' }));
+      expect(await screen.findByText(refusal)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('keeps launch disabled while the offers load', async () => {
+      stub({ offers: 'pending' });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await screen.findByLabelText('Prompt');
+      expect(screen.getByRole('button', { name: 'launch' })).toBeDisabled();
+    });
+
+    it('keeps launch disabled, and says why, when no machine is offered', async () => {
+      stub({
+        offers: {
+          project: '/abs/alpha',
+          machines: [homeOffer({ offered: false, reason: 'dashboard unreachable — down', usage: null }), proOffer({ offered: false, reason: 'sync is off for o/r on Pro', usage: null })],
+          suggestion: null
+        }
+      });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await screen.findByText(NO_MACHINE_TEXT);
+      expect(screen.getByRole('button', { name: 'launch' })).toBeDisabled();
+    });
+
+    it('runs here, and says so, when the machine list cannot be read', async () => {
+      const calls = stub({ offers: 'reject' });
+      await openSheet();
+      expect(screen.getByText(/could not load the machine list/i)).toBeInTheDocument();
+      const body = await launchBody(calls, 'launch');
+      expect(body).not.toHaveProperty('machine');
     });
   });
 

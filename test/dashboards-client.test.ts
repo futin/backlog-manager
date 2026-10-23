@@ -9,6 +9,9 @@ import {
   fetchOffers,
   lockedFor,
   machineLabelByHost,
+  narrowTo,
+  prRequiredText,
+  runsText,
   saveEntry,
   saveHome,
   saveSuggestion
@@ -259,5 +262,29 @@ describe('useOffers', () => {
     });
     expect(result.current.offers).toEqual(OFFERS);
     expect(result.current.error).toBeNull();
+  });
+});
+
+// Task 9's three small derivations the launch sheets share: where a narrowed select lands, and the two hints a remote pick draws.
+describe('narrowTo', () => {
+  it('keeps a value the list already holds, and any value when there is no list', () => {
+    expect(narrowTo('sonnet', ['opus', 'sonnet'], 'opus')).toBe('sonnet');
+    expect(narrowTo('haiku', [], 'opus')).toBe('haiku');
+    expect(narrowTo('', [], '')).toBe('');
+  });
+
+  it('falls to the Settings default when it is listed, else to the first listed', () => {
+    expect(narrowTo('haiku', ['opus', 'sonnet'], 'sonnet')).toBe('sonnet');
+    expect(narrowTo('haiku', ['opus', 'sonnet'], 'max')).toBe('opus');
+    // The "default" option is never listed on a narrowed select, so an untouched '' lands somewhere real.
+    expect(narrowTo('', ['low', 'high'], '')).toBe('low');
+  });
+});
+
+describe('hint text', () => {
+  it('names the machine and lists its values in the order the offer carries them', () => {
+    expect(prRequiredText('Pro')).toBe('Required when running on Pro');
+    expect(runsText('Pro', ['opus', 'sonnet'])).toBe('Pro runs opus, sonnet');
+    expect(runsText('Pro', ['high'])).toBe('Pro runs high');
   });
 });

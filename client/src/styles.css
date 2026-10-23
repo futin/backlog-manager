@@ -3349,7 +3349,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .chev-right { transform: rotate(-90deg) }
 @media (prefers-reduced-motion: reduce) { .chev-down { transition: none } .chev-up { transition: none } .chev-right { transition: none } }
 
-/* RunOn — the "Run on" machine-card group (spec "The picker's look"; §8.9.5's launch sheet, §7). One card-sized toggle per machine in an auto-fit grid, so two
+/* RunOn — the "Run on" machine-card group (spec "The picker's look"; §8.7 Overlays — the launch sheets it sits in, §7). One card-sized toggle per machine in an auto-fit grid, so two
    cards sit side by side on a sheet and stack on a phone with no breakpoint of this family's own. The card wears the chip's skin — `--strip`, a `--hairline2`
    stroke, `--ink3` when pressed — at the 12 px radius §4 gives chips, and a dashed stroke with `--ink3` type when disabled, for `.ui-chip[aria-disabled]`'s
    reason: the stroke says "unavailable" in the shape's own language, and unlike opacity it keeps the reason's text at the contrast daylight-contrast measures.

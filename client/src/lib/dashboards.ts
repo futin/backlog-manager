@@ -129,6 +129,29 @@ export function lockedFor(offer: MachineOffer | null): { prOnly: boolean; models
   return { prOnly: true, models: offer.models, efforts: offer.efforts };
 }
 
+/**
+ * Where a narrowed select lands when its current value is not among the machine's own: the Settings default if the machine lists it, else the first listed.
+ * A value already listed stays put, so a pick the person made on home that the machine also runs survives the switch. `''` (the "default" option) is never
+ * listed on a narrowed select — a remote account's own default is not a thing this client can name — so it always falls through to one of the two.
+ */
+export function narrowTo(value: string, list: string[], settingsDefault: string): string {
+  if (list.length === 0 || list.includes(value)) return value;
+  return list.includes(settingsDefault) ? settingsDefault : list[0];
+}
+
+/** The hint under Finish / Merge mode while a remote is picked: the field is not the person's to change, and this says why. */
+export function prRequiredText(label: string): string {
+  return `Required when running on ${label}`;
+}
+
+/** The hint under Model and Effort while a remote is picked: `Pro runs opus, sonnet`, the machine's own list in the order the offer carries it. */
+export function runsText(label: string, list: string[]): string {
+  return `${label} runs ${list.join(', ')}`;
+}
+
+/** What a sheet says when the machine list could not be read and it falls back to running here, which is what the sheet did before there was a picker. */
+export const OFFERS_FAILED_TEXT = 'Could not load the machine list — this will run here.';
+
 /** The picker draws when two or more machines are configured for the project, reachable or not — an unreachable one is a disabled card, not a missing one. */
 export function showsPicker(offers: ProjectOffers): boolean {
   return offers.machines.length >= 2;
