@@ -51,7 +51,7 @@ report rather than silently diverging. Any size mentioned is a soft target.
 2. **A machine appears or disappears between the two reads** (`/api/dashboards` and `/machines` disagree — a remote just added, removed or renamed). A
    machine the machines answer lacks reads as not answered (quiet dot, `checking…`); a status for a machine the view lacks is ignored. (Task 4 lookup helper
    test; Task 5 case.)
-3. **Selection after Remove / rename / Add.** Removing the selected remote falls back to the first machine; renaming it through Edit keeps it selected under
+3. **Selection after a reorder / Remove / rename / Add.** Moving the selected machine keeps it selected; removing the selected remote falls back to the first machine; renaming it through Edit keeps it selected under
    its new name; Add selects the new machine once the view holds it. (Task 4 `pickSelected` tests; Task 5 cases.)
 4. **`BM_AGENTS` off or unreadable `dashboards.json`.** Off: zero outbound calls, every dot quiet, Home's usage area says `no usage figure`. Unreadable: the
    machines answer has Home only, the banner shows, every control is disabled, the list still draws Home. (Task 3 route cases; Task 5 case.)
@@ -115,9 +115,10 @@ Component names inside the page are a recommendation; keep them or merge list ro
 - [ ] **Step 4: Rewire `DispatchStatus.tsx`.** Delete `DotTier`, `dispatchDotTier`, the local `Dot` and `dispatchHealthy`. `AgentsStatusLines` draws
   `ui/Dot` with `tone={dispatchDotTone(status) ?? undefined}` (no tone = quiet, size 8); `DispatchSetupSteps` hides when `status === null` or the tone is
   `'live'`. Text of every line is unchanged. Rewrite the tier comment to describe the four rungs. Keep the file's other comments. Remove the three
-  `.set-dot-*` rules (and a bare `.set-dot` rule if one exists and nothing else uses it — grep) and the two entries in `test/daylight-contrast.test.ts`.
+  `.set-dot-*` rules (`styles.css:957-959`; there is no bare `.set-dot` rule) and the two entries in `test/daylight-contrast.test.ts`.
   If any remaining code imports `dispatchHealthy`, repoint it at the predicate (grep shows only `DispatchStatus.tsx` today).
-- [ ] **Step 5: Assertions that change behaviour.** In `test/settings-view.test.tsx` (the Claude Agents card on Shared), add: an unreachable status draws a
+- [ ] **Step 5: Assertions that change behaviour.** In `test/settings-view.test.tsx` (`the dispatch report · Shared`, ~:306 — the Dashboards card's
+  `Dispatch` row, the only place `AgentsStatusLines` draws today; there is no `Claude Agents` card any more), add: an unreachable status draws a
   `.ui-dot-crashed` inside the dispatch line; a reachable status with `spawnAvailable: false` draws `.ui-dot-paused` and the setup steps. Fix any existing
   assertion that queried `.set-dot-*`.
 - [ ] **Step 6: Run** `pnpm run test:jest -- test/dispatch-dot-tone.test.ts test/settings-view.test.tsx test/settings-dashboards.test.tsx test/daylight-contrast.test.ts test/dashboards-usage.test.ts test/ui-dot.test.tsx` and `pnpm run typecheck` — PASS.
@@ -127,7 +128,7 @@ Component names inside the page are a recommendation; keep them or merge list ro
 
 **Files:**
 - Modify: `client/src/components/ui/Pill.tsx`, `client/src/styles.css` (beside the `.ui-pill-*` rules)
-- Test: `test/ui-pill.test.tsx`; `test/daylight-contrast.test.ts` only if it pins each pill tone's text token
+- Test: `test/ui-pill.test.tsx`; `test/daylight-contrast.test.ts` (it pins pill tones, ~:280 and ~:403 — add `.ui-pill-off`'s text token there)
 
 **Interfaces:**
 - Produces: `Pill({ children, tone?, title?, off? }: { …; off?: boolean })` — `off` adds class `ui-pill-off` on top of the tone class; nothing else changes.
@@ -182,7 +183,7 @@ Component names inside the page are a recommendation; keep them or merge list ro
   9. **Default source** — no file: one entry, Home, `usage.fiveHour.pct` `12` (Home's `/api/account` was asked).
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/dashboards-machines.test.ts` — FAIL (404).
 - [ ] **Step 3: Implement** `healthOf`, `MachinesService` (doc comment: why health-only, why sequential health-then-usage per machine and parallel across
-  machines, the ~9–10 s worst case, why it reads Home's usage under `default` unlike the offers), the controller GET and the module provider. Update the
+  machines, the ~9–10 s worst case, why it reads Home's usage under `default` unlike the offers; `usage.read`'s `ageMs` lands in `usageAgeMs`), the controller GET and the module provider. Update the
   `agents.module.ts` provider comment block with one line for `MachinesService`.
 - [ ] **Step 4: Run** `pnpm run test:jest -- test/dashboards-machines.test.ts test/dashboards-offers.test.ts test/dashboards-routes.test.ts test/dashboards-usage.test.ts test/agents-origin-guard.test.ts` and `pnpm run typecheck` — PASS. If the Host-allowlist or route-list suites enumerate GET routes, add the new one there.
 - [ ] **Step 5: Commit** — `feat(api): GET /api/dashboards/machines — health and usage per machine`.
@@ -250,7 +251,8 @@ Component names inside the page are a recommendation; keep them or merge list ro
 **Behaviour** (the spec's "The page", "Selection", "Widths" and "States" sections are normative; this is the checklist):
 - State and writes move from `DashboardsGroup` unchanged: `written ?? loaded`, `write(scope, send)` single-flight on a ref + `busy`, notices scoped `form` /
   `list` / `suggest`, `Editing`, `asking`, `thresholdNonce`, `MAX_REMOTES = 8`. Every successful write also calls `useMachines().reload()`.
-- `ids = machineIds(view)`; `selected = pickSelected(ids, wanted)`, `wanted` in component state (initial `null`). A successful rename via Edit sets `wanted`
+- `ids = machineIds(view)`; `selected = pickSelected(ids, wanted)`, `wanted` in component state (initial `null`). A row click sets `wanted` to the clicked
+  id; a ↑/↓ move leaves `wanted` alone, so the selection follows the moved machine by id rather than by position. A successful rename via Edit sets `wanted`
   to the entry's new name; a successful Add sets `wanted` to the added entry's name (it is in the fresh view the write answered); Remove needs nothing —
   `pickSelected` falls back.
 - **Suggest card** (`SettingsGroup`, full width, title `Suggest`, hint `Which machine a launch sheet starts on. You can still pick another there.`): the three
@@ -260,7 +262,8 @@ Component names inside the page are a recommendation; keep them or merge list ro
 - **List**: one `button` row per id (`aria-pressed` on the selected one; click selects): order number box (1-based), `Dot` with
   `tone={dispatchDotTone(health) ?? undefined}` — Home's health is `useAgents().status`, a remote's `statusFor(machines, id)` —, the name (Home's `view.home.label`),
   `Pill` `this machine` on Home, the account `Pill` or a muted `no account set`, then two `Meter`s `5 H` and `WEEK` (`value` `${usagePercent(pct)}%`,
-  `fraction` pct/100, `tone` `usageTone(pct)`) only when that machine's status has `usage`. Then `+ Add dashboard` `Chip` with today's disabled rules and title.
+  `fraction` pct/100, `tone` `usageTone(pct)`) only when that machine's status has `usage`. Then the Add `Chip` with today's disabled rules and title; its accessible name stays `Add dashboard` (existing
+  queries use it), any `+` glyph `aria-hidden`.
 - **Detail** (`Sheet`): head = same order box, dot, name, pills; right side `↑` `↓` `Edit` and (remotes) `Remove` with today's aria-labels and disabled rules,
   or the `Confirm` in their place. Under it `noticeFor('list')`. Status line: Home → `dispatch <AgentsStatusLines status={status} />` + `DispatchSetupSteps`;
   remote → the same three readings from its `MachineStatus` (`checking…` while absent; `unreachable — <error>`; `connected — no CLAUDE_BIN, remote answers off`
@@ -291,6 +294,7 @@ Component names inside the page are a recommendation; keep them or merge list ro
   - reset lines: Pro's 5 h `resetsAt` later today renders `resets HH:MM` (compute expected with `resetClockText` in the test, from a fixed fake `now`);
   - machines never answer (fetch pending forever): list, detail facts and every control draw; dots carry no tone class; usage area `checking…`;
   - a machine in `/machines` the view lacks is ignored; a view machine `/machines` lacks reads `checking…`;
+  - select `Pro` (not first), move it up → `Pro` is still `aria-pressed` and the detail still shows Pro;
   - remove the selected `Pro` → selection falls back to the first machine; rename `Pro` → `Pro2` through Edit → `Pro2` stays selected; Add `Linux` →
     `Linux` selected;
   - every successful write is followed by a `GET /api/dashboards/machines`;
@@ -326,9 +330,10 @@ Component names inside the page are a recommendation; keep them or merge list ro
   - run-on: the Settings link's href is `/?section=settings&settings=dashboards`.
   - settings-view: Shared renders `Orchestrator watchdog` (and the tick card) and NOT `Dashboards`; the Dashboards page renders the `Suggest` group and the
     machine list and none of Local's or Shared's cards; the band pill on Dashboards reads `this machine` with `ui-pill-neutral`; the band title is `Settings`
-    on all three pages; Dashboards' subtitle is its own (assert it differs from Shared's). Move the Claude Agents/dispatch assertions that referred to the
-    Dashboards card on Shared to wherever the dispatch line now draws (the Dashboards page's Home detail; Shared's `Claude Agents` card if it still draws it —
-    check `SharedPage`).
+    on all three pages; Dashboards' subtitle is its own (assert it differs from Shared's). After this task Shared draws no dispatch line at all: move the
+    `the dispatch report · Shared` cases (~:306) and `puts the dispatch status row in the Dashboards card` (~:735–738) to the Dashboards page's Home detail in
+    `test/settings-dashboards.test.tsx` (or render `settings='dashboards'` here), and the Shared group list (~:715) becomes
+    `['Orchestrator watchdog', 'Backlog tick', 'Trackers']` with scopes `['this server', 'this machine', 'this machine']`.
 - [ ] **Step 2: Run** those suites — FAIL.
 - [ ] **Step 3: Implement.** Band per page: Dashboards subtitle `The machines a launch can run on, in prefer order, and how the launch sheet picks one. Saved
   on the API host — change it here and it changes for everyone.`; pill `this machine`. Third page renders `DashboardsPage`. `SharedPage` drops

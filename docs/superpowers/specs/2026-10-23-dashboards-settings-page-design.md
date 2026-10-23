@@ -87,8 +87,8 @@ quiet (no tone); `enabled && !reachable` → red (`Dot` tone `crashed`); `reacha
 the status line); otherwise green (tone `live`). One predicate decides it, in `shared/` beside the other dispatch predicates, and every dot on the page reads
 it. It REPLACES today's two disagreeing readings in `DispatchStatus.tsx` — `dispatchDotTier` (green on `reachable && remoteAnswer`, blind to
 `spawnAvailable`) and `dispatchHealthy` (which gates `DispatchSetupSteps`) — and that file's local `Dot`/`.set-dot` gives way to `ui/Dot`, so
-`AgentsStatusLines`' dot, `DispatchSetupSteps`' gate and the page's dots are one function, not agreeing expressions. Wherever else those lines draw
-(the Shared page's `Claude Agents` card), an unreachable dashboard's dot turns from gray to red with them. *My call:* Home's dot reads `useAgents`' status through that predicate —
+`AgentsStatusLines`' dot, `DispatchSetupSteps`' gate and the page's dots are one function, not agreeing expressions. (Those lines draw nowhere else:
+today their only home is the Dashboards card's `Dispatch` row, which moves to this page.) An unreachable dashboard's dot turns from gray to red with them. *My call:* Home's dot reads `useAgents`' status through that predicate —
 the same status its status line and setup steps read — so Home can never show a green dot above open setup steps; the remotes' dots read the new route's
 answer through the same predicate.
 - **Usage:** both `Meter`s full width, each with its reset time under it as an absolute local clock time: `resets 23:39` when the reset falls today,
