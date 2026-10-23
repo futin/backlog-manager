@@ -1,9 +1,8 @@
 import type { ReactNode } from 'react';
 
 import { noUsageText, resetClockText, usagePercent, usageTone } from '../../lib/dashboards';
-import { dispatchDotTone, EFFORTS, MODELS } from '../../../../shared/agent';
+import { EFFORTS, MODELS } from '../../../../shared/agent';
 import type { AgentsStatus, DashboardsView, MachineStatus } from '../../../../shared/types';
-import { Dot } from '../ui/Dot';
 import { Meter } from '../ui/Meter';
 import { Pill } from '../ui/Pill';
 import { Sheet } from '../ui/Sheet';
@@ -20,9 +19,9 @@ import { MachineIdentity, type ListMachine } from './DashboardsList';
  * never sit above open setup steps — and a remote's read its entry in `GET /api/dashboards/machines`. Usage, for Home too, is the machines read's. The
  * config half (head, lists, facts) reads `GET /api/dashboards` only, so it draws at once and the status half says `checking…` until its answer lands.
  *
- * **A remote's line is Home's in the same words where they apply** (`AgentsStatusLines`): `off`, `unreachable — <the server's error>`, `connected` with the
- * gaps that stop a launch or `· spawn on`, then the ceiling. Never a project count — the machines read does not carry one, and a line that drew `0 projects`
- * would be a reading nobody took.
+ * **A remote's line is Home's ladder itself** (`AgentsStatusLines`, one component for both): `off`, `unreachable — <the server's error>`, `connected` with
+ * the gaps that stop a launch or `· spawn on`, then the ceiling. Never a project count — the machines read does not carry `projectPaths`, so the ladder drops
+ * that rung, and a line that drew `0 projects` would be a reading nobody took.
  *
  * **Models and efforts are facts, so they are `Pill`s, not `Chip`s** (the clickable primitive): every member of `MODELS` / `EFFORTS`, the allowed ones in
  * the normal look and the rest `off`, titled `not run on <label>`. "Allowed" is `ticked` — an empty list means "no narrowing", every member. Home's are drawn
@@ -34,25 +33,14 @@ import { MachineIdentity, type ListMachine } from './DashboardsList';
 
 type Remote = DashboardsView['dashboards'][number];
 
-/** The token's fact: the var's NAME and whether it is set, and nothing of its value (the payload never carries one). */
-function tokenLine(tokenVar: string, set: boolean): string {
-  return set ? `${tokenVar} ✓ set` : `${tokenVar} not set — needed only if that dashboard does not trust this machine; then add it to .env and restart`;
-}
-
-function RemoteStatusLine({ status }: { status: MachineStatus | null }) {
-  if (status === null) return <span>checking…</span>;
-  const dot = <Dot tone={dispatchDotTone(status) ?? undefined} />;
-  let line: string;
-  if (!status.enabled) line = 'off — dispatch is not enabled on the API';
-  else if (!status.reachable) line = `unreachable${status.error ? ` — ${status.error}` : ''}`;
-  else {
-    const gaps = [status.spawnAvailable ? null : 'no CLAUDE_BIN', status.remoteAnswer ? null : 'remote answers off'].filter((g): g is string => g !== null);
-    line = `connected${gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'} · ceiling: ${status.spawnMaxPermission ?? 'unknown'}`;
-  }
+/** The token's fact: the var's NAME (in `<code>`, like every other name-of-a-thing fact) and whether it is set, and nothing of its value — the payload never
+ * carries one. */
+function TokenLine({ tokenVar, set }: { tokenVar: string; set: boolean }) {
   return (
-    <span>
-      {dot} {line}
-    </span>
+    <>
+      <code>{tokenVar}</code>
+      {set ? ' ✓ set' : ' not set — needed only if that dashboard does not trust this machine; then add it to .env and restart'}
+    </>
   );
 }
 
@@ -141,7 +129,10 @@ export function DashboardDetail({
         </>
       ) : (
         <p className="dash-page-status set-hint">
-          <RemoteStatusLine status={status} />
+          {/* A span of its own so `checking…` sits in an element, as Home's does behind its `dispatch` word. */}
+          <span>
+            <AgentsStatusLines status={status} />
+          </span>
         </p>
       )}
       <div className="dash-page-usage">
@@ -177,7 +168,7 @@ export function DashboardDetail({
           </>
         )}
         <dt>Token</dt>
-        <dd>{remote === null ? tokenLine(home.tokenVar, home.tokenSet) : tokenLine(remote.tokenVar, remote.tokenSet)}</dd>
+        <dd>{remote === null ? <TokenLine tokenVar={home.tokenVar} set={home.tokenSet} /> : <TokenLine tokenVar={remote.tokenVar} set={remote.tokenSet} />}</dd>
       </dl>
     </Sheet>
   );

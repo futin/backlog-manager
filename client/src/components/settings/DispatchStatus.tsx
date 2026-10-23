@@ -1,5 +1,5 @@
 import { dispatchDotTone } from '../../../../shared/agent';
-import type { AgentsStatus } from '../../../../shared/types';
+import type { AgentsStatus, MachineHealth } from '../../../../shared/types';
 import { Dot } from '../ui/Dot';
 
 /**
@@ -32,7 +32,11 @@ import { Dot } from '../ui/Dot';
 // nested a `.set-hint` inside a `.set-hint` — harmless (the class sets no
 // compounding properties) but redundant, so this returns bare content and
 // lets the row supply the class once.
-export function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
+//
+// One ladder for every machine (Settings › Dashboards): Home passes `useAgents`' `AgentsStatus` and a remote its `MachineStatus` from the machines read —
+// both are a `MachineHealth`, so the off / unreachable / connected words can never drift apart between two copies. The project count is the one rung only
+// Home's report carries (`projectPaths`); a remote's health has none, so its line ends at the ceiling rather than drawing a `0 projects` nobody measured.
+export function AgentsStatusLines({ status }: { status: (MachineHealth & { projectPaths?: string[] }) | null }) {
   const dot = <Dot tone={dispatchDotTone(status) ?? undefined} />;
   if (status === null) return <>checking…</>;
   if (!status.enabled) return <>{dot} off — dispatch is not enabled on the API</>;
@@ -48,8 +52,7 @@ export function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
     <>
       {dot} connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
       {' · '}ceiling: {status.spawnMaxPermission ?? 'unknown'}
-      {' · '}
-      {status.projectPaths.length} projects
+      {status.projectPaths !== undefined && <>{` · ${status.projectPaths.length} projects`}</>}
     </>
   );
 }

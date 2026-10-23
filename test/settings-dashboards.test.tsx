@@ -91,7 +91,10 @@ function machineOf(machine: string, over: Partial<MachineStatus> = {}): MachineS
   };
 }
 
-/** Home and Pro healthy with distinct usage on each window, Max unreachable — the brief's default. Pro's ceiling differs from Home's so a line cannot pass by reading the wrong one. */
+/**
+ * Home and Pro healthy with distinct usage on each window, Max unreachable — the brief's default. Pro's ceiling differs from Home's so a line cannot pass
+ * by reading the wrong one.
+ */
 const MACHINES: MachinesStatus = {
   machines: [
     machineOf('home', { usage: usageOf(12, 30), usageAgeMs: 4_000 }),
@@ -460,6 +463,7 @@ describe('DashboardsPage', () => {
       stubFetch({ machines: 'pending' });
       await renderPage();
       expect(names()).toEqual(['Home', 'Pro', 'Max']);
+      // Home's dot is left out on purpose: it reads `useAgents`, which answered here, not the machines read that never does.
       expect(toneOf(rowOf('Pro'))).toBeNull();
       expect(toneOf(rowOf('Max'))).toBeNull();
       expect(metersOf(rowOf('Pro'))).toEqual([]);

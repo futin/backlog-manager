@@ -68,6 +68,8 @@ import { SuggestCard } from './SuggestCard';
  * **Unreadable file** (`source: 'unreadable'`): the server ignores every remote and refuses every write (409, file untouched), so every control is DISABLED,
  * a banner at the top names the file and the one fix, by hand, and the list still draws Home. Selecting a machine is a read and stays possible.
  *
+ * **The threshold's commit-on-blur and its re-seed after a refusal** are the Suggest card's paragraph now — `SuggestCard.tsx`'s header, beside the field.
+ *
  * The view is read as the card read it — `useDashboards` once on mount, deliberately no focus trigger, plus each write's answer — so another tab's edit shows
  * on the next reload.
  */
@@ -310,7 +312,9 @@ export function DashboardsPage() {
         <span className="set-hint">
           Saved to <code>{view.file}</code>
         </span>
-        <span className="set-hint">Listed in prefer order — move a machine with ↑ ↓. Tokens are never entered here: each is an environment variable, set in .env.</span>
+        <span className="set-hint">
+          Listed in prefer order — move a machine with ↑ ↓. Tokens are never entered here: each is an environment variable, set in .env.
+        </span>
       </div>
 
       {editing?.kind === 'home' && (
