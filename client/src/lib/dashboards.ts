@@ -140,13 +140,18 @@ export function lockedFor(offer: MachineOffer | null): { prOnly: boolean; models
 }
 
 /**
- * Where a narrowed select lands when its current value is not among the machine's own: the Settings default if the machine lists it, else the first listed.
- * A value already listed stays put, so a pick the person made on home that the machine also runs survives the switch. `''` (the "default" option) is never
- * listed on a narrowed select — a remote account's own default is not a thing this client can name — so it always falls through to one of the two.
+ * Where a narrowed select lands when its current value is not among the machine's own: the Settings default if the machine lists it (or if it is `''`),
+ * else the first listed. A value already listed stays put, so a pick the person made on home that the machine also runs survives the switch.
+ *
+ * `''` (the "default" option) is never narrowed (final-review I4). It is not a value at all but the absence of one: `modelEffortFlags` sends no key for it,
+ * and the server applies its own default — a remote's model via `remoteDefaultModel`, which only ever names a model that machine lists, and an effort not at
+ * all, so the remote session runs at its account's own. That is legal on every machine, so there is nothing to narrow. Narrowing it to `list[0]` — what this
+ * function did first — turned a person who chose nothing into a launch at `low` that nobody picked, and the sheet then kept `low` after the switch back home.
+ * The same reasoning lands a narrowed-away explicit value on a `''` Settings default rather than on `list[0]`.
  */
 export function narrowTo(value: string, list: string[], settingsDefault: string): string {
-  if (list.length === 0 || list.includes(value)) return value;
-  return list.includes(settingsDefault) ? settingsDefault : list[0];
+  if (value === '' || list.length === 0 || list.includes(value)) return value;
+  return settingsDefault === '' || list.includes(settingsDefault) ? settingsDefault : list[0];
 }
 
 /** The hint under Finish / Merge mode while a remote is picked: the field is not the person's to change, and this says why. */

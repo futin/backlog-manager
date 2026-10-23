@@ -276,8 +276,14 @@ describe('narrowTo', () => {
   it('falls to the Settings default when it is listed, else to the first listed', () => {
     expect(narrowTo('haiku', ['opus', 'sonnet'], 'sonnet')).toBe('sonnet');
     expect(narrowTo('haiku', ['opus', 'sonnet'], 'max')).toBe('opus');
-    // The "default" option is never listed on a narrowed select, so an untouched '' lands somewhere real.
-    expect(narrowTo('', ['low', 'high'], '')).toBe('low');
+  });
+
+  // Final-review I4: '' is the Settings "default" — no pick, which a remote launch sends as no value and the server fills (a model) or omits (an effort).
+  // It is legal on every machine, so it is never narrowed, and an explicit value narrowed away lands on it when that is the Settings default.
+  it("never narrows '' (the default), and lands a narrowed-away value on a '' Settings default", () => {
+    expect(narrowTo('', ['low', 'high'], '')).toBe('');
+    expect(narrowTo('', ['low', 'high'], 'high')).toBe('');
+    expect(narrowTo('max', ['low', 'high'], '')).toBe('');
   });
 });
 

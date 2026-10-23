@@ -497,9 +497,10 @@ describe('LaunchSheet', () => {
       expect(finish.value).toBe('pr');
       expect(finish).toBeDisabled();
       expect(screen.getByText('Required when running on Pro')).toBeInTheDocument();
-      expect(options('Model')).toEqual(['opus', 'sonnet']);
+      // '' first: the "default" option stays drawable on a remote (final-review I4), the machine's own list after it.
+      expect(options('Model')).toEqual(['', 'opus', 'sonnet']);
       expect(screen.getByText('Pro runs opus, sonnet')).toBeInTheDocument();
-      expect(options('Effort')).toEqual(['low', 'high']);
+      expect(options('Effort')).toEqual(['', 'low', 'high']);
       expect(screen.getByText('Pro runs low, high')).toBeInTheDocument();
       // The Base select shows exactly as it does for a PR finish today, and the clause line follows it.
       const base = screen.getByLabelText('Base') as HTMLSelectElement;
@@ -553,6 +554,33 @@ describe('LaunchSheet', () => {
       expect(body).not.toHaveProperty('base');
     });
 
+    // Final-review I4: default Settings ('' for both) with a remote suggested. The default is never narrowed into the machine's first value — nobody
+    // chose `low` — so neither key is sent, on Pro (the server fills the model) or after switching back to home.
+    it('sends no model or effort on Pro with default Settings, and shows default on both selects', async () => {
+      const calls = stub({ offers: proSuggested() });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('');
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('');
+      const body = await launchBody(calls, 'Start on Pro');
+      expect(body.machine).toBe('Pro');
+      expect(body).not.toHaveProperty('model');
+      expect(body).not.toHaveProperty('effort');
+    });
+
+    it('sends no model or effort on home after the suggested Pro, with default Settings', async () => {
+      const calls = stub({ offers: proSuggested() });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('');
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('');
+      const body = await launchBody(calls, 'launch');
+      expect(body).not.toHaveProperty('machine');
+      expect(body).not.toHaveProperty('model');
+      expect(body).not.toHaveProperty('effort');
+    });
+
     it('falls to the first listed model and effort when the Settings default is not among them', async () => {
       localStorage.setItem('backlog-manager.settings', JSON.stringify({ dispatchDefaultModel: 'opus', dispatchDefaultEffort: 'max' }));
       const calls = stub({ offers: { ...proSuggested(), machines: [homeOffer(), proOffer({ models: ['sonnet', 'haiku'], efforts: ['medium'] })] } });
@@ -562,6 +590,18 @@ describe('LaunchSheet', () => {
       expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('medium');
       const body = await launchBody(calls, 'Start on Pro');
       expect(body).toMatchObject({ model: 'sonnet', effort: 'medium' });
+    });
+
+    // Final-review I4: the state under a narrowed select is the Settings default, so home gets back `opus`/`max` — not Pro's first-listed sonnet/medium.
+    it('restores the Settings default on home after a remote showed its first listed values', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ dispatchDefaultModel: 'opus', dispatchDefaultEffort: 'max' }));
+      stub({ offers: { ...proSuggested(), machines: [homeOffer(), proOffer({ models: ['sonnet', 'haiku'], efforts: ['medium'] })] } });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('medium');
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('opus');
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('max');
     });
 
     it("shows the server's 409 in the error slot and stays open", async () => {

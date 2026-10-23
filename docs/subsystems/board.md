@@ -170,8 +170,10 @@ is drawn disabled with its reason in the card. The group draws nothing below two
 was. `useRunOn(project)` owns the state: one `GET /api/dashboards/offers?project=` per sheet open (`useOffers`), the pick held as `null` until a person clicks
 and otherwise derived from the offers (`defaultMachine` — the suggestion, else the first offered, else home), so a sheet that opens before the answer lands is
 on home and moves to the suggestion when it arrives, and a person who has already clicked is never moved. A remote pick LOCKS Finish and Merge mode to `pr` (the
-controls read as PR with the reason beside them) and narrows model and effort to the machine's lists; a narrowed-away model or effort falls to the Settings
-default (or the first listed) and is not restored on switching back, while Finish and Merge are derived and come back for free. The button reads `Start on
+controls read as PR with the reason beside them) and narrows model and effort to the machine's lists, each select keeping its "default" option first; a
+narrowed-away model or effort shows the Settings default (or the first listed) and switching back to home restores the Settings default — not the person's
+pre-lock pick — while Finish and Merge are derived and come back for free. `''`, the "default", is never narrowed: it goes out as no key on every machine,
+and the server fills a remote's model from that machine's list and sends no effort at all (final-review I4). The button reads `Start on
 <label>`, and the request carries `machine` only for a remote pick — a home pick sends today's body, byte for byte. A failed offers read with nothing to show is
 home, with a warning note (`OFFERS_FAILED_TEXT`), because blocking a local launch on a fan-out to other machines would make the board's only launch path depend
 on them. Jira's launch sheet has no picker: its Start stays home-only ([jira.md](jira.md)).

@@ -42,10 +42,17 @@ export interface RunOnState {
  * pick if the offers still know it, else `defaultMachine(offers)` (the suggestion, else the first offered, else home). A sheet that opens before the answer
  * lands is therefore on home, then moves to the suggestion when it arrives, and a person who has already clicked is never moved.
  *
- * **Model and effort are the one thing written back.** The sheets seed them from Settings, and a remote machine lists only some of the values, so on a remote
- * pick an unlisted value falls to the Settings default (or the first listed — `narrowTo`) and STAYS there when the person switches back to home: the ruling is
- * that a narrowed-away value is not restored, unlike Finish / Merge mode, which the sheets derive (`remote ? 'pr' : picked`) and so give back for free. The
- * returned `model` / `effort` are narrowed in render as well as written back, so no frame shows a value the machine does not list.
+ * **Model and effort are the one thing written back, and what is written is the Settings default.** The sheets seed them from Settings, and a remote machine
+ * lists only some of the values, so on a remote pick an unlisted value is shown as `narrowTo`'s answer — the Settings default if the machine lists it, else the
+ * first listed — and the state underneath is reset to the Settings default itself. Switching back to home therefore restores the Settings default, not the
+ * narrowed value and not the person's own pre-lock pick: the final-review I4 ruling, per Review Focus 5 and Task 9's brief case (haiku with Settings opus,
+ * pick Pro → opus, back home → opus). A Settings default the machine does not list is shown as its first value while remote and comes back whole on home.
+ * Finish / Merge mode need none of this — the sheets derive them (`remote ? 'pr' : picked`) and so give them back for free. The returned `model` / `effort`
+ * are narrowed in render as well, so no frame shows a value the machine does not list.
+ *
+ * **`''` is never narrowed.** It is the Settings "default" — no pick — and goes out as no key at all, which every machine accepts (`narrowTo` says why), so a
+ * remote's select keeps a "default" option ahead of its own list for `''` to be drawn as. A person who never chose an effort launches on Pro and on home
+ * alike with no `effort` in the body.
  *
  * A failed offers read with nothing to show is home: the sheet then does exactly what it did before the picker existed, and says so (`OFFERS_FAILED_TEXT`).
  * Blocking the launch on it would make the board's only launch path depend on a fan-out to machines that have nothing to do with a local run.
@@ -65,12 +72,17 @@ export function useRunOn(project: string): RunOnState {
 
   const shownModel = narrowTo(model, lock.models, settings.dispatchDefaultModel);
   const shownEffort = narrowTo(effort, lock.efforts, settings.dispatchDefaultEffort);
+  // Reset to the Settings default, not to the shown value: the two differ only when the machine lists neither the value nor the default, and then the
+  // default is what home must get back. Once state IS the default this is a no-op, so a default the machine does not list cannot loop the effect.
+  const modelDefault = settings.dispatchDefaultModel;
+  const effortDefault = settings.dispatchDefaultEffort;
   useEffect(() => {
-    if (shownModel !== model) setModel(shownModel);
-    if (shownEffort !== effort) setEffort(shownEffort);
-  }, [shownModel, shownEffort, model, effort]);
+    if (shownModel !== model && model !== modelDefault) setModel(modelDefault);
+    if (shownEffort !== effort && effort !== effortDefault) setEffort(effortDefault);
+  }, [shownModel, shownEffort, model, effort, modelDefault, effortDefault]);
 
-  const asOptions = (list: string[]): Option[] => list.map((v) => ({ value: v, label: v }));
+  // The leading "default" entry is MODEL_OPTIONS' own first one, so a remote's select draws `''` with the same label home does.
+  const asOptions = (list: string[], all: Option[]): Option[] => [all[0], ...list.map((v) => ({ value: v, label: v }))];
   const loading = offers === null && error === null;
   const noneOffered = offers !== null && !offers.machines.some((m) => m.offered);
   // The group draws the "no machine" line itself once it is drawn (two or more machines); a single unoffered home has no group to say it.
@@ -87,8 +99,8 @@ export function useRunOn(project: string): RunOnState {
     setModel,
     effort: shownEffort,
     setEffort,
-    modelOptions: lock.models.length > 0 ? asOptions(lock.models) : MODEL_OPTIONS,
-    effortOptions: lock.efforts.length > 0 ? asOptions(lock.efforts) : EFFORT_OPTIONS,
+    modelOptions: lock.models.length > 0 ? asOptions(lock.models, MODEL_OPTIONS) : MODEL_OPTIONS,
+    effortOptions: lock.efforts.length > 0 ? asOptions(lock.efforts, EFFORT_OPTIONS) : EFFORT_OPTIONS,
     request: remote ? { machine } : {},
     blocked: loading || noneOffered || (offer !== null && !offer.offered),
     note

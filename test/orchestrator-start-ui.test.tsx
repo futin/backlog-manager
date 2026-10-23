@@ -1915,17 +1915,17 @@ describe('OrchestrateSheet', () => {
       expect(merge.value).toBe('pr');
       expect(merge).toBeDisabled();
       expect(screen.getByText('Required when running on Pro')).toBeInTheDocument();
-      expect(options('Model')).toEqual(['opus', 'sonnet']);
+      // '' first: the "default" option stays drawable on a remote (final-review I4), the machine's own list after it.
+      expect(options('Model')).toEqual(['', 'opus', 'sonnet']);
       expect(screen.getByText('Pro runs opus, sonnet')).toBeInTheDocument();
-      expect(options('Effort')).toEqual(['low', 'high']);
+      expect(options('Effort')).toEqual(['', 'low', 'high']);
       expect(screen.getByText('Pro runs low, high')).toBeInTheDocument();
 
       await userEvent.click(start);
       await waitFor(() => expect(calls).toHaveLength(1));
+      // Default Settings: no model and no effort key (final-review I4) — the default is never narrowed into Pro's first value; the server fills the model.
       expect(calls[0].body).toEqual({
         project: '/abs/alpha',
-        model: 'opus',
-        effort: 'low',
         permissionMode: 'acceptEdits',
         mergeMode: 'pr',
         questionMode: 'park',
@@ -1972,6 +1972,21 @@ describe('OrchestrateSheet', () => {
       await waitFor(() => expect(calls).toHaveLength(1));
       expect(calls[0].body).toMatchObject({ mergeMode: 'branch', model: 'opus' });
       expect(calls[0].body).not.toHaveProperty('machine');
+    });
+
+    it('sends no model or effort on home after the suggested Pro, with default Settings (final-review I4)', async () => {
+      const calls = stubOrchestrate(OK, covered, 'ok', proSuggested());
+      renderSheet();
+      await toModes();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      await userEvent.click(screen.getByRole('button', { name: /^Home\b/ }));
+      expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('');
+      expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('');
+      await userEvent.click(screen.getByRole('button', { name: 'start' }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0].body).not.toHaveProperty('machine');
+      expect(calls[0].body).not.toHaveProperty('model');
+      expect(calls[0].body).not.toHaveProperty('effort');
     });
 
     it('does not ask for the local merge-check while a remote machine is picked', async () => {
