@@ -387,16 +387,33 @@ async function cmdDecide(argv) {
   const { streak } = streakOf(state.recent, settings.resetAt[root]);
   if (streak >= settings.haltAfter) return say('idle', haltedReason(streak, settings.haltAfter));
 
-  // The tracker's two reads, taken once: the runs (busy) and the items (busy, execute, groom). Either failing after a healthy `/api/health` is the stack
-  // going away mid-tick, and reads the same as it being down. A files project asks for the runs only to see a board-started run, and only if the API answers
-  // — with the stack down there is no board to have started one.
+  // The tracker's three reads, taken once: the runs (busy), the items (busy, execute, groom) and the poller's row for this project (#332). Any of them
+  // failing after a healthy `/api/health` is the stack going away mid-tick, and reads the same as it being down. A files project asks for the runs only to
+  // see a board-started run, and only if the API answers — with the stack down there is no board to have started one.
   const runs = await apiJson('/api/orchestrator/runs', tracker ? API_TIMEOUT_MS : HEALTH_TIMEOUT_MS);
   let mine = [];
   if (tracker) {
     const index = await apiJson('/api/items');
-    if (runs === null || index === null || !Array.isArray(index.items)) return say('idle', 'stack down');
+    const trackers = await apiJson('/api/trackers');
+    if (runs === null || index === null || !Array.isArray(index.items) || trackers === null || !Array.isArray(trackers.projects)) {
+      return say('idle', 'stack down');
+    }
     // `projectPath`, never the display name: two checkouts of one repo share a name but never a path.
     mine = index.items.filter((it) => it && it.projectPath === root);
+    // The server's tracker cache is in memory and per repo, so every restart empties it until that repo's first sync lands — and in that window
+    // `/api/items` lists no rows for this project, with no error. Read as it stands that is "nothing to do", and on 2026-10-22 an ixray tick spent itself
+    // on exactly that false idle (#332). So ask the poller whether it has read this repo before believing the index, matched on `path` for the reason
+    // above. `trackerPolledAt` in orchestrate.mjs is the precedent (bug-41) and not a twin: the orchestrator times a re-read off the stamp, while a tick
+    // needs none — the next scheduled tick IS the retry. All three are `idle`, so nothing is locked and nothing is recorded, exactly like `stack down`.
+    // Access before `polledAt`: a first sync that failed leaves both set, and "rate-limited" says more than "not polled yet".
+    const row = trackers.projects.find((p) => p && p.path === root);
+    if (!row) return say('idle', `tracker not polled yet: ${ctx.repo}`);
+    if (row.access !== 'ok') return say('idle', `tracker ${row.access}: ${row.detail ?? ctx.repo}`);
+    if (typeof row.polledAt !== 'string') return say('idle', `tracker not polled yet: ${ctx.repo}`);
+    // Polled, and still not one row of any status. A repo with genuinely no issues lands here too, which costs nothing — the verdict is `idle` either way,
+    // only the reason differs — while a cache that was stamped and never filled (the unexplained half of #332) stops passing for an empty backlog. One done
+    // or out-of-scope row is enough to prove the read filled it.
+    if (mine.length === 0) return say('idle', `tracker cache holds no items for ${ctx.repo} (polled ${row.polledAt})`);
   }
 
   // 4. Busy.

@@ -238,7 +238,8 @@ check is skipped); a `started:` marker on any open item in the main checkout or 
 writes its marker there; a live claim; and, on a tracker project, a fresh remote run, because between items such a run holds no claim and the claim race alone
 would let a tick slip an item in under it. The orchestrator's own `.worktrees/<id>` trees and execute's `.worktrees/execute-<id>` trees are skipped, because the
 run file and the lock respectively speak for them, and a killed execute there would otherwise block the project for good. A tracker project with the stack down
-is `idle: stack down`, taken before the lock. A Jira live session is NOT a busy signal: Jira work happens in its own worktree on a ticket.
+is `idle: stack down`, taken before the lock. A tracker project whose repo the server's poller has not read yet, cannot read, or read into no rows for it is
+`idle` too, before the busy check (#332): every one of those leaves `/api/items` with nothing for the project, and an empty index is not an idle project. A Jira live session is NOT a busy signal: Jira work happens in its own worktree on a ticket.
 
 **Never a plan nobody has read.** The tick writes plans unattended, and the user's review is the only check on them. Because `/git-sync` commits any uncommitted
 work, "the groom is uncommitted" cannot be that check — it would approve every plan overnight — so the gate is an explicit mark, `plan-review`: a label on a
