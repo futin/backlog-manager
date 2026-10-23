@@ -227,7 +227,8 @@ the machine is `home`.
 `efforts`), the prefer `order`, the `strategy` and `threshold`, a `source` of `file`, `default` (no file) or `unreadable` (with the reason), and per machine
 `tokenSet` and `tokenVar` — never a token. Four POSTs edit it, each behind `SameOriginPostGuard`, each answering the fresh view, and each a `409` naming the
 file while it is unreadable: `/api/dashboards/entries` (add or replace a remote), `/entries/delete`, `/home` (home's account, models and efforts) and
-`/settings` (order, strategy, threshold). A malformed body is a `400`, an unknown entry to delete a `404`. The file's rules are in
+`/settings` (order, strategy, threshold). An entry may leave `bmUrl` and `host` blank, and the server stores their defaults — `http://<url's host>:5177`
+(`defaultBoardUrl`, `shared/agent.ts`) and the entry's name. A malformed body is a `400`, an unknown entry to delete a `404`. The file's rules are in
 [invariants.md](invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced).
 
 `GET /api/dashboards/offers?project=<abs path>` answers which machines can run that project, in prefer order, each with `offered` (and, when not, the one

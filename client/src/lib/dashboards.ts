@@ -1,6 +1,6 @@
 import { unwrap } from './agents';
 import { formatSpanCompact } from './run-time';
-import type { DashboardEntry, DashboardsView, HomeEntry, MachineOffer, MachineUsage, ProjectOffers, SuggestStrategy } from '../../../shared/types';
+import type { DashboardEntryInput, DashboardsView, HomeEntry, MachineOffer, MachineUsage, ProjectOffers, SuggestStrategy } from '../../../shared/types';
 
 /**
  * The client's half of multi-dashboard (spec `2026-10-22-multi-dashboard-design.md`): the six calls the launch sheets, the card dispatch and the Settings card
@@ -90,7 +90,7 @@ async function post(path: string, body: unknown): Promise<DashboardsView> {
 }
 
 /** Upsert one remote. `replaces` is the existing entry's name when this is a rename — the server keeps its position in the prefer order. */
-export function saveEntry(entry: DashboardEntry, replaces?: string): Promise<DashboardsView> {
+export function saveEntry(entry: DashboardEntryInput, replaces?: string): Promise<DashboardsView> {
   return post('entries', replaces === undefined ? { entry } : { entry, replaces });
 }
 

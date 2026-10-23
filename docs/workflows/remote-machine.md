@@ -10,16 +10,31 @@ living in the environment is in
 [invariants.md](../subsystems/invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced), and the routes
 in [api.md](../subsystems/api.md#launching-on-another-machine).
 
+## On a tailnet: the short path
+
+When both machines are on one tailnet, the remote's dashboard trusts tailnet devices, and both apps run on their default ports (dashboard 4173, board 5177),
+this is the whole setup — no token and nothing in this machine's `.env`:
+
+1. **On the remote:** `BM_MACHINE_NAME=<name>` in `~/.zshenv` and in its board's `.env`, a restart of its stack, and `pnpm run tailnet` once so its board is
+   reachable (Vite listens on `127.0.0.1` otherwise).
+2. **Here:** Settings › Shared › Dashboards › Add dashboard, with the Name the same as that `BM_MACHINE_NAME` and the Dashboard URL
+   `http://<name>.<tailnet>.ts.net:4173`. Leave Board URL and Machine name blank: they are stored as the same host on `:5177` and the name, and the fields show
+   those defaults as their placeholders.
+
+The token line reads `not set — needed only if that dashboard does not trust this machine`, which is the expected state here. Anything off that path — another
+port, a dashboard that does not trust the tailnet, a machine name that differs from the entry's name — is the full list below.
+
 ## What a remote needs
 
 - Its dashboard running with dispatch enabled, and reachable from THIS board's API host (the server calls it — the browser never does).
 - Its own board running, reachable the same way. This board reads `GET <bmUrl>/api/projects` there, with no `Authorization`, to learn the project's path on that
   machine; the repo is matched by its identity (the `origin`, case-insensitive), so the same repo must be registered on both boards, and it must be a tracker
   project — a `files` project is refused for a remote launch.
-- A name for the machine, set the same way on both sides of its own claims: **`BM_MACHINE_NAME` on the remote must equal the `host` you enter here**, because a
-  claim comment records the name the session ran under and the board decides "this card is running over there" by comparing that `host` to a configured
-  remote's. Set it in the remote's shell environment (`~/.zshenv`, which `backlog.mjs` and `orchestrate.mjs` read) and in that board's `.env` (which compose
-  passes to its server). Choose a name rather than publish an OS username and hostname: on a public repo the claim comment carries it.
+- A name for the machine, set the same way on both sides of its own claims: **`BM_MACHINE_NAME` on the remote must equal the `host` you enter here** (blank
+  means the entry's name), because a claim comment records the name the session ran under and the board decides "this card is running over there" by comparing
+  that `host` to a configured remote's. Set it in the remote's shell environment (`~/.zshenv`, which `backlog.mjs` and `orchestrate.mjs` read) and in that
+  board's `.env` (which compose passes to its server). Choose a name rather than publish an OS username and hostname: on a public repo the claim comment
+  carries it.
 
 ## Steps
 
@@ -33,18 +48,19 @@ in [api.md](../subsystems/api.md#launching-on-another-machine).
    `*.local` and `*.localhost`; anything beyond those goes in that dashboard's `ALLOWED_HOSTS` (its `.env.example` documents the rule — it is the dashboard's
    setting, not this board's). The dashboard's write gate admits this machine, and a tailnet device while its "Trust tailnet devices" setting is on; a client it
    does not trust needs the dashboard's `ANSWER_TOKEN` — set one on the remote if you reach it any other way, and note its value for the next step.
-4. **On THIS board, put the token in `.env`:** `BM_AGENTS_TOKEN_<NAME>=<the remote's ANSWER_TOKEN>` with the NAME the entry will have, upper-cased
-   (`BM_AGENTS_TOKEN_PRO` for `pro`). Home's own token is `BM_AGENTS_TOKEN`. Then restart the stack — compose's container reads the bind-mounted `.env`, not
-   your shell, and compose passes `BM_MACHINE_NAME` through but no token. The token is never typed into the board: Settings only reports `✓ set` or `✗ not set`.
-5. **Add the entry:** Settings › Shared › Dashboards › Add dashboard. Name (a letter, then letters and digits, at most 24, unique ignoring case, never `home`),
-   the dashboard `url`, the board `bmUrl`, and the `host` from step 1. An account label, and a models or efforts list if the remote should run only some of them
-   (leave every box ticked for "all"), are optional. At most eight remotes. Save writes `~/.backlog-manager/settings/dashboards.json` (or
-   `$BM_DASHBOARDS_FILE`).
+4. **Only if step 3 needed a token — put it in THIS board's `.env`:** `BM_AGENTS_TOKEN_<NAME>=<the remote's ANSWER_TOKEN>` with the NAME the entry will have,
+   upper-cased (`BM_AGENTS_TOKEN_PRO` for `pro`). Home's own token is `BM_AGENTS_TOKEN`. Then restart the stack — compose's container reads the bind-mounted
+   `.env`, not your shell, and compose passes `BM_MACHINE_NAME` through but no token. With no token the server sends no `Authorization` header at all. The token
+   is never typed into the board: Settings only reports `✓ set` or `not set`.
+5. **Add the entry:** Settings › Shared › Dashboards › Add dashboard. Name (a letter, then letters and digits, at most 24, unique ignoring case, never `home`)
+   and the dashboard `url` are required. The board `bmUrl` and the `host` from step 1 are optional: blank stores `http://<url's host>:5177` and the name. An
+   account label, and a models or efforts list if the remote should run only some of them (leave every box ticked for "all"), are optional too. At most eight
+   remotes. Save writes `~/.backlog-manager/settings/dashboards.json` (or `$BM_DASHBOARDS_FILE`).
 
 ## Verification
 
-- The Dashboards card draws the new row with its token line `✓ set`. `✗ not set` means step 4 did not reach the server: check the variable's exact name and that
-  the stack was restarted.
+- The Dashboards card draws the new row. Its token line reads `✓ set` if you did step 4; if you did and it reads `not set`, step 4 did not reach the server —
+  check the variable's exact name and that the stack was restarted.
 - Open any launch sheet for a tracker project that is registered on both boards: a `Run on` group appears at the top with a card per machine. The remote card is
   enabled and shows its usage; if it is disabled the reason is printed in the card — that is the one place the refusal is read.
 - Launch a small card on the remote. The card reads `Starting on <name>`, then `running on <name>` once the remote's session claims it; Stop & release stops it

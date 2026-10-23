@@ -96,6 +96,11 @@ describe('readDashboardsFile', () => {
     expect((readDashboardsFile(file) as { value: DashboardsFile }).value.strategy).toBe('prefer');
   });
 
+  it('completes a hand-edited entry that leaves out bmUrl and host with their defaults', () => {
+    writeFileSync(file, JSON.stringify({ dashboards: [{ name: 'Pro', url: 'http://pro.ts.net:4173' }] }));
+    const r = readDashboardsFile(file);
+    expect(r.source === 'file' && r.value.dashboards).toEqual([{ name: 'Pro', url: 'http://pro.ts.net:4173', bmUrl: 'http://pro.ts.net:5177', host: 'Pro' }]);
+  });
   it('drops an entry that fails validation and keeps the rest', () => {
     writeFileSync(file, JSON.stringify({ dashboards: [entry('Pro'), { name: '2bad' }, 'junk', entry('Studio')] }));
     const v = (readDashboardsFile(file) as { value: DashboardsFile }).value;
@@ -204,8 +209,30 @@ describe('validateEntry', () => {
   it('rejects a host with whitespace', () => {
     expect(validateEntry({ ...entry('Pro'), host: 'a b' })).toBe('host must be 1–64 characters with no whitespace');
   });
-  it('rejects an empty host', () => {
-    expect(validateEntry({ ...entry('Pro'), host: '' })).toBe('host must be 1–64 characters with no whitespace');
+  it('stores the name as the host when host is absent, null, empty or whitespace', () => {
+    const { host: _host, ...noHost } = entry('Pro');
+    for (const body of [noHost, { ...noHost, host: null }, { ...noHost, host: '' }, { ...noHost, host: '  ' }])
+      expect((validateEntry(body) as { host: string }).host).toBe('Pro');
+  });
+  it('stores the dashboard host on http :5177 as bmUrl when bmUrl is absent, null, empty or whitespace — an https url too', () => {
+    const { bmUrl: _bmUrl, ...noBoard } = entry('Pro');
+    for (const body of [noBoard, { ...noBoard, bmUrl: null }, { ...noBoard, bmUrl: '' }, { ...noBoard, bmUrl: ' ' }])
+      expect((validateEntry(body) as { bmUrl: string }).bmUrl).toBe('http://pro.ts.net:5177');
+    expect((validateEntry({ ...noBoard, url: 'http://[fd7a::1]:4173' }) as { bmUrl: string }).bmUrl).toBe('http://[fd7a::1]:5177');
+  });
+  it('name + url alone is a whole entry', () => {
+    expect(validateEntry({ name: 'Pro', url: 'http://pro.tail1.ts.net:4173' })).toEqual({
+      name: 'Pro',
+      url: 'http://pro.tail1.ts.net:4173',
+      bmUrl: 'http://pro.tail1.ts.net:5177',
+      host: 'Pro'
+    });
+  });
+  it('an explicit bmUrl or host still wins over its default', () => {
+    expect(validateEntry({ name: 'Pro', url: 'http://a:4173', bmUrl: 'http://b:6000', host: 'pro-mac' })).toMatchObject({
+      bmUrl: 'http://b:6000',
+      host: 'pro-mac'
+    });
   });
   it('rejects a model outside the list', () => {
     expect(validateEntry({ ...entry('Pro'), models: ['gpt'] })).toBe('models must be a non-empty subset of opus, sonnet, haiku, fable');

@@ -7,7 +7,6 @@ import { DashboardsGroup } from './DashboardsGroup';
 import { TickGroup } from './TickGroup';
 import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
-import { useAgents } from '../../hooks/useAgents';
 import { useJiraContext } from '../../hooks/JiraContext';
 import { useSettings } from '../../hooks/useSettings';
 import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
@@ -16,7 +15,7 @@ import { mergeModeOptionLabels } from '../../lib/merge-mode';
 import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, MERGE_MODES } from '../../../../shared/types';
-import type { AgentsStatus, QuestionMode } from '../../../../shared/types';
+import type { QuestionMode } from '../../../../shared/types';
 
 /**
  * Preview colors per theme — board / strip / accent, in that order. A mirror of
@@ -84,61 +83,6 @@ function landingOptions(jiraConfigured: boolean, current: Landing): { value: Lan
 }
 
 /**
- * The dot's three colors answer one question — "can I dispatch right now?" —
- * not the whole gate ladder `dispatchGate` walks: `spawnAvailable` (no
- * CLAUDE_BIN) still surfaces as gap text below, it just doesn't change the
- * color. `green` needs the dashboard reachable AND remote answers on;
- * anything short of reachable (off, unreachable, still checking) is `gray`
- * rather than a fourth color, since none of those name a fixable dashboard
- * setting the way "remote answers off" does.
- */
-type DotTier = 'green' | 'amber' | 'gray';
-
-function dispatchDotTier(status: AgentsStatus | null): DotTier {
-  if (status === null || !status.enabled || !status.reachable) return 'gray';
-  return status.remoteAnswer ? 'green' : 'amber';
-}
-
-function Dot({ tier }: { tier: DotTier }) {
-  return <span className={`set-dot set-dot-${tier}`}>●</span>;
-}
-
-/**
- * One line per gate, in the order dispatchBlock (shared/agent.ts) checks
- * them, so the first red dot named here is also the thing worth fixing
- * first. Read-only: every one of these gates lives on a host — in this
- * API's env or in the dashboard's — and a switch here that wrote to a
- * browser's localStorage would just be a lie about where the setting is.
- */
-// No wrapping `<span className="set-hint">` here on purpose: every caller
-// passes this straight into `SettingsRow`'s `hint` prop, which already wraps
-// its child in that exact span (`SettingsRow.tsx`). Wrapping it again here
-// nested a `.set-hint` inside a `.set-hint` — harmless (the class sets no
-// compounding properties) but redundant, so this returns bare content and
-// lets the row supply the class once.
-function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
-  const dot = <Dot tier={dispatchDotTier(status)} />;
-  if (status === null) return <>checking…</>;
-  if (!status.enabled) return <>{dot} off — dispatch is not enabled on the API</>;
-  if (!status.reachable) {
-    return (
-      <>
-        {dot} unreachable{status.error ? ` — ${status.error}` : ''}
-      </>
-    );
-  }
-  const gaps = [status.spawnAvailable ? null : 'no CLAUDE_BIN', status.remoteAnswer ? null : 'remote answers off'].filter((g): g is string => g !== null);
-  return (
-    <>
-      {dot} connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
-      {' · '}ceiling: {status.spawnMaxPermission ?? 'unknown'}
-      {' · '}
-      {status.projectPaths.length} projects
-    </>
-  );
-}
-
-/**
  * The Settings section (`.claude/DESIGN.md` §8.6): this device only
  * (localStorage), plus the one card that is not — the watchdog's, which says so
  * in its own scope subtitle.
@@ -188,10 +132,11 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
 
       {/* One of two card sets, never both — the page IS the scope (§8.6), so a
           card that mixed backends would make the pill above a lie. That is why
-          `Claude Agents` is two cards: its status lines report the HOST's
-          environment while its model, effort and link rows were this browser's
-          localStorage all along, and the split is what let each half sit under
-          a truthful heading.
+          the old `Claude Agents` card was split: its status lines report the
+          HOST's environment (now the Home row of `Dashboards`) while its model,
+          effort and link rows were this browser's localStorage all along (now
+          `Dispatch` on Local), and the split is what let each half sit under a
+          truthful heading.
 
           There is no in-page control that moves between these two, at any
           width. The rail's tree is the only one, the same rule Runs' three pages
@@ -203,21 +148,21 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
 }
 
 /**
- * The Shared page: the watchdog's file beside the registry, the host
- * environment `Claude Agents` reports on, what this machine can currently
+ * The Shared page: the watchdog's file beside the registry, the machines a
+ * launch can run on with this host's own dispatch report, what this machine can currently
  * see of each project's tracker — since task-45 — and, since the tick breaker,
  * the tick halt threshold under the watchdog.
  *
- * Five cards, and the hand-balanced columns hold up for a different reason
+ * Four cards, and the hand-balanced columns hold up for a different reason
  * here than on Local: the left column is the two machine-wide CONTROLS (the
  * watchdog's long card over the tick breaker's one-row card), the right the
- * host's dispatch side — the `Claude Agents` report, then (multi-dashboard) the
- * `Dashboards` card, then the `Trackers` report. `Dashboards` is the one card
- * on the right that sets things, and it sits under `Claude Agents` because it
- * is the same subject widened: that card reports this machine's own dashboard,
- * this one lists the others a launch can run on. It is tall, which is why it
- * goes right and not under the tick breaker — the left column is already the
- * watchdog's long card.
+ * host's dispatch side — `Dashboards`, then the `Trackers` report.
+ * `Dashboards` absorbed the old `Claude Agents` card: that card reported this
+ * machine's own dashboard and this one already listed it as `Home` beside the
+ * others a launch can run on, so the status became the Home row's first line
+ * and the two cards one subject. It is tall, which is why it goes right and
+ * not under the tick breaker — the left column is already the watchdog's long
+ * card.
  */
 function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   return (
@@ -230,13 +175,14 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
       </div>
 
       <div className="set-col">
-        <AgentsGroup />
+        {/* Dashboards carries this machine's dispatch report on its Home row
+            (what the `Claude Agents` card used to be) above the other machines
+            a launch can run on — one subject, one card. */}
         <DashboardsGroup />
-        {/* Beside Claude Agents (spec §5.6), under it in the same column: both
-            report on the HOST — one on the dispatch environment, one on the
-            tracker connection — and both are read-only reports rather than
-            controls, so they read as one column of "what this machine can
-            currently reach". */}
+        {/* Under it in the same column (spec §5.6): both report on the HOST —
+            one on the dispatch environment, one on the tracker connection —
+            so they read as one column of "what this machine can currently
+            reach". */}
         <TrackersGroup />
       </div>
     </div>
@@ -445,60 +391,6 @@ function OrchestratorGroup() {
           onChange={(orchestrateDefaultQuestionMode) => update({ orchestrateDefaultQuestionMode })}
         />
       </SettingsRow>
-    </SettingsGroup>
-  );
-}
-
-/**
- * `Claude Agents`, Shared — a report on where the HOST's dispatch config
- * currently stands, and nothing this browser can change.
- *
- * task-42 took three rows out of this card. `Default model`, `Default effort`
- * and `Dashboard link` were this browser's localStorage sitting under a
- * heading that says `this machine`, which was tolerable while Settings was one
- * page and is not now that the page IS the scope: they are `DispatchGroup`
- * below, on Local. What is left is genuinely the host's — the status lines and
- * the conditional setup block — which is why this card has a status row with
- * nothing in its right slot at all. The `open dashboard ↗` link went with the
- * per-device field that supplies its href.
- *
- * The bearer token is not here and never was, on either page: it must never be
- * in a browser at all.
- */
-function AgentsGroup() {
-  const { status } = useAgents();
-  const healthy = status !== null && status.enabled && status.reachable && status.spawnAvailable && status.remoteAnswer;
-
-  return (
-    <SettingsGroup title="Claude Agents" scope="this machine">
-      {/* No control in the right slot, which is the shape of a card that
-          reports rather than sets. Every gate named in the hint lives on a host
-          — in this API's env or in the dashboard's — and a switch here that
-          wrote to a browser's localStorage would just be a lie about where the
-          setting is. */}
-      <SettingsRow name="Dispatch" hint={<AgentsStatusLines status={status} />} />
-
-      {/* Gated on an actual answer, not bare `!healthy`: `healthy` starts
-          false the instant `status` is still `null` (its own `status !==
-          null` check fails first), which would fold "not answered yet" into
-          "broken" and tell the reader to go edit their .env while the status
-          line above still correctly says "checking…". */}
-      {status !== null && !healthy && (
-        <div className="set-row set-row-stacked">
-          <div className="set-label">
-            <span className="set-name">Setting it up</span>
-            <span className="set-hint">
-              1 · <code>BM_AGENTS=on</code> and <code>BM_AGENTS_URL</code> in this app's <code>.env</code>, then restart the API.
-              <br />2 · <code>CLAUDE_BIN</code> in the dashboard's <code>.env</code> — that is its spawn gate.
-              <br />
-              3 · Turn its remote-answer pill on; spawning is refused without it.
-              <br />4 · Run its <code>pnpm hooks:install</code>, or a groom that asks you a question will stall with nowhere to ask.
-              <br />5 · A project needs one Claude session inside the dashboard's <code>LOOKBACK_HOURS</code> before it can be dispatched to — open one there,
-              or raise <code>LOOKBACK_HOURS</code> in the dashboard's <code>.env</code>.
-            </span>
-          </div>
-        </div>
-      )}
     </SettingsGroup>
   );
 }

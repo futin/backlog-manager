@@ -916,3 +916,23 @@ export function finishClause(finish: ExecuteFinish, base: string): string {
   if (finish === 'in-place') return COMMIT_RULE;
   return `Finish with \`--finish pr --base ${base}\`: the skill commits, reviews, pushes and opens the PR into ${base}, and never merges.`;
 }
+
+/**
+ * A remote board's default web port: compose's `BM_WEB_PORT` default, which `pnpm run tailnet` publishes on the same number and over plain http (it registers
+ * `--http`, never `--https` — `scripts/tailnet.mjs`). A remote dashboard entry that leaves its board URL blank is stored with the dashboard URL's host on this
+ * port, so on a tailnet where both run with their defaults the dashboard URL is the only URL a person types.
+ */
+export const DEFAULT_BOARD_PORT = 5177;
+
+/**
+ * `http://<the dashboard url's hostname>:5177`, or null when `url` is not an http(s) URL. Shared because the server stores it for a blank board URL
+ * (`validateEntry`) and the Dashboards card shows it as that field's placeholder — one function, so what the form promises is what the file gets.
+ */
+export function defaultBoardUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? `http://${u.hostname}:${DEFAULT_BOARD_PORT}` : null;
+  } catch {
+    return null;
+  }
+}
