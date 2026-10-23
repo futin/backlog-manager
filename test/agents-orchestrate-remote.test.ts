@@ -265,6 +265,22 @@ describe('POST /api/agents/orchestrate with a machine', () => {
     expect(spawnsOf(pro)).toEqual([]);
   });
 
+  it("400s an effort outside Pro's list", async () => {
+    await start({ efforts: ['low', 'medium'] });
+    await post({ project: trackerPath, machine: 'Pro', effort: 'max' }).expect(400, { error: `effort "max" is not in Pro's list (low, medium)` });
+    expect(spawnsOf(pro)).toEqual([]);
+  });
+
+  it("409s when Pro is not offered for the project (Pro's board does not list it), and spawns nothing", async () => {
+    board = await stub({ '/api/projects': [] });
+    await start();
+    const res = await post({ project: trackerPath, machine: 'Pro' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(new RegExp(`^Pro is not offered for ${trackerPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: `));
+    expect(spawnsOf(pro)).toEqual([]);
+    expect(spawnsOf(home)).toEqual([]);
+  });
+
   it("success on Pro: Pro's dashboard, token and dirName; no watchdog arm, no local starting entry, a remoteStarting entry; a second Pro launch 409s, home is allowed", async () => {
     await start();
     await post({ project: trackerPath, machine: 'Pro' }).expect(201, { sessionId: 'sess-pro' });

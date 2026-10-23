@@ -409,11 +409,8 @@ export class AgentsService {
 
     // Multi-dashboard task 5 — the machine, resolved ahead of every other rule because the finish below depends on it. Absent (the client omits it for home)
     // and `home` in any case are this machine, which is the whole of the home-only promise: such a body walks exactly the path it walked before, gate for
-    // gate, to a byte-identical spawn. A remote is found by its name in the settings file as read for THIS request; anything else — a name edited away
-    // since the sheet opened, or a non-string the controller forwarded unvalidated — is a 400, never a quiet fallback to home, which would run the work
-    // on a machine the reader did not pick.
-    const m = req.machine === undefined || typeof req.machine === 'string' ? this.dashboards.machine(req.machine) : null;
-    if (m === null) throw new HttpException({ error: `unknown machine "${String(req.machine)}"` }, 400);
+    // gate, to a byte-identical spawn. Anything that names no machine is a 400 — `resolveMachine`, shared with orchestrate, says why.
+    const m = this.resolveMachine(req.machine);
 
     // Work sent to a remote machine always comes back as a PR (spec, Goals): a remote execute's finish IS `pr`, whatever the body says — and a body that
     // names another finish is refused rather than overridden, because the sheet locks the picker to PR for a remote, so a body that disagrees came from
@@ -476,30 +473,13 @@ export class AgentsService {
       throw new HttpException({ error: `this item's next step is ${action}, not ${req.action}` }, 409);
     }
 
-    // A remote's two 400s, here because both need the item: its project's source, and — on a remote only — the machine's own model/effort lists. A files
-    // project cannot run remotely at all (the remote session writes its items through the remote's own backlog-manager, which only a tracker project
-    // has). The lists are a 400 where home's `pickFrom` drops, because the remote dashboard would drop an unknown name just as silently and the session
-    // would then run on that account's default with no error anywhere (spec, "Models and efforts are per machine"); home keeps its drop untouched.
-    if (!m.home) {
-      if (item.source !== 'github') throw new HttpException({ error: filesBackedReason(m.label, item.projectPath) }, 400);
-      const choice = machineChoiceBlock(m, req.model, req.effort);
-      if (choice !== null) throw new HttpException({ error: choice }, 400);
-    }
+    // A remote's two 400s (`remoteChoiceChecks`, shared with orchestrate), here because both need the item: its source and the machine's model/effort
+    // lists. Home keeps its `pickFrom` drop untouched.
+    if (!m.home) this.remoteChoiceChecks(m, item.source === 'github', item.projectPath, req.model, req.effort);
 
-    // Offered NOW, not when the picker drew: the offers are minutes old by the time Start is clicked, and a remote that has since gone down, lost the
-    // repo or had its sync turned off is refused with the same reason the picker would now show. Then the project's path ON that machine, asked again
-    // rather than lifted from the offer, so the gate below and the spawn after it judge the path that is true at this moment. Uncoded 409s — states a
-    // reader can go and change, with the 502 left to the gate below for the one case with an upstream to blame.
-    let remotePath: string | undefined;
-    if (!m.home) {
-      const notOffered = (reason: string): HttpException => new HttpException({ error: `${m.label} is not offered for ${item.projectPath}: ${reason}` }, 409);
-      const offer = (await this.offers.offers(item.projectPath)).machines.find((o) => o.machine === m.id);
-      if (offer === undefined) throw notOffered('no longer configured');
-      if (offer.reason !== null) throw notOffered(offer.reason);
-      const there = await this.offers.remotePath(item.projectPath, m);
-      if ('reason' in there) throw notOffered(there.reason);
-      remotePath = there.path;
-    }
+    // Offered NOW and the project's path on that machine asked again (`remoteLaunchPath`, shared with orchestrate) — uncoded 409s, with the 502 left to
+    // the gate below for the one case with an upstream to blame.
+    const remotePath = m.home ? undefined : await this.remoteLaunchPath(item.projectPath, m);
 
     // Home: `dispatchBlock` against home's status, exactly as before. A remote: the same gate (`projectDispatchGate`, which `dispatchBlock` is a one-line
     // delegate to) against THAT machine's status and THAT machine's path — never `dispatchBlock(item, …)`, whose `item.projectPath` is this machine's
@@ -679,11 +659,10 @@ export class AgentsService {
    * edit in between could answer differently.
    */
   async orchestrate(req: AgentOrchestrateRequest): Promise<{ result: AgentDispatchResult; machine: Machine }> {
-    // The machine first, as dispatch resolves it (multi-dashboard task 5) and for the same reason: every rule below depends on it. Absent and `home` in any
+    // The machine first, through dispatch's own `resolveMachine` (multi-dashboard task 5) and for the same reason: every rule below depends on it. Absent and `home` in any
     // case are this machine, and from here on a home body walks exactly the path it walked before this field existed, to a byte-identical spawn — the
     // `m.home` branches below are the whole of the difference, and each one's home arm is the line that stood there before.
-    const m = req.machine === undefined || typeof req.machine === 'string' ? this.dashboards.machine(req.machine) : null;
-    if (m === null) throw new HttpException({ error: `unknown machine "${String(req.machine)}"` }, 400);
+    const m = this.resolveMachine(req.machine);
 
     // A remote drain always ends in a PR (spec, Goals) — the remote's merge would land on a clone this machine never sees, and a branch would leave work
     // nobody here is shown. An absent or empty `mergeMode` IS `pr` there; any other value is refused rather than overridden, because the Orchestrate
@@ -692,22 +671,11 @@ export class AgentsService {
       throw new HttpException({ error: `merge mode must be pr on ${m.label}` }, 400);
     }
 
-    // A remote's two 400s and its offer, in dispatch's order (task 5's comments there carry the full reasoning): a files project cannot run remotely at all
-    // — the remote session writes items through that machine's own backlog-manager, which only a tracker project has — and a model or effort outside
-    // the machine's list is a 400 where home's `pickFrom` drops. Then offered NOW rather than when the picker drew, and the project's path on that
-    // machine asked again, so the gate below judges the path that is true at this moment. Uncoded 409s — states a reader can go and change.
+    // A remote's two 400s and its offer, in dispatch's order and through dispatch's own helpers, so the sheet and the card refuse in the same words.
     let remotePath: string | undefined;
     if (!m.home) {
-      if (this.items.sourceOf(req.project) !== 'github') throw new HttpException({ error: filesBackedReason(m.label, req.project) }, 400);
-      const choice = machineChoiceBlock(m, req.model, req.effort);
-      if (choice !== null) throw new HttpException({ error: choice }, 400);
-      const notOffered = (reason: string): HttpException => new HttpException({ error: `${m.label} is not offered for ${req.project}: ${reason}` }, 409);
-      const offer = (await this.offers.offers(req.project)).machines.find((o) => o.machine === m.id);
-      if (offer === undefined) throw notOffered('no longer configured');
-      if (offer.reason !== null) throw notOffered(offer.reason);
-      const there = await this.offers.remotePath(req.project, m);
-      if ('reason' in there) throw notOffered(there.reason);
-      remotePath = there.path;
+      this.remoteChoiceChecks(m, this.items.sourceOf(req.project) === 'github', req.project, req.model, req.effort);
+      remotePath = await this.remoteLaunchPath(req.project, m);
     }
 
     // Home's status as before; a remote's read under the 5 s every remote read gets. Its `enabled` is home's own flag (`DashboardsService` copies it into
@@ -890,6 +858,48 @@ export class AgentsService {
     if (starting.some((s) => s.project === project)) {
       throw new HttpException({ error: 'a run is already starting for this project', code: RUN_IN_PROGRESS_CODE }, 409);
     }
+  }
+
+  /**
+   * A launch body's `machine`, resolved — dispatch's and orchestrate's one copy (multi-dashboard tasks 5–6), so the card and the sheet refuse in the same
+   * words. Absent and `home` in any case are this machine; a remote is found by its name in the settings file as read for THIS request. Anything else — a
+   * name edited away since the sheet opened, or a non-string the controller forwarded unvalidated — is a 400, never a quiet fallback to home, which would
+   * run the work on a machine the reader did not pick.
+   */
+  private resolveMachine(raw: unknown): Machine {
+    const m = raw === undefined || typeof raw === 'string' ? this.dashboards.machine(raw) : null;
+    if (m === null) throw new HttpException({ error: `unknown machine "${String(raw)}"` }, 400);
+    return m;
+  }
+
+  /**
+   * A remote launch's two 400s, shared by dispatch and orchestrate. A files project cannot run remotely at all (the remote session writes its items
+   * through the remote's own backlog-manager, which only a tracker project has); a model or effort outside the machine's list is a 400 where home's
+   * `pickFrom` drops, because the remote dashboard would drop an unknown name just as silently and the session would then run on that account's default
+   * with no error anywhere (spec, "Models and efforts are per machine"). `tracker` is the caller's own reading of the source — the item's for dispatch,
+   * the project's for orchestrate — because each has a different thing in hand. Never called for home.
+   */
+  private remoteChoiceChecks(m: Machine, tracker: boolean, projectPath: string, model: unknown, effort: unknown): void {
+    if (!tracker) throw new HttpException({ error: filesBackedReason(m.label, projectPath) }, 400);
+    const choice = machineChoiceBlock(m, model, effort);
+    if (choice !== null) throw new HttpException({ error: choice }, 400);
+  }
+
+  /**
+   * The project's path on remote `m`, or the uncoded 409 `<label> is not offered for <project>: <reason>` — dispatch's and orchestrate's one copy. Offered
+   * NOW, not when the picker drew: the offers are minutes old by the time Start is clicked, and a remote that has since gone down, lost the repo or had its
+   * sync turned off is refused with the same reason the picker would now show. Then the path ON that machine, asked again rather than lifted from the
+   * offer, so the gate and the spawn after it judge the path that is true at this moment. 409, a state a reader can go and change; the 502 is left to the
+   * caller's gate for the one case with an upstream to blame.
+   */
+  private async remoteLaunchPath(projectPath: string, m: Machine): Promise<string> {
+    const notOffered = (reason: string): HttpException => new HttpException({ error: `${m.label} is not offered for ${projectPath}: ${reason}` }, 409);
+    const offer = (await this.offers.offers(projectPath)).machines.find((o) => o.machine === m.id);
+    if (offer === undefined) throw notOffered('no longer configured');
+    if (offer.reason !== null) throw notOffered(offer.reason);
+    const there = await this.offers.remotePath(projectPath, m);
+    if ('reason' in there) throw notOffered(there.reason);
+    return there.path;
   }
 
   /**
