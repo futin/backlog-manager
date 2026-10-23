@@ -4,7 +4,7 @@ import { useCoalescedFetch } from './useCoalescedFetch';
 
 /**
  * The board's refresh cadence in one place (#285): `useCoalescedFetch`'s stable trigger, fired once on mount and once per window `focus` — the entry
- * every board poller (`useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useOrchestratorArchive`) goes through.
+ * every board poller (`useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useOrchestratorArchive`, `useMachines`) goes through.
  *
  * Why mount + focus and not a timer: almost everything these hooks read changes OUTSIDE this tab — a skill run in some terminal moves an item, a
  * dashboard starts, an orchestrator run archives its `run.json` — and the moment you come back to look is exactly the moment a `focus` event fires. A

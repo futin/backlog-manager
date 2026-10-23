@@ -1,6 +1,17 @@
 import { unwrap } from './agents';
 import { formatSpanCompact } from './run-time';
-import type { DashboardEntryInput, DashboardsView, HomeEntry, MachineOffer, MachineUsage, ProjectOffers, SuggestStrategy } from '../../../shared/types';
+import { USAGE_FRESH_MS } from '../../../shared/agent';
+import type {
+  DashboardEntryInput,
+  DashboardsView,
+  HomeEntry,
+  MachineOffer,
+  MachinesStatus,
+  MachineStatus,
+  MachineUsage,
+  ProjectOffers,
+  SuggestStrategy
+} from '../../../shared/types';
 
 /**
  * The client's half of multi-dashboard (spec `2026-10-22-multi-dashboard-design.md`): the six calls the launch sheets, the card dispatch and the Settings card
@@ -59,6 +70,34 @@ function isProjectOffers(data: unknown): data is ProjectOffers {
       Array.isArray(m.efforts) &&
       (m.usage === null || (typeof m.usage === 'object' && isWindow(m.usage.fiveHour) && isWindow(m.usage.week)))
   );
+}
+
+/**
+ * The machines route's answer, checked field-level the way the two guards above are: an entry's identity, its two flags the dots read, and a usage whose two
+ * windows are real readings. `usage: null` is legal (past the freshness limit, or never obtained).
+ */
+function isMachinesStatus(data: unknown): data is MachinesStatus {
+  if (typeof data !== 'object' || data === null) return false;
+  const m = (data as MachinesStatus).machines;
+  return (
+    Array.isArray(m) &&
+    m.every(
+      (e) =>
+        typeof e === 'object' &&
+        e !== null &&
+        typeof e.machine === 'string' &&
+        typeof e.enabled === 'boolean' &&
+        typeof e.reachable === 'boolean' &&
+        (e.usage === null || (typeof e.usage === 'object' && isWindow(e.usage.fiveHour) && isWindow(e.usage.week)))
+    )
+  );
+}
+
+/** Health and usage for every machine the Dashboards page lists, home first then the remotes (the order is NOT the prefer order — `machineIds` is). */
+export async function fetchMachines(): Promise<MachinesStatus> {
+  const data = await unwrap<MachinesStatus>(await fetch('/api/dashboards/machines'));
+  if (!isMachinesStatus(data)) throw new Error('unexpected /api/dashboards/machines response');
+  return data;
 }
 
 export async function fetchDashboards(): Promise<DashboardsView> {
@@ -203,6 +242,59 @@ export function fiveHourResetText(usage: MachineUsage, now: number): string | nu
   const at = usage.fiveHour.resetsAt === null ? NaN : Date.parse(usage.fiveHour.resetsAt);
   if (!Number.isFinite(at)) return null;
   return at <= now ? '5 h resets now' : `5 h resets in ${formatSpanCompact(at - now)}`;
+}
+
+/**
+ * The machines in prefer order — what the Settings › Dashboards list draws, top to bottom. `order` lists every machine once, but a remote the server sent and
+ * the order lacks is still listed, last, rather than hidden, and an id the order names but no entry owns (a removed remote) is dropped. Home is always listed:
+ * first when the order does not place it.
+ */
+export function machineIds(view: DashboardsView): string[] {
+  const remotes = new Map(view.dashboards.map((d) => [d.name, d]));
+  const ids = [...view.order.filter((id) => id === HOME_MACHINE || remotes.has(id)), ...view.dashboards.map((d) => d.name).filter((n) => !view.order.includes(n))];
+  if (!ids.includes(HOME_MACHINE)) ids.unshift(HOME_MACHINE);
+  return ids;
+}
+
+/** The selected machine: the one the person had picked while it is still listed (a delete or a rename can remove it), else the first. */
+export function pickSelected(ids: string[], wanted: string | null): string {
+  return wanted !== null && ids.includes(wanted) ? wanted : ids[0];
+}
+
+/** One machine's reading from the machines answer; `null` before the first answer lands and for an id the answer lacks, so a caller draws no dot, not a wrong one. */
+export function statusFor(machines: MachinesStatus | null, id: string): MachineStatus | null {
+  return machines?.machines.find((m) => m.machine === id) ?? null;
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * When a usage window resets, as the viewer's own wall clock: `resets 23:39` today, `resets Sat 00:05` on a later day (a window is at most a week long, so a
+ * weekday names it unambiguously), `resets now` once the moment has passed — the figure is then about to be replaced, and a clock in the past would read as a
+ * bug. The weekday is a fixed English table rather than `Intl` so the line, and its tests, do not move with the machine's locale. `null` for no reset time or
+ * one that does not parse.
+ */
+export function resetClockText(resetsAt: string | null, now: number): string | null {
+  if (resetsAt === null) return null;
+  const at = new Date(resetsAt);
+  if (Number.isNaN(at.getTime())) return null;
+  if (at.getTime() <= now) return 'resets now';
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  const today = new Date(now);
+  const sameDay = at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate();
+  return sameDay ? `resets ${clock}` : `resets ${WEEKDAYS[at.getDay()]} ${clock}`;
+}
+
+/**
+ * What a usage slot says when it has no figure to draw (called only when `usage` is null). Unreachable wins for an enabled machine — a switched-off one is not
+ * "unreachable", it was never asked; then a figure that exists but is past `USAGE_FRESH_MS` says how old, so the person can tell "gone quiet" from "never
+ * had one"; else the plain absence.
+ */
+export function noUsageText(s: Pick<MachineStatus, 'enabled' | 'reachable' | 'usageAgeMs'>): string {
+  if (s.enabled && !s.reachable) return 'unreachable';
+  if (s.usageAgeMs !== null && s.usageAgeMs > USAGE_FRESH_MS) return `no fresh figure · ${usageAgeText(s.usageAgeMs)}`;
+  return 'no usage figure';
 }
 
 /** `usage 40 s ago`, `usage 4 min ago`, `usage 2 h ago` — whole units, rounded down, the way the dashboard words its own freshness. */
