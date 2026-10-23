@@ -80,7 +80,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `Meter`                | `.ui-meter`       | `label`, `value`, `fraction` (clamped; `null` draws empty), `tone?: green\|amber\|red`, `width?` (px, default 56, or `'fill'`) | `TrackerChip` — the chip's POLL and API meters, the popover's rows and API block; `JiraChip`'s POLL and CALLS |
 | `Ledger`, `DayKicker`  | `.ui-ledger`      | `Ledger{columns?, children, label?}` owns the `overflow-x` box; `DayKicker{children}`            | Runs History's day groups, the Watchdog activity feed                           |
 | `Modal`                | `.ui-modal`       | `label`, `facts`, `children`, `onClose`                                                          | `ItemModal`, `JiraIssueModal` — the app's two modals                            |
-| `FormSheet`            | `.ui-form-sheet`  | `label`, `title`, `steps?`, `footer`, `children`, `onClose`                                      | `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`                             |
+| `FormSheet`            | `.ui-form-sheet`  | `label`, `title`, `steps?`, `footer`, `children`, `onClose`                                      | `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`, `JiraLaunchSheet`, `DashboardSheet` |
 | `Popover`              | `.ui-popover`     | `label`, `width` (px), `anchor`, `onClose`, `children`                                           | `FilterBar` (Filters, Sort), `TrackerChip`, `JiraChip`, the Jira board's picker, `JiraBoardSheet`'s roots search |
 | `Segmented`            | `.ui-seg`         | `value`, `options`, `onChange`, `disabled?`, `label?`, `pill?`                                   | Settings (density, text size, staleness), the Runs range control (stroked, not `pill`) |
 | `Select`               | `.ui-select`      | `value`, `options`, `onChange`, `disabled?`, `label?`                                            | Settings rows, `WatchdogGroup`'s three ladders, both sheets' pickers            |
@@ -179,7 +179,7 @@ home, with a warning note (`OFFERS_FAILED_TEXT`), because blocking a local launc
 on them. Jira's launch sheet has no picker: its Start stays home-only ([jira.md](jira.md)).
 
 Both sheets and the item modal — and, since Jira phase 2, the Jira issue modal and board sheet, since the release chip the What's new drawer, and since Jira
-phase 5 the Jira launch sheet — are the seven dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
+phase 5 the Jira launch sheet, and since the Dashboards card stopped editing in place its add/edit sheet — are the eight dialogs on the escape stack, and neither the sheets, the modals nor the drawer binds a key of its own: `Modal` and `FormSheet` call `useDialogEscape` for
 whatever they wrap, and `ReleasesDrawer` calls it itself, since its shell is ui-kit's (#298) and is handed `closeOnEscape={false}`. Two further entries join the same stack
 while they are drawn and are not dialogs: `ui/Confirm` (bug-53), described with the detail sheet below, and `ui/Popover` — the tracker chip's panel, the band's
 Filters and Sort, and Jira's chip, board picker, roots search and `Run ▾` panel — which closes only itself, and whose click-outside is its own `pointerdown`, since the stack
@@ -326,8 +326,8 @@ a row of URLs, the `BM_MACHINE_NAME` a claim's `host` must equal, the account, t
 strategy as a radio group and the threshold beneath. `DashboardsGroup` reads `useDashboards` once on mount (no poll, no focus trigger: the file changes only
 when a person edits it) and every write — `POST /api/dashboards/entries`, `/entries/delete`, `/home`, `/settings` — answers the whole fresh view, which the card
 draws rather than an optimistic copy. **A token is never on the page in any form**: the payload carries `tokenSet` and the env var's name, and the line says `✓
-set` or `✗ not set — add it to .env and restart`; there is no field to type one into, because the env var is the only place the server reads it from. One form
-is open at a time, a same-name Add is held at the form (the server treats it as an update), every box ticked is sent as no list, and an unreadable
+set` or `✗ not set — add it to .env and restart`; there is no field to type one into, because the env var is the only place the server reads it from. Add and Edit open `DashboardSheet` (a `FormSheet`, one at a time) rather than a form in place under the row; Remove stays an inline `Confirm`. A same-name
+Add is held at the sheet (the server treats it as an update), every box ticked is sent as no list, and an unreadable
 `dashboards.json` answers 409 on every write with the file left byte-identical, which the card prints verbatim
 ([invariants.md](invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)). The RunOn group's Settings
 link and the deep link `/?section=settings&settings=shared` both land on this page: `settings=shared|local` is read only beside `section=settings`.
@@ -495,7 +495,7 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 ## Invariants
 
 The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the four per-item dispatch blocks
-(the in-review rung, `a PR is open for this item`, the newest) and which one lets a click through, the dialog escape stack and its seven dialogs, a crashed
+(the in-review rung, `a PR is open for this item`, the newest) and which one lets a click through, the dialog escape stack and its eight dialogs, a crashed
 run rendering as crashed, "queue wait is not work",
 [Settings being two pages whose page IS the scope](invariants.md#settings-is-two-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only

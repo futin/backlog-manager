@@ -33,7 +33,10 @@ import { useEffect, useRef } from 'react';
  * before it, with nothing here changed — `FormSheet`'s composers are now `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet` and it. It is hosted once, in
  * `JiraView`, after the issue modal, so a sheet opened from the modal's `Run ▾` ranks above it by mount order.
  *
- * One entry is not a dialog at all, and it is not one of the seven: bug-53's
+ * Eight since the Dashboards card's add/edit sheet: `DashboardSheet` (`components/settings/DashboardSheet.tsx`) composes `ui/FormSheet`, its fifth composer,
+ * and joined by construction with nothing here changed.
+ *
+ * One entry is not a dialog at all, and it is not one of the eight: bug-53's
  * `ui/Confirm.tsx`, the inline confirmation the run's Stop opens (as do the claim release, the Jira board sheet's `Delete board`, the Skills card's `×` and the
  * Jira modal's `Stop session`). It paints no
  * scrim and floats over nothing, but it calls this hook while it is drawn,
