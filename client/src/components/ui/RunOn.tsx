@@ -16,7 +16,7 @@ import {
 import type { MachineOffer, ProjectOffers } from '../../../../shared/types';
 
 /**
- * RunOn — the "Run on" machine-card group at the top of a launch sheet (spec "The picker's look", option A; .claude/DESIGN.md §8.9.5's launch sheet, §7's
+ * RunOn — the "Run on" machine-card group at the top of a launch sheet (spec "The picker's look", option A; .claude/DESIGN.md §8.7's Launch and Orchestrate sheets, §7's
  * reusable patterns and §8.2's tokens). One card-sized toggle button per machine, side by side: a name, an account line, a 5 h and a weekly bar with their
  * percentages and the 5 h reset time. The suggested machine carries a `Suggested` tag and the home machine a `home` tag; one line beneath says which strategy
  * suggested it and why, with a link to the Settings card, and the age of the usage readings sits at the group's top right. A machine the server did not offer

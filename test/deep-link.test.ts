@@ -7,30 +7,51 @@ import { readDeepLink, withoutDeepLink } from '../client/src/lib/deep-link';
 */
 describe('readDeepLink', () => {
   it('reads a section and the Runs page', () => {
-    expect(readDeepLink('?section=runs&runs=history')).toEqual({ section: 'runs', runsMode: 'runs' });
-    expect(readDeepLink('?section=runs&runs=watchdog')).toEqual({ section: 'runs', runsMode: 'watchdog' });
+    expect(readDeepLink('?section=runs&runs=history')).toEqual({ section: 'runs', runsMode: 'runs', settingsScope: null });
+    expect(readDeepLink('?section=runs&runs=watchdog')).toEqual({ section: 'runs', runsMode: 'watchdog', settingsScope: null });
   });
 
   it('reads a section alone', () => {
-    expect(readDeepLink('?section=archive')).toEqual({ section: 'archive', runsMode: null });
-    expect(readDeepLink('?section=runs')).toEqual({ section: 'runs', runsMode: null });
+    expect(readDeepLink('?section=archive')).toEqual({ section: 'archive', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=runs')).toEqual({ section: 'runs', runsMode: null, settingsScope: null });
   });
 
   it('is empty without a search, or with an unknown section', () => {
-    expect(readDeepLink('')).toEqual({ section: null, runsMode: null });
-    expect(readDeepLink('?section=projects')).toEqual({ section: null, runsMode: null });
-    expect(readDeepLink('?other=1')).toEqual({ section: null, runsMode: null });
+    expect(readDeepLink('')).toEqual({ section: null, runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=projects')).toEqual({ section: null, runsMode: null, settingsScope: null });
+    expect(readDeepLink('?other=1')).toEqual({ section: null, runsMode: null, settingsScope: null });
   });
 
   it('takes a Runs page only with the Runs section, and never the internal name of History', () => {
-    expect(readDeepLink('?runs=watchdog')).toEqual({ section: null, runsMode: null });
-    expect(readDeepLink('?section=board&runs=watchdog')).toEqual({ section: 'board', runsMode: null });
-    expect(readDeepLink('?section=runs&runs=runs')).toEqual({ section: 'runs', runsMode: null });
+    expect(readDeepLink('?runs=watchdog')).toEqual({ section: null, runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=board&runs=watchdog')).toEqual({ section: 'board', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=runs&runs=runs')).toEqual({ section: 'runs', runsMode: null, settingsScope: null });
+  });
+});
+
+describe('the Settings page', () => {
+  it('reads a scope beside the Settings section', () => {
+    expect(readDeepLink('?section=settings&settings=shared')).toEqual({ section: 'settings', runsMode: null, settingsScope: 'shared' });
+    expect(readDeepLink('?section=settings&settings=local')).toEqual({ section: 'settings', runsMode: null, settingsScope: 'local' });
+  });
+
+  it('ignores a scope beside any other section, or beside none', () => {
+    expect(readDeepLink('?section=runs&settings=shared')).toEqual({ section: 'runs', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?settings=shared')).toEqual({ section: null, runsMode: null, settingsScope: null });
+  });
+
+  it('ignores an unknown scope, and an inherited object key', () => {
+    expect(readDeepLink('?section=settings&settings=bogus')).toEqual({ section: 'settings', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=settings&settings=constructor')).toEqual({ section: 'settings', runsMode: null, settingsScope: null });
   });
 });
 
 describe('withoutDeepLink', () => {
-  it('drops the two parameters and keeps everything else', () => {
+  it('drops the Settings scope with the others', () => {
+    expect(withoutDeepLink('/', '?section=settings&settings=shared', '')).toBe('/');
+  });
+
+  it('drops the parameters and keeps everything else', () => {
     expect(withoutDeepLink('/', '?section=runs&runs=history', '')).toBe('/');
     expect(withoutDeepLink('/', '?a=1&section=runs&runs=history', '#x')).toBe('/?a=1#x');
   });

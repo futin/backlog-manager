@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import { App } from '../client/src/App';
@@ -56,6 +56,20 @@ describe('a deep link', () => {
     window.history.replaceState(null, '', '/?section=runs&runs=history');
     render(<App />);
     expect(await screen.findByText('runs stub: runs')).toBeInTheDocument();
+  });
+
+  it('applies a Settings scope through the settings the rail writes, and only beside the Settings section', async () => {
+    window.history.replaceState(null, '', '/?section=settings&settings=shared');
+    const first = render(<App />);
+    await waitFor(() => expect((stored(SETTINGS_STORAGE_KEY) as { settingsScope?: string } | null)?.settingsScope).toBe('shared'));
+    expect(window.location.search).toBe('');
+    first.unmount();
+
+    localStorage.clear();
+    window.history.replaceState(null, '', '/?section=runs&settings=shared');
+    render(<App />);
+    expect(await screen.findByText('runs stub: runs')).toBeInTheDocument();
+    expect((stored(SETTINGS_STORAGE_KEY) as { settingsScope?: string } | null)?.settingsScope ?? 'local').toBe('local');
   });
 
   it('opens nothing special for an unknown section', async () => {
