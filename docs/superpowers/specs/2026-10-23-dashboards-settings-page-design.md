@@ -57,7 +57,7 @@ picture.
 
 Drawn to `.claude/DESIGN.md` §8.6 (Settings), which gains a paragraph for this page (see Docs).
 
-**Band.** `Dashboards`, subtitle along the lines of "The machines a launch can run on, in prefer order, and how the launch sheet picks one. Saved on the API
+**Band.** The title stays `Settings` on all three pages, as today; only the subtitle and the scope pill change per page. The Dashboards subtitle along the lines of "The machines a launch can run on, in prefer order, and how the launch sheet picks one. Saved on the API
 host — change it here and it changes for everyone." Right slot: the scope pill `this machine`, `tone="neutral"`, exactly as Shared draws it.
 
 **Suggest card** — full width, above the list and detail. Today's two rows, restyled:
@@ -87,7 +87,8 @@ quiet (no tone); `enabled && !reachable` → red (`Dot` tone `crashed`); `reacha
 the status line); otherwise green (tone `live`). One predicate decides it, in `shared/` beside the other dispatch predicates, and every dot on the page reads
 it. It REPLACES today's two disagreeing readings in `DispatchStatus.tsx` — `dispatchDotTier` (green on `reachable && remoteAnswer`, blind to
 `spawnAvailable`) and `dispatchHealthy` (which gates `DispatchSetupSteps`) — and that file's local `Dot`/`.set-dot` gives way to `ui/Dot`, so
-`AgentsStatusLines`' dot, `DispatchSetupSteps`' gate and the page's dots are one function, not agreeing expressions. *My call:* Home's dot reads `useAgents`' status through that predicate —
+`AgentsStatusLines`' dot, `DispatchSetupSteps`' gate and the page's dots are one function, not agreeing expressions. Wherever else those lines draw
+(the Shared page's `Claude Agents` card), an unreachable dashboard's dot turns from gray to red with them. *My call:* Home's dot reads `useAgents`' status through that predicate —
 the same status its status line and setup steps read — so Home can never show a green dot above open setup steps; the remotes' dots read the new route's
 answer through the same predicate.
 - **Usage:** both `Meter`s full width, each with its reset time under it as an absolute local clock time: `resets 23:39` when the reset falls today,
@@ -111,8 +112,8 @@ answer through the same predicate.
 move into the band subtitle or the footer; its meaning must stay on the page.
 
 **Selection.** Defaults to the first machine in prefer order. Not stored (no new settings key). It follows a machine through a reorder; when the selected
-machine is removed (here, or by another tab's write once the page re-reads `GET /api/dashboards` — on window focus, beside the machines read), it falls
-back to the first. Add selects the new machine once the server's view
+machine is no longer in the view the page draws (removed here), it falls back to the first. The view is read as today — `useDashboards` once on mount,
+deliberately no focus trigger, plus each write's answer — so another tab's edit shows on the next reload, unchanged from the card. Add selects the new machine once the server's view
 contains it.
 
 **Widths.** Under Settings' own 1100 px fold the two columns stack: list above detail, full width. Under 700 px the list rows stay as drawn and the detail's
@@ -145,7 +146,8 @@ configured machine (in `machines()`' order — the client's `ids` derivation is 
   machines run in parallel.
 - Never a token, never a URL (the view already carries URLs).
 
-It is always a 200 once it runs: an unreachable machine is an answer, not an error — the offers route's rule. With `BM_AGENTS` off, remotes are not called at
+It is always a 200 once it runs: an unreachable machine is an answer, not an error — the offers route's rule. Unlike the offers, it reads Home's usage
+even when the file's source is `default` (home only): the offers skip it because no picker is drawn, while this page draws Home's meters either way. With `BM_AGENTS` off, remotes are not called at
 all (the feature's off switch) and read as not enabled. With an unreadable `dashboards.json` only Home is answered, matching `machines()`.
 
 This is a new outbound read inside `agents/` (the dashboards submodule already calls remote dashboards), so no fourth outbound-calling module appears.
@@ -166,7 +168,11 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 - `DashboardsGroup.tsx` is replaced by the page's components (names are the builder's); its header comment's content (what the card draws, why a token is
   never on the page, why Home's lists narrow nothing, the one-write-at-a-time guard, the unreadable lock, the threshold re-seed) moves with the code it
   describes — none of it is dropped.
-- Styles: the `.dash-*` rules in `client/src/styles.css` that only the old card used go; new rules live beside them.
+- Styles: the `.dash-*` rules in `client/src/styles.css` that `DashboardSheet` does not use go — `.dash-machine` (its three rules), `.dash-line`,
+  `.dash-strategies`, `.dash-strategy`, `.dash-strategy input`, `.dash-strategy-text`, `.dash-threshold`, and the `.dash-strategy input` half of the shared
+  `.dash-check input, .dash-strategy input` rule unless the restyled radios keep it; the sheet's `.dash-field/-text/-checks/-check/-actions/-sheet-*` stay.
+  New rules live beside them. The `.set-dot-*` rules go with the local `Dot`, and `test/daylight-contrast.test.ts`'s `.set-dot-green`/`.set-dot-amber`
+  entries follow.
 
 ## Invariants and docs touched
 
@@ -179,6 +185,11 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 - `docs/subsystems/board.md` (Settings), `docs/subsystems/api.md` (the new route). The mechanism and body text that say two pages also change:
   `.claude/rules/board.md`'s "`settingsScope` … is `local | shared`", `invariants.md`'s section body and its "Settings (Local, Shared)" mention, and
   `.claude/DESIGN.md`'s "Settings is TWO pages". CLAUDE.md's Layout line does not name Settings' pages, so only its headline changes.
+  `.claude/rules/dispatch-watchdog.md`'s `dashboards.json` bullet gains the new route beside the others and a clause that it, unlike the offers, reads
+  Home's usage under a `default` source (the same note in `offers.service.ts`' header stays true of the offers).
+  Renaming the headline renames the `invariants.md` anchor, so its links in `CLAUDE.md`, `.claude/rules/board.md` and `docs/subsystems/board.md` move with
+  it. Also stale: `.claude/DESIGN.md`'s "Settings' Local and Shared (§8.6)" and `docs/subsystems/board.md`'s "Settings (Local, Shared)"; the mentions of
+  "the Dashboards card's add/edit sheet" read "page" for "card".
 
 ## Parity checklist — today's card against the page
 
