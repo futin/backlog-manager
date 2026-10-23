@@ -51,7 +51,7 @@ picture.
   health and usage filling in when they arrive.
 - A token's value reaching the payload or the DOM.
 - A second look for an existing primitive (`test/design-guards.test.ts` guard 7): meters are `Meter`, dots `Dot`, pills `Pill`, buttons `Chip`, the
-  strategy picker `Segmented`, cards `Sheet`/`SettingsGroup`.
+  cards `Sheet`/`SettingsGroup`.
 
 ## The page
 
@@ -61,10 +61,10 @@ Drawn to `.claude/DESIGN.md` §8.6 (Settings), which gains a paragraph for this 
 host — change it here and it changes for everyone." Right slot: the scope pill `this machine`, `tone="neutral"`, exactly as Shared draws it.
 
 **Suggest card** — full width, above the list and detail. Today's two rows, restyled:
-- `Strategy`: the three strategies as a `Segmented` `pill` (`Prefer order`, `Most headroom`, `Least likely to run out`) in the row's control slot; the
-  row's hint is the selected strategy's one-line explanation (today's `STRATEGIES[].line`). Today's radiogroup semantics (`role="radiogroup"`, an accessible
-  name per option and its description) must survive in whatever form `Segmented` offers; if `Segmented` cannot carry them, the builder keeps the radios and
-  restyles them instead — accessibility outranks the look.
+- `Strategy`: today's three radios (`Prefer order`, `Most headroom`, `Least likely to run out`), kept as radios — `Segmented` is a `role="group"` of
+  `aria-pressed` buttons and rejects radiogroup semantics — and restyled under the page's own class as three side-by-side option tiles, each drawing its
+  name and its own one-line explanation (today's `STRATEGIES[].line`). All three lines survive, each still the `aria-describedby` of its own radio, and the
+  `role="radiogroup"` with its accessible name stays. Accessibility outranks the look.
 - `Threshold`: the 1–100 `NumberField` with its `%` unit and its refused-value re-seed (`thresholdNonce`), unchanged.
 - The `suggest`-scope refusal row under them, as today.
 
@@ -82,19 +82,25 @@ is unreadable. Rows are buttons (keyboard-selectable); the list is not a dialog 
   is unhealthy. A remote — the same reading in the same words where it applies (answers / cannot take a launch and why / unreachable with the error in the
   server's words).
 
-**The health dot means "a launch could go there now"** (decided by the user). Three tones and the quiet one: green — the dashboard answers AND it can take a
-launch (enabled, spawn available, remote answers on — whatever today's dispatch-health reading for Home already requires); amber — it answers but cannot take
-a launch (the reason is the status line); red — it does not answer; quiet (no tone) — not answered yet, or `BM_AGENTS` off. One predicate decides it, in
-`shared/` beside the other dispatch predicates, and every dot on the page reads it. *My call:* Home's dot reads `useAgents`' status through that predicate —
+**The health dot means "a launch could go there now"** (decided by the user). Four rungs, checked in this order: no answer yet (`null`) or `!enabled` →
+quiet (no tone); `enabled && !reachable` → red (`Dot` tone `crashed`); `reachable && !(spawnAvailable && remoteAnswer)` → amber (tone `paused`; the reason is
+the status line); otherwise green (tone `live`). One predicate decides it, in `shared/` beside the other dispatch predicates, and every dot on the page reads
+it. It REPLACES today's two disagreeing readings in `DispatchStatus.tsx` — `dispatchDotTier` (green on `reachable && remoteAnswer`, blind to
+`spawnAvailable`) and `dispatchHealthy` (which gates `DispatchSetupSteps`) — and that file's local `Dot`/`.set-dot` gives way to `ui/Dot`, so
+`AgentsStatusLines`' dot, `DispatchSetupSteps`' gate and the page's dots are one function, not agreeing expressions. *My call:* Home's dot reads `useAgents`' status through that predicate —
 the same status its status line and setup steps read — so Home can never show a green dot above open setup steps; the remotes' dots read the new route's
 answer through the same predicate.
-- **Usage:** both `Meter`s full width, each with its reset time under it (`resets 23:39`, `resets Sun 05:59`). The meter's tone follows the percent
-  (`lib/dashboards.ts` already has `usageTone`, `fiveHourResetText` and `usageAgeText` — reuse them). With no figure the meters are replaced by ONE generic
-  muted line, specific only where the server already knows: `unreachable` for a machine that does not answer, `last figure 14m old` for a figure past
-  `USAGE_FRESH_MS`, and plain `no usage figure` otherwise (signed out, `SHOW_USAGE` off and a failed account read are not told apart — **decided by the user**,
+- **Usage:** both `Meter`s full width, each with its reset time under it as an absolute local clock time: `resets 23:39` when the reset falls today,
+  `resets Sun 05:59` otherwise, `resets now` once the stamp has passed, and no reset line for a window with no (or an unparseable) reset time. That is a NEW
+  helper in `lib/dashboards.ts` taking one window's `resetsAt` and the caller's clock, used for both windows; `fiveHourResetText` (relative, 5 h only) stays
+  as the launch sheet's and is not reused here. The meter's tone follows the percent through the existing `usageTone`. With no figure the meters are
+  replaced by ONE generic muted line, specific only where the server already knows: `unreachable` for a machine that does not answer,
+  `no fresh figure · usage 14 min ago` for a figure past `USAGE_FRESH_MS` (the second half is the existing `usageAgeText`, unchanged), and plain
+  `no usage figure` otherwise (signed out, `SHOW_USAGE` off and a failed account read are not told apart — **decided by the user**,
   so `UsageService` and its cache stay as they are).
-- **Chips:** `Models` and `Efforts`, every member of `MODELS` / `EFFORTS` drawn, the allowed ones solid and the others visibly off (the mock struck them
-  through on a dashed outline — the builder may pick another "off" treatment from existing tokens). Home's are drawn the same way and, as today, narrow
+- **Models and efforts:** `Models` and `Efforts`, every member of `MODELS` / `EFFORTS` drawn as a `Pill` — they are facts, not controls, and `Chip` is the
+  clickable primitive — the allowed ones in the normal look and the others visibly off. "Off" is a new prop on `Pill` itself (one home; the mock struck
+  them through on a dashed outline — the builder may pick another treatment from existing tokens), never a page-local class. Home's are drawn the same way and, as today, narrow
   nothing; no hint suggests otherwise.
 - **Facts:** a two-column label/value grid under a hairline, values in monospace, each one wrapping anywhere: `Dashboard` (Home: its URL plus a small
   `BM_AGENTS_URL` tag naming where it comes from), `Board` and `Machine name` (remotes only), `Token` — the var's name and `✓ set`, or today's "not set —
@@ -105,7 +111,8 @@ answer through the same predicate.
 move into the band subtitle or the footer; its meaning must stay on the page.
 
 **Selection.** Defaults to the first machine in prefer order. Not stored (no new settings key). It follows a machine through a reorder; when the selected
-machine is removed (here or by another tab's write arriving in a fresh view), it falls back to the first. Add selects the new machine once the server's view
+machine is removed (here, or by another tab's write once the page re-reads `GET /api/dashboards` — on window focus, beside the machines read), it falls
+back to the first. Add selects the new machine once the server's view
 contains it.
 
 **Widths.** Under Settings' own 1100 px fold the two columns stack: list above detail, full width. Under 700 px the list rows stay as drawn and the detail's
@@ -113,7 +120,8 @@ head wraps its controls onto a second line; no horizontal page scroll at any wid
 
 **States.**
 - `GET /api/dashboards` not answered yet / failed: today's null-view card, unchanged in content — the dispatch status line, the setup steps, and
-  `checking…` or `Unavailable — <error>`.
+  `checking…` or, on failure, the row named `Unavailable` with the hint `Could not read the dashboards — <error>. This page will fill in once the API
+  answers GET /api/dashboards again.` (today's sentence with "card" → "page").
 - `source: 'unreadable'`: a banner row at the top of the page naming the file and the one fix by hand (today's sentence); every control disabled; the list
   still draws Home.
 - Machine status not answered yet: dots in the quiet (no-tone) `Dot`, meters absent, and the detail's usage area says `checking…`. The config parts draw
@@ -121,16 +129,20 @@ head wraps its controls onto a second line; no horizontal page scroll at any wid
 
 ## Server: one new read
 
-`GET /api/dashboards/machines` (name is the builder's call; it must sit under `/api/dashboards`, read-only and unguarded like every GET). It answers, per
-configured machine in prefer order:
+`GET /api/dashboards/machines` (name is the builder's call; it must sit under `/api/dashboards`, read-only, Host-allowlisted and without `SameOriginPostGuard` like every GET). It answers, per
+configured machine (in `machines()`' order — the client's `ids` derivation is what puts the list in prefer order):
 
 - `machine` (id), `reachable` and, when not, the `error` sentence, plus the dispatch-health fields the dot's predicate needs (whatever `/api/health` gives
-  — `spawnAvailable`, `remoteAnswer`, `spawnMaxPermission` — in the shape Home's `AgentsStatus` already uses, so one predicate reads both). Home from
-  `DashboardStatusService.statusOf(home.cfg)` (home's own budget and cache, the same reads `GET /api/agents/status` makes); a remote under the 5 s
-  `REMOTE_BUDGET` every new outbound read gets. A remote's health must NOT depend on any project (no board read, no `projectMap` verdict): the builder picks
-  the lightest call that carries those fields, and documents why.
+  — `spawnAvailable`, `remoteAnswer`, `spawnMaxPermission` — in the shape Home's `AgentsStatus` already uses, so one predicate reads both). Every machine,
+  Home included, is judged by ONE new health-only method on `DashboardStatusService` that reads `/api/health` and nothing else: `statusOf` and
+  `remoteStatusOf` both also read the project map (`/api/configs`, up to 15 s), which this route never needs and which would make a remote's health depend
+  on a project. Home's health budget is its existing 4 s, a remote's the 5 s `REMOTE_BUDGET`. `projectPaths` is not in the answer. The page reads Home's
+  dot and status line from `useAgents` (above) and ignores the route's Home health, which exists only to gate Home's usage read.
 - `usage` and `usageAgeMs` from `UsageService.read` — the same in-memory cache the offers use, so opening Settings and opening a launch sheet share one fetch
-  per machine per `USAGE_TTL_MS`.
+  per machine per `USAGE_TTL_MS`. Usage is read only once that machine's health answer is `enabled && reachable`, otherwise it is `null`/`null` — the offers'
+  order (judge, then read). `UsageService.read` has no `enabled` check of its own, so this gate is what keeps `BM_AGENTS` off egress-free for Home too. The
+  two reads are therefore sequential per machine — worst case one health budget plus one 5 s usage budget (about 9 s for Home, 10 s for a remote) — and
+  machines run in parallel.
 - Never a token, never a URL (the view already carries URLs).
 
 It is always a 200 once it runs: an unreachable machine is an answer, not an error — the offers route's rule. With `BM_AGENTS` off, remotes are not called at
@@ -146,7 +158,8 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 - `client/src/lib/settings.ts`: `SettingsScope` becomes `local | shared | dashboards`; `SETTINGS_SCOPES` gains it; `clampSettings` keeps routing through
   `pickOne`, so an old stored value still clamps.
 - `client/src/components/SideRail.tsx`: `RAIL_SCOPE_LABEL.dashboards = 'Dashboards'`. The tree stays the only switch.
-- `client/src/lib/deep-link.ts`: `settings=dashboards` is accepted next to `section=settings`.
+- `client/src/lib/deep-link.ts`: `settings=dashboards` is accepted the moment `SETTINGS_SCOPES` grows (it checks `SETTINGS_SCOPES.includes`); the work is its
+  doc comment ("`shared` or `local`", "points at the Dashboards card") and `test/deep-link.test.ts`.
 - `client/src/lib/dashboards.ts`: `SETTINGS_HREF` (the Run on card's Settings link) becomes `/?section=settings&settings=dashboards`.
 - `client/src/components/settings/SettingsView.tsx`: a third page component; the band's subtitle and pill per page; the Shared page drops `DashboardsGroup`
   and rebalances — the watchdog and tick breaker on the left, `Trackers` on the right — with its header comment rewritten to say why.
@@ -163,7 +176,9 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
   `test/claude-rules.test.ts` holds the headlines byte-equal.
 - `.claude/DESIGN.md` §8.6: a paragraph for the Dashboards page (list + detail, the Suggest card on top, the fold), and the Shared page's balance sentence
   updated now that `Dashboards · this machine` is no longer on it.
-- `docs/subsystems/board.md` (Settings), `docs/subsystems/api.md` (the new route), CLAUDE.md's Layout line for `client/src/` if it names Settings' pages.
+- `docs/subsystems/board.md` (Settings), `docs/subsystems/api.md` (the new route). The mechanism and body text that say two pages also change:
+  `.claude/rules/board.md`'s "`settingsScope` … is `local | shared`", `invariants.md`'s section body and its "Settings (Local, Shared)" mention, and
+  `.claude/DESIGN.md`'s "Settings is TWO pages". CLAUDE.md's Layout line does not name Settings' pages, so only its headline changes.
 
 ## Parity checklist — today's card against the page
 
@@ -181,11 +196,11 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 | Remote: dashboard URL, board URL, machine name | `Dashboard`, `Board`, `Machine name` facts |
 | Token line, set / not-set sentence | `Token` fact, same words |
 | Account line | Account `Pill` in list row and head |
-| Models / efforts comma lines (`ticked`) | Chips, allowed solid, the rest off |
+| Models / efforts comma lines (`ticked`) | `Pill`s, allowed normal, the rest `off` |
 | `DashboardSheet` for Home, Add and Edit; error in the sheet | Unchanged |
 | Notices scoped `form` / `list` / `suggest`, server's words | Same three scopes, placed as above |
 | One write in flight (`busyRef` + `busy`), fresh view after every write | Unchanged |
-| Strategy radios with name + line | `Segmented` + selected line, a11y kept |
+| Strategy radios with name + line | Same radios, restyled as tiles, every line kept |
 | Threshold `NumberField`, commit on blur, re-seed on refusal | Unchanged |
 | `Saved to <file>` | Footer |
 | — (new) | Health dot, usage meters + resets, per machine |
@@ -197,7 +212,7 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
   offered machine.
 - `Segmented` is a `role="group"` of `aria-pressed` buttons and its header deliberately rejects radiogroup semantics, so the strategy picker keeps today's
   radios, restyled under the page's own class (the fallback the Suggest card section already allows).
-- Health and usage reads run in parallel per machine and machines in parallel, so the route's worst case is about one 5 s budget, not two.
+- Health then usage per machine (usage gated on the health answer), machines in parallel: the route's worst case is two budgets, about 10 s.
 - Selection follows a rename made through the Edit sheet (the save knows the new name).
 - After any write, the machines read is triggered at once rather than waiting for the timer.
 - The new wording of the Settings headline and its anchor are the builder's, kept byte-equal across its three homes.
@@ -206,9 +221,10 @@ This is a new outbound read inside `agents/` (the dashboards submodule already c
 
 - The new route's name and response type name (in `shared/types.ts`), and which call proves a remote "answers".
 - Component and file names for the page, its list and its detail; whether the list row and detail head share one component.
-- The "off" chip treatment, the exact meter tones' thresholds (today's `Meter` tones are green / amber / red), and the reset-time format beyond "time today,
-  weekday + time otherwise".
+- The `Pill`'s "off" treatment, from existing tokens.
 - Where the old lead line lands (subtitle or footer).
 - Test layout, following `CLAUDE.md`'s rules on where a test sits. Expected at least: the rail tree's three items and labels; the deep link; `SETTINGS_HREF`;
-  the moved `settings-view` assertions for the Dashboards card; the route (unreachable remote is a 200 with an error; no token in the body; `BM_AGENTS` off
-  calls no remote; an unreadable file answers Home only); selection fallback after a remove.
+  the moved Dashboards-card assertions (today's `test/settings-dashboards.test.tsx`, plus the page-level ones in `test/settings-view.test.tsx`); the old href
+  pinned at `test/run-on.test.tsx`; the route (unreachable remote is a 200 with an error; no token in the body; `BM_AGENTS` off calls no remote and none of
+  Home's usage endpoints; an unreadable file answers Home only; an unreachable machine's usage is not read); the health predicate's four rungs; the reset
+  helper (today, another day, passed, missing); selection fallback after a remove.
