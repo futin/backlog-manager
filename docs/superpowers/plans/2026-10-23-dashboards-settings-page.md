@@ -128,7 +128,8 @@ Component names inside the page are a recommendation; keep them or merge list ro
 
 **Files:**
 - Modify: `client/src/components/ui/Pill.tsx`, `client/src/styles.css` (beside the `.ui-pill-*` rules)
-- Test: `test/ui-pill.test.tsx`; `test/daylight-contrast.test.ts` (it pins pill tones, ~:280 and ~:403 — add `.ui-pill-off`'s text token there)
+- Test: `test/ui-pill.test.tsx`. No `test/daylight-contrast.test.ts` entry unless `.ui-pill-off` paints its own fill (then the fill-site list, ~:280) or
+  tint (then the `PINNED` table, ~:403); its `--ink3` text is already measured by the general case (~:243)
 
 **Interfaces:**
 - Produces: `Pill({ children, tone?, title?, off? }: { …; off?: boolean })` — `off` adds class `ui-pill-off` on top of the tone class; nothing else changes.
@@ -252,7 +253,8 @@ Component names inside the page are a recommendation; keep them or merge list ro
 - State and writes move from `DashboardsGroup` unchanged: `written ?? loaded`, `write(scope, send)` single-flight on a ref + `busy`, notices scoped `form` /
   `list` / `suggest`, `Editing`, `asking`, `thresholdNonce`, `MAX_REMOTES = 8`. Every successful write also calls `useMachines().reload()`.
 - `ids = machineIds(view)`; `selected = pickSelected(ids, wanted)`, `wanted` in component state (initial `null`). A row click sets `wanted` to the clicked
-  id; a ↑/↓ move leaves `wanted` alone, so the selection follows the moved machine by id rather than by position. A successful rename via Edit sets `wanted`
+  id; a ↑/↓ move sets `wanted` to the moved machine's id (it may still be `null` from load), so the selection follows the moved machine by id rather than by
+  position. A successful rename via Edit sets `wanted`
   to the entry's new name; a successful Add sets `wanted` to the added entry's name (it is in the fresh view the write answered); Remove needs nothing —
   `pickSelected` falls back.
 - **Suggest card** (`SettingsGroup`, full width, title `Suggest`, hint `Which machine a launch sheet starts on. You can still pick another there.`): the three
@@ -295,6 +297,7 @@ Component names inside the page are a recommendation; keep them or merge list ro
   - machines never answer (fetch pending forever): list, detail facts and every control draw; dots carry no tone class; usage area `checking…`;
   - a machine in `/machines` the view lacks is ignored; a view machine `/machines` lacks reads `checking…`;
   - select `Pro` (not first), move it up → `Pro` is still `aria-pressed` and the detail still shows Pro;
+  - with no click at all, move the default-selected first machine down → it is still `aria-pressed`, now at position 2;
   - remove the selected `Pro` → selection falls back to the first machine; rename `Pro` → `Pro2` through Edit → `Pro2` stays selected; Add `Linux` →
     `Linux` selected;
   - every successful write is followed by a `GET /api/dashboards/machines`;
