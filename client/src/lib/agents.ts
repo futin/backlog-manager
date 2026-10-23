@@ -356,6 +356,12 @@ export interface StartOrchestrateRequest {
    *  `parseIdsArg` keeps in orchestrate.mjs. Ids only — this request has no
    *  prompt field to widen, and the server composes the prompt itself. */
   ids?: string[];
+  /**
+   * The machine to run on: a configured remote's name (`ProjectOffers.machines[].machine`). Absent means this machine — and the client sends nothing rather than
+   * `'home'` for it, so a home-only board's request is byte-identical to what it was before multi-dashboard. An unknown name is a 400 server-side. A remote run
+   * is PR mode only (`mergeMode: 'pr'`), and `lockedFor` (`lib/dashboards.ts`) is what the sheet reads to enforce that before the request is made.
+   */
+  machine?: string;
 }
 
 /**
