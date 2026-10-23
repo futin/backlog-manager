@@ -10,9 +10,10 @@ import { remoteProject } from './remote-board.util';
 import { suggest } from './suggest.util';
 import { UsageService } from './usage.service';
 
-/** Every read the offers make of a REMOTE machine is a new outbound read, and every new outbound read gets 5 s (global constraints). */
+/** Every read the offers make of a REMOTE machine is a new outbound read, and every new outbound read gets 5 s (global constraints). A remote launch's own
+ *  gate reads (`AgentsService.dispatch`) go out under the same budget, for the same reason. */
 export const OFFERS_TIMEOUT_MS = 5_000;
-const REMOTE_BUDGET: StatusBudget = { healthMs: OFFERS_TIMEOUT_MS, managementMs: OFFERS_TIMEOUT_MS };
+export const REMOTE_BUDGET: StatusBudget = { healthMs: OFFERS_TIMEOUT_MS, managementMs: OFFERS_TIMEOUT_MS };
 
 type Judged = { reason: string | null };
 
@@ -90,7 +91,7 @@ export class OffersService {
   async remotePath(project: string, m: Machine): Promise<{ path: string } | { reason: string }> {
     if (m.home) return { path: project };
     const repo = this.repoOf(project);
-    if (repo === null) return { reason: `${m.label} runs tracker projects only — ${project} is files-backed` };
+    if (repo === null) return { reason: filesBackedReason(m.label, project) };
     return fromBoard(await remoteProject(m.bmUrl as string, repo), repo, m.label);
   }
 
@@ -123,6 +124,11 @@ export class OffersService {
     if (lookup.kind !== 'writer') return null;
     return isRepo(lookup.marker.repo) ? lookup.marker.repo : null;
   }
+}
+
+/** Why a remote cannot run `project` at all — its one home, shared by `remotePath` and the dispatch route's 400 (multi-dashboard task 5). */
+export function filesBackedReason(label: string, project: string): string {
+  return `${label} runs tracker projects only — ${project} is files-backed`;
 }
 
 /** Rungs 2–4 of the ladder, from a `remoteProject` answer: the first that applies, or the remote path when none does. */

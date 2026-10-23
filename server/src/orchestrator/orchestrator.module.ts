@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { OrchestratorController } from './orchestrator.controller';
 import { OrchestratorService } from './orchestrator.service';
 import { RemoteRunsService } from './remote-runs.service';
+import { RemoteStartingService } from './remote-starting.service';
 import { StartingRunsService } from './starting-runs.service';
 import { TrackerSyncController } from './tracker-sync.controller';
 import { WatchdogStateService } from './watchdog-state.service';
@@ -35,6 +36,9 @@ import { TrackerModule } from '../tracker/tracker.module';
  * SAME singleton, which is only true because this module exports it and
  * `AgentsModule` already imports this one.
  *
+ * `RemoteStartingService` (multi-dashboard task 5) is provided and exported on the same footing: `AgentsService.dispatch` marks and asks it, and the runs
+ * controller here lists (and so sweeps) it into the payload — one singleton reached from both modules, which `AgentsModule` importing this one gives for free.
+ *
  * `TrackerSyncController` (#17, `POST /api/trackers/sync`) is here rather than in `TrackerModule` because its off-under-a-live-run 409 needs the two
  * services above, and `TrackerModule` providing them would be a module cycle — see the controller's header. `SameOriginPostGuard` is provided for it on the
  * same footing `AgentsModule` provides it: a guard named in `@UseGuards` is resolved from the injector of the module whose controller names it.
@@ -45,7 +49,7 @@ import { TrackerModule } from '../tracker/tracker.module';
   // imports only `RegistryModule`.
   imports: [RegistryModule, TrackerModule],
   controllers: [OrchestratorController, TrackerSyncController],
-  providers: [OrchestratorService, RemoteRunsService, StartingRunsService, WatchdogStateService, SameOriginPostGuard],
-  exports: [OrchestratorService, StartingRunsService, WatchdogStateService]
+  providers: [OrchestratorService, RemoteRunsService, RemoteStartingService, StartingRunsService, WatchdogStateService, SameOriginPostGuard],
+  exports: [OrchestratorService, RemoteStartingService, StartingRunsService, WatchdogStateService]
 })
 export class OrchestratorModule {}

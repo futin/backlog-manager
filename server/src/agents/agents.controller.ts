@@ -90,6 +90,9 @@ export class AgentsController {
       // without one), or a `base` that is no local branch becomes a 400 — it has the item's action and project in hand, which this shape check does not.
       finish: body.finish,
       base: body.base,
+      // Unvalidated here as well: which machines exist is the settings file's answer, read per request by the service (`unknown machine "<x>"`). Absent is
+      // home, and the client omits it for home, so a home launch reaches the service exactly as it did before multi-dashboard.
+      machine: body.machine,
       remoteControl: body.remoteControl === true
     });
   }

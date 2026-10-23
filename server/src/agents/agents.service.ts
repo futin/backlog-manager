@@ -16,6 +16,8 @@ import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from
 // Re-exported so every importer from before multi-dashboard task 4 moved them into config.util.ts (to break a module cycle) is untouched.
 export { authHeaders, dashboardError, message } from './config.util';
 import { DashboardStatusService } from './dashboard-status.service';
+import { DashboardsService, type Machine } from './dashboards/dashboards.service';
+import { filesBackedReason, OffersService, REMOTE_BUDGET } from './dashboards/offers.service';
 import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
 import {
   clampMode,
@@ -40,6 +42,7 @@ import {
 import { composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
+import { RemoteStartingService } from '../orchestrator/remote-starting.service';
 import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentDispatchRequest,
@@ -295,7 +298,18 @@ export class AgentsService {
      * the same code without injecting this service (task 5 makes this service inject the offers, and the reverse edge would be a cycle Nest cannot
      * construct). Every call here still goes through it with home's config, so home's reads, budgets and cache behave exactly as before the move.
      */
-    private readonly dashboardStatus: DashboardStatusService
+    private readonly dashboardStatus: DashboardStatusService,
+    /**
+     * Multi-dashboard task 5 — which machines a launch may go to (`machine(id)`), whether the picked one is offered for the project right now, and the
+     * project's path on it. Neither service injects this one (both read dashboards through `DashboardStatusService`), so the edge opens no cycle.
+     */
+    private readonly dashboards: DashboardsService,
+    private readonly offers: OffersService,
+    /**
+     * "Starting on <machine>" between a remote launch and its first claim — provided and exported by `OrchestratorModule`, which this module already
+     * imports, so the runs controller there lists the same singleton this marks.
+     */
+    private readonly remoteStarting: RemoteStartingService
   ) {}
 
   /** Home's dashboard, as Settings and every launch gate read it. The body is `DashboardStatusService.statusOf`, which can read any machine's. */
@@ -379,6 +393,22 @@ export class AgentsService {
       throw new HttpException({ error: 'prompt is too long' }, 400);
     }
 
+    // Multi-dashboard task 5 — the machine, resolved ahead of every other rule because the finish below depends on it. Absent (the client omits it for home)
+    // and `home` in any case are this machine, which is the whole of the home-only promise: such a body walks exactly the path it walked before, gate for
+    // gate, to a byte-identical spawn. A remote is found by its name in the settings file as read for THIS request; anything else — a name edited away
+    // since the sheet opened, or a non-string the controller forwarded unvalidated — is a 400, never a quiet fallback to home, which would run the work
+    // on a machine the reader did not pick.
+    const m = req.machine === undefined || typeof req.machine === 'string' ? this.dashboards.machine(req.machine) : null;
+    if (m === null) throw new HttpException({ error: `unknown machine "${String(req.machine)}"` }, 400);
+
+    // Work sent to a remote machine always comes back as a PR (spec, Goals): a remote execute's finish IS `pr`, whatever the body says — and a body that
+    // names another finish is refused rather than overridden, because the sheet locks the picker to PR for a remote, so a body that disagrees came from
+    // somewhere that would be surprised by a push. Execute only: finish is not a thing a groom or a capture has, on any machine, and rules 1–2 below
+    // answer a body that gives one exactly as they always have.
+    if (!m.home && req.action === 'execute' && req.finish !== undefined && req.finish !== 'pr') {
+      throw new HttpException({ error: `finish must be pr on ${m.label}` }, 400);
+    }
+
     // The execute finish — the sheet's picker, validated here and appended as `finishClause` below. `req.finish` and `req.base` are typed, but the
     // controller forwards them unvalidated (as `model` is, and `pickFrom` checks that), so every rule below runs on what the wire actually carried. A body
     // from before this field sends neither and is `in-place`: no 400, which is what keeps an open tab working across the deploy.
@@ -392,7 +422,9 @@ export class AgentsService {
     if (req.finish !== undefined && req.action !== 'execute') {
       throw new HttpException({ error: 'finish applies only to execute' }, 400);
     }
-    const finish = req.finish ?? 'in-place';
+    // Rules 3–4 run on the DERIVED finish, so a remote execute with no `finish` is held to `pr`'s own rule — a base is required — rather than to a
+    // second copy of it.
+    const finish = !m.home && req.action === 'execute' ? 'pr' : (req.finish ?? 'in-place');
     if (req.base !== undefined && finish !== 'pr') {
       throw new HttpException({ error: 'base applies only to finish pr' }, 400);
     }
@@ -430,8 +462,37 @@ export class AgentsService {
       throw new HttpException({ error: `this item's next step is ${action}, not ${req.action}` }, 409);
     }
 
-    const status = await this.status();
-    const blocked = dispatchBlock(item, status);
+    // A remote's two 400s, here because both need the item: its project's source, and — on a remote only — the machine's own model/effort lists. A files
+    // project cannot run remotely at all (the remote session writes its items through the remote's own backlog-manager, which only a tracker project
+    // has). The lists are a 400 where home's `pickFrom` drops, because the remote dashboard would drop an unknown name just as silently and the session
+    // would then run on that account's default with no error anywhere (spec, "Models and efforts are per machine"); home keeps its drop untouched.
+    if (!m.home) {
+      if (item.source !== 'github') throw new HttpException({ error: filesBackedReason(m.label, item.projectPath) }, 400);
+      const choice = machineChoiceBlock(m, req.model, req.effort);
+      if (choice !== null) throw new HttpException({ error: choice }, 400);
+    }
+
+    // Offered NOW, not when the picker drew: the offers are minutes old by the time Start is clicked, and a remote that has since gone down, lost the
+    // repo or had its sync turned off is refused with the same reason the picker would now show. Then the project's path ON that machine, asked again
+    // rather than lifted from the offer, so the gate below and the spawn after it judge the path that is true at this moment. Uncoded 409s — states a
+    // reader can go and change, with the 502 left to the gate below for the one case with an upstream to blame.
+    let remotePath: string | undefined;
+    if (!m.home) {
+      const notOffered = (reason: string): HttpException => new HttpException({ error: `${m.label} is not offered for ${item.projectPath}: ${reason}` }, 409);
+      const offer = (await this.offers.offers(item.projectPath)).machines.find((o) => o.machine === m.id);
+      if (offer === undefined) throw notOffered('no longer configured');
+      if (offer.reason !== null) throw notOffered(offer.reason);
+      const there = await this.offers.remotePath(item.projectPath, m);
+      if ('reason' in there) throw notOffered(there.reason);
+      remotePath = there.path;
+    }
+
+    // Home: `dispatchBlock` against home's status, exactly as before. A remote: the same gate (`projectDispatchGate`, which `dispatchBlock` is a one-line
+    // delegate to) against THAT machine's status and THAT machine's path — never `dispatchBlock(item, …)`, whose `item.projectPath` is this machine's
+    // path, which a remote dashboard's project list never holds. Its status is read under the 5 s every remote read gets, and its ceiling clamps the
+    // spawn below, so a stricter remote is never widened by home's.
+    const status = m.home ? await this.status() : await this.dashboardStatus.statusOf(m.cfg, REMOTE_BUDGET);
+    const blocked = m.home ? dispatchBlock(item, status) : remoteGateBlock(status, remotePath as string);
     if (blocked !== null) {
       // 502 only when the feature is on and we genuinely failed to reach the
       // dashboard — the one case with an upstream to blame. BM_AGENTS off is
@@ -494,8 +555,15 @@ export class AgentsService {
       if (refusal !== null) throw new HttpException({ error: refusal }, 409);
     }
 
+    // A remote launch of this item that has not claimed it yet — on ANY machine, home included. Until that session's first claim lands nothing on the
+    // tracker says the item is taken, so every claim check above waves a second launch through onto the same issue; this is the one record that it is
+    // not free. Uncoded 409, the claim refusals' status. In a home-only setup nothing ever marks it, so home's path is unchanged.
+    const startingOn = this.remoteStarting.itemBlock(item.projectPath, item.id, Date.now());
+    if (startingOn !== null) throw new HttpException({ error: `${item.id} is already starting on ${startingOn.machine}` }, 409);
+
     // Proved last of the checks, and always asked of git — `main` included (`proveBaseBranch`, which says why `resolveBase`'s `'main'` carve-out is wrong
-    // here). `item.projectPath` is the registry's own path for the project, resolved from the item, never from the body.
+    // here). `item.projectPath` is the registry's own path for the project, resolved from the item, never from the body — and it is THIS machine's clone
+    // for a remote launch too (the plan's "Base proof" decision): the server never fetches, and the PR the remote opens targets the shared repo's branch.
     const base = finish === 'pr' ? await proveBaseBranch(req.base, item.projectPath) : '';
 
     const spawned = await this.spawnInProject(item.projectPath, {
@@ -507,12 +575,18 @@ export class AgentsService {
       maxPermission: status.spawnMaxPermission,
       model: req.model,
       effort: req.effort,
-      remoteControl: req.remoteControl
+      remoteControl: req.remoteControl,
+      machine: m,
+      remotePath
     });
     // #225 — remembered, because this id is the one the spawned session claims its issue under (`claude -p --session-id`), and without it nothing on
     // the board can later tell "the board started the session holding this claim" from "somebody at a terminal did". Only after a spawn that came
     // back with an id: a refused spawn started nothing to remember.
-    this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, at: Date.now() });
+    // `machine` is which dashboard holds the session — `home` for this machine's — so Stop & release can be sent where the session actually runs.
+    this.dispatches.record(spawned.sessionId, { projectPath: item.projectPath, itemPath: item.path, action, machine: m.id, at: Date.now() });
+    // Marked only after the spawn came back with an id, as `StartingRunsService` is: a refused spawn started nothing to wait for. Remote only — a home
+    // session is this machine's, and its claim is visible to the gates above the moment it lands.
+    if (!m.home) this.remoteStarting.markItem(item.projectPath, item.id, m, Date.now());
     return spawned;
   }
 
@@ -524,13 +598,33 @@ export class AgentsService {
    *
    * `maxPermission` is the caller's `status().spawnMaxPermission`, passed in rather than re-read: each caller has just read the status for its own gate,
    * and a second read here would be a second `/api/health` call per launch, and a ceiling that could differ from the one the gate was judged against.
+   *
+   * Multi-dashboard task 5: `machine` + `remotePath` send the launch to a REMOTE dashboard — its `cfg` (url and token), its dirName for the project's path
+   * on THAT machine, and its own model/effort lists. Absent, or home, is today's path line for line: home's config read the way it always was, this
+   * project's own path, `pickFrom` over the mirrored lists — which is what keeps a home spawn byte-identical (Review Focus 1). The body's keys are built in
+   * one literal for both, in the same order, so the two can never drift into differently shaped requests. The caller has already 400'd a remote model or
+   * effort outside the machine's lists, so `pickFrom` against those lists only ever keeps a pick or fills the default here.
    */
   async spawnInProject(
     projectPath: string,
-    opts: { prompt: string; name: string; permissionMode: string; maxPermission: PermissionMode | null; model?: unknown; effort?: unknown; remoteControl: boolean }
+    opts: {
+      prompt: string;
+      name: string;
+      permissionMode: string;
+      maxPermission: PermissionMode | null;
+      model?: unknown;
+      effort?: unknown;
+      remoteControl: boolean;
+      machine?: Machine;
+      remotePath?: string;
+    }
   ): Promise<AgentDispatchResult> {
-    const cfg = readAgentsConfig();
-    const dirName = (await this.dashboardStatus.projectMap(cfg)).get(projectPath);
+    const remote = opts.machine !== undefined && !opts.machine.home ? opts.machine : null;
+    const cfg = remote === null ? readAgentsConfig() : remote.cfg;
+    const map = remote === null ? await this.dashboardStatus.projectMap(cfg) : await this.dashboardStatus.projectMap(cfg, REMOTE_BUDGET.managementMs);
+    // A remote with no path is refused below like an unseen one — never sent this machine's path, which names nothing on that disk.
+    const path = remote === null ? projectPath : opts.remotePath;
+    const dirName = path === undefined ? undefined : map.get(path);
     if (dirName === undefined) {
       // The caller's gate already covers this from the same map, so reaching
       // here means the cache expired between the two reads. Refuse rather than
@@ -550,8 +644,8 @@ export class AgentsService {
       // `--effort`. Validated here rather than trusted because the sheet is
       // not the only possible caller; the dashboard would drop a bad value
       // too, but that is its check, not ours.
-      model: pickFrom(opts.model, MODELS) ?? DEFAULT_MODEL,
-      effort: pickFrom(opts.effort, EFFORTS),
+      model: remote === null ? (pickFrom(opts.model, MODELS) ?? DEFAULT_MODEL) : (pickFrom(opts.model, remote.models) ?? remoteDefaultModel(remote)),
+      effort: pickFrom(opts.effort, remote === null ? EFFORTS : remote.efforts),
       // Strictly `=== true`, matching the dashboard's own parse rule for this
       // field: anything else means off.
       remoteControl: opts.remoteControl === true
@@ -2006,6 +2100,36 @@ export async function staleClaimProbe(holder: { session: string; host?: string }
   return status === 'working' || status === 'question'
     ? `session ${holder.session} is ${status} on this machine — its heartbeat is late, not stopped; stop it before taking its claim`
     : null;
+}
+
+/**
+ * A remote launch's model/effort refusal (multi-dashboard task 5), `null` to proceed. On a REMOTE machine any value outside that machine's list is a 400,
+ * unknown names included: the remote dashboard drops a name outside its own fixed list without a word, and a name inside that list but outside what the
+ * account can run would start a session that fails — either way nobody would hear about it (spec, "Models and efforts are per machine"). `undefined` and
+ * `''` are "no pick" — the two spellings `pickFrom` documents as the sheet's Default — and are not refused. Never called for home, whose `pickFrom` drop
+ * is unchanged. Exported for `orchestrate`'s remote launch to share one wording with this one.
+ */
+export function machineChoiceBlock(m: Machine, model: unknown, effort: unknown): string | null {
+  const outside = (value: unknown, list: readonly string[]): boolean =>
+    value !== undefined && value !== '' && !(typeof value === 'string' && list.includes(value));
+  if (outside(model, m.models)) return `model "${String(model)}" is not in ${m.label}'s list (${m.models.join(', ')})`;
+  if (outside(effort, m.efforts)) return `effort "${String(effort)}" is not in ${m.label}'s list (${m.efforts.join(', ')})`;
+  return null;
+}
+
+/**
+ * The model a remote launch with no pick runs on: `DEFAULT_MODEL`, as home's does, when the machine lists it — otherwise the machine's first listed model,
+ * because sending `DEFAULT_MODEL` to an account whose list leaves it out is exactly the silent failure the list exists to prevent. Never `undefined`: home
+ * never sends a spawn without a model either (`DEFAULT_MODEL`'s own comment), and a remote must not fall to the CLI's own default instead.
+ */
+function remoteDefaultModel(m: Machine): string {
+  return m.models.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : (m.models[0] ?? DEFAULT_MODEL);
+}
+
+/** `dispatchBlock`'s flattening of the gate, for a remote: the same `projectDispatchGate`, asked about the project's path on THAT machine. */
+function remoteGateBlock(status: AgentsStatus, remotePath: string): string | null {
+  const gate = projectDispatchGate(status, remotePath);
+  return gate.control === 'enabled' ? null : gate.reason;
 }
 
 /**
