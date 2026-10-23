@@ -13,7 +13,7 @@ const INTERVAL_OPTIONS = (Object.keys(SYNC_INTERVALS) as SyncInterval[]).map((va
 
 /**
  * The Trackers card (.claude/DESIGN.md §8.6's settings card, applied; spec
- * §5.6) — Shared Settings, `scope="this machine"`, under Dashboards.
+ * §5.6) — Shared Settings, `scope="this machine"`.
  *
  * **Connecting is read-only here, and that is a design decision rather than a
  * phase-2 limit.** There is no connections file: a project is connected by

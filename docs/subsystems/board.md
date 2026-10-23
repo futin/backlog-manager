@@ -296,10 +296,10 @@ so a page that could not reach the server never says the breaker is quiet.
 
 ### Settings
 
-THREE pages, picked from the rail's tree and from nothing else — `settingsScope` (`local | shared | dashboards`) is the setting, `local` the default. **The page is
-the scope**: Local is everything in this browser's `localStorage`, Shared and Dashboards are what the API reads off the host. The band states which in a `Pill` at
-`neutral` (`this browser` / `this machine`, the latter on both host pages) and its subtitle is the page's own one-line summary; there is no in-page switch at any
-width.
+THREE pages, picked from the rail's tree and from nothing else — `settingsScope` (`local | shared | dashboards`) is the setting, `local` the default. **The page
+is the scope**: Local is everything in this browser's `localStorage`, Shared and Dashboards are what the API reads off the host. The band states which in a
+`Pill` at `neutral` (`this browser` / `this machine`, the latter on both host pages) and its subtitle is the page's own one-line summary; there is no in-page
+switch at any width.
 
 | Page           | Column 1                            | Column 2                |
 | -------------- | ----------------------------------- | ----------------------- |
@@ -312,8 +312,8 @@ Each card on Local and Shared is still a title plus a scope (`this device`, `thi
 changing this affects anybody but the person changing it. Both draw the same two hand-placed columns, so a card does not move to the other side of the page when
 its neighbour grows a row; one column under 1100 px. The balances differ — Local is two short cards against two taller ones; Shared is the watchdog's long card,
 with the `Backlog tick` card under it (both machine-wide controls), against `Trackers`, the one host report. Shared once held `Dashboards` in that column too
-(task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and `Dashboards` absorbed `Claude Agents`) until the machine list
-outgrew a card and became its own page; Shared draws no dispatch line now.
+(task-45 added `Trackers` under `Claude Agents`, multi-dashboard put `Dashboards` between them, and `Dashboards` absorbed `Claude Agents`) until the machine
+list outgrew a card and became its own page; Shared draws no dispatch line now.
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
 model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
@@ -325,19 +325,19 @@ what the card offers instead of a button is the `backlog.mjs connect github <own
 **Dashboards** is the one page that writes the machine list (`DashboardsPage`, drawn to `.claude/DESIGN.md` §8.6): the Suggest card (`SuggestCard` — the three
 strategies as a radio group, the threshold beneath) on top, then `DashboardsList` (360 px) beside `DashboardDetail`, and a footer, folding to one column at
 1100 px. The list is the machines in prefer order with home first until moved; each row is its place, a health dot, its name, its account and two usage meters.
-The detail is the selected machine's URLs, the `BM_MACHINE_NAME` a claim's `host` must equal, the models and efforts it may run and one token fact. Home's detail
-also carries the dispatch status line (`DispatchStatus.tsx`, read by `useAgents`, so it draws even while the list has not loaded) and the `Setting it up` steps
-while it is unhealthy. **Two reads, and neither waits on the other.** `useDashboards` reads the file once on mount (no poll, no focus trigger: the file changes
-only when a person edits it) and every write — `POST /api/dashboards/entries`, `/entries/delete`, `/home`, `/settings` — answers the whole fresh view, which the
-page draws rather than an optimistic copy. `useMachines` reads `GET /api/dashboards/machines` — health and usage per machine, up to two outbound budgets on the
-server — on mount, on focus, every minute through `useRefreshing`, and at once after each write; the dots stay quiet and the meters absent (`checking…`) until it
-answers, so a slow or dead remote can never hold the config. Its answer is matched to the list by machine id and its own order ignored; a failed read keeps the
-previous answer. Selection is page state, never stored: the picked id is drawn while it is listed and the first machine otherwise.
+The detail is the selected machine's URLs, the `BM_MACHINE_NAME` a claim's `host` must equal, the models and efforts it may run and one token fact. Home's
+detail also carries the dispatch status line (`DispatchStatus.tsx`, read by `useAgents`, so it draws even while the list has not loaded) and the `Setting it up`
+steps while it is unhealthy. **Two reads, and neither waits on the other.** `useDashboards` reads the file once on mount (no poll, no focus trigger: the file
+changes only when a person edits it) and every write — `POST /api/dashboards/entries`, `/entries/delete`, `/home`, `/settings` — answers the whole fresh view,
+which the page draws rather than an optimistic copy. `useMachines` reads `GET /api/dashboards/machines` — health and usage per machine, up to two outbound
+budgets on the server — on mount, on focus, every minute through `useRefreshing`, and at once after each write; the dots stay quiet and the meters absent
+(`checking…`) until it answers, so a slow or dead remote can never hold the config. Its answer is matched to the list by machine id and its own order ignored; a
+failed read keeps the previous answer. Selection is page state, never stored: the picked id is drawn while it is listed and the first machine otherwise.
 **A token is never on the page in any form**: the payload carries `tokenSet` and the env var's name, and the fact says `✓ set` or `not set — needed only if that
 dashboard does not trust this machine` (a tailnet-trusting dashboard takes a call with no token, so unset is the common case, not a fault); there is no field to
-type one into, because the env var is the only place the server reads it from. Add and Edit open `DashboardSheet` (a `FormSheet`, one at a time) rather than a form
-in place; Remove stays an inline `Confirm`. A same-name Add is held at the sheet (the server treats it as an update), every box ticked is sent as no list, and an
-unreadable `dashboards.json` answers 409 on every write with the file left byte-identical — the page then disables every control and says so in a banner
+type one into, because the env var is the only place the server reads it from. Add and Edit open `DashboardSheet` (a `FormSheet`, one at a time) rather than a
+form in place; Remove stays an inline `Confirm`. A same-name Add is held at the sheet (the server treats it as an update), every box ticked is sent as no list,
+and an unreadable `dashboards.json` answers 409 on every write with the file left byte-identical — the page then disables every control and says so in a banner
 ([invariants.md](invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)). The RunOn group's Settings
 link and the deep link `/?section=settings&settings=dashboards` land on this page: `settings=local|shared|dashboards` is read only beside `section=settings`.
 
@@ -481,7 +481,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   the 15 s poll only while `live` — the Runs › Ticks page passes `true`, Settings' card `false`. A save or a reset redraws from the POST's own answer, never a
   follow-up GET, and a refused write lands in `saveError`, beside the failed-GET `error`, so a refusal never blanks `data`.
 - `hooks/useMachines.ts` (`MACHINES_POLL_MS`, 60 s) — `GET /api/dashboards/machines`, health and usage per machine, for Settings › Dashboards only: `{ machines,
-  reload }`, entered through `useRefreshing` with `armed` constant `true` (the page's mount is the arming), and a failed read keeps the previous answer silently.
+  reload }`, entered through `useRefreshing` with `armed` constant `true` (the page's mount is the arming), and a failed read keeps the previous answer
+  silently.
 - `hooks/useDashboards.ts`, `hooks/useOffers.ts`, `hooks/useRunOn.ts` — the configured machines (one read on mount, `refresh` for a write's caller), one
   project's offers (asked when a sheet passes a project, dropped by sequence number and by project tag so no frame shows the previous project's cards), and the
   sheets' shared pick-lock-narrow state over both. `lib/dashboards.ts` is the one home of the wire calls, `machineLabelByHost` / `machineLabelById`,

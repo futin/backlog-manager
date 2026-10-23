@@ -6,7 +6,7 @@
  * half-typed number never clamps mid-keystroke, and re-seeds from `value` via
  * the `key` when the value changes from somewhere else (a Reset, a server
  * refusal handing back the stored figure). `disabled` is for a card that can
- * show its figure but cannot save one (the Dashboards card on an unreadable
+ * show its figure but cannot save one (the Dashboards page on an unreadable
  * file); absent, the markup is what it always was.
  */
 export function NumberField({

@@ -21,7 +21,7 @@ import { Dot } from '../ui/Dot';
 
 /**
  * One line per gate, in the order dispatchBlock (shared/agent.ts) checks
- * them, so the first red dot named here is also the thing worth fixing
+ * them, so the first gap named here is also the thing worth fixing
  * first. Read-only: every one of these gates lives on a host — in this
  * API's env or in the dashboard's — and a switch here that wrote to a
  * browser's localStorage would just be a lie about where the setting is.

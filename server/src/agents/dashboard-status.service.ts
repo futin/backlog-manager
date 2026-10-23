@@ -91,7 +91,6 @@ export class DashboardStatusService {
     return this.judge(cfg, budget, true);
   }
 
-  /** `statusOf`'s body as it stood, with the one switch `remoteStatusOf` needs: what a failed project-map read means. */
   /**
    * One dashboard's `/api/health` and NOTHING else — the Dashboards page's per-machine read (`MachinesService`). `statusOf` and `remoteStatusOf` also read the
    * project map (`/api/configs`, up to 15 s), which a Settings page has no project to ask about and which would make a remote's health depend on one; this is
@@ -120,6 +119,7 @@ export class DashboardStatusService {
     };
   }
 
+  /** `statusOf`'s body as it stood, with the one switch `remoteStatusOf` needs: what a failed project-map read means. */
   private async judge(cfg: AgentsConfig, budget: StatusBudget, mapFailureIsUnreachable: boolean): Promise<AgentsStatus> {
     // The health half is `healthOf`; what this adds is the project map. A disabled or unreachable answer is returned as it came, with the empty list the
     // old `off` answer always carried.

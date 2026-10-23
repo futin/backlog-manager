@@ -7,7 +7,7 @@ import { Chip } from '../ui/Chip';
 import { FormSheet } from '../ui/FormSheet';
 
 /**
- * DashboardSheet — the Dashboards card's add and edit forms (`.claude/DESIGN.md` §8.7 "Sheet", `FormSheet`'s fifth composer; the fields are §8.6's 36 px
+ * DashboardSheet — the Dashboards page's add and edit forms (`.claude/DESIGN.md` §8.7 "Sheet", `FormSheet`'s fifth composer; the fields are §8.6's 36 px
  * family). One sheet, three shapes: `Add dashboard`, a remote's `Edit`, and Home's `Edit`. They used to open in place, under the row they edited, and a form
  * of seven fields inside a list of machines read as part of the list — it was hard to see where the form ended, which fields were the entry's and which were
  * the next row's lines. A sheet puts the whole entry in one place with the list out of the way behind the scrim, and its Save and Cancel pinned in a footer

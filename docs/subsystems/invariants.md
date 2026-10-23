@@ -3158,8 +3158,9 @@ than no test at all.
 
 The machine list started as a Shared card, grew a per-machine detail (URLs, the claim `host`, models, efforts, a token fact), then a health dot and two usage
 meters per machine, and a card holding a list beside a detail beside a Suggest control stopped being a card. It is a page of its own, so the pair the first
-split argued from — local against host — is unchanged: Dashboards writes `dashboards.json` on the API host, so its pill reads `this machine` and nothing on it is
-per device. Not a sub-section of Shared, because the rail's tree is the only switch and a second in-page level would be a second wording free to disagree with it.
+split argued from — local against host — is unchanged: Dashboards writes `dashboards.json` on the API host, so its pill reads `this machine` and nothing on it
+is per device. Not a sub-section of Shared, because the rail's tree is the only switch and a second in-page level would be a second wording free to disagree
+with it.
 
 What the page reads is two requests that never wait on each other. `GET /api/dashboards` is the file (cheap, no outbound call) and draws the list and the detail
 at once; `GET /api/dashboards/machines` is a health probe of every remote plus each machine's usage, up to two outbound budgets, and only colours the dots and

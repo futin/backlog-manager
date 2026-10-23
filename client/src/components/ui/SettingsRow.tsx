@@ -31,7 +31,7 @@ import { Sheet, SheetHead } from './Sheet';
 /*
   `children` is optional since task-42, and the empty `.set-control` goes with
   it rather than being rendered hollow. The dispatch report (once the
-  `Claude Agents` card, now the Dashboards card's `Dispatch` row) is a REPORT —
+  `Claude Agents` card, now the Dashboards page's `Dispatch` row) is a REPORT —
   it states where the host's dispatch config stands and has nothing to set — and a row is the right shape for it: the label and hint
   are exactly what such a row needs. An empty control div beside it would
   reserve the right-hand slot's width for nothing, pulling the hint in against

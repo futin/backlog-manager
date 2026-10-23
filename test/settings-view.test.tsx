@@ -223,7 +223,7 @@ describe('SettingsView', () => {
    * pill — which is precisely the shape a half-done version of this change
    * takes, and precisely the shape that would make the pill a lie.
    */
-  describe('the two pages (task-42)', () => {
+  describe('the three pages (task-42)', () => {
     it('renders only the per-device cards on Local', () => {
       renderView();
 

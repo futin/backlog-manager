@@ -31,7 +31,7 @@ import { SuggestCard } from './SuggestCard';
  * three suggestion strategies as a radio group and the threshold (`SuggestCard`).
  *
  * **Home's status line is this machine's dispatch report** (`DispatchStatus.tsx`) — the status that was the `Claude Agents` card before it was folded into
- * the Dashboards card, since that card reported the very dashboard this page lists as Home — and the setup steps open under it while it is unhealthy. It is
+ * the Dashboards card (this page's predecessor), since that card reported the very dashboard this page lists as Home — and the setup steps open under it while it is unhealthy. It is
  * read by `useAgents`, not from the dashboards view, so it is drawn even while `GET /api/dashboards` has not answered or has failed (the null-view card
  * below). Home's dot reads the same status through `dispatchDotTone`, so a green dot can never sit over open setup steps.
  *
