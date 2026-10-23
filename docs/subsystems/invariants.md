@@ -1947,6 +1947,43 @@ NOT freshness-gated: `runChipReading` (`RunChip.tsx`) counts a stale `running` r
 as crashed, never as nothing" is that control's whole job. So the rule to carry forward is per-question rather than per-surface — **a claim about one ITEM is
 freshness-gated; a count of what the RUNS are doing is not** — and a future session widening one must not read this section as licence to widen the other.
 
+## `dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced
+
+**The machine list** (spec: [2026-10-22-multi-dashboard-design.md](../superpowers/specs/2026-10-22-multi-dashboard-design.md)). One board can start work on this
+machine ("home", id `home`, the dashboard `BM_AGENTS_URL` names) or on another machine's dashboard (a "remote", id = its `name`).
+`~/.backlog-manager/settings/dashboards.json` (`$BM_DASHBOARDS_FILE` to override, read per call and cached nowhere) lists the remotes and carries the person's
+own presentation: `{ home?, dashboards: [{ name, url, bmUrl, host, account?, models?, efforts? }], order?, strategy?, threshold? }`. It is the sixth file the
+server
+owns under `settings/` and it keeps the relationship `jira.json` and `tick.json` have with their reader, with one difference that matters: NO skill and no tool
+reads it. The server writes it (`writeDashboardsFile`, the only write path, behind `POST /api/dashboards/entries`, `/entries/delete`, `/home` and `/settings`)
+and
+the server reads it (`readDashboardsFile`) for `GET /api/dashboards`, the offers, the launch routes and the stop route — so what the file decides is where THIS
+server will send a prompt that starts a Claude Code session, and that is why the four POSTs are guarded like every other agents POST and why a name is held to
+`^[A-Za-z][A-Za-z0-9]{0,23}$`, unique case-insensitively, never `home`, at most eight.
+
+**A file that cannot be read is never replaced, and a file that does not exist is the product as it was.** A MISSING file (ENOENT) is `source: "default"`: home
+alone, no remote, and every surface the feature adds stays out of sight — `GET /api/dashboards/offers` answers home without fetching any usage, the client draws
+no machine picker, and a request without `machine` is the launch it has always been, byte for byte. That is the promise the whole feature is built around: a
+person who never creates the file never sees it. An UNREADABLE file — an I/O error that is not ENOENT, text that is not JSON, or JSON that is not a plain object
+(`tick.json`'s strictness, not `jira.json`'s: a hand-edit in flight is not "no machines") — is `source: "unreadable"`: the reader answers home only and ignores
+every remote it might have held, and the four POSTs answer `409` naming the file (`DashboardsFileUnreadable`, thrown before any write) and leave it
+byte-identical. The stop is the point: rewriting from defaults would turn a stray comma into "no remotes" with nothing on disk left to recover the entries from,
+and falling back to the last good read would send a launch somewhere the file on disk no longer says. A readable file is read forgivingly entry by entry — an
+invalid entry, a case-insensitive duplicate (the first wins) and anything past the eighth is dropped, never an error — because a remote that cannot be
+launched to is a card the person can see and fix, where a thrown error would blank the whole list.
+
+**Tokens are env-only, and no response carries one.** A remote's token is `BM_AGENTS_TOKEN_<NAME uppercased>`, home's is `BM_AGENTS_TOKEN`, and neither is in
+the file, the view or any error: `DashboardsView` carries `tokenSet` (a boolean) and `tokenVar` (the variable's NAME, so the card can say which one to set), and
+an offer is built field by field from the machine so a machine's config, which holds the token, is never spread into it. This is the GitHub and Jira tokens'
+rule applied to a third secret; the file is plain text a person edits and may paste into a bug report, and the variable is what a process manager already
+keeps out of one.
+
+**The write is atomic and the file's own.** A temp file in the same directory, then `rename`, the `tick-breaker.util.ts` shape — a reader concurrently sees the
+old complete file or the new complete one — with the temp file removed when the write fails. Each POST is a read-modify-write of one field family (an entry, the
+home block, the strategy), so editing one machine never forgets another; two concurrent POSTs are the later one wins, the precedent `jira.json` set: one person,
+one board. The file never holds anything a machine owns: a remote's `host` is the value that machine's claims carry (its `BM_MACHINE_NAME`), recorded here only
+so a stop after a restart can route by it.
+
 ## Every agents POST is guarded by content-type and origin
 
 (`server/src/agents/origin.guard.ts`) — this is the one place in the app where loopback is NOT the access control. Nest registers `express.urlencoded` on every
@@ -2455,6 +2492,9 @@ five-status line still counts a crashed run under `running`, because that is a t
 
 `useOrchestratorRuns` polls while any run is `running`, fresh or not. Widened from "any run is fresh" — a crashed run's attempt counter, error text and the
 moment it goes fresh again would otherwise wait for a window focus, and the crashed row would read as a screenshot instead of something live.
+It also polls while the payload's `remoteStarting` is non-empty (multi-dashboard): a `Starting on <machine>` row is cleared by the SERVER's rules, with no run
+file of this machine's to tell the client, so without the poll the row would sit until something else woke it. It arms the same single coalesced request, never
+a second one in flight.
 
 #### Which object describes a run right now — the three tiers behind `pickAuthority`
 

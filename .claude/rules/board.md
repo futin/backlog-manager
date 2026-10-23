@@ -91,7 +91,8 @@ paths: ["client/src/**"]
   `last reported <id> at <stage>` or `all items at rest`, `watchdogClause`) travel in one element or the row says less than the strip it replaced. `crashed` is
   **not** a sixth `RunStatus`. Why: [invariants.md](docs/subsystems/invariants.md#a-crashed-run-renders-as-crashed-never-as-nothing)
 - **`useOrchestratorRuns` polls while any run is `running`, fresh or not** — and, since task-48, while any REMOTE run is `running`, which is the only way this
-  machine sees another's progress. Why:
+  machine sees another's progress, and, since multi-dashboard, while `remoteStarting` is non-empty, so a `Starting on <machine>` row disappears when its entry
+  clears and not when something else wakes the poll — through the same single coalesced request, never a second one in flight. Why:
   [invariants.md](docs/subsystems/invariants.md#a-crashed-run-renders-as-crashed-never-as-nothing)
 - **The board offers a hand resume exactly when the watchdog will not spawn one — absent a stop request, which suppresses both sides — and that is one
   function, not two agreeing expressions.** `watchdogStoodDown`

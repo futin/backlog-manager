@@ -102,3 +102,28 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
 - **Every agents POST is guarded by content-type and origin** (`server/src/agents/origin.guard.ts`) — the one place loopback is NOT the access control.
   `test/agents-origin-guard.test.ts`'s route list is where the guarded set lives, never a count in prose. Absent `Origin` stays allowed; the guard compares host
   and port, not scheme. Why: [invariants.md](docs/subsystems/invariants.md#every-agents-post-is-guarded-by-content-type-and-origin)
+- **`~/.backlog-manager/settings/dashboards.json` has exactly one writer, the server, and a file that cannot be read is never replaced.** The file is
+  `$BM_DASHBOARDS_FILE` (read per call), else `~/.backlog-manager/settings/dashboards.json`, shaped `{ home?, dashboards: [{ name, url, bmUrl, host, account?,
+  models?, efforts? }], order?, strategy?, threshold? }`; `writeDashboardsFile` in `server/src/agents/dashboards/dashboards-file.util.ts` is the only thing that
+  writes it (a temp file in the SAME directory, then `rename`, the temp removed on a failed write) behind `POST /api/dashboards/entries`, `/entries/delete`,
+  `/home` and `/settings`, each a read-modify-write of its own field family and each behind `SameOriginPostGuard`. A machine id is `home` or a remote's `name`
+  (`^[A-Za-z][A-Za-z0-9]{0,23}$`, unique case-insensitively, never `home`, at most `MAX_REMOTES` = 8). Reading has three outcomes: `file`, `default` (ENOENT —
+  home only, no remote, no picker anywhere, and `GET /api/dashboards/offers` fetches no usage) and `unreadable` (an I/O error that is not ENOENT, text that is
+  not JSON, or JSON that is not a plain object — `tick.json`'s strictness): every remote is then ignored, all four POSTs throw `DashboardsFileUnreadable` BEFORE
+  any write and answer `409` naming the file, leaving it byte-identical. A readable file drops an invalid entry, a case-insensitive duplicate (the first wins)
+  and anything past the eighth, never an error. Tokens are env-only — `BM_AGENTS_TOKEN_<NAME uppercased>` for a remote, `BM_AGENTS_TOKEN` for home — and appear
+  in no file, view or error: `DashboardsView` carries `tokenSet` and `tokenVar` (the variable's name), and `MachineOffer` is built field by field so a machine's
+  config is never spread into it. **A request without `machine`, or with `machine: "home"`, is today's home launch, byte for byte.** A remote launch (`dispatch`
+  and `orchestrate` alike; `DashboardsService.machines()` resolves the id, an id it does not know is a `400`) is accepted for a GitHub tracker project only,
+  holds finish and merge mode to `pr` (absent is `pr`; any other value is a `400` — `finish must be pr on <label>`, `merge mode must be pr on <label>` — never
+  overridden), takes `model`/`effort` only from that machine's `models`/`efforts` (outside the list is a `400`; no model sent means `DEFAULT_MODEL` if listed,
+  else the first listed), re-judges the offer at launch time rather than trusting the picker's answer, and spawns at the path `remotePath` read from that
+  machine's own board. The `409`s a remote launch or stop answers: `<id> is already starting on <label>`, `<project> is already starting on <label>`, `a run of
+  <repo> is live on <label>`, `<id> was dispatched to <machine>, which is no longer configured`, and `<label> is not offered for <project>: <reason>`. A remote
+  run never blocks a local one; a remote live run blocks only a second REMOTE orchestrate to that machine. `RemoteStartingService` is memory only, rides in the
+  runs payload's `remoteStarting` and NEVER in `starting` (bug-57), clears on the host's first claim, on a remote run of that project on that host at or after
+  `requestedAt`, or past `RUN_STALE_MS`, and is swept when the payload is read. Stop and release route by a ladder: a dispatch record names its machine; no
+  record plus a claim `host` equal to a configured remote's `host` stops there, then releases; otherwise today's path. Every NEW outbound read of a remote
+  (offers, usage, board, status) is held to 5 s (`OFFERS_TIMEOUT_MS`, `USAGE_TIMEOUT_MS`, `BOARD_TIMEOUT_MS`); home keeps its 4 s health and 15 s management
+  budgets, and spawn and stop keep 10 s. `agents/dashboards/` is part of the `agents/` outbound module, not a fourth one. Why:
+  [invariants.md](docs/subsystems/invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)

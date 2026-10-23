@@ -3,9 +3,9 @@
 Nest, one process, every route under `/api`. It owns nine things: reading the registry, listing each registered project's items through whichever source owns
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
-by default — asking another local process to start a Claude Code session. It writes no item file and no run file; the only bytes it owns are five files under
-`~/.backlog-manager/settings/` — the watchdog config, the per-project control file, `tracker-sync.json`, since Jira phase 2 `jira.json` and, for the tick
-breaker, `tick.json`. Its writes to
+by default — asking another local process to start a Claude Code session, which since multi-dashboard may be a process on another machine. It writes no item
+file and no run file; the only bytes it owns are six files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
+`tracker-sync.json`, since Jira phase 2 `jira.json`, for the tick breaker `tick.json` and, for the machine list, `dashboards.json`. Its writes to
 Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
@@ -180,14 +180,19 @@ Read-only view of the registry file, re-read on every request so a capture made 
 
 ### `agents/`
 
-One of the three modules that call outbound, and every POST in it is guarded by content-type and origin:
+One of the three modules that call outbound, and every POST in it is guarded by content-type and origin. Since multi-dashboard its `dashboards/` folder widens
+WHERE it calls — not how many modules do: home's dashboard (`BM_AGENTS_URL`) as ever, plus any remote dashboard and any remote board that
+`~/.backlog-manager/settings/dashboards.json` names, each read per request with a token that is env-only. With no such file every route below is what it was:
+the machine is `home`.
 
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
 - `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's prompt has no closing clause: the
   finish clause is the sheet's picker, not editable text.
 - `POST /api/agents/dispatch` — spawns the session in that dashboard. An execute dispatch also takes `finish` (`in-place` | `pr`, absent meaning in-place) and
   `base` (a local branch, proved server-side, legal only with `pr` and required by it); the server appends the finish clause from those validated fields after
-  the body, and a body that spells `--finish` or `--base` is a 400. `finish` on any other action is a 400.
+  the body, and a body that spells `--finish` or `--base` is a 400. `finish` on any other action is a 400. Both `dispatch` and `orchestrate` take an optional
+  `machine`: absent or `home` is the launch above, byte for byte, and a remote's `name` sends it to that machine's dashboard — see "Launching on another
+  machine".
 - `POST /api/agents/orchestrate` — spawns a headless `/backlog-orchestrate` run for one project. The prompt is composed server-side, so a caller can influence
   which items, which modes and which base branch, and nothing else. A TRACKER project is accepted since task-47: `resolveIds` proves its ids against
   `ItemsService` rather than against a directory scan, accepts `#31` / the URN / a bare `31`, and **emits bare digits alone**, so the prompt never carries a
@@ -215,10 +220,45 @@ One of the three modules that call outbound, and every POST in it is guarded by 
   deliberately not annotated with which tree holds which branch: the sheet needs names, and where a branch is checked out is a question the run answers at merge
   time.
 
-`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` answers 409 with the same sentence). `status` exists to report that gate, so it answers either
-way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard at all: two read this process's own state, one writes its own
-settings file, one looks at local git. `pause` being independent of the switch is deliberate rather than incidental — a pause is a fact on this machine's own
-disk about a run that is already going, so gating it would mean a run started while dispatch was on could never be stopped after somebody turned it off.
+#### `agents/dashboards/` — the machine list and where a launch goes
+
+`GET /api/dashboards` answers the `DashboardsView`: home's presentation and every remote (`name`, `url`, `bmUrl`, `host`, optional `account`, `models`,
+`efforts`), the prefer `order`, the `strategy` and `threshold`, a `source` of `file`, `default` (no file) or `unreadable` (with the reason), and per machine
+`tokenSet` and `tokenVar` — never a token. Four POSTs edit it, each behind `SameOriginPostGuard`, each answering the fresh view, and each a `409` naming the
+file while it is unreadable: `/api/dashboards/entries` (add or replace a remote), `/entries/delete`, `/home` (home's account, models and efforts) and
+`/settings` (order, strategy, threshold). A malformed body is a `400`, an unknown entry to delete a `404`. The file's rules are in
+[invariants.md](invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced).
+
+`GET /api/dashboards/offers?project=<abs path>` answers which machines can run that project, in prefer order, each with `offered` (and, when not, the one
+reason), its usage and what it can run, plus the `suggestion` among the offered ones. It is always a `200` once the query is well formed — a machine that cannot
+be reached is an answer, never an error. A files project, or a setup with no remote, gets home alone with no usage fetched. Otherwise every machine is judged at
+once, and a remote is offered only if its dashboard answers, its board (`GET <bmUrl>/api/projects`, no `Authorization`) lists the same GitHub repo — identity is
+`owner/name`, never a disk path — with sync on, and that dashboard lists the project's path on its own disk. Usage comes from the dashboard's own `account` and
+`usage/profile` routes, cached 60 s per dashboard and read as none once older than ten minutes; the suggestion never picks on usage a machine does not have.
+
+##### Launching on another machine
+
+A remote launch is for a GitHub tracker project only (a files project is a `400`) and goes to the dashboard of the machine named in `machine`: an id the file no
+longer holds is a `400` (`unknown machine`), `finish` and `mergeMode` are held to `pr` (absent means `pr`, another value is a `400`), `model` and `effort` must
+be on that machine's list (else `400`; no model sent means `DEFAULT_MODEL` if it is listed, else the first listed), the offer is judged again at launch time,
+and the session starts at the project's path on THAT machine, read from its board. The `409`s, in the order a launch meets them: `<id> is already starting on
+<label>`, `<project> is already starting on <label>`, `a run of <repo> is live on <label>` and `<label> is not offered for <project>: <reason>`. A remote run
+never blocks a local one, and a live remote run blocks only a second orchestrate to the same machine. A launch is remembered in `RemoteStartingService` (see
+`orchestrator/`) until that machine's first claim shows it.
+
+`POST /api/items/abort` routes by where the work is: a dispatch record names its machine and the stop goes to that dashboard; with no record, a claim whose
+`host` equals a configured remote's `host` stops there; otherwise the stop is today's, checked against `BM_MACHINE_NAME`. Either way the release follows the
+stop, and a record whose machine has since left the file is a `409` (`<id> was dispatched to <machine>, which is no longer configured`). `resume`, `pause` and
+the run `stop` stay home-only: they act on a run file, and a remote run has none here — the board draws a remote run read-only.
+
+Every new outbound read — the offers' dashboard and board reads, usage, and a remote's status — is held to 5 s. Home keeps its 4 s health and 15 s management
+reads, and every spawn and stop keeps 10 s.
+
+`BM_AGENTS` off turns away `dispatch`, `dispatch-jira`, `orchestrate` and `resume` — the four that spawn something (`jira-stop` answers 409 with the same
+sentence). `status` exists to report that gate, so it answers either way, and `pause`, `watchdog`, `watchdog/config` and `merge-check` never call the dashboard
+at all: two read this process's own state, one writes its own settings file, one looks at local git. `pause` being independent of the switch is deliberate
+rather than incidental — a pause is a fact on this machine's own disk about a run that is already going, so gating it would mean a run started while dispatch
+was on could never be stopped after somebody turned it off.
 
 The run watchdog lives here too (`watchdog.service.ts`), armed only while some `run.json` says `running`.
 
@@ -229,13 +269,19 @@ A read-only view of the orchestrator's run-state directory:
 - `GET /api/orchestrator/runs` — every project's current `run.json`, re-read fresh on every request, which is what lets the board watch a run's heartbeat live;
   plus the runs this server has itself just asked for and whose run file does not exist yet (`starting`); plus, in a separate `remote` array (task-48), the
   runs other machines drove on a tracker project, derived from the poller's cached claim comments by `remote-runs.service.ts` — never members of `runs`, so
-  this machine's lock and watchdog never see them, and dropped whenever a local run file carries the same `runId`.
+  this machine's lock and watchdog never see them, and dropped whenever a local run file carries the same `runId`. A third array, `remoteStarting`, holds the
+  launches this server sent to a remote dashboard that no claim shows yet (below); like `starting`, it is in memory only and is never a member of `runs`.
 - `GET /api/orchestrator/archive` — every run a project has ever produced, current and archived alike.
 - `GET /api/orchestrator/archive/run` — one run file verbatim, gated by an id pattern and an allowlist built the same way item bodies are.
 
 `orchestrate.mjs` is that directory's only writer; this module never writes it and never caches it. Beside those endpoints sit three pieces of state this module
 owns: `watchdog-state.service.ts` (in memory — what the watchdog did, annotated onto `/api/orchestrator/runs` as `watchdog` on crashed runs only),
-`remote-runs.service.ts` with its pure half `remote-runs.util.ts` (no state at all — other machines' runs, re-derived per request from the poller's cached
+`remote-starting.service.ts` (in memory — a launch sent to a remote machine's dashboard — a card dispatch keyed by (project, item), blocking that item on every
+machine, a remote orchestrate keyed by (project, machine), blocking only a second one to that machine — surfaced as `remoteStarting` and NEVER in
+`starting`, because `starting` blocks home's own lock and a remote launch must block none of it; it clears on the host's first claim, on a remote run of that
+project
+on that host starting at or after `requestedAt`, or past `RUN_STALE_MS`, and is swept whenever the payload is read), `remote-runs.service.ts` with its pure half
+`remote-runs.util.ts` (no state at all — other machines' runs, re-derived per request from the poller's cached
 claim comments into the payload's separate `remote` array), `starting-runs.service.ts` (in memory — a spawn this server itself requested, surfaced as the payload's separate `starting` array so a board-started run is
 visible before `init` writes a run file), and two files it genuinely writes: `watchdog-config.util.ts`, the first file the server ever wrote, and
 `pause-control.util.ts`, the second — the pause request `orchestrate.mjs` reads back at its two dispatch gates, the one file in this system travelling server →
@@ -316,6 +362,9 @@ rebinding, which satisfies that guard with two matching lies. Global rather than
 - **The run-state directory** — read fresh per request. Its only writer is `skills/backlog-orchestrate/tools/orchestrate.mjs`; the server re-derives the
   directory path with its own copy of the same function rather than importing the `.mjs` tool.
 - **`../claude-agents-dashboard`** — reached only from `agents/`, at an env-only URL, and never by the browser: every call goes board → this API → dashboard.
+- **Remote dashboards and remote boards** — reached only from `agents/dashboards/`, at the `url` and `bmUrl` of an entry in `settings/dashboards.json`, with the
+  dashboard's token read per call from `BM_AGENTS_TOKEN_<NAME uppercased>` and no token ever sent to a board, and never by the browser. The same module as
+  the line above, not a fourth outbound-calling one.
 - **`api.github.com`** — reached only from `tracker/`, with a token read per call from `BM_GITHUB_TOKEN`, and never by the browser: every call goes board → this
   API → GitHub, and the token reaches no payload.
 - **`api.atlassian.com`** — reached only from `jira/`, through the gateway path `/ex/jira/<cloudId>/rest/api/3`, with Basic credentials read per call from

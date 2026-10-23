@@ -24,6 +24,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [workflows/development.md](workflows/development.md) | running the app while you work on it: stack or host, ports, verification, failure modes                                 |
 | [workflows/publishing.md](workflows/publishing.md)   | getting a skill edit out of the working tree and into the installed plugin                                              |
 | [workflows/ci.md](workflows/ci.md)                   | the PR gate: `ci / checks`, `ci / pr-title`, `ci / skills` from release-kit, and the `main-pr-only` ruleset             |
+| [workflows/remote-machine.md](workflows/remote-machine.md) | adding a second machine to the launch picker: its name, its tailnet reach, its allowlist and token, this board's `.env` |
 
 `.claude/rules/` sits beside that table rather than in it: eleven path-scoped files that a session loads automatically when it reads a file under their `paths:`
 glob, each the one home of the mechanism text for the rules scoped to its paths — CLAUDE.md keeps the headlines, `subsystems/invariants.md` the reasoning. They
@@ -50,7 +51,9 @@ Five artefacts hold everything, and the single-writer column is the load-bearing
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
 guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through six guarded config routes (`POST /api/jira/boards`, `/boards/delete`,
-`/repos`, `/skills`, `/skills/delete` and `/repo-defaults`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)).
+`/repos`, `/skills`, `/skills/delete` and `/repo-defaults`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)), and `dashboards.json`, the
+list of other machines a launch can go to, which the server alone reads and writes through four guarded routes under `/api/dashboards` — no skill reads it
+([workflows/remote-machine.md](workflows/remote-machine.md)).
 
 ### The API — [full doc](subsystems/api.md)
 
@@ -71,7 +74,9 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`agents/`** — one of the three modules that make an outbound call — to the local claude-agents-dashboard — and the only one that can start a session. Off
   unless `BM_AGENTS` says otherwise; every POST here is additionally guarded by content-type and `Origin`, because loopback is no boundary against a page in
   this machine's own browser (the `Host` allowlist above is what covers the rebinding case those two checks do not). The run watchdog lives here too, armed only
-  while some run file says `running`.
+  while some run file says `running`. Its `dashboards/` folder is what lets a launch go to ANOTHER machine's dashboard instead — the outbound destinations are
+  then the remote dashboards and the remote boards named in `~/.backlog-manager/settings/dashboards.json`, still this one module, and with no such file nothing
+  about a launch changes ([setup](workflows/remote-machine.md)).
 - **`tracker/`** — the second of three outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
   the in-memory issue cache the `github` adapter answers from (one of the two caches in this server whose age is rendered, as `polledAt`), the eleven-label
   bootstrap, the claim protocol's pure half (`claim.ts` — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for
@@ -87,7 +92,9 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`registry/`** — read-only view of the registry file.
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
   package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog. The run widget opens
-  `/?section=runs&runs=history`, the one URL the client reads (`client/src/lib/deep-link.ts`); the other two open `/`.
+  `/?section=runs&runs=history`, the one URL the client reads (`client/src/lib/deep-link.ts`); the other two open `/`. That reader has one more parameter,
+  `settings=shared|local`, honoured only beside `section=settings`: the launch sheets' "Run on" card links to Shared Settings with it, because the viewer's
+  stored scope defaults to `local`.
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins
   the inline theme script by hash; and every route, read or write, is gated by a `Host` allowlist, which is what a page that rebinds DNS onto loopback cannot
   pass.
