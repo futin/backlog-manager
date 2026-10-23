@@ -1375,6 +1375,29 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .jira-skill-add-name { width: 100%; max-width: 100% }
 .jira-skill-add-prompt { align-self: stretch; width: 100%; font-size: 12px; min-height: 64px }
 
+/* The Dashboards card (multi-dashboard, §8.6): a machine's facts are lines inside its row's hint, and the add/edit form is a stacked row of labelled 36 px
+   fields (`.set-text`, `.ui-number`'s family) under it. A form sits INSIDE its machine's wrapper so the hairline `.set-row + .set-row` draws between machines
+   and not between a machine and its own form. Checkboxes are the platform's own, in the card's accent — a model list is four short words, which a pill
+   track per word would only make taller. */
+.set-row + .dash-machine, .dash-machine + .dash-machine, .dash-machine + .set-row { border-top: 1px solid var(--hairline) }
+.dash-machine + .set-error-row { border-top: 0; padding-top: 0 }
+.dash-machine > .set-row { border-top: 0 }
+.dash-line { display: block; overflow-wrap: anywhere }
+.dash-form { gap: 16px }
+.dash-machine > .dash-form { padding-top: 0 }
+.dash-field { display: flex; flex-direction: column; gap: 4px }
+.dash-text { width: 100%; max-width: 420px }
+.dash-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; padding: 0; border: 0; min-width: 0 }
+.dash-checks legend { padding: 0; margin-bottom: 6px }
+.dash-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink) }
+.dash-check input, .dash-strategy input { accent-color: var(--ink) }
+.dash-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
+.dash-strategies { display: flex; flex-direction: column; gap: 10px }
+.dash-strategy { display: flex; align-items: flex-start; gap: 10px; cursor: pointer }
+.dash-strategy input { margin-top: 3px }
+.dash-strategy-text { display: flex; flex-direction: column; gap: 2px }
+.dash-threshold { display: inline-flex; align-items: center; gap: 8px }
+
 /* The roots search is its Popover's positioning parent (the panel hangs under it, right edges together), and the field takes the section's full width. */
 .jira-sheet-search { position: relative; display: flex; flex-direction: column; gap: 6px }
 .jira-sheet-search-field { width: 100% }
