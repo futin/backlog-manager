@@ -936,6 +936,11 @@ export interface AgentDispatchRequest {
    */
   finish?: ExecuteFinish;
   base?: string;
+  /**
+   * The machine to start on: a configured remote's name. Absent or `home` is this machine and produces the spawn request it always has; the client omits it
+   * for home. An unknown name is a 400.
+   */
+  machine?: string;
   remoteControl: boolean;
 }
 
@@ -1910,6 +1915,112 @@ export interface OrchestratorRunsPayload {
  * says rather than hiding.
  */
 export type RemoteRun = OrchestratorRun & { fresh: boolean; remote: true; repo: string };
+
+/**
+ * Multi-dashboard (spec 2026-10-22-multi-dashboard-design.md). One board can start work on this machine ("home", id `home`, the dashboard `BM_AGENTS_URL` names)
+ * or on another machine's dashboard (a "remote", id = its `name`). `~/.backlog-manager/settings/dashboards.json` lists the remotes and carries the strategy,
+ * threshold and prefer order too — server-side, because the server computes the suggestion. These shapes are the file's and the wire's; the reader/writer is
+ * `server/src/agents/dashboards/dashboards-file.util.ts`.
+ */
+
+/** How the suggestion picks among offered machines: `prefer` — first in prefer order under the threshold; `headroom` — most headroom; `runway` — least likely to run out. */
+export type SuggestStrategy = 'prefer' | 'headroom' | 'runway';
+
+/**
+ * One remote dashboard. `url` is its dashboard's origin (spawn/stop/health), `bmUrl` its backlog-manager's origin (read to decide "offered"), `host` the value
+ * that machine's claims carry — it must equal `BM_MACHINE_NAME` there, because a stop after a restart routes by it. `models` / `efforts` narrow what that
+ * account can run; absent means the whole list. The token is never stored: it is `BM_AGENTS_TOKEN_<NAME>` in the environment.
+ */
+export interface DashboardEntry {
+  name: string;
+  url: string;
+  bmUrl: string;
+  host: string;
+  account?: string;
+  models?: string[];
+  efforts?: string[];
+}
+
+/** This machine's own presentation: everything optional, and home's URL and token stay `BM_AGENTS_URL` / `BM_AGENTS_TOKEN`, never in the file. */
+export interface HomeEntry {
+  label?: string;
+  account?: string;
+  models?: string[];
+  efforts?: string[];
+}
+
+/** `dashboards.json` as the server reads it AFTER normalisation (`readDashboardsFile`); on disk every key but `dashboards` may be missing. */
+export interface DashboardsFile {
+  home?: HomeEntry;
+  dashboards: DashboardEntry[];
+  order?: string[];
+  strategy?: SuggestStrategy;
+  threshold?: number;
+}
+
+/** One machine's usage as the dashboard reports it: percent used (0–100) per window, the weekly projection and when it was fetched. */
+export interface MachineUsage {
+  fiveHour: { pct: number; resetsAt: string | null };
+  week: { pct: number; resetsAt: string | null };
+  projection: 'safe' | 'runs-out' | 'unknown';
+  exhaustAt: string | null;
+  fetchedAt: string;
+}
+
+/** One machine as a launch surface sees it for one project: offered or not (with the reason it is not), its usage, and what it can run. */
+export interface MachineOffer {
+  machine: string;
+  label: string;
+  home: boolean;
+  account: string | null;
+  offered: boolean;
+  reason: string | null;
+  usage: MachineUsage | null;
+  usageAgeMs: number | null;
+  models: string[];
+  efforts: string[];
+}
+
+/** The machine the board suggests; `basis` is `default` when no offered machine had usage figures. */
+export interface Suggestion {
+  machine: string;
+  reason: string;
+  basis: 'usage' | 'default';
+}
+
+/** Answer to `GET /api/dashboards/offers?project=`: every configured machine for that project, in prefer order, and the suggestion among the offered ones. */
+export interface ProjectOffers {
+  project: string;
+  machines: MachineOffer[];
+  suggestion: Suggestion | null;
+}
+
+/**
+ * Answer to `GET /api/dashboards` — what Settings draws. Carries each entry's URLs (the card edits them) but never a token: `tokenSet` says whether
+ * `tokenVar` is non-empty in this server's environment, and the value itself never leaves it. `source` is `unreadable` when the file cannot be read, in which
+ * case every remote is ignored (fail closed) and every write is a 409.
+ */
+export interface DashboardsView {
+  source: 'file' | 'default' | 'unreadable';
+  file: string;
+  home: { label: string; url: string; account: string | null; models: string[]; efforts: string[]; tokenVar: 'BM_AGENTS_TOKEN'; tokenSet: boolean };
+  dashboards: Array<DashboardEntry & { tokenVar: string; tokenSet: boolean; models: string[]; efforts: string[] }>;
+  order: string[];
+  strategy: SuggestStrategy;
+  threshold: number;
+}
+
+/**
+ * One "a launch was sent to a remote dashboard and has not shown up in that machine's claims yet" record, held in server memory only (never on disk) and for
+ * `RUN_STALE_MS` at most. The remote counterpart of `StartingRun`, which is home's.
+ */
+export interface RemoteStarting {
+  kind: 'dispatch' | 'orchestrate';
+  project: string;
+  machine: string;
+  itemId: string | null;
+  requestedAt: string;
+}
 
 /**
  * One "the board asked for a run and this server spawned it, but
