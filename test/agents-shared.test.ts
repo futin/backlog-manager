@@ -847,6 +847,24 @@ describe('inReviewBlock', () => {
     const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
     expect(prMode).toContain(finishClause('execute', 'pr', '<base>'));
   });
+
+  /* The same seam for the flagged sentence: §1 quotes it so a session can tell `--auto-merge --fix` arrived from the board, and a reworded clause would
+     leave the quote describing a prompt nobody sends. Both flags on, because that sentence carries every clause the auto-merge-only one has. */
+  it('pr-mode.md quotes the execute flag sentence', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { autoMerge: true, fix: true }));
+  });
+
+  /* The procedure's load-bearing literals: the one line a not-allowed repo gets (a person greps the final message for it), the two soft bounds the spec
+     states in the file, the `--auto --<method>` spelling that arms rather than merges, and the force-push ban the fix loop's merge-of-base relies on. */
+  it('auto-merge.md names the exact not-allowed line, the 45-minute and 3-round bounds, and forbids force-push', () => {
+    const autoMerge = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'auto-merge.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(autoMerge).toContain('auto-merge: not allowed on <owner>/<repo> — PR left open');
+    expect(autoMerge).toContain('45 minutes');
+    expect(autoMerge).toContain('3 fix rounds');
+    expect(autoMerge).toContain('--auto --');
+    expect(autoMerge.toLowerCase()).toContain('never force');
+  });
 });
 
 /*

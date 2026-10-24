@@ -6,8 +6,9 @@ read there.
 
 In `pr` mode execute works the item in a worktree that holds this item's work and nothing else, and on verified success commits it, has
 `backlog-manager:backlog-reviewer` review the commit, pushes the branch and opens one PR into the base. It never merges — a person (or GitHub) does that, and
-`backlog-orchestrate` stays the only skill that merges. It never asks "should I push / open a PR?": the trigger already answered that, and asking is the exact
-step this mode exists to remove.
+`backlog-orchestrate` stays the only skill that merges. With `--auto-merge` it arms GitHub auto-merge on that PR and waits for GitHub to merge it (§8, last;
+`references/auto-merge.md`) — still GitHub's merge, never this skill's. It never asks "should I push / open a PR?": the trigger already answered that,
+and asking is the exact step this mode exists to remove.
 
 Numbered sections follow the flow in order. Everything SKILL.md says that this file does not replace still holds — the refusal gate, dispatch, verification,
 both pre-review checks — and is done inside the tree §2 picks. A reference file is read with the Read tool and never has `${CLAUDE_PLUGIN_ROOT}` filled in:
@@ -31,12 +32,19 @@ trigger and refused an unknown or doubled `--finish`; this section settles `<bas
 - **An unknown or doubled `--finish` never falls back to either mode:** a quiet `in-place` would skip the PR the person asked for, and a quiet `pr` would
   commit and push where nobody asked for it.
 - **It is read once, from the trigger, and never re-read in the new worktree.**
-- **State the mode in one line and ask nothing:** `finish mode: pr → PR into <base>`.
+- **State the mode in one line and ask nothing:** `finish mode: pr → PR into <base>`, followed by `, auto-merge` and `, fix` for each of those flags the
+  trigger carries — `finish mode: pr → PR into <base>, auto-merge, fix` with both. SKILL.md's Finish mode section has already refused a flag that arrived
+  without the ones it needs (`--auto-merge` needs `--finish pr`; `--fix` needs both).
 - **A board-dispatched prompt in `pr` mode ends with**
   ``Finish with `--finish pr --base <base>`: the skill commits, reviews, pushes and opens the PR into <base>, and never merges.``
   — the real base in place of `<base>`. That sentence is the trigger's flag, composed server-side from the launch sheet's pickers: its `--finish pr` is the
   same one signal a typed trigger carries, and its `--base` is `<base>`. A board prompt ending in `COMMIT_RULE`'s "commit … Do not push." sentence is an
   `in-place` launch, untouched by this file. Nothing else is a signal: generic commit or PR wording elsewhere in a prompt switches nothing.
+- **With the sheet's Auto-merge and Fix if it fails ticked, it ends instead with**
+  ``Finish with `--finish pr --base <base> --auto-merge --fix`: the skill commits, reviews, pushes, opens the PR into <base> and arms GitHub auto-merge if the repository allows it, then waits for GitHub to merge it, fixing failing checks and conflicts with <base> meanwhile; the skill never merges itself.``
+  — and with Auto-merge alone, the same sentence without ` --fix` inside the backticks and without the ", fixing … meanwhile" clause. The flags count only
+  inside the backticks, exactly like `--finish pr`; the prose after the colon describes `references/auto-merge.md` and is no signal of its own. "The skill
+  never merges itself" holds: arming auto-merge asks GitHub to merge, and GitHub performs the merge into `<base>`.
 
 ## 2. Pick the tree
 
@@ -268,6 +276,16 @@ undoes nothing** — the comment and the release still run — and the final mes
 - **The remote rejects the push:** stop and report; never force (above).
 - **`gh` is missing or not authenticated:** report the command (above).
 
+### Last, with `--auto-merge`: arm it and wait
+
+Only when the trigger carries `--auto-merge`, and only once the PR is open and — tracker — the `review <id> on`, `comment` and `stop <id> --keep-started`
+sequence above has run, so the `in-review` guard is on and no claim is held: read `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md`
+in full and run it now, in `<tree>`, with `<pr>` the number of the PR this section opened. It arms GitHub auto-merge if the repository allows it, waits for
+GitHub to merge, and with `--fix` repairs failing checks and conflicts with `<base>` meanwhile; it never merges itself.
+
+No PR opened — `gh` missing or unauthenticated, a refused or rejected step anywhere above — means there is nothing to arm: skip that file, and the final
+message's auto-merge line says `auto-merge: not armed — no PR`.
+
 ## 9. Leave the tree, and the final message
 
 The worktree stays where it is: the PR may need follow-up fixes there. The final message carries:
@@ -278,7 +296,10 @@ The worktree stays where it is: the PR may need follow-up fixes there. The final
   open issue, removed with `backlog.mjs review <n> off`; with `Refs #<n>`, that the issue must be closed by hand once the work reaches the default branch, and
   the label removed then. If the label write failed: that the guard is missing, and the command to add it;
 - **files:** "merge this PR before draining the backlog" — until it merges the item is still in `open/` on `<base>`, and an orchestrator run would execute it
-  again. That is a known limitation: a files project has no label to carry a guard.
+  again. That is a known limitation: a files project has no label to carry a guard. Not printed when the auto-merge wait saw the PR merge;
+- **with `--auto-merge`:** the one `auto-merge:` outcome line and every fix commit (`<short sha> <subject>`, or `fix commits: none`), as
+  `references/auto-merge.md` §4 lists them. A merged PR with `Closes #<n>` closed the issue and took `in-review` with it, so the tracker line above becomes
+  "merged and closed"; with `Refs #<n>` the hand steps above still apply.
 
 ## Where each rule comes from
 
@@ -299,3 +320,7 @@ permission denial stops only the git and `gh` steps — a tracker item's `backlo
 reviewer is used as-is, with its report outside the repo and only one-line
 summaries in the PR body (§7, §8); a tree behind the base is fast-forwarded (§2); a new tree's names are `execute/<id>` and `.worktrees/execute-<id>` (§2);
 at most two fix rounds, mirroring the orchestrator's loop (§7); `Refs #<n>` for a non-default base (§8); and the worktree is left in place (§9).
+
+`--auto-merge` and `--fix` come from `docs/superpowers/specs/2026-10-24-groom-pr-and-auto-merge-design.md`: legal only beside `--finish pr` (and `--fix`
+only beside `--auto-merge`), refused rather than dropped (§1, SKILL.md's Finish mode); run after the tracker guard is on and the claim released (§8, last);
+the procedure, its bounds and its rulings live in `references/auto-merge.md`, shared with `backlog-groom`'s pr mode.
