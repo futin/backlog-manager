@@ -1655,8 +1655,8 @@ description is what yields to it; a prompt that cannot keep at least one charact
 that has one. This is mitigation, not proof — a model can still be talked into things — and the rest of the defence is that the session is the person's own,
 in a repository the person mapped, under the permission mode they chose, clamped to the dashboard's ceiling. **Item `dispatch` stays the exception to the
 whole rule:** its prompt is the launch sheet's text, which a human edits before sending, and is the one field taken outright
-— save an execute's finish clause, which is appended server-side from the validated `finish`/`base` fields, after the body, and never travels in the
-editable text.
+— save an execute's or a groom's finish clause, which is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields, after the
+body, and never travels in the editable text.
 
 **An execute's or a groom's finish clause is the third server-composed piece, beside the orchestrate trigger's flags and the Jira prompt.**
 `finishClause(action, finish, base, flags)` (`shared/agent.ts`) is the whole of it: ` --finish pr --base <base>` plus its sentence for `pr` — an execute's says it
