@@ -77,6 +77,7 @@ The superpowers 7.0.0 size-name break that briefly made grooms skip the spec is 
 - Fix covers **failing CI checks** and **merge conflicts with the base**. Not review comments.
 - **The same session waits** and fixes; no separate later session.
 - "If allowed by the project" means **GitHub's repository setting** ("Allow auto-merge"), checked by the skill with `gh` at runtime.
+- Whether Auto-merge and Fix start on is **configurable in Settings**, as two defaults the sheet's toggles seed from.
 
 ## The trigger
 
@@ -218,7 +219,14 @@ blocks another session.
   when Auto-merge is cleared or Finish leaves PR. A note under them: "Needs Allow auto-merge on the GitHub repo; checked when the PR opens." Visual language:
   the sheet's existing `Switch` (Remote control, `LaunchSheet.tsx`; Jira's "Open MR when done" is one too) under `.claude/DESIGN.md` §8 — "checkbox" in this
   document means that control. The builder cites the subsection.
-- Both checkboxes start unticked on every open (*my call*: a merge is a per-launch decision, never seeded; this mirrors why `base` is never seeded).
+- **Both toggles seed from Settings** (user's decision, after the first draft had them always start off): two new rows on the Settings page that holds
+  Execute default finish — **Auto-merge PRs** (`prAutoMergeDefault`, boolean, default `false`) and **Fix if it fails** (`prFixDefault`, boolean, default
+  `false`) — clamped in `clampSettings` like the other keys (a non-boolean reads as `false`). One pair for both groom and execute, because the toggles mean the
+  same thing for both. Seeded once per sheet open and from nowhere else — never from the last launch — the rule model/effort/finish already follow. In
+  Settings the Fix row is disabled while Auto-merge is off, the sheet's own dependency; a stored `prFixDefault: true` beside `prAutoMergeDefault: false`
+  seeds Fix off. The seed applies only when the sheet's Finish is PR; flipping Finish to PR mid-sheet re-applies it, and leaving PR clears both. The defaults
+  never reach a launch on their own: the sheet shows the toggles' state before Launch, and only the request body's booleans, composed from what the sheet
+  shows, set the flags — so the anti-goal "a merge nobody asked for" still holds.
 - The groom finish seeds from a new Settings row, **Groom default finish** (`groomDefaultFinish`, `client/src/lib/settings.ts`, clamped like
   `executeDefaultFinish`, default `in-place`), shown next to Execute default finish in `SettingsView.tsx`. *My call*: projects with a protected `main` want
   PR every time, and a default is how execute already serves that.
@@ -250,7 +258,10 @@ blocks another session.
 - `composePrompt` for groom no longer ends in `COMMIT_RULE`, and dispatch's final in-place groom prompt still does.
 - LaunchSheet: Finish/Base drawn for groom; checkboxes only under PR; Fix disabled until Auto-merge; leaving PR clears both; the request body carries the
   booleans only under PR.
-- Settings: `groomDefaultFinish` clamps an unknown value to `in-place`.
+- Settings: `groomDefaultFinish` clamps an unknown value to `in-place`; `prAutoMergeDefault` / `prFixDefault` clamp a non-boolean to `false`; the Fix row is
+  disabled while Auto-merge is off.
+- LaunchSheet: toggles seed from the two defaults when Finish is PR; `prFixDefault: true` with `prAutoMergeDefault: false` seeds Fix off; flipping Finish
+  away from PR and back re-seeds.
 - The skills' prose is not unit-tested; the builder runs one real groom in `pr` mode against a scratch GitHub repo with auto-merge allowed, and one with it
   disallowed, and records the transcripts' outcome lines in the PR.
 
