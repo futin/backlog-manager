@@ -5918,7 +5918,7 @@ export function verifyEnv(env) {
   return out;
 }
 
-const VERIFY_USAGE ='usage: orchestrate.mjs verify <itemId> --cwd <dir> [--json]';
+const VERIFY_USAGE = 'usage: orchestrate.mjs verify <itemId> --cwd <dir> [--json]';
 
 function cmdVerify(argv) {
   const itemId = argv[0];
