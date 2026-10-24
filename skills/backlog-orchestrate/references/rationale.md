@@ -121,6 +121,16 @@ assignments in the environment of the program it execs — rather than in front 
 command. §5's `--resume` retry carries it too, unlike the prompt marker, which that line deliberately does not repeat: a resumed session keeps its original
 prompt but gets a brand-new environment, so the assignment has to be made again or the retry pays the hold the fresh dispatch was spared.
 
+### Why every launch line unsets `COREPACK_ROOT` (#294)
+
+A driver started from the claude-agents-dashboard (run-20261017-190335, #285) inherited `COREPACK_ROOT` from that server's own `pnpm`, and with Homebrew's pnpm
+11 ahead of the nvm corepack shim on PATH, pnpm read the variable as "corepack invoked me" and refused the `packageManager` pin instead of switching to it:
+every check red before a line ran. `verify` strips it from its own children (`verifyEnv` in `orchestrate.mjs`, with the `npm_*` keys a parent run injects); the
+launch lines strip it from the execute session, which runs pnpm through its own Bash tool. Only `COREPACK_ROOT` there — the `npm_*` keys are harmless to a
+`claude` process. It opens the body rather than prefixing `exec` because a `;` in front of `exec` would cut it loose from the `cd … &&` and `test -s … &&`
+guards ahead of it, and it is inside the body, never in front of `nohup`, for the reason `BM_ORCH_RUN` is. PATH is deliberately left alone: reordering a
+person's PATH is guessing at their toolchain, and the leaked variable — not the PATH order — is what turned "wrong pnpm first" into "every check red".
+
 ### Why `-n` names the session by item id
 
 The prompt marker is read by the model, `BM_ORCH_RUN` by a hook, and `-n` by whoever opens the dashboard mid-run to see what is happening — the channel follows

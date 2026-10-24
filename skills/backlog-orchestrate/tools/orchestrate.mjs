@@ -5870,8 +5870,21 @@ const VERIFY_TAIL_MAX_CHARS = 8 * 1024;
 // `ok: false` — neither is proof the item works, and the merge gate must be
 // shut for either — but the recorded row now says which one happened, so
 // nobody is sent to debug a suite that never executed.
+//
+// `env` is `verifyEnv(process.env)`, never the driver's environment verbatim
+// (#294). Measured in run-20261017-190335 on #285: a driver launched from the
+// claude-agents-dashboard inherited `COREPACK_ROOT` from that server's own
+// `pnpm`, and with Homebrew's pnpm 11 ahead of the nvm corepack shim on PATH,
+// pnpm read the variable as "corepack invoked me" and refused the
+// `packageManager` pin (`Corepack invoked pnpm with this version`) instead of
+// switching to it — `test`, `typecheck` and `build` all red before a line of
+// them ran, on code that had nothing to do with it. With the variable gone
+// pnpm's own version management switches and the checks run. PATH itself is
+// deliberately left alone: reordering a person's PATH from `engines` or
+// `.nvmrc` is guessing at their toolchain, and the leaked variable — not the
+// PATH order — is what turned "wrong pnpm first" into "every check red".
 function runVerifyCommand(cmd, cwd) {
-  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', maxBuffer: VERIFY_MAX_BUFFER });
+  const result = spawnSync(cmd, { shell: true, cwd, encoding: 'utf8', maxBuffer: VERIFY_MAX_BUFFER, env: verifyEnv(process.env) });
   const combined = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   const lines = combined.split('\n');
   const trimmedLines = lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
@@ -5881,6 +5894,28 @@ function runVerifyCommand(cmd, cwd) {
     return { cmd, ok: false, tail: tail === '' ? why : `${why}\n${tail}` };
   }
   return { cmd, ok: result.status === 0, tail };
+}
+
+// A copy of `env` without what a parent package-manager invocation leaves
+// behind to describe ITSELF (#294): `COREPACK_ROOT` (set by corepack's shim,
+// read by pnpm as "corepack invoked me"), `npm_execpath`, `npm_node_execpath`,
+// `npm_config_user_agent`, and every `npm_lifecycle_*` and `npm_package_*` key
+// a `pnpm run`/`npm run` injects. A check spawned with those describes the
+// driver's parent, not the project being verified. Everything else stays —
+// PATH, PNPM_HOME, COREPACK_HOME, COREPACK_ENABLE_*, and every other
+// `npm_config_*` key, which are the person's own configuration (a registry,
+// a cache dir), not a parent's identity. Pure: the argument is never mutated.
+const VERIFY_ENV_DROP = new Set(['COREPACK_ROOT', 'npm_execpath', 'npm_node_execpath', 'npm_config_user_agent']);
+const VERIFY_ENV_DROP_PREFIXES = ['npm_lifecycle_', 'npm_package_'];
+
+export function verifyEnv(env) {
+  const out = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (VERIFY_ENV_DROP.has(key)) continue;
+    if (VERIFY_ENV_DROP_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
+    out[key] = value;
+  }
+  return out;
 }
 
 const VERIFY_USAGE = 'usage: orchestrate.mjs verify <itemId> --cwd <dir> [--json]';
