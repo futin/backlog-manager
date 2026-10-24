@@ -26,7 +26,8 @@ and each project's `backlog/` directory are the data.
 | CI gate (every PR into `main`)            | `.github/workflows/ci.yml` → [docs/workflows/ci.md](docs/workflows/ci.md) |
 
 **CI is the full-suite gate — never re-run the whole `pnpm test` locally just before a push.** Push and let CI run it; locally run only the suites the change
-(or a merge of `main`) touched. Why: `~/.claude/session-analytics-log.md`, 2026-10-15.
+(or a merge of `main`) touched. Why: `~/.claude/session-analytics-log.md`, 2026-10-15. A docs-only or skills-only PR gets a scoped run instead, picked by
+`scripts/ci-scope.mjs`; every code PR and every push to `main` still runs everything ([ci.md](docs/workflows/ci.md#scoped-checks)).
 
 Ports: API `4322`, Vite `5177` (guide-manager holds 4321/5175/5176 on this machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in `.env` —
 inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` from that same `.env` and serves the tailnet on the same number.
@@ -88,7 +89,8 @@ Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figur
 - `backlog/` — this repo's own backlog, self-registered like any project. Tracker-backed: it holds the `source.json` marker, and its items are GitHub issues.
 - `scripts/` — `sync-plugin.mjs` (reinstall the plugin from the pushed HEAD, → [docs/workflows/publishing.md](docs/workflows/publishing.md)), `test-all.mjs`
   (`pnpm test`, → [docs/workflows/development.md](docs/workflows/development.md)), `test-tmpdir.mjs` (the per-run temp root `test:skills` runs `node --test`
-  inside, same doc) and `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper).
+  inside, same doc), `tailnet.mjs` (`pnpm run tailnet` — the `tailscale serve` wrapper) and `ci-scope.mjs` (CI's one check command — what a PR's diff can
+  break, → [docs/workflows/ci.md](docs/workflows/ci.md#scoped-checks)).
 - `docs/` — the reference docs; `docs/superpowers/` holds the design spec and implementation plans this repo was built from.
 
 ## Invariants

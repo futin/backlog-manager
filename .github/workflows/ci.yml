@@ -20,9 +20,10 @@ jobs:
   ci:
     uses: futin/release-kit/.github/workflows/ci-node.yml@v1
     with:
-      # The same three an orchestrated item's verification resolves to off package.json. `pnpm test` is already the union of jest and the node
-      # skills suite (scripts/test-all.mjs), so no `skills-command` is passed and `ci / skills` reports green without running anything.
+      # One command that picks what the PR's diff can break (docs/workflows/ci.md §Scoped checks): a docs-only or skills-only PR runs the suites that
+      # read those files and skips typecheck and build; anything else — and every push to main — runs `pnpm typecheck`, `pnpm build` and `pnpm test`,
+      # the same three an orchestrated item's verification resolves to off package.json. The scope is decided inside the step from the diff alone, never
+      # by skipping the job, so an `edited` re-run reaches the same verdict. No `skills-command` is passed: the script already runs the node skills suite
+      # whenever skills change, so `ci / skills` reports green without running anything.
       check-commands: |
-        pnpm typecheck
-        pnpm build
-        pnpm test
+        node scripts/ci-scope.mjs

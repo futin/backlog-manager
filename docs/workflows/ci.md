@@ -8,12 +8,43 @@ did, by release-kit's README §Adopting it in an app.
 
 | Context         | What it does                                                                                                              | When it is green without running anything |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `ci / checks`   | `pnpm install --frozen-lockfile`, then `pnpm typecheck`, `pnpm build`, `pnpm test`, each reported on its own              | never                                     |
+| `ci / checks`   | `pnpm install --frozen-lockfile`, then `node scripts/ci-scope.mjs`: `pnpm typecheck`, `pnpm build`, `pnpm test`, or a scoped subset (below) | never                                     |
 | `ci / pr-title` | the PR title must match the Conventional Commits rule in release-kit's `scripts/pr-title.mjs`                             | on `push` (no title)                      |
-| `ci / skills`   | nothing here — no `skills-command` is passed, because `pnpm test` already runs the node skills suite (`scripts/test-all.mjs`) | always                                    |
+| `ci / skills`   | nothing here — no `skills-command` is passed, because `ci-scope.mjs` already runs the node skills suite whenever skills change | always                                    |
 
-The three checks are the ones an orchestrated item's verification step resolves to off `package.json`, so a PR is held to the same bar an orchestrator merge
-is. `ci / skills` still reports: the ruleset in release-kit requires all three contexts in every app, so the job runs and passes rather than being absent.
+The full run is the three checks an orchestrated item's verification step resolves to off `package.json`, so a code PR is held to the same bar an orchestrator
+merge is. `ci / skills` still reports: the ruleset in release-kit requires all three contexts in every app, so the job runs and passes rather than being absent.
+
+## Scoped checks
+
+`scripts/ci-scope.mjs` is the one check command. It reads the PR's changed files and runs only what they can break. Why: the full gate is ~6 min (366 s on
+2026-10-24), and 9 of the 30 PRs merged before this landed touched only docs or only skills — files typecheck and build never see (`tsconfig.json` covers
+`server/ shared/ client/ test/` only) and most suites never read.
+
+| The PR changes only…                                                                  | Runs                                                                                                   |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| docs — `docs/**` and any other `*.md`                                                 | the jest and node suites whose code names a changed file or its parent directory; no typecheck, no build |
+| skills — `skills/**`, `agents/**` (docs may ride along)                               | `pnpm run test:skills`, plus the jest suites whose code names `skills/`/`agents/` or a path under them; no typecheck, no build |
+| anything else — `server/`, `client/`, `shared/`, configs, the lockfile, and always `scripts/**`, `test/**`, `.github/**` | everything: `pnpm typecheck`, `pnpm build`, `pnpm test`                                               |
+
+- **Docs are not test-free here.** `claude-rules.test.ts` and `dialog-count-docs.test.ts` hold `CLAUDE.md`, `.claude/rules/` and `invariants.md` to each
+  other, and `backlog.test.mjs` / `orchestrate.test.mjs` read the repo's own `CLAUDE.md` and `invariants.md`. A docs-only PR still runs those, so a
+  doc that breaks a guard is red on the PR, not on `main`.
+- **Which suites "name" a file** is found by scanning the suites' source at run time — no hand-kept list to drift. A path piece counts when it is bounded
+  by quotes or slashes on code lines (comment lines are dropped, so a header citing `.claude/DESIGN.md` reads nothing). It is a heuristic, generous on
+  purpose: a suite picked wrongly costs seconds.
+- **Every doubt runs the full suite**: a push to `main`, a PR merge commit that is not two-parented, a failed fetch, an empty diff, and any path the table
+  does not name. `scripts/**`, `test/**` and `.github/**` are full even when they are markdown, because they change how the suites run.
+- **The push run on `main` is the backstop.** A suite the scan misses — one that reaches a doc through a helper or a computed path — passes the PR and fails
+  the push run after the merge. That is the price of the scoped run; it shows up as a red `main` and is fixed by the next PR.
+- **How the diff is read.** The PR checkout is the merge ref at depth 1; the script fetches that merge commit's first parent (the base tip) and diffs the two
+  with `--no-renames`, so a file moved from `server/` into `docs/` lists both paths and runs full.
+- **The job is never skipped.** release-kit's rule — a skipped job reports success for the same head sha — is why the scope is decided inside the step,
+  from the diff alone: a title edit's re-run reaches the same verdict, red stays red.
+- The scope is posted as a `ci scope` notice on the run's summary page. To check one by hand:
+  `node scripts/ci-scope.mjs --dry-run --files docs/overview.md` prints the plan without running it.
+
+Local `pnpm test` and an orchestrated item's verification are unchanged — they always run both runners in full.
 
 Allowed title types: `feat`, `fix`, `perf` (these may carry `!`), and `docs`, `chore`, `test`, `refactor`, `ci`, `build` (these may not). The scope, if any, is
 lowercase `[a-z0-9-]`. A GitHub "Revert …" title fails until it is retitled.
@@ -104,6 +135,7 @@ A dispatch `sha` must be a commit on `main`; any other commit fails with `target
   sources:
     - .github/workflows
     - .github/pull_request_template.md
+    - scripts/ci-scope.mjs
   kind: workflow
   verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
 -->
