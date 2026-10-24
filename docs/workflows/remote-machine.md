@@ -17,7 +17,7 @@ this is the whole setup — no token and nothing in this machine's `.env`:
 
 1. **On the remote:** `BM_MACHINE_NAME=<name>` in `~/.zshenv` and in its board's `.env`, a restart of its stack, and `pnpm run tailnet` once so its board is
    reachable (Vite listens on `127.0.0.1` otherwise).
-2. **Here:** Settings › Shared › Dashboards › Add dashboard, with the Name the same as that `BM_MACHINE_NAME` and the Dashboard URL
+2. **Here:** Settings › Dashboards › Add dashboard, with the Name the same as that `BM_MACHINE_NAME` and the Dashboard URL
    `http://<name>.<tailnet>.ts.net:4173`. Leave Board URL and Machine name blank: they are stored as the same host on `:5177` and the name, and the fields show
    those defaults as their placeholders.
 
@@ -52,14 +52,14 @@ port, a dashboard that does not trust the tailnet, a machine name that differs f
    upper-cased (`BM_AGENTS_TOKEN_PRO` for `pro`). Home's own token is `BM_AGENTS_TOKEN`. Then restart the stack — compose's container reads the bind-mounted
    `.env`, not your shell, and compose passes `BM_MACHINE_NAME` through but no token. With no token the server sends no `Authorization` header at all. The token
    is never typed into the board: Settings only reports `✓ set` or `not set`.
-5. **Add the entry:** Settings › Shared › Dashboards › Add dashboard. Name (a letter, then letters and digits, at most 24, unique ignoring case, never `home`)
+5. **Add the entry:** Settings › Dashboards › Add dashboard. Name (a letter, then letters and digits, at most 24, unique ignoring case, never `home`)
    and the dashboard `url` are required. The board `bmUrl` and the `host` from step 1 are optional: blank stores `http://<url's host>:5177` and the name. An
    account label, and a models or efforts list if the remote should run only some of them (leave every box ticked for "all"), are optional too. At most eight
    remotes. Save writes `~/.backlog-manager/settings/dashboards.json` (or `$BM_DASHBOARDS_FILE`).
 
 ## Verification
 
-- The Dashboards card draws the new row. Its token line reads `✓ set` if you did step 4; if you did and it reads `not set`, step 4 did not reach the server —
+- The Dashboards page (Settings › Dashboards) draws the new row, with a health dot once the status read lands. Its token line reads `✓ set` if you did step 4; if you did and it reads `not set`, step 4 did not reach the server —
   check the variable's exact name and that the stack was restarted.
 - Open any launch sheet for a tracker project that is registered on both boards: a `Run on` group appears at the top with a card per machine. The remote card is
   enabled and shows its usage; if it is disabled the reason is printed in the card — that is the one place the refusal is read.

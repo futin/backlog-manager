@@ -1,7 +1,7 @@
 import { HttpException, Injectable } from '@nestjs/common';
 
 import { PERMISSION_LADDER } from '../../../shared/agent';
-import type { AgentsStatus, PermissionMode } from '../../../shared/types';
+import type { AgentsStatus, MachineHealth, PermissionMode } from '../../../shared/types';
 import { authHeaders, dashboardError, message, type AgentsConfig } from './config.util';
 
 /*
@@ -91,26 +91,40 @@ export class DashboardStatusService {
     return this.judge(cfg, budget, true);
   }
 
-  /** `statusOf`'s body as it stood, with the one switch `remoteStatusOf` needs: what a failed project-map read means. */
-  private async judge(cfg: AgentsConfig, budget: StatusBudget, mapFailureIsUnreachable: boolean): Promise<AgentsStatus> {
-    const off: AgentsStatus = {
-      enabled: false,
-      reachable: false,
-      remoteAnswer: false,
-      spawnAvailable: false,
-      spawnMaxPermission: null,
-      projectPaths: []
-    };
+  /**
+   * One dashboard's `/api/health` and NOTHING else — the Dashboards page's per-machine read (`MachinesService`). `statusOf` and `remoteStatusOf` also read the
+   * project map (`/api/configs`, up to 15 s), which a Settings page has no project to ask about and which would make a remote's health depend on one; this is
+   * their health half on its own, so `projectPaths` is not in the answer and the three fields the dot reads come out exactly as `judge` reads them.
+   *
+   * `!cfg.enabled` is the same off switch `judge` has: the all-false answer with no fetch, so `BM_AGENTS` off stays egress-free here too. A failed read is
+   * `enabled: true, reachable: false` carrying `message(e)` — the wording `judge` has always given.
+   */
+  async healthOf(cfg: AgentsConfig, healthMs: number): Promise<MachineHealth> {
+    const off: MachineHealth = { enabled: false, reachable: false, remoteAnswer: false, spawnAvailable: false, spawnMaxPermission: null };
     // The short-circuit is the feature's off switch: no fetch, so no egress,
     // so nothing to report about a dashboard we never contacted.
     if (!cfg.enabled) return off;
-
     let health: DashboardHealth;
     try {
-      health = await this.get<DashboardHealth>(cfg, '/api/health', budget.healthMs);
+      health = await this.get<DashboardHealth>(cfg, '/api/health', healthMs);
     } catch (e) {
       return { ...off, enabled: true, error: message(e) };
     }
+    return {
+      enabled: true,
+      reachable: true,
+      remoteAnswer: health.remoteAnswer === true,
+      spawnAvailable: health.spawnAvailable === true,
+      spawnMaxPermission: asMode(health.spawnMaxPermission)
+    };
+  }
+
+  /** `statusOf`'s body as it stood, with the one switch `remoteStatusOf` needs: what a failed project-map read means. */
+  private async judge(cfg: AgentsConfig, budget: StatusBudget, mapFailureIsUnreachable: boolean): Promise<AgentsStatus> {
+    // The health half is `healthOf`; what this adds is the project map. A disabled or unreachable answer is returned as it came, with the empty list the
+    // old `off` answer always carried.
+    const health = await this.healthOf(cfg, budget.healthMs);
+    if (!health.reachable) return { ...health, projectPaths: [] };
 
     let projectPaths: string[] = [];
     try {
@@ -123,17 +137,12 @@ export class DashboardStatusService {
       //
       // Not for a remote (`remoteStatusOf`): there the empty list would be read as "never seen the project", the worse lie of the two. `projectMap`
       // wraps every failure in an HttpException whose `error` is already `dashboardError`'s wording, so that text is relayed as it stands.
-      if (mapFailureIsUnreachable) return { ...off, enabled: true, error: mapError(e) };
+      if (mapFailureIsUnreachable) {
+        return { enabled: true, reachable: false, remoteAnswer: false, spawnAvailable: false, spawnMaxPermission: null, projectPaths: [], error: mapError(e) };
+      }
     }
 
-    return {
-      enabled: true,
-      reachable: true,
-      remoteAnswer: health.remoteAnswer === true,
-      spawnAvailable: health.spawnAvailable === true,
-      spawnMaxPermission: asMode(health.spawnMaxPermission),
-      projectPaths
-    };
+    return { ...health, projectPaths };
   }
 
   /**

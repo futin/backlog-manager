@@ -15,10 +15,16 @@ export type PillTone = 'neutral' | 'live' | 'warn' | 'bad' | 'done';
  * `neutral` for a count, `live` for something running, `warn` for something
  * waiting on a person, `bad` for a failure, `done` for a finished thing — so a
  * palette swap moves the colour and never the meaning.
+ *
+ * `off` is NOT a sixth tone: it is a state any tone can be in, for a fact that
+ * does not hold — a model a machine may not run, an effort it will not take.
+ * The tone class stays on the element (the pill still names what it is a
+ * reading OF) and `ui-pill-off` rides beside it, so the look that says "not
+ * allowed" never has to be restated per tone and a palette swap still moves it.
  */
-export function Pill({ children, tone = 'neutral', title }: { children: ReactNode; tone?: PillTone; title?: string }) {
+export function Pill({ children, tone = 'neutral', title, off = false }: { children: ReactNode; tone?: PillTone; title?: string; off?: boolean }) {
   return (
-    <span className={`ui-pill ui-pill-${tone}`} title={title}>
+    <span className={`ui-pill ui-pill-${tone}${off ? ' ui-pill-off' : ''}`} title={title}>
       {children}
     </span>
   );

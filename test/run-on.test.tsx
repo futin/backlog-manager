@@ -99,7 +99,7 @@ describe('RunOn', () => {
     render(<RunOn offers={SUGGESTED} value="Pro" onChange={() => {}} />);
     expect(screen.getByText(REASON).textContent).toBe(REASON);
     const link = screen.getByRole('link', { name: /settings/i });
-    expect(link.getAttribute('href')).toBe('/?section=settings&settings=shared');
+    expect(link.getAttribute('href')).toBe('/?section=settings&settings=dashboards');
   });
 
   it('reads the cache age at the group’s top right', () => {

@@ -6,19 +6,25 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import {
   deleteEntry,
   fetchDashboards,
+  fetchMachines,
   fetchOffers,
   lockedFor,
+  machineIds,
   machineLabelByHost,
   narrowTo,
+  noUsageText,
+  pickSelected,
   prRequiredText,
+  resetClockText,
   saveEntry,
   saveHome,
-  saveSuggestion
+  saveSuggestion,
+  statusFor
 } from '../client/src/lib/dashboards';
 import { dispatchAgent, startOrchestrate } from '../client/src/lib/agents';
 import { useDashboards } from '../client/src/hooks/useDashboards';
 import { useOffers } from '../client/src/hooks/useOffers';
-import type { DashboardsView, MachineOffer, ProjectOffers } from '../shared/types';
+import type { DashboardsView, MachineOffer, MachineStatus, MachinesStatus, ProjectOffers } from '../shared/types';
 
 /**
  * Task 8's client half of the multi-dashboard feature: the six calls, the two derivations the launch surfaces share, and the two hooks that read them. Every
@@ -289,5 +295,115 @@ describe('narrowTo', () => {
 describe('hint text', () => {
   it('names the machine', () => {
     expect(prRequiredText('Pro')).toBe('Required when running on Pro');
+  });
+});
+
+/** The Settings › Dashboards page's derivations (task 4): which machines it lists and in what order, which one is selected, and the words a card's usage slot shows. */
+describe('machineIds', () => {
+  const view = (order: string[], names: string[]): DashboardsView => ({ ...VIEW, order, dashboards: names.map((name) => ({ ...VIEW.dashboards[0], name })) });
+
+  it('follows the prefer order, then appends a remote the order lacks', () => {
+    expect(machineIds(view(['Pro', 'home'], ['Pro', 'Linux']))).toEqual(['Pro', 'home', 'Linux']);
+  });
+
+  it('puts home first when the order does not name it', () => {
+    expect(machineIds(view(['Pro'], ['Pro']))).toEqual(['home', 'Pro']);
+  });
+
+  it('drops an id the order names but no entry owns', () => {
+    expect(machineIds(view(['home', 'Gone', 'Pro'], ['Pro']))).toEqual(['home', 'Pro']);
+  });
+});
+
+describe('pickSelected', () => {
+  it('keeps the wanted id when it is listed, else the first', () => {
+    expect(pickSelected(['home', 'Pro'], 'Pro')).toBe('Pro');
+    expect(pickSelected(['home', 'Pro'], 'Gone')).toBe('home');
+    expect(pickSelected(['home', 'Pro'], null)).toBe('home');
+  });
+});
+
+describe('statusFor', () => {
+  const status = (machine: string): MachineStatus => ({
+    machine,
+    enabled: true,
+    reachable: true,
+    remoteAnswer: true,
+    spawnAvailable: true,
+    spawnMaxPermission: null,
+    usage: null,
+    usageAgeMs: null
+  });
+  const answer: MachinesStatus = { machines: [status('home'), status('Pro')] };
+
+  it('answers the entry for the id, or null', () => {
+    expect(statusFor(answer, 'Pro')?.machine).toBe('Pro');
+    expect(statusFor(answer, 'Gone')).toBeNull();
+    expect(statusFor(null, 'Pro')).toBeNull();
+  });
+});
+
+describe('resetClockText', () => {
+  // A local-constructor clock so the suite does not depend on the machine's zone; 2026-10-23 is a Friday.
+  const now = new Date(2026, 9, 23, 10, 0).getTime();
+  const at = (...a: [number, number, number, number, number]): string => new Date(...a).toISOString();
+
+  it('says the clock time for later today', () => {
+    expect(resetClockText(at(2026, 9, 23, 23, 39), now)).toBe('resets 23:39');
+  });
+
+  it('prefixes a fixed English weekday for a later day', () => {
+    expect(resetClockText(at(2026, 9, 24, 0, 5), now)).toBe('resets Sat 00:05');
+    expect(resetClockText(at(2026, 9, 25, 5, 59), now)).toBe('resets Sun 05:59');
+    expect(resetClockText(at(2026, 9, 29, 9, 0), now)).toBe('resets Thu 09:00');
+  });
+
+  it('says now for a reset at or before now', () => {
+    expect(resetClockText(at(2026, 9, 23, 9, 59), now)).toBe('resets now');
+    expect(resetClockText(new Date(now).toISOString(), now)).toBe('resets now');
+  });
+
+  it('is null for a missing or unparseable time', () => {
+    expect(resetClockText(null, now)).toBeNull();
+    expect(resetClockText('soon', now)).toBeNull();
+  });
+});
+
+describe('noUsageText', () => {
+  it('names an unreachable enabled machine', () => {
+    expect(noUsageText({ enabled: true, reachable: false, usageAgeMs: null })).toBe('unreachable');
+  });
+
+  it('says how old a stale figure is, and otherwise that there is none', () => {
+    expect(noUsageText({ enabled: true, reachable: true, usageAgeMs: 14 * 60_000 })).toBe('no fresh figure · usage 14 min ago');
+    expect(noUsageText({ enabled: true, reachable: true, usageAgeMs: 40_000 })).toBe('no usage figure');
+    expect(noUsageText({ enabled: true, reachable: true, usageAgeMs: null })).toBe('no usage figure');
+  });
+
+  it('does not call a switched-off machine unreachable', () => {
+    expect(noUsageText({ enabled: false, reachable: false, usageAgeMs: null })).toBe('no usage figure');
+  });
+});
+
+describe('fetchMachines', () => {
+  it('resolves a well-formed answer from the machines route', async () => {
+    const body = {
+      machines: [
+        { machine: 'home', enabled: true, reachable: true, remoteAnswer: true, spawnAvailable: true, spawnMaxPermission: null, usage: null, usageAgeMs: null }
+      ]
+    };
+    const fn = stubFetch(body);
+    await expect(fetchMachines()).resolves.toEqual(body);
+    expect(fn.mock.calls[0][0]).toBe('/api/dashboards/machines');
+  });
+
+  it('refuses an entry missing its flags', async () => {
+    stubFetch({ machines: [{ machine: 'home' }] });
+    await expect(fetchMachines()).rejects.toThrow('unexpected /api/dashboards/machines response');
+  });
+
+  it('refuses a usage whose windows are not readings', async () => {
+    stubFetch({ machines: [{ machine: 'home', enabled: true, reachable: true, usage: { fiveHour: null, week: null }, usageAgeMs: 1 }] });
+    await expect(fetchMachines()).rejects.toThrow('unexpected /api/dashboards/machines response');
   });
 });

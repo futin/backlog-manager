@@ -123,5 +123,10 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   remote launch blocks, and the memory-only map that marks it in flight, are `orchestrator.md`'s `remoteStarting` rule. Stop and release route by a ladder: a
   dispatch record names its machine; no record plus a claim `host` equal to a configured remote's `host` stops there, then releases; otherwise today's path.
   Every NEW outbound read of a remote (offers, usage, board, status) is held to 5 s (`OFFERS_TIMEOUT_MS`, `USAGE_TIMEOUT_MS`, `BOARD_TIMEOUT_MS`); home keeps
-  its 4 s health and 15 s management budgets, and spawn and stop keep 10 s. `agents/dashboards/` is part of the `agents/` outbound module, not a fourth one.
+  its 4 s health and 15 s management budgets, and spawn and stop keep 10 s. `GET /api/dashboards/machines` (`MachinesService`, read-only, unguarded, always a
+  200) is the Settings › Dashboards page's read, beside the four POSTs and the offers: `{ machines: MachineStatus[] }`, home first and then the remotes in
+  FILE order (an unreadable file is home alone). Per machine it makes `/api/health` and nothing else (never `/api/configs`; home's 4 s budget, a remote's 5 s),
+  then usage only when that answer says `enabled && reachable` — so `BM_AGENTS` off makes no outbound call at all, home included. Unlike the offers, it reads
+  home's usage under a `default` source (no file, home alone), because the page draws home's meters either way. A `MachineStatus` is built field by field: no
+  URL and no token reach the body. `agents/dashboards/` is part of the `agents/` outbound module, not a fourth one.
   Why: [invariants.md](docs/subsystems/invariants.md#dashboardsjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced)

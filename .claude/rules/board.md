@@ -10,7 +10,7 @@ paths: ["client/src/**"]
   [invariants.md](docs/subsystems/invariants.md#a-starting-entry-blocks-what-a-run-file-blocks-bug-21)
 - **Escape has one owner, and the topmost dialog is the only one that closes.** `hooks/useDialogEscape.ts` is a module-level LIFO stack plus a single `window`
   listener; eight dialogs are on it — the item modal, `LaunchSheet`, `OrchestrateSheet`, since Jira phase 2 `JiraIssueModal` and `JiraBoardSheet`, since the
-  release chip `ReleasesDrawer`, since Jira phase 5 `JiraLaunchSheet`, and since the Dashboards card's add/edit sheet `DashboardSheet` — and
+  release chip `ReleasesDrawer`, since Jira phase 5 `JiraLaunchSheet`, and since the Dashboards page's add/edit sheet `DashboardSheet` — and
   none binds its own (bug-23 — four until task-37 took the run drawer off the Board, whose content is the Runs page's inline detail sheet and never a dialog
   again; three from then until Jira phase 2). Since task-40 the hook is called by the overlay shells (`ui/Modal.tsx`, `ui/FormSheet.tsx`), not by the
   surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`, `JiraLaunchSheet` and `DashboardSheet`,
@@ -44,13 +44,13 @@ paths: ["client/src/**"]
   or rejected is never stale; unparseable or absent stamps read as fresh; a task never leaves the Board, it gains a `stale` marker. `staleDays` (default 30)
   clamps to the DEFAULT below `min`, never to the bound. Why:
   [invariants.md](docs/subsystems/invariants.md#board-versus-archive-is-derived-and-last-touched-has-three-rungs)
-- **Settings is two pages, the page is the scope, and the rail is the only thing that switches them.** `settingsScope` (`client/src/lib/settings.ts`) is
-  `local | shared`: Local is this browser's `localStorage`, Shared is what the API reads off the host. No card mixes the two — which is why `Claude Agents` is
-  two cards and why `open dashboard ↗` sits beside the per-device field supplying its href — and there is no in-page switch at any width, the same rule Runs'
-  two pages follow, and Jira's since phase 2. One `RailTree` renders every tree — Runs, Jira and Settings, three call sites; `SECTIONS`/`Section` live in
-  `client/src/lib/sections.ts` because the rail reading `useSettings` closed a
-  cycle with `lib/settings.ts`. Why:
-  [invariants.md](docs/subsystems/invariants.md#settings-is-two-pages-the-page-is-the-scope)
+- **Settings is three pages, the page is the scope, and the rail is the only thing that switches them.** `settingsScope` (`client/src/lib/settings.ts`) is
+  `local | shared | dashboards`: Local is this browser's `localStorage`, Shared and Dashboards are what the API reads off the host (Dashboards is the machine
+  list and each machine's health and usage, its own page since they outgrew a card; its scope pill reads `this machine`, as Shared's does). No card mixes
+  local and host — which is why `Claude Agents` was two cards and why `open dashboard ↗` sits beside the per-device field supplying its href — and there is no
+  in-page switch at any width, the same rule Runs' three pages follow, and Jira's since phase 2. One `RailTree` renders every tree — Runs, Jira and Settings,
+  three call sites; `SECTIONS`/`Section` live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
+  [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
 - **The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only
   when `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `archive` and `settings` UNCONDITIONALLY — `resolveSection`
   runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips the row unless the
@@ -115,7 +115,8 @@ paths: ["client/src/**"]
 - **A client poller built on `useCoalescedFetch` never has two of its own requests in flight: its timer is armed by an answer, and a trigger that lands
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
   of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
-  poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks` and `useOrchestratorArchive` (no `armed`: it never polls) — owning the
+  poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive` (no `armed`: it never polls) and
+  `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) — owning the
   mount + window-focus triggers once; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
   by every trigger that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout`
   re-armed `intervalMs` after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes;

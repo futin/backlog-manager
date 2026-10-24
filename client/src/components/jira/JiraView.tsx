@@ -15,7 +15,7 @@ import { JiraSetupView } from './JiraSetupView';
  * so a machine that never configures Jira never fetches this chunk.
  *
  * It decides one thing: which of the section's two pages is drawn, read from `useJiraPage` — the module store the rail's `Board`/`Setup` tree writes. It
- * draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is two pages…"): the tree is the switch, and the two
+ * draws NO control that switches them, at any width (the Runs/Settings rule, CLAUDE.md "Settings is three pages…"): the tree is the switch, and the two
  * in-page links that also land on a page (`Open board` on Setup, the empty board's chip to Setup) are `onOpenJiraPage`, the rail's own navigation threaded
  * down from `App`, handed to the pages as given.
  *

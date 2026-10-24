@@ -72,6 +72,13 @@ describe('a deep link', () => {
     expect((stored(SETTINGS_STORAGE_KEY) as { settingsScope?: string } | null)?.settingsScope ?? 'local').toBe('local');
   });
 
+  it('applies the Dashboards scope the same way, so the Run on card’s Settings link lands on the machines page', async () => {
+    window.history.replaceState(null, '', '/?section=settings&settings=dashboards');
+    render(<App />);
+    await waitFor(() => expect((stored(SETTINGS_STORAGE_KEY) as { settingsScope?: string } | null)?.settingsScope).toBe('dashboards'));
+    expect(window.location.search).toBe('');
+  });
+
   it('opens nothing special for an unknown section', async () => {
     window.history.replaceState(null, '', '/?section=nope');
     render(<App />);

@@ -93,8 +93,8 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 - **`hub/`** — three read-only Lookout widgets (open work, projects, this machine's run state) at `/api/hub/widgets`, served through the `lookout-widgets`
   package (#249). No actions, so no write path; it reads runs through the pure service read, so a hub poll never arms the watchdog. The run widget opens
   `/?section=runs&runs=history`, the one URL the client reads (`client/src/lib/deep-link.ts`); the other two open `/`. That reader has one more parameter,
-  `settings=shared|local`, honoured only beside `section=settings`: the launch sheets' "Run on" card links to Shared Settings with it, because the viewer's
-  stored scope defaults to `local`.
+  `settings=shared|local|dashboards`, honoured only beside `section=settings`: the launch sheets' "Run on" card links to the Dashboards page with it, because
+  the viewer's stored scope defaults to `local`.
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins
   the inline theme script by hash; and every route, read or write, is gated by a `Host` allowlist, which is what a page that rebinds DNS onto loopback cannot
   pass.

@@ -227,8 +227,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#loopback-bind-is-the-access-control-except-where-noted)
 - **Every route is gated by a Host allowlist, because a bind is no defence against DNS rebinding**
   Why: [invariants.md](docs/subsystems/invariants.md#every-route-is-gated-by-a-host-allowlist)
-- **Settings is two pages, the page is the scope, and the rail is the only thing that switches them.**
-  Why: [invariants.md](docs/subsystems/invariants.md#settings-is-two-pages-the-page-is-the-scope)
+- **Settings is three pages, the page is the scope, and the rail is the only thing that switches them.**
+  Why: [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
 - **The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only
   when `GET /api/jira` says configured.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)

@@ -381,17 +381,20 @@ const RAIL_SUB_LABEL: Record<RunsMode, string> = {
 
 /**
  * The Settings tree's labels, and — exactly like `RAIL_SUB_LABEL` above — the
- * only labels these two pages have: Settings draws no in-page switch at any
+ * only labels these three pages have: Settings draws no in-page switch at any
  * width, so there is no second wording for this one to fall out of step with.
  *
  * `Local` and `Shared` name the SCOPE rather than the contents, because that is
  * the question a reader is answering when they pick one: whether what they are
- * about to change affects anybody but themselves. The page's own scope pill
+ * about to change affects anybody but themselves. `Dashboards` is the one label
+ * that names contents — the page is the machines list, and what it writes is the
+ * host's like Shared's. The page's own scope pill
  * spells the same distinction out in words (`this browser` / `this machine`).
  */
 const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
   local: 'Local',
-  shared: 'Shared'
+  shared: 'Shared',
+  dashboards: 'Dashboards'
 };
 
 /**

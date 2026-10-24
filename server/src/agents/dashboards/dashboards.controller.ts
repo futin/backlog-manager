@@ -1,10 +1,11 @@
 import { isAbsolute } from 'node:path';
 import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards } from '@nestjs/common';
 
-import type { DashboardsView, ProjectOffers } from '../../../../shared/types';
+import type { DashboardsView, MachinesStatus, ProjectOffers } from '../../../../shared/types';
 import { SameOriginPostGuard } from '../origin.guard';
 import { DashboardsFileUnreadable } from './dashboards-file.util';
 import { DashboardsService } from './dashboards.service';
+import { MachinesService } from './machines.service';
 import { OffersService } from './offers.service';
 
 /**
@@ -21,7 +22,8 @@ import { OffersService } from './offers.service';
 export class DashboardsController {
   constructor(
     private readonly dashboards: DashboardsService,
-    private readonly offersService: OffersService
+    private readonly offersService: OffersService,
+    private readonly machinesService: MachinesService
   ) {}
 
   @Get()
@@ -38,6 +40,15 @@ export class DashboardsController {
   offers(@Query('project') project: unknown): Promise<ProjectOffers> {
     if (typeof project !== 'string' || !isAbsolute(project)) throw new HttpException({ error: 'project must be an absolute path' }, 400);
     return this.offersService.offers(project);
+  }
+
+  /**
+   * Every machine's health and usage, for the Settings › Dashboards page (`MachinesService`). Read-only and unguarded like every GET, and always a 200: an
+   * unreachable machine is an answer (`reachable: false` with its error), never an error. A distinct path segment, so it cannot collide with `@Get()` or `offers`.
+   */
+  @Get('machines')
+  machines(): Promise<MachinesStatus> {
+    return this.machinesService.read(Date.now());
   }
 
   @UseGuards(SameOriginPostGuard)

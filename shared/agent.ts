@@ -1,5 +1,5 @@
 import { ATTENTION_RUN_STAGES, EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
-import type { AgentsStatus, BacklogItem, ExecuteFinish, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
+import type { AgentsStatus, BacklogItem, ExecuteFinish, MachineHealth, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
 
 /**
  * agent.ts — what a card's button does, decided once for both sides.
@@ -299,6 +299,27 @@ export function clampMode(want: string, ceiling: PermissionMode | null): Permiss
  * reachability.
  */
 export type DispatchGate = { control: 'enabled' } | { control: 'hidden'; reason: string } | { control: 'disabled'; reason: string };
+
+/** A usage figure older than this reads as no usage, its age still shown. Lives here so the server's cache and a client that draws the age agree on one number. */
+export const USAGE_FRESH_MS = 10 * 60_000;
+
+/**
+ * The one reading of "a launch could go there now", as a dot tone for `ui/Dot` — every surface that draws a machine's health draws it from this, so two dots
+ * for one machine can never disagree. It replaced `dispatchDotTier` and `dispatchHealthy` (client/src/components/settings/DispatchStatus.tsx), whose
+ * three-colour dot was blind to `spawnAvailable`: a dashboard with no `CLAUDE_BIN` drew green while every launch to it was a 404.
+ *
+ * Four rungs, checked in `environmentBlock`'s order so the first one that fails is also the first thing worth fixing:
+ *  - `null` (a quiet dot): no answer yet, or dispatch is off. Neither names a fixable dashboard setting, and off wins over everything below it.
+ *  - `'crashed'`: dispatch is on but the dashboard did not answer.
+ *  - `'paused'`: it answered but cannot take a launch — no `CLAUDE_BIN`, or remote answers off.
+ *  - `'live'`: all four are true.
+ */
+export function dispatchDotTone(h: Pick<MachineHealth, 'enabled' | 'reachable' | 'remoteAnswer' | 'spawnAvailable'> | null): 'live' | 'paused' | 'crashed' | null {
+  if (h === null || !h.enabled) return null;
+  if (!h.reachable) return 'crashed';
+  if (!(h.spawnAvailable && h.remoteAnswer)) return 'paused';
+  return 'live';
+}
 
 /**
  * The four ENVIRONMENT-level dispatch blockers — dispatchGate's `hidden`

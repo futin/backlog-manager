@@ -3,7 +3,7 @@ import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
-import { DashboardsGroup } from './DashboardsGroup';
+import { DashboardsPage } from './DashboardsPage';
 import { TickGroup } from './TickGroup';
 import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
@@ -12,7 +12,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
 import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
-import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type ThemeId } from '../../lib/settings';
+import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type SettingsScope, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, MERGE_MODES } from '../../../../shared/types';
 import type { QuestionMode } from '../../../../shared/types';
@@ -83,9 +83,8 @@ function landingOptions(jiraConfigured: boolean, current: Landing): { value: Lan
 }
 
 /**
- * The Settings section (`.claude/DESIGN.md` §8.6): this device only
- * (localStorage), plus the one card that is not — the watchdog's, which says so
- * in its own scope subtitle.
+ * The Settings section (`.claude/DESIGN.md` §8.6): three pages, and the page is the scope. Local is this device only (localStorage); Shared is what the API
+ * reads off the host (the watchdog file, the tick breaker, the tracker report); Dashboards is the machines a launch can run on, also the host's.
  *
  * `onOpenWatchdog` is the rail's own navigation, threaded down for the watchdog
  * group's `Live view` link (DESIGN.md §8.6), exactly as `BoardView` takes
@@ -97,7 +96,7 @@ function landingOptions(jiraConfigured: boolean, current: Landing): { value: Lan
  */
 export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   const { settings, update } = useSettings();
-  const shared = settings.settingsScope === 'shared';
+  const scope = settings.settingsScope;
 
   return (
     <div className="set">
@@ -121,16 +120,12 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
           something rather than decorate. */}
       <Band
         title="Settings"
-        sub={
-          shared
-            ? 'What the API reads off the host — the watchdog file beside the registry, and the environment the server was started with. Change one here and it changes for everyone.'
-            : 'How this board looks and behaves on this device. These live in this browser and never leave it.'
-        }
+        sub={BAND_SUB[scope]}
       >
-        <Pill tone="neutral">{shared ? 'this machine' : 'this browser'}</Pill>
+        <Pill tone="neutral">{scope === 'local' ? 'this browser' : 'this machine'}</Pill>
       </Band>
 
-      {/* One of two card sets, never both — the page IS the scope (§8.6), so a
+      {/* One of three card sets, never both — the page IS the scope (§8.6), so a
           card that mixed backends would make the pill above a lie. That is why
           the old `Claude Agents` card was split: its status lines report the
           HOST's environment (now the Home row of `Dashboards`) while its model,
@@ -138,31 +133,35 @@ export default function SettingsView({ onOpenWatchdog }: { onOpenWatchdog?: () =
           `Dispatch` on Local), and the split is what let each half sit under a
           truthful heading.
 
-          There is no in-page control that moves between these two, at any
+          There is no in-page control that moves between these three, at any
           width. The rail's tree is the only one, the same rule Runs' three pages
           follow since task-38; a second control here would be a second wording
           free to disagree with the tree's. */}
-      {shared ? <SharedPage onOpenWatchdog={onOpenWatchdog} /> : <LocalPage />}
+      {scope === 'shared' ? <SharedPage onOpenWatchdog={onOpenWatchdog} /> : scope === 'dashboards' ? <DashboardsPage /> : <LocalPage />}
     </div>
   );
 }
 
 /**
- * The Shared page: the watchdog's file beside the registry, the machines a
- * launch can run on with this host's own dispatch report, what this machine can currently
- * see of each project's tracker — since task-45 — and, since the tick breaker,
- * the tick halt threshold under the watchdog.
+ * The band's one-line summary per page — the sentence that makes the scope pill mean something rather than decorate. The Dashboards line is its own and not
+ * the page's footer lead (`Listed in prefer order — move a machine with ↑ ↓…`), which stays where the reader has the list in front of them.
+ */
+const BAND_SUB: Record<SettingsScope, string> = {
+  local: 'How this board looks and behaves on this device. These live in this browser and never leave it.',
+  shared:
+    'What the API reads off the host — the watchdog file beside the registry, and the environment the server was started with. Change one here and it changes for everyone.',
+  dashboards:
+    'The machines a launch can run on, in prefer order, and how the launch sheet picks one. Saved on the API host — change it here and it changes for everyone.'
+};
+
+/**
+ * The Shared page: the watchdog's file beside the registry, what this machine can currently see of each project's tracker — since task-45 — and, since the
+ * tick breaker, the tick halt threshold under the watchdog.
  *
- * Four cards, and the hand-balanced columns hold up for a different reason
- * here than on Local: the left column is the two machine-wide CONTROLS (the
- * watchdog's long card over the tick breaker's one-row card), the right the
- * host's dispatch side — `Dashboards`, then the `Trackers` report.
- * `Dashboards` absorbed the old `Claude Agents` card: that card reported this
- * machine's own dashboard and this one already listed it as `Home` beside the
- * others a launch can run on, so the status became the Home row's first line
- * and the two cards one subject. It is tall, which is why it goes right and
- * not under the tick breaker — the left column is already the watchdog's long
- * card.
+ * Three cards, and the hand-balanced columns hold up for a different reason than on Local: the left column is the two machine-wide CONTROLS (the watchdog's
+ * long card over the tick breaker's one-row card), the right the one host REPORT, `Trackers`. The machines a launch can run on were a fourth card here
+ * (`Dashboards`, which had absorbed the old `Claude Agents` dispatch report as its Home row) until its list, its selection and its per-machine detail outgrew
+ * a card: they are the Dashboards page now, so Shared draws no dispatch line at all and a reader looking for one is one rail entry away.
  */
 function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
   return (
@@ -175,14 +174,7 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
       </div>
 
       <div className="set-col">
-        {/* Dashboards carries this machine's dispatch report on its Home row
-            (what the `Claude Agents` card used to be) above the other machines
-            a launch can run on — one subject, one card. */}
-        <DashboardsGroup />
-        {/* Under it in the same column (spec §5.6): both report on the HOST —
-            one on the dispatch environment, one on the tracker connection —
-            so they read as one column of "what this machine can currently
-            reach". */}
+        {/* The host's one report on this page: what this machine can currently reach of each project's tracker (spec §5.6). */}
         <TrackersGroup />
       </div>
     </div>
@@ -208,8 +200,8 @@ function LocalPage() {
        hang under `Orchestrator` for the same kind of reason, and that pairing
        is gone by design — the watchdog is the server's and this page is the
        browser's, and the split is what says so. Shared is the other shape
-       entirely: the watchdog's long card against the agents report, one tall
-       column each (see `SharedPage`).
+       entirely: the watchdog's long card over the tick breaker against the
+       tracker report (see `SharedPage`).
 
        Folds to one column under 1100 px, which is Settings' own breakpoint and
        deliberately NOT the 700 px phone break every other split on this board

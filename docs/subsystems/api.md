@@ -238,6 +238,15 @@ once, and a remote is offered only if its dashboard answers, its board (`GET <bm
 `owner/name`, never a disk path — with sync on, and that dashboard lists the project's path on its own disk. Usage comes from the dashboard's own `account` and
 `usage/profile` routes, cached 60 s per dashboard and read as none once older than ten minutes; the suggestion never picks on usage a machine does not have.
 
+`GET /api/dashboards/machines` answers `MachinesStatus { machines: MachineStatus[] }` — each machine's health (`enabled`, `reachable`, `remoteAnswer`,
+`spawnAvailable`, `spawnMaxPermission`, and `error` when the probe failed) plus its `usage` and `usageAgeMs` — for Settings › Dashboards, which has no project
+to ask the offers about. Home first, then the remotes in FILE order (an unreadable file is home alone); read-only, unguarded and always a `200`, because an
+unreachable machine is `reachable: false` with its error, never an error. It carries no URL and no token: a `MachineStatus` is built field by field. Each
+machine is asked `GET /api/health` only (never `/api/configs`, so a remote's dot never depends on a project) within home's 4 s budget or a remote's 5 s, and its
+usage — the same 60 s cache the offers share, 5 s budget — only when that answer says `enabled && reachable`, so `BM_AGENTS` off makes no outbound call at all,
+home included. Machines are asked in parallel and health-then-usage within one, so the worst case is about 10 s for a remote. Unlike the offers, home's usage is
+read under a `default` source as well, since the page draws home's meters either way.
+
 ##### Launching on another machine
 
 A remote launch is for a GitHub tracker project only (a files project is a `400`) and goes to the dashboard of the machine named in `machine`: an id the file no

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { USAGE_FRESH_MS } from '../../../../shared/agent';
 import type { MachineUsage } from '../../../../shared/types';
 import { authHeaders, type AgentsConfig } from '../config.util';
 import type { Machine } from './dashboards.service';
@@ -9,7 +10,8 @@ export const USAGE_TIMEOUT_MS = 5_000;
 /** An answer younger than this is served from memory; the offers route asks on every sheet open, and a dashboard's gauge does not move that fast. */
 export const USAGE_TTL_MS = 60_000;
 /** Past this a figure is a guess about a window that has moved on: it reads as no usage, its age still shown (spec: "older than the cache's freshness limit"). */
-export const USAGE_FRESH_MS = 10 * 60_000;
+// The number lives in shared/agent.ts so the client reads the same limit; re-exported under the same name so this file's importers do not change.
+export { USAGE_FRESH_MS };
 
 interface Answer {
   /** `null` is an ANSWER too — signed out, `SHOW_USAGE` off, a window with no figure — and it ages and expires like a number does. */

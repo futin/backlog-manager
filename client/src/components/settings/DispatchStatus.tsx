@@ -1,38 +1,27 @@
-import type { AgentsStatus } from '../../../../shared/types';
+import { dispatchDotTone } from '../../../../shared/agent';
+import type { AgentsStatus, MachineHealth } from '../../../../shared/types';
+import { Dot } from '../ui/Dot';
 
 /**
- * This machine's dispatch report — the status line and the setup steps — drawn on the `Home` row of the Dashboards card (`.claude/DESIGN.md` §8.6), which
- * is where it has lived since the `Claude Agents` card was folded into that one: both answered "what can this machine's own dashboard do", one as a status
- * and one as a list entry, and two cards for one subject read as two subjects. A module of its own because `DashboardsGroup` draws it and `SettingsView`
- * imports `DashboardsGroup`, so it cannot live in either without a cycle.
+ * This machine's dispatch report — the status line and the setup steps — drawn in Home's detail on the Dashboards page (`.claude/DESIGN.md` §8.6), which
+ * is where it has lived since the `Claude Agents` card was folded into the Dashboards card and that card became a page: both answered "what can this
+ * machine's own dashboard do", one as a status and one as a list entry, and two cards for one subject read as two subjects. A module of its own because
+ * `DashboardsPage` draws it and `SettingsView` imports `DashboardsPage`, so it cannot live in either without a cycle.
  *
  * Read-only, like the card it came from: every gate named here lives on a host — in this API's env or in the dashboard's — and a switch that wrote to a
  * browser's localStorage would be a lie about where the setting is. The bearer token is not here and never was: it must never be in a browser at all.
  */
 
-/**
- * The dot's three colors answer one question — "can I dispatch right now?" —
- * not the whole gate ladder `dispatchGate` walks: `spawnAvailable` (no
- * CLAUDE_BIN) still surfaces as gap text below, it just doesn't change the
- * color. `green` needs the dashboard reachable AND remote answers on;
- * anything short of reachable (off, unreachable, still checking) is `gray`
- * rather than a fourth color, since none of those name a fixable dashboard
- * setting the way "remote answers off" does.
+/*
+ * The dot is `dispatchDotTone`'s (shared/agent.ts) — the one reading of "a launch could go there now" — drawn by `ui/Dot`, so this row and every other
+ * surface that draws a machine's health cannot disagree. Four rungs: no tone (quiet) while there is no answer or dispatch is off, `crashed` when dispatch is
+ * on but the dashboard did not answer, `paused` when it answered but cannot take a launch (no CLAUDE_BIN, or remote answers off — the gaps the line below
+ * names), `live` when all four hold. The old three-colour dot read green with no CLAUDE_BIN, which is a dashboard that 404s every spawn.
  */
-type DotTier = 'green' | 'amber' | 'gray';
-
-function dispatchDotTier(status: AgentsStatus | null): DotTier {
-  if (status === null || !status.enabled || !status.reachable) return 'gray';
-  return status.remoteAnswer ? 'green' : 'amber';
-}
-
-function Dot({ tier }: { tier: DotTier }) {
-  return <span className={`set-dot set-dot-${tier}`}>●</span>;
-}
 
 /**
  * One line per gate, in the order dispatchBlock (shared/agent.ts) checks
- * them, so the first red dot named here is also the thing worth fixing
+ * them, so the first gap named here is also the thing worth fixing
  * first. Read-only: every one of these gates lives on a host — in this
  * API's env or in the dashboard's — and a switch here that wrote to a
  * browser's localStorage would just be a lie about where the setting is.
@@ -43,8 +32,12 @@ function Dot({ tier }: { tier: DotTier }) {
 // nested a `.set-hint` inside a `.set-hint` — harmless (the class sets no
 // compounding properties) but redundant, so this returns bare content and
 // lets the row supply the class once.
-export function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
-  const dot = <Dot tier={dispatchDotTier(status)} />;
+//
+// One ladder for every machine (Settings › Dashboards): Home passes `useAgents`' `AgentsStatus` and a remote its `MachineStatus` from the machines read —
+// both are a `MachineHealth`, so the off / unreachable / connected words can never drift apart between two copies. The project count is the one rung only
+// Home's report carries (`projectPaths`); a remote's health has none, so its line ends at the ceiling rather than drawing a `0 projects` nobody measured.
+export function AgentsStatusLines({ status }: { status: (MachineHealth & { projectPaths?: string[] }) | null }) {
+  const dot = <Dot tone={dispatchDotTone(status) ?? undefined} />;
   if (status === null) return <>checking…</>;
   if (!status.enabled) return <>{dot} off — dispatch is not enabled on the API</>;
   if (!status.reachable) {
@@ -59,24 +52,18 @@ export function AgentsStatusLines({ status }: { status: AgentsStatus | null }) {
     <>
       {dot} connected{gaps.length > 0 ? ` — ${gaps.join(', ')}` : ' · spawn on'}
       {' · '}ceiling: {status.spawnMaxPermission ?? 'unknown'}
-      {' · '}
-      {status.projectPaths.length} projects
+      {status.projectPaths !== undefined && <>{` · ${status.projectPaths.length} projects`}</>}
     </>
   );
 }
 
-/** Every gate open: the one state in which the setup steps would only nag. */
-export function dispatchHealthy(status: AgentsStatus | null): boolean {
-  return status !== null && status.enabled && status.reachable && status.spawnAvailable && status.remoteAnswer;
-}
-
 /**
- * The five setup steps, shown only once an answer has landed and it is not healthy. Gated on an actual answer, not bare `!healthy`: `dispatchHealthy` is
- * false the instant `status` is still `null`, which would fold "not answered yet" into "broken" and tell the reader to go edit their .env while the status
+ * The five setup steps, shown only once an answer has landed and it is not healthy. Gated on an actual answer, not bare `tone !== 'live'`: that is
+ * true the instant `status` is still `null`, which would fold "not answered yet" into "broken" and tell the reader to go edit their .env while the status
  * line above still correctly says "checking…".
  */
 export function DispatchSetupSteps({ status }: { status: AgentsStatus | null }) {
-  if (status === null || dispatchHealthy(status)) return null;
+  if (status === null || dispatchDotTone(status) === 'live') return null;
   return (
     <div className="set-row set-row-stacked">
       <div className="set-label">
