@@ -453,8 +453,8 @@ the working tree, because those are the only bytes a dispatched session will eve
 gate as ungroomed and is skipped — `not committed on <base> — the worktree this run creates from <base> would not contain backlog/…`, where `<base>` is the
 branch that run was started on (`main` unless it was told otherwise). That verdict fired five times
 across three projects in the 2026-09-06 sweep, and each one cost a run slot and a person a second trip. This skill is what creates the uncommitted state, so it
-is the only place the sentence can be said at the moment it becomes true. It stops there: the commit is the user's own act, since no skill commits a groom
-for them, and `backlog.mjs` has no notion of whether a file is committed — giving it one would make the registry's writer a git
+is the only place the sentence can be said at the moment it becomes true. It stops there: in place the commit is the user's own act, since no in-place groom commits
+for them (`--finish pr` is the one mode that does, in a worktree of its own), and `backlog.mjs` has no notion of whether a file is committed — giving it one would make the registry's writer a git
 reader for a message this file can print by itself.
 
 **Not printed for a rejection, and not for an idea or refactor left as one.** A rejected item is closed and an un-promoted idea is not a candidate, so no run

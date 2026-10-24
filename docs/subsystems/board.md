@@ -148,9 +148,14 @@ which would claim the run is starting here; it holds the `starting` tone for the
 
 A dispatch control — on the card and again in the modal — opens a launch sheet onto `../claude-agents-dashboard`. An execute's sheet adds a **Finish**
 picker (`In place` / `PR`, seeded on every open from the `executeDefaultFinish` setting, default `In place`, never from the last launch) and, under PR, a
-**Base** select (the project's local branches, seeded to the literal `main` and never stored; a failed branch fetch leaves `main` alone). Below the editable
-body a read-only line shows the closing clause exactly as the server will append it, tracking both selects; `finish` is sent on every execute launch and `base`
-only under PR. Groom and capture sheets keep their closing rule inside the editable text. The toolbar Orchestrate control opens
+**Base** select (the project's local branches, seeded to the literal `main` and never stored; a failed branch fetch leaves `main` alone) and two Switches,
+**Auto-merge** and **Fix** (seeded from `prAutoMergeDefault` and `prFixDefault` each time the finish becomes PR, cleared on leaving it; Fix is disabled, not
+hidden, while Auto-merge is off, and turning Auto-merge off takes Fix with it). A groom's sheet draws the same Finish/Base/toggle rows, seeded from
+`groomDefaultFinish`, but only for a groom run on home: a remote groom has no finish (the server 400s one, and its clause is always the commit rule), so
+the rows wait for `useRunOn`'s `loading` to clear — until the offers answer `runOn` reads home, and a suggested remote landing a moment later would take a
+Finish the person had already touched away. Below the editable body a read-only line shows the closing clause exactly as the server will append it, tracking
+every control; `finish` is sent on every execute launch (and a home groom's), `base`, `autoMerge` and `fix` only under PR, and `fix` only as `autoMerge &&
+fix`. A capture sheet keeps its closing rule inside the editable text. The toolbar Orchestrate control opens
 `OrchestrateSheet`, three steps inside a `FormSheet`, with Start on the last one alone so it never sits under a scroll region whose length is the project's
 queue:
 
@@ -334,7 +339,9 @@ list outgrew a card and became its own page; Shared draws no dispatch line now.
 
 Local holds themes, density, text scale, content width, landing section, the staleness window, the two orchestrator run defaults, and `Dispatch` — the default
 model and effort every launch sheet seeds from, the dashboard link base, and the `open dashboard ↗` link, which rides the `Dashboard link` row it reads its href
-from. `Dispatch` also carries `Execute finish` (`executeDefaultFinish`, the execute sheet's Finish seed) and, only while Jira is configured, `Jira default
+from. `Dispatch` also carries `Execute finish` (`executeDefaultFinish`, the execute sheet's Finish seed), `Groom finish` (`groomDefaultFinish`, a home groom's),
+`Auto-merge PRs` (`prAutoMergeDefault`) and `Fix if it fails` (`prFixDefault`, disabled while the row above it is off, its stored value left alone) and, only
+while Jira is configured, `Jira default
 action` — the action a Jira card's `Run ▾` lists first, read through `resolveJiraAction` so a deleted skill's id reads as `Work it end to end` while the stored
 value is left alone.
 That card is what the old `Claude Agents` card's per-device half became: that card mixed backends, and a page that promises a scope cannot carry one that

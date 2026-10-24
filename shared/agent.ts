@@ -909,8 +909,8 @@ export function defuseFinishFlags(text: string): string {
  *
  * Known seam, deliberately one-sided: `skills/backlog-execute/SKILL.md` still
  * says "Never commits, never pushes" for an in-place finish, and CLAUDE.md's
- * invariant reads "`backlog-orchestrate` is the only skill that merges;
- * `backlog-execute` commits and pushes its own branch only in `pr` mode" — a
+ * invariant reads "`backlog-orchestrate` is the only skill that merges into a
+ * base; `backlog-execute` and `backlog-groom` commit and push their own branch only in `pr` mode" — a
  * commit from an in-place dispatch is in neither half.
  * Only this prompt changed — it is the most specific instruction the spawned
  * session receives, and `skills/` is a publishing boundary (an install is a copy

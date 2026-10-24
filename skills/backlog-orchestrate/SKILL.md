@@ -6,7 +6,7 @@ description: >
   whole phased feature can be drained onto a branch without main being written at all — or, told to leave branches instead, stopped at a reviewed git branch per
   item with nothing merged. Use it to drain the backlog, work the whole queue, run the backlog while I'm away, orchestrate tasks 3-7, drain the backlog onto
   feature/x, work the queue on a branch instead of main, drain the backlog but leave me branches to merge by hand, or to --resume or --abort a run that was
-  interrupted. It is the only skill that merges, and inside a run the only one that commits — execute
+  interrupted. It is the only skill that merges into a base, and inside a run the only one that commits — execute
   still does the work, groom still writes the plans, and neither of them touches git here. Trigger: /backlog-orchestrate
 trigger: /backlog-orchestrate
 ---
