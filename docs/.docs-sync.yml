@@ -32,6 +32,8 @@ docs:
     kind: subsystem
   - path: docs/workflows/ci.md
     kind: workflow
+  - path: docs/subsystems/releases.md
+    kind: subsystem
 out-of-scope:
   - path: backlog/
     reason: the backlog store itself — item files are skill-written records, and the store README documents the store beside the items it describes
