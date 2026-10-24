@@ -441,13 +441,13 @@ test('files: a started marker in a linked worktree is busy and names the tree', 
   assert.equal((await decide(fx)).reason, `started marker on bug-2 in ${other}`);
 });
 
-test('files: the orchestrator and execute trees under .worktrees are skipped, any other tree there is not', async (t) => {
+test('files: the orchestrator, execute and groom trees under .worktrees are skipped, any other tree there is not', async (t) => {
   const fx = project(t);
   item(fx, 'bug-1', BUG_READY);
   item(fx, 'bug-2', BUG_READY);
   commitAll(fx.root);
   const trees = path.join(fx.root, '.worktrees');
-  for (const name of ['execute-bug-2', 'bug-2']) {
+  for (const name of ['execute-bug-2', 'groom-bug-2', 'bug-2']) {
     const tree = path.join(trees, name);
     git(fx.root, 'worktree', 'add', '-q', tree, '-b', `b-${name}`);
     item(fx, 'bug-2', BUG_READY, { started: '2026-10-22T10:00:00Z', phase: 'execute' }, tree);
@@ -529,6 +529,19 @@ test('existing execute branch or worktree skips the item', async (t) => {
   assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-2');
 });
 
+test('files: a groom/<id> branch or a .worktrees/groom-<id> tree takes the item out of the groom candidates', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_RAW);
+  item(fx, 'bug-2', BUG_RAW);
+  commitAll(fx.root);
+  git(fx.root, 'branch', 'groom/bug-1');
+  assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-2');
+  git(fx.root, 'branch', '-D', 'groom/bug-1');
+  assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-1');
+  fs.mkdirSync(path.join(fx.root, '.worktrees', 'groom-bug-1'), { recursive: true });
+  assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-2');
+});
+
 test('tracker: in-review, plan-review and an execute/<n> branch skip the issue', async (t) => {
   const fx = project(t, { tracker: true });
   const items = (over) => [apiItem(fx, 12, over), apiItem(fx, 13, { section: 'tasks' })];
@@ -546,6 +559,20 @@ test('tracker: in-review, plan-review and an execute/<n> branch skip the issue',
   git(fx.root, 'branch', '-D', 'execute/12');
   fs.mkdirSync(path.join(fx.root, '.worktrees', 'execute-12'), { recursive: true });
   assert.equal((await pick(items({}))).id, '#13');
+});
+
+test('tracker: a groom/<n> branch or .worktrees/groom-<n> tree skips the issue for groom', async (t) => {
+  const fx = project(t, { tracker: true });
+  const items = [apiItem(fx, 12, { groomed: false }), apiItem(fx, 13, { section: 'refactors', groomed: null })];
+  const pick = () => withApi(trackerRoutes(fx, items), (port) => decide(fx, ['--dry-run'], { port }));
+  assert.equal((await pick()).id, '#12');
+  git(fx.root, 'branch', 'groom/#12');
+  assert.equal((await pick()).id, '#12');
+  git(fx.root, 'branch', 'groom/12');
+  assert.equal((await pick()).id, '#13');
+  git(fx.root, 'branch', '-D', 'groom/12');
+  fs.mkdirSync(path.join(fx.root, '.worktrees', 'groom-12'), { recursive: true });
+  assert.equal((await pick()).id, '#13');
 });
 
 test('failed record with the same hash skips; an edited item is eligible again', async (t) => {
