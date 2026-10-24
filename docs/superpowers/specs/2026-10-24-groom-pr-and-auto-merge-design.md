@@ -45,15 +45,16 @@ The superpowers 7.0.0 size-name break that briefly made grooms skip the spec is 
 2. The launch sheet offers Finish (In place | PR) and Base for a groom, as it does for an execute.
 3. For any launch whose finish is PR — groom or execute — the sheet offers two checkboxes: **Auto-merge** and **Fix if it fails**.
 4. Auto-merge: after opening the PR, the session arms GitHub auto-merge — only when the repository allows it, checked at runtime with `gh`. Not allowed → one
-   line says so and the PR stays open.
-5. Fix if it fails: the same session stays alive after arming, watches the PR, and on a failing check or a conflict with the base fixes it, commits and pushes
-   again — bounded in rounds and wall clock — until the PR merges or the bound is hit.
+   line says so and the PR stays open. Once armed, the session stays alive and waits for the merge, bounded in wall clock ("### Wait" below).
+5. Fix if it fails: while it waits, the session also fixes a failing check or a conflict with the base — commits and pushes again — bounded in rounds, until
+   the PR merges or a bound is hit.
 
 ## Non-goals
 
 - Review comments (CodeRabbit or human) are not something the fix loop acts on. Failing checks and base conflicts only.
 - A separate "fix session" dispatched later by the board or the dashboard. The fixing session is the one that opened the PR.
-- Ticks: neither tick's groom nor tick's execute gains auto-merge or fix. Tick behaviour is byte-identical.
+- Ticks: neither tick's groom nor tick's execute gains auto-merge or fix. The one tick change is defensive: `tick.mjs` learns to skip a groom's pr-mode tree
+  and branch ("The guard while the PR is open").
 - The orchestrator: its merge modes are untouched; it still owns its own merges.
 - A groom on a remote machine. Today a remote execute is forced to PR; a groom has no finish on any machine. This work gives a groom a finish on THIS machine
   only — a groom body naming a remote machine and a finish is a 400, exactly as a finish on a groom is today.
@@ -107,19 +108,23 @@ happens after the last one. It lives in a new reference file, `skills/backlog-gr
 2. **Pick the tree** — a new worktree cut from `<base>`, on branch `groom/<id>`, set up the way execute's pr-mode §2 sets one up (same location rules, same
    "no local `<base>` → stop" check, same refusal-leaves-nothing rule). `show`, `start --as groom`, every item write and `stop` run in that tree. *My call:*
    no reuse-the-starting-tree branch — a groom has no prior commits to continue, and one rule is easier to keep true than two.
-3. **Brainstorm and plan** — unchanged, run with the tree as the cwd, so the code it reads is `<base>`'s. The spec, when the size is "a project with a written
+3. **Brainstorm and plan** — unchanged, every command run as `cd <tree> && …` (execute's pr-mode §2 "Every command runs in that tree"), so the code it reads
+   is `<base>`'s. The spec, when the size is "a project with a written
    design", is written into the tree. Brainstorming's own "commit the spec" step is folded into step 5 — one commit for the groom, not one per document.
-4. **Write the item** — unchanged in content. On a tracker project the `## Plan` permalink cannot carry the final sha before the commit exists, so the order is:
-   commit (step 5), push (step 6), then write the issue body with `blob/<sha>` of the pushed commit. GitHub keeps PR commits reachable through
-   `refs/pull/<n>/head`, so the permalink survives a squash merge. **A tracker groom in `pr` mode writes its plan with the `plan-review` mark** (the tick's
-   mark: `--plan-review` on `new`/`body`, the label on GitHub), whenever it opened a PR — see "The guard while the PR is open" below.
+4. **Write the item** — unchanged in content. On a **files** project the item is a file in the tree and is written before the commit, as today. On a
+   **tracker** project the `## Plan` permalink cannot carry the final sha before the commit exists, so the order is: commit the spec (step 5), push (step 6),
+   then write the issue — `new … --from <id>` for a promote, `body` for a bug — with `blob/<sha>` of the pushed commit, then open the PR (step 6). GitHub keeps
+   PR commits reachable through `refs/pull/<n>/head`, so the permalink survives a squash merge. **A tracker groom in `pr` mode writes its plan with the
+   `plan-review` mark** (the tick's mark: `--plan-review` on `new`/`body`, the label on GitHub), whenever it opens a PR — see "The guard while the PR is open".
 5. **Commit** — stage only the files this groom wrote (the spec, the plan document if any, and on a files project the item's new and removed files). Never
    `git add -A`. One commit, message `docs(groom): <item title>` (*my call* — it passes `ci / pr-title` when used as the PR title, and a groom is docs).
-6. **Push and PR** — `git push -u origin groom/<id>`, then `gh pr create --base <base>`. Body: what was groomed (verdict, item id), the spec path, the plan's
-   first lines, and on a tracker project `Refs #<n>` (never `Closes` — the issue is the item and stays open to be executed).
-7. **Nothing to commit** — a tracker project groom that wrote no spec has changed nothing in the repo; the groom is on GitHub already. Say
-   `nothing to commit — the groom lives on #<n>; no PR` in one line, remove the empty worktree and branch it made, and end as today. A files project always
-   has the item file to commit, so it always gets a PR.
+6. **Push and PR** — `git push -u origin groom/<id>`; on a tracker project the issue write of step 4 comes next; then `gh pr create --base <base>`. Body: what
+   was groomed (verdict, item id), the spec path, the plan's first lines, and on a tracker project `Refs #<n>`, where `<n>` is the issue that now holds the
+   plan — the new task's number on a promote (the idea it came from is closed by the promote, as today), the bug's own number on a bug. Never `Closes`: that
+   issue is the item, and it stays open to be executed.
+7. **Nothing to commit** — whatever the source, when step 5 would stage nothing: a tracker groom that wrote no spec (the groom already lives on GitHub), or any
+   groom that ended without a verdict — a refusal, a stand-down on an item already in progress, no verdict reached — after §2 cut the tree. Say
+   `nothing to commit — no PR` with the reason in one line, remove the worktree and branch it made, and end as today.
 8. **Auto-merge / fix** — when flagged, the shared procedure below.
 9. **Final message** — PR URL (or the exact `gh pr create` to run by hand and why), branch, absolute worktree path, and the auto-merge outcome. The
    "Groomed on disk only" line is not printed in `pr` mode — the commit exists; once the PR merges, an orchestrator run on `<base>` sees the item.
@@ -128,15 +133,23 @@ happens after the last one. It lives in a new reference file, `skills/backlog-gr
 
 *My call — the user was asked and did not pick; check this one.* The rule is: **the item becomes executable when its groom PR merges, not before.**
 
-- **Files project:** nothing extra. `<base>` holds the un-groomed item until the PR merges, so no gate can execute it; the merge IS the approval. Known
+- **Files project:** no mark. `<base>` holds the un-groomed item until the PR merges, so no gate can execute it; the merge IS the approval. Known
   limitation, stated in the final message the way execute's pr-mode §9 states its own: until the PR merges, the main checkout shows the item un-groomed, so a
-  second groom from the board would groom it again. `tick.mjs`'s exclusions (`execute/<id>`, `.worktrees/execute-<id>`) are NOT extended to `groom/<id>` —
-  ticks stay byte-identical — so the final message says so.
+  second groom from the board would groom it again.
+- **Ticks on a files project:** `tick.mjs` scans every linked worktree for a `started:` marker and skips only `.worktrees/<id>` and `.worktrees/execute-<id>`
+  (`isSkippedTree`), and excludes an item from execute while `execute/<id>` or `.worktrees/execute-<id>` exists (`executeTaken`). A pr-mode groom's tree,
+  `.worktrees/groom-<id>`, holds a `started:` marker while it works — and forever if the session is killed — which would block every tick on that project.
+  So `isSkippedTree` also skips a `groom-` prefix, and a `groomTaken` twin of `executeTaken` (`groom/<id>` branch or `.worktrees/groom-<id>` tree) excludes
+  the item from a tick's groom candidates. The pr-mode tree is therefore exactly `.worktrees/groom-<id>`, on branch `groom/<id>` — named here because
+  `tick.mjs` depends on the spelling.
 - **Tracker project:** the issue body is live the moment it is written, so the plan goes out carrying `plan-review` (step 4). Every gate already honours that
   mark (`planReviewBlock`, `shared/agent.ts`; the orchestrator; `tick.mjs`). It comes off in exactly one of two ways:
-  - the session saw the PR merge — with `--auto-merge`, the session always waits for the merge inside the bounds below (with or without `--fix`; `--fix` only
-    adds the fix rounds) and on `MERGED` runs `backlog.mjs plan-review <id> off`;
-  - otherwise a person approves it on the board, exactly as for a tick's groom.
+  - the session saw the PR merge — with `--auto-merge` armed, the session always waits ("### Wait" below) and on `MERGED` runs
+    `backlog.mjs plan-review <id> off`;
+  - otherwise a person approves it on the board, exactly as for a tick's groom — this covers no auto-merge, auto-merge not allowed or refused, and a wait
+    that hit its bound or ended `CLOSED` before the merge. The final message says the mark is still on and gives the `plan-review <id> off` command.
+- Side effect, expected: a tick counts its groom room off `plan-review` labels (`tick.mjs`, `--max-plans`), so a board pr-groom waiting on its PR takes one
+  of those slots until it merges. Not a bug.
 - A tracker groom that opened **no** PR (step 7: no spec written) writes no mark — there is no unreviewed document behind the plan, the same as an in-place
   groom today.
 
@@ -154,15 +167,15 @@ and — for execute — after the tracker label/comment/stop sequence, so the is
 
 ### Arm
 
-1. Read the repository's settings:
-   `gh repo view --json autoMergeAllowed,squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed`.
-2. `autoMergeAllowed` false → one line: `auto-merge: not allowed on <owner>/<repo> — PR left open`. Skip fix. End as a plain PR finish.
+1. Read the repository's settings: `gh api repos/{owner}/{repo} --jq .allow_auto_merge` for the auto-merge switch (`gh repo view --json` has no such field
+   in gh 2.102.0), and `gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed` for the methods.
+2. `allow_auto_merge` not `true` → one line: `auto-merge: not allowed on <owner>/<repo> — PR left open`. No wait, no fix. End as a plain PR finish.
 3. Merge method: squash if allowed, else merge commit, else rebase (*my call*: matches this repo's squash-only `main`, and every other method is a fallback).
 4. `gh pr merge <n> --auto --<method>`. If GitHub reports nothing is pending (no required checks, PR already mergeable), `gh` merges directly — which is what
    the person ticked. The builder confirms `gh`'s actual behaviour here and records it in the reference file.
-5. Any refusal (permission denial, GitHub error) → report it, leave the PR open, skip fix.
+5. Any refusal (permission denial, GitHub error) → report it, leave the PR open, no wait, no fix.
 
-### Fix (only with `--fix`)
+### Wait (always, once armed)
 
 A foreground loop in the PR's worktree. Nothing in the background — the foreground-only rule both skills already carry holds. It runs inside the turn that
 opened the PR, because a `claude -p` process exits when its turn ends. The dashboard puts no cap on a turn's length (`claude-agents-dashboard/server/lib/
@@ -171,14 +184,21 @@ other session.
 
 - **Watch:** `gh pr view <n> --json state,mergeable,mergeStateStatus,statusCheckRollup` plus `gh pr checks <n> --watch` bounded per call (the Bash tool caps a
   call at 10 minutes, so the wait is a sequence of bounded calls, not one).
-- **Merged** → done; the final message says so.
+- **Merged** → done. Groom on a tracker project: `backlog.mjs plan-review <id> off`. Execute: changes nothing on the issue — with `Closes #<n>` GitHub closes
+  it and `in-review` goes with it; with `Refs #<n>` the issue stays open with `in-review` on, and the final message lists pr-mode §9's hand steps as today.
 - **Closed without merging** → stop, report.
+- **Wall clock:** **45 minutes** from arming (*my call*, a soft default stated in the file). Hit without a merge → stop, leave auto-merge armed (a person's
+  later push still merges it), and report what is pending or red. Without `--fix`, a red check or a conflict also ends the wait at once — nothing will
+  change it — and is reported the same way.
+
+### Fix (only with `--fix`, inside the wait)
+
 - **A failing check** → read the failing job's log (`gh run view <run> --log-failed`), fix in the tree, run the item's verification (execute: the same command
   verification used; groom: whatever check the failing job runs, locally), commit (`fix: <what>`, narrow staging), push. One round.
 - **Conflict with base** (`mergeable: CONFLICTING`) → `git fetch origin <base>` and `git merge origin/<base>` in the tree, resolve, verify, commit, push. One
   round. Never rebase, never force.
-- **Bounds (my call, stated in the file as soft defaults):** at most **3** fix rounds and **45 minutes** of wall clock from arming. On hitting either: stop,
-  leave auto-merge armed (a person's later push still merges it), and report what is red and why.
+- **Rounds (my call, a soft default stated in the file):** at most **3** fix rounds, inside the wait's 45 minutes. A fourth red result → stop as the wall
+  clock does: auto-merge left armed, what is red and why reported.
 - **Not fixable** — a check failing for a reason outside the PR's diff (infra, a flaky job twice in a row, a secret missing) → stop and report rather than
   edit unrelated code. The test for "outside the diff" is the builder's to word.
 - **Re-review (my call):** execute does not re-dispatch `backlog-reviewer` for a fix round; the fix is verified, and the commit is on a PR a person can read.
@@ -221,7 +241,7 @@ blocks another session.
   document means that control. The builder cites the subsection.
 - **Both toggles seed from Settings** (user's decision, after the first draft had them always start off): two new rows on the Settings page that holds
   Execute default finish — **Auto-merge PRs** (`prAutoMergeDefault`, boolean, default `false`) and **Fix if it fails** (`prFixDefault`, boolean, default
-  `false`) — clamped in `clampSettings` like the other keys (a non-boolean reads as `false`). One pair for both groom and execute, because the toggles mean the
+  `false`) — clamped in `clampSettings` by one new boolean helper shared by both keys (a non-boolean reads as `false`). One pair for both groom and execute, because the toggles mean the
   same thing for both. Seeded once per sheet open and from nowhere else — never from the last launch — the rule model/effort/finish already follow. In
   Settings the Fix row is disabled while Auto-merge is off, the sheet's own dependency; a stored `prFixDefault: true` beside `prAutoMergeDefault: false`
   seeds Fix off. The seed applies only when the sheet's Finish is PR; flipping Finish to PR mid-sheet re-applies it, and leaving PR clears both. The defaults
@@ -239,6 +259,8 @@ blocks another session.
   they opened when the trigger says `--auto-merge` — GitHub performs the merge. The fix loop's `git merge origin/<base>` into the PR branch is a merge INTO
   the item's branch, not into the base, and is named as such. Update the headline in CLAUDE.md, its `.claude/rules/` home (byte-equal headline, guarded by
   `test/claude-rules.test.ts`), its `invariants.md` section, `docs/overview.md`, and the description in `skills/backlog-orchestrate/SKILL.md` (line 9) together.
+  The rule's home, `.claude/rules/orchestrator.md`, also needs its mechanism body updated ("Execute is the one other skill that writes git", "it never
+  merges"), not only the headline.
 - **Groom "never commits"** (SKILL.md header and hard limits) gains its `pr` exception, worded as execute's is.
 - **"Dispatch derives the action; it never accepts one"** — untouched; finish is not an action.
 
@@ -258,6 +280,8 @@ blocks another session.
 - `composePrompt` for groom no longer ends in `COMMIT_RULE`, and dispatch's final in-place groom prompt still does.
 - LaunchSheet: Finish/Base drawn for groom; checkboxes only under PR; Fix disabled until Auto-merge; leaving PR clears both; the request body carries the
   booleans only under PR.
+- `tick.mjs`: a `started:` marker inside `.worktrees/groom-<id>` does not block a tick; an item with a `groom/<id>` branch or `.worktrees/groom-<id>` tree is
+  not a groom candidate; `.worktrees/execute-<id>` and `.worktrees/<id>` behave as today.
 - Settings: `groomDefaultFinish` clamps an unknown value to `in-place`; `prAutoMergeDefault` / `prFixDefault` clamp a non-boolean to `false`; the Fix row is
   disabled while Auto-merge is off.
 - LaunchSheet: toggles seed from the two defaults when Finish is PR; `prFixDefault: true` with `prAutoMergeDefault: false` seeds Fix off; flipping Finish
