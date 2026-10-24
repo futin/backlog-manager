@@ -39,6 +39,11 @@ import type { BacklogItem, ExecuteFinish, PermissionMode } from '../../../../sha
  * closing clause those picks append. The plan's prompt carries no such clause: the server appends it at dispatch from the `finish`/`base` this sheet sends,
  * through the same `finishClause` this file previews with, so what is shown is what is sent. Its selects are the 36 px family, `.claude/DESIGN.md` §8.2/§8.6,
  * like every other select on this sheet.
+ *
+ * A `groom` on the home machine picks its finish the same way, seeded from its own Settings default; a groom sent to another machine has no finish at all
+ * (the server 400s one) and draws only the clause line, which then reads the commit rule the server appends. Under PR, for either action, two Switches —
+ * auto-merge, and fix-if-it-fails beneath it — ride as booleans beside `finish`/`base` and change the clause line as they flip. They are the §8.2/§8.6 Switch
+ * row the remote-control toggle already uses.
  */
 export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () => void }) {
   const { settings } = useSettings();
@@ -64,12 +69,10 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const runOn = useRunOn(item.projectPath);
   const { model, setModel, effort, setEffort } = runOn;
   const [remoteControl, setRemoteControl] = useState(true);
-  // Execute's finish pick, seeded from Settings and from nowhere else, for the same reason as model/effort above. `clampSettings` has already dropped
-  // anything outside EXECUTE_FINISHES, so the select can only be seeded with a value it offers. Only an `execute` plan draws or sends it.
+  // The finish pick, seeded from Settings and from nowhere else, for the same reason as model/effort above — once per fetched plan (the effect below), from
+  // the default for that plan's action: execute's and groom's are two Settings rows, so a person who wants every execute to open a PR does not get a PR on
+  // every groom too. `clampSettings` has already dropped anything outside EXECUTE_FINISHES, so the select can only be seeded with a value it offers.
   const [pickedFinish, setFinish] = useState<ExecuteFinish>(settings.executeDefaultFinish);
-  // A remote machine takes PR only, so Finish is DERIVED from the pick rather than overwritten by it: the person's own choice stays in `pickedFinish` and
-  // comes back untouched when they switch to home (Review Focus 5). Derived in render, the way the Orchestrate sheet derives its merge mode.
-  const finish: ExecuteFinish = runOn.lock.prOnly ? 'pr' : pickedFinish;
   // Never stored, never seeded from a previous launch: a base is a fact about one repository's branches, so every open starts on `'main'`.
   const [base, setBase] = useState<string>('main');
   const { busy, error, run } = useAction();
@@ -81,12 +84,42 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
     if (plan === null) return;
     setPrompt(plan.prompt);
     setMode(plan.defaultMode);
+    setFinish(plan.action === 'groom' ? settings.groomDefaultFinish : settings.executeDefaultFinish);
   }, [plan]);
 
   const isExecute = plan?.action === 'execute';
+  const isGroom = plan?.action === 'groom';
+  // Whether this launch takes a finish at all: every execute, and a groom only on the home machine — the server refuses a finish on a groom sent elsewhere.
+  // A groom waits for the offers to answer, because until they do `runOn` reads home, and a suggested remote landing a moment later would take away a Finish
+  // row (and a branch read) the person had just been shown.
+  const hasFinish = isExecute || (isGroom && !runOn.remote && !runOn.loading);
+  // A remote machine takes PR only for an execute, so Finish is DERIVED from the pick rather than overwritten by it: the person's own choice stays in
+  // `pickedFinish` and comes back untouched when they switch to home (Review Focus 5). Derived in render, the way the Orchestrate sheet derives its merge mode.
+  // A groom ignores the lock: it never reaches a remote machine with a finish, so the lock has nothing to say about it.
+  const finish: ExecuteFinish = isExecute && runOn.lock.prOnly ? 'pr' : pickedFinish;
+  const isPr = hasFinish && finish === 'pr';
+
+  // Auto-merge and fix exist only under a PR finish. Each time the derived finish BECOMES PR — the open with a PR default, a pick, a switch to a remote
+  // execute — both re-seed from Settings, and leaving PR clears both, so a toggle flipped under one PR visit never rides into the next. Fix seeds on only
+  // beside auto-merge: Settings can hold `prFixDefault` true under a false `prAutoMergeDefault` (its row is disabled, not cleared), and the server refuses
+  // fix without auto-merge. Adjusted during render, keyed on `isPr`, rather than in an effect: an effect would paint one frame of the previous visit's
+  // toggles (and their clause line) before correcting it.
+  const [autoMerge, setAutoMerge] = useState(false);
+  const [fix, setFix] = useState(false);
+  const [seededPr, setSeededPr] = useState(false);
+  if (seededPr !== isPr) {
+    setSeededPr(isPr);
+    setAutoMerge(isPr && settings.prAutoMergeDefault);
+    setFix(isPr && settings.prAutoMergeDefault && settings.prFixDefault);
+  }
+  // Fix without auto-merge has nothing to wait on, so turning auto-merge off takes fix with it rather than leaving a disabled switch reading on.
+  const pickAutoMerge = (v: boolean): void => {
+    setAutoMerge(v);
+    if (!v) setFix(false);
+  };
   /**
    * The Base select's options — `GET /api/agents/branches`, the Orchestrate sheet's base picker's read (`OrchestrateSheet.tsx`, task-44), keyed on the
-   * project so it runs once per sheet open and never again as Finish flips. Skipped (`null`) for groom and capture, which draw no picker.
+   * project so it runs once per sheet open and never again as Finish flips. Skipped (`null`) for a remote groom and for capture, which draw no picker.
    *
    * **A failure here leaves the select holding `'main'` alone and never blocks a launch** — the reasoning is that sheet's, unchanged: the list only offers
    * alternatives to the default, so losing it costs the alternatives and leaves the default, which is exactly what a launch that asked for nothing else
@@ -94,7 +127,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
    * select still has to offer the value the launch will send; the server proves the base against real branches and refuses a missing one, which is the
    * honest answer.
    */
-  const fetchedBranches = useFetched(isExecute ? () => fetchBranches(item.projectPath) : null, [item.projectPath]);
+  const fetchedBranches = useFetched(hasFinish ? () => fetchBranches(item.projectPath) : null, [item.projectPath]);
   const fetchedList = fetchedBranches.status === 'ok' ? fetchedBranches.value! : [];
   const branches: string[] = fetchedList.includes('main') ? fetchedList : ['main', ...fetchedList];
 
@@ -118,10 +151,12 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           // Spread, not `model: model || undefined` — see `modelEffortFlags`.
           ...modelEffortFlags(model, effort),
           remoteControl,
-          // Execute always names its finish, even untouched — the server appends the closing clause from it, so an absent key would read as in-place whatever
-          // the sheet showed. `base` rides only under PR: a base picked and then abandoned must not reach an in-place launch, which the server refuses.
-          // Groom and capture send neither key; the server 400s `finish` on any other action.
-          ...(isExecute ? (finish === 'pr' ? { finish, base } : { finish }) : {}),
+          // An execute, and a groom on home, always name their finish, even untouched — the server appends the closing clause from it, so an absent key
+          // would read as in-place whatever the sheet showed. `base`, `autoMerge` and `fix` ride only under PR: a base or a toggle picked and then
+          // abandoned must not reach an in-place launch, which the server refuses; under PR both booleans are always present, and `fix` is sent as
+          // `autoMerge && fix` so a fix the server would refuse cannot leave this sheet. A remote groom and a capture send none of the four keys: the
+          // server 400s a finish on either, and a remote groom's clause is always the commit rule.
+          ...(hasFinish ? (finish === 'pr' ? { finish, base, autoMerge, fix: autoMerge && fix } : { finish }) : {}),
           // Only a remote pick names its machine; home sends no key at all, so a home-only board's request is byte-identical to what it was before the
           // picker existed (Review Focus 1).
           ...runOn.request
@@ -202,14 +237,17 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
           </label>
 
           {/* The line the server will append to the prompt at launch — `finishClause`, the one function, so this cannot drift from what is sent. Read-only
-              and outside the textarea on purpose: flipping Finish or Base updates only this line, never the plan and never what was typed. */}
-          {isExecute && <div className="sheet-note">{finishClause('execute', finish, base)}</div>}
+              and outside the textarea on purpose: flipping Finish, Base or a toggle updates only this line, never the plan and never what was typed. A remote
+              groom draws it too, with no finish to read: the server appends the commit rule to it, and `in-place` is what yields exactly that. */}
+          {(isExecute || isGroom) && (
+            <div className="sheet-note">{finishClause(isGroom ? 'groom' : 'execute', hasFinish ? finish : 'in-place', base, { autoMerge, fix })}</div>
+          )}
 
-          {isExecute && (
+          {hasFinish && (
             <div className="sheet-row">
               <label className="sheet-field">
                 <span className="set-name">Finish</span>
-                <Select<ExecuteFinish> label="Finish" value={finish} onChange={setFinish} options={EXECUTE_FINISH_OPTIONS} disabled={runOn.lock.prOnly} />
+                <Select<ExecuteFinish> label="Finish" value={finish} onChange={setFinish} options={EXECUTE_FINISH_OPTIONS} disabled={isExecute && runOn.lock.prOnly} />
                 {runOn.remote && <span className="sheet-note">{prRequiredText(runOn.label!)}</span>}
               </label>
 
@@ -220,6 +258,28 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
                 </label>
               )}
             </div>
+          )}
+
+          {/* The PR finish's two Switches, the remote-control row's §8.2/§8.6 shape. Fix is disabled, not hidden, while auto-merge is off: it only means
+              something once GitHub is waiting to merge, and a dead control with its reason in `title` says that where a missing one would not. */}
+          {isPr && (
+            <>
+              <div className="sheet-check">
+                <Switch checked={autoMerge} onChange={pickAutoMerge} label="auto-merge" />
+                <span>auto-merge — GitHub merges the PR once its checks pass</span>
+              </div>
+              <div className="sheet-check">
+                <Switch
+                  checked={fix}
+                  onChange={setFix}
+                  label="fix if it fails"
+                  disabled={!autoMerge}
+                  title={autoMerge ? undefined : 'Turn on auto-merge first: fixing only applies while GitHub waits to merge'}
+                />
+                <span>fix if it fails — the session stays and fixes failing checks and base conflicts</span>
+              </div>
+              <div className="sheet-note">Needs Allow auto-merge on the GitHub repo; checked when the PR opens.</div>
+            </>
           )}
 
           {/* One row, three controls: "how should this run" is a single

@@ -11,6 +11,8 @@ import { daysAgoDate } from './helpers/dates';
 import { homeOffer, homeOnly, proOffer, proSuggested } from './helpers/offers';
 import { COMMIT_RULE, finishClause } from '../shared/agent';
 import { NO_MACHINE_TEXT } from '../client/src/lib/dashboards';
+
+const AUTO_MERGE_NOTE = 'Needs Allow auto-merge on the GitHub repo; checked when the PR opens.';
 import type { AgentPlan, BacklogItem, ProjectOffers } from '../shared/types';
 
 const ITEM: BacklogItem = {
@@ -356,6 +358,7 @@ describe('LaunchSheet', () => {
   /*
    * The execute finish picker (spec §4). Finish seeds from Settings and is overridable for the one launch; Base exists only while Finish reads PR; the
    * clause line under the prompt is `finishClause` for the current picks — the same function the server appends with, so the sheet shows what will be sent.
+   * Since the groom-PR change a home groom draws the same picker from its own Settings default, and under PR both actions add the auto-merge/fix Switches.
    */
   describe('execute finish picker', () => {
     const dispatchBody = (calls: { url: string; body: unknown }[]): Record<string, unknown> =>
@@ -443,19 +446,128 @@ describe('LaunchSheet', () => {
       expect(calls.filter((c) => c.url.endsWith('/plan'))).toHaveLength(1);
     });
 
-    it('draws no Finish, no clause line and no finish or base key for a groom launch', async () => {
-      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr' }));
+    // Task 4: a groom on the home machine takes a finish too, seeded from its own Settings default — never from execute's.
+    it('a home groom draws Finish (seeded In place) and sends finish in-place with no base, autoMerge or fix', async () => {
       const calls = stub({ plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' } });
       await openSheet();
-      expect(screen.queryByLabelText('Finish')).not.toBeInTheDocument();
+      expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('in-place');
       expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
-      expect(screen.queryByText(COMMIT_RULE)).not.toBeInTheDocument();
-      expect(screen.queryByText(finishClause('execute', 'pr', 'main'))).not.toBeInTheDocument();
+      expect(screen.getByText(COMMIT_RULE)).toBeInTheDocument();
       const body = await launchNow(calls);
       expect(body.action).toBe('groom');
-      expect(body).not.toHaveProperty('finish');
+      expect(body.finish).toBe('in-place');
       expect(body).not.toHaveProperty('base');
-      expect(calls.some((c) => c.url.includes('/api/agents/branches'))).toBe(false);
+      expect(body).not.toHaveProperty('autoMerge');
+      expect(body).not.toHaveProperty('fix');
+    });
+
+    it("a groom seeded PR from groomDefaultFinish offers branches and shows finishClause('groom','pr','main')", async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ groomDefaultFinish: 'pr' }));
+      const calls = stub({ plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' }, branches: ['main', 'develop'] });
+      await openSheet();
+      expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('pr');
+      const base = screen.getByLabelText('Base') as HTMLSelectElement;
+      await waitFor(() => expect([...base.options].map((o) => o.value)).toEqual(['main', 'develop']));
+      expect(screen.getByText(finishClause('groom', 'pr', 'main'))).toBeInTheDocument();
+      expect(calls.some((c) => c.url.includes('/api/agents/branches?project=%2Fabs%2Falpha'))).toBe(true);
+      const body = await launchNow(calls);
+      expect(body).toMatchObject({ action: 'groom', finish: 'pr', base: 'main', autoMerge: false, fix: false });
+    });
+
+    it('executeDefaultFinish pr does not seed a groom', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', groomDefaultFinish: 'in-place' }));
+      stub({ plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' } });
+      await openSheet();
+      expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('in-place');
+      expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
+    });
+
+    it('no toggles under In place; both toggles under PR, Fix disabled until Auto-merge is on', async () => {
+      stub({});
+      await openSheet();
+      expect(screen.queryByRole('switch', { name: 'auto-merge' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch', { name: 'fix if it fails' })).not.toBeInTheDocument();
+      expect(screen.queryByText(AUTO_MERGE_NOTE)).not.toBeInTheDocument();
+
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'pr');
+      const autoMerge = screen.getByRole('switch', { name: 'auto-merge' });
+      const fix = screen.getByRole('switch', { name: 'fix if it fails' });
+      expect(screen.getByText('auto-merge — GitHub merges the PR once its checks pass')).toBeInTheDocument();
+      expect(screen.getByText('fix if it fails — the session stays and fixes failing checks and base conflicts')).toBeInTheDocument();
+      expect(screen.getByText(AUTO_MERGE_NOTE)).toBeInTheDocument();
+      expect(autoMerge).toHaveAttribute('aria-checked', 'false');
+      expect(fix).toHaveAttribute('aria-checked', 'false');
+      expect(fix).toBeDisabled();
+
+      await userEvent.click(autoMerge);
+      expect(autoMerge).toHaveAttribute('aria-checked', 'true');
+      expect(fix).toBeEnabled();
+      expect(screen.getByText(finishClause('execute', 'pr', 'main', { autoMerge: true }))).toBeInTheDocument();
+      await userEvent.click(fix);
+      expect(fix).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByText(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }))).toBeInTheDocument();
+    });
+
+    it('toggles seed from Settings when Finish is PR', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', prAutoMergeDefault: true, prFixDefault: true }));
+      const calls = stub({});
+      await openSheet();
+      expect(screen.getByRole('switch', { name: 'auto-merge' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('switch', { name: 'fix if it fails' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByText(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }))).toBeInTheDocument();
+      const body = await launchNow(calls);
+      expect(body).toMatchObject({ finish: 'pr', base: 'main', autoMerge: true, fix: true });
+    });
+
+    // A stored prFixDefault can be true under a false prAutoMergeDefault (Settings disables the row, it does not clear it); the server refuses fix
+    // without autoMerge, so the sheet must never seed it on.
+    it('prFixDefault true with prAutoMergeDefault false seeds Fix off', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', prAutoMergeDefault: false, prFixDefault: true }));
+      const calls = stub({});
+      await openSheet();
+      const fix = screen.getByRole('switch', { name: 'fix if it fails' });
+      expect(fix).toHaveAttribute('aria-checked', 'false');
+      expect(fix).toBeDisabled();
+      const body = await launchNow(calls);
+      expect(body).toMatchObject({ finish: 'pr', autoMerge: false, fix: false });
+    });
+
+    it('flipping Finish away from PR clears both and back re-seeds', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', prAutoMergeDefault: true, prFixDefault: true }));
+      const calls = stub({});
+      await openSheet();
+      // Turned off by hand first, so the re-seed below is visibly the Settings default coming back and not leftover state.
+      await userEvent.click(screen.getByRole('switch', { name: 'auto-merge' }));
+      expect(screen.getByRole('switch', { name: 'fix if it fails' })).toHaveAttribute('aria-checked', 'false');
+
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
+      expect(screen.queryByRole('switch', { name: 'auto-merge' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch', { name: 'fix if it fails' })).not.toBeInTheDocument();
+      expect(screen.getByText(COMMIT_RULE)).toBeInTheDocument();
+
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'pr');
+      expect(screen.getByRole('switch', { name: 'auto-merge' })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('switch', { name: 'fix if it fails' })).toHaveAttribute('aria-checked', 'true');
+
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'in-place');
+      const body = await launchNow(calls);
+      expect(body.finish).toBe('in-place');
+      expect(body).not.toHaveProperty('autoMerge');
+      expect(body).not.toHaveProperty('fix');
+      expect(body).not.toHaveProperty('base');
+    });
+
+    it('turning Auto-merge off clears Fix', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', prAutoMergeDefault: true, prFixDefault: true }));
+      const calls = stub({});
+      await openSheet();
+      await userEvent.click(screen.getByRole('switch', { name: 'auto-merge' }));
+      const fix = screen.getByRole('switch', { name: 'fix if it fails' });
+      expect(fix).toHaveAttribute('aria-checked', 'false');
+      expect(fix).toBeDisabled();
+      expect(screen.getByText(finishClause('execute', 'pr', 'main'))).toBeInTheDocument();
+      const body = await launchNow(calls);
+      expect(body).toMatchObject({ finish: 'pr', autoMerge: false, fix: false });
     });
   });
 
@@ -517,9 +629,42 @@ describe('LaunchSheet', () => {
       renderSheet({ item: ITEM, onClose: () => {} });
       await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
       expect(screen.queryByLabelText('Finish')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch', { name: 'auto-merge' })).not.toBeInTheDocument();
+      // The clause line is still drawn: it is what the server appends to a remote groom, which takes no finish and so always gets the commit rule.
+      expect(screen.getByText(COMMIT_RULE)).toBeInTheDocument();
       const body = await launchBody(calls, 'Start on Pro');
       expect(body.machine).toBe('Pro');
       expect(body).not.toHaveProperty('finish');
+      expect(body).not.toHaveProperty('base');
+      expect(body).not.toHaveProperty('autoMerge');
+      expect(body).not.toHaveProperty('fix');
+      expect(calls.some((c) => c.url.includes('/api/agents/branches'))).toBe(false);
+    });
+
+    // Until the offers answer, `useRunOn` reads home; a groom that drew Finish then would lose it the moment a suggested remote landed, so it waits.
+    it('draws no groom Finish and reads no branches while the offers load', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ groomDefaultFinish: 'pr' }));
+      const calls = stub({ offers: 'pending', plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' } });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      expect(await screen.findByLabelText('Prompt')).toHaveValue('Groom task-12.');
+      expect(screen.queryByLabelText('Finish')).not.toBeInTheDocument();
+      expect(screen.getByText(COMMIT_RULE)).toBeInTheDocument();
+      expect(calls.some((c) => c.url.includes('/api/agents/branches'))).toBe(false);
+    });
+
+    it('a remote execute draws the toggles and sends them', async () => {
+      localStorage.setItem('backlog-manager.settings', JSON.stringify({ prAutoMergeDefault: true }));
+      const calls = stub({ offers: proSuggested() });
+      renderSheet({ item: ITEM, onClose: () => {} });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start on Pro' })).toBeEnabled());
+      expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('pr');
+      const autoMerge = screen.getByRole('switch', { name: 'auto-merge' });
+      expect(autoMerge).toHaveAttribute('aria-checked', 'true');
+      await userEvent.click(screen.getByRole('switch', { name: 'fix if it fails' }));
+      expect(screen.getByText(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }))).toBeInTheDocument();
+      const body = await launchBody(calls, 'Start on Pro');
+      expect(body).toMatchObject({ machine: 'Pro', finish: 'pr', base: 'main', autoMerge: true, fix: true });
     });
 
     // Review Focus 5.

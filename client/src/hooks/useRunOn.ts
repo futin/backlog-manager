@@ -30,6 +30,9 @@ export interface RunOnState {
   request: { machine?: string };
   /** A launch has nowhere to go yet: the offers are loading, or no machine is offered. A failed read is NOT this — it falls back to home. */
   blocked: boolean;
+  /** The offers have not answered yet (a failed read is not loading). `machine` reads home until they do, so a sheet that draws something only on home — the
+   *  launch sheet's groom Finish — waits on this rather than drawing it for one frame and taking it away when a suggested remote lands. */
+  loading: boolean;
   /** One line under the group when it has something to say that `<RunOn>` does not draw itself, else `null`. */
   note: string | null;
 }
@@ -103,6 +106,7 @@ export function useRunOn(project: string): RunOnState {
     effortOptions: lock.efforts.length > 0 ? asOptions(lock.efforts, EFFORT_OPTIONS) : EFFORT_OPTIONS,
     request: remote ? { machine } : {},
     blocked: loading || noneOffered || (offer !== null && !offer.offered),
+    loading,
     note
   };
 }
