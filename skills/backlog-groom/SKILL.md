@@ -252,15 +252,24 @@ exactly one such place, step 1's headings.
    plan the work is simply planned work.
 
 2. Turn whatever came out of step 1 into a plan, written directly into the new task's `## Plan` section — **that section is the plan artifact; there is no
-   separate plan document to produce.** Which route you take follows brainstorming's own classification, not a separate decision:
-   - **Architectural** → invoke `superpowers:writing-plans`, and put its plan's content into `## Plan`. That heading is where the plan lives; writing-plans is
-     never asked to produce a standalone file for this.
-   - **Bounded** → don't invoke `superpowers:writing-plans` at all — brainstorming's own rule for this path is "implementation proceeds directly through the
-     normal development workflow; no plan document," and writing-plans is only ever invoked after an Architectural brainstorm. Write `## Plan` straight from the
-     short design brainstorming already settled in chat. This is not a workaround or a shortcut: it's the correct reading of both files together, not a
-     contradiction between them.
+   separate plan document to produce.** Which route you take follows the size brainstorming names out loud in its "Size the Work" step — or the size the user
+   overrode it to — not a separate decision:
+   - **A project with a written design** → let brainstorming write its design document where it says (`docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`,
+     committed in a software repo) and get it approved, then invoke `superpowers:writing-plans` and put its plan's content into `## Plan`. That heading is where
+     the plan lives; writing-plans is never asked to produce a standalone file for this. `## Plan` cites the spec — by path on a files project, by permalink
+     on a tracker one (step 4) — so the executing session can read the design the plan came from.
+   - **A small change**, **a quick, clear task**, or a brainstorm the user opted out of → don't invoke `superpowers:writing-plans` at all — brainstorming's own
+     rule for these sizes is to build "through the normal workflow" with no design document, and writing-plans is only ever invoked after a project's document
+     is approved. Write `## Plan` straight from what brainstorming already settled in chat. This is not a workaround or a shortcut: it's the correct reading of
+     both files together, not a contradiction between them.
 
-   Either route ends the same way: `## Plan` must come out real and substantive. `backlog-execute` refuses a task whose `## Plan` is absent, empty, or a
+   When the size is in doubt between a small change and a project, take the project: reaching for the smaller size to skip the document is the doubt itself, and
+   the document is what the person reviewing the groom reads. A groom never takes brainstorming's spike route — a spike builds, and a groom never builds.
+
+   These are superpowers 7's size names. Earlier versions called the two routes **Architectural** (the project route) and **Bounded** (the small-change route);
+   if the brainstorming skill you loaded still uses those words, map them the same way.
+
+   Every route ends the same way: `## Plan` must come out real and substantive. `backlog-execute` refuses a task whose `## Plan` is absent, empty, or a
    placeholder — an under-planned promote doesn't fail here, it fails later, in execute, and the user won't know why. That's what keeps this requirement
    non-negotiable even after the shortest brainstorm.
 

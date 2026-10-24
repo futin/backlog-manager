@@ -24,9 +24,9 @@ Nobody is there to answer, and an unanswered question parks the whole tick.
 - **Every open question you settled is listed, with the answer you chose, under a `## Assumptions (unattended)` heading** — the last heading of the body, after
   `## Fix` (bug) or `## Done when` (task). It is what the person approving the plan reads first. The heading is always written: with no open questions it holds
   the single line `None.`, so a reviewer never has to wonder whether the section was forgotten.
-- A promote's `## Plan` is written straight from what you settled — the "Bounded" route in Promote step 2, never the "Architectural" one that invokes
-  `superpowers:writing-plans`. It must still be real and substantive: `backlog-execute` refuses a placeholder, and under a tick that refusal is a wasted PR
-  slot.
+- A promote's `## Plan` is written straight from what you settled — the "small change" route in Promote step 2, never the "project with a written design" one
+  that writes a spec and invokes `superpowers:writing-plans`. It must still be real and substantive: `backlog-execute` refuses a placeholder, and under a
+  tick that refusal is a wasted PR slot.
 
 ## The plan-review mark — written in the same write as the plan
 
