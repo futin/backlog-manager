@@ -118,13 +118,19 @@ happens after the last one. It lives in a new reference file, `skills/backlog-gr
    `plan-review` mark** (the tick's mark: `--plan-review` on `new`/`body`, the label on GitHub), whenever it opens a PR — see "The guard while the PR is open".
 5. **Commit** — stage only the files this groom wrote (the spec, the plan document if any, and on a files project the item's new and removed files). Never
    `git add -A`. One commit, message `docs(groom): <item title>` (*my call* — it passes `ci / pr-title` when used as the PR title, and a groom is docs).
-6. **Push and PR** — `git push -u origin groom/<id>`; on a tracker project the issue write of step 4 comes next; then `gh pr create --base <base>`. Body: what
+   **Where `stop` falls.** On a files project `stop` runs before the step-5 commit, because it rewrites the item file (removes `started:`, re-stamps
+   `groomed-at:`, SKILL.md "Groomed on disk only" section) and that rewrite belongs in the commit. On a tracker project the claim must outlive the issue write
+   (SKILL.md: `stop` only after `body` exits `0`), so the order there is: commit → push → `new`/`body --plan-review` (run on its own, retried per SKILL.md on
+   a refusal) → plain `stop <id>` → `gh pr create` → auto-merge.
+6. **Push and PR** — `git push -u origin groom/<id>`; on a tracker project the issue write of step 4 and `stop` come next; then `gh pr create --base <base>`. Body: what
    was groomed (verdict, item id), the spec path, the plan's first lines, and on a tracker project `Refs #<n>`, where `<n>` is the issue that now holds the
    plan — the new task's number on a promote (the idea it came from is closed by the promote, as today), the bug's own number on a bug. Never `Closes`: that
    issue is the item, and it stays open to be executed.
 7. **Nothing to commit** — whatever the source, when step 5 would stage nothing: a tracker groom that wrote no spec (the groom already lives on GitHub), or any
    groom that ended without a verdict — a refusal, a stand-down on an item already in progress, no verdict reached — after §2 cut the tree. Say
-   `nothing to commit — no PR` with the reason in one line, remove the worktree and branch it made, and end as today.
+   `nothing to commit — no PR` with the reason in one line, remove the worktree and branch it made, and end as today. A tracker groom that reached a verdict
+   but wrote no spec still writes its issue exactly as an in-place groom does — `body`/`new` with no `--plan-review` and no `blob/<sha>` — and runs `stop`,
+   before the tree is removed; the deferred write of step 4 is only for a groom that has a commit to cite.
 8. **Auto-merge / fix** — when flagged, the shared procedure below.
 9. **Final message** — PR URL (or the exact `gh pr create` to run by hand and why), branch, absolute worktree path, and the auto-merge outcome. The
    "Groomed on disk only" line is not printed in `pr` mode — the commit exists; once the PR merges, an orchestrator run on `<base>` sees the item.
@@ -145,9 +151,10 @@ happens after the last one. It lives in a new reference file, `skills/backlog-gr
 - **Tracker project:** the issue body is live the moment it is written, so the plan goes out carrying `plan-review` (step 4). Every gate already honours that
   mark (`planReviewBlock`, `shared/agent.ts`; the orchestrator; `tick.mjs`). It comes off in exactly one of two ways:
   - the session saw the PR merge — with `--auto-merge` armed, the session always waits ("### Wait" below) and on `MERGED` runs
-    `backlog.mjs plan-review <id> off`;
+    `backlog.mjs plan-review <n> off`, where `<n>` is the issue that holds the plan — the new task's number on a promote (the mark rides on the task `new
+    … --from <id> --plan-review` created; the original is closed), the bug's own number on a bug;
   - otherwise a person approves it on the board, exactly as for a tick's groom — this covers no auto-merge, auto-merge not allowed or refused, and a wait
-    that hit its bound or ended `CLOSED` before the merge. The final message says the mark is still on and gives the `plan-review <id> off` command.
+    that hit its bound or ended `CLOSED` before the merge. The final message says the mark is still on and gives the `plan-review <n> off` command, `<n>` as above.
 - Side effect, expected: a tick counts its groom room off `plan-review` labels (`tick.mjs`, `--max-plans`), so a board pr-groom waiting on its PR takes one
   of those slots until it merges. Not a bug.
 - A tracker groom that opened **no** PR (step 7: no spec written) writes no mark — there is no unreviewed document behind the plan, the same as an in-place
@@ -184,7 +191,7 @@ other session.
 
 - **Watch:** `gh pr view <n> --json state,mergeable,mergeStateStatus,statusCheckRollup` plus `gh pr checks <n> --watch` bounded per call (the Bash tool caps a
   call at 10 minutes, so the wait is a sequence of bounded calls, not one).
-- **Merged** → done. Groom on a tracker project: `backlog.mjs plan-review <id> off`. Execute: changes nothing on the issue — with `Closes #<n>` GitHub closes
+- **Merged** → done. Groom on a tracker project: `backlog.mjs plan-review <n> off`, `<n>` the issue that holds the plan ("The guard while the PR is open"). Execute: changes nothing on the issue — with `Closes #<n>` GitHub closes
   it and `in-review` goes with it; with `Refs #<n>` the issue stays open with `in-review` on, and the final message lists pr-mode §9's hand steps as today.
 - **Closed without merging** → stop, report.
 - **Wall clock:** **45 minutes** from arming (*my call*, a soft default stated in the file). Hit without a merge → stop, leave auto-merge armed (a person's
