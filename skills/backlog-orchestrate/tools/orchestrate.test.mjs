@@ -2743,6 +2743,59 @@ test('verify distinguishes "could not run this command" from a command that ran 
   assert.doesNotMatch(rows[1].tail, /could not run this command/);
 });
 
+// #294: verify's children used to inherit the driver's environment verbatim, and a driver launched under a parent `pnpm` (the dashboard's) carries
+// `COREPACK_ROOT`, which makes a non-corepack pnpm earlier on PATH refuse the `packageManager` pin instead of switching — every check red before it ran. The
+// unit case pins exactly which keys go (a parent's identity) and which stay (the user's own configuration, PATH included); `orch.verifyEnv` through the
+// namespace import, so a missing export fails this case alone.
+test('verifyEnv drops COREPACK_ROOT and a parent run\'s npm_* identity keys, keeps PATH and the user\'s own config, and does not mutate its argument', () => {
+  const env = {
+    PATH: 'p',
+    COREPACK_ROOT: 'c',
+    COREPACK_HOME: 'h',
+    PNPM_HOME: 'ph',
+    npm_execpath: 'x',
+    npm_config_user_agent: 'u',
+    npm_lifecycle_event: 'test',
+    npm_package_name: 'n',
+    npm_config_registry: 'r'
+  };
+  const before = { ...env };
+  assert.deepEqual(orch.verifyEnv(env), { PATH: 'p', COREPACK_HOME: 'h', PNPM_HOME: 'ph', npm_config_registry: 'r' });
+  assert.deepEqual(env, before, 'verifyEnv mutated the env it was given');
+});
+
+test('verify runs every check without the driver\'s COREPACK_ROOT or npm_lifecycle_* keys in its environment', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-9', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true });
+  const probe = 'node -e "process.exit(process.env.COREPACK_ROOT || process.env.npm_lifecycle_event ? 1 : 0)"';
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands: [probe] }));
+
+  // `run()` with two extra keys, the shape a driver spawned under a parent `pnpm run` inherits.
+  const out = spawnSync('node', [SCRIPT, 'verify', 'task-9', '--cwd', worktree, '--json'], {
+    encoding: 'utf8',
+    cwd: project,
+    maxBuffer: CLI_MAX_BUFFER,
+    env: {
+      ...process.env,
+      BM_ORCH_HOME: home,
+      BM_ORCH_CONTROL_HOME: `${home}-control`,
+      CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID,
+      COREPACK_ROOT: '/x',
+      npm_lifecycle_event: 'test'
+    }
+  });
+
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].ok, true, 'the check saw the driver\'s COREPACK_ROOT or npm_lifecycle_event');
+});
+
 test('verify with no run exits 3', (t) => {
   const { home, project } = orchFixture(t);
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-verify-'));
@@ -3707,6 +3760,7 @@ test('the body keeps the rules whose stories moved to references/', () => {
     ['`--model opus` stays on the line', 'every launch line carries --model opus, the retry and fix-loop lines included'],
     ['never run this body under zsh', 'the --settings expansion is correct only under sh'],
     ['never in front of `nohup`', 'BM_ORCH_RUN is a prefix on exec inside the sh -c body'],
+    ['**`unset COREPACK_ROOT;` opens the `sh -c \'…\'` body of every launch line', 'every launch line unsets COREPACK_ROOT inside its sh -c body'],
     ['and no `:` or `/` in it', "the session's -n name is the item id, with a space separator and no : or /"],
     ['retry names itself `orch <id> retry 1`**', "the retry's -n name carries the retry counter"],
     ['If this call exits `10` a stop landed in the gap', 'a refused pid record is not retried or worked around'],
@@ -4320,6 +4374,18 @@ test('the run id assignment sits inside the sh -c body, not in front of nohup', 
   for (const line of dispatchLines) {
     const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"));
     assert.ok(body.includes(ORCH_RUN_ENV), `${ORCH_RUN_ENV} is outside the single-quoted dispatch body: ${line}`);
+  }
+});
+
+test('every launch line unsets COREPACK_ROOT first thing inside its sh -c body', () => {
+  // #294: a driver started under a parent `pnpm` inherits COREPACK_ROOT, and the execute session it spawns runs pnpm through its own Bash tool, where the
+  // variable makes a non-corepack pnpm refuse the packageManager pin. It opens the body — never a prefix on `exec`, where its `;` would detach `exec` from the
+  // `cd … &&` and `test -s … &&` guards — and never sits in front of `nohup`.
+  const lines = execClaudeLines(fs.readFileSync(SKILL_MD, 'utf8'));
+  assert.equal(lines.length, 3, `expected exactly 3 headless launch lines, found ${lines.length}`);
+  for (const line of lines) {
+    const body = line.slice(line.indexOf("sh -c '") + "sh -c '".length, line.lastIndexOf("'"));
+    assert.ok(body.startsWith('unset COREPACK_ROOT; '), `launch line does not open its sh -c body with \`unset COREPACK_ROOT;\`: ${line}`);
   }
 });
 
@@ -10032,7 +10098,8 @@ test('cleanup 3b (remove-then-verify, real directories): a finished delete is pr
   fs.chmodSync(path.join(locked, 'inner'), 0o555);
   const survivor = orch.finishFailedDelete(locked);
   assert.equal(survivor.gone, false);
-  assert.match(survivor.error, /EACCES|EPERM|permission/i);
+  // Node 26 reports this delete as `ENOTEMPTY, Directory not empty` (the parent's rmdir, after the child's unlink failed); node 22/24 as EACCES (#294).
+  assert.match(survivor.error, /EACCES|EPERM|ENOTEMPTY|permission|not empty/i);
 });
 
 test('cleanup 3c: a delete git cannot finish, run for real — unregistered, the directory survives, the entry quotes the error, the branch still goes', (t) => {
@@ -10054,7 +10121,8 @@ test('cleanup 3c: a delete git cannot finish, run for real — unregistered, the
     assert.equal(attention[0].id, CL_ID);
     assert.equal(attention[0].kind, 'parked');
     assert.ok(attention[0].detail.startsWith(`merged; worktree ${tree} would not remove`), attention[0].detail);
-    assert.match(attention[0].detail, /EACCES|EPERM|permission/i, 'the entry does not quote the error');
+    // Node 26 words this failure `ENOTEMPTY, Directory not empty`; node 22/24 `EACCES` (#294).
+    assert.match(attention[0].detail, /EACCES|EPERM|ENOTEMPTY|permission|not empty/i, 'the entry does not quote the error');
     assert.equal(stageOf(fx), 'merged');
     assert.equal(out.branchDeleted, true, 'the registration is gone, so the merged branch is deletable');
   } finally {
