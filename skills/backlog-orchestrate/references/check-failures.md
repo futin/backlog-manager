@@ -86,3 +86,10 @@ other red row and it gates the merge identically, but sending a fix loop after t
 Fix the command or the environment, or park the item with `attention <id> --kind parked --detail "a check could not run: <the failing command names> — fix the
 command or the environment"`, then `stage <id> parked`. The row's `tail` is the tool's text, not this run's: it stays in `status --json` and never goes in
 the detail.
+
+A red row whose `tail` ends in a package-manager or runtime version error — `Corepack invoked pnpm with this version`, `This project is configured to use
+<n> of pnpm`, `Unsupported engine` — ran, but against the wrong toolchain: it is the environment, not the item, and a fix loop would be spent on code that has
+nothing to do with it. `verify` already strips `COREPACK_ROOT` and a parent run's `npm_*` identity keys from every check (#294), so what is left is the
+machine's own PATH or toolchain. Park it with `attention <id> --kind parked --detail "a check could not run: <the failing command names> — environment:
+package-manager or runtime version mismatch"`, then `stage <id> parked` — the same rule as above: the error line itself stays in the `tail`, never in the
+detail.
