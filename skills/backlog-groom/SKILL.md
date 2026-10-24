@@ -5,7 +5,8 @@ description: >
   bug's cause and fix without moving it, or close anything out as decided against. Use it to groom the backlog, plan idea 3, plan ref 2, reject task 5, say this
   is out of scope, or make this executable. It only ever edits and moves existing items — filing a new one is backlog-capture's job, and doing the actual work
   once it's groomed is backlog-execute's, and it never commits: a groom lands on disk only, so the item has to be committed before an orchestrator run can read
-  it. Trigger: /backlog-groom
+  it — unless the trigger says `--finish pr`, where it works in a worktree of its own and ends in a commit, a push and a PR it never merges; with
+  `--auto-merge` it arms GitHub auto-merge on its own PR and GitHub merges. Trigger: /backlog-groom
 trigger: /backlog-groom
 ---
 
@@ -15,8 +16,10 @@ Groom gives one open item a verdict: **promote** it, **plan its fix** in place, 
 it never does the actual work — that's `backlog-execute`. Every verdict below ends with a file that's either fully rewritten or left fully alone; there's no
 half-done state this skill leaves behind on purpose.
 
-It also never commits — the only skills that do are `backlog-orchestrate` and `backlog-execute` in `pr` mode, each in a worktree of its own — so a groom
-lands **on disk only**, and an orchestrator run reads each
+It also never commits — unless the trigger says `--finish pr` ("Finish mode" below) — the only skills that do are `backlog-orchestrate`, and
+`backlog-execute` and this skill in `pr` mode, each in a worktree of its own; in `pr` mode it commits only in the tree it cut for this groom, pushes only that
+tree's own branch, never `<base>` and never with force, and never merges — with `--auto-merge` it arms GitHub auto-merge on its own PR and GitHub merges
+(`references/pr-mode.md`). Otherwise a groom lands **on disk only**, and an orchestrator run reads each
 item at the commit its worktree is created from rather than off the working tree. An executable item that was never committed is therefore invisible to a run,
 which is why the two verdicts that produce one end by saying so out loud (see "Groomed on disk only" below).
 
@@ -29,6 +32,28 @@ exist — plan a bug's fix, or promote a refactor to a task — never a reject, 
 confidence, an item that should be rejected, or any refusal writes no verdict, runs your own `stop` as usual and ends with one line starting `failed:` and the
 reason — and on a files project never takes over a `started:` marker you did not set. Read
 `${CLAUDE_PLUGIN_ROOT}/skills/backlog-groom/references/backlog-tick.md` in full, before `show`: it holds the mark's spelling per source and the stops.
+
+## Finish mode: `in-place` or `pr`
+
+Under a `[backlog-tick]` marker skip this section entirely: a tick never passes a finish, and its groom stays on disk. Otherwise read it from the trigger,
+once, before `show`:
+
+- **No `--finish`, or `--finish in-place`** — today's behaviour, unchanged and unannounced. Everything below applies as written. A `--base` beside it is
+  ignored, and one line says so.
+- **`--finish pr`** — `<base>` is the trigger's `--base <ref>`, else the remote's default branch, else `main` (`references/pr-mode.md` §1 has the git
+  read). Say `finish mode: pr → PR into <base>` in one line, ask nothing, and read `${CLAUDE_PLUGIN_ROOT}/skills/backlog-groom/references/pr-mode.md` in
+  full before Pick an item. It cuts the tree every later command runs in, and it replaces this file's never-commits text and the `Groomed on disk only`
+  line where it says so.
+- **Any other `--finish` value** — stop and say the two legal values are `in-place` and `pr`. **Both `--finish pr` and `--finish in-place`** — stop and name
+  both. Never fall back to either mode.
+- **The `--finish pr` token is the one signal**, typed or inside the board's closing sentence (pr-mode.md §1 quotes it). A board prompt ending in the
+  "commit … Do not push." rule is `in-place`. Generic commit or PR wording elsewhere in a prompt switches nothing, and this skill never offers a switch.
+- **`--auto-merge` and `--fix` are read in the same pass**, from the same place, and only beside `--finish pr`: `--auto-merge` arms GitHub auto-merge on the
+  PR this session opens, `--fix` keeps the session fixing failing checks and conflicts with `<base>` until GitHub merges it. `--auto-merge` without
+  `--finish pr`, or `--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule; never fall back to a mode without the flag, nor to one
+  without the PR. With either present the mode line names them — `finish mode: pr → PR into <base>, auto-merge, fix`, each flag only when present — and
+  `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` is read in full where pr-mode.md §8 says, never earlier. Generic "merge" wording
+  in a prompt arms nothing.
 
 ## Pick an item
 
@@ -435,6 +460,10 @@ reader for a message this file can print by itself.
 **Not printed for a rejection, and not for an idea or refactor left as one.** A rejected item is closed and an un-promoted idea is not a candidate, so no run
 would pick either one up and committing it changes nothing about that.
 
+**Not printed in `pr` mode.** The sentence stays exactly as above and is still the in-place ending; a `--finish pr` groom commits what it wrote in its own
+worktree and opens a PR, so there is no uncommitted state for the line to warn about, and the final message carries the PR instead
+(`references/pr-mode.md` §9). Once that PR merges, an orchestrator run on `<base>` sees the item.
+
 ## If the session ends without a verdict
 
 If the user walks away mid-groom — no verdict given yet, or one chosen but the steps above never finished — clear the marker before the turn ends:
@@ -456,6 +485,9 @@ reached `start` at all.
 
 The one case where this section _does_ apply after a refusal is a stale stamp you re-took with `stop` then `start` — the marker is this session's own from that
 point on, and everything here holds for it in full.
+
+**In `pr` mode** this `stop` runs in the tree the groom cut, under the same test, and then `references/pr-mode.md` §7 removes that tree and its branch — only
+while the branch has nothing of its own, and never anything a person might want — and says `nothing to commit — no PR` with the reason.
 
 ## Next
 

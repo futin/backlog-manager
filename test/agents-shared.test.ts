@@ -878,6 +878,32 @@ describe('inReviewBlock', () => {
     expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
     expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
   });
+
+  /* Groom's half of the same seam. Its sentence differs from execute's by "reviews, " (no reviewer runs on a groom PR), so a groom pr-mode.md that copied
+     execute's quote would describe a prompt the board never sends a groom — and the flag sentence is the one a session reads `--auto-merge --fix` out of. */
+  it('groom pr-mode.md quotes both groom sentences', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('groom', 'pr', '<base>'));
+    expect(prMode).toContain(finishClause('groom', 'pr', '<base>', { autoMerge: true, fix: true }));
+  });
+
+  /* `tick.mjs` skips `.worktrees/groom-<id>` when it scans for `started:` markers and treats `groom/<id>` or that tree as taken (`groomTaken`). The spelling
+     is a contract between two files that never import each other: a groom that cut `.worktrees/groom/<id>` or branched `groom-<id>` would block every tick on
+     a files project with its marker, and let a tick re-groom an item whose plan sits on an open PR. */
+  it('groom pr-mode.md spells the tree tick.mjs skips', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8');
+    expect(prMode).toContain('.worktrees/groom-<id>');
+    expect(prMode).toContain('groom/<id>');
+  });
+
+  /* The doors into the room: SKILL.md's Finish mode section is the only thing that sends a session to pr-mode.md, and pr-mode.md's auto-merge step is the
+     only thing that sends a groom to the shared procedure. Either pointer deleted leaves both files green and the mode unreachable. */
+  it('groom SKILL.md points at pr-mode.md and auto-merge.md is reached from it', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'SKILL.md'), 'utf8');
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8');
+    expect(skill).toContain('skills/backlog-groom/references/pr-mode.md');
+    expect(prMode).toContain('skills/backlog-execute/references/auto-merge.md');
+  });
 });
 
 /*
