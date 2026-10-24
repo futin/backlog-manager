@@ -575,7 +575,12 @@ describe('POST /api/agents/dispatch', () => {
     const spawnedPrompt = (sent: Sent[]) => JSON.parse(String(spawned(sent)?.init?.body)).prompt as string;
     const exec = (over: Record<string, unknown> = {}) => post({ ...good, itemPath: bugPath('bug-2-a-known-bug.md'), ...over });
     /** The token refusal, byte for byte (the plan's Global Constraints). */
-    const TOKEN_REFUSAL = "the finish mode and base are set by the sheet's pickers — remove --finish and --base from the prompt";
+    const TOKEN_REFUSAL =
+      "the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge and --fix from the prompt";
+    const GROOM_PROMPT = 'Use the backlog-manager:backlog-groom skill on bug-1.';
+    /** A groom twin of `exec`: bug-1 is the ungroomed bug, so its derived action is groom. */
+    const groom = (over: Record<string, unknown> = {}) =>
+      post({ ...good, action: 'groom', itemPath: bugPath('bug-1-a-fresh-bug.md'), prompt: GROOM_PROMPT, ...over });
 
     it('no finish: the spawned prompt ends with COMMIT_RULE', async () => {
       const sent = stubDashboard();
@@ -617,17 +622,86 @@ describe('POST /api/agents/dispatch', () => {
       expect(spawned(sent)).toBeUndefined();
     });
 
-    it('400s a finish on a groom item (rule 2)', async () => {
+    it('groom finish pr + base main: the prompt ends with finishClause(groom, pr, main) and carries no COMMIT_RULE', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      await groom({ finish: 'pr', base: 'main' }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(GROOM_PROMPT + ' ' + finishClause('groom', 'pr', 'main'));
+      expect(spawnedPrompt(sent)).not.toContain(COMMIT_RULE);
+    });
+
+    it("in-place groom: the spawned prompt equals today's composePrompt bytes, with and without an explicit finish", async () => {
+      const sent = stubDashboard();
+      const untouched = GROOM_PROMPT + ' ' + COMMIT_RULE;
+      await groom().expect(201);
+      await groom({ finish: 'in-place' }).expect(201);
+      const prompts = sent.filter((s) => s.url.endsWith('/api/spawn')).map((s) => JSON.parse(String(s.init?.body)).prompt);
+      expect(prompts).toEqual([untouched, untouched]);
+    });
+
+    it('old-tab groom body ending in COMMIT_RULE: exactly one clause, whichever finish', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      const body = GROOM_PROMPT + ' ' + COMMIT_RULE;
+      await groom({ prompt: body }).expect(201);
+      expect(spawnedPrompt(sent).split(COMMIT_RULE)).toHaveLength(2);
+      const sent2 = stubDashboard();
+      await groom({ prompt: body, finish: 'pr', base: 'main' }).expect(201);
+      const p = spawnedPrompt(sent2);
+      expect(p).not.toContain(COMMIT_RULE);
+      expect(p.endsWith(finishClause('groom', 'pr', 'main'))).toBe(true);
+    });
+
+    it('groom pr with autoMerge and fix ends with the groom flag sentence', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      await groom({ finish: 'pr', base: 'main', autoMerge: true, fix: true }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(GROOM_PROMPT + ' ' + finishClause('groom', 'pr', 'main', { autoMerge: true, fix: true }));
+      expect(spawnedPrompt(sent)).toContain('--auto-merge --fix');
+    });
+
+    it('execute pr with autoMerge ends with the execute auto-merge sentence', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      await exec({ finish: 'pr', base: 'main', autoMerge: true }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'main', { autoMerge: true }));
+    });
+
+    it('400s a finish on a capture item (rule 2)', async () => {
       const sent = stubDashboard();
       await post({
         ...good,
-        action: 'groom',
-        itemPath: bugPath('bug-1-a-fresh-bug.md'),
-        prompt: 'Use the backlog-manager:backlog-groom skill on bug-1.',
+        action: 'capture',
+        itemPath: join(projectPath, 'backlog', 'out-of-scope', 'oos-1-declined.md'),
+        prompt: 'Use the backlog-manager:backlog-capture skill on oos-1.',
         finish: 'pr',
         base: 'main'
-      }).expect(400, { error: 'finish applies only to execute' });
+      }).expect(400, { error: 'finish applies only to execute or groom' });
       expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('400s autoMerge or fix beside a finish other than pr (rule 6), fix before rule 7, and a lone fix beside pr (rule 7)', async () => {
+      makeRepo('main');
+      const sent = stubDashboard();
+      const only = { error: 'autoMerge and fix apply only to finish pr' };
+      await exec({ finish: 'in-place', autoMerge: true }).expect(400, only);
+      await exec({ fix: true }).expect(400, only);
+      await groom({ autoMerge: true }).expect(400, only);
+      await exec({ finish: 'pr', base: 'main', fix: true }).expect(400, { error: 'fix requires autoMerge' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('400s a non-boolean autoMerge or fix (rule 4)', async () => {
+      const sent = stubDashboard();
+      await exec({ autoMerge: 'yes' }).expect(400, { error: 'autoMerge must be a boolean' });
+      await exec({ fix: 1 }).expect(400, { error: 'fix must be a boolean' });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('accepts autoMerge false and fix false under in-place: an untouched toggle', async () => {
+      const sent = stubDashboard();
+      await exec({ finish: 'in-place', autoMerge: false, fix: false }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + COMMIT_RULE);
     });
 
     it('400s a base beside finish in-place, and beside no finish (rule 3)', async () => {
@@ -664,16 +738,42 @@ describe('POST /api/agents/dispatch', () => {
       expect(spawned(sent)).toBeDefined();
     });
 
-    it('rule 5 is execute-only: a groom body containing --base x is not refused by it', async () => {
+    it.each([
+      ['--auto-merge', 'Use the skill on bug-2 with --auto-merge.'],
+      ['--fix', 'Use the skill on bug-2, then `--fix`.']
+    ])('400s an execute body typing %s', async (_name, prompt) => {
       const sent = stubDashboard();
-      await post({
-        ...good,
-        action: 'groom',
-        itemPath: bugPath('bug-1-a-fresh-bug.md'),
-        prompt: 'Use the backlog-manager:backlog-groom skill on bug-1. Mention --base x.'
-      }).expect(201);
-      // Groom sends its body unchanged: no clause is appended.
-      expect(spawnedPrompt(sent)).toBe('Use the backlog-manager:backlog-groom skill on bug-1. Mention --base x.');
+      await exec({ prompt }).expect(400, { error: TOKEN_REFUSAL });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it.each([
+      ['--finish', 'Use the skill on bug-1; --finish pr.'],
+      ['--auto-merge', 'Use the skill on bug-1 (--auto-merge).'],
+      ['--base', 'Use the skill on bug-1. Mention --base x.']
+    ])('400s a groom body typing %s', async (_name, prompt) => {
+      const sent = stubDashboard();
+      await groom({ prompt }).expect(400, { error: TOKEN_REFUSAL });
+      expect(spawned(sent)).toBeUndefined();
+    });
+
+    it('a capture body is not checked: a typed --fix is a 201 and goes out unchanged', async () => {
+      const sent = stubDashboard();
+      const prompt = 'Use the backlog-manager:backlog-capture skill on oos-1, mentioning --fix.';
+      await post({ ...good, action: 'capture', itemPath: join(projectPath, 'backlog', 'out-of-scope', 'oos-1-declined.md'), prompt }).expect(201);
+      expect(spawnedPrompt(sent)).toBe(prompt);
+    });
+
+    it('the untouched groom plan for an item titled "Add --fix and --auto-merge flags" dispatches 201', async () => {
+      const file = 'bug-4-flagged.md';
+      writeFileSync(
+        join(projectPath, 'backlog', 'bugs/open', file),
+        item('bug-4', 'Add --fix and --auto-merge flags', '## Symptom\n\nx\n\n## Cause\n\nunknown\n\n## Fix\n\nunknown\n')
+      );
+      const prompt = composePrompt({ id: 'bug-4', title: 'Add --fix and --auto-merge flags', section: 'bugs', groomed: false } as BacklogItem, 'groom');
+      const sent = stubDashboard();
+      await groom({ itemPath: bugPath(file), prompt }).expect(201);
+      expect(spawnedPrompt(sent).match(/--fix|--auto-merge/g)).toBeNull();
     });
 
     /* A title spelling `--base x` must not break the board's own untouched default: composePrompt defuses the token inside the quoted title, so rule 5 sees

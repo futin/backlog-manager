@@ -91,8 +91,11 @@ export class AgentsController {
       effort: body.effort,
       // Unvalidated here too, as `model` is: `AgentsService.dispatch` is the one place a `finish` outside the vocabulary, a `base` without `pr` (or `pr`
       // without one), or a `base` that is no local branch becomes a 400 — it has the item's action and project in hand, which this shape check does not.
+      // `autoMerge` and `fix` ride the same way: the service's rule 4 refuses a non-boolean, rules 6–7 refuse them beside a finish other than `pr`.
       finish: body.finish,
       base: body.base,
+      autoMerge: body.autoMerge,
+      fix: body.fix,
       // Unvalidated here as well: which machines exist is the settings file's answer, read per request by the service (`unknown machine "<x>"`). Absent is
       // home, and the client omits it for home, so a home launch reaches the service exactly as it did before multi-dashboard.
       machine: body.machine,

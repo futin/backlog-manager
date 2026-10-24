@@ -1,6 +1,6 @@
-import { COMMIT_RULE, defuseFinishFlags, oneLine } from '../../../shared/agent';
+import { COMMIT_RULE, defuseFinishFlags, finishClause, oneLine } from '../../../shared/agent';
 import type { AgentAction } from '../../../shared/agent';
-import type { BacklogItem } from '../../../shared/types';
+import type { BacklogItem, ExecuteFinish, FinishFlags } from '../../../shared/types';
 
 /**
  * prompt.util.ts — what the spawned session is actually told to do.
@@ -24,23 +24,42 @@ const SKILL: Record<AgentAction, string> = {
 };
 
 export function composePrompt(item: BacklogItem, action: AgentAction): string {
-  // The title is defused of `--finish`/`--base` tokens for every action — one rule, and harmless for groom and capture — because for an execute, dispatch's
-  // rule 5 would otherwise refuse the board's own untouched prompt over a title that merely mentions the flag.
+  // The title is defused of `--finish`/`--base`/`--auto-merge`/`--fix` tokens for every action — one rule, and harmless for capture — because for an execute
+  // or a groom, dispatch's rule 8 would otherwise refuse the board's own untouched prompt over a title that merely mentions a flag.
   const head = `Use the ${SKILL[action]} skill on ${item.id} — "${defuseFinishFlags(oneLine(item.title))}" — in this repo's backlog.`;
-  // An execute's closing clause is NOT part of the composed prompt: the launch sheet's finish picker owns it, and `AgentsService.dispatch` appends
-  // `finishClause(finish, base)` from validated fields after the sheet's body. Were it here, in the textarea the person may edit, deleting ` --finish pr` from
-  // the text would leave the sheet showing PR while the session stays in place. Groom and capture write item files, never open a PR, and have no picker, so
-  // their `COMMIT_RULE` stays in the editable text as it always did.
-  if (action === 'execute') return [head, instruction(item, action)].join(' ');
+  // An execute's or groom's closing clause is NOT part of the composed prompt: the launch sheet's finish picker owns it, and `AgentsService.dispatch` appends
+  // `finishClause(action, finish, base, flags)` from validated fields after the sheet's body (`appendFinishClause` below). Were it here, in the textarea the
+  // person may edit, deleting ` --finish pr` from the text would leave the sheet showing PR while the session stays in place. Capture writes a new item file,
+  // never opens a PR, and has no picker, so its `COMMIT_RULE` stays in the editable text as it always did.
+  if (action === 'execute' || action === 'groom') return [head, instruction(item, action)].join(' ');
   return [head, instruction(item, action), COMMIT_RULE].join(' ');
 }
 
 /**
+ * The prompt `AgentsService.dispatch` actually spawns: the sheet's body, then the finish clause for an execute or a groom, the body alone for a capture.
+ *
+ * A groom body that ends in `COMMIT_RULE` — a tab opened before the clause left the editable text, or a hand-edited prompt that kept it — loses ONE trailing
+ * copy (with the whitespace before it) first. Under `in-place` the clause is `COMMIT_RULE` again, so the sent bytes are what an old tab always produced; under
+ * `pr` the old sentence ends "Do not push.", the opposite of the clause that follows, and would be the session's second-to-last word. Only a trailing copy is
+ * stripped: one quoted mid-prompt is the person's own text. An execute is deliberately not stripped — its prompt never carried the rule, a body that does is
+ * the "doubled, harmless" case `agents-dispatch.test.ts` pins, and rewriting it would be a behaviour change nobody asked for.
+ */
+export function appendFinishClause(body: string, action: AgentAction, finish: ExecuteFinish, base: string, flags: FinishFlags): string {
+  if (action === 'capture') return body;
+  let text = body;
+  if (action === 'groom') {
+    const trimmed = body.trimEnd();
+    if (trimmed.endsWith(COMMIT_RULE)) text = trimmed.slice(0, trimmed.length - COMMIT_RULE.length).trimEnd();
+  }
+  const clause = finishClause(action, finish, base, flags);
+  return text === '' ? clause : `${text} ${clause}`;
+}
+
+/**
  * The action- and section-specific middle of the prompt — everything between
- * the "use this skill on this item" head and the commit rule groom and capture
- * share (an execute has none here: dispatch appends its finish clause). Split out so the closing rule is appended in exactly one place: when it
- * lived at the end of each branch's own template, the next branch added was the
- * one that forgot it.
+ * the "use this skill on this item" head and the commit rule capture alone
+ * keeps in its text (an execute and a groom have none here: dispatch appends their finish clause). Split out so the closing rule is appended in exactly one
+ * place: when it lived at the end of each branch's own template, the next branch added was the one that forgot it.
  */
 function instruction(item: BacklogItem, action: AgentAction): string {
   if (action === 'execute') {

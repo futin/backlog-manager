@@ -108,14 +108,12 @@ describe('composePrompt', () => {
   });
 
   /*
-   * The commit rule rides on groom and capture, asserted per action. An execute's closing clause is appended by `AgentsService.dispatch` from the
-   * sheet's validated finish pick (`finishClause`), so the plan's text carries none. Each of these writes files — a groom rewrites
-   * an item, a promote creates a task, a capture creates a new item — and a
-   * dispatched session that leaves them loose in the working tree has produced
-   * nothing that survives on its own.
+   * The commit rule rides on capture alone. An execute's and a groom's closing clause is appended by `AgentsService.dispatch` from the sheet's validated
+   * finish pick (`finishClause`), so their plan text carries none — for `in-place` that clause IS this sentence, asserted in agents-dispatch.test.ts. A
+   * capture creates a new item, and a dispatched session that leaves it loose in the working tree has produced nothing that survives on its own.
    */
-  it.each(['groom', 'capture'] as const)('asks %s to commit, narrowly, and never to push', (action) => {
-    const item = action === 'capture' ? fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null }) : fakeItem();
+  it.each(['capture'] as const)('asks %s to commit, narrowly, and never to push', (action) => {
+    const item = fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null });
     const p = composePrompt(item, action);
     expect(p).toMatch(/commit the work/i);
     // The scope is the load-bearing half: a dispatched session runs in the
@@ -312,7 +310,7 @@ describe('dashboardError', () => {
 });
 
 /*
- * The execute prompt carries no closing clause (the finish pick is the sheet's, appended at dispatch), while groom and capture keep `COMMIT_RULE` in the
+ * The execute and groom prompts carry no closing clause (the finish pick is the sheet's, appended at dispatch), while capture keeps `COMMIT_RULE` in the
  * editable text. composePrompt takes exactly (item, action): nothing about the finish mode is read at plan time — it is the sheet's pick.
  */
 describe('composePrompt closing clause', () => {
@@ -324,9 +322,24 @@ describe('composePrompt closing clause', () => {
     expect(p).not.toContain('Do not push');
   });
 
-  it.each(['groom', 'capture'] as const)('%s still ends with COMMIT_RULE', (action) => {
-    const it_ = action === 'capture' ? fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null }) : fakeItem({ groomed: false });
-    expect(composePrompt(it_, action).endsWith(COMMIT_RULE)).toBe(true);
+  it('capture still ends with COMMIT_RULE', () => {
+    const it_ = fakeItem({ id: 'oos-2', section: 'out-of-scope', status: 'terminal', groomed: null });
+    expect(composePrompt(it_, 'capture').endsWith(COMMIT_RULE)).toBe(true);
+  });
+
+  it('groom no longer carries COMMIT_RULE — the finish clause is appended at dispatch, like an execute\'s', () => {
+    const p = composePrompt(fakeItem({ groomed: false }), 'groom');
+    expect(p).not.toContain(COMMIT_RULE);
+    expect(p).not.toContain('Do not push');
+  });
+
+  it.each([
+    ['a bug', fakeItem({ id: 'bug-1', section: 'bugs', groomed: false })],
+    ['an idea', fakeItem({ id: 'idea-1', section: 'ideas', groomed: null })],
+    ['a refactor', fakeItem({ id: 'ref-1', section: 'refactors', groomed: null })],
+    ['a task', fakeItem({ id: 'task-1', section: 'tasks', groomed: false })]
+  ])('the groom prompt for %s carries no FINISH_FLAG match', (_name, it_) => {
+    expect(FINISH_FLAG.test(composePrompt(it_, 'groom'))).toBe(false);
   });
 });
 
