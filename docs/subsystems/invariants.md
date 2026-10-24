@@ -2034,6 +2034,11 @@ itself ever changing, which is exactly why this section's own heading used to na
 (`resume`) landed, then again when a fourth and fifth did: `test/agents-origin-guard.test.ts`'s own parametrized route list — `plan`, `dispatch`, `orchestrate`,
 `resume`, `watchdog/config` — is where the actual set lives now, not a number carried in this prose.
 
+That list has since outgrown those five, which is the point of keeping it there: `pause` and `stop`, the item writes, Jira's `dispatch-jira` (the second
+session-starting POST) and its `jira-stop`, and the four `/api/dashboards` settings POSTs, guarded because they change which machine a launch may be sent to
+and so are as guarded as the launch itself. The POSTs that list does not carry — Jira's `jira.json` and issue writes, the two `/api/ticks` writes and
+`POST /api/trackers/sync` — carry the same `SameOriginPostGuard` and are pinned in their own route suites.
+
 ## Launch sheet model/effort pickers seed from Settings, never the last launch
 
 `dispatchDefaultModel` / `dispatchDefaultEffort` (`client/src/lib/settings.ts`, mirroring the dashboard's own `spawnDefaultModel` / `spawnDefaultEffort`) are
@@ -4238,6 +4243,11 @@ never as nothing" holds for a remote run too. The stamped claim's own heartbeat 
 releases it first, #240) moves it to the server's clock, milliseconds after `finished.at`; a resume never needs it, since a re-claim is a takeover that posts a NEW comment. A released claim whose
 `reason` is a stage reads as that stage — the driver releases at a terminal stage without a final state heartbeat, so `state.stage` is the one before.
 
+**A `stale` release is not the run's own stamp, so it never moves `updatedAt`** (#295). `updatedAt` — what the Runs detail sheet's "last heartbeat" and the
+elapsed time are read from — is the newest of every claim's `heartbeat`, `released.at` and `finished.at`, skipping `released.at` when its `reason` is `stale`.
+That release is written by whoever retired the claim as dead — `GithubSource.claim` in ANOTHER session's takeover, or a person's release route — so counting
+it stretched a run that died 19 s after its claim to the reaper's clock, a day later (run-20261016-163408). `test/remote-runs.test.ts` R-11b pins the case.
+
 **A remote run is read-only, and says so.** Pause, resume, abort and the watchdog are all local mechanisms on the machine holding the run file, so the Runs
 detail sheet draws `Remote run: its controls are on the machine that ran it.` in the controls' slot and never fetches `archive/run`. A queue holds only what
 the run has CLAIMED, and the sheet says that too; a LOCAL run of a tracker project that has claimed nothing says it is not visible from other machines.
@@ -4393,6 +4403,11 @@ left pending, so the next call retries instead of the project being pinned to th
 subject is the working tree, which the fingerprint does not watch — and a request that arrives after an edit must not be handed a read that began before it. Two
 concurrent calls spawn git twice; `test/git-run.test.ts` pins that.
 
+**`ReleasesService` is the one later sharer, on the same terms, so the heading above is narrower than the code** (the release chip, #290; since #301 the read
+is release-kit's `createReleasesReader`). Its key is cheap and trustworthy for the same reason — the root, HEAD and the mtimes of `packed-refs` and `refs/tags`
+under the common git dir — so concurrent requests under one key share one read, a newer key is never handed an older read, the pending entry is dropped when
+it settles, and an incomplete answer is never memoised. Its git still goes through `runGit`, handed to the reader as its git port.
+
 ### What was left synchronous, deliberately
 
 The synchronous `fs` reads (`readFileSync`, `readdirSync`, `statSync` in `orchestrator.service.ts`, `scan.util.ts`, `resolve.util.ts`) were not converted.
@@ -4495,5 +4510,5 @@ padding keep the overhang inside the rail's padding box; an ancestor that clippe
     - test
     - docker-compose.yml
   kind: subsystem
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

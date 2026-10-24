@@ -20,8 +20,9 @@ pnpm install
 cp .env.example .env
 ```
 
-Everything in [`.env.example`](../../.env.example) is commented out and documents its own default; the file matters for four things — moving the host-side
-ports, pointing the container at a project tree that isn't `~/Documents/custom-projects`, turning dispatch on, giving the tracker poller its
+Everything in [`.env.example`](../../.env.example) is commented out and documents its own default; the file matters for five things — moving the host-side
+ports, pointing the container at a project tree that isn't `~/Documents/custom-projects` (or, with `BM_JIRA_REPO_ROOT`, at a tree of Jira-mapped repos that
+isn't `~/Documents/timify-projects`), turning dispatch on, giving the tracker poller its
 `BM_GITHUB_TOKEN`, and giving the Jira poller its three credentials. `BM_AGENTS` is **off** by default, and compose passes it through as
 `${BM_AGENTS:-off}` rather than setting a literal, so that documented default survives the documented quick start. `BM_GITHUB_TOKEN` is passed through the
 same way (`${BM_GITHUB_TOKEN:-}`), because a literal there would be a token committed to the repo; absent is a supported state, and the poller stays disarmed.
@@ -75,7 +76,14 @@ Reaching the board from another device is a separate, deliberate step: `pnpm run
 `~/.backlog-manager` and the project tree come in **read-only**, at their host paths, because the registry stores absolute host paths and they have to mean the
 same thing inside. One nested mount is read-write: `~/.backlog-manager/settings`, the only place the server itself writes — the watchdog config, the pause
 or stop request a live run reads back, and each tracker repo's sync interval (`tracker-sync.json`). The image also carries `git` and a system-config
-`safe.directory` — see Failure modes.
+`safe.directory` — see Failure modes. The server's other settings files — `jira.json`, `tick.json` and `dashboards.json` — live in that same directory,
+for the same reason.
+
+A second tree comes in read-only the same way: `BM_JIRA_REPO_ROOT` (default `~/Documents/timify-projects`), the repos a Jira project is mapped to in Setup →
+Repositories. The server reads their branches and worktrees and never writes them — `jira.mjs worktree` does, on the host. A host path that does not exist is
+created by Docker's bind mount as an empty directory (root-owned on Linux), so point the variable at a directory that already exists. Compose also hands the
+server both roots, `:`-joined, as `BM_REPO_ROOTS` — compose's to set, not `.env`'s — so a mapped repo outside every mount reads as "not mounted into the
+board" rather than as missing; a host-run API leaves it unset and skips that check.
 
 ## Verification
 
@@ -183,5 +191,5 @@ stack topology (`host.docker.internal`), not a policy default, so it is overrida
     - scripts/test-all.mjs
     - server/src/main.ts
   kind: workflow
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

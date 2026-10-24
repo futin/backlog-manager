@@ -21,8 +21,9 @@ watchdog that resumes a crashed run.
 
 - **No auth, no database.** The registry file and each project's `backlog/` directory ARE the data; there is nothing here to log into.
 - **The app writes no item files.** Filing, grooming, executing and moving items all happen through the skills — at the CLI, inside Claude Code, or in a session
-  the board itself spawned. What the board can do is start that work (a dispatch, or an orchestrator run), pause, resume or stop a run, and save the run
-  watchdog's own server-side settings; every item on screen is rendered from what is already on disk. A project connected to a tracker has no item files at
+  the board itself spawned. What the board can do is start that work (a dispatch, or an orchestrator run — on this machine or on another machine's dashboard),
+  pause, resume or stop a run, and save its own server-side settings under `~/.backlog-manager/settings/` (the run watchdog's, the tick breaker's, the remote
+  dashboards list, the Jira setup); every item on screen is rendered from what is already on disk. A project connected to a tracker has no item files at
   all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
 
 **Docs.** [`docs/overview.md`](docs/overview.md) is the map and the one place that lists them all: the architecture in brief, the rationale behind the rules
@@ -84,8 +85,9 @@ No database to start first.
 
 ### Configuration
 
-Everything lives in `.env`, and `.env.example` documents each key — except the four rows marked "Not in `.env.example`" below (`BM_ORCH_HOME`,
-`BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`), which are read straight from the process environment.
+Everything lives in `.env`, and `.env.example` documents each key — except the rows marked "Not in `.env.example`" below (`BM_ORCH_HOME`,
+`BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`, `BM_TICK_FILE`, `BM_DASHBOARDS_FILE` and `BM_AGENTS_TOKEN_<NAME>`), which are read straight from
+the process environment.
 
 | Key                           | Default                                             | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -101,6 +103,7 @@ Everything lives in `.env`, and `.env.example` documents each key — except the
 | `BM_AGENTS_URL`               | `http://127.0.0.1:4173`                             | The dashboard's API origin — its `PORT`, not its Vite port. The host-side answer; compose deliberately never interpolates this key                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `BM_AGENTS_DOCKER_URL`        | `http://host.docker.internal:4173`                  | The same origin as seen from inside the server container. Set it when that default does not reach your host — under WSL2 it resolves and then refuses, and the bridge gateways refuse it too, so use one of the host's own interface IPs (prefer a tailnet address, which survives a reboot)                                                                                                                                                                                                                                                                                                       |
 | `BM_AGENTS_TOKEN`             | empty                                               | Sent as `Authorization: Bearer …` when the dashboard sets `ANSWER_TOKEN`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `BM_AGENTS_TOKEN_<NAME>`      | empty                                               | A remote dashboard's bearer token: `BM_AGENTS_TOKEN_` plus the name of its Settings › Dashboards entry, uppercased (`BM_AGENTS_TOKEN_PRO` for `Pro`). Read per call, and a missing one sends no `Authorization` header — the tailnet path needs none. Never typed into the board, which reports only whether it is set ([setup](docs/workflows/remote-machine.md)). Not in `.env.example` |
 | `BM_GITHUB_TOKEN`             | empty                                               | The credential the tracker poller reads for every project whose committed `backlog/source.json` names GitHub. Issue read access plus label write; absent is a supported state (the poller stays disarmed and the Trackers card says `no token`). Process-only — it reaches no payload, no URL and no log line, and the browser never talks to GitHub                                                                                                                                                                                                                                               |
 | `BM_JIRA_SITE`                | empty                                               | The Jira Cloud site, as a hostname only (`acme.atlassian.net`) — no scheme, path, port or query; the server always speaks `https://` and builds every URL itself. One of three Jira credentials, all or none: any one missing or blank reads as not configured, and the Jira poller stays disarmed ([doc](docs/subsystems/jira.md))                                                                                                                                                                                                                                                                |
 | `BM_JIRA_EMAIL`               | empty                                               | The Atlassian account `BM_JIRA_TOKEN` belongs to — half of the Basic credential, so it stays in the server process exactly as the token does                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -111,6 +114,8 @@ Everything lives in `.env`, and `.env.example` documents each key — except the
 | `BM_ORCH_CONTROL_HOME`        | `~/.backlog-manager/settings/orchestrator-control/` | Where this server writes a pause or stop request, which a live run reads back at its dispatch gates — the one file travelling server to tool. Not in `.env.example`                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `BM_TRACKER_SYNC_FILE`        | `~/.backlog-manager/settings/tracker-sync.json`     | Where this server writes each connected repo's tracker sync interval — the one control on Shared Settings' Trackers card (`server/src/tracker/sync-config.util.ts`). Not in `.env.example`                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `BM_JIRA_FILE`                | `~/.backlog-manager/settings/jira.json`             | The per-machine Jira settings (`{ boards, repos, repoDefaults, skills }`). The server reads it and writes it through six guarded routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`. Not in `.env.example`                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `BM_TICK_FILE`                | `~/.backlog-manager/settings/tick.json`             | The tick breaker's settings: how many failed ticks in a row halt a project (Settings › Shared › Backlog tick) and when each project was last Reset (Runs › Ticks). The server writes it through `POST /api/ticks/config` and `/reset`; `tick.mjs` reads it. A file that cannot be read is never replaced. Not in `.env.example` |
+| `BM_DASHBOARDS_FILE`          | `~/.backlog-manager/settings/dashboards.json`       | The other machines' dashboards this board can start work on, plus the strategy, threshold and prefer order its machine suggestion reads. The server writes it from Settings › Dashboards; a file that cannot be read is never replaced, and its remotes are ignored until it is fixed. No file means home-only. Not in `.env.example` |
 | `BM_MACHINE_NAME`             | `<user>@<host>`                                     | The machine name a tracker claim records, read by `backlog.mjs` and `orchestrate.mjs` from their own environment, and by this server (through compose) only for the board's **Release claim** on a session it did not dispatch, which it refuses unless the claim's host equals this name — or, for a STALE claim, only to ask the dashboard whether a holder on this machine is still working before releasing it or dispatching over it. Set it in both places. On a public repository the claim comment publishes it, so set a name you chose rather than publish your OS username and hostname |
 
 A project outside `BM_PROJECT_ROOT` is invisible to the container and is reported as missing on `/api/projects` rather than silently dropped from the board —
@@ -124,9 +129,13 @@ gets executed. The board calls this API, this API calls the dashboard's `POST /a
 can watch it, and answer its questions from a phone if its hooks are installed.
 
 Off until you set `BM_AGENTS=on` (plus `BM_AGENTS_URL`, or `BM_AGENTS_DOCKER_URL` when the stack is doing the calling, and `BM_AGENTS_TOKEN` if the dashboard
-sets `ANSWER_TOKEN`). **Settings ▸ Shared ▸ Dashboards** (its Home row) reports exactly which gate is closed and what to do about it. The action is derived from the item file, not
+sets `ANSWER_TOKEN`). **Settings ▸ Dashboards** (Home's detail) reports exactly which gate is closed and what to do about it. The action is derived from the item file, not
 from the click, so an ungroomed bug cannot be executed by asking nicely — and nothing here ever writes an item: the spawned session runs the skills, which
 remain the only writers.
+
+A second machine that runs its own dashboard and its own board can take that work too: add it on Settings ▸ Dashboards, and every launch sheet for a tracker
+project registered on both boards grows a `Run on` group with a card per machine. The server calls the remote dashboard — never the browser — under the same
+`BM_AGENTS` switch; the setup, including the `BM_MACHINE_NAME` both sides must agree on, is [`docs/workflows/remote-machine.md`](docs/workflows/remote-machine.md).
 
 The board's Orchestrate control goes out the same way and through the same switch: with `BM_AGENTS` off there is nothing to spawn a run with. Pausing or
 cancelling a live run is deliberately not gated on it — a pause is a fact on this machine's own disk and calls nothing outbound, so it keeps working after that
@@ -198,8 +207,9 @@ The repo is its own plugin marketplace:
 /plugin install backlog-manager@backlog-manager-marketplace
 ```
 
-That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`, `/backlog-orchestrate`, `/backlog-tick` and `/backlog-retro`,
-plus the read-only reviewer agent `backlog-manager:backlog-reviewer` that `/backlog-orchestrate` dispatches before every merge. (An install carries `agents/`
+That gives every project `/backlog`, `/backlog-capture`, `/backlog-groom`, `/backlog-execute`, `/backlog-orchestrate`, `/backlog-tick`, `/backlog-retro` and
+`/jira`, plus the read-only reviewer agent `backlog-manager:backlog-reviewer` that `/backlog-orchestrate` dispatches before every merge, and `/backlog-execute`
+before it pushes in `--finish pr` mode. (An install carries `agents/`
 because a marketplace with no `sparsePaths` clones the whole repo; if your own declaration in `~/.claude/settings.json` pins that key, it has to list `agents` alongside `skills` or
 the reviewer is invisible in the install.) `init` and `new` both register the current project in the real registry, so a project appears on the board the first
 time a skill files or scaffolds an item in it — no separate registration step.
@@ -232,6 +242,7 @@ node <plugin-cache-path>/skills/backlog/tools/backlog.mjs init
 | Tests (both runners)                    | `pnpm test`                                     |
 | Tests, jest only                        | `pnpm run test:jest`                            |
 | Skill tests (node:test)                 | `pnpm run test:skills`                          |
+| Reinstall the plugin from pushed HEAD   | `pnpm run plugin:sync`                          |
 | Publish the web port to the tailnet     | `pnpm run tailnet` (`up` \| `status` \| `down`) |
 | Types                                   | `pnpm run typecheck`                            |
 | Production build                        | `pnpm run build`                                |
@@ -271,14 +282,15 @@ Five seams, one doc each:
 
 - [**The API**](docs/subsystems/api.md) — Nest, every route under `/api`. Reads the registry, each project's store and the orchestrator's run state; the only
   thing here that can spawn a session, and only when `BM_AGENTS` says so.
-- [**The board**](docs/subsystems/board.md) — the React SPA: four lazy sections behind a side rail, with most of what you see derived in the browser from whole
+- [**The board**](docs/subsystems/board.md) — the React SPA: five lazy sections behind a side rail, with most of what you see derived in the browser from whole
   corpora.
 - [**The skills**](docs/subsystems/skills.md) — the eight published skills, their five CLIs, and the reviewer agent the orchestrator dispatches before a merge.
 - [**Jira**](docs/subsystems/jira.md) — the server half of the Jira Cloud integration: a client, a board poller and its caches, and read routes under
-  `/api/jira` (seven), plus seven guarded POSTs: five config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`, `/skills`, `/skills/delete`) and, since
-  phase 3, two writes to Jira itself (`/issue/assign` and `/issue/transition`) — the only writes this server makes to Jira; since phase 5a, the Run half in
-  `agents/` (`POST /api/agents/dispatch-jira` and `/jira-stop`) with an in-memory map of live Jira sessions; and, since phase 4, the `jira` skill (`jira.mjs`) that reaches
-  those routes from any session.
+  `/api/jira` (nine), plus eight guarded POSTs: six config writes to `jira.json` (`/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills`,
+  `/skills/delete`) and, since phase 3, two writes to Jira itself (`/issue/assign` and `/issue/transition`) — the only writes this server makes to Jira; since
+  phase 5a, the Run half in `agents/` (`POST /api/agents/dispatch-jira` and `/jira-stop`) with an in-memory map of live Jira sessions; and, since phase 4, the
+  `jira` skill (`jira.mjs`) that reaches those routes from any session, and on a Run makes the ticket's git worktree in a mapped repo (`jira.mjs worktree`, git
+  only).
 - [**Invariant rationale**](docs/subsystems/invariants.md) — the rules all four are held to, and the failure each one encodes.
 
 [`docs/overview.md`](docs/overview.md) is the map, and the one place that lists every doc.
@@ -309,11 +321,11 @@ Ports, binds, what the container mounts and the failure modes each of those has 
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `skills/`  | The eight published skills — the plugin's skill root ([doc](docs/subsystems/skills.md))                                                                                                                                                  |
 | `agents/`  | The plugin's own agents; today just the orchestrator's reviewer ([doc](docs/subsystems/skills.md))                                                                                                                                       |
-| `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller ([doc](docs/subsystems/api.md)), the Jira read routes ([doc](docs/subsystems/jira.md))                               |
-| `client/`  | React SPA — side rail, board, run chip, runs, archive, settings ([doc](docs/subsystems/board.md))                                                                                                                                        |
-| `shared/`  | Types, the derivations both sides must agree on (`agent.ts`), theme tokens                                                                                                                                                               |
+| `server/`  | Nest API — items, projects, item bodies, the registry reader, the agents module, the run reader, the tracker poller, the tick breaker's routes, the release tags reader, the remote dashboards ([doc](docs/subsystems/api.md)), the Jira routes ([doc](docs/subsystems/jira.md))                               |
+| `client/`  | React SPA — side rail, board, run chip, runs, archive, Jira, settings ([doc](docs/subsystems/board.md))                                                                                                                                        |
+| `shared/`  | Types, the derivations both sides must agree on (`agent.ts`), the Jira branch-name rule (`jira-branch.ts`), theme tokens                                                                                                                                                               |
 | `backlog/` | This repo's own backlog marker — its items are GitHub issues since the repo connected itself to a tracker                                                                                                                                |
-| `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)), `test-all.mjs` and `test-tmpdir.mjs`, the per-run temp root `test:skills` runs through ([doc](docs/workflows/development.md)), and `tailnet.mjs`, the `tailscale serve` wrapper |
+| `scripts/` | `sync-plugin.mjs` ([doc](docs/workflows/publishing.md)), `test-all.mjs` and `test-tmpdir.mjs`, the per-run temp root `test:skills` runs through ([doc](docs/workflows/development.md)), `tailnet.mjs`, the `tailscale serve` wrapper, and `ci-scope.mjs`, CI's one check command ([doc](docs/workflows/ci.md)) |
 | `docs/`    | The reference docs — start at [`overview.md`](docs/overview.md); `superpowers/` is the design spec and implementation plans                                                                                                              |
 
 ## Screenshot
@@ -337,5 +349,5 @@ drop the image at `docs/board.png`._
     - .env.example
     - pnpm-workspace.yaml
   kind: readme
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

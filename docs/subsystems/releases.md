@@ -44,17 +44,19 @@ HEAD or a tag next moves. Concurrent requests under one key share one read. The 
 
 `v0.3.0`, or `v0.3.0+2` when HEAD is two commits past the tag (ui-kit's `chipLabel`). No chip at all when `current` is null — which is what a checkout without
 the baseline tag shows. It is the rail's last element, sunk to its foot, and the last row of the phone menu, where tapping it closes the menu as every rail
-entry does.
+entry does. There the chip's `narrow` prop gives the pill a 44 px hit area, which overhangs it by 8 px above and below; `.rail-release`'s margins and the rail's
+padding keep that overhang inside the rail, whose `overflow-x: hidden` clips the y-axis too.
 
 **The dot.** A cyan dot sits in the chip while the newest release (the baseline counts) is above the version stored under `localStorage`
 `backlog-manager.releases-last-seen` — a raw version string, not JSON. Opening the drawer stores the newest, and keeps storing whatever is newest while it is
 open — but never a version below the stored one, so opening the drawer on an older checkout does not re-flag the releases it has not got. A first visit, or a stored value that is not a version, seeds the newest without showing the dot (ui-kit's `dotState`), so a fresh browser never flags the whole
-history as new. Storage that throws (a private window, blocked site data) means no dot, never a crash: `AppShell` mirrors the value in memory, so the seed it
+history as new. Storage that throws (a private window, blocked site data) means no dot, never a crash: `useWhatsNew` mirrors the value in memory, so the seed it
 could not write still settles the dot. A per-browser convenience, not a record.
 
 ## The drawer
 
-Opened from the chip, which refetches first; the list is also fetched once on load. There is no poll — a new release reaches the server only when someone
+Opened from the chip, which refetches as it opens — the drawer opens at once, without waiting for the answer; the list is also fetched once on load.
+There is no poll — a new release reaches the server only when someone
 pulls or fetches tags and restarts it, and the chip is rarely looked at. A fetch that fails, or answers something that is not the releases shape, keeps the
 last good answer. Each entry: version, type badge (Feature / Fix / Performance), a separate Breaking badge, date, the title without its `type(scope)!: `
 prefix (the badge already says it), the notes through ui-kit's own renderer when there are any, and `PR #N` when the origin is on GitHub. The
@@ -88,5 +90,5 @@ bumped by hand, separately, for the plugin. The GitHub Release pages are written
     - client/src/App.tsx
     - client/src/styles.css
   kind: subsystem
-  verified: ce41a287e78746f99d78dc8f5758ac2036064f20
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

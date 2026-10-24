@@ -63,7 +63,7 @@ make the server append the clause, and a typed trigger carries the same flag by 
   parent can stay synchronous: `fetch` is asynchronous and `orchestrate.mjs`'s entry guard rests on nothing holding the event loop open, so the asynchrony is
   exiled into a child that is reaped before the parent's call returns. Its exit codes are private (`0`/`3`/`5`) and `apiCall` maps them onto the tool's own
   `8` (the stack is down) and `9` (a refusal this command cannot absorb).
-- `skills/jira/tools/jira.mjs` — the `jira` skill's CLI (Jira phase 4): `show`, `transitions`, `transition`, `assign` and `status`, each one or two requests to
+- `skills/jira/tools/jira.mjs` — the `jira` skill's CLI (Jira phase 4): `show`, `transitions`, `transition`, `assign` and `status`, each one to three requests to
   `/api/jira` on `127.0.0.1`. API-only except `worktree`, which runs git in the mapped repo (below); the API commands have no files mode and write no file,
   and none of it carries a Jira credential, the server being Jira's one caller.
   Exit `0` success, `1` usage (a key that is not one included — nothing is sent), `2` a 4xx, `3` a 5xx, `5` the stack is down.
@@ -74,8 +74,8 @@ make the server append the clause, and a typed trigger carries the same flag by 
   writes `.worktrees/` and `node_modules` to `info/exclude` and links `node_modules` for a tree it made, and prints one JSON line
   (`{ worktree, branch, created, notes }`). It never runs `--force`, `-D`, `prune` or `reset`. Exit `0`, `1` usage, or `4` — git refused, or a re-check
   stopped the Run, and nothing changed — never `2`, `3` or `5`.
-- `skills/backlog-retro/tools/retro.mjs` — `backlog-retro`'s own CLI, and the only writer of `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`). It is the one of
-  the three that writes nothing anybody else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by
+- `skills/backlog-retro/tools/retro.mjs` — `backlog-retro`'s own CLI, and the only writer of `~/.backlog-manager/retro/` (`$BM_RETRO_HOME`). It is the one
+  writer among them whose files nothing else reads at runtime: it reads the run-state directory (`$BM_ORCH_HOME`), the registry (`$BM_REGISTRY_FILE`) and, by
   recorded lease id, a run's driver transcript (`$BM_CLAUDE_PROJECTS`), and its `record` command writes a sweep, the session's labels and the report beside
   them, once, refusing to overwrite.
 
@@ -87,6 +87,8 @@ The Jira repo/branch work added two more pairs, each across a different border: 
 idempotent append to `<common dir>/info/exclude` that keeps `.worktrees/` and the `node_modules` link out of `git status`), and `jira.mjs` carries Tables A
 and B — `branchNameProblem` and `branchCarriesKey` — whose other home is not a tool at all but `shared/jira-branch.ts`, which the server and the client import
 and no skill can. `jira.test.mjs` pins the same Table A and B rows as `test/jira-branch.test.ts`.
+`tick.mjs` carries the most, in `tick-lib.mjs` and its own source — `orchHome()` and `projectDir()` among them, so that pair has a third copy — each with a
+comment naming its original ([`backlog-tick`](#backlog-tick)).
 `retro.mjs` has no discriminator at all — it needs no git root, because its subject is every project at once — and `backlog.mjs` has neither path helper,
 because the run-state directory is none of its business. Each copy is pinned by its own tool's suite.
 
@@ -128,15 +130,16 @@ that string, so the variable is a privacy setting first.
 What every one of them _does_ share is how it ends: `process.exitCode = main(...)`, never `process.exit(main(...))`. Writing to a pipe is asynchronous, so
 `process.exit()` tears the process down before stdout drains and a `--json` payload is silently cut at exactly 65,536 bytes — while a `> file.json` redirect,
 synchronous on POSIX, stays perfectly fine, which is why the shipped instance (a 442,757-byte `retro.mjs sweep --json` that arrived through `| jq` as 65,536
-bytes and a parse error) survived every hand check. Setting the code instead lets node flush and exit on its own. That is only safe because none of the three
+bytes and a parse error) survived every hand check. Setting the code instead lets node flush and exit on its own. That is only safe because none of them
 holds the event loop open: all reads are synchronous `fs`, every child is `spawnSync`, and `orchestrate.mjs watch` sleeps by blocking on `Atomics.wait` rather
 than on a timer. Whoever adds a timer, a server or an async child closes its handle — restoring `process.exit()` would restore the truncation. One rule, one
 comment per file; `retro.mjs`'s is the long-form copy the others point at, and `backlog.test.mjs`'s source guard reads every one of them.
 
-`backlog.mjs` (task-46), `api-call.mjs` (task-47) and `jira.mjs` (Jira phase 4) end `process.exitCode = await main(...)`, and the rule is untouched by the
-`await`: it is `process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open when `main` returns. Each
-awaits every `fetch` to completion and sends `connection: close`, so no pooled socket outlives the call; the source guard accepts the awaited form for those
-three files and still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s
+`backlog.mjs` (task-46), `api-call.mjs` (task-47), `jira.mjs` (Jira phase 4) and `tick.mjs` (backlog-tick) end `process.exitCode = await main(...)`, and the
+rule is untouched by the `await`: it is `process.exit()` that truncates a pipe, and what the rule actually requires is that nothing hold the event loop open
+when `main` returns. Each awaits every `fetch` to completion and sends `connection: close`, so no pooled socket outlives the call — `tick.mjs`'s request
+timeout is an `AbortSignal.timeout`, an unref'd timer, and every child it runs is `spawnSync`; the source guard accepts the awaited form for those four files
+and still requires the synchronous one of `orchestrate.mjs` and `retro.mjs`, which hold no asynchronous work at all. `backlog.test.mjs`'s
 `CLI_SOURCES` is where the list of files lives, never a count in prose.
 
 #### `orchestrate.mjs`'s two modes (task-47, spec §7)
@@ -252,6 +255,12 @@ size is printed as a `t.diagnostic` line by every `pnpm run test:skills` run, as
 `skills/backlog-retro/references/rationale.md` is the same idea: why a tool computes and a session labels, why the label set is closed, and the 2026-09-06
 baseline the first record is measured against.
 
+`backlog-execute` and `backlog-groom` keep the same split for the paths an ordinary session never takes. `skills/backlog-execute/references/pr-mode.md` is the
+whole `--finish pr` flow, read in full once the trigger chose `pr`; `skills/backlog-execute/references/backlog-tick.md` is the reasoning and the stops behind a
+session dispatched under a `[backlog-tick]` marker, read when a stop happens; and `skills/backlog-groom/references/backlog-tick.md` is read in full, before
+`show`, by a groom carrying that marker — the two verdicts a tick may groom, the `## Assumptions (unattended)` heading and the `plan-review` mark's spelling per
+source.
+
 ### `agents/`
 
 The plugin's own agents, one file each, discovered from this root-level directory by Claude Code's own convention — no `.claude-plugin/plugin.json` declaration
@@ -297,5 +306,5 @@ skill's own `SKILL.md` is the authority on how that skill behaves; this doc is t
     - skills
     - agents
   kind: subsystem
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->
