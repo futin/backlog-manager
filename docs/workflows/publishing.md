@@ -10,12 +10,13 @@ else. That is why the sync script refuses a tree that is anything less rather th
 ## Steps
 
 ```bash
-# 1. commit, on main
+# 1. commit, on a branch — main refuses a direct push (ci.md §The ruleset)
 git add skills agents
 git commit
-# 2. push — the installer clones from GitHub, not from your working tree
-git push
-# 3. reinstall from the pushed HEAD
+# 2. push the branch, open a PR, and squash-merge it once CI is green — the installer clones main from GitHub, not your working tree
+git push -u origin HEAD
+# 3. bring main up to the merge, then reinstall from the pushed HEAD
+git switch main && git pull --ff-only
 pnpm run plugin:sync
 # 4. restart Claude Code so the new skills load
 ```
@@ -84,5 +85,5 @@ one.
     - scripts/sync-plugin.test.mjs
     - .claude-plugin
   kind: workflow
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

@@ -16,7 +16,7 @@ are GitHub issues rather than files: there the skills still decide every write, 
 | [CLAUDE.md](../CLAUDE.md)                            | the normative index: one headline per rule — mechanism in `.claude/rules/`, reasoning in `subsystems/invariants.md`     |
 | [subsystems/api.md](subsystems/api.md)               | the Nest side: what each module owns, which reads are cached and which must never be                                    |
 | [subsystems/jira.md](subsystems/jira.md)             | the Jira integration's server half: the client, the board poller and its caches, the `/api/jira` read routes            |
-| [subsystems/board.md](subsystems/board.md)           | the client: the four surfaces, and what the browser derives rather than fetches                                         |
+| [subsystems/board.md](subsystems/board.md)           | the client: the five sections, and what the browser derives rather than fetches                                         |
 | [subsystems/releases.md](subsystems/releases.md)     | the board's own versions: `GET /api/releases` from the checkout's tags, the rail's version chip and the What's new drawer |
 | [.claude/DESIGN.md](../.claude/DESIGN.md)            | the client's visual language: the reference design (§1–7, copied from the dashboard) and how this board applies it (§8) |
 | [subsystems/skills.md](subsystems/skills.md)         | the eight skills, the CLIs beneath them, and the reviewer agent                                                         |
@@ -38,22 +38,24 @@ Deliberately not tracked, and each for a stated reason in [`.docs-sync.yml`](.do
 
 ### The data plane
 
-Five artefacts hold everything, and the single-writer column is the load-bearing part:
+Six artefacts hold everything, and the single-writer column is the load-bearing part:
 
 | artefact                                             | one writer                                         | read by                                                                                                     |
 | ---------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `~/.backlog-manager/registry.json`                   | `skills/backlog/tools/backlog.mjs`                 | the server, per request, never cached                                                                       |
 | each project's `backlog/**/*.md`                     | the skills                                         | the server's scan; the client renders it                                                                    |
 | `~/.backlog-manager/orchestrator/<project>/run.json` | `skills/backlog-orchestrate/tools/orchestrate.mjs` | `server/src/orchestrator/`, fresh per request                                                               |
-| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config and the tracker sync intervals it wrote, and — for the control file — `orchestrate.mjs` |
+| `~/.backlog-manager/settings/`                       | the server                                         | the watchdog config and the tracker sync intervals it wrote, and — for the control file — `orchestrate.mjs`, and — for `tick.json` — `tick.mjs` |
 | `~/.backlog-manager/retro/`                          | `skills/backlog-retro/tools/retro.mjs record`      | `retro.mjs sweep`, read-only, for the deltas against the newest record of the same scope                    |
+| `~/.backlog-manager/tick/`                           | `skills/backlog-tick/tools/tick.mjs`               | the server's `tick/` module, read-only, for `GET /api/ticks`                                                |
 
 The `settings/` row is the one exception to the direction of travel: everything else under `~/.backlog-manager` flows tool → server, and the control file — one
 per project, holding a pause request or a stop request (bug-39) — flows server → tool. The retro home travels nowhere at all — one tool writes it and the same tool reads it back on the next sweep. The run file's own single-writer
 guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through six guarded config routes (`POST /api/jira/boards`, `/boards/delete`,
 `/repos`, `/skills`, `/skills/delete` and `/repo-defaults`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)), and `dashboards.json`, the
 list of other machines a launch can go to, which the server alone reads and writes through four guarded routes under `/api/dashboards` — no skill reads it
-([workflows/remote-machine.md](workflows/remote-machine.md)).
+([workflows/remote-machine.md](workflows/remote-machine.md)). And it holds `tick.json`, the tick breaker's halt threshold and per-project resets, which travels
+server → tool like the control file: the server writes it through two guarded routes (`POST /api/ticks/config` and `/reset`), and `tick.mjs` only reads it.
 
 ### The API — [full doc](subsystems/api.md)
 
@@ -95,6 +97,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   `/?section=runs&runs=history`, the one URL the client reads (`client/src/lib/deep-link.ts`); the other two open `/`. That reader has one more parameter,
   `settings=shared|local|dashboards`, honoured only beside `section=settings`: the launch sheets' "Run on" card links to the Dashboards page with it, because
   the viewer's stored scope defaults to `local`.
+- **`tick/`** — the tick breaker's three routes under `/api/ticks`: a `GET` that reads the tick home `tick.mjs` writes (one directory per project, holding
+  `state.json` and `lock`) and never writes under it, and the two guarded POSTs that write `tick.json`. Not an outbound-calling module.
+- **`releases/`** — `GET /api/releases`, this checkout's own `vX.Y.Z` tags for the rail's version chip, read through release-kit's reader with every git call
+  going through `runGit`. Read-only and git only, so not an outbound-calling module either; [full doc](subsystems/releases.md).
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins
   the inline theme script by hash; and every route, read or write, is gated by a `Host` allowlist, which is what a page that rebinds DNS onto loopback cannot
   pass.
@@ -110,9 +116,11 @@ rail ends in a version chip that opens a What's new drawer of every release, rea
 ### The skills — [full doc](subsystems/skills.md)
 
 Eight skills under `skills/`, five CLIs beneath them (`backlog.mjs`, the registry's only writer; `orchestrate.mjs`, the run file's only writer; `retro.mjs`, the
-retro home's only writer and the one of the three writers nothing else reads at runtime; `jira.mjs`, API-only, which writes no file and reaches Jira through
-`/api/jira`), and one agent under `agents/` that the orchestrator dispatches to review an item's branch before it merges (and execute, before a `pr`-mode
-push). `backlog-orchestrate` is the only skill that merges — it works one item per worktree and merges each into the run's base branch (`main` unless the run
+retro home's only writer and the one of the four writers nothing else reads at runtime; `tick.mjs`, the tick home's only writer, which decides one unattended
+unit of work per scheduled tick and is read-only against items, the run state and git; `jira.mjs`, API-only, which writes no file and reaches Jira through
+`/api/jira` — save `worktree`, which is git only and makes a ticket's worktree in a mapped repo), and one agent under `agents/` that the orchestrator
+dispatches to review an item's branch before it merges (and execute, before a `pr`-mode push).
+`backlog-orchestrate` is the only skill that merges — it works one item per worktree and merges each into the run's base branch (`main` unless the run
 was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and
 opens one pull request into the base, and for a tracker project it pushes that base — while execute does the work and groom writes the plans. Groom never
 commits; execute commits and pushes only when its trigger says `--finish pr` (the board's launch sheet picks it per run), and then only its own branch in its
@@ -138,5 +146,5 @@ its tests decide — but the disagreement itself is a bug worth fixing in the sa
     - agents
     - docs/.docs-sync.yml
   kind: overview
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

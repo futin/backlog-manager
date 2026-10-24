@@ -93,7 +93,7 @@ orchestrator gate turns it `ungroomed` with the same sentence.
 (`shared/agent.ts`) makes `plan`/`dispatch` refuse a mapped `planReview` item with `this plan awaits review`, always AFTER `inReviewBlock`, and the orchestrator
 gate turns it `ungroomed` with the same sentence. `backlog.mjs plan-review <id> on|off` is the one caller of the route, and `off` is how a person approves.
 
-The ninth write route, `POST /api/items/abort` (#225, body `project, id`), is not in this file: it calls the dashboard, so it lives in
+The eleventh write route, `POST /api/items/abort` (#225, body `project, id`), is not in this file: it calls the dashboard, so it lives in
 `agents/items-abort.controller.ts` and borrows `writable`, `answer` and `required` from this one. It releases a live, non-run claim with `reason: 'aborted'` and
 `authority: 'board'` (a field `release` never parses) once one proof holds — the holder is a session this server dispatched, which it stops through the
 dashboard first (`POST /api/sessions/:id/stop`; a 200 or the `no live session` 404 proceeds, anything else is a 502 and the claim is untouched), or the claim's
@@ -303,7 +303,8 @@ tool. The third, `settings/tracker-sync.json` (#17), is written through `tracker
 
 `/api/hub/widgets` serves Lookout's widget catalog contract v1 through the `lookout-widgets` package (#249): `hub.controller.ts` hands every method and path
 under that prefix to the package's handler, which owns the contract's routing and answers 404 for anything not declared. `hub-widgets.ts` declares three tiles,
-each opening `/` because the client has no URL routing:
+the first two opening `/`, and since #328 the `run` tile `/?section=runs&runs=history` — a deep link `client/src/lib/deep-link.ts` reads,
+because the client has no URL routing and otherwise opens on whatever section localStorage holds:
 
 - **`open-total`** (stat, 60 s) — open bugs plus open tasks across every registered project; `warn` while any bug is open. Ideas and refactors are not work
   until promoted.
@@ -395,5 +396,5 @@ origin guard, the derive-never-accept rule for dispatch, and the watchdog's armi
   sources:
     - server/src
   kind: subsystem
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

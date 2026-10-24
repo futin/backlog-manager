@@ -50,16 +50,16 @@ trees a ticket has (`GET /api/jira/worktrees`) with a Remove that only copies th
 | `identity.ts`        | `JiraBootState` — the four boot answers, the token kind, the site-level `access`/`detail`, the 429 window and the 15 s → 5 min back-off        |
 | `map-issue.ts`       | `mapJiraIssue`, `pickSprintField`, `categoryOf`, `JIRA_ISSUE_FIELDS` and the Done window (`JIRA_DONE_WINDOW_DAYS`)                             |
 | `adf.ts`             | `adfToMarkdown` — Atlassian Document Format to Markdown, read side only; `ADF_PLACEHOLDER_RE`                                                  |
-| `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30)              |
+| `block.ts`           | `renderTicketBlock` — one issue as plain text: the facts, the description, the subtasks (capped at `JIRA_BLOCK_CHILDREN_CAP`, 30); since phase 5a `TicketBlockOptions` — the prompt composer's fenced description and `JIRA_TRUNCATED_MARKER` after a cut, both outside the fence, while `?format=text` and `jira.mjs show` keep the `as-is` drawing |
 | `poller.service.ts`  | `JiraPollerService` — the ticker, the boot sequence, the per-board caches, every fresh read the routes make, and since phase 3 `assignToMe`, `transitionIssue`, the splice and the sweep's newest-wins rule |
 | `unwrap.util.ts`     | `unwrapJira` — a poller outcome as its value or its §8 error, shared by both controllers so a failure means the same on every route (phase 3); `jiraWriteOrThrow` (phase 5a) — an issue write's outcome with its two own refusals, hoisted out of the write controller so the two write routes and `dispatch-jira` answer a failure in the same words |
 | `prompt.util.ts`     | `composeJiraPrompt` — what a Run session is told, the ticket framed as data (phase 5a); `resolveJiraActionOrThrow`; `JIRA_PROMPT_MAX`; since the repo/branch work `workspaceBlock` and the Open MR closing rule |
 | `refs.util.ts`       | the repo/branch work's one reader of git: `readRepoRefs` (`JiraRepoRefs`), `readWorktrees`, `checkRepo` (the unavailable reasons) — every call a read through `runGit` |
 | `branch-choice.util.ts` | `parseBranchChoice` (the branch choice's shape, 400s) and `resolveWorkspace` (the choice against the refs, 409s), shared by `/prompt` and `dispatch-jira` |
-| `live.service.ts`    | `JiraLiveService` — the in-memory key → session map (phase 5a, → [the live map](#the-live-map-phase-5a)); not `JiraService`, the spec's name for it |
+| `live.service.ts`    | `JiraLiveService` — the in-memory key → session map (phase 5a, → [the live map](#the-live-map)); not `JiraService`, the spec's name for it |
 | `jira.controller.ts` | the nine read routes (six, phase 5's `GET /prompt`, and the repo/branch work's `GET /refs` and `GET /worktrees`)                                |
 | `jira-write.controller.ts` | the eight write routes — six config writes (three in phase 2, the two skills routes in 5a, `/repo-defaults` in the repo/branch work) and the two issue writes (phase 3), each behind `SameOriginPostGuard` |
-| `jira.module.ts`     | `JiraModule` — the poller and the client (a factory value, the one place a suite swaps in a fake `fetch`), both exported                       |
+| `jira.module.ts`     | `JiraModule` — the two controllers, the poller, the client (a factory value, the one place a suite swaps in a fake `fetch`) and since phase 5a `JiraLiveService`, all three exported for `AgentsModule` to import, never the reverse |
 
 `agents/` holds the other half of Run, in `jira-agents.controller.ts` (the two POSTs), `jira-dispatch.service.ts` (`JiraDispatchService`: dispatch and stop),
 `jira-live.service.ts` (`JiraLiveReconciler`) and `session-stop.util.ts` (the dashboard stop call, hoisted out of the item abort) — see
@@ -554,5 +554,5 @@ the three keys so no suite inherits a developer's credentials. `test/compose-env
   sources:
     - server/src/jira
   kind: subsystem
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->

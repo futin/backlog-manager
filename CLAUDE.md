@@ -40,9 +40,9 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
 - `server/src/` — Nest, every route under `/api`: `health/`, `items/` (items, projects, item bodies, `uncommitted`, the read-only claim lookup, the item-source
   adapters, and the ten guarded write routes in `items-write.controller.ts`, which with `abort` (in `agents/`) are the ONLY writes this server makes to
   anybody's items), `agents/` (the dashboard calls — the item `abort` among them — plus the run watchdog, `POST /api/agents/dispatch-jira` and `/jira-stop`,
-  and the 60 s reconciler that keeps the Jira live map honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers and usage reads,
-  and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are part of THIS
-  module, not a fourth), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
+  and the 60 s reconciler that keeps the Jira live map honest, and `agents/dashboards/` — `dashboards.json`'s reader/writer, the machine offers, health and
+  usage reads, and a card's or an Orchestrate run's launch and stop on another machine, whose outbound calls go to remote dashboards and remote boards and are
+  part of THIS module, not a fourth), `tracker/` (the GitHub client, the issue poller and its in-memory cache, the label bootstrap,
   the read-only `trackers` route and `tracker-sync.json`'s reader/writer), `jira/` (the Jira Cloud client, the board poller and its caches, the nine read
   routes under `/api/jira` — `GET /prompt`, `/refs` and `/worktrees` among them — `jira.json`'s six guarded write routes, `POST /api/jira/boards`,
   `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`, in `jira-write.controller.ts`, beside the two writes to Jira itself,
@@ -70,7 +70,7 @@ Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figur
   cite its subsection in a header comment. Not a `.claude/rules/` file — those hold the mechanism tier for a path scope, every bullet anchored into
   `invariants.md`.
 - `shared/` — `types.ts` (all shared shapes), `agent.ts` (`deriveAction`, `dispatchGate` and the run/watchdog predicates both sides must agree on), `theme.css`
-  (five theme palettes).
+  (five theme palettes), `jira-branch.ts` (a Jira Run's branch-naming rules, which server and launch sheet both import; `jira.mjs` keeps its one hand copy).
 - `skills/backlog/`, `skills/backlog-capture/`, `skills/backlog-groom/`, `skills/backlog-execute/`, `skills/backlog-orchestrate/`, `skills/backlog-retro/`,
   `skills/backlog-tick/`, `skills/jira/` — the skills this repo publishes. `skills/backlog/tools/backlog.mjs` is the registry's only writer;
   `skills/backlog-orchestrate/tools/orchestrate.mjs` is the run file's only writer. `skills/backlog-retro/tools/retro.mjs` reads the run-state directory, the
@@ -314,5 +314,5 @@ of them, and to be opened by hand before editing through any other route (`Write
     - vite.config.ts
     - pnpm-workspace.yaml
   kind: index
-  verified: 9cbf5e1a207d009e9fcf01f9f1b79804ed1742da
+  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
 -->
