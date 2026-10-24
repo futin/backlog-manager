@@ -18,6 +18,9 @@ describe('clampSettings', () => {
       orchestrateDefaultMergeMode: 'branch',
       orchestrateDefaultQuestionMode: 'decide',
       executeDefaultFinish: 'pr',
+      groomDefaultFinish: 'pr',
+      prAutoMergeDefault: true,
+      prFixDefault: true,
       settingsScope: 'shared',
       contentWidth: 'full',
       jiraDefaultAction: 's_0123abcd'
@@ -34,6 +37,9 @@ describe('clampSettings', () => {
       orchestrateDefaultMergeMode: 'branch',
       orchestrateDefaultQuestionMode: 'decide',
       executeDefaultFinish: 'pr',
+      groomDefaultFinish: 'pr',
+      prAutoMergeDefault: true,
+      prFixDefault: true,
       settingsScope: 'shared',
       contentWidth: 'full',
       jiraDefaultAction: 's_0123abcd'
@@ -178,6 +184,41 @@ describe('executeDefaultFinish', () => {
 
   it.each([['merge'], [7], ['PR'], [null]])('clamps %p to in-place', (junk) => {
     expect(clampSettings({ executeDefaultFinish: junk }).executeDefaultFinish).toBe('in-place');
+  });
+});
+
+/**
+ * `groomDefaultFinish`, `prAutoMergeDefault` and `prFixDefault` seed the groom/execute launch sheets' PR options. The finish is clamped like
+ * `executeDefaultFinish` (the same closed `ExecuteFinish` enum); the two flags through `pickBool`, so a hand-edited string or number reads as off rather than
+ * as truthy. The clamp does NOT reconcile the pair: a stored fix-on with auto-merge-off survives, because the sheet — not the clamp — resolves it.
+ */
+describe('groomDefaultFinish and the PR defaults', () => {
+  it('default to in-place, off and off', () => {
+    expect(DEFAULT_SETTINGS.groomDefaultFinish).toBe('in-place');
+    expect(DEFAULT_SETTINGS.prAutoMergeDefault).toBe(false);
+    expect(DEFAULT_SETTINGS.prFixDefault).toBe(false);
+    const clamped = clampSettings({});
+    expect([clamped.groomDefaultFinish, clamped.prAutoMergeDefault, clamped.prFixDefault]).toEqual(['in-place', false, false]);
+  });
+
+  it('keeps pr and clamps a non-member finish to in-place', () => {
+    expect(clampSettings({ groomDefaultFinish: 'pr' }).groomDefaultFinish).toBe('pr');
+    expect(clampSettings({ groomDefaultFinish: 'squash' }).groomDefaultFinish).toBe('in-place');
+  });
+
+  it.each([['true'], [1], [null]])('clamps prAutoMergeDefault %p to false, and keeps true', (junk) => {
+    expect(clampSettings({ prAutoMergeDefault: junk }).prAutoMergeDefault).toBe(false);
+    expect(clampSettings({ prAutoMergeDefault: true }).prAutoMergeDefault).toBe(true);
+  });
+
+  it.each([['true'], [1], [null]])('clamps prFixDefault %p to false, and keeps true', (junk) => {
+    expect(clampSettings({ prFixDefault: junk }).prFixDefault).toBe(false);
+    expect(clampSettings({ prFixDefault: true }).prFixDefault).toBe(true);
+  });
+
+  it('leaves a stored fix-on with auto-merge-off unchanged', () => {
+    const clamped = clampSettings({ prAutoMergeDefault: false, prFixDefault: true });
+    expect([clamped.prAutoMergeDefault, clamped.prFixDefault]).toEqual([false, true]);
   });
 });
 

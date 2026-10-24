@@ -3,6 +3,7 @@ import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Segmented } from '../ui/Segmented';
 import { Select } from '../ui/Select';
+import { Switch } from '../ui/Switch';
 import { DashboardsPage } from './DashboardsPage';
 import { TickGroup } from './TickGroup';
 import { TrackersGroup } from './TrackersGroup';
@@ -448,6 +449,38 @@ function DispatchGroup() {
           value={settings.executeDefaultFinish}
           options={EXECUTE_FINISH_OPTIONS}
           onChange={(executeDefaultFinish) => update({ executeDefaultFinish })}
+        />
+      </SettingsRow>
+
+      {/* The groom sheet's Finish default and the two PR defaults both PR launches (groom and execute) seed from, directly under the execute one so the four
+          read as one cluster (§8.6: rows on the pill `Switch`/`Select` primitives). Fix is a refinement of auto-merge, so its switch is dead — and says why in
+          its title — while auto-merge is off; turning auto-merge off leaves the stored fix value alone, since the launch sheet seeds Fix off itself. */}
+      <SettingsRow name="Groom finish" hint="PR mode writes the spec and plan in its own worktree, commits, pushes and opens a PR. It never merges.">
+        <Select
+          label="Groom finish"
+          value={settings.groomDefaultFinish}
+          options={EXECUTE_FINISH_OPTIONS}
+          onChange={(groomDefaultFinish) => update({ groomDefaultFinish })}
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        name="Auto-merge PRs"
+        hint="Preselects Auto-merge on a PR launch. Armed only if the GitHub repo allows auto-merge — GitHub does the merge."
+      >
+        <Switch label="auto-merge PRs" checked={settings.prAutoMergeDefault} onChange={(prAutoMergeDefault) => update({ prAutoMergeDefault })} />
+      </SettingsRow>
+
+      <SettingsRow
+        name="Fix if it fails"
+        hint="Preselects Fix on a PR launch: the session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes."
+      >
+        <Switch
+          label="fix if it fails"
+          checked={settings.prFixDefault}
+          disabled={!settings.prAutoMergeDefault}
+          title={settings.prAutoMergeDefault ? undefined : 'Needs Auto-merge PRs on'}
+          onChange={(prFixDefault) => update({ prFixDefault })}
         />
       </SettingsRow>
 
