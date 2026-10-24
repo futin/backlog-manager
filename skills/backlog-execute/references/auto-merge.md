@@ -17,8 +17,9 @@ SKILL.md's own commands show.
 
 - **45 minutes** of wall clock from the moment auto-merge is armed. Every outcome below that is not a merge leaves auto-merge armed, so a person's later push
   or approval still merges the PR without this session.
-- **3 fix rounds** at most, all inside those 45 minutes, and only with `--fix`. A round is one pushed attempt to turn the PR mergeable: a fix commit for a
-  failing check, a merge of `<base>` into the branch, or one re-run of a check judged flaky (Fix, "Not this PR's failure").
+- **3 fix rounds** at most, all inside those 45 minutes, and only with `--fix`. A round is one attempt started to turn the PR mergeable, pushed or not: a
+  fix for a failing check, a merge of `<base>` into the branch, or one re-run of a check judged flaky (Fix, "Not this PR's failure"). An attempt whose local
+  verification is red still counts, and pushes nothing (Fix, "A red round").
 
 ## Rules that hold throughout
 
@@ -29,7 +30,7 @@ SKILL.md's own commands show.
 - **Nothing is held.** The claim was released before this file was opened (execute: pr-mode §8's `stop --keep-started`; groom: its plain `stop`), so no
   `heartbeat`, `start` or `comment` runs here. The one `backlog.mjs` call this file makes is groom's `plan-review <issue> off`, on a merge (Wait, `MERGED`).
 - **Never rebase, never force-push** — in any spelling (`--force`, `-f`, `--force-with-lease`, a `+` refspec). Every fix is a new commit on top of the branch,
-  pushed with a plain `git push`. A push the remote rejects is reported with git's own words and ends the procedure.
+  pushed with a plain `git push origin <branch>`. A push the remote rejects is reported with git's own words and ends the procedure.
 - **Never merge, never bypass.** No `gh pr merge` without `--auto`, no `--admin`, no `gh api` merge call, no disabling a check or a branch rule.
 - **A refused step ends the procedure.** The permission layer refusing a `git` or `gh` call (a denial, as opposed to a rejection by GitHub or the remote) stops
   every later step here, and it is never retried another way — another command, a wrapper shell, the API. This is execute pr-mode §8 "When a step is
@@ -48,7 +49,9 @@ SKILL.md's own commands show.
    The literal `{owner}/{repo}` is filled in by `gh` itself from the tree's remote — type it as written. (`gh repo view --json` has no auto-merge field in
    gh 2.102.0, which is why the first read is `gh api`.) `<owner>/<repo>` below is the second read's `nameWithOwner`.
 
-2. **Anything but `true`** — `false`, `null`, an empty answer — and the final message says exactly one line about it:
+   Either read exiting non-zero (auth expired, network, rate limit) is not an answer: it is step 5's refusal, with gh's own words.
+
+2. **An answered `false` or `null`** (anything but `true` from a read that exited `0`) — and the final message says exactly one line about it:
 
    `auto-merge: not allowed on <owner>/<repo> — PR left open`
 
@@ -105,7 +108,8 @@ A loop of bounded reads in the foreground, until one of the exits below. Each pa
      cd <tree> && gh pr checks <pr> --watch --fail-fast --interval 30
      ```
 
-     with the Bash tool's `timeout` at `540000` (9 minutes) — under the 10-minute cap, so the call always returns. A call the timeout ends is not an outcome:
+     with the Bash tool's `timeout` at `540000` (9 minutes), or the time left of the 45 minutes when that is less — under the 10-minute cap, so the call
+     always returns, and never far past the bound. A call the timeout ends is not an outcome:
      the checks are still running, and the next pass reads them again. Whatever it prints, the next pass's `gh pr view` is what decides.
    - **`mergeStateStatus` is `BLOCKED` with every check finished and green** — a required review or another rule only a person can satisfy: stop, auto-merge
      left armed, report what it is waiting on (exit "Stopped").
@@ -137,8 +141,9 @@ A loop of bounded reads in the foreground, until one of the exits below. Each pa
 
 ## 3. Fix — only with `--fix`, inside the wait
 
-Before each round, count it: a round that would be the fourth is not started — the wait stops instead (exit "Stopped", reason `3 fix rounds spent`), with
-auto-merge left armed and what is still red and why in the report. `backlog-reviewer` is not re-dispatched for a fix round: the round is verified, and its
+Before each round, count it and read the clock: a round that would be the fourth is not started — the wait stops instead (exit "Stopped", reason
+`3 fix rounds spent`), with auto-merge left armed and what is still red and why in the report — and neither is one begun once the 45 minutes are up (exit
+"Bound hit"). `backlog-reviewer` is not re-dispatched for a fix round: the round is verified, and its
 commit sits on a PR a person reads.
 
 ### A failing check
@@ -153,14 +158,13 @@ commit sits on a PR a person reads.
 2. **Decide whose failure it is** — "Not this PR's failure" below. Only a failure this PR causes is fixed.
 3. **Fix it in `<tree>`**, touching only what the failure needs — never unrelated code, never a test weakened to pass.
 4. **Verify.** execute: the same verification command(s) the item's Outcome recorded, plus the failing job's own command run locally when it differs. groom:
-   the command the failing job runs, run locally. Red locally → that is the round's result: commit nothing, and the next round (if one is left) starts from
-   the log again.
+   the command the failing job runs, run locally. Red locally → "A red round" below: nothing from this round is committed or pushed.
 5. **Commit and push**, staging narrowly — `git status --short` first, then each path this round changed, by name; never `git add -A` or `git add .`:
 
    ```bash
    cd <tree> && git add <path> [<path> …]
    cd <tree> && git commit -m "fix: <what was failing>"
-   cd <tree> && git push
+   cd <tree> && git push origin <branch>
    ```
 
    Record the commit's short sha and subject for the final message. Then pause (Wait, the `node` line) and take the next pass.
@@ -169,16 +173,31 @@ commit sits on a PR a person reads.
 
 ```bash
 cd <tree> && git fetch origin <base>
-cd <tree> && git merge origin/<base>
+cd <tree> && git merge --no-commit --no-ff origin/<base>
 ```
 
-This merges `<base>` INTO `<branch>` — the PR's own branch. Never `git rebase`, never `git pull --rebase`, never a push with force.
+This merges `<base>` INTO `<branch>` — the PR's own branch. Never `git rebase`, never `git pull --rebase`, never a push with force. `--no-commit --no-ff`
+stops the merge before its commit whether or not it conflicts, so nothing is committed until it is verified: a textually clean merge is exactly where a
+change on `<base>` (a renamed API, a new test) breaks this branch.
 
-- **Clean merge** → git made the merge commit itself.
-- **Conflicts** → resolve every conflicted path so both sides' intent survives, verify (as for a failing check, step 4), then stage the resolved paths by
-  name and `git commit --no-edit`. A conflict whose resolution needs a decision the item does not answer is not guessed at: `git merge --abort`, stop, and
-  report the conflicted paths (exit "Stopped").
-- Then `git push`, record the merge commit's short sha and subject, pause, and take the next pass.
+1. **Conflicts** → resolve every conflicted path so both sides' intent survives, then stage the resolved paths by name. A conflict whose resolution needs a
+   decision the item does not answer is not guessed at: `git merge --abort`, stop, and report the conflicted paths (exit "Stopped"). A clean merge has
+   nothing to resolve.
+2. **Verify** — clean or resolved alike — as for a failing check, step 4. Red → "A red round" below: the merge is aborted and nothing is pushed.
+3. **Green** → `git commit --no-edit` (git's own merge message), `git push origin <branch>`, record the merge commit's short sha and subject, pause, and take
+   the next pass.
+
+### A red round
+
+A round whose local verification is red ends without a commit and without a push, and leaves the tree as it found it, so the next round — or the person
+who opens the worktree after this session (pr-mode §9) — starts from the branch's last commit, not from a half-fix nobody explained:
+
+1. **Record it** for the final message: the failing check's name (or, for a merge round, `merge of <base>`) and the round's change, staged and unstaged
+   together — `cd <tree> && git diff --stat HEAD`.
+2. **Return the tree to `HEAD`.** A merge in progress (`git rev-parse -q --verify MERGE_HEAD` prints a sha) → `cd <tree> && git merge --abort`. Otherwise
+   restore every tracked path the round changed — `cd <tree> && git restore --source=HEAD --staged --worktree -- <path> [<path> …]` — and delete each file
+   the round created, by name. `git status --short` then prints nothing.
+3. **Take the next pass.** The round is spent; the next one, if one is left, starts from the log or the PR's state again.
 
 ### Not this PR's failure
 
@@ -215,6 +234,8 @@ The caller's own final message (execute pr-mode §9, groom's final message) carr
   - `auto-merge: armed (<method>), stopped — <why>` (a red check or conflict without `--fix`, `BLOCKED` on a person, `3 fix rounds spent`, not this PR's
     failure, a refused step, a rejected push);
 - **every fix commit**, one line each, `<short sha> <subject>` — the fix commits and the merge commits of §3, in order — or `fix commits: none`;
+- **every red round** (§3, "A red round"), one entry each: `red round <k>: <check name, or merge of <base>> — not pushed`, followed by the
+  `git diff --stat HEAD` it recorded;
 - **any `plan-review` left on** (groom, tracker), with the `plan-review <issue> off` command a person runs once they approve;
 - **any command not run** because a step was refused, in order.
 
@@ -224,4 +245,5 @@ The design spec, `docs/superpowers/specs/2026-10-24-groom-pr-and-auto-merge-desi
 GitHub's own repository setting read at runtime; squash › merge › rebase; 45 minutes and 3 fix rounds as soft defaults stated here; no reviewer re-dispatch
 for a fix round; the claim released before the wait. Ruled while writing this file: `BEHIND` is handled as a conflict round, a `BLOCKED` PR with every check
 green ends the wait (only a person can unblock it), the "outside the diff" test is the list above with one counted re-run for a check that passes locally,
-and the pause between reads is a foreground `node` timer.
+and the pause between reads is a foreground `node` timer. Ruled on review: a round is any attempt started, pushed or not; a merge of `<base>` is verified
+before it is committed, clean or not; and a red round records its `git diff --stat HEAD`, then returns the tree to `HEAD`.

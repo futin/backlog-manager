@@ -279,9 +279,10 @@ undoes nothing** — the comment and the release still run — and the final mes
 ### Last, with `--auto-merge`: arm it and wait
 
 Only when the trigger carries `--auto-merge`, and only once the PR is open and — tracker — the `review <id> on`, `comment` and `stop <id> --keep-started`
-sequence above has run, so the `in-review` guard is on and no claim is held: read `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md`
-in full and run it now, in `<tree>`, with `<pr>` the number of the PR this section opened. It arms GitHub auto-merge if the repository allows it, waits for
-GitHub to merge, and with `--fix` repairs failing checks and conflicts with `<base>` meanwhile; it never merges itself.
+sequence above has run — whether or not the label write succeeded, since a failed one is already reported and undoes nothing — so no claim is held: read
+`${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now, in `<tree>`, with `<pr>` the number of the PR this section
+opened. It arms GitHub auto-merge if the repository allows it, waits for GitHub to merge, and with `--fix` repairs failing checks and conflicts with `<base>`
+meanwhile; it never merges itself.
 
 No PR opened — `gh` missing or unauthenticated, a refused or rejected step anywhere above — means there is nothing to arm: skip that file, and the final
 message's auto-merge line says `auto-merge: not armed — no PR`.

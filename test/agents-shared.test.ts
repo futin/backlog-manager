@@ -864,6 +864,19 @@ describe('inReviewBlock', () => {
     expect(autoMerge).toContain('3 fix rounds');
     expect(autoMerge).toContain('--auto --');
     expect(autoMerge.toLowerCase()).toContain('never force');
+    // Fix round 1: a merge of the base is verified before it is committed, clean or not, and a red round leaves the tree at HEAD with its stat recorded.
+    expect(autoMerge).toContain('git merge --no-commit --no-ff origin/<base>');
+    expect(autoMerge).toContain('git diff --stat HEAD');
+  });
+
+  /* The two quotes above would stay green if the hooks that lead a session INTO auto-merge.md were deleted: SKILL.md's flag rule and mode line, and pr-mode
+     §8's read-it-now pointer. One literal each keeps the door pinned, not only the room. */
+  it('backlog-execute reads the flags and hands off to auto-merge.md', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain('`--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule');
+    expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
+    expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
   });
 });
 
