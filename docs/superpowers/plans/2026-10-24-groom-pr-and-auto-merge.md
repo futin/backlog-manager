@@ -133,15 +133,20 @@ appended exactly as today (no strip — its existing "doubled, harmless" case at
     `COMMIT_RULE` exactly once; with `finish:'pr', base:'main'` → contains `COMMIT_RULE` zero times and ends with `finishClause('groom','pr','main')`.
   - `groom finish pr + base main: ends with finishClause(groom, pr, main)`.
   - `groom pr with autoMerge and fix: ends with the groom flag sentence`; `execute pr with autoMerge: ends with the execute autoMerge sentence`.
-  - `capture with finish → 400 finish applies only to execute or groom` (replaces the :629 expectation's wording).
-  - `autoMerge true with finish in-place → 400`; `fix true with no finish → 400`; `fix true without autoMerge (finish pr) → 400 fix requires autoMerge`;
+  - The existing `400s a finish on a groom item (rule 2)` case (`test/agents-dispatch.test.ts:620-631`) is a groom body with `finish:'pr', base:'main'`,
+    which is now accepted: convert it into the groom-pr 201 case above. Add a separate `capture with finish → 400 finish applies only to execute or groom`
+    case on an `out-of-scope` item (the `good` fixture at :162 is an execute).
+  - `autoMerge true with finish in-place → 400 autoMerge and fix apply only to finish pr`; `fix true with no finish → 400 autoMerge and fix apply only to
+    finish pr` (a missing finish derives `in-place`; this case also proves rule 6 runs before rule 7); `fix true without autoMerge (finish pr) → 400 fix
+    requires autoMerge`;
     `autoMerge "yes" → 400 autoMerge must be a boolean`; `fix 1 → 400 fix must be a boolean`; `autoMerge false, fix false with in-place → 201`.
   - `typed --auto-merge / --fix in an execute body → 400` and `typed --finish / --auto-merge in a groom body → 400` (new refusal text; update
     `TOKEN_REFUSAL` at :578). `typed --fix in a capture body → 201` (capture unchecked).
   - `the untouched groom plan for an item titled "Add --fix and --auto-merge flags" dispatches 201` (Review Focus 3).
   In `test/agents-dispatch-remote.test.ts`:
   - `remote groom with finish pr → 400 a groom on Pro has no finish`; `remote groom with no finish still spawns 'Groom #32. ' + COMMIT_RULE` (the existing
-    :375–426 expectations must keep passing unchanged).
+    :375–426 expectations must keep passing unchanged — they do only because the strip removes the one `COMMIT_RULE` the body carried and the `in-place`
+    clause puts the same bytes back).
   - `remote execute with autoMerge and fix → the sent prompt ends with finishClause('execute','pr','main',{autoMerge:true,fix:true})`.
   In `test/agents-prompt.test.ts`: change `'%s still ends with COMMIT_RULE'` (:327) so capture still does and groom does not contain `COMMIT_RULE`; add
   `the groom prompt carries no FINISH_FLAG match for every section`. In `test/agents-plan.test.ts`: a groom plan's prompt does not contain `COMMIT_RULE`.
@@ -168,7 +173,7 @@ appended exactly as today (no strip — its existing "doubled, harmless" case at
   never merges.`
 - **Auto-merge PRs** — `Switch` (label `auto-merge PRs`); hint `Preselects Auto-merge on a PR launch. Armed only if the GitHub repo allows auto-merge — GitHub
   does the merge.`
-- **Fix if it fails** — `Switch` (label `fix if it fails`), `disabled` with its `title`-style reason `Needs Auto-merge PRs on` while `prAutoMergeDefault` is
+- **Fix if it fails** — `Switch` (label `fix if it fails`), `disabled` with the Switch's `title` prop `Needs Auto-merge PRs on` while `prAutoMergeDefault` is
   off; hint `Preselects Fix on a PR launch: the session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes.`
 - Turning Auto-merge PRs off does not rewrite `prFixDefault` (the stored value is inert while the row is disabled; the sheet seeds Fix off, Task 4).
 
@@ -198,7 +203,7 @@ appended exactly as today (no strip — its existing "doubled, harmless" case at
   (it shows `COMMIT_RULE`, what the server appends) and no Finish.
 - The Finish pick seeds once per fetched plan: `executeDefaultFinish` for execute, `groomDefaultFinish` for groom. Execute on a remote stays derived as `pr`
   (unchanged); a groom ignores `runOn.lock.prOnly`.
-- Branches are fetched when the plan is execute or groom (still once per open).
+- Branches are fetched when `hasFinish` holds (still once per open) — a remote groom draws no Base and fetches nothing.
 - Toggle row, drawn only while the derived finish is `pr`: two `Switch`es, `auto-merge` (span text `auto-merge — GitHub merges the PR once its checks pass`)
   and `fix if it fails` (span text `fix if it fails — the session stays and fixes failing checks and base conflicts`), the second disabled until the first is
   on; under them a `sheet-note`: `Needs Allow auto-merge on the GitHub repo; checked when the PR opens.` Same §8 Switch row as remote control.
@@ -220,7 +225,7 @@ appended exactly as today (no strip — its existing "doubled, harmless" case at
   - `flipping Finish away from PR clears both and back re-seeds` — on/on → In place (no toggles, body has neither key) → PR (on/on again).
   - `turning Auto-merge off clears Fix` → body `autoMerge:false, fix:false`.
   - `a remote execute draws the toggles and sends them` (locked PR); the existing `sends a remote groom with the machine and no finish` (:515) keeps passing
-    and additionally asserts no `autoMerge`/`fix` key and no Finish select.
+    and additionally asserts no `autoMerge`/`fix` key, no Finish select, and that the clause line IS drawn and reads `COMMIT_RULE`.
 - [ ] **Step 2: Run** `pnpm exec jest --runInBand test/launch-sheet.test.tsx` — expect the new cases to FAIL.
 - [ ] **Step 3: Implement** the behaviour above; update the header comment and the request-body comment (groom now sends its finish; remote groom does not).
 - [ ] **Step 4: Run** the same command plus `test/dispatch-button.test.tsx` and `pnpm run typecheck` — PASS.
@@ -288,7 +293,7 @@ appended exactly as today (no strip — its existing "doubled, harmless" case at
 - [ ] **Step 1: Write the failing tests** in `test/agents-shared.test.ts` beside :846: `pr-mode.md quotes the execute flag sentence` —
   `prMode` contains `finishClause('execute','pr','<base>',{autoMerge:true,fix:true})`; `auto-merge.md names the exact not-allowed line, the 45-minute and
   3-round bounds, and forbids force-push` — the file (whitespace-collapsed) contains `auto-merge: not allowed on <owner>/<repo> — PR left open`, `45 minutes`,
-  `3`, `--auto --`, `never force` (case-insensitive for the last).
+  `3 fix rounds`, `--auto --`, `never force` (case-insensitive for the last). `auto-merge.md` states the round bound with the exact phrase `3 fix rounds`.
 - [ ] **Step 2: Run** `pnpm exec jest --runInBand test/agents-shared.test.ts` — FAIL.
 - [ ] **Step 3: Write** `auto-merge.md` and the execute edits.
 - [ ] **Step 4: Run** the same command — PASS.
@@ -325,14 +330,16 @@ appended exactly as today (no strip — its existing "doubled, harmless" case at
   `skills/backlog-groom/references/pr-mode.md`, pr-mode.md contains `skills/backlog-execute/references/auto-merge.md`.
 - [ ] **Step 2: Run** `pnpm exec jest --runInBand test/agents-shared.test.ts` — FAIL.
 - [ ] **Step 3: Write** the files.
-- [ ] **Step 4: Run** the same command — PASS. `pnpm run test:skills` only if a skill test reads groom's SKILL.md (`grep -rl "backlog-groom/SKILL.md"
-  skills test` decides).
+- [ ] **Step 4: Run** the same command — PASS. Then `pnpm run test:skills`: `skills/backlog/tools/backlog.test.mjs:2861-2913` reads groom's SKILL.md and
+  pins `### Mark it in progress` and the `Groomed on disk only` line — "not printed in `pr` mode" keeps that sentence in the file and changes only when it
+  is printed.
 - [ ] **Step 5: Commit** — `feat(groom): a --finish pr mode that lands the spec and plan in a PR`.
 
 ### Task 8: Invariants and docs
 
 **Files:**
-- Modify: `CLAUDE.md:195` (headline), `.claude/rules/orchestrator.md:45-50` (headline byte-equal + mechanism body), `docs/subsystems/invariants.md:603` (section
+- Modify: `shared/agent.ts:908-913` (the `COMMIT_RULE` doc comment quotes the old headline — reword it to the new one), `CLAUDE.md:195` (headline),
+  `.claude/rules/orchestrator.md:45-50` (headline byte-equal + mechanism body), `docs/subsystems/invariants.md:603` (section
   + heading) and every link to its anchor (`grep -rn "backlog-orchestrate-is-the-only-skill-that-merges" .`), `docs/subsystems/invariants.md:261` (tick
   paragraph wording if it restates the rule), `docs/overview.md:123`, `skills/backlog-orchestrate/SKILL.md:9`
 - Modify: `docs/subsystems/skills.md` (groom finish mode; the shared auto-merge procedure), `docs/subsystems/board.md` (sheet controls, Settings rows),
@@ -347,7 +354,8 @@ Reasoning section in invariants.md: why auto-merge is not "the skill merging" (t
 - [ ] **Step 1: Edit** the headline in both tiers and the heading; fix every anchor link the grep finds.
 - [ ] **Step 2: Run** `pnpm exec jest --runInBand test/claude-rules.test.ts` — PASS (headlines byte-equal, anchors resolve once).
 - [ ] **Step 3: Edit** the three subsystem docs and the orchestrate description.
-- [ ] **Step 4: Run** `grep -rn "only skill that merges" CLAUDE.md docs skills .claude` — every hit is the new wording or a historical spec/plan.
+- [ ] **Step 4: Run** `grep -rn "only skill that merges" CLAUDE.md docs skills .claude shared server client` — every hit is the new wording, or lies
+  under `docs/superpowers/` (historical specs, plans and reviews, left as written).
 - [ ] **Step 5: Commit** — `docs: groom pr finish and auto-merge in invariants and subsystem docs`.
 
 ### Task 9: Real-run verification (held — needs the user)
