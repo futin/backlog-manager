@@ -845,7 +845,7 @@ describe('inReviewBlock', () => {
      placeholder, so that is the base it is rendered with here. */
   it('is the pr sentence backlog-execute pr-mode.md quotes', () => {
     const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
-    expect(prMode).toContain(finishClause('pr', '<base>'));
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>'));
   });
 });
 
@@ -1014,21 +1014,90 @@ describe('watchdogStoodDown over a failing run', () => {
 /* The execute finish vocabulary and the one sentence that closes an execute prompt. `finishClause` is shared so the launch sheet's preview and the prompt the
    server sends are the same string by construction — these cases pin the bytes, because the pr sentence is what the spawned session obeys. */
 describe('finishClause', () => {
-  it('is COMMIT_RULE for in-place, whatever the base', () => {
-    expect(finishClause('in-place', 'develop')).toBe(COMMIT_RULE);
-    expect(finishClause('in-place', 'main')).toBe(COMMIT_RULE);
+  const EXEC_PR = 'Finish with `--finish pr --base main`: the skill commits, reviews, pushes and opens the PR into main, and never merges.';
+  const GROOM_PR = 'Finish with `--finish pr --base main`: the skill commits, pushes and opens the PR into main, and never merges.';
+  /* One row per flag combination, for either action: the sentence is the same bar the word "reviews", which only an execute has a reviewer for. The base is a
+     parameter so a slashed one is proved verbatim in every place the sentence spells it. */
+  const armed = (action: 'execute' | 'groom', base: string, fix: boolean): string => {
+    const reviews = action === 'execute' ? 'reviews, ' : '';
+    return (
+      `Finish with \`--finish pr --base ${base} --auto-merge${fix ? ' --fix' : ''}\`: the skill commits, ${reviews}pushes, opens the PR into ${base} and arms ` +
+      `GitHub auto-merge if the repository allows it, then waits for GitHub to merge it${fix ? `, fixing failing checks and conflicts with ${base} meanwhile` : ''}; ` +
+      'the skill never merges itself.'
+    );
+  };
+
+  it.each(['execute', 'groom'] as const)('is COMMIT_RULE for in-place, whatever the base (%s)', (action) => {
+    expect(finishClause(action, 'in-place', 'develop')).toBe(COMMIT_RULE);
+    expect(finishClause(action, 'in-place', 'main')).toBe(COMMIT_RULE);
   });
 
-  it('names the base in both places for pr', () => {
-    expect(finishClause('pr', 'main')).toBe(
-      'Finish with `--finish pr --base main`: the skill commits, reviews, pushes and opens the PR into main, and never merges.'
-    );
+  it('in-place is COMMIT_RULE for both actions and any flags', () => {
+    expect(finishClause('groom', 'in-place', 'develop', { autoMerge: true, fix: true })).toBe(COMMIT_RULE);
+    expect(finishClause('execute', 'in-place', 'main', { autoMerge: true })).toBe(COMMIT_RULE);
+  });
+
+  it('names the base in both places for an execute pr, byte for byte as before', () => {
+    expect(finishClause('execute', 'pr', 'main')).toBe(EXEC_PR);
+  });
+
+  it('groom pr drops "reviews"', () => {
+    const clause = finishClause('groom', 'pr', 'main');
+    expect(clause).toBe(GROOM_PR);
+    expect(clause).not.toContain('reviews');
   });
 
   it('carries a slashed base through verbatim', () => {
-    const clause = finishClause('pr', 'release/1.x');
+    const clause = finishClause('execute', 'pr', 'release/1.x');
     expect(clause).toContain('--finish pr --base release/1.x');
     expect(clause).toContain('into release/1.x');
+  });
+
+  it('each flag combination, both actions', () => {
+    const base = 'release/1.x';
+    for (const action of ['execute', 'groom'] as const) {
+      expect(finishClause(action, 'pr', base, { autoMerge: true })).toBe(armed(action, base, false));
+      expect(finishClause(action, 'pr', base, { autoMerge: true, fix: true })).toBe(armed(action, base, true));
+    }
+    // The four rows against the literal sentences, so `armed` above cannot drift into agreeing with a wrong function.
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge`: the skill commits, reviews, pushes, opens the PR into main and arms GitHub auto-merge if the ' +
+        'repository allows it, then waits for GitHub to merge it; the skill never merges itself.'
+    );
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge --fix`: the skill commits, reviews, pushes, opens the PR into main and arms GitHub auto-merge if ' +
+        'the repository allows it, then waits for GitHub to merge it, fixing failing checks and conflicts with main meanwhile; the skill never merges itself.'
+    );
+    expect(finishClause('groom', 'pr', 'main', { autoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge`: the skill commits, pushes, opens the PR into main and arms GitHub auto-merge if the repository ' +
+        'allows it, then waits for GitHub to merge it; the skill never merges itself.'
+    );
+    expect(finishClause('groom', 'pr', 'main', { autoMerge: true, fix: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge --fix`: the skill commits, pushes, opens the PR into main and arms GitHub auto-merge if the ' +
+        'repository allows it, then waits for GitHub to merge it, fixing failing checks and conflicts with main meanwhile; the skill never merges itself.'
+    );
+  });
+
+  it('fix alone is ignored', () => {
+    expect(finishClause('execute', 'pr', 'main', { fix: true })).toBe(EXEC_PR);
+    expect(finishClause('groom', 'pr', 'main', { fix: true })).toBe(GROOM_PR);
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: false, fix: true })).toBe(EXEC_PR);
+  });
+
+  /* The skill's flag parser reads the backticked span; prose that spelled a flag outside it would be a second, unparsed spelling a reader could take for one. */
+  it('flags only inside the backticks', () => {
+    const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }];
+    for (const action of ['execute', 'groom'] as const) {
+      for (const flags of flagSets) {
+        const clause = finishClause(action, 'pr', 'main', flags);
+        const open = clause.indexOf('`');
+        const close = clause.indexOf('`', open + 1);
+        for (const m of clause.matchAll(/--(auto-merge|fix)(?![\w-])/g)) {
+          expect(m.index).toBeGreaterThan(open);
+          expect(m.index).toBeLessThan(close);
+        }
+      }
+    }
   });
 });
 

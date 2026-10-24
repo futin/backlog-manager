@@ -390,13 +390,13 @@ describe('LaunchSheet', () => {
       const base = screen.getByLabelText('Base') as HTMLSelectElement;
       await waitFor(() => expect([...base.options].map((o) => o.value)).toEqual(['main', 'develop']));
       expect(base.value).toBe('main');
-      expect(screen.getByText(finishClause('pr', 'main'))).toBeInTheDocument();
+      expect(screen.getByText(finishClause('execute', 'pr', 'main'))).toBeInTheDocument();
       expect(screen.queryByText(COMMIT_RULE)).not.toBeInTheDocument();
       expect(calls.some((c) => c.url.includes('/api/agents/branches?project=%2Fabs%2Falpha'))).toBe(true);
 
       await userEvent.selectOptions(base, 'develop');
-      expect(screen.getByText(finishClause('pr', 'develop'))).toBeInTheDocument();
-      expect(screen.queryByText(finishClause('pr', 'main'))).not.toBeInTheDocument();
+      expect(screen.getByText(finishClause('execute', 'pr', 'develop'))).toBeInTheDocument();
+      expect(screen.queryByText(finishClause('execute', 'pr', 'main'))).not.toBeInTheDocument();
 
       const body = await launchNow(calls);
       expect(body.finish).toBe('pr');
@@ -450,7 +450,7 @@ describe('LaunchSheet', () => {
       expect(screen.queryByLabelText('Finish')).not.toBeInTheDocument();
       expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
       expect(screen.queryByText(COMMIT_RULE)).not.toBeInTheDocument();
-      expect(screen.queryByText(finishClause('pr', 'main'))).not.toBeInTheDocument();
+      expect(screen.queryByText(finishClause('execute', 'pr', 'main'))).not.toBeInTheDocument();
       const body = await launchNow(calls);
       expect(body.action).toBe('groom');
       expect(body).not.toHaveProperty('finish');
@@ -506,7 +506,7 @@ describe('LaunchSheet', () => {
       const base = screen.getByLabelText('Base') as HTMLSelectElement;
       await waitFor(() => expect([...base.options].map((o) => o.value)).toEqual(['main', 'develop']));
       await userEvent.selectOptions(base, 'develop');
-      expect(screen.getByText(finishClause('pr', 'develop'))).toBeInTheDocument();
+      expect(screen.getByText(finishClause('execute', 'pr', 'develop'))).toBeInTheDocument();
 
       const body = await launchBody(calls, 'Start on Pro');
       expect(body).toMatchObject({ machine: 'Pro', finish: 'pr', base: 'develop' });

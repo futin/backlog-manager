@@ -565,7 +565,7 @@ export class AgentsService {
     const spawned = await this.spawnInProject(item.projectPath, {
       // An execute's body is the sheet's text as sent and the clause follows it, built from `finish` and the proved `base` alone — see composePrompt's
       // note on why the clause is not in the editable body. Groom and capture keep their `COMMIT_RULE` inside the text, so they go out unchanged.
-      prompt: action === 'execute' ? `${prompt} ${finishClause(finish, base)}` : prompt,
+      prompt: action === 'execute' ? `${prompt} ${finishClause('execute', finish, base)}` : prompt,
       name: sessionName(item),
       permissionMode: req.permissionMode,
       maxPermission: status.spawnMaxPermission,

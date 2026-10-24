@@ -894,8 +894,8 @@ export interface AgentPlan {
   action: AgentAction;
   /**
    * The composed default. The sheet may edit it before dispatching. For an `execute` it is the body WITHOUT its closing clause: the sheet renders
-   * `finishClause(finish, base)` read-only beneath it and dispatch appends it, so an edit cannot contradict the finish picker. Groom and capture keep
-   * their `COMMIT_RULE` inside this text.
+   * `finishClause(action, finish, base, flags)` read-only beneath it and dispatch appends it, so an edit cannot contradict the finish picker. Groom's is
+   * appended the same way; only capture keeps its `COMMIT_RULE` inside this text.
    */
   prompt: string;
   /** Display name of the project the session will run in. */
@@ -930,12 +930,18 @@ export interface AgentDispatchRequest {
   model?: string;
   effort?: string;
   /**
-   * How an `execute` session ends (`ExecuteFinish`) and, for `pr`, the branch the PR targets. Both optional so a tab opened before the deploy — which sends
-   * neither — reads as `in-place` rather than a 400; `base` is meaningful only beside `finish: 'pr'` — dispatch refuses
+   * How an `execute` or `groom` session ends (`ExecuteFinish`) and, for `pr`, the branch the PR targets. Both optional so a tab opened before the deploy —
+   * which sends neither — reads as `in-place` rather than a 400; `base` is meaningful only beside `finish: 'pr'` — dispatch refuses
    * (400) a `base` sent with any other finish, or with none.
    */
   finish?: ExecuteFinish;
   base?: string;
+  /**
+   * `--finish pr` follow-ups (`FinishFlags`): arm GitHub auto-merge and wait for it, and, beside that, fix failing checks and conflicts meanwhile. Optional, so a
+   * body that sends neither is today's. Meaningful only beside `finish: 'pr'`, and `fix` only beside `autoMerge` — dispatch 400s the rest.
+   */
+  autoMerge?: boolean;
+  fix?: boolean;
   /**
    * The machine to start on: a configured remote's name. Absent or `home` is this machine and produces the spawn request it always has; the client omits it
    * for home. An unknown name is a 400.
@@ -1135,6 +1141,21 @@ export const MERGE_MODES: readonly MergeMode[] = ['merge', 'branch', 'pr'];
  * never reach. Absent anywhere reads as `in-place`.
  */
 export type ExecuteFinish = 'in-place' | 'pr';
+
+/**
+ * The two actions whose prompt ends in `finishClause`: execute and groom. Capture is not one — it creates a new item and keeps its `COMMIT_RULE` in its editable
+ * text. A subset of `AgentAction`, so the clause's one function can say "reviews" for the action that has a reviewer and drop it for the one that does not.
+ */
+export type FinishAction = 'execute' | 'groom';
+
+/**
+ * The two optional `--finish pr` follow-ups a launch can add: arm GitHub auto-merge and wait for it (`autoMerge`), and, while waiting, fix failing checks and
+ * conflicts with the base (`fix`). `fix` means something only beside `autoMerge`; dispatch 400s it alone, and `finishClause` ignores it alone.
+ */
+export interface FinishFlags {
+  autoMerge?: boolean;
+  fix?: boolean;
+}
 
 /**
  * Every member of `ExecuteFinish`, as a value — what a dispatch body's `finish`, the `--finish` trigger flag and Settings' stored default are all checked

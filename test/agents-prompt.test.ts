@@ -1,7 +1,7 @@
 import { readAgentsConfig } from '../server/src/agents/config.util';
 import { dashboardError, resumeSessionName } from '../server/src/agents/agents.service';
 import { composePrompt, sessionName } from '../server/src/agents/prompt.util';
-import { COMMIT_RULE, FINISH_FLAG } from '../shared/agent';
+import { COMMIT_RULE, FINISH_FLAG, defuseFinishFlags } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -351,5 +351,27 @@ describe('composePrompt title flag tokens', () => {
   it('applies to groom and capture too, one rule for every action', () => {
     const p = composePrompt(fakeItem({ title: 'About --finish' }), 'groom');
     expect(p).toContain(`"About ${NB}finish"`);
+  });
+});
+
+/* The pattern learned two more tokens with the auto-merge and fix checkboxes: a body spelling either is as much a smuggled flag as `--finish` is. The same
+   boundary rule applies — a longer word (`--fix-up`, `--auto-merged`) or a word character before it is not a flag. */
+describe('FINISH_FLAG and the auto-merge / fix tokens', () => {
+  it.each(['--auto-merge', '--fix'])('matches %s bare, quoted and parenthesised', (flag) => {
+    expect(FINISH_FLAG.test(`Run with ${flag} now`)).toBe(true);
+    expect(FINISH_FLAG.test(`Run with "${flag}" now`)).toBe(true);
+    expect(FINISH_FLAG.test(`Run with (${flag}) now`)).toBe(true);
+    expect(FINISH_FLAG.test(flag)).toBe(true);
+  });
+
+  it.each(['--fixed', '--fix-up', '--auto-merged', 'prefix--fix', '--auto-merge-queue'])('does not match %s', (word) => {
+    expect(FINISH_FLAG.test(`about ${word} here`)).toBe(false);
+  });
+
+  it('defuseFinishFlags rewrites both, leaves no match and keeps the visible words', () => {
+    const out = defuseFinishFlags('Use --fix and --auto-merge');
+    expect(FINISH_FLAG.test(out)).toBe(false);
+    expect(out).toBe('Use \u2011\u2011fix and \u2011\u2011auto-merge');
+    expect(out.replace(/\u2011/g, '-')).toBe('Use --fix and --auto-merge');
   });
 });

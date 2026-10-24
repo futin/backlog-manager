@@ -601,14 +601,14 @@ describe('POST /api/agents/dispatch', () => {
       makeRepo('main');
       const sent = stubDashboard();
       await exec({ finish: 'pr', base: 'main' }).expect(201);
-      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('pr', 'main'));
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'main'));
     });
 
     it('finish pr, base develop with a real local develop: ends with finishClause(pr, develop)', async () => {
       makeRepo('main', ['develop']);
       const sent = stubDashboard();
       await exec({ finish: 'pr', base: 'develop' }).expect(201);
-      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('pr', 'develop'));
+      expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + finishClause('execute', 'pr', 'develop'));
     });
 
     it('400s a finish outside the vocabulary (rule 1)', async () => {
@@ -698,7 +698,7 @@ describe('POST /api/agents/dispatch', () => {
         await exec({ itemPath, prompt, finish: 'pr', base: 'main' }).expect(201);
         const p = spawnedPrompt(sent);
         expect(p.match(/--base/g)).toHaveLength(1);
-        expect(p.endsWith(finishClause('pr', 'main'))).toBe(true);
+        expect(p.endsWith(finishClause('execute', 'pr', 'main'))).toBe(true);
       });
 
       it('finish in-place: 201', async () => {

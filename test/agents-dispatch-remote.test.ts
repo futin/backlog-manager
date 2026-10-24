@@ -258,7 +258,7 @@ describe('POST /api/agents/dispatch with a machine', () => {
       await start();
       await execute({ base: 'main', machine: 'Pro' }).expect(201, { sessionId: 'sess-pro' });
       const sent = JSON.parse(spawnsOf(pro)[0].body) as { prompt: string };
-      expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('pr', 'main'));
+      expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main'));
     });
 
     it('finish absent and no base: 400 base is required with finish pr', async () => {
@@ -343,7 +343,7 @@ describe('POST /api/agents/dispatch with a machine', () => {
     expect(spawns[0].auth).toBe(`Bearer ${PRO_TOKEN}`);
     const sent = JSON.parse(spawns[0].body) as Record<string, unknown>;
     expect(sent.project).toBe(PRO_DIRNAME);
-    expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('pr', 'main'));
+    expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main'));
     expect(sent.model).toBe(DEFAULT_MODEL);
     // Neither machine's path rides the body: membership is by dirName, Pro's own.
     expect(spawns[0].body).not.toContain(trackerPath);

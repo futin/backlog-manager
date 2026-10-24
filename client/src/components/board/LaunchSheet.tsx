@@ -203,7 +203,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
 
           {/* The line the server will append to the prompt at launch — `finishClause`, the one function, so this cannot drift from what is sent. Read-only
               and outside the textarea on purpose: flipping Finish or Base updates only this line, never the plan and never what was typed. */}
-          {isExecute && <div className="sheet-note">{finishClause(finish, base)}</div>}
+          {isExecute && <div className="sheet-note">{finishClause('execute', finish, base)}</div>}
 
           {isExecute && (
             <div className="sheet-row">
