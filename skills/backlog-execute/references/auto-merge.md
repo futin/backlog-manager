@@ -4,8 +4,9 @@ Read this file **in full, once**, when the trigger carries `--auto-merge` — an
 callers reach it: `backlog-execute`'s `references/pr-mode.md` (§8, last) and `backlog-groom`'s `references/pr-mode.md` (its auto-merge step). A session
 whose trigger has no `--auto-merge` never opens it, and neither does a session under an `[orchestrator-run` marker: no finish mode is read there.
 
-**The skill never merges.** It asks GitHub to merge the PR it opened, once the repository's own requirements are met, and GitHub performs the only merge into
-`<base>` — `backlog-orchestrate` stays the only skill that runs a merge into a base. The one `git merge` this file ever runs (Fix, "a conflict with the base")
+**The skill never merges.** It asks GitHub to merge the PR it opened, once the repository's own requirements are met — and on a repository that requires
+nothing, only once the PR's checks have passed (§1, step 5) — and GitHub performs the only merge into `<base>` — `backlog-orchestrate` stays the only skill
+that runs a merge into a base. The one `git merge` this file ever runs (Fix, "a conflict with the base")
 is a merge of `origin/<base>` INTO the PR's own branch, never into a base.
 
 Names used below, all already settled by the caller: `<tree>` is the PR's worktree and every command runs as `cd <tree> && …`; `<branch>` is the PR's head
@@ -15,8 +16,9 @@ SKILL.md's own commands show.
 
 ## Bounds — soft defaults, stated here so a session never has to choose one
 
-- **45 minutes** of wall clock from the moment auto-merge is armed. Every outcome below that is not a merge leaves auto-merge armed, so a person's later push
-  or approval still merges the PR without this session.
+- **45 minutes** of wall clock from the read before arming (§1, step 4: `<started>`). Every outcome reached after arming that is not a merge leaves auto-merge
+  armed, so a person's later push or approval still merges the PR without this session. Not-allowed, refused and the not-armed exits (§2) arm nothing: a PR
+  left that way merges only by a person's hand.
 - **3 fix rounds** at most, all inside those 45 minutes, and only with `--fix`. A round is one attempt started to turn the PR mergeable, pushed or not: a
   fix for a failing check, a merge of `<base>` into the branch, or one re-run of a check judged flaky (Fix, "Not this PR's failure"). An attempt whose local
   verification is red still counts, and pushes nothing (Fix, "A red round").
@@ -49,7 +51,7 @@ SKILL.md's own commands show.
    The literal `{owner}/{repo}` is filled in by `gh` itself from the tree's remote — type it as written. (`gh repo view --json` has no auto-merge field in
    gh 2.102.0, which is why the first read is `gh api`.) `<owner>/<repo>` below is the second read's `nameWithOwner`.
 
-   Either read exiting non-zero (auth expired, network, rate limit) is not an answer: it is step 5's refusal, with gh's own words.
+   Either read exiting non-zero (auth expired, network, rate limit) is not an answer: it is step 6's refusal, with gh's own words.
 
 2. **An answered `false` or `null`** (anything but `true` from a read that exited `0`) — and the final message says exactly one line about it:
 
@@ -58,33 +60,46 @@ SKILL.md's own commands show.
    No wait, no fix: stop here and finish as a plain `--finish pr` session would. `--fix` changes nothing about this — it only ever runs inside a wait.
 
 3. **The merge method**, from the second read: `--squash` if `squashMergeAllowed` is `true`, else `--merge` if `mergeCommitAllowed` is `true`, else
-   `--rebase` if `rebaseMergeAllowed` is `true`. None of the three `true` → treat it as a refusal (step 5), reason `no merge method allowed`.
+   `--rebase` if `rebaseMergeAllowed` is `true`. None of the three `true` → treat it as a refusal (step 6), reason `no merge method allowed`.
 
-4. **Arm it**, and record when:
+4. **Read the PR before arming**, and start the clock:
 
    ```bash
-   cd <tree> && gh pr merge <pr> --auto --<method>
+   cd <tree> && gh pr view <pr> --json mergeStateStatus,statusCheckRollup
    date +%s
    ```
 
-   The second command's number is `<armed>`, the start of the 45 minutes. Never add `--delete-branch`: the worktree stays (pr-mode §9) and a deleted remote
-   branch would strand a later fix push.
+   The second command's number is `<started>`, the start of the 45 minutes — the clock starts here, not at arming, because the wait below may begin before
+   anything is armed.
 
-   **What the call does on a PR with nothing pending** — no required checks, no required review, already mergeable — was checked against the installed `gh`
-   (gh 2.102.0, `gh pr merge --help`): the help documents only the arming path ("Automatically merge only after necessary requirements are met"), and the
-   behaviour on an already-mergeable PR could not be settled offline. So read it as: **the call may merge at once.** That is still what the person ticked,
-   and nothing here depends on which way it went — the first read of the Wait below sees `MERGED` and takes the merged path.
+5. **Arm now, or wait for the checks first** — by the first read's `mergeStateStatus`:
 
-5. **Any refusal** — `gh` exits non-zero, GitHub answers with an error (auto-merge not permitted for this user, a protected branch, the PR not in a state
+   - **`BLOCKED` or `BEHIND`** — GitHub itself gates the merge on the repository's requirements. Arm now, then the Wait (§2):
+
+     ```bash
+     cd <tree> && gh pr merge <pr> --auto --<method>
+     ```
+
+   - **Anything else** (`CLEAN`, `HAS_HOOKS`, `UNSTABLE`, `UNKNOWN`, …) — **do not arm yet.** Run the Wait (§2) unarmed; it arms with the same command once
+     every check in `statusCheckRollup` has concluded green (Wait, "Not yet armed").
+
+   Never add `--delete-branch` to the arming call: the worktree stays (pr-mode §9) and a deleted remote branch would strand a later fix push.
+
+   **Why arming waits on the read.** `gh pr merge --auto` on a PR GitHub would already merge — nothing required pending, typical of a repository with "Allow
+   auto-merge" on and no branch protection — merges it at once instead of arming, before its checks have finished. Arming only where GitHub gates the merge,
+   and elsewhere only once the checks have passed, keeps "GitHub merges the PR once its checks pass" true on an unprotected repository too.
+
+6. **Any refusal** — `gh` exits non-zero, GitHub answers with an error (auto-merge not permitted for this user, a protected branch, the PR not in a state
    that can be armed), or the permission layer denies the call — and the final message says `auto-merge: refused — <gh's own words> — PR left open`.
    No wait, no fix. A denial also follows "A refused step ends the procedure" above.
 
-## 2. Wait — always, once armed
+## 2. Wait — always, armed or not yet
 
-A loop of bounded reads in the foreground, until one of the exits below. Each pass, in order:
+A loop of bounded reads in the foreground, until one of the exits below. A wait killed from outside — the spawning job's own timeout ending the session —
+leaves the PR open, auto-merge armed if it was armed, and the tree kept. Each pass, in order:
 
-1. **The clock.** `echo $(( $(date +%s) - <armed> ))` — at `2700` or more (45 minutes) the bound is hit: stop, leave auto-merge armed, report what is still
-   pending or red (exit "Bound hit").
+1. **The clock.** `echo $(( $(date +%s) - <started> ))` — at `2700` or more (45 minutes) the bound is hit: stop, leave auto-merge as it is, report what is
+   still pending or red (exit "Bound hit", or "Bound hit, not armed" when nothing was armed yet).
 2. **Read the PR:**
 
    ```bash
@@ -96,10 +111,11 @@ A loop of bounded reads in the foreground, until one of the exits below. Each pa
    - **`state` is `MERGED`** → done (exit "Merged").
    - **`state` is `CLOSED`** → someone closed it without merging: stop, report (exit "Closed").
    - **A red check** — any `statusCheckRollup` entry whose `conclusion` is `FAILURE`, `TIMED_OUT`, `CANCELLED`, `STARTUP_FAILURE` or `ACTION_REQUIRED`, or
-     whose `state` is `FAILURE` or `ERROR` — without `--fix`: the wait ends at once, because nothing in this session will change it (exit "Stopped"). With
-     `--fix`: a fix round (§3, "A failing check"), then the next pass.
-   - **`mergeable` is `CONFLICTING`** — without `--fix`: ends the wait at once (exit "Stopped"). With `--fix`: a fix round (§3, "A conflict with the base"),
-     then the next pass.
+     whose `state` is `FAILURE` or `ERROR` — without `--fix`: the wait ends at once, because nothing in this session will change it (exit "Stopped", or
+     "Checks failed, not armed" when nothing was armed yet). With `--fix`: a fix round (§3, "A failing check"), then the next pass — armed or not, the same
+     rounds within the same bound.
+   - **`mergeable` is `CONFLICTING`, or `mergeStateStatus` is `DIRTY`** — without `--fix`: ends the wait at once (exit "Stopped"). With `--fix`: a fix
+     round (§3, "A conflict with the base"), then the next pass.
    - **`mergeStateStatus` is `BEHIND`** — the base has a branch rule requiring an up-to-date branch. Without `--fix`: ends the wait (exit "Stopped"). With
      `--fix`: the same round as a conflict, which then has nothing to resolve.
    - **A check still running** — an entry whose `status` is not `COMPLETED`, or whose `state` is `PENDING` or `EXPECTED` — wait on them:
@@ -111,6 +127,9 @@ A loop of bounded reads in the foreground, until one of the exits below. Each pa
      with the Bash tool's `timeout` at `540000` (9 minutes), or the time left of the 45 minutes when that is less — under the 10-minute cap, so the call
      always returns, and never far past the bound. A call the timeout ends is not an outcome:
      the checks are still running, and the next pass reads them again. Whatever it prints, the next pass's `gh pr view` is what decides.
+   - **Not yet armed, and every check has concluded** green, neutral or skipped — none reported at all counts as concluded → arm now, with §1 step 5's
+     command (a refusal is §1 step 6). GitHub merges at once where it gates nothing — that is the person's tick, and the checks have passed — or arms
+     where it does. Then pause (the `node` line below) and take the next pass, which sees `MERGED` or waits armed.
    - **`mergeStateStatus` is `BLOCKED` with every check finished and green** — a required review or another rule only a person can satisfy: stop, auto-merge
      left armed, report what it is waiting on (exit "Stopped").
    - **`mergeable` is `UNKNOWN`, or every check is green and the PR is still `OPEN`** — GitHub is computing mergeability, or is about to merge. Pause, then
@@ -135,14 +154,17 @@ A loop of bounded reads in the foreground, until one of the exits below. Each pa
     merge, so §9's "merge this PR before draining the backlog" line is not printed.
 - **Closed.** Stop and report. Auto-merge ended with the PR. Groom on a tracker project leaves `plan-review` on, and the final message says so with the
   `plan-review <issue> off` command.
-- **Bound hit**, **Stopped** — stop and report: auto-merge left armed, every check still pending or red by name, `mergeable` and `mergeStateStatus` as last
-  read, and why the wait ended (the bound; a red check or conflict without `--fix`; `BLOCKED` on a person; a fourth round needed; not this PR's failure; a
-  refusal). Groom on a tracker project leaves `plan-review` on, and says so as for Closed.
+- - **Bound hit**, **Stopped** — stop and report: auto-merge left armed, every check still pending or red by name, `mergeable` and `mergeStateStatus` as last
+  read, and why the wait ended (the bound; a red check or conflict without `--fix`; `BLOCKED` on a person; a fourth round needed; a red merge round; not this
+  PR's failure; a refusal). Groom on a tracker project leaves `plan-review` on, and says so as for Closed.
+- **Checks failed, not armed**, **Bound hit, not armed**, **Stopped, not armed** — the same report, but auto-merge was never armed, and the final message
+  says so: nothing will merge this PR until a person does. A red check without `--fix` on a PR GitHub would merge at once names its failing checks.
 
 ## 3. Fix — only with `--fix`, inside the wait
 
-Before each round, count it and read the clock: a round that would be the fourth is not started — the wait stops instead (exit "Stopped", reason
-`3 fix rounds spent`), with auto-merge left armed and what is still red and why in the report — and neither is one begun once the 45 minutes are up (exit
+Before each round, count it, read the clock, and record `cd <tree> && git status --short` as the round's baseline — the untracked paths already there are
+not the round's to delete (A red round). A round that would be the fourth is not started — the wait stops instead (exit "Stopped", reason
+`3 fix rounds spent`), with auto-merge left as it is and what is still red and why in the report — and neither is one begun once the 45 minutes are up (exit
 "Bound hit"). `backlog-reviewer` is not re-dispatched for a fix round: the round is verified, and its
 commit sits on a PR a person reads.
 
@@ -158,7 +180,9 @@ commit sits on a PR a person reads.
 2. **Decide whose failure it is** — "Not this PR's failure" below. Only a failure this PR causes is fixed.
 3. **Fix it in `<tree>`**, touching only what the failure needs — never unrelated code, never a test weakened to pass.
 4. **Verify.** execute: the same verification command(s) the item's Outcome recorded, plus the failing job's own command run locally when it differs. groom:
-   the command the failing job runs, run locally. Red locally → "A red round" below: nothing from this round is committed or pushed.
+   the command the failing job runs, run locally — and for a merge round with no failing job behind it (a `BEHIND` PR), its diff is one item file and a
+   spec at most, so `git diff --cached --check` (no conflict marker left) is the whole verification. Red locally → "A red round" below: nothing from this
+   round is committed or pushed.
 5. **Commit and push**, staging narrowly — `git status --short` first, then each path this round changed, by name; never `git add -A` or `git add .`:
 
    ```bash
@@ -193,11 +217,15 @@ A round whose local verification is red ends without a commit and without a push
 who opens the worktree after this session (pr-mode §9) — starts from the branch's last commit, not from a half-fix nobody explained:
 
 1. **Record it** for the final message: the failing check's name (or, for a merge round, `merge of <base>`) and the round's change, staged and unstaged
-   together — `cd <tree> && git diff --stat HEAD`.
+   together — `cd <tree> && git diff --stat HEAD` — plus, by name, each untracked path `git status --short` lists that the baseline did not, since the stat
+   omits untracked files.
 2. **Return the tree to `HEAD`.** A merge in progress (`git rev-parse -q --verify MERGE_HEAD` prints a sha) → `cd <tree> && git merge --abort`. Otherwise
-   restore every tracked path the round changed — `cd <tree> && git restore --source=HEAD --staged --worktree -- <path> [<path> …]` — and delete each file
-   the round created, by name. `git status --short` then prints nothing.
-3. **Take the next pass.** The round is spent; the next one, if one is left, starts from the log or the PR's state again.
+   restore every tracked path the round changed — `cd <tree> && git restore --source=HEAD --staged --worktree -- <path> [<path> …]`. Either way, then delete
+   each file the round created — an untracked path absent from the baseline, by name, build output included. `git status --short` then prints the baseline
+   again.
+3. **A red merge round ends the wait** (exit "Stopped", reason `merge of <base> is red`): the same merge of the same `<base>` would be red again, and would
+   only burn the rounds left. **A red fix round takes the next pass**: the round is spent; the next one, if one is left, starts from the log or the PR's
+   state again.
 
 ### Not this PR's failure
 
@@ -206,6 +234,8 @@ A red check is outside the PR's diff — stop and report it, never edit unrelate
 - **It never reached the project's own commands:** the log shows a runner, checkout, setup, dependency-download, network, rate-limit or disk failure, or the
   job was cancelled or timed out by the platform rather than by a command of the project.
 - **It names a missing secret, token or permission** — something only a repository admin can grant.
+- **A commit cannot fix it:** the check reads the PR's title, body or labels, not its code — a PR-title check such as `ci / pr-title`
+  (`docs/workflows/ci.md`). It is not a fix round: stop and report it, and never edit the PR's title or body to turn it green.
 - **It fails identically on `<base>`:** the same workflow's latest run on the base is red too —
   `gh run list --branch <base> --workflow "<workflow name>" --limit 1 --json conclusion,headSha` reports `failure`. The base is broken; this PR did not
   break it.
@@ -231,8 +261,12 @@ The caller's own final message (execute pr-mode §9, groom's final message) carr
   - `auto-merge: merged by GitHub (<method>)`
   - `auto-merge: armed (<method>), PR closed without merging`
   - `auto-merge: armed (<method>), still open after 45 minutes — <what is pending or red>`
-  - `auto-merge: armed (<method>), stopped — <why>` (a red check or conflict without `--fix`, `BLOCKED` on a person, `3 fix rounds spent`, not this PR's
-    failure, a refused step, a rejected push);
+  - - `auto-merge: armed (<method>), stopped — <why>` (a red check or conflict without `--fix`, `BLOCKED` on a person, `3 fix rounds spent`, `merge of <base> is
+    red`, not this PR's failure, a refused step, a rejected push);
+  - `auto-merge: not armed — checks failed on a PR GitHub would merge at once — PR left open`, followed by the failing checks' names
+  - `auto-merge: not armed, still open after 45 minutes — <what is pending or red>`
+  - `auto-merge: not armed, stopped — <why>` (as for the armed line, on a PR that was never armed)
+  - `auto-merge: not armed, PR closed without merging`;
 - **every fix commit**, one line each, `<short sha> <subject>` — the fix commits and the merge commits of §3, in order — or `fix commits: none`;
 - **every red round** (§3, "A red round"), one entry each: `red round <k>: <check name, or merge of <base>> — not pushed`, followed by the
   `git diff --stat HEAD` it recorded;
@@ -246,4 +280,7 @@ GitHub's own repository setting read at runtime; squash › merge › rebase; 45
 for a fix round; the claim released before the wait. Ruled while writing this file: `BEHIND` is handled as a conflict round, a `BLOCKED` PR with every check
 green ends the wait (only a person can unblock it), the "outside the diff" test is the list above with one counted re-run for a check that passes locally,
 and the pause between reads is a foreground `node` timer. Ruled on review: a round is any attempt started, pushed or not; a merge of `<base>` is verified
-before it is committed, clean or not; and a red round records its `git diff --stat HEAD`, then returns the tree to `HEAD`.
+before it is committed, clean or not; and a red round records its `git diff --stat HEAD`, then returns the tree to `HEAD`. Ruled on the final review:
+`gh pr merge --auto` merges an already-mergeable PR at once, so arming waits on a `mergeStateStatus` read — armed at once only on `BLOCKED` or `BEHIND`,
+elsewhere only once every check has concluded green — and the 45 minutes start at that read; a check a commit cannot fix (a PR-title check) is not a fix
+round; a red merge round ends the wait; and a round records a `git status --short` baseline, so a red round deletes only the untracked paths it created.

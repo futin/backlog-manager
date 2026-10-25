@@ -1,5 +1,18 @@
 import { ATTENTION_RUN_STAGES, EXECUTE_FINISHES, MERGE_MODES, QUESTION_MODES, RUN_CLAIMED_STAGES } from './types';
-import type { AgentsStatus, BacklogItem, ExecuteFinish, FinishAction, FinishFlags, MachineHealth, MergeMode, OrchestratorRunsPayload, PermissionMode, QuestionMode, RunQueueItem, RunStage } from './types';
+import type {
+  AgentsStatus,
+  BacklogItem,
+  ExecuteFinish,
+  FinishAction,
+  FinishFlags,
+  MachineHealth,
+  MergeMode,
+  OrchestratorRunsPayload,
+  PermissionMode,
+  QuestionMode,
+  RunQueueItem,
+  RunStage
+} from './types';
 
 /**
  * agent.ts — what a card's button does, decided once for both sides.
@@ -870,7 +883,7 @@ export function oneLine(text: string): string {
 }
 
 /**
- * The `--finish` / `--base` / `--auto-merge` / `--fix` token, as one pattern. `AgentsService.dispatch` refuses an execute or groom body containing it (rule 5:
+ * The `--finish` / `--base` / `--auto-merge` / `--fix` token, as one pattern. `AgentsService.dispatch` refuses an execute or groom body containing it (rule 8:
  * the sheet's pickers and checkboxes are the only channel for any of them), and `composePrompt` defuses it inside an item title with `defuseFinishFlags` — two
  * uses of one pattern, so what the refusal would match and what the defuser rewrites cannot drift. A word character or hyphen on either side means a longer
  * word (`--finished`, `--base-ref`, `--fix-up`, `--auto-merged`, `base64`), which is not a flag. Non-global on purpose: `.test` on a global regex carries
@@ -880,8 +893,8 @@ export const FINISH_FLAG = /(?<![\w-])--(finish|base|auto-merge|fix)(?![\w-])/;
 
 /**
  * An item title is free text, and this repo's own history has titles that spell `--base` (`On a --base run the orchestrator's branch -d refuses…`). Left as
- * is, the board's own untouched execute or groom prompt would trip rule 5 on its quoted title and 400 the default dispatch. The `--` of each flag token (all
- * four `FINISH_FLAG` names, `--auto-merge` and `--fix` included) becomes two U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 5
+ * is, the board's own untouched execute or groom prompt would trip rule 8 on its quoted title and 400 the default dispatch. The `--` of each flag token (all
+ * four `FINISH_FLAG` names, `--auto-merge` and `--fix` included) becomes two U+2011 NON-BREAKING HYPHENs: a person reads the same title, while neither rule 8
  * nor the skill's flag parser sees a flag. Only the title goes through this — a token a person TYPES into the body is still refused.
  */
 export function defuseFinishFlags(text: string): string {
@@ -929,16 +942,21 @@ export const COMMIT_RULE =
 
 /**
  * The closing sentence of an `execute` or `groom` prompt for a chosen finish. Lives here, not in the server, so the launch sheet's preview and the prompt the
- * server sends are one function and cannot drift. `in-place` is `COMMIT_RULE` byte for byte (base and flags ignored, for either action); `pr` names the flags the
- * skill's own pr procedure parses and says the PR goes into `base` and is never merged by the skill. It restates no git step: the skill's pr procedure owns every
- * one (worktree, narrow staging, review, push, PR, the wait), and a copy here would drift from the rule the spawned session reads in full from the skill. This
- * sentence only has to stop `COMMIT_RULE`'s "Do not push." from being the last, most specific word the session hears.
+ * server sends are one function and cannot drift. `in-place` is `COMMIT_RULE` byte for byte (base and flags ignored, for either action); `pr` names the flags
+ * the skill's own pr procedure parses and says the PR goes into `base` and is never merged by the skill. It restates no git step: the skill's pr procedure owns
+ * every one (worktree, narrow staging, review, push, PR, the wait), and a copy here would drift from the rule the spawned session reads in full from the skill.
+ * This sentence only has to stop `COMMIT_RULE`'s "Do not push." from being the last, most specific word the session hears.
  *
  * Groom's sentence drops "reviews": a groom's diff is one plan in one item file, which the person reviews as the PR, and no `backlog-reviewer` pass runs on it.
  * `autoMerge` adds `--auto-merge` and the arm-then-wait clause; `fix` adds `--fix` and the fix-meanwhile clause, and only beside `autoMerge` — the server 400s
  * a lone `fix`, so this function treating it as absent is a second line of defence, not a contract a caller should lean on. Both flags appear only inside the
- * backticks, where the skill's flag parser reads them; the prose after the colon never spells one. The `fix` clause says conflicts "with ${base}" — the base the
- * PR targets, which is what a conflict is with — so the base is interpolated in all three places.
+ * backticks, where the skill's flag parser reads them; the prose after the colon never spells one. The `fix` clause says conflicts "with ${base}" — the base
+ * the PR targets, which is what a conflict is with — so the base is interpolated in all three places.
+ *
+ * "Arms … then waits" summarises; `skills/backlog-execute/references/auto-merge.md` is the procedure, and the clause defers to it rather than restating its
+ * order. "The skill never merges itself" holds because the skill never runs a `gh pr merge` without `--auto`, and arms only once GitHub would gate the merge
+ * (`mergeStateStatus` `BLOCKED` or `BEHIND`) or the PR's checks have passed — gh merges an already-mergeable PR at once instead of arming, so on a repository
+ * with no branch protection the arming call waits for the checks, and the merge it triggers is still GitHub's, after them.
  */
 export function finishClause(action: FinishAction, finish: ExecuteFinish, base: string, flags: FinishFlags = {}): string {
   if (finish === 'in-place') return COMMIT_RULE;

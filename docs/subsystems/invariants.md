@@ -236,9 +236,10 @@ between a tick choosing an item and the skill writing its `started:` marker or c
 board-started run that has no run file yet (server memory, so readable only while the stack is up — with it down there is no board to have started one, and the
 check is skipped); a `started:` marker on any open item in the main checkout or a linked worktree, since an in-place groom or execute in a linked worktree
 writes its marker there; a live claim; and, on a tracker project, a fresh remote run, because between items such a run holds no claim and the claim race alone
-would let a tick slip an item in under it. The orchestrator's own `.worktrees/<id>` trees, execute's `.worktrees/execute-<id>` trees and a PR-mode groom's `.worktrees/groom-<id>` trees are skipped,
-because the run file speaks for the first and the lock and the candidate exclusions for the others, and a killed execute or groom there would otherwise block
-the project for good. A tracker project with the stack down is `idle: stack down`, taken before the lock. A tracker project whose repo the server's poller has not read yet, cannot read, or read into no rows for it is
+would let a tick slip an item in under it. The orchestrator's own `.worktrees/<id>` trees, execute's `.worktrees/execute-<id>` trees and a PR-mode groom's
+`.worktrees/groom-<id>` trees are skipped, because the run file speaks for the first and the lock and the candidate exclusions for the others, and a killed
+execute or groom there would otherwise block the project for good. A tracker project with the stack down is `idle: stack down`, taken before the lock. A tracker
+project whose repo the server's poller has not read yet, cannot read, or read into no rows for it is
 `idle` too, before the busy check (#332): every one of those leaves `/api/items` with nothing for the project, and an empty index is not an idle project. A Jira live session is NOT a busy signal: Jira work happens in its own worktree on a ticket.
 
 **Never a plan nobody has read.** The tick writes plans unattended, and the user's review is the only check on them. Because `/git-sync` commits any uncommitted
@@ -258,7 +259,8 @@ project — the board reads the working tree, so a line deleted but not yet comm
 orchestrator read `<base>`, the tree an execute worktree is cut from, so approval there is delete-and-commit.
 
 **What a tick never does** is the same list the spec's non-goals make, and each is a rule about who owns the thing: it never merges (`backlog-orchestrate` is
-the only skill that merges into a base), never commits a groom, never promotes an idea, never rejects, never asks a question (a scheduled step has nobody to answer, and an
+the only skill that merges into a base), never commits a groom, never promotes an idea, never rejects, never asks a question (a scheduled step has nobody to
+answer, and an
 unanswered question parks the whole tick), and never runs anything in the background (`claude -p` exits when the turn does). An item a tick failed on is
 recorded by content hash and skipped until it changes, so one impossible item cannot take every night's slot; the hash covers the body and the keys a person
 edits, never `updated:`, `started:`, `phase:`, `groomed-at:` or the counters, which every attempt rewrites.
@@ -281,8 +283,9 @@ until they clear it. The tick would be making a decision it has no evidence for.
 
 **Everything else is left, each for its own reason.** A tracker claim is never cleared: the proof above is frontmatter and a tracker item has none, and release
 is not the tick's to force — the dead claim goes stale after 15 minutes (`CLAIM_LIVE_MS`) and the next claimant's `start` retires it, which is the claim
-protocol's rule, not a takeover the tick decides. An execute's marker lives in `.worktrees/execute-<id>` (a PR-mode groom's in `.worktrees/groom-<id>`), which the busy scan skips, and the `execute/<id>` or
-`groom/<id>` branch and worktree a killed one leaves keep the item off the candidate list anyway (`executeTaken`, `groomTaken`); clearing a marker there would also be clearing it in a tree another
+protocol's rule, not a takeover the tick decides. An execute's marker lives in `.worktrees/execute-<id>` (a PR-mode groom's in `.worktrees/groom-<id>`), which
+the busy scan skips, and the `execute/<id>` or `groom/<id>` branch and worktree a killed one leaves keep the item off the candidate list anyway (`executeTaken`,
+`groomTaken`); clearing a marker there would also be clearing it in a tree another
 process may still own. An unreadable lock is removed and nothing else is done, since there is no verdict to act on. The shape is a deliberate asymmetry: the
 tick recovers its own groom, because a groom writes into the main checkout the busy scan reads and a dead one would block the project for good, and it
 recovers nothing it cannot prove.
@@ -603,7 +606,8 @@ what the two-gate placement deliberately rules out, and widening it would make e
 ## `backlog-orchestrate` is the only skill that merges into a base; execute and groom commit and push only in `pr` mode, and may arm GitHub auto-merge
 
 Every other skill in this repo edits item files and nothing else, with one opt-in exception below (`pr` mode, execute's and groom's); `backlog-orchestrate` was
-the first one to touch git history, and it is still the only one that merges into a base. It can, because of what it alone controls: `backlog-execute`'s "never commits, never pushes" limit exists because an
+the first one to touch git history, and it is still the only one that merges into a base. It can, because of what it alone controls: `backlog-execute`'s "never
+commits, never pushes" limit exists because an
 execute session — headless inside a run, or by hand in the user's own checkout — runs inside a tree it does not own, and staging there could sweep up work that
 has nothing to do with it — an unscoped `git add` in the user's own checkout is not a call any skill gets to make. The orchestrator's worktree is different by
 construction: `orchestrate.mjs worktree <id>` (`git worktree add .worktrees/<id> -b backlog/<id> <base>`) creates a tree that holds exactly one item's work and
@@ -621,7 +625,8 @@ ever committed to. Force-push and history rewrite stay off the table entirely.
 **Push is no longer off the table, and the narrowing is exactly one sentence wide (task-47).** For a TRACKER project — and only for one — this skill pushes its
 run's base: `git -C "<base tree>" pull --ff-only origin <base>` before each item's worktree, `git -C "<base tree>" push origin <base>` after each merge, and
 `git push -u origin backlog/<n>` from the item worktree under branch mode. For a files project the orchestrator pushes nothing and publishing remains the user's
-call, merge commits or otherwise. The only other pushes in this plugin are execute's and groom's `pr` modes, below — each its own branch only, never `<base>`, in files and tracker
+call, merge commits or otherwise. The only other pushes in this plugin are execute's and groom's `pr` modes, below — each its own branch only, never `<base>`,
+in files and tracker
 projects alike.
 
 **Execute's `pr` mode commits and pushes, and it is this same argument applied to a tree execute owns** (the execute pr-mode spec). The limit above was never
@@ -631,11 +636,13 @@ for: `.worktrees/execute-<id>` on `execute/<id>`, cut from local `<base>` — na
 `backlog/<id>` — or a linked worktree it starts in that is clean, on a named branch other than `<base>`, with no commits beyond it. That tree holds this item's
 work alone, so `git add -A` there is as safe as in the orchestrator's, for the same reason. In it execute commits, has `backlog-reviewer` review
 `<base>...<branch>` (at most two fix rounds), pushes `-u origin <branch>` and runs `gh pr create --base <base>` — and that is the whole of its git: never to
-`<base>`, never a force-push, never a merge (the merge is the PR's, done by a person — or by GitHub, when auto-merge was armed below), and never under an `[orchestrator-run` marker, where the run owns git and
+`<base>`, never a force-push, never a merge (the merge is the PR's, done by a person — or by GitHub, when auto-merge was armed below), and never under an
+`[orchestrator-run` marker, where the run owns git and
 the old limit holds unchanged. The mode is a trigger flag, chosen per run, rather than a committed file: a project-wide setting made every hand run a PR run
 until someone edited and committed a file back, and what a person wants from one launch is not a fact about the project. The flag is composed server-side from a
-validated field the way `--merge-mode` is (`AgentsService` appends `finishClause(action, finish, base, flags)` from the sheet's `finish`/`base` after the editable body, and a
-body that spells `--finish` or `--base` is a 400 — a groom's too, and the auto-merge flags below), and an unknown or doubled `--finish` stops execute rather than falling back to either mode, for the reason an
+validated field the way `--merge-mode` is (`AgentsService` appends `finishClause(action, finish, base, flags)` from the sheet's `finish`/`base` after the
+editable body, and a body that spells `--finish` or `--base` is a 400 — a groom's too, and the auto-merge flags below), and an unknown or doubled `--finish`
+stops execute rather than falling back to either mode, for the reason an
 `unsupported` source never falls back to `files`. A permission-layer
 denial of a git or `gh` step stops those steps and hands over the remaining commands; it is never retried another way. In a tracker project the pushed item then
 carries the `in-review` label, which every per-item gate reads as `a PR is open for this item` — see [the eleven item-write
@@ -652,15 +659,19 @@ a `started:` marker and treats an item with a `groom/<id>` branch as taken, so t
 
 **Arming GitHub auto-merge is not "the skill merging", and that is why the headline says "into a base".** `--auto-merge` (the sheet's Auto-merge toggle, seeded
 from `prAutoMergeDefault`) lets either skill, once its PR is open and any claim released, run `gh pr merge <pr> --auto --<method>` — squash, else merge commit,
-else rebase, whichever the repository allows, and nothing at all if `allow_auto_merge` is off — and then wait up to 45 minutes, in the foreground, for GitHub
-to land it; `--fix` (`prFixDefault`, only beside `--auto-merge`) lets it spend at most three rounds repairing a failing check or a conflict with `<base>` in
-that time. The whole procedure is `skills/backlog-execute/references/auto-merge.md`, one file both skills read, so the bounds cannot drift apart. The skill is
-asking, not merging: a person ticked the box for this launch, GitHub performs the only merge into the base and only when the repository's own branch
-protection (required checks, required reviews) is satisfied, and what the skill is forbidden is exactly what it was — a `gh pr merge` without `--auto`, a
-`git merge` into a base, a force-push, an admin override. The one `git merge` the procedure runs, `git merge origin/<base>` in the fix loop, merges the base
-INTO the PR's own branch in the skill's own worktree, which is the commit rule's tree and no base's. Every outcome that is not a merge leaves auto-merge armed,
-so a person's later push or approval still lands the PR without the session. Neither toggle is a trigger by itself: `autoMerge`/`fix` are accepted only with
-finish `pr` (and `fix` only with `autoMerge`), and the clause that carries the flags is composed server-side like the finish.
+else rebase, whichever the repository allows, and nothing at all if `allow_auto_merge` is off — and wait up to 45 minutes, in the foreground, for GitHub to land
+it. The arming waits on a `mergeStateStatus` read: `gh pr merge --auto` on a PR GitHub would already merge (nothing required pending — a repository with
+auto-merge allowed and no branch protection) merges it at once instead of arming, so the skill arms at once only on `BLOCKED` or `BEHIND`, where GitHub gates
+the merge, and elsewhere only once every check has concluded green — which keeps "merged once its checks pass" true on an unprotected repository; `--fix`
+(`prFixDefault`, only beside `--auto-merge`) lets it spend at most three rounds repairing a failing check or a conflict with `<base>` in that time. The whole
+procedure is `skills/backlog-execute/references/auto-merge.md`, one file both skills read, so the bounds cannot drift apart. The skill is asking, not merging: a
+person ticked the box for this launch, GitHub performs the only merge into the base and only when the repository's own branch protection (required checks,
+required reviews) is satisfied, and what the skill is forbidden is exactly what it was — a `gh pr merge` without `--auto`, a `git merge` into a base, a
+force-push, an admin override. The one `git merge` the procedure runs, `git merge origin/<base>` in the fix loop, merges the base INTO the PR's own branch in
+the skill's own worktree, which is the commit rule's tree and no base's. Every outcome reached after arming that is not a merge leaves auto-merge armed, so a
+person's later push or approval still lands the PR without the session; not-allowed, refused and the not-armed exits arm nothing. Neither toggle is a trigger by
+itself: `autoMerge`/`fix` are accepted only with finish `pr` (and `fix` only with `autoMerge`), and the clause that carries the flags is composed server-side
+like the finish.
 
 **A Jira Run's push is not a skill's, so it does not contradict this rule** (Jira repo/branch, spec §6). This rule is about this plugin's skills operating on
 backlog items. A Jira Run started with **Open MR when done** ticked is told by its prompt to push its branch and open one merge request once the work is done:
@@ -798,7 +809,8 @@ The setting is chosen in a browser and consumed by a headless process on the mac
 exactly one writer. It rides the one channel that exists — the spawn prompt — and lands in the run file, where every other fact about a run lives:
 `orchestrateDefaultMergeMode` (client Settings, per-device, default `'merge'`, clamped by the same `pickOne` as `dispatchDefaultModel`) seeds the
 `OrchestrateSheet` picker (and `executeDefaultFinish` — per-device, default `'in-place'`, clamped by the same `pickOne` over `EXECUTE_FINISHES` — seeds the
-execute `LaunchSheet`'s Finish picker on every open, never from the last launch; `groomDefaultFinish` does the same for a groom's, below); the sheet sends `mergeMode` on **every** launch, including when it equals the
+execute `LaunchSheet`'s Finish picker on every open, never from the last launch; `groomDefaultFinish` does the same for a groom's, below); the sheet sends
+`mergeMode` on **every** launch, including when it equals the
 default, because the field is the sheet's answer to
 "what should this run do" and inferring it server-side from an absent field would put one decision in two places; `AgentsService` validates it and appends the
 compile-time literal ` --merge-mode branch` (or ` --merge-mode pr`, below); `orchestrate.mjs init` writes `mergeMode`, `mergeModeEffective` and
@@ -1659,17 +1671,18 @@ whole rule:** its prompt is the launch sheet's text, which a human edits before 
 body, and never travels in the editable text.
 
 **An execute's or a groom's finish clause is the third server-composed piece, beside the orchestrate trigger's flags and the Jira prompt.**
-`finishClause(action, finish, base, flags)` (`shared/agent.ts`) is the whole of it: ` --finish pr --base <base>` plus its sentence for `pr` — an execute's says it
-reviews, a groom's does not — and today's `COMMIT_RULE` for `in-place`, built from `finish` (a member of `EXECUTE_FINISHES`, else a 400) and a `base` that is proved
-the way the orchestrate `base` is (`proveBaseBranch`) and only ever sent under `pr`. `flags` is `{ autoMerge, fix }`: `autoMerge` adds ` --auto-merge` and an
-arm-then-wait sentence, `fix` adds ` --fix` and is read only beside `autoMerge`. Both are validated booleans, accepted only with finish `pr` (`fix` only with
-`autoMerge`), so a lone `fix` or a flag under `in-place` is a 400 rather than a clause that lies; `false` is an untouched toggle and is accepted anywhere. A groom
-names its finish only on the home machine — one sent to another machine has none, a 400. The plan's execute and groom prompts carry no closing clause at all
-(`composePrompt` no longer appends `COMMIT_RULE` to a groom; `finishClause` does, byte for byte, under `in-place`), so the sheet's textarea holds the body
+`finishClause(action, finish, base, flags)` (`shared/agent.ts`) is the whole of it: ` --finish pr --base <base>` plus its sentence for `pr` — an execute's says
+it reviews, a groom's does not — and today's `COMMIT_RULE` for `in-place`, built from `finish` (a member of `EXECUTE_FINISHES`, else a 400) and a `base` that is
+proved the way the orchestrate `base` is (`proveBaseBranch`) and only ever sent under `pr`. `flags` is `{ autoMerge, fix }`: `autoMerge` adds ` --auto-merge`
+and an arm-then-wait sentence, `fix` adds ` --fix` and is read only beside `autoMerge`. Both are validated booleans, accepted only with finish `pr` (`fix` only
+with `autoMerge`), so a lone `fix` or a flag under `in-place` is a 400 rather than a clause that lies; `false` is an untouched toggle and is accepted anywhere.
+A groom names its finish only on the home machine — one sent to another machine has none, a 400. The plan's execute and groom prompts carry no closing clause at
+all (`composePrompt` no longer appends `COMMIT_RULE` to a groom; `finishClause` does, byte for byte, under `in-place`), so the sheet's textarea holds the body
 alone and the clause sits read-only below it: deleting ` --finish pr` from an editable box would otherwise silently turn a PR run into an in-place one. For
-the same reason an execute or groom body spelling `--finish`, `--base`, `--auto-merge` or `--fix` (bare, quoted or backticked — a word character or hyphen on either side is what spares `--finished` and `--base-ref`) is a 400 rather than being merged with the
-clause. An old client that sends no `finish` is treated as in-place and gets `COMMIT_RULE` appended even if an execute's prompt already ends with it — a
-doubled sentence, harmless, and never a 400; a groom body's one trailing copy is stripped first, so an old tab's groom sends the bytes it always did.
+the same reason an execute or groom body spelling `--finish`, `--base`, `--auto-merge` or `--fix` (bare, quoted or backticked — a word character or hyphen on
+either side is what spares `--finished` and `--base-ref`) is a 400 rather than being merged with the clause. An old client that sends no `finish` is treated as
+in-place and gets `COMMIT_RULE` appended even if an execute's prompt already ends with it — a doubled sentence, harmless, and never a 400; a groom body's one
+trailing copy is stripped first, so an old tab's groom sends the bytes it always did.
 
 ## The browser never talks to the dashboard
 

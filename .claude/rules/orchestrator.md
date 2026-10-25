@@ -45,14 +45,15 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
 - **`backlog-orchestrate` is the only skill that merges into a base; `backlog-execute` and `backlog-groom` commit and push their own branch only in `pr` mode, and may arm GitHub auto-merge on the PR they opened.** Inside a per-item worktree,
   on `backlog/<id>` alone; merged into the run's **base branch** (`main` unless `--base` said otherwise), `--no-ff` only, only once the tree holding that base
   is verified to have it actually checked out. Execute and groom are the two other skills that write git, and only
-  when their trigger says `--finish pr` (`skills/backlog-execute/references/pr-mode.md`, `skills/backlog-groom/references/pr-mode.md`): each commits, pushes `-u`
-  and runs `gh pr create` only in a tree that holds that one item's work alone — execute in one it cut from local `<base>` as `.worktrees/execute-<id>` on
+  when their trigger says `--finish pr` (`skills/backlog-execute/references/pr-mode.md`, `skills/backlog-groom/references/pr-mode.md`): each commits, pushes
+  `-u` and runs `gh pr create` only in a tree that holds that one item's work alone — execute in one it cut from local `<base>` as `.worktrees/execute-<id>` on
   `execute/<id>` (or a clean reused worktree with no commits beyond `<base>`), groom in `.worktrees/groom-<id>` on `groom/<id>`, `<id>` with no `#` — never to
   `<base>`, never with force, execute never under an `[orchestrator-run` marker and groom never under a `[backlog-tick]` one, and neither merges. With
   `--auto-merge` either may then arm GitHub auto-merge on the PR it opened (`skills/backlog-execute/references/auto-merge.md`, the one procedure both read):
-  `gh pr merge <pr> --auto --<method>`, never a `gh pr merge` without `--auto`, and only after the repo's `allow_auto_merge` is checked. GitHub performs the merge
-  into the base, behind its own branch protection; the `--fix` loop's `git merge origin/<base>` is a merge into the PR's own branch, never into a base. The
-  orchestrator's push half is task-47's
+  `gh pr merge <pr> --auto --<method>`, never a `gh pr merge` without `--auto`, and only after the repo's `allow_auto_merge` is checked — at once only on a
+  `mergeStateStatus` of `BLOCKED` or `BEHIND`, elsewhere only once every check has concluded green, since gh merges an already-mergeable PR at once. GitHub
+  performs the merge into the base, behind its own branch protection; the `--fix` loop's `git merge origin/<base>` is a merge into the PR's own branch, never
+  into a base. The orchestrator's push half is task-47's
   and is exactly three commands, none of them ever run for a files project: `pull --ff-only origin <base>` in the base tree before each item's worktree,
   `push origin <base>` after each merge and
   before `stage <n> merged`, and `push -u origin backlog/<n>` from the item worktree under branch mode. **A rejected or classifier-denied push PARKS, never

@@ -867,6 +867,11 @@ describe('inReviewBlock', () => {
     // Fix round 1: a merge of the base is verified before it is committed, clean or not, and a red round leaves the tree at HEAD with its stat recorded.
     expect(autoMerge).toContain('git merge --no-commit --no-ff origin/<base>');
     expect(autoMerge).toContain('git diff --stat HEAD');
+    // Final review: gh merges an already-mergeable PR at once, so it arms at once only where GitHub gates the merge, and otherwise waits for the checks
+    // unarmed — and a red check there, without --fix, ends on its own line, since nothing was armed.
+    expect(autoMerge).toContain('**`BLOCKED` or `BEHIND`** — GitHub itself gates the merge on the repository\'s requirements. Arm now');
+    expect(autoMerge).toContain('**do not arm yet.** Run the Wait (§2) unarmed');
+    expect(autoMerge).toContain('auto-merge: not armed — checks failed on a PR GitHub would merge at once — PR left open');
   });
 
   /* The two quotes above would stay green if the hooks that lead a session INTO auto-merge.md were deleted: SKILL.md's flag rule and mode line, and pr-mode
@@ -897,12 +902,15 @@ describe('inReviewBlock', () => {
   });
 
   /* The doors into the room: SKILL.md's Finish mode section is the only thing that sends a session to pr-mode.md, and pr-mode.md's auto-merge step is the
-     only thing that sends a groom to the shared procedure. Either pointer deleted leaves both files green and the mode unreachable. */
+     only thing that sends a groom to the shared procedure. pr-mode.md also names auto-merge.md in its intro, so the bare path would stay green with §8's
+     read-it-now pointer deleted: the pointer is pinned whole, as execute's is, and so are SKILL.md's `--fix` stop rule and its flagged mode line. */
   it('groom SKILL.md points at pr-mode.md and auto-merge.md is reached from it', () => {
-    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'SKILL.md'), 'utf8');
-    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8');
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
     expect(skill).toContain('skills/backlog-groom/references/pr-mode.md');
-    expect(prMode).toContain('skills/backlog-execute/references/auto-merge.md');
+    expect(skill).toContain('`--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule');
+    expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
+    expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
   });
 });
 
@@ -1078,8 +1086,9 @@ describe('finishClause', () => {
   const armed = (action: 'execute' | 'groom', base: string, fix: boolean): string => {
     const reviews = action === 'execute' ? 'reviews, ' : '';
     return (
-      `Finish with \`--finish pr --base ${base} --auto-merge${fix ? ' --fix' : ''}\`: the skill commits, ${reviews}pushes, opens the PR into ${base} and arms ` +
-      `GitHub auto-merge if the repository allows it, then waits for GitHub to merge it${fix ? `, fixing failing checks and conflicts with ${base} meanwhile` : ''}; ` +
+      `Finish with \`--finish pr --base ${base} --auto-merge${fix ? ' --fix' : ''}\`: the skill commits, ${reviews}pushes, opens the PR into ${base} ` +
+      'and arms GitHub auto-merge if the repository allows it, then waits for GitHub to merge it' +
+      `${fix ? `, fixing failing checks and conflicts with ${base} meanwhile` : ''}; ` +
       'the skill never merges itself.'
     );
   };
@@ -1141,7 +1150,9 @@ describe('finishClause', () => {
     expect(finishClause('execute', 'pr', 'main', { autoMerge: false, fix: true })).toBe(EXEC_PR);
   });
 
-  /* The skill's flag parser reads the backticked span; prose that spelled a flag outside it would be a second, unparsed spelling a reader could take for one. */
+  /* The skill's flag parser reads the backticked span; prose that spelled a flag outside it would be a second, unparsed spelling a reader could take for one.
+     Asserted on the text outside the backticks — no `--` at all there — so the flagless sets, where a per-match loop would have nothing to iterate, still
+     assert something. */
   it('flags only inside the backticks', () => {
     const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }];
     for (const action of ['execute', 'groom'] as const) {
@@ -1149,10 +1160,9 @@ describe('finishClause', () => {
         const clause = finishClause(action, 'pr', 'main', flags);
         const open = clause.indexOf('`');
         const close = clause.indexOf('`', open + 1);
-        for (const m of clause.matchAll(/--(auto-merge|fix)(?![\w-])/g)) {
-          expect(m.index).toBeGreaterThan(open);
-          expect(m.index).toBeLessThan(close);
-        }
+        expect(open).toBeGreaterThanOrEqual(0);
+        expect(close).toBeGreaterThan(open);
+        expect(clause.slice(0, open) + clause.slice(close + 1)).not.toContain('--');
       }
     }
   });
