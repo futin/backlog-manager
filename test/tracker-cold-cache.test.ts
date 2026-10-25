@@ -271,11 +271,18 @@ describe('a claim made before this process started', () => {
    * leaves such a comment standing for the full stale window when its delete
    * fails, so this is not a one-tick state. The route must name the WINNER,
    * the lowest live id, on both of its paths.
+   *
+   * Both comments are stamped as edited NOW, the way the heartbeat that keeps
+   * a claim live edits its comment: since #266 a heartbeat is held to its
+   * comment's `updated_at` plus `CLAIM_HEARTBEAT_SKEW_MS`, so `build`'s 10:00
+   * stamp would clamp both claims stale and leave no live claim to choose from.
    */
   function seedLoser(): void {
+    const now = new Date().toISOString();
     const loser = gh.claim(record({ session: 'the-loser' }), 5, 101);
     loser.created_at = '2026-09-18T10:00:00Z';
-    loser.updated_at = '2026-09-18T10:00:00Z';
+    loser.updated_at = now;
+    gh.comments.get(100)!.updated_at = now;
   }
 
   it('answers the lowest live claim, not the newest, from the cache', async () => {
