@@ -571,7 +571,7 @@ describe('SettingsView', () => {
         ['pr', 'PR']
       ]);
       expect(
-        screen.getByText("PR mode writes the spec and plan in its own worktree, commits, pushes and opens a PR. It never merges.")
+        screen.getByText('PR mode writes the spec and plan in its own worktree, commits, pushes and opens a PR. It never merges.')
       ).toBeInTheDocument();
       await userEvent.selectOptions(select, 'pr');
       expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').groomDefaultFinish).toBe('pr');
@@ -581,7 +581,9 @@ describe('SettingsView', () => {
       renderView();
       const autoMerge = await screen.findByRole('switch', { name: 'auto-merge PRs' });
       const fix = screen.getByRole('switch', { name: 'fix if it fails' });
-      expect(screen.getByText('Preselects Auto-merge on a PR launch. Armed only if the GitHub repo allows auto-merge — GitHub does the merge.')).toBeInTheDocument();
+      expect(
+        screen.getByText('Preselects Auto-merge on a PR launch. Armed only if the GitHub repo allows auto-merge — GitHub does the merge.')
+      ).toBeInTheDocument();
       expect(
         screen.getByText(
           'Preselects Fix on a PR launch: the session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes.'
@@ -703,7 +705,16 @@ describe('SettingsView', () => {
         ['s_0123abcd', 'Groom ticket']
       ]);
       expect(select.value).toBe('execute');
-      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Groom finish', 'Auto-merge PRs', 'Fix if it fails', 'Jira default action', 'Dashboard link']);
+      expect(rowNamesIn('Dispatch')).toEqual([
+        'Default model',
+        'Default effort',
+        'Execute finish',
+        'Groom finish',
+        'Auto-merge PRs',
+        'Fix if it fails',
+        'Jira default action',
+        'Dashboard link'
+      ]);
     });
 
     it('persists a pick as the setting string', async () => {
@@ -867,7 +878,15 @@ describe('SettingsView', () => {
       renderView();
       expect(rowNamesIn('Display')).toEqual(['Theme', 'Density', 'Text size', 'Content width', 'Opens on']);
       expect(rowNamesIn('Board')).toEqual(['Archive after']);
-      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Groom finish', 'Auto-merge PRs', 'Fix if it fails', 'Dashboard link']);
+      expect(rowNamesIn('Dispatch')).toEqual([
+        'Default model',
+        'Default effort',
+        'Execute finish',
+        'Groom finish',
+        'Auto-merge PRs',
+        'Fix if it fails',
+        'Dashboard link'
+      ]);
     });
 
     it('puts the dispatch status line in Home’s detail on the Dashboards page, and none on Shared', async () => {

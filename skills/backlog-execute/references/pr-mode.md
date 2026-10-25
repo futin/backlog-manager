@@ -6,9 +6,9 @@ read there.
 
 In `pr` mode execute works the item in a worktree that holds this item's work and nothing else, and on verified success commits it, has
 `backlog-manager:backlog-reviewer` review the commit, pushes the branch and opens one PR into the base. It never merges — a person (or GitHub) does that, and
-`backlog-orchestrate` stays the only skill that merges into a base. With `--auto-merge` it arms GitHub auto-merge on that PR and waits for GitHub to merge it (§8, last;
-`references/auto-merge.md`) — still GitHub's merge, never this skill's. It never asks "should I push / open a PR?": the trigger already answered that,
-and asking is the exact step this mode exists to remove.
+`backlog-orchestrate` stays the only skill that merges into a base. With `--auto-merge` it arms GitHub auto-merge on that PR and waits for GitHub to merge it
+(§8, last; `references/auto-merge.md`) — still GitHub's merge, never this skill's. It never asks "should I push / open a PR?": the trigger already answered
+that, and asking is the exact step this mode exists to remove.
 
 Numbered sections follow the flow in order. Everything SKILL.md says that this file does not replace still holds — the refusal gate, dispatch, verification,
 both pre-review checks — and is done inside the tree §2 picks. A reference file is read with the Read tool and never has `${CLAUDE_PLUGIN_ROOT}` filled in:

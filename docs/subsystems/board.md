@@ -149,8 +149,8 @@ which would claim the run is starting here; it holds the `starting` tone for the
 A dispatch control — on the card and again in the modal — opens a launch sheet onto `../claude-agents-dashboard`. An execute's sheet adds a **Finish**
 picker (`In place` / `PR`, seeded on every open from the `executeDefaultFinish` setting, default `In place`, never from the last launch) and, under PR, a
 **Base** select (the project's local branches, seeded to the literal `main` and never stored; a failed branch fetch leaves `main` alone) and two Switches,
-**Auto-merge** and **Fix** (seeded from `prAutoMergeDefault` and `prFixDefault` each time the finish becomes PR, cleared on leaving it; Fix is disabled, not
-hidden, while Auto-merge is off, and turning Auto-merge off takes Fix with it). A groom's sheet draws the same Finish/Base/toggle rows, seeded from
+`auto-merge` and `fix if it fails` (seeded from `prAutoMergeDefault` and `prFixDefault` each time the finish becomes PR, cleared on leaving it; Fix is disabled,
+not hidden, while Auto-merge is off, and turning Auto-merge off takes Fix with it). A groom's sheet draws the same Finish/Base/toggle rows, seeded from
 `groomDefaultFinish`, but only for a groom run on home: a remote groom has no finish (the server 400s one, and its clause is always the commit rule), so
 the rows wait for `useRunOn`'s `loading` to clear — until the offers answer `runOn` reads home, and a suggested remote landing a moment later would take a
 Finish the person had already touched away. Below the editable body a read-only line shows the closing clause exactly as the server will append it, tracking

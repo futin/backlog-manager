@@ -69,10 +69,18 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
   const runOn = useRunOn(item.projectPath);
   const { model, setModel, effort, setEffort } = runOn;
   const [remoteControl, setRemoteControl] = useState(true);
-  // The finish pick, seeded from Settings and from nowhere else, for the same reason as model/effort above — once per fetched plan (the effect below), from
-  // the default for that plan's action: execute's and groom's are two Settings rows, so a person who wants every execute to open a PR does not get a PR on
-  // every groom too. `clampSettings` has already dropped anything outside EXECUTE_FINISHES, so the select can only be seeded with a value it offers.
+  // The finish pick, seeded from Settings and from nowhere else, for the same reason as model/effort above — once per fetched plan, from the default for
+  // that plan's action: execute's and groom's are two Settings rows, so a person who wants every execute to open a PR does not get a PR on every groom too.
+  // `clampSettings` has already dropped anything outside EXECUTE_FINISHES, so the select can only be seeded with a value it offers. Seeded during render,
+  // keyed on the plan object, rather than in the prompt/mode effect below: the action is unknown until the plan arrives, and an effect would commit one
+  // frame of the execute default on a groom — its PR rows and toggles drawn, then taken away. The `useState` value only stands while no plan is rendered,
+  // and no Finish row is drawn then.
   const [pickedFinish, setFinish] = useState<ExecuteFinish>(settings.executeDefaultFinish);
+  const [finishSeededFor, setFinishSeededFor] = useState<typeof plan>(null);
+  if (plan !== null && plan !== finishSeededFor) {
+    setFinishSeededFor(plan);
+    setFinish(plan.action === 'groom' ? settings.groomDefaultFinish : settings.executeDefaultFinish);
+  }
   // Never stored, never seeded from a previous launch: a base is a fact about one repository's branches, so every open starts on `'main'`.
   const [base, setBase] = useState<string>('main');
   const { busy, error, run } = useAction();
@@ -84,7 +92,6 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
     if (plan === null) return;
     setPrompt(plan.prompt);
     setMode(plan.defaultMode);
-    setFinish(plan.action === 'groom' ? settings.groomDefaultFinish : settings.executeDefaultFinish);
   }, [plan]);
 
   const isExecute = plan?.action === 'execute';
@@ -247,7 +254,13 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
             <div className="sheet-row">
               <label className="sheet-field">
                 <span className="set-name">Finish</span>
-                <Select<ExecuteFinish> label="Finish" value={finish} onChange={setFinish} options={EXECUTE_FINISH_OPTIONS} disabled={isExecute && runOn.lock.prOnly} />
+                <Select<ExecuteFinish>
+                  label="Finish"
+                  value={finish}
+                  onChange={setFinish}
+                  options={EXECUTE_FINISH_OPTIONS}
+                  disabled={isExecute && runOn.lock.prOnly}
+                />
                 {runOn.remote && <span className="sheet-note">{prRequiredText(runOn.label!)}</span>}
               </label>
 

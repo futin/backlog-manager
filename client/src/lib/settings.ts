@@ -144,7 +144,8 @@ export interface Settings {
   executeDefaultFinish: ExecuteFinish;
   /**
    * Preselected in the board's `groom` launch sheet's Finish select; the same closed `ExecuteFinish` enum and the same reasons as `executeDefaultFinish`
-   * above. `'in-place'` is today's groom (it writes the spec and plan to disk and commits nothing), so a board that never touches this keeps behaving as it does.
+   * above. `'in-place'` is today's groom (it writes the spec and plan to disk and commits nothing), so a board that never touches this keeps behaving as it
+   * does.
    */
   groomDefaultFinish: ExecuteFinish;
   /**

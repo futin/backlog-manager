@@ -55,7 +55,9 @@ trigger and refused an unknown or doubled `--finish`, and a flag that arrived wi
 ## 2. Pick the tree
 
 Before `show`, because `show` resolves the item from the cwd's tree and the item has to be read from the tree the groom writes in. With no id in the trigger,
-run `board` from the starting tree — a read — and settle the item with the user as Pick an item says; then cut the tree, and run `show` in it.
+run `board` from the starting tree — a read — and settle the item with the user as Pick an item says; then cut the tree, and run `show` in it. On a tracker
+project `show` resolves through the API, not the tree, so run it once from the starting tree before cutting — a read; exit `5` (the stack is down) → stop
+and say so, before anything is cut.
 
 **There is no reuse of the tree you started in**, unlike execute's pr mode: a groom has no prior commits to continue, and one rule is easier to keep true than
 two. Every pr-mode groom cuts a new tree.
@@ -187,7 +189,8 @@ cd <tree> && git commit -m "docs(groom): <item title>" -m "<id>: <verdict>"
 **The tracker issue write**, after a successful push only:
 
 1. **The permalink.** `<sha>` is `git -C <tree> rev-parse HEAD` — the commit just pushed. `<owner>/<repo>` is parsed from `git -C <tree> remote get-url origin`
-   (strip `https://github.com/` or `git@github.com:`, and a trailing `.git`). The link is `https://github.com/<owner>/<repo>/blob/<sha>/<spec path>`, the
+   (strip everything up to and including `github.com/` or `github.com:` — `https://github.com/`, `git@github.com:`, `ssh://git@github.com/` — then a
+   trailing `/` and a trailing `.git`). The link is `https://github.com/<owner>/<repo>/blob/<sha>/<spec path>`, the
    spec path relative to the repository root. Fill it into the draft's `## Plan`. A `blob/<sha>` link survives a squash merge: GitHub keeps a PR's commits
    reachable through `refs/pull/<n>/head`.
 2. **Write the plan with the `plan-review` mark**, in the one write SKILL.md's tracker section gives the verdict:
@@ -242,15 +245,16 @@ verdict after §2 cut the tree: a refusal, a stand-down on an item another sessi
    ```bash
    git -C <root> rev-list --count <base>..groom/<id>
    cd <tree> && git status --porcelain
+   # files project where start and stop ran, and the item file is the only path listed:
+   cd <tree> && git restore --source=HEAD --staged --worktree -- <item path>
    git -C <root> worktree remove <root>/.worktrees/groom-<id>
    git -C <root> branch -D groom/<id>
    ```
 
    The first must print `0`, or nothing is removed. In a files project where `start` and `stop` ran, they left the item file modified in `<tree>` with
-   bookkeeping alone (`updated:`, the counters) — this groom produced nothing to keep, so restore that one file first:
-   `cd <tree> && git restore --source=HEAD --staged --worktree -- <item path>`. Any other path `git status --porcelain` lists — a spec draft, a file you
-   cannot attribute — is left: remove nothing, and the final message names the tree, the branch and the path, so the person decides. `worktree remove` runs
-   without `--force`; if it refuses, leave both as they are and say so.
+   bookkeeping alone (`updated:`, the counters) — this groom produced nothing to keep, so the `git restore` line puts that one file back before the remove.
+   Any other path `git status --porcelain` lists — a spec draft, a file you cannot attribute — is left: remove nothing, and the final message names the tree,
+   the branch and the path, so the person decides. `worktree remove` runs without `--force`; if it refuses, leave both as they are and say so.
 4. **End as SKILL.md's verdict ends**, without the `Groomed on disk only` line — nothing is on disk anywhere for it to describe.
 
 ## 8. With `--auto-merge`: arm it and wait

@@ -704,14 +704,14 @@ describe('POST /api/agents/dispatch', () => {
       expect(spawnedPrompt(sent)).toBe(good.prompt + ' ' + COMMIT_RULE);
     });
 
-    it('400s a base beside finish in-place, and beside no finish (rule 3)', async () => {
+    it('400s a base beside finish in-place, and beside no finish (rule 5)', async () => {
       const sent = stubDashboard();
       await exec({ finish: 'in-place', base: 'main' }).expect(400, { error: 'base applies only to finish pr' });
       await exec({ base: 'main' }).expect(400, { error: 'base applies only to finish pr' });
       expect(spawned(sent)).toBeUndefined();
     });
 
-    it('400s finish pr with no base (rule 4)', async () => {
+    it('400s finish pr with no base (rule 5)', async () => {
       const sent = stubDashboard();
       await exec({ finish: 'pr' }).expect(400, { error: 'base is required with finish pr' });
       expect(spawned(sent)).toBeUndefined();
@@ -725,7 +725,7 @@ describe('POST /api/agents/dispatch', () => {
       ['a backticked token', 'Use the skill on bug-2, then `--finish pr`.'],
       ['a double-quoted token', 'Use the skill on bug-2 with "--finish pr".'],
       ['a parenthesised token', 'Use the skill on bug-2 (--base develop).']
-    ])('400s an execute body with %s (rule 5), whatever the pick', async (_name, prompt) => {
+    ])('400s an execute body with %s (rule 8), whatever the pick', async (_name, prompt) => {
       const sent = stubDashboard();
       await exec({ prompt }).expect(400, { error: TOKEN_REFUSAL });
       await exec({ prompt, finish: 'in-place' }).expect(400, { error: TOKEN_REFUSAL });
@@ -776,7 +776,7 @@ describe('POST /api/agents/dispatch', () => {
       expect(spawnedPrompt(sent).match(/--fix|--auto-merge/g)).toBeNull();
     });
 
-    /* A title spelling `--base x` must not break the board's own untouched default: composePrompt defuses the token inside the quoted title, so rule 5 sees
+    /* A title spelling `--base x` must not break the board's own untouched default: composePrompt defuses the token inside the quoted title, so rule 8 sees
        only a typed one. The spawned prompt then carries exactly one `--base`, the clause's. */
     describe('an item whose title spells --base', () => {
       const titled = () => {

@@ -538,8 +538,8 @@ function isSkippedTree(root, tree) {
 
 const executeTaken = (root, id) => branchExists(root, `execute/${executeId(id)}`) || fs.existsSync(path.join(root, '.worktrees', `execute-${executeId(id)}`));
 
-// A pr-mode groom's own branch and tree (`groom/<id>`, `.worktrees/groom-<id>`): the plan lives on that branch, not on disk in the main checkout, so without this
-// the item would look ungroomed on the next tick and be groomed again while its PR is still open. Same shape and same `#`-stripping as `executeTaken`.
+// A pr-mode groom's own branch and tree (`groom/<id>`, `.worktrees/groom-<id>`): the plan lives on that branch, not on disk in the main checkout, so without
+// this the item would look ungroomed on the next tick and be groomed again while its PR is still open. Same shape and same `#`-stripping as `executeTaken`.
 const groomTaken = (root, id) => branchExists(root, `groom/${executeId(id)}`) || fs.existsSync(path.join(root, '.worktrees', `groom-${executeId(id)}`));
 
 // Files: LISTED off the working tree's `open/`, READ at `<base>` — the shape of orchestrate.mjs's `listOpenItems` plus its `<base>` read. Both halves are a
@@ -584,7 +584,7 @@ async function trackerExecuteCandidate({ root }, mine, state) {
 }
 
 // Files: the WORKING TREE, where step 5 read `<base>` — a tick's groom is uncommitted by design, so a `<base>` read would still see last night's bug as
-// ungroomed and groom it again.
+// ungroomed and groom it again. An item a pr-mode groom already holds is skipped (`groomTaken`, above).
 function filesGroomCandidate({ root }, state) {
   const items = [];
   for (const it of itemsOnDisk(root, ['bugs', 'refactors'])) {

@@ -420,8 +420,23 @@ describe('POST /api/agents/dispatch with a machine', () => {
 
   it('a groom on Pro with a finish is a 400: it has no finish on a remote machine', async () => {
     await start();
-    await post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32.', permissionMode: 'acceptEdits', machine: 'Pro', finish: 'pr', base: 'main' }).expect(400, {
-      error: 'a groom on Pro has no finish'
+    await post({
+      itemPath: urn(32),
+      action: 'groom',
+      prompt: 'Groom #32.',
+      permissionMode: 'acceptEdits',
+      machine: 'Pro',
+      finish: 'pr',
+      base: 'main'
+    }).expect(400, { error: 'a groom on Pro has no finish' });
+    expect(spawnsOf(pro)).toEqual([]);
+  });
+
+  // With no finish sent, a remote groom derives in-place, so a lone auto-merge tick is rule 6's refusal rather than an armed merge on nobody's PR.
+  it('a groom on Pro with autoMerge is a 400: auto-merge applies only to a PR finish', async () => {
+    await start();
+    await post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32.', permissionMode: 'acceptEdits', machine: 'Pro', autoMerge: true }).expect(400, {
+      error: 'autoMerge and fix apply only to finish pr'
     });
     expect(spawnsOf(pro)).toEqual([]);
   });
@@ -434,7 +449,7 @@ describe('POST /api/agents/dispatch with a machine', () => {
     expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }));
   });
 
-  it('groom and capture on Pro: no finish clause, no base, no 400', async () => {
+  it('groom and capture on Pro: the groom ends on the in-place clause (the commit rule), capture on its own text; no base, no 400', async () => {
     await start();
     await post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32. ' + COMMIT_RULE, permissionMode: 'acceptEdits', machine: 'Pro' }).expect(201);
     await post({ itemPath: urn(33), action: 'capture', prompt: 'Capture from #33.', permissionMode: 'acceptEdits', machine: 'Pro' }).expect(201);

@@ -3246,7 +3246,8 @@ test('backlog-orchestrate hands the reviewer a base and the reviewer diffs again
 // sweep (bug-12 twice here, bug-13 in claude-agents-dashboard, bug-16 in ixray,
 // bug-7 in the dashboard), each one a spent run slot and a second trip for a
 // person. `backlog-groom` is the skill that creates the uncommitted state, the
-// commit is the user's own act — no skill commits a groom for them —
+// commit is the user's own act — no in-place groom commits for them (a
+// `--finish pr` groom does, in its own worktree, and prints no such line) —
 // and `backlog.mjs` has no notion of whether a file is committed, so the whole
 // fix is one sentence said where the state is made.
 //

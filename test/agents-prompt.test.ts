@@ -1,7 +1,7 @@
 import { readAgentsConfig } from '../server/src/agents/config.util';
 import { dashboardError, resumeSessionName } from '../server/src/agents/agents.service';
-import { composePrompt, sessionName } from '../server/src/agents/prompt.util';
-import { COMMIT_RULE, FINISH_FLAG, defuseFinishFlags } from '../shared/agent';
+import { appendFinishClause, composePrompt, sessionName } from '../server/src/agents/prompt.util';
+import { COMMIT_RULE, FINISH_FLAG, defuseFinishFlags, finishClause } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
 
 function fakeItem(over: Partial<BacklogItem> = {}): BacklogItem {
@@ -386,5 +386,32 @@ describe('FINISH_FLAG and the auto-merge / fix tokens', () => {
     expect(FINISH_FLAG.test(out)).toBe(false);
     expect(out).toBe('Use \u2011\u2011fix and \u2011\u2011auto-merge');
     expect(out.replace(/\u2011/g, '-')).toBe('Use --fix and --auto-merge');
+  });
+});
+
+/*
+ * The groom strip: a groom's editable body ends in `COMMIT_RULE`, and dispatch swaps that trailing sentence for the finish clause — never a copy of the rule a
+ * person moved to the middle of their text, and never the text around it.
+ */
+describe('appendFinishClause', () => {
+  const PR = finishClause('groom', 'pr', 'main');
+
+  it('swaps a trailing commit rule for the clause, trailing whitespace and all', () => {
+    expect(appendFinishClause(`Groom bug-3. ${COMMIT_RULE}`, 'groom', 'pr', 'main', {})).toBe(`Groom bug-3. ${PR}`);
+    expect(appendFinishClause(`Groom bug-3. ${COMMIT_RULE}  \n\n`, 'groom', 'pr', 'main', {})).toBe(`Groom bug-3. ${PR}`);
+  });
+
+  it('leaves a commit rule in the middle of the text where it is', () => {
+    const body = `Groom bug-3. ${COMMIT_RULE} Then say hello.`;
+    expect(appendFinishClause(body, 'groom', 'pr', 'main', {})).toBe(`${body} ${PR}`);
+  });
+
+  it('an empty body, or one that was only the rule, is the clause alone', () => {
+    expect(appendFinishClause('', 'groom', 'pr', 'main', {})).toBe(PR);
+    expect(appendFinishClause(COMMIT_RULE, 'groom', 'in-place', 'main', {})).toBe(COMMIT_RULE);
+  });
+
+  it('capture keeps its own text untouched', () => {
+    expect(appendFinishClause(`Capture. ${COMMIT_RULE}`, 'capture', 'in-place', 'main', {})).toBe(`Capture. ${COMMIT_RULE}`);
   });
 });

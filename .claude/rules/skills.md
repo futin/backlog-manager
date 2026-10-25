@@ -30,8 +30,9 @@ paths: ["skills/**", "agents/**"]
   session and ends with `record`, which releases it. Busy is any of: a `running` or `paused` orchestrator run, a board-started run with no run file yet (read
   through the API, so skipped with the stack down), a `started:` marker on any open item in the main checkout or a linked worktree (the orchestrator's
   `.worktrees/<id>`, execute's `.worktrees/execute-<id>` and a PR-mode groom's `.worktrees/groom-<id>` trees skipped), a live claim, or a fresh remote run.
-  Execute is capped by the open PRs whose head starts `execute/` (`gh pr list --state open --limit 500`; no `gh`, a failure, unparseable output or 500 results is `cannot count open PRs`) and groom by the
-  items carrying `plan-review`; a groom only plans an ungroomed bug or promotes a refactor, and skips an item whose `groom/<id>` branch or `.worktrees/groom-<id>` tree exists (`groomTaken`). The mark is the label on a tracker project and a `plan-review: true`
+  Execute is capped by the open PRs whose head starts `execute/` (`gh pr list --state open --limit 500`; no `gh`, a failure, unparseable output or 500 results
+  is `cannot count open PRs`) and groom by the items carrying `plan-review`; a groom only plans an ungroomed bug or promotes a refactor, and skips an item whose
+  `groom/<id>` branch or `.worktrees/groom-<id>` tree exists (`groomTaken`). The mark is the label on a tracker project and a `plan-review: true`
   frontmatter line on a files project, written in the SAME write as the plan — `backlog.mjs body|new --plan-review`, or the frontmatter groom prints — so no
   moment exists where an approved-looking plan has no mark, and every gate refuses it with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
   `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and the execute skill): the board's Run, the server's `plan`/`dispatch` ladder
@@ -43,7 +44,8 @@ paths: ["skills/**", "agents/**"]
   stale, so two ticks cannot both recover), records the item `failed` — `killed at timeout` — and answers `recover`. It sets `stop: true` only where the marker
   is provably its own: a FILES project, the lock's verdict a `groom`, and that id's file in the main checkout carrying `started:` with `phase: groom`. The skill
   then runs `backlog.mjs stop <id> --abandon` on that one id. A tracker claim is never cleared by a tick (it goes stale after 15 minutes and the next `start`
-  retires it), an execute's marker lives in `.worktrees/execute-<id>` and a PR-mode groom's in `.worktrees/groom-<id>`, and neither is ever touched, and every other marker is a person's or another session's and keeps
+  retires it), an execute's marker lives in `.worktrees/execute-<id>` and a PR-mode groom's in `.worktrees/groom-<id>`, and neither is ever touched, and every
+  other marker is a person's or another session's and keeps
   blocking the project. Why: [invariants.md](docs/subsystems/invariants.md#the-only-started-marker-a-tick-clears-is-the-one-a-killed-tick-left)
 - **A tick halt is derived from `state.json`'s `recent` and the reset time, never stored, and only a person's Reset clears it.** `streakOf(recent, resetAt)` in
   `skills/backlog-tick/tools/tick-breaker.mjs` walks `recent` newest first: an `at` that does not parse (`Date.parse` NaN) stops the walk, checked BEFORE the

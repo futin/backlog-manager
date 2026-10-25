@@ -11,9 +11,9 @@ import { daysAgoDate } from './helpers/dates';
 import { homeOffer, homeOnly, proOffer, proSuggested } from './helpers/offers';
 import { COMMIT_RULE, finishClause } from '../shared/agent';
 import { NO_MACHINE_TEXT } from '../client/src/lib/dashboards';
+import type { AgentPlan, BacklogItem, ProjectOffers } from '../shared/types';
 
 const AUTO_MERGE_NOTE = 'Needs Allow auto-merge on the GitHub repo; checked when the PR opens.';
-import type { AgentPlan, BacklogItem, ProjectOffers } from '../shared/types';
 
 const ITEM: BacklogItem = {
   id: 'task-12',
@@ -474,12 +474,23 @@ describe('LaunchSheet', () => {
       expect(body).toMatchObject({ action: 'groom', finish: 'pr', base: 'main', autoMerge: false, fix: false });
     });
 
-    it('executeDefaultFinish pr does not seed a groom', async () => {
+    /* Not even for one frame: the groom's seed lands while the plan is rendered, not in an effect after it, so the PR rows (whose auto-merge line is the
+       marker here) are never committed to the DOM. Mutation records hold every node ever added, so a row added and removed between two assertions still
+       shows up in them where a live-DOM query would miss it. */
+    it('executeDefaultFinish pr does not seed a groom, not even for one frame', async () => {
       localStorage.setItem('backlog-manager.settings', JSON.stringify({ executeDefaultFinish: 'pr', groomDefaultFinish: 'in-place' }));
       stub({ plan: { ...PLAN, action: 'groom', prompt: 'Groom task-12.' } });
+      let prRowsDrawn = false;
+      const observer = new MutationObserver((records) => {
+        for (const r of records) for (const n of r.addedNodes) if (n.textContent?.includes('auto-merge — GitHub merges')) prRowsDrawn = true;
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
       await openSheet();
       expect((screen.getByLabelText('Finish') as HTMLSelectElement).value).toBe('in-place');
       expect(screen.queryByLabelText('Base')).not.toBeInTheDocument();
+      await act(async () => {});
+      observer.disconnect();
+      expect(prRowsDrawn).toBe(false);
     });
 
     it('no toggles under In place; both toggles under PR, Fix disabled until Auto-merge is on', async () => {
@@ -555,6 +566,18 @@ describe('LaunchSheet', () => {
       expect(body).not.toHaveProperty('autoMerge');
       expect(body).not.toHaveProperty('fix');
       expect(body).not.toHaveProperty('base');
+    });
+
+    // A toggle is seeded only when Finish BECOMES PR, so a hand flip survives a re-render that has nothing to do with Finish — here, typing into the prompt.
+    it('a hand-flipped toggle survives an unrelated re-render', async () => {
+      const calls = stub({});
+      await openSheet();
+      await userEvent.selectOptions(screen.getByLabelText('Finish'), 'pr');
+      await userEvent.click(screen.getByRole('switch', { name: 'auto-merge' }));
+      await userEvent.type(screen.getByLabelText('Prompt'), ' more');
+      expect(screen.getByRole('switch', { name: 'auto-merge' })).toHaveAttribute('aria-checked', 'true');
+      const body = await launchNow(calls);
+      expect(body).toMatchObject({ finish: 'pr', autoMerge: true, fix: false });
     });
 
     it('turning Auto-merge off clears Fix', async () => {

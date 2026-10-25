@@ -937,8 +937,8 @@ export interface AgentDispatchRequest {
   finish?: ExecuteFinish;
   base?: string;
   /**
-   * `--finish pr` follow-ups (`FinishFlags`): arm GitHub auto-merge and wait for it, and, beside that, fix failing checks and conflicts meanwhile. Optional, so a
-   * body that sends neither is today's. Meaningful only beside `finish: 'pr'`, and `fix` only beside `autoMerge` — dispatch 400s the rest.
+   * `--finish pr` follow-ups (`FinishFlags`): arm GitHub auto-merge and wait for it, and, beside that, fix failing checks and conflicts meanwhile. Optional, so
+   * a body that sends neither is today's. Meaningful only beside `finish: 'pr'`, and `fix` only beside `autoMerge` — dispatch 400s the rest.
    */
   autoMerge?: boolean;
   fix?: boolean;
@@ -1143,8 +1143,9 @@ export const MERGE_MODES: readonly MergeMode[] = ['merge', 'branch', 'pr'];
 export type ExecuteFinish = 'in-place' | 'pr';
 
 /**
- * The two actions whose prompt ends in `finishClause`: execute and groom. Capture is not one — it creates a new item and keeps its `COMMIT_RULE` in its editable
- * text. A subset of `AgentAction`, so the clause's one function can say "reviews" for the action that has a reviewer and drop it for the one that does not.
+ * The two actions whose prompt ends in `finishClause`: execute and groom. Capture is not one — it creates a new item and keeps its `COMMIT_RULE` in its
+ * editable text. A subset of `AgentAction`, so the clause's one function can say "reviews" for the action that has a reviewer and drop it for the one that does
+ * not.
  */
 export type FinishAction = 'execute' | 'groom';
 

@@ -16,10 +16,10 @@ Groom gives one open item a verdict: **promote** it, **plan its fix** in place, 
 it never does the actual work — that's `backlog-execute`. Every verdict below ends with a file that's either fully rewritten or left fully alone; there's no
 half-done state this skill leaves behind on purpose.
 
-It also never commits — unless the trigger says `--finish pr` ("Finish mode" below) — the only skills that do are `backlog-orchestrate`, and
-`backlog-execute` and this skill in `pr` mode, each in a worktree of its own; in `pr` mode it commits only in the tree it cut for this groom, pushes only that
-tree's own branch, never `<base>` and never with force, and never merges — with `--auto-merge` it arms GitHub auto-merge on its own PR and GitHub merges
-(`references/pr-mode.md`). Otherwise a groom lands **on disk only**, and an orchestrator run reads each
+It never commits unless the trigger says `--finish pr` ("Finish mode" below). The only skills that commit are `backlog-orchestrate`, and `backlog-execute`
+and this skill in `pr` mode, each in a worktree of its own; in `pr` mode it commits only in the tree it cut for this groom, pushes only that tree's own branch,
+never `<base>` and never with force, and never merges — with `--auto-merge` it arms GitHub auto-merge on its own PR and GitHub merges (`references/pr-mode.md`).
+Otherwise a groom lands **on disk only**, and an orchestrator run reads each
 item at the commit its worktree is created from rather than off the working tree. An executable item that was never committed is therefore invisible to a run,
 which is why the two verdicts that produce one end by saying so out loud (see "Groomed on disk only" below).
 
@@ -453,8 +453,9 @@ the working tree, because those are the only bytes a dispatched session will eve
 gate as ungroomed and is skipped — `not committed on <base> — the worktree this run creates from <base> would not contain backlog/…`, where `<base>` is the
 branch that run was started on (`main` unless it was told otherwise). That verdict fired five times
 across three projects in the 2026-09-06 sweep, and each one cost a run slot and a person a second trip. This skill is what creates the uncommitted state, so it
-is the only place the sentence can be said at the moment it becomes true. It stops there: in place the commit is the user's own act, since no in-place groom commits
-for them (`--finish pr` is the one mode that does, in a worktree of its own), and `backlog.mjs` has no notion of whether a file is committed — giving it one would make the registry's writer a git
+is the only place the sentence can be said at the moment it becomes true. It stops there: in place the commit is the user's own act, since no in-place groom
+commits for them (`--finish pr` is the one mode that does, in a worktree of its own), and `backlog.mjs` has no notion of whether a file is committed — giving it
+one would make the registry's writer a git
 reader for a message this file can print by itself.
 
 **Not printed for a rejection, and not for an idea or refactor left as one.** A rejected item is closed and an un-promoted idea is not a candidate, so no run
@@ -462,7 +463,8 @@ would pick either one up and committing it changes nothing about that.
 
 **Not printed in `pr` mode.** The sentence stays exactly as above and is still the in-place ending; a `--finish pr` groom commits what it wrote in its own
 worktree and opens a PR, so there is no uncommitted state for the line to warn about, and the final message carries the PR instead
-(`references/pr-mode.md` §9). Once that PR merges, an orchestrator run on `<base>` sees the item.
+(`references/pr-mode.md` §9). Once that PR merges and the local `<base>` is pulled — a run cuts from local `<base>` — an orchestrator run on it sees the
+item.
 
 ## If the session ends without a verdict
 
@@ -491,5 +493,6 @@ while the branch has nothing of its own, and never anything a person might want 
 
 ## Next
 
-A promoted idea or a fixed-in-place bug is ready for **`backlog-execute`** — and, once committed, for **`backlog-orchestrate`** too. A rejected item is closed —
+A promoted idea or a fixed-in-place bug is ready for **`backlog-execute`** — and, once committed (in `pr` mode: once its PR merges into `<base>`), for
+**`backlog-orchestrate`** too. A rejected item is closed —
 nothing further happens to it. Either way, `/backlog` shows the updated board.
