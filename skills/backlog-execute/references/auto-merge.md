@@ -106,7 +106,7 @@ leaves the PR open, auto-merge armed if it was armed, and the tree kept. Each pa
    cd <tree> && gh pr view <pr> --json state,mergeable,mergeStateStatus,statusCheckRollup
    ```
 
-3. **Act on what it says**, first match wins:
+3. **Act on what it says**, first match wins. An exit reached before anything was armed takes its `, not armed` name (The exits):
 
    - **`state` is `MERGED`** → done (exit "Merged").
    - **`state` is `CLOSED`** → someone closed it without merging: stop, report (exit "Closed").
@@ -127,9 +127,12 @@ leaves the PR open, auto-merge armed if it was armed, and the tree kept. Each pa
      with the Bash tool's `timeout` at `540000` (9 minutes), or the time left of the 45 minutes when that is less — under the 10-minute cap, so the call
      always returns, and never far past the bound. A call the timeout ends is not an outcome:
      the checks are still running, and the next pass reads them again. Whatever it prints, the next pass's `gh pr view` is what decides.
-   - **Not yet armed, and every check has concluded** green, neutral or skipped — none reported at all counts as concluded → arm now, with §1 step 5's
-     command (a refusal is §1 step 6). GitHub merges at once where it gates nothing — that is the person's tick, and the checks have passed — or arms
-     where it does. Then pause (the `node` line below) and take the next pass, which sees `MERGED` or waits armed.
+   - **Not yet armed, and every check has concluded** green, neutral, skipped or stale → arm now, with §1 step 5's command (a refusal is §1 step 6). An
+     empty `statusCheckRollup` is not concluded at first: a PR just opened or just pushed has usually not registered its checks yet, and arming then would
+     merge before CI starts. Pause instead (the `node` line below); empty counts as concluded only once every read for at least 2 minutes since `<started>`
+     (or since the last fix push) has come back empty — a repository with no checks at all. GitHub merges at once where it gates nothing — that is the
+     person's tick, and the checks have passed — or arms where it does. Then pause (the `node` line below) and take the next pass, which sees `MERGED`
+     or waits armed.
    - **`mergeStateStatus` is `BLOCKED` with every check finished and green** — a required review or another rule only a person can satisfy: stop, auto-merge
      left armed, report what it is waiting on (exit "Stopped").
    - **`mergeable` is `UNKNOWN`, or every check is green and the PR is still `OPEN`** — GitHub is computing mergeability, or is about to merge. Pause, then
@@ -154,7 +157,7 @@ leaves the PR open, auto-merge armed if it was armed, and the tree kept. Each pa
     merge, so §9's "merge this PR before draining the backlog" line is not printed.
 - **Closed.** Stop and report. Auto-merge ended with the PR. Groom on a tracker project leaves `plan-review` on, and the final message says so with the
   `plan-review <issue> off` command.
-- - **Bound hit**, **Stopped** — stop and report: auto-merge left armed, every check still pending or red by name, `mergeable` and `mergeStateStatus` as last
+- **Bound hit**, **Stopped** — stop and report: auto-merge left armed, every check still pending or red by name, `mergeable` and `mergeStateStatus` as last
   read, and why the wait ended (the bound; a red check or conflict without `--fix`; `BLOCKED` on a person; a fourth round needed; a red merge round; not this
   PR's failure; a refusal). Groom on a tracker project leaves `plan-review` on, and says so as for Closed.
 - **Checks failed, not armed**, **Bound hit, not armed**, **Stopped, not armed** — the same report, but auto-merge was never armed, and the final message
@@ -261,7 +264,7 @@ The caller's own final message (execute pr-mode §9, groom's final message) carr
   - `auto-merge: merged by GitHub (<method>)`
   - `auto-merge: armed (<method>), PR closed without merging`
   - `auto-merge: armed (<method>), still open after 45 minutes — <what is pending or red>`
-  - - `auto-merge: armed (<method>), stopped — <why>` (a red check or conflict without `--fix`, `BLOCKED` on a person, `3 fix rounds spent`, `merge of <base> is
+  - `auto-merge: armed (<method>), stopped — <why>` (a red check or conflict without `--fix`, `BLOCKED` on a person, `3 fix rounds spent`, `merge of <base> is
     red`, not this PR's failure, a refused step, a rejected push);
   - `auto-merge: not armed — checks failed on a PR GitHub would merge at once — PR left open`, followed by the failing checks' names
   - `auto-merge: not armed, still open after 45 minutes — <what is pending or red>`
