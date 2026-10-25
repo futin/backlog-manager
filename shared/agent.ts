@@ -995,14 +995,18 @@ export function defaultBoardUrl(url: string): string | null {
 }
 
 /**
- * The two `permissions.allow` rules the Orchestrate sheet's setup hint tells a reader to paste, and the pair `merge-check.util.ts` is tested against (#269).
- * One per command shape a merge-mode run asks the classifier about: the preflight probe, `git merge --no-ff … HEAD`, runs from the project root with no `-C`
- * (backlog-orchestrate SKILL.md §2), while every real merge is `git -C "<base tree>" merge --no-ff …` (§9) — and Claude Code matches a Bash rule against the
- * command text as written, so `Bash(git merge:*)` never matches the second. `--no-ff` and no further: the tracker merge carries three `-m` flags where the
- * files merge carries `--no-edit`, and one pair has to cover both.
+ * The two `permissions.allow` rules the Orchestrate sheet's setup hint tells a reader to paste for `projectPath`, and the pair `merge-check.util.ts` is
+ * tested against (#269). One per command shape a merge-mode run asks the classifier about: the preflight probe, `git merge --no-ff … HEAD`, runs from the
+ * project root with no `-C` (backlog-orchestrate SKILL.md §2), while every real merge is `git -C "<base tree>" merge --no-ff …` (§9) — and Claude Code
+ * matches a Bash rule against the command text as written, so `Bash(git merge:*)` never matches the second. `--no-ff` and no further: the tracker merge
+ * carries three `-m` flags where the files merge carries `--no-edit`, and one pair has to cover both.
  *
- * The `*` in the second rule stands before the subcommand because the path does, and that is the narrowest the grammar allows; Claude Code warns at startup
- * about such a rule, since `*` also matches an option like `-c` placed there. The alternative, `Bash(git -C:*)`, grants every git subcommand under `-C`.
+ * The merge rule names the project's own path, quoted as SKILL.md quotes it, because a `*` anywhere before the subcommand — `Bash(git -C * merge --no-ff *)`,
+ * the obvious way to cover any base tree — also matches git's `-c` option, and `-c core.fsmonitor=<command>` runs that command with the classifier out of the
+ * path. Every `*` here comes after `merge`, where `-c` is a merge option, not git's. The price is that a run whose base is checked out in no tree merges in
+ * a `.worktrees/_base-<ref>` tree this rule does not name, so those merges still go to the classifier; a `*` inside that path would reopen the hole.
  * Shared because the server's check and the sheet's snippet must name the same pair — a hint that recommends a rule the check would not credit is #269 again.
  */
-export const MERGE_ALLOW_RULES = ['Bash(git merge --no-ff *)', 'Bash(git -C * merge --no-ff *)'] as const;
+export function mergeAllowRules(projectPath: string): string[] {
+  return ['Bash(git merge --no-ff *)', `Bash(git -C "${projectPath}" merge --no-ff *)`];
+}

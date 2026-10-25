@@ -12,7 +12,7 @@ import {
   type MergeCheckResult,
   type UncommittedItems
 } from '../../lib/agents';
-import { actionLabel, clampMode, deriveAction, MERGE_ALLOW_RULES, modesUpTo, type AgentAction } from '../../../../shared/agent';
+import { actionLabel, clampMode, deriveAction, mergeAllowRules, modesUpTo, type AgentAction } from '../../../../shared/agent';
 import { useRunOn } from '../../hooks/useRunOn';
 import { useSettings } from '../../hooks/useSettings';
 import { prRequiredText } from '../../lib/dashboards';
@@ -53,13 +53,15 @@ const STEPS = ['items', 'order', 'modes'] as const;
 type Step = 1 | 2 | 3;
 
 /**
- * The exact JSON the setup hint (§6) tells a reader to paste: `MERGE_ALLOW_RULES`, the two entries `merge-check.util.ts` is tested against — one for the
- * preflight probe's `git merge --no-ff … HEAD`, one for the real merges' `git -C "<base tree>" merge --no-ff …`. Until #269 this was the single
+ * The exact JSON the setup hint (§6) tells a reader to paste for `project`: `mergeAllowRules`, the pair `merge-check.util.ts` is tested against — one for the
+ * preflight probe's `git merge --no-ff … HEAD`, one for the real merges' `git -C "<project>" merge --no-ff …`. Until #269 this was the single
  * `Bash(git merge:*)`, which matches the probe and no real merge: the sheet said "covered" while every merge still went to the classifier. Never the broader
- * `Bash(git:*)`, which grants every git subcommand, not just the one this run needs. `JSON.stringify(..., null, 2)` rather than a hand-typed multi-line
- * template so this can never drift from actually-valid JSON.
+ * `Bash(git:*)`, which grants every git subcommand, and never a `*` before `merge` (`mergeAllowRules` says why). `JSON.stringify(..., null, 2)` rather than a
+ * hand-typed multi-line template so this can never drift from actually-valid JSON.
  */
-const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: [...MERGE_ALLOW_RULES] } }, null, 2);
+function mergeAllowSnippet(project: string): string {
+  return JSON.stringify({ permissions: { allow: mergeAllowRules(project) } }, null, 2);
+}
 
 /**
  * OrchestrateSheet — the toolbar's "drain this project's whole groomed
@@ -1159,7 +1161,7 @@ export function OrchestrateSheet({
                   Review fix round 1 (Minor): the choice of
                   `settings.local.json` over the shared `settings.json` used to
                   live only in this file's own top-of-file comment and
-                  `MERGE_ALLOW_SNIPPET`'s — a reader of the rendered hint had
+                  `mergeAllowSnippet`'s — a reader of the rendered hint had
                   no way to learn the alternative existed at all. One sentence
                   below makes that tradeoff legible without touching either the
                   FACT or the LIKELIHOOD sentence on either side of it:
@@ -1176,7 +1178,7 @@ export function OrchestrateSheet({
                     creating it if it does not exist yet (or merge the two entries into an existing <code>permissions.allow</code> list rather than replacing
                     it):
                   </p>
-                  <pre className="orchestrate-merge-hint-json">{MERGE_ALLOW_SNIPPET}</pre>
+                  <pre className="orchestrate-merge-hint-json">{mergeAllowSnippet(project)}</pre>
                 </div>
               )}
 

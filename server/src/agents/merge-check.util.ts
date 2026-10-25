@@ -33,15 +33,23 @@ import { join } from 'node:path';
  * and every merge still goes to the classifier.
  *
  * So the check builds `mergeCommandSamples` — those four commands, with the
- * project's own path and a `_base-<ref>` tree under it standing in for
- * `<base tree>` — and a settings file covers when every sample matches at least
- * one of its entries. Samples rather than a word-prefix compare because a rule
- * can now carry its `*` mid-command (`Bash(git -C * merge --no-ff *)`), and the
- * only faithful way to judge that is to run Claude Code's own matching over a
- * command of the real shape. The per-item parts (`backlog/<id>`, the `-m`
- * texts) vary on every merge, so a rule with no `*` — an EXACT rule — can match
- * at most one past invocation; it is refused outright rather than left to the
- * samples, where it could only ever match by coincidence.
+ * project's own path, quoted, standing in for `<base tree>` — and a settings
+ * file covers when every sample matches at least one of its entries. Samples
+ * rather than a word-prefix compare because a rule can carry its `*`
+ * mid-command (`Bash(git -C * merge --no-ff *)`), and the only faithful way to
+ * judge that is to run Claude Code's own matching over a command of the real
+ * shape. The per-item parts (`backlog/<id>`, the `-m` texts) vary on every
+ * merge, so a rule with no `*` — an EXACT rule — can match at most one past
+ * invocation; it is refused outright rather than left to the samples, where it
+ * could only ever match by coincidence.
+ *
+ * The base tree is sampled as the main tree only: that is where the base is
+ * checked out on the usual run, and the narrowest safe rule (`mergeAllowRules`,
+ * shared/agent.ts, which says why) can name no other tree. A run whose base is
+ * checked out nowhere merges in `.worktrees/_base-<ref>`, which that rule does
+ * not cover — one more way this answer is "your settings look right" and never
+ * "your merge will work". The check credits whatever a file grants, a wildcard
+ * `-C` rule included; only the hint is held to the safe pair.
  *
  * Each file is judged on its own: a pair split between `settings.local.json`
  * and `~/.claude/settings.json` reads as not covered, though Claude Code would
@@ -49,8 +57,7 @@ import { join } from 'node:path';
  * keeps `source` meaning one file.
  *
  * A bare `Bash` entry (no parens at all) is Claude Code's own "allow every
- * command" wildcard and always covers. The pair the sheet recommends is
- * `MERGE_ALLOW_RULES` (shared/agent.ts), whose comment says why it is those two.
+ * command" wildcard and always covers.
  */
 export interface MergeCheckResult {
   covered: boolean;
@@ -61,21 +68,16 @@ export interface MergeCheckResult {
 
 /**
  * Commands of the four shapes a merge-mode run issues — see the file header.
- * Both base-tree candidates are quoted, as SKILL.md writes them: the main tree
- * (the base is checked out there, the usual case) and the `_base-<ref>` tree a
- * run creates when no tree holds the base, so a rule naming one literal path
- * covers half the runs and is reported as covering none.
+ * The base tree is the main tree, quoted as SKILL.md writes it.
  */
 function mergeCommandSamples(projectPath: string): string[] {
   const trackerMessages = '-m "Merge backlog/1: title" -m "Fixes #1" -m "Reviewed: approve (reviews/1-1.md)"';
-  const samples = [
+  return [
     'git merge --no-ff --no-edit HEAD',
-    'git merge --no-ff -m "Merge probe: run-1" -m "Fixes nothing: merge-mode probe" -m "Reviewed: merge-mode probe, no item" HEAD'
+    'git merge --no-ff -m "Merge probe: run-1" -m "Fixes nothing: merge-mode probe" -m "Reviewed: merge-mode probe, no item" HEAD',
+    `git -C "${projectPath}" merge --no-ff --no-edit backlog/task-1`,
+    `git -C "${projectPath}" merge --no-ff ${trackerMessages} backlog/1`
   ];
-  for (const tree of [projectPath, join(projectPath, '.worktrees', '_base-feature-x')]) {
-    samples.push(`git -C "${tree}" merge --no-ff --no-edit backlog/task-1`, `git -C "${tree}" merge --no-ff ${trackerMessages} backlog/1`);
-  }
-  return samples;
 }
 
 /** `Bash(<pattern>)` — any rule body; `Bash` alone is handled before this. */
