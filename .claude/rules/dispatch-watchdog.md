@@ -14,8 +14,8 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   [invariants.md](docs/subsystems/invariants.md#a-board-started-run-is-visible-before-its-run-file-exists)
 - **Dispatch derives the action; it never accepts one.** `deriveAction` (`shared/agent.ts`) is the single implementation for the board's label and the server's
   validation; dispatch re-scans the file and 409s on disagreement. The prompt is the only client field taken outright
-  (one exception: an execute's finish clause is appended server-side from the validated `finish`/`base` fields, and an execute body spelling `--finish` or
-  `--base` is a 400); unknown `model`/`effort` drop rather than
+  (one exception: an execute's or a groom's finish clause is appended server-side from the validated `finish`/`base`/`autoMerge`/`fix` fields, and an execute
+  or groom body spelling `--finish`, `--base`, `--auto-merge` or `--fix` is a 400); unknown `model`/`effort` drop rather than
   reject; the controller rebuilds the body field by field and checks `action` with `isAgentAction`, never a hand-written comparison chain. `AgentAction` has
   three members and ONE check runs ahead of all of them: `capture` is derived for an out-of-scope item by SECTION, before the `status !== 'open'` check; a
   `done/` item still derives `null`; capture spawns `backlog-capture` for a **new** item citing `from: <id>`, and `moveItem` still refuses every move out of
@@ -54,8 +54,9 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   `BEGIN TICKET <nonce>` / `END TICKET <nonce>` lines whose nonce is minted per composition, the description in a fence longer than any backtick run inside it.
   Either is capped at `JIRA_PROMPT_MAX` (4 000, the dashboard's own cap — a built-in prompt that cannot hold at least one character of the description, or a
   skill's whose placeholders fill past it, is a 400 `prompt too long`, never one that says `(no description)`). **Item `dispatch` is the exception to both**:
-  its prompt is the launch sheet's, edited by a human, and is taken outright — save an execute's finish clause, which dispatch appends from validated
-  `finish`/`base` (a body spelling either flag is a 400).
+  its prompt is the launch sheet's, edited by a human, and is taken outright — save an execute's or a groom's finish clause, which dispatch appends from
+  validated `finish`/`base`/`autoMerge`/`fix` (a body spelling any of the four flags is a 400; a groom body's one trailing `COMMIT_RULE` is stripped first;
+  `autoMerge`/`fix` are accepted only with finish `pr`, and `fix` only with `autoMerge`; a groom sent to another machine has no finish, a 400).
   Why: [invariants.md](docs/subsystems/invariants.md#the-orchestrate-and-jira-spawn-prompts-are-composed-server-side)
 - **The browser never talks to the dashboard.** Every call goes board → this API → dashboard; `BM_AGENTS_URL` is env-only; `BM_AGENTS` defaults to off — and
   **compose passes that one through as `${BM_AGENTS:-off}`, never as a literal** (bug-25, pinned by `test/compose-env.test.ts`). `BM_AGENTS_URL` beside it is

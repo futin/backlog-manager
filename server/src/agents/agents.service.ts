@@ -24,7 +24,6 @@ import {
   deriveAction,
   dispatchBlock,
   FINISH_FLAG,
-  finishClause,
   inReviewBlock,
   isExecuteFinish,
   isItemId,
@@ -39,7 +38,7 @@ import {
   MODELS,
   DEFAULT_MODEL
 } from '../../../shared/agent';
-import { composePrompt, sessionName } from './prompt.util';
+import { appendFinishClause, composePrompt, sessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
@@ -414,26 +413,38 @@ export class AgentsService {
 
     // Work sent to a remote machine always comes back as a PR (spec, Goals): a remote execute's finish IS `pr`, whatever the body says — and a body that
     // names another finish is refused rather than overridden, because the sheet locks the picker to PR for a remote, so a body that disagrees came from
-    // somewhere that would be surprised by a push. Execute only: finish is not a thing a groom or a capture has, on any machine, and rules 1–2 below
-    // answer a body that gives one exactly as they always have.
+    // somewhere that would be surprised by a push. A remote GROOM is the opposite case and is refused by rule 3 below: it has no finish at all (it stays
+    // an in-place groom on the remote, whose claim and plan the board already follows), so a body naming one came from a sheet that does not know that.
     if (!m.home && req.action === 'execute' && req.finish !== undefined && req.finish !== 'pr') {
       throw new HttpException({ error: `finish must be pr on ${m.label}` }, 400);
     }
 
-    // The execute finish — the sheet's picker, validated here and appended as `finishClause` below. `req.finish` and `req.base` are typed, but the
-    // controller forwards them unvalidated (as `model` is, and `pickFrom` checks that), so every rule below runs on what the wire actually carried. A body
-    // from before this field sends neither and is `in-place`: no 400, which is what keeps an open tab working across the deploy.
+    // The finish — the sheet's picker for an execute OR a groom, validated here and appended as `finishClause` below. `req.finish`, `req.base`,
+    // `req.autoMerge` and `req.fix` are typed, but the controller forwards them unvalidated (as `model` is, and `pickFrom` checks that), so every rule below
+    // runs on what the wire actually carried. A body from before these fields sends none of them and is `in-place`: no 400, which is what keeps an open tab
+    // working across the deploy.
     //
     // All the SHAPE rules run before the item lookup — they need only the body — and the one that needs git (the base proof) runs after every 409, so a
     // reader told "this item's next step is groom" is not first told their branch is wrong.
-    //   1. a finish outside the vocabulary; 2. a finish on anything but an execute; 3. a base without `pr`; 4. `pr` without a base.
+    //   1. a finish outside the vocabulary; 2. a finish on anything but an execute or a groom; 3. a finish on a groom sent to another machine;
+    //   4. `autoMerge` or `fix` that is not a boolean; then, on the DERIVED finish, 5. a base without `pr` and `pr` without a base; 6. `autoMerge: true` or
+    //   `fix: true` beside a finish other than `pr` (a `false` is an untouched toggle and is accepted anywhere); 7. `fix: true` without `autoMerge: true`.
     if (req.finish !== undefined && !isExecuteFinish(req.finish)) {
       throw new HttpException({ error: 'finish must be in-place or pr' }, 400);
     }
-    if (req.finish !== undefined && req.action !== 'execute') {
-      throw new HttpException({ error: 'finish applies only to execute' }, 400);
+    if (req.finish !== undefined && req.action !== 'execute' && req.action !== 'groom') {
+      throw new HttpException({ error: 'finish applies only to execute or groom' }, 400);
     }
-    // Rules 3–4 run on the DERIVED finish, so a remote execute with no `finish` is held to `pr`'s own rule — a base is required — rather than to a
+    if (!m.home && req.action === 'groom' && req.finish !== undefined) {
+      throw new HttpException({ error: `a groom on ${m.label} has no finish` }, 400);
+    }
+    if (req.autoMerge !== undefined && typeof req.autoMerge !== 'boolean') {
+      throw new HttpException({ error: 'autoMerge must be a boolean' }, 400);
+    }
+    if (req.fix !== undefined && typeof req.fix !== 'boolean') {
+      throw new HttpException({ error: 'fix must be a boolean' }, 400);
+    }
+    // The base rules run on the DERIVED finish, so a remote execute with no `finish` is held to `pr`'s own rule — a base is required — rather than to a
     // second copy of it.
     const finish = !m.home && req.action === 'execute' ? 'pr' : (req.finish ?? 'in-place');
     if (req.base !== undefined && finish !== 'pr') {
@@ -442,16 +453,28 @@ export class AgentsService {
     if (finish === 'pr' && req.base === undefined) {
       throw new HttpException({ error: 'base is required with finish pr' }, 400);
     }
-    //   5. An execute body carrying a `--finish` or `--base` token. The pickers are the only channel for either: the clause appended below is built from
-    //      validated values alone, so a typed `--finish pr` under an In place pick would reach the skill beside `COMMIT_RULE` (which carries no token)
-    //      and push, and a typed `--base develop` beside the clause's own `--base main` would leave the session two bases. The skill reads the token
-    //      as the pr signal wherever it appears in the trigger, and the board's own clause spells it inside backticks, so a body that quotes, backticks or
-    //      parenthesises the token (`--finish pr`, "--finish pr", (--base x)) steers the session as surely as a bare one. The pattern therefore asks only
-    //      that no word character or hyphen sits on either side of the token — `[\w-]` — rather than requiring whitespace: `--finished`, `--base-ref` and a
-    //      `base64` blob are longer words and are left alone, while `--base=develop` (`=` is neither) is refused. Groom and capture bodies are free text no
-    //      flag parser reads, and are not refused.
-    if (req.action === 'execute' && FINISH_FLAG.test(prompt)) {
-      throw new HttpException({ error: "the finish mode and base are set by the sheet's pickers — remove --finish and --base from the prompt" }, 400);
+    // Rule 6 comes before rule 7 on purpose: a lone `fix: true` with no finish derives `in-place`, and the reader should hear "this applies only to a PR"
+    // before "fix needs auto-merge" — the second would send them to tick a box that a PR finish would then have to be chosen for anyway.
+    if ((req.autoMerge === true || req.fix === true) && finish !== 'pr') {
+      throw new HttpException({ error: 'autoMerge and fix apply only to finish pr' }, 400);
+    }
+    if (req.fix === true && req.autoMerge !== true) {
+      throw new HttpException({ error: 'fix requires autoMerge' }, 400);
+    }
+    //   8. An execute or groom body carrying a `--finish`, `--base`, `--auto-merge` or `--fix` token. The pickers and checkboxes are the only channel for any
+    //      of them: the clause appended below is built from validated values alone, so a typed `--finish pr` under an In place pick would reach the skill
+    //      beside `COMMIT_RULE` (which carries no token) and push, a typed `--base develop` beside the clause's own `--base main` would leave the session
+    //      two bases, and a typed `--auto-merge` under a plain PR pick would arm a merge nobody chose. The skill reads the token as the signal wherever it
+    //      appears in the trigger, and the board's own clause spells it inside backticks, so a body that quotes, backticks or parenthesises the token
+    //      (`--finish pr`, "--finish pr", (--base x)) steers the session as surely as a bare one. The pattern therefore asks only that no word character or
+    //      hyphen sits on either side of the token — `[\w-]` — rather than requiring whitespace: `--finished`, `--base-ref` and a `base64` blob are longer
+    //      words and are left alone, while `--base=develop` (`=` is neither) is refused. A capture body is free text no flag parser reads, and is not
+    //      refused.
+    if ((req.action === 'execute' || req.action === 'groom') && FINISH_FLAG.test(prompt)) {
+      throw new HttpException(
+        { error: "the finish mode, base, auto-merge and fix are set by the sheet's pickers — remove --finish, --base, --auto-merge and --fix from the prompt" },
+        400
+      );
     }
 
     const item = await this.findItem(req.itemPath);
@@ -563,9 +586,12 @@ export class AgentsService {
     const base = finish === 'pr' ? await proveBaseBranch(req.base, item.projectPath) : '';
 
     const spawned = await this.spawnInProject(item.projectPath, {
-      // An execute's body is the sheet's text as sent and the clause follows it, built from `finish` and the proved `base` alone — see composePrompt's
-      // note on why the clause is not in the editable body. Groom and capture keep their `COMMIT_RULE` inside the text, so they go out unchanged.
-      prompt: action === 'execute' ? `${prompt} ${finishClause(finish, base)}` : prompt,
+      // An execute's or groom's body is the sheet's text as sent and the clause follows it, built from `finish`, the proved `base` and the two validated
+      // booleans alone — see composePrompt's note on why the clause is not in the editable body. A groom body from a tab that predates the move still ends
+      // in `COMMIT_RULE`, so one trailing copy is stripped first: the in-place clause puts the same bytes back, and a PR finish does not end up with a
+      // "do not push" the clause then contradicts. An execute is NOT stripped — its existing "doubled, harmless" case stays. Capture keeps its
+      // `COMMIT_RULE` inside the text and goes out unchanged.
+      prompt: appendFinishClause(prompt, action, finish, base, { autoMerge: req.autoMerge, fix: req.fix }),
       name: sessionName(item),
       permissionMode: req.permissionMode,
       maxPermission: status.spawnMaxPermission,

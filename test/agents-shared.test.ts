@@ -845,7 +845,72 @@ describe('inReviewBlock', () => {
      placeholder, so that is the base it is rendered with here. */
   it('is the pr sentence backlog-execute pr-mode.md quotes', () => {
     const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
-    expect(prMode).toContain(finishClause('pr', '<base>'));
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>'));
+  });
+
+  /* The same seam for the flagged sentence: §1 quotes it so a session can tell `--auto-merge --fix` arrived from the board, and a reworded clause would
+     leave the quote describing a prompt nobody sends. Both flags on, because that sentence carries every clause the auto-merge-only one has. */
+  it('pr-mode.md quotes the execute flag sentence', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('execute', 'pr', '<base>', { autoMerge: true, fix: true }));
+  });
+
+  /* The procedure's load-bearing literals: the one line a not-allowed repo gets (a person greps the final message for it), the two soft bounds the spec
+     states in the file, the `--auto --<method>` spelling that arms rather than merges, and the force-push ban the fix loop's merge-of-base relies on. */
+  it('auto-merge.md names the exact not-allowed line, the 45-minute and 3-round bounds, and forbids force-push', () => {
+    const autoMerge = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'auto-merge.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(autoMerge).toContain('auto-merge: not allowed on <owner>/<repo> — PR left open');
+    expect(autoMerge).toContain('45 minutes');
+    expect(autoMerge).toContain('3 fix rounds');
+    expect(autoMerge).toContain('--auto --');
+    expect(autoMerge.toLowerCase()).toContain('never force');
+    // Fix round 1: a merge of the base is verified before it is committed, clean or not, and a red round leaves the tree at HEAD with its stat recorded.
+    expect(autoMerge).toContain('git merge --no-commit --no-ff origin/<base>');
+    expect(autoMerge).toContain('git diff --stat HEAD');
+    // Final review: gh merges an already-mergeable PR at once, so it arms at once only where GitHub gates the merge, and otherwise waits for the checks
+    // unarmed — and a red check there, without --fix, ends on its own line, since nothing was armed.
+    expect(autoMerge).toContain('**`BLOCKED` or `BEHIND`** — GitHub itself gates the merge on the repository\'s requirements. Arm now');
+    expect(autoMerge).toContain('**do not arm yet.** Run the Wait (§2) unarmed');
+    expect(autoMerge).toContain('auto-merge: not armed — checks failed on a PR GitHub would merge at once — PR left open');
+  });
+
+  /* The two quotes above would stay green if the hooks that lead a session INTO auto-merge.md were deleted: SKILL.md's flag rule and mode line, and pr-mode
+     §8's read-it-now pointer. One literal each keeps the door pinned, not only the room. */
+  it('backlog-execute reads the flags and hands off to auto-merge.md', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain('`--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule');
+    expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
+    expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
+  });
+
+  /* Groom's half of the same seam. Its sentence differs from execute's by "reviews, " (no reviewer runs on a groom PR), so a groom pr-mode.md that copied
+     execute's quote would describe a prompt the board never sends a groom — and the flag sentence is the one a session reads `--auto-merge --fix` out of. */
+  it('groom pr-mode.md quotes both groom sentences', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(prMode).toContain(finishClause('groom', 'pr', '<base>'));
+    expect(prMode).toContain(finishClause('groom', 'pr', '<base>', { autoMerge: true, fix: true }));
+  });
+
+  /* `tick.mjs` skips `.worktrees/groom-<id>` when it scans for `started:` markers and treats `groom/<id>` or that tree as taken (`groomTaken`). The spelling
+     is a contract between two files that never import each other: a groom that cut `.worktrees/groom/<id>` or branched `groom-<id>` would block every tick on
+     a files project with its marker, and let a tick re-groom an item whose plan sits on an open PR. */
+  it('groom pr-mode.md spells the tree tick.mjs skips', () => {
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8');
+    expect(prMode).toContain('.worktrees/groom-<id>');
+    expect(prMode).toContain('groom/<id>');
+  });
+
+  /* The doors into the room: SKILL.md's Finish mode section is the only thing that sends a session to pr-mode.md, and pr-mode.md's auto-merge step is the
+     only thing that sends a groom to the shared procedure. pr-mode.md also names auto-merge.md in its intro, so the bare path would stay green with §8's
+     read-it-now pointer deleted: the pointer is pinned whole, as execute's is, and so are SKILL.md's `--fix` stop rule and its flagged mode line. */
+  it('groom SKILL.md points at pr-mode.md and auto-merge.md is reached from it', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    const prMode = readFileSync(join(__dirname, '..', 'skills', 'backlog-groom', 'references', 'pr-mode.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain('skills/backlog-groom/references/pr-mode.md');
+    expect(skill).toContain('`--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule');
+    expect(skill).toContain('finish mode: pr → PR into <base>, auto-merge, fix');
+    expect(prMode).toContain('${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` in full and run it now');
   });
 });
 
@@ -1014,21 +1079,92 @@ describe('watchdogStoodDown over a failing run', () => {
 /* The execute finish vocabulary and the one sentence that closes an execute prompt. `finishClause` is shared so the launch sheet's preview and the prompt the
    server sends are the same string by construction — these cases pin the bytes, because the pr sentence is what the spawned session obeys. */
 describe('finishClause', () => {
-  it('is COMMIT_RULE for in-place, whatever the base', () => {
-    expect(finishClause('in-place', 'develop')).toBe(COMMIT_RULE);
-    expect(finishClause('in-place', 'main')).toBe(COMMIT_RULE);
+  const EXEC_PR = 'Finish with `--finish pr --base main`: the skill commits, reviews, pushes and opens the PR into main, and never merges.';
+  const GROOM_PR = 'Finish with `--finish pr --base main`: the skill commits, pushes and opens the PR into main, and never merges.';
+  /* One row per flag combination, for either action: the sentence is the same bar the word "reviews", which only an execute has a reviewer for. The base is a
+     parameter so a slashed one is proved verbatim in every place the sentence spells it. */
+  const armed = (action: 'execute' | 'groom', base: string, fix: boolean): string => {
+    const reviews = action === 'execute' ? 'reviews, ' : '';
+    return (
+      `Finish with \`--finish pr --base ${base} --auto-merge${fix ? ' --fix' : ''}\`: the skill commits, ${reviews}pushes, opens the PR into ${base} ` +
+      'and arms GitHub auto-merge if the repository allows it, then waits for GitHub to merge it' +
+      `${fix ? `, fixing failing checks and conflicts with ${base} meanwhile` : ''}; ` +
+      'the skill never merges itself.'
+    );
+  };
+
+  it.each(['execute', 'groom'] as const)('is COMMIT_RULE for in-place, whatever the base (%s)', (action) => {
+    expect(finishClause(action, 'in-place', 'develop')).toBe(COMMIT_RULE);
+    expect(finishClause(action, 'in-place', 'main')).toBe(COMMIT_RULE);
   });
 
-  it('names the base in both places for pr', () => {
-    expect(finishClause('pr', 'main')).toBe(
-      'Finish with `--finish pr --base main`: the skill commits, reviews, pushes and opens the PR into main, and never merges.'
-    );
+  it('in-place is COMMIT_RULE for both actions and any flags', () => {
+    expect(finishClause('groom', 'in-place', 'develop', { autoMerge: true, fix: true })).toBe(COMMIT_RULE);
+    expect(finishClause('execute', 'in-place', 'main', { autoMerge: true })).toBe(COMMIT_RULE);
+  });
+
+  it('names the base in both places for an execute pr, byte for byte as before', () => {
+    expect(finishClause('execute', 'pr', 'main')).toBe(EXEC_PR);
+  });
+
+  it('groom pr drops "reviews"', () => {
+    const clause = finishClause('groom', 'pr', 'main');
+    expect(clause).toBe(GROOM_PR);
+    expect(clause).not.toContain('reviews');
   });
 
   it('carries a slashed base through verbatim', () => {
-    const clause = finishClause('pr', 'release/1.x');
+    const clause = finishClause('execute', 'pr', 'release/1.x');
     expect(clause).toContain('--finish pr --base release/1.x');
     expect(clause).toContain('into release/1.x');
+  });
+
+  it('each flag combination, both actions', () => {
+    const base = 'release/1.x';
+    for (const action of ['execute', 'groom'] as const) {
+      expect(finishClause(action, 'pr', base, { autoMerge: true })).toBe(armed(action, base, false));
+      expect(finishClause(action, 'pr', base, { autoMerge: true, fix: true })).toBe(armed(action, base, true));
+    }
+    // The four rows against the literal sentences, so `armed` above cannot drift into agreeing with a wrong function.
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge`: the skill commits, reviews, pushes, opens the PR into main and arms GitHub auto-merge if the ' +
+        'repository allows it, then waits for GitHub to merge it; the skill never merges itself.'
+    );
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge --fix`: the skill commits, reviews, pushes, opens the PR into main and arms GitHub auto-merge if ' +
+        'the repository allows it, then waits for GitHub to merge it, fixing failing checks and conflicts with main meanwhile; the skill never merges itself.'
+    );
+    expect(finishClause('groom', 'pr', 'main', { autoMerge: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge`: the skill commits, pushes, opens the PR into main and arms GitHub auto-merge if the repository ' +
+        'allows it, then waits for GitHub to merge it; the skill never merges itself.'
+    );
+    expect(finishClause('groom', 'pr', 'main', { autoMerge: true, fix: true })).toBe(
+      'Finish with `--finish pr --base main --auto-merge --fix`: the skill commits, pushes, opens the PR into main and arms GitHub auto-merge if the ' +
+        'repository allows it, then waits for GitHub to merge it, fixing failing checks and conflicts with main meanwhile; the skill never merges itself.'
+    );
+  });
+
+  it('fix alone is ignored', () => {
+    expect(finishClause('execute', 'pr', 'main', { fix: true })).toBe(EXEC_PR);
+    expect(finishClause('groom', 'pr', 'main', { fix: true })).toBe(GROOM_PR);
+    expect(finishClause('execute', 'pr', 'main', { autoMerge: false, fix: true })).toBe(EXEC_PR);
+  });
+
+  /* The skill's flag parser reads the backticked span; prose that spelled a flag outside it would be a second, unparsed spelling a reader could take for one.
+     Asserted on the text outside the backticks — no `--` at all there — so the flagless sets, where a per-match loop would have nothing to iterate, still
+     assert something. */
+  it('flags only inside the backticks', () => {
+    const flagSets = [{}, { autoMerge: true }, { autoMerge: true, fix: true }, { fix: true }];
+    for (const action of ['execute', 'groom'] as const) {
+      for (const flags of flagSets) {
+        const clause = finishClause(action, 'pr', 'main', flags);
+        const open = clause.indexOf('`');
+        const close = clause.indexOf('`', open + 1);
+        expect(open).toBeGreaterThanOrEqual(0);
+        expect(close).toBeGreaterThan(open);
+        expect(clause.slice(0, open) + clause.slice(close + 1)).not.toContain('--');
+      }
+    }
   });
 });
 

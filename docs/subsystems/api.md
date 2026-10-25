@@ -187,11 +187,13 @@ WHERE it calls — not how many modules do: home's dashboard (`BM_AGENTS_URL`) a
 the machine is `home`.
 
 - `GET /api/agents/status` — whether dispatch is on and whether `../claude-agents-dashboard` answered.
-- `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's prompt has no closing clause: the
-  finish clause is the sheet's picker, not editable text.
-- `POST /api/agents/dispatch` — spawns the session in that dashboard. An execute dispatch also takes `finish` (`in-place` | `pr`, absent meaning in-place) and
-  `base` (a local branch, proved server-side, legal only with `pr` and required by it); the server appends the finish clause from those validated fields after
-  the body, and a body that spells `--finish` or `--base` is a 400. `finish` on any other action is a 400. Both `dispatch` and `orchestrate` take an optional
+- `POST /api/agents/plan` — this item's next step, derived from the file, plus a composed default prompt. An execute plan's and a groom plan's prompt have no
+  closing clause: the finish clause is the sheet's picker, not editable text (only a capture's keeps its commit rule in the text).
+- `POST /api/agents/dispatch` — spawns the session in that dashboard. An execute or a home groom dispatch also takes `finish` (`in-place` | `pr`, absent
+  meaning in-place), `base` (a local branch, proved server-side, legal only with `pr` and required by it) and, only with `pr`, the booleans `autoMerge` and
+  `fix` (`fix` needs `autoMerge`; each a 400 otherwise, `autoMerge and fix apply only to finish pr` / `fix requires autoMerge`); the server appends the finish
+  clause from those validated fields after the body, and a body that spells `--finish`, `--base`, `--auto-merge` or `--fix` is a 400. `finish` on a capture, or
+  on a groom sent to a remote machine, is a 400. Both `dispatch` and `orchestrate` take an optional
   `machine`: absent or `home` is the launch above, byte for byte, and a remote's `name` sends it to that machine's dashboard — see "Launching on another
   machine".
 - `POST /api/agents/orchestrate` — spawns a headless `/backlog-orchestrate` run for one project. The prompt is composed server-side, so a caller can influence

@@ -4,7 +4,8 @@ description: >
   Do the actual work on a groomed bug or task — debug and fix, or build out a planned task — then archive it once verification proves it worked. Refuses
   anything ungroomed: a task with no real plan, or a bug whose fix is still unknown. Use it to execute task 12, fix bug 7, work the backlog, or do the next
   thing. Never touches ideas or already-rejected items, and never commits or pushes on its own — unless the trigger says `--finish pr`, where it
-  works in a worktree of its own and ends in a commit, a review, a push and a PR it never merges. Trigger: /backlog-execute
+  works in a worktree of its own and ends in a commit, a review, a push and a PR it never merges; with `--auto-merge` it arms GitHub auto-merge on its
+  own PR and GitHub merges. Trigger: /backlog-execute
 trigger: /backlog-execute
 ---
 
@@ -84,6 +85,12 @@ trigger, once, before `show`:
   both. Never fall back to either mode.
 - **The `--finish pr` token is the one signal**, typed or inside the board's closing sentence (pr-mode.md §1 quotes it). A board prompt ending in the
   "commit … Do not push." rule is `in-place`. Generic commit or PR wording elsewhere in a prompt switches nothing, and this skill never offers a switch.
+- **`--auto-merge` and `--fix` are read in the same pass**, from the same place, and only beside `--finish pr`: `--auto-merge` arms GitHub auto-merge on the
+  PR this session opens, `--fix` keeps the session fixing failing checks and conflicts with `<base>` until GitHub merges it. `--auto-merge` without
+  `--finish pr`, or `--fix` without both `--finish pr` and `--auto-merge` → stop and name that rule; never fall back to a mode without the flag, nor to one
+  without the PR. With either present the mode line names them — `finish mode: pr → PR into <base>, auto-merge, fix`, each flag only when present — and
+  `${CLAUDE_PLUGIN_ROOT}/skills/backlog-execute/references/auto-merge.md` is read in full where pr-mode.md §8 says, never earlier. Generic "merge" wording
+  in a prompt arms nothing.
 
 ## Pick an item
 
@@ -378,7 +385,8 @@ whatever time was spent and drops `started` along with it, because there's nothi
   dirty tree can sweep in unrelated in-flight work that has nothing to do with this item. Leave the working tree as it is; tell the user what files changed
   and let them stage and commit it themselves — or, under an `[orchestrator-run` marker, list them in the final message instead, because the run commits that
   worktree itself in its next step and no user is reading. The marker overrides `pr` mode too. In `pr` mode (`references/pr-mode.md`) it commits only in the
-  tree it cut, or verified clean, for this item; pushes only that tree's own branch, never `<base>` and never with force; and never merges.
+  tree it cut, or verified clean, for this item; pushes only that tree's own branch, never `<base>` and never with force; and never merges; with
+  `--auto-merge` it arms GitHub auto-merge on its own PR and GitHub merges (`references/auto-merge.md`).
 - **Never touches `ideas/`, `refactors/` or `out-of-scope/`.** An idea isn't executable by definition, and neither is a refactor — promoting either into a task
   is `backlog-groom`'s job. A rejected item is closed. If `show` resolves the id into any of those three directories, refuse immediately (see Pick an item
   above). Nothing but this rule enforces the idea and refactor halves of it: `start` used to refuse an idea and no longer does, because grooming one is real

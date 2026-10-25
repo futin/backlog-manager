@@ -258,7 +258,7 @@ describe('POST /api/agents/dispatch with a machine', () => {
       await start();
       await execute({ base: 'main', machine: 'Pro' }).expect(201, { sessionId: 'sess-pro' });
       const sent = JSON.parse(spawnsOf(pro)[0].body) as { prompt: string };
-      expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('pr', 'main'));
+      expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main'));
     });
 
     it('finish absent and no base: 400 base is required with finish pr', async () => {
@@ -343,7 +343,7 @@ describe('POST /api/agents/dispatch with a machine', () => {
     expect(spawns[0].auth).toBe(`Bearer ${PRO_TOKEN}`);
     const sent = JSON.parse(spawns[0].body) as Record<string, unknown>;
     expect(sent.project).toBe(PRO_DIRNAME);
-    expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('pr', 'main'));
+    expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main'));
     expect(sent.model).toBe(DEFAULT_MODEL);
     // Neither machine's path rides the body: membership is by dirName, Pro's own.
     expect(spawns[0].body).not.toContain(trackerPath);
@@ -418,7 +418,38 @@ describe('POST /api/agents/dispatch with a machine', () => {
     });
   });
 
-  it('groom and capture on Pro: no finish clause, no base, no 400', async () => {
+  it('a groom on Pro with a finish is a 400: it has no finish on a remote machine', async () => {
+    await start();
+    await post({
+      itemPath: urn(32),
+      action: 'groom',
+      prompt: 'Groom #32.',
+      permissionMode: 'acceptEdits',
+      machine: 'Pro',
+      finish: 'pr',
+      base: 'main'
+    }).expect(400, { error: 'a groom on Pro has no finish' });
+    expect(spawnsOf(pro)).toEqual([]);
+  });
+
+  // With no finish sent, a remote groom derives in-place, so a lone auto-merge tick is rule 6's refusal rather than an armed merge on nobody's PR.
+  it('a groom on Pro with autoMerge is a 400: auto-merge applies only to a PR finish', async () => {
+    await start();
+    await post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32.', permissionMode: 'acceptEdits', machine: 'Pro', autoMerge: true }).expect(400, {
+      error: 'autoMerge and fix apply only to finish pr'
+    });
+    expect(spawnsOf(pro)).toEqual([]);
+  });
+
+  it('an execute on Pro with autoMerge and fix: the sent prompt ends with the execute auto-merge-and-fix clause', async () => {
+    gitInit();
+    await start();
+    await execute({ base: 'main', machine: 'Pro', autoMerge: true, fix: true }).expect(201);
+    const sent = JSON.parse(spawnsOf(pro)[0].body) as { prompt: string };
+    expect(sent.prompt).toBe('Use the backlog-execute skill on #31. ' + finishClause('execute', 'pr', 'main', { autoMerge: true, fix: true }));
+  });
+
+  it('groom and capture on Pro: the groom ends on the in-place clause (the commit rule), capture on its own text; no base, no 400', async () => {
     await start();
     await post({ itemPath: urn(32), action: 'groom', prompt: 'Groom #32. ' + COMMIT_RULE, permissionMode: 'acceptEdits', machine: 'Pro' }).expect(201);
     await post({ itemPath: urn(33), action: 'capture', prompt: 'Capture from #33.', permissionMode: 'acceptEdits', machine: 'Pro' }).expect(201);

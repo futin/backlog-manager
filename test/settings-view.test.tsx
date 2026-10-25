@@ -560,6 +560,50 @@ describe('SettingsView', () => {
       expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').executeDefaultFinish).toBe('pr');
     });
 
+    // The groom sheet's Finish default and the two PR defaults every PR launch shares. Fix is a refinement of auto-merge, so its switch is dead (with a title
+    // saying why) while auto-merge is off; turning auto-merge off never rewrites the stored fix value — it is inert, and the sheet seeds Fix off.
+    it('offers a groom finish default, starting on In place, and persists a pick', async () => {
+      renderView();
+      const select = (await screen.findByLabelText('Groom finish')) as HTMLSelectElement;
+      expect(select.value).toBe('in-place');
+      expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+        ['in-place', 'In place'],
+        ['pr', 'PR']
+      ]);
+      expect(
+        screen.getByText('PR mode writes the spec and plan in its own worktree, commits, pushes and opens a PR. It never merges.')
+      ).toBeInTheDocument();
+      await userEvent.selectOptions(select, 'pr');
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').groomDefaultFinish).toBe('pr');
+    });
+
+    it('offers the auto-merge and fix defaults, with Fix disabled until Auto-merge is on', async () => {
+      renderView();
+      const autoMerge = await screen.findByRole('switch', { name: 'auto-merge PRs' });
+      const fix = screen.getByRole('switch', { name: 'fix if it fails' });
+      expect(
+        screen.getByText('Preselects Auto-merge on a PR launch. Armed only if the GitHub repo allows auto-merge — GitHub does the merge.')
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'Preselects Fix on a PR launch: the session stays and fixes failing checks and base conflicts, up to 3 rounds in 45 minutes.'
+        )
+      ).toBeInTheDocument();
+      expect(autoMerge).toHaveAttribute('aria-checked', 'false');
+      expect(fix).toBeDisabled();
+      expect(fix).toHaveAttribute('title', 'Needs Auto-merge PRs on');
+      await userEvent.click(autoMerge);
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').prAutoMergeDefault).toBe(true);
+      expect(screen.getByRole('switch', { name: 'fix if it fails' })).toBeEnabled();
+      await userEvent.click(screen.getByRole('switch', { name: 'fix if it fails' }));
+      expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').prFixDefault).toBe(true);
+      // Auto-merge off again: Fix greys out but its stored value is left alone.
+      await userEvent.click(screen.getByRole('switch', { name: 'auto-merge PRs' }));
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
+      expect([stored.prAutoMergeDefault, stored.prFixDefault]).toEqual([false, true]);
+      expect(screen.getByRole('switch', { name: 'fix if it fails' })).toBeDisabled();
+    });
+
     // Task 7: the orchestrator's own default, seeding the sheet Task 8 adds —
     // not the per-item launch sheet the two rows above feed. Asserted the
     // same way as those: the row offers both real options (never a blank
@@ -661,7 +705,16 @@ describe('SettingsView', () => {
         ['s_0123abcd', 'Groom ticket']
       ]);
       expect(select.value).toBe('execute');
-      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Jira default action', 'Dashboard link']);
+      expect(rowNamesIn('Dispatch')).toEqual([
+        'Default model',
+        'Default effort',
+        'Execute finish',
+        'Groom finish',
+        'Auto-merge PRs',
+        'Fix if it fails',
+        'Jira default action',
+        'Dashboard link'
+      ]);
     });
 
     it('persists a pick as the setting string', async () => {
@@ -825,7 +878,15 @@ describe('SettingsView', () => {
       renderView();
       expect(rowNamesIn('Display')).toEqual(['Theme', 'Density', 'Text size', 'Content width', 'Opens on']);
       expect(rowNamesIn('Board')).toEqual(['Archive after']);
-      expect(rowNamesIn('Dispatch')).toEqual(['Default model', 'Default effort', 'Execute finish', 'Dashboard link']);
+      expect(rowNamesIn('Dispatch')).toEqual([
+        'Default model',
+        'Default effort',
+        'Execute finish',
+        'Groom finish',
+        'Auto-merge PRs',
+        'Fix if it fails',
+        'Dashboard link'
+      ]);
     });
 
     it('puts the dispatch status line in Home’s detail on the Dashboards page, and none on Shared', async () => {

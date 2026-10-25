@@ -127,6 +127,8 @@ describe('POST /api/agents/plan', () => {
     expect(res.body.action).toBe('groom');
     expect(res.body.project).toBe('alpha');
     expect(res.body.prompt).toContain('backlog-manager:backlog-groom');
+    // Groom's closing clause is the sheet's finish pick, appended by dispatch — it is not in the editable plan text any more.
+    expect(res.body.prompt).not.toContain(COMMIT_RULE);
     expect(res.body.allowedModes).toEqual(['plan', 'acceptEdits']);
     // The composed default is `auto`, so this is the clamp: a host that caps at
     // acceptEdits gets acceptEdits, and the sheet never offers a rung the

@@ -34,8 +34,8 @@ its own, `backlog/run-<date>-<n>`, which `init` creates at the tip of the branch
 [invariants.md](invariants.md#pr-mode-drains-onto-a-run-branch-and-opens-one-pr-per-run).
 
 `backlog-execute` has a per-run **finish mode**, read from its trigger: `--finish in-place|pr`, with `--base <ref>` beside `pr`. `in-place` — the default, and
-what an absent flag means — is execute as it always was: it works in the tree it starts in and never commits or pushes. `pr` makes execute the one other skill
-that writes git: it works in its own
+what an absent flag means — is execute as it always was: it works in the tree it starts in and never commits or pushes. `pr` makes execute one of the two other
+skills that write git (groom is the other, below): it works in its own
 worktree (`.worktrees/execute-<id>` on `execute/<id>`, cut from local `base`, or a clean reused linked worktree), commits there, has `backlog-reviewer` review
 the diff (at most two fix rounds), pushes that branch and opens a pull request into `base` with `gh pr create`. It never merges, never pushes `base`, never
 force-pushes, and under an `[orchestrator-run` marker ignores the mode entirely — inside a run the orchestrator still owns git. `base` is the trigger's
@@ -44,9 +44,19 @@ In a tracker project nothing is archived: the claim is held through the review, 
 `backlog.mjs review <id> on` puts the `in-review` label on, so every gate reads the open issue as `a PR is open for this item` until the PR merges and closes
 it. The board's execute launch sheet is where the flag normally comes from: its Finish picker (seeded from the `executeDefaultFinish` setting) and Base select
 make the server append the clause, and a typed trigger carries the same flag by hand.
+`--auto-merge` and `--fix` ride beside `--finish pr` (never beside `in-place`, and `--fix` only with `--auto-merge`): after the PR is open, execute arms GitHub
+auto-merge on it (`gh pr merge <pr> --auto --<method>`, squash over merge over rebase, only when the repo's `allow_auto_merge` is on), waits up to 45
+minutes in the foreground for GitHub to land it and, under `--fix`, repairs a red check or a base conflict in at most three rounds, the one `git merge` being
+`origin/<base>` into the PR's own branch. A non-merge outcome leaves auto-merge armed and says so; the skill never merges without `--auto`. The procedure is
+`skills/backlog-execute/references/auto-merge.md`, shared with groom, and the sheet's Auto-merge and Fix toggles are seeded from `prAutoMergeDefault` and
+`prFixDefault`.
 `skills/backlog-execute/references/pr-mode.md` is the whole flow, and
-[invariants.md](invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-and-execute-commits-and-pushes-only-in-pr-mode) the reasoning.
-`backlog-groom` lands on disk only, so an item has to be committed before an orchestrator run can read it.
+[invariants.md](invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-into-a-base-execute-and-groom-commit-and-push-only-in-pr-mode-and-may-arm-github-auto-merge) the reasoning.
+`backlog-groom` has the same finish modes: `--finish in-place|pr`, with `--base <ref>` and `--auto-merge`/`--fix` beside `pr`. In place — the default — a groom
+lands on disk only, so an item has to be committed before an orchestrator run can read it. Under `pr` it works in `.worktrees/groom-<id>` on `groom/<id>`
+(`<id>` without any `#`, cut from local `<base>`), stages only the item's own files, commits once, pushes `-u` and opens one PR into `<base>`; there is no
+reviewer, a PR that holds a plan is the person's review, and it never runs under a `[backlog-tick]` marker, so a tick's groom stays on disk. A tick treats
+that tree and branch as a groom already taken. `skills/backlog-groom/references/pr-mode.md` is the flow.
 
 ### The CLIs
 

@@ -192,8 +192,8 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **`refactors/` is a peer section, not a facet on ideas** Why: [invariants.md](docs/subsystems/invariants.md#refactors-is-a-peer-section-not-a-facet-on-ideas)
 - **`started:` and `phase:` are the lifecycle keys allowed in frontmatter, and neither is a status**
   Why: [invariants.md](docs/subsystems/invariants.md#started-and-phase-are-the-lifecycle-keys-in-frontmatter-and-neither-is-a-status)
-- **`backlog-orchestrate` is the only skill that merges; `backlog-execute` commits and pushes its own branch only in `pr` mode.**
-  Why: [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-and-execute-commits-and-pushes-only-in-pr-mode)
+- **`backlog-orchestrate` is the only skill that merges into a base; `backlog-execute` and `backlog-groom` commit and push their own branch only in `pr` mode, and may arm GitHub auto-merge on the PR they opened.**
+  Why: [invariants.md](docs/subsystems/invariants.md#backlog-orchestrate-is-the-only-skill-that-merges-into-a-base-execute-and-groom-commit-and-push-only-in-pr-mode-and-may-arm-github-auto-merge)
 - **On a tracker project the DRIVER owns each item's claim, and the execute session never touches the issue**
   Why: [invariants.md](docs/subsystems/invariants.md#the-driver-owns-a-tracker-items-claim-for-the-whole-item)
 - **The merge happens in whichever tree holds the base, and the run removes only the tree it made.**

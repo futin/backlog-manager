@@ -447,7 +447,7 @@ async function cmdDecide(argv) {
   let groom = null;
   if (caps.planReview >= opts.maxPlans) groomWhy = `${caps.planReview} plans awaiting review (cap ${opts.maxPlans})`;
   else {
-    groom = tracker ? await trackerGroomCandidate(mine, state) : filesGroomCandidate(ctx, state);
+    groom = tracker ? await trackerGroomCandidate(ctx, mine, state) : filesGroomCandidate(ctx, state);
     if (groom === null) groomWhy = 'no ungroomed bug or refactor';
   }
   if (groom !== null) {
@@ -500,8 +500,9 @@ function busyReason({ root, tracker, repo }, runs, mine, now) {
 }
 
 // Any open item with a non-empty `started:`, in the main checkout or in a linked worktree — an in-place groom or execute in a linked worktree writes its marker
-// there. Two kinds of tree are skipped: the orchestrator's `<root>/.worktrees/<id>` (its run file speaks for it) and execute's `<root>/.worktrees/execute-<id>`
-// (the candidate exclusion and the lock speak for it, and a killed execute there would otherwise block the project for good).
+// there. Three kinds of tree are skipped: the orchestrator's `<root>/.worktrees/<id>` (its run file speaks for it), execute's `<root>/.worktrees/execute-<id>`
+// and a pr-mode groom's `<root>/.worktrees/groom-<id>` (the candidate exclusions and the lock speak for them, and a killed execute or pr-mode groom there
+// would otherwise block the project for good — its marker lives in the tree it made, never in the main checkout).
 function startedMarker(root) {
   const inTree = (tree) => itemsOnDisk(tree, ALL_SECTIONS).find((it) => readFrontmatter(readText(it.file) ?? '').fields.started);
   const main = inTree(root);
@@ -531,11 +532,15 @@ function startedMarker(root) {
 function isSkippedTree(root, tree) {
   const rel = path.relative(root, tree).split(path.sep);
   if (rel.length !== 2 || rel[0] !== '.worktrees') return false;
-  const name = rel[1].startsWith('execute-') ? rel[1].slice('execute-'.length) : rel[1];
+  const name = rel[1].replace(/^(?:execute|groom)-/, '');
   return FILE_ITEM_ID.test(name);
 }
 
 const executeTaken = (root, id) => branchExists(root, `execute/${executeId(id)}`) || fs.existsSync(path.join(root, '.worktrees', `execute-${executeId(id)}`));
+
+// A pr-mode groom's own branch and tree (`groom/<id>`, `.worktrees/groom-<id>`): the plan lives on that branch, not on disk in the main checkout, so without
+// this the item would look ungroomed on the next tick and be groomed again while its PR is still open. Same shape and same `#`-stripping as `executeTaken`.
+const groomTaken = (root, id) => branchExists(root, `groom/${executeId(id)}`) || fs.existsSync(path.join(root, '.worktrees', `groom-${executeId(id)}`));
 
 // Files: LISTED off the working tree's `open/`, READ at `<base>` — the shape of orchestrate.mjs's `listOpenItems` plus its `<base>` read. Both halves are a
 // veto. The listing is the working tree's because a groom's rejection or archive is uncommitted by design: an item moved out of `open/` on disk is decided
@@ -579,7 +584,7 @@ async function trackerExecuteCandidate({ root }, mine, state) {
 }
 
 // Files: the WORKING TREE, where step 5 read `<base>` — a tick's groom is uncommitted by design, so a `<base>` read would still see last night's bug as
-// ungroomed and groom it again.
+// ungroomed and groom it again. An item a pr-mode groom already holds is skipped (`groomTaken`, above).
 function filesGroomCandidate({ root }, state) {
   const items = [];
   for (const it of itemsOnDisk(root, ['bugs', 'refactors'])) {
@@ -587,6 +592,7 @@ function filesGroomCandidate({ root }, state) {
     if (text === null) continue;
     const { fields, body } = readFrontmatter(text);
     if (fields.started) continue;
+    if (groomTaken(root, it.id)) continue;
     if (it.section === 'bugs' && deriveGroomed('bugs', body) !== false) continue;
     items.push({ ...it, text });
   }
@@ -597,9 +603,10 @@ function filesGroomCandidate({ root }, state) {
   return null;
 }
 
-async function trackerGroomCandidate(mine, state) {
+async function trackerGroomCandidate({ root }, mine, state) {
   const items = mine.filter((it) => it.status === 'open' && ((it.section === 'bugs' && it.groomed === false) || it.section === 'refactors'));
   for (const it of orderGroom(items)) {
+    if (groomTaken(root, it.id)) continue;
     const body = await issueBody(it.path);
     if (body === null) continue;
     if (isSkipped(state.items[it.id], contentHash(body), 'groom')) continue;

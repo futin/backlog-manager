@@ -143,6 +143,23 @@ export interface Settings {
    */
   executeDefaultFinish: ExecuteFinish;
   /**
+   * Preselected in the board's `groom` launch sheet's Finish select; the same closed `ExecuteFinish` enum and the same reasons as `executeDefaultFinish`
+   * above. `'in-place'` is today's groom (it writes the spec and plan to disk and commits nothing), so a board that never touches this keeps behaving as it
+   * does.
+   */
+  groomDefaultFinish: ExecuteFinish;
+  /**
+   * Preselects Auto-merge on a PR launch (groom or execute). A boolean with no third state: off is today's behaviour, where a PR is opened and never merged by
+   * this app. The stored value only SEEDS the sheet; whether GitHub will really arm the merge is the repo's setting, read at launch.
+   */
+  prAutoMergeDefault: boolean;
+  /**
+   * Preselects Fix on a PR launch. Fix only has meaning once auto-merge is on, so Settings disables its row while `prAutoMergeDefault` is off — but turning
+   * auto-merge off does not rewrite this value, and the clamp does not reconcile the pair. The stored value is inert while the row is disabled, and the launch
+   * sheet (not this file) resolves the two, seeding Fix off whenever auto-merge starts off.
+   */
+  prFixDefault: boolean;
+  /**
    * Days. How long an open item may go untouched before it leaves the Board
    * for Archive (`client/src/lib/item-stale.ts`).
    *
@@ -183,6 +200,9 @@ export const DEFAULT_SETTINGS: Settings = {
   orchestrateDefaultMergeMode: 'merge',
   orchestrateDefaultQuestionMode: 'park',
   executeDefaultFinish: 'in-place',
+  groomDefaultFinish: 'in-place',
+  prAutoMergeDefault: false,
+  prFixDefault: false,
   staleDays: 30,
   settingsScope: 'local',
   contentWidth: 'fixed',
@@ -229,6 +249,11 @@ export const SETTINGS_STORAGE_KEY = 'backlog-manager.settings';
 
 function pickOne<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+/** A boolean passes through; anything else (a hand-edited string, a number, null) is the fallback, never coerced to truthy. */
+function pickBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
@@ -343,6 +368,9 @@ export function clampSettings(raw: unknown): Settings {
     orchestrateDefaultMergeMode: pickOne(s.orchestrateDefaultMergeMode, MERGE_MODES, DEFAULT_SETTINGS.orchestrateDefaultMergeMode),
     orchestrateDefaultQuestionMode: pickOne(s.orchestrateDefaultQuestionMode, QUESTION_MODES, DEFAULT_SETTINGS.orchestrateDefaultQuestionMode),
     executeDefaultFinish: pickOne(s.executeDefaultFinish, EXECUTE_FINISHES, DEFAULT_SETTINGS.executeDefaultFinish),
+    groomDefaultFinish: pickOne(s.groomDefaultFinish, EXECUTE_FINISHES, DEFAULT_SETTINGS.groomDefaultFinish),
+    prAutoMergeDefault: pickBool(s.prAutoMergeDefault, DEFAULT_SETTINGS.prAutoMergeDefault),
+    prFixDefault: pickBool(s.prFixDefault, DEFAULT_SETTINGS.prFixDefault),
     staleDays: clampDays(s.staleDays, DEFAULT_SETTINGS.staleDays, LIMITS.staleDays.min, LIMITS.staleDays.max),
     settingsScope: pickOne(s.settingsScope, SETTINGS_SCOPES, DEFAULT_SETTINGS.settingsScope),
     contentWidth: pickOne(s.contentWidth, CONTENT_WIDTHS, DEFAULT_SETTINGS.contentWidth),

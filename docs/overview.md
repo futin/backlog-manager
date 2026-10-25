@@ -120,11 +120,13 @@ retro home's only writer and the one of the four writers nothing else reads at r
 unit of work per scheduled tick and is read-only against items, the run state and git; `jira.mjs`, API-only, which writes no file and reaches Jira through
 `/api/jira` — save `worktree`, which is git only and makes a ticket's worktree in a mapped repo), and one agent under `agents/` that the orchestrator
 dispatches to review an item's branch before it merges (and execute, before a `pr`-mode push).
-`backlog-orchestrate` is the only skill that merges — it works one item per worktree and merges each into the run's base branch (`main` unless the run
+`backlog-orchestrate` is the only skill that merges into a base — it works one item per worktree and merges each into the run's base branch (`main` unless the
+run
 was given `--base`), or leaves a reviewed branch per item in branch mode, or — in PR mode, tracker projects only — merges them onto a run branch of its own and
-opens one pull request into the base, and for a tracker project it pushes that base — while execute does the work and groom writes the plans. Groom never
-commits; execute commits and pushes only when its trigger says `--finish pr` (the board's launch sheet picks it per run), and then only its own branch in its
-own worktree, ending in a pull request rather than a merge.
+opens one pull request into the base, and for a tracker project it pushes that base — while execute does the work and groom writes the plans. Execute and groom
+commit and push only when their trigger says `--finish pr` (the board's launch sheet picks it per run), and then only their own branch in their own worktree
+(`execute/<id>`, `groom/<id>`), ending in a pull request rather than a merge; with `--auto-merge` (and optionally `--fix`) they may arm GitHub auto-merge on
+that PR and wait for GitHub to land it, which is still not the skill merging.
 
 An install is a copy of the pushed `HEAD`, never the working tree; see [workflows/publishing.md](workflows/publishing.md).
 
