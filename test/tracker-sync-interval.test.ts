@@ -281,7 +281,7 @@ describe('summary and syncOffBlock', () => {
 });
 
 describe('remote runs', () => {
-  function withLiveClaim(repo: string): { remote: RemoteRunsService } {
+  function withLiveClaim(repo: string): { remote: RemoteRunsService; poller: TrackerPollerService } {
     const project = githubProject(repo);
     const registry = registryOf(project);
     const poller = new TrackerPollerService(registry, new GithubClient((async () => new Response('[]')) as unknown as typeof fetch));
@@ -304,7 +304,7 @@ describe('remote runs', () => {
       updated_at: record.heartbeat
     });
     const orchestrator = { localRunIds: () => new Set<string>() } as unknown as OrchestratorService;
-    return { remote: new RemoteRunsService(registry, poller, orchestrator) };
+    return { remote: new RemoteRunsService(registry, poller, orchestrator), poller };
   }
 
   it('derives nothing for an off repo, and the run for the same repo at 15s', () => {
@@ -312,5 +312,18 @@ describe('remote runs', () => {
     expect(remote.list(clock).map((r) => r.runId)).toEqual(['run-20260928-115900']);
     writeSyncInterval('b/remote', 'off');
     expect(remote.list(clock)).toEqual([]);
+  });
+
+  /* #266, fix piece 2: a repo whose derivation throws says nothing, and the route answers — never a 500 that freezes the Runs page for every repo,
+     local runs included. The throw is injected at the cache read because a malformed claim can no longer reach the derivation at all. */
+  it('derives nothing for a repo whose derivation throws, rather than throwing out of list', () => {
+    const { remote, poller } = withLiveClaim('b/throws');
+    jest.spyOn(poller, 'comments').mockImplementation(() => {
+      throw new TypeError('boom');
+    });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(remote.list(clock)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith('remote runs for b/throws skipped: boom');
+    warn.mockRestore();
   });
 });

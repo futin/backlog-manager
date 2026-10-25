@@ -455,6 +455,10 @@ export interface GithubComment {
    *  claim that won, and so `comment`'s 201 can answer with a URL. */
   html_url: string;
   user?: { login: string } | null;
+  /** The author's relationship to the repository, as GitHub states it on every comment it returns — `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`,
+   *  `NONE` and a few more. `parseClaim` reads it (#266): on a public repo anybody may comment, and only the first three can be a session of ours.
+   *  Optional because a comment this code builds by hand carries none, and absent is read as "not stated", never as an outsider. */
+  author_association?: string;
   created_at: string;
   updated_at: string;
 }
