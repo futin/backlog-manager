@@ -993,3 +993,16 @@ export function defaultBoardUrl(url: string): string | null {
     return null;
   }
 }
+
+/**
+ * The two `permissions.allow` rules the Orchestrate sheet's setup hint tells a reader to paste, and the pair `merge-check.util.ts` is tested against (#269).
+ * One per command shape a merge-mode run asks the classifier about: the preflight probe, `git merge --no-ff … HEAD`, runs from the project root with no `-C`
+ * (backlog-orchestrate SKILL.md §2), while every real merge is `git -C "<base tree>" merge --no-ff …` (§9) — and Claude Code matches a Bash rule against the
+ * command text as written, so `Bash(git merge:*)` never matches the second. `--no-ff` and no further: the tracker merge carries three `-m` flags where the
+ * files merge carries `--no-edit`, and one pair has to cover both.
+ *
+ * The `*` in the second rule stands before the subcommand because the path does, and that is the narrowest the grammar allows; Claude Code warns at startup
+ * about such a rule, since `*` also matches an option like `-c` placed there. The alternative, `Bash(git -C:*)`, grants every git subcommand under `-C`.
+ * Shared because the server's check and the sheet's snippet must name the same pair — a hint that recommends a rule the check would not credit is #269 again.
+ */
+export const MERGE_ALLOW_RULES = ['Bash(git merge --no-ff *)', 'Bash(git -C * merge --no-ff *)'] as const;

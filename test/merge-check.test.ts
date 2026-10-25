@@ -16,6 +16,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 import { mergeCheck } from '../server/src/agents/merge-check.util';
+import { MERGE_ALLOW_RULES } from '../shared/agent';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
@@ -58,17 +59,17 @@ describe('mergeCheck (util)', () => {
   });
 
   it('case 1: covers from project settings.local.json', () => {
-    const file = writeAllow(projectRoot, 'settings.local.json', ['Bash(git merge:*)']);
+    const file = writeAllow(projectRoot, 'settings.local.json', [...MERGE_ALLOW_RULES]);
     expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: true, source: file });
   });
 
   it('case 2: covers from project settings.json when no local override exists', () => {
-    const file = writeAllow(projectRoot, 'settings.json', ['Bash(git merge:*)']);
+    const file = writeAllow(projectRoot, 'settings.json', [...MERGE_ALLOW_RULES]);
     expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: true, source: file });
   });
 
   it('case 3: covers from home settings.json when neither project file exists', () => {
-    const file = writeAllow(homeRoot, 'settings.json', ['Bash(git merge:*)']);
+    const file = writeAllow(homeRoot, 'settings.json', [...MERGE_ALLOW_RULES]);
     expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: true, source: file });
   });
 
@@ -77,8 +78,8 @@ describe('mergeCheck (util)', () => {
     // proves an explicit precedence ORDER rather than merely "the first
     // file that happens to exist" — local.json must win over home
     // settings.json even with nothing in between.
-    const local = writeAllow(projectRoot, 'settings.local.json', ['Bash(git merge:*)']);
-    writeAllow(homeRoot, 'settings.json', ['Bash(git merge:*)']);
+    const local = writeAllow(projectRoot, 'settings.local.json', [...MERGE_ALLOW_RULES]);
+    writeAllow(homeRoot, 'settings.json', [...MERGE_ALLOW_RULES]);
     expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: true, source: local });
   });
 
@@ -98,14 +99,54 @@ describe('mergeCheck (util)', () => {
     expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: false, source: null });
   });
 
-  it('case 8: a narrower prefix that still covers the flags the run issues', () => {
-    const file = writeAllow(projectRoot, 'settings.local.json', ['Bash(git merge --no-ff:*)']);
+  // --- #269: the rule has to match the command the run REALLY issues -------
+  //
+  // The merge is `git -C "<base tree>" merge --no-ff …` (SKILL.md §9) and the
+  // preflight probe is `git merge --no-ff … HEAD` (SKILL.md §2), so a rule
+  // only counts when it matches both — the `-C` in the one and its absence in
+  // the other are the whole of this bug.
+
+  it('case 8: Bash(git merge:*) alone does not cover — the real merge starts git -C, not git merge', () => {
+    writeAllow(projectRoot, 'settings.local.json', ['Bash(git merge:*)']);
+    expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: false, source: null });
+  });
+
+  it('case 8a: the -C merge rule alone does not cover — the probe has no -C and would still be classified', () => {
+    writeAllow(projectRoot, 'settings.local.json', ['Bash(git -C * merge --no-ff *)']);
+    expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: false, source: null });
+  });
+
+  it('case 8b: rules naming --no-edit miss the tracker merge, whose three -m flags replace it', () => {
+    writeAllow(projectRoot, 'settings.local.json', ['Bash(git merge --no-ff --no-edit *)', 'Bash(git -C * merge --no-ff --no-edit *)']);
+    expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: false, source: null });
+  });
+
+  it('case 8c: the colon form of the same pair covers too — `:*` is a trailing ` *`', () => {
+    const file = writeAllow(projectRoot, 'settings.local.json', ['Bash(git merge --no-ff:*)', 'Bash(git -C:*)']);
     expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: true, source: file });
+  });
+
+  it('case 8d: a pair split across two files is judged per file, so it does not cover', () => {
+    writeAllow(projectRoot, 'settings.local.json', [MERGE_ALLOW_RULES[0]]);
+    writeAllow(homeRoot, 'settings.json', [MERGE_ALLOW_RULES[1]]);
+    expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: false, source: null });
+  });
+
+  it('case 8e: an exact rule (no wildcard) for one merge never covers the next', () => {
+    writeAllow(projectRoot, 'settings.local.json', [`Bash(git -C "${projectRoot}" merge --no-ff --no-edit backlog/task-1)`, 'Bash(git merge --no-ff *)']);
+    expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: false, source: null });
   });
 
   it('case 9: a broader prefix covers too', () => {
     const file = writeAllow(projectRoot, 'settings.local.json', ['Bash(git:*)']);
     expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: true, source: file });
+  });
+
+  it('case 9a: bare Bash, and Bash(*), allow every command', () => {
+    const file = writeAllow(projectRoot, 'settings.local.json', ['Bash']);
+    expect(mergeCheck(projectRoot, homeRoot)).toEqual({ covered: true, source: file });
+    const star = writeAllow(homeRoot, 'settings.json', ['Bash(*)']);
+    expect(mergeCheck(join(projectRoot, 'elsewhere'), homeRoot)).toEqual({ covered: true, source: star });
   });
 
   it('case 10: a different git subcommand does not cover', () => {
@@ -210,7 +251,7 @@ describe('GET /api/agents/merge-check', () => {
     // still passing it. A fixture using settings.json instead would not
     // catch that swap, because settings.json IS one of the swapped call's
     // real candidates.
-    const file = writeAllow(projectPath, 'settings.local.json', ['Bash(git merge:*)']);
+    const file = writeAllow(projectPath, 'settings.local.json', [...MERGE_ALLOW_RULES]);
     const res = await request(app.getHttpServer()).get('/api/agents/merge-check').query({ project: projectPath }).expect(200);
     expect(res.body).toEqual({ covered: true, source: file });
   });
@@ -224,7 +265,7 @@ describe('GET /api/agents/merge-check', () => {
     // alpha's (uncovered) result instead of beta's (covered) one, and this
     // assertion would catch that: it would see `covered: false` where
     // `covered: true` is expected.
-    const file = writeAllow(otherPath, 'settings.local.json', ['Bash(git merge:*)']);
+    const file = writeAllow(otherPath, 'settings.local.json', [...MERGE_ALLOW_RULES]);
     const res = await request(app.getHttpServer()).get('/api/agents/merge-check').query({ project: otherPath }).expect(200);
     expect(res.body).toEqual({ covered: true, source: file });
 

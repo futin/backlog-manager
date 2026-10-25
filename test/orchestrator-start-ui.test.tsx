@@ -1297,7 +1297,9 @@ describe('OrchestrateSheet', () => {
     // ABSENT), which `findBy` cannot prove and is handled differently.
     expect(await screen.findByText(/settings\.local\.json/)).toBeInTheDocument();
     expect(screen.getByText('git merge')).toBeInTheDocument();
-    expect(screen.getByText('Bash(git merge:*)', { exact: false })).toBeInTheDocument();
+    // Both rules of the pair (#269): the -C one is what covers a real merge, the other the -C-less probe.
+    expect(screen.getByText('Bash(git -C * merge --no-ff *)', { exact: false })).toBeInTheDocument();
+    expect(screen.getByText('Bash(git merge --no-ff *)', { exact: false })).toBeInTheDocument();
   });
 
   // A pr run asks the classifier for the same `git merge` at every item, so the no-allow-rule hint applies to it exactly as it does to merge (spec §5).

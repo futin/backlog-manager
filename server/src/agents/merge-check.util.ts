@@ -13,49 +13,44 @@ import { join } from 'node:path';
  * telling the reader about, but this function can only ever report "your
  * settings look right", never "your merge will work".
  *
- * ## The matching rule, and why it is not a literal string compare
+ * ## What a rule has to match, and why it is not a literal string compare
  *
- * Claude Code's own `Bash(<prefix>:*)` permission grammar matches the START
- * of the literal command line. The command backlog-orchestrate actually
- * issues (skills/backlog-orchestrate/SKILL.md) is:
+ * Claude Code matches a `Bash(...)` permission rule against the literal command
+ * text, `*` standing for any run of characters (spaces included) at any
+ * position, and a trailing `:*` being only another spelling of a trailing ` *`.
+ * A merge-mode run asks the classifier about two command shapes, and an allow
+ * rule only takes the classifier out of the path for the shape it matches:
  *
- *   git merge --no-ff --no-edit backlog/<id>
+ *   git merge --no-ff --no-edit HEAD                              (the probe, SKILL.md §2)
+ *   git -C "<base tree>" merge --no-ff --no-edit backlog/<id>     (every merge, SKILL.md §9)
  *
- * `<id>` is the one part of that line that varies run to run and item to
- * item, so a literal prefix compare of the WHOLE string would only ever
- * credit an allow entry that happened to spell out one specific branch
- * name — useless for a setup hint whose job is "will this cover every item
- * this run merges", not "did it cover the last one". The comparison target
- * below, `MERGE_COMMAND_WORDS`, is therefore the fixed part of the command
- * with the per-item branch name removed: the part that is identical on
- * every merge this skill will ever issue, and the only part a person would
- * ever write an allow rule around in the first place.
+ * plus the tracker spelling of each, where three `-m` flags stand in for
+ * `--no-edit`. The probe runs from the project root and has no `-C`; the merge
+ * does, because the base may live in a tree that is not the cwd. Until #269
+ * this file modelled only `git merge --no-ff --no-edit` and so credited
+ * `Bash(git merge:*)` — a rule that matches the probe and no real merge, which
+ * is the worst pairing there is: the probe passes, the sheet says "covered",
+ * and every merge still goes to the classifier.
  *
- * A candidate entry then "covers" that target when its own prefix, split on
- * whitespace, is a WHOLE-WORD prefix of `MERGE_COMMAND_WORDS` — matched word
- * by word, never as a raw substring, so a coincidental textual prefix (say,
- * `Bash(git me:*)`) is never counted as covering a command it does not
- * actually name. Three shapes fall out of that one rule, and they are the
- * three the design spec pins as the test of this decision:
+ * So the check builds `mergeCommandSamples` — those four commands, with the
+ * project's own path and a `_base-<ref>` tree under it standing in for
+ * `<base tree>` — and a settings file covers when every sample matches at least
+ * one of its entries. Samples rather than a word-prefix compare because a rule
+ * can now carry its `*` mid-command (`Bash(git -C * merge --no-ff *)`), and the
+ * only faithful way to judge that is to run Claude Code's own matching over a
+ * command of the real shape. The per-item parts (`backlog/<id>`, the `-m`
+ * texts) vary on every merge, so a rule with no `*` — an EXACT rule — can match
+ * at most one past invocation; it is refused outright rather than left to the
+ * samples, where it could only ever match by coincidence.
  *
- *   - `Bash(git merge:*)`         — exactly MERGE_COMMAND_WORDS's own
- *                                   prefix. Covers.
- *   - `Bash(git merge --no-ff:*)` — narrower than the family name, but every
- *                                   one of its words matches the actual
- *                                   flags issued, in order. Covers.
- *   - `Bash(git:*)`               — broader still, one word. Covers.
- *   - `Bash(git status:*)`        — a different git subcommand entirely;
- *                                   "status" is not "merge" no matter how
- *                                   broad `git:*` would have been. Does not
- *                                   cover.
+ * Each file is judged on its own: a pair split between `settings.local.json`
+ * and `~/.claude/settings.json` reads as not covered, though Claude Code would
+ * union them. That errs toward showing the hint, never toward hiding it, and
+ * keeps `source` meaning one file.
  *
  * A bare `Bash` entry (no parens at all) is Claude Code's own "allow every
- * command" wildcard and always covers. An entry with no trailing `:*` is an
- * EXACT-command rule — it matches one literal invocation, not a family of
- * them — and is deliberately treated as NOT covering: `<id>` varies on every
- * run, so an exact rule can cover at most one past invocation, never the
- * capability a future run needs. Counting it as covering would be exactly
- * the overclaim the rest of this comment argues against.
+ * command" wildcard and always covers. The pair the sheet recommends is
+ * `MERGE_ALLOW_RULES` (shared/agent.ts), whose comment says why it is those two.
  */
 export interface MergeCheckResult {
   covered: boolean;
@@ -65,35 +60,49 @@ export interface MergeCheckResult {
 }
 
 /**
- * The fixed part of `git merge --no-ff --no-edit backlog/<id>` (SKILL.md)
- * once the per-item branch name is removed — see the file header for why
- * that name is dropped from the comparison target rather than from the rule
- * text a user would write.
+ * Commands of the four shapes a merge-mode run issues — see the file header.
+ * Both base-tree candidates are quoted, as SKILL.md writes them: the main tree
+ * (the base is checked out there, the usual case) and the `_base-<ref>` tree a
+ * run creates when no tree holds the base, so a rule naming one literal path
+ * covers half the runs and is reported as covering none.
  */
-const MERGE_COMMAND_WORDS = ['git', 'merge', '--no-ff', '--no-edit'];
-
-/** `Bash(<prefix>:*)` — Claude Code's own wildcard-prefix grammar. */
-const WILDCARD_RE = /^Bash\((.*):\*\)$/;
-
-/**
- * True when every word of `prefix`, in order, matches the start of
- * MERGE_COMMAND_WORDS — see the file header for the three shapes this must
- * accept or refuse.
- */
-function coversMergeCommand(prefix: string): boolean {
-  const words = prefix
-    .trim()
-    .split(/\s+/)
-    .filter((word) => word.length > 0);
-  if (words.length === 0 || words.length > MERGE_COMMAND_WORDS.length) return false;
-  return words.every((word, i) => word === MERGE_COMMAND_WORDS[i]);
+function mergeCommandSamples(projectPath: string): string[] {
+  const trackerMessages = '-m "Merge backlog/1: title" -m "Fixes #1" -m "Reviewed: approve (reviews/1-1.md)"';
+  const samples = [
+    'git merge --no-ff --no-edit HEAD',
+    'git merge --no-ff -m "Merge probe: run-1" -m "Fixes nothing: merge-mode probe" -m "Reviewed: merge-mode probe, no item" HEAD'
+  ];
+  for (const tree of [projectPath, join(projectPath, '.worktrees', '_base-feature-x')]) {
+    samples.push(`git -C "${tree}" merge --no-ff --no-edit backlog/task-1`, `git -C "${tree}" merge --no-ff ${trackerMessages} backlog/1`);
+  }
+  return samples;
 }
 
-/** One `permissions.allow` entry, judged against Claude Code's own grammar. */
-function entryCoversGitMerge(entry: string): boolean {
-  if (entry === 'Bash') return true; // the grammar's own "allow everything"
-  const match = WILDCARD_RE.exec(entry);
-  return match !== null && coversMergeCommand(match[1]);
+/** `Bash(<pattern>)` — any rule body; `Bash` alone is handled before this. */
+const BASH_RULE_RE = /^Bash\((.*)\)$/s;
+
+/**
+ * Claude Code's Bash-rule grammar as a matcher: `:*` at the end is a trailing
+ * ` *`, every `*` matches any text, and everything else is literal. `null` for
+ * a rule with no `*` at all — an exact rule, which never covers (file header).
+ */
+function ruleMatcher(entry: string): RegExp | null {
+  if (entry === 'Bash') return /^/; // the grammar's own "allow everything"
+  const match = BASH_RULE_RE.exec(entry);
+  if (match === null) return null;
+  const pattern = match[1].endsWith(':*') ? `${match[1].slice(0, -2)} *` : match[1];
+  if (!pattern.includes('*')) return null;
+  const source = pattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${source}$`, 's');
+}
+
+/** True when every merge-mode command shape matches at least one of `allow`'s entries. */
+function coversMergeCommands(allow: string[], samples: string[]): boolean {
+  const matchers = allow.map(ruleMatcher).filter((matcher): matcher is RegExp => matcher !== null);
+  return samples.every((command) => matchers.some((matcher) => matcher.test(command)));
 }
 
 /**
@@ -149,9 +158,10 @@ export function mergeCheck(projectPath: string, homeDir: string): MergeCheckResu
     join(projectPath, '.claude', 'settings.json'),
     join(homeDir, '.claude', 'settings.json')
   ];
+  const samples = mergeCommandSamples(projectPath);
   for (const file of candidates) {
     const allow = readAllowList(file);
-    if (allow !== null && allow.some(entryCoversGitMerge)) return { covered: true, source: file };
+    if (allow !== null && coversMergeCommands(allow, samples)) return { covered: true, source: file };
   }
   return { covered: false, source: null };
 }

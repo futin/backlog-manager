@@ -440,8 +440,10 @@ _after_ the failure, staged, never committed. **Nothing about permissions differ
 _(2026-09-04 note: the skill has since dropped the `-C "$PWD"` clause from both this command and the merge-mode probe (SKILL.md §2) — a no-op removed, since the
 session's cwd was already the project root at every call site. Claude Code's `permissions.allow` grammar matches an entry against the literal command line by
 prefix, so `Bash(git merge:*)` — the very rule the dashboard staged above — would not actually have matched the line quoted above; it starts `git -C`, not
-`git merge`. Dropping the clause is what makes that rule genuinely cover the command SKILL.md issues today. The quote itself is left exactly as these three runs
-issued it.)_
+`git merge`. Dropping the clause made that rule cover the command SKILL.md issued then — until run-scoped bases put `-C "<base tree>"` back into the merge
+(SKILL.md §9; the probe still has none), after which it matched no real merge again (#269). `server/src/agents/merge-check.util.ts` now judges a rule against
+both shapes, and the Orchestrate sheet recommends the pair in `MERGE_ALLOW_RULES` (`shared/agent.ts`): `Bash(git merge --no-ff *)` for the probe and
+`Bash(git -C * merge --no-ff *)` for the merges. The quote itself is left exactly as these three runs issued it.)_
 
 The denied run's own notes diagnosed that missing `Bash(git merge:*)` rule. It is a valid _remedy_ and a wrong _explanation_: an `allow` rule takes the
 classifier out of the path for matching commands, so it is worth having and worth telling the user about, but it is not what differed between these three runs.

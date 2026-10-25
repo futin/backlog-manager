@@ -12,7 +12,7 @@ import {
   type MergeCheckResult,
   type UncommittedItems
 } from '../../lib/agents';
-import { actionLabel, clampMode, deriveAction, modesUpTo, type AgentAction } from '../../../../shared/agent';
+import { actionLabel, clampMode, deriveAction, MERGE_ALLOW_RULES, modesUpTo, type AgentAction } from '../../../../shared/agent';
 import { useRunOn } from '../../hooks/useRunOn';
 import { useSettings } from '../../hooks/useSettings';
 import { prRequiredText } from '../../lib/dashboards';
@@ -53,16 +53,13 @@ const STEPS = ['items', 'order', 'modes'] as const;
 type Step = 1 | 2 | 3;
 
 /**
- * The exact JSON the setup hint (§6) tells a reader to paste. One `allow`
- * entry — `Bash(git merge:*)`, the family-level rule `merge-check.util.ts`'s
- * own comment names as the plainest of the three shapes it accepts — never
- * the broader `Bash(git:*)` (grants every git subcommand, not just the one
- * this run needs) or the narrower `--no-ff` variant (buys nothing extra: the
- * family rule already covers the literal invocation SKILL.md issues).
- * `JSON.stringify(..., null, 2)` rather than a hand-typed multi-line
+ * The exact JSON the setup hint (§6) tells a reader to paste: `MERGE_ALLOW_RULES`, the two entries `merge-check.util.ts` is tested against — one for the
+ * preflight probe's `git merge --no-ff … HEAD`, one for the real merges' `git -C "<base tree>" merge --no-ff …`. Until #269 this was the single
+ * `Bash(git merge:*)`, which matches the probe and no real merge: the sheet said "covered" while every merge still went to the classifier. Never the broader
+ * `Bash(git:*)`, which grants every git subcommand, not just the one this run needs. `JSON.stringify(..., null, 2)` rather than a hand-typed multi-line
  * template so this can never drift from actually-valid JSON.
  */
-const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: ['Bash(git merge:*)'] } }, null, 2);
+const MERGE_ALLOW_SNIPPET = JSON.stringify({ permissions: { allow: [...MERGE_ALLOW_RULES] } }, null, 2);
 
 /**
  * OrchestrateSheet — the toolbar's "drain this project's whole groomed
@@ -1176,7 +1173,8 @@ export function OrchestrateSheet({
                     <code>{project}/.claude/settings.local.json</code> has no <code>git merge</code> allow rule. This is the per-user file, so the rule stays
                     out of the shared <code>settings.json</code> your team commits — put it there instead if you want everyone to inherit it. The run may still
                     merge without one, but not reliably — the auto-mode classifier's verdict on that exact command varies between runs. Add this to the file,
-                    creating it if it does not exist yet (or merge the one entry into an existing <code>permissions.allow</code> list rather than replacing it):
+                    creating it if it does not exist yet (or merge the two entries into an existing <code>permissions.allow</code> list rather than replacing
+                    it):
                   </p>
                   <pre className="orchestrate-merge-hint-json">{MERGE_ALLOW_SNIPPET}</pre>
                 </div>
