@@ -1,5 +1,6 @@
-import { CLAIM_MARKER, CLAIM_STALE_MS } from '../../../shared/types';
-import type { ClaimRecord } from '../../../shared/types';
+import { isMergeMode, isQuestionMode } from '../../../shared/agent';
+import { CLAIM_FINISHED_STATUSES, CLAIM_MARKER, CLAIM_STALE_MS } from '../../../shared/types';
+import type { ClaimFinishedStatus, ClaimRecord } from '../../../shared/types';
 import type { GithubComment } from './github.client';
 
 /**
@@ -96,6 +97,12 @@ const FENCE = /```json\s*\n([\s\S]*?)\n```/;
  * that is what makes a hand-mangled claim comment fall out of the protocol
  * rather than wedge it.
  *
+ * Since #266 three more things read as "not a claim", because on a public
+ * repository ANYONE can comment, not only those with write access: a comment
+ * by an outsider (`trustedAuthor`), a record whose fields do not have the shape
+ * their writers give them (`wellFormed`) — and a heartbeat from the future is
+ * clamped (`CLAIM_HEARTBEAT_SKEW_MS`) rather than believed.
+ *
  * A `v` this build does not know reads as `null` too, deliberately. An old
  * build ignoring a future version's claim is a build that will contest an issue
  * it should have left alone — visible, recoverable, and loud. An old build
@@ -113,9 +120,89 @@ export function parseClaim(comment: GithubComment): ClaimRecord | null {
   } catch {
     return null;
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-  if ((parsed as { v?: unknown }).v !== 1) return null;
-  return parsed as ClaimRecord;
+  if (!isObject(parsed)) return null;
+  if (parsed.v !== 1) return null;
+  if (!trustedAuthor(comment)) return null;
+  if (!wellFormed(parsed)) return null;
+  const record = parsed as unknown as ClaimRecord;
+  const ceiling = heartbeatCeiling(comment);
+  if (ceiling !== null && Date.parse(record.heartbeat) > ceiling) record.heartbeat = new Date(ceiling).toISOString();
+  return record;
+}
+
+/**
+ * How far a heartbeat may run ahead of the comment that carries it (#266).
+ *
+ * A heartbeat is stamped by the server's clock a moment before the edit that publishes it, and the edit moves the comment's `updated_at` on GITHUB's
+ * clock — so a real heartbeat is never later than `updated_at` by more than the two clocks disagree. A forged one can name any year it likes, and before
+ * this it was live for that long: `claim` refused every session and the board's abort refused to clear it. Clamped rather than refused, so a claim
+ * written by a machine whose clock runs fast still reads as a claim; it just goes stale on GitHub's clock instead of its own.
+ *
+ * Five minutes is the skew allowance — far above an NTP-synced pair of machines, far below the fifteen-minute stale window it bounds.
+ */
+export const CLAIM_HEARTBEAT_SKEW_MS = 5 * 60_000;
+
+/** `updated_at` plus the skew allowance, or `null` when the comment carries no readable stamp — a hand-built comment, never one off the API. */
+function heartbeatCeiling(comment: GithubComment): number | null {
+  const updated = typeof comment.updated_at === 'string' ? Date.parse(comment.updated_at) : Number.NaN;
+  return Number.isNaN(updated) ? null : updated + CLAIM_HEARTBEAT_SKEW_MS;
+}
+
+/**
+ * The authors whose comments can carry a claim (#266): the repository's owner, an organisation member, a collaborator — every account a token this app
+ * holds can belong to, since writing a claim needs write access.
+ *
+ * Read off `author_association`, which GitHub sets on every comment, rather than compared with the token's own login: two machines on one repo may hold
+ * two people's tokens, and both are legitimate claimants. An absent field is trusted — it means the comment was built here, not received — because every
+ * comment the API returns carries one, so the case this check exists for always states its association.
+ */
+const TRUSTED_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+function trustedAuthor(comment: GithubComment): boolean {
+  return comment.author_association === undefined || TRUSTED_ASSOCIATIONS.has(comment.author_association);
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isString = (v: unknown): v is string => typeof v === 'string';
+const isCount = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+
+/**
+ * Does the parsed JSON have the shape `ClaimRecord` declares (#266)?
+ *
+ * The cast below used to be the whole check, and every reader trusted it: `statusOf` read `finished.at` off a `null` and the runs route answered 500 on
+ * every poll; the abort route did the same on `run: null`. Checking here, once, is what lets every one of those readers stay as written — a record that
+ * fails is "not a claim", the same answer a hand-mangled comment always got.
+ *
+ * Every field is held to what its one writer produces: the item write routes validate `run` and `finished` with the same vocabularies (`claimRunOf`,
+ * `claimFinishedOf` in `items-write.controller.ts`), and the server seeds all four counters. `state` is not checked — it is carried opaque and read
+ * tolerantly by `readClaimState` — and unknown keys pass through, which is how an old build reads a newer build's claim.
+ */
+function wellFormed(raw: Record<string, unknown>): boolean {
+  if (!isString(raw.session) || raw.session === '') return false;
+  if (raw.phase !== 'groom' && raw.phase !== 'execute') return false;
+  if (!isString(raw.at) || !isString(raw.heartbeat)) return false;
+  if (raw.host !== undefined && !isString(raw.host)) return false;
+
+  const counters = raw.counters;
+  if (!isObject(counters)) return false;
+  for (const key of ['groomElapsed', 'executeElapsed', 'groomTokens', 'executeTokens']) if (!isCount(counters[key])) return false;
+
+  const released = raw.released;
+  if (released !== undefined && !(isObject(released) && isString(released.at) && isString(released.reason) && isString(released.by))) return false;
+
+  const finished = raw.finished;
+  if (finished !== undefined && !(isObject(finished) && isString(finished.at) && CLAIM_FINISHED_STATUSES.includes(finished.status as ClaimFinishedStatus))) {
+    return false;
+  }
+
+  const run = raw.run;
+  if (run !== undefined) {
+    if (!isObject(run)) return false;
+    if (!isString(run.runId) || run.runId === '' || !isString(run.startedAt) || !isString(run.base)) return false;
+    if (!isMergeMode(run.mergeMode) || !isQuestionMode(run.questionMode)) return false;
+    if (run.maxItems !== null && !(Number.isInteger(run.maxItems) && (run.maxItems as number) >= 0)) return false;
+  }
+  return true;
 }
 
 /**

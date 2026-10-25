@@ -60,16 +60,23 @@ export class RemoteRunsService {
     const localRunIds = this.orchestrator.localRunIds();
     const out: RemoteRun[] = [];
     for (const [repo, project] of projects) {
-      out.push(
-        ...deriveRemoteRuns({
-          repo,
-          project,
-          comments: this.poller.comments(repo),
-          issueTitle: (n) => this.poller.issue(repo, n)?.title ?? null,
-          localRunIds,
-          nowMs
-        })
-      );
+      // One repo whose derivation throws says nothing, the same "says nothing" an unsynced repo gets, and every other repo still derives (#266). The
+      // claims reaching `deriveRemoteRuns` are shape-checked by `parseClaim` now, so this is the second line, not the first: before it, one forged
+      // comment answered 500 on every poll of the runs route — which carries this machine's own runs too — for as long as the comment sat in the cache.
+      try {
+        out.push(
+          ...deriveRemoteRuns({
+            repo,
+            project,
+            comments: this.poller.comments(repo),
+            issueTitle: (n) => this.poller.issue(repo, n)?.title ?? null,
+            localRunIds,
+            nowMs
+          })
+        );
+      } catch (err) {
+        console.warn(`remote runs for ${repo} skipped: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
     return out;
   }

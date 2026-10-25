@@ -1,4 +1,4 @@
-import { claimsFor, currentClaim, isLive, newestClaim, parseClaim, renderClaim, winner } from '../server/src/tracker/claim';
+import { CLAIM_HEARTBEAT_SKEW_MS, claimsFor, currentClaim, isLive, newestClaim, parseClaim, renderClaim, winner } from '../server/src/tracker/claim';
 import { CLAIM_MARKER, CLAIM_STALE_MS } from '../shared/types';
 import type { ClaimRecord } from '../shared/types';
 import type { GithubComment } from '../server/src/tracker/github.client';
@@ -130,6 +130,59 @@ describe('renderClaim / parseClaim', () => {
 
   it('answers null for a body this app never wrote at all', () => {
     expect(parseClaim(comment({ body: null }))).toBeNull();
+  });
+});
+
+/* #266. Every claim this app reads comes off a repository's comment stream, and on a public repo anybody can write to that stream. These rows pin the
+   three things `parseClaim` now refuses to take on trust: who wrote the comment, the shape of what it says, and a heartbeat from the future. */
+describe('parseClaim and untrusted comments (#266)', () => {
+  /** A claim body with `patch` merged over a valid record — the raw JSON, so a field can be `null` or the wrong type, which `renderClaim` would never write. */
+  function forged(patch: Record<string, unknown>): string {
+    return `${CLAIM_MARKER}\n\n\`\`\`json\n${JSON.stringify({ ...record(), ...patch })}\n\`\`\`\n`;
+  }
+
+  it.each(['NONE', 'CONTRIBUTOR', 'FIRST_TIMER', 'FIRST_TIME_CONTRIBUTOR', 'MANNEQUIN'])('ignores a claim written by an outsider (%s)', (association) => {
+    expect(parseClaim(comment({ author_association: association }))).toBeNull();
+  });
+
+  it.each(['OWNER', 'MEMBER', 'COLLABORATOR'])('accepts a claim written by a %s', (association) => {
+    expect(parseClaim(comment({ author_association: association }))).toEqual(record());
+  });
+
+  it('ignores the audit-s repro: a run with nothing but an id, and a null finished', () => {
+    expect(parseClaim(comment({ body: forged({ run: { runId: 'x' }, finished: null }) }))).toBeNull();
+  });
+
+  it.each([
+    ['run: null', { run: null }],
+    ['released: null', { released: null }],
+    ['finished: null', { finished: null }],
+    ['a released stamp missing its reason', { released: { at: '2026-09-18T12:00:00Z', by: 'A' } }],
+    ['a finished status nobody writes', { finished: { at: '2026-09-18T12:00:00Z', status: 'exploded' } }],
+    ['a run whose mergeMode is unknown', { run: { runId: 'r', startedAt: 's', mergeMode: 'yolo', questionMode: 'park', maxItems: null, base: 'main' } }],
+    ['a run whose maxItems is negative', { run: { runId: 'r', startedAt: 's', mergeMode: 'merge', questionMode: 'park', maxItems: -1, base: 'main' } }],
+    ['a numeric session', { session: 7 }],
+    ['an empty session', { session: '' }],
+    ['a phase nobody writes', { phase: 'lunch' }],
+    ['a missing heartbeat', { heartbeat: undefined }],
+    ['null counters', { counters: null }],
+    ['a counter that is not a number', { counters: { groomElapsed: '1', executeElapsed: 0, groomTokens: 0, executeTokens: 0 } }],
+    ['a non-string host', { host: 42 }]
+  ])('ignores a claim with %s', (_label, patch) => {
+    expect(parseClaim(comment({ body: forged(patch) }))).toBeNull();
+  });
+
+  /* A heartbeat is stamped by the server a moment before the edit that carries it, so the comment's own `updated_at` — GitHub's clock, not the writer's —
+     bounds it. A far-future one is clamped to that bound plus the skew allowance, and then goes stale on the ordinary clock. */
+  it('clamps a heartbeat from the future to the comment-s updated_at plus the skew allowance', () => {
+    const parsed = parseClaim(comment({ body: forged({ heartbeat: '2099-01-01T00:00:00.000Z' }), updated_at: '2026-09-18T11:59:00Z' }));
+    expect(parsed?.heartbeat).toBe(new Date(Date.parse('2026-09-18T11:59:00Z') + CLAIM_HEARTBEAT_SKEW_MS).toISOString());
+    expect(isLive(parsed!, Date.parse('2026-09-18T11:59:00Z') + CLAIM_HEARTBEAT_SKEW_MS + CLAIM_STALE_MS)).toBe(false);
+  });
+
+  it('leaves a heartbeat inside the skew allowance exactly as written', () => {
+    const heartbeat = new Date(Date.parse('2026-09-18T11:59:00Z') + CLAIM_HEARTBEAT_SKEW_MS - 1000).toISOString();
+    expect(parseClaim(comment({ body: forged({ heartbeat }) }))?.heartbeat).toBe(heartbeat);
   });
 });
 

@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { ATTENTION_LINE, deriveRemoteRuns, parseAttention, readClaimState } from '../server/src/orchestrator/remote-runs.util';
 import { renderClaim } from '../server/src/tracker/claim';
 import type { GithubComment } from '../server/src/tracker/github.client';
+import { CLAIM_MARKER } from '../shared/types';
 import type { ClaimRecord, ClaimRun } from '../shared/types';
 
 /**
@@ -174,6 +175,16 @@ describe('deriveRemoteRuns', () => {
     expect(runs[0].project).toBe(PROJECT);
     expect(runs[0].driver).toBeNull();
     expect(runs[0].mergeModeEffective).toBe(runs[0].mergeMode);
+  });
+});
+
+/* #266: one forged claim-shaped comment used to throw inside `statusOf` (a `null` `finished`), and the route answered 500 on every poll while the comment
+   sat in the cache — the Runs page froze for local runs too. The forged comment is now not a claim at all, and the real run beside it still derives. */
+describe('deriveRemoteRuns and a forged claim (#266)', () => {
+  it('derives the real run and ignores a claim-shaped comment with a null finished', () => {
+    const forgedBody = `${CLAIM_MARKER}\n\n\`\`\`json\n${JSON.stringify({ v: 1, run: { runId: 'x' }, finished: null })}\n\`\`\`\n`;
+    const runs = derive([claimComment(3), comment(4, forgedBody)]);
+    expect(runs.map((r) => r.runId)).toEqual([RUN_ID]);
   });
 });
 
