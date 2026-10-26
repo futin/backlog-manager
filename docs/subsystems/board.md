@@ -80,7 +80,7 @@ table is the documentation half. The two are meant to agree; a primitive added t
 | `GatedChip`            | none (draws `.ui-chip`) | `gateBlock`, `otherBlock`, `idleTitle`, `reverify?`, `recheck`, `onActivate`, `variant?`, `size?`, `children` (a node, or a function of `blocked`) — the disabled half is `gateView` (`lib/gate-view.ts`) | `DispatchButton` (card and modal), the Board band's Orchestrate chip |
 | `Pill`                 | `.ui-pill`        | `tone?: neutral\|live\|warn\|bad\|done`, `title?`, `off?` (a state any tone can be in — `ui-pill-off` beside the tone class) | column counts, run mode, stage words, `crashed`, `paused`, `uncommitted`, `DashboardDetail`'s model and effort pills (`off` for one the machine may not run) |
 | `Dot`                  | `.ui-dot`         | `size?: 8\|10`, `breathe?`, and either `tone?` or `hue` (1–8, through `project-hue.ts`)          | card foot, column header, run chip, Runs rows, modal facts                     |
-| `RunOn`                | `.ui-run-on`      | `offers: ProjectOffers`, `value`, `onChange` (draws nothing below two machines)                  | `LaunchSheet`, `OrchestrateSheet` step 3                                        |
+| `RunOn`                | `.ui-run-on`      | `offers: ProjectOffers`, `value`, `onChange` (draws nothing below two machines)                  | `LaunchSheet`, `ModesStep` (Orchestrate step 3)                                 |
 | `Marker`               | `.ui-marker`      | `tone: groomed\|kind\|done\|stale\|untyped\|match\|machine`, `children`, `title?`    | `ItemCard`'s marker row (Board and Archive draw the same card), `JiraCard`'s `match` marker |
 | `SpreadBar`            | `.ui-spread`      | `done`, `doing`, `todo`, `caption?` — a 4 px track of up to three segments, nothing drawn when all three are zero | `JiraCard`'s fold block, `JiraIssueModal`'s Children head |
 | `JiraTypeIcon`         | `.ui-type-icon`   | `type` (a `JiraIssue['type']`) — the glyph by what the type is: sub-task, epic or above, bug, story, else task | `JiraCard`, `JiraIssueModal`'s Children rows |
@@ -157,7 +157,9 @@ Finish the person had already touched away. Below the editable body a read-only 
 every control; `finish` is sent on every execute launch (and a home groom's), `base`, `autoMerge` and `fix` only under PR, and `fix` only as `autoMerge &&
 fix`. A capture sheet keeps its closing rule inside the editable text. The toolbar Orchestrate control opens
 `OrchestrateSheet`, three steps inside a `FormSheet`, with Start on the last one alone so it never sits under a scroll region whose length is the project's
-queue:
+queue. The sheet itself holds only `step`: the run's state, its three reads and Start are `hooks/useOrchestrateDraft.ts`'s, the derivations
+`lib/orchestrate-draft.ts`'s, and each step is a presentational view under `board/orchestrate/` — `ItemsStep`, `OrderStep`, `ModesStep` — over the one
+`OrchestrateDraft` the hook returns (#306):
 
 1. **Items.** Previews the queue and selects a subset of it, flagging with an `uncommitted` chip every row whose file on disk is not the file at `main`, and
    a note that states only the fates actually present, each with its own count — absent from `main` is skipped in the run's own words
@@ -503,6 +505,10 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `lib/agents.ts` — same-origin fetches against `/api`.
 - `lib/board-sort.ts` (#258) — the Board's sort pipeline, pure: `SortKey`/`SortDir`, `NATURAL_DIR`, `COMPARATORS`, `resolveSortKey`, `liveRank` and
   `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
+- `lib/orchestrate-draft.ts` and `hooks/useOrchestrateDraft.ts` (#306) — the Orchestrate sheet's derivations, pure (`orchestrateQueue`, `resolveSelection`,
+  `arrangeOrder`, `moveRow`, `toggleSelected`, `withoutIds`, `uncommittedFates`, `branchOptions`, `effectiveMergeMode`, `buildStartRequest`), pinned by
+  `test/orchestrate-draft.test.ts`; and the hook that holds the sheet's run state, its three `useFetched` reads and `start`, returning the one `OrchestrateDraft`
+  the three step views render from (`test/orchestrate-steps.test.tsx` renders each alone).
 - `lib/runs-list.ts` (#284) — the Runs page's run-list derivations, pure: `mergeRuns` (the archive listing, the live poll and other machines' runs folded into
   one row list), `splitLive`, `sortByStartedAtDesc`, `groupByDay`, `queueCounts`, pinned directly by `test/runs-list.test.ts`; `RunsView` is the one consumer.
 - `lib/time-zone.ts` (#241) — the one home of wall-clock and calendar math: `zonedParts`, `startOfZonedDay`, `zonedDayStart` (a calendar date's first
@@ -520,12 +526,12 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 - `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines`
   among them, and `TimeZoneProvider`'s read (#241), which like `useOrchestratorArchive` passes no `armed` and never polls.
 - `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
-  superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan and branch list, `OrchestrateSheet`'s
+  superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan and branch list, `useOrchestrateDraft`'s
   merge-check, uncommitted flag and branch list, `RunDetail`'s archived run, `JiraIssueModal`'s detail and worktrees, `JiraLaunchSheet`'s prompt preview and
   detail, `JiraBranchSection`'s and `JiraReposGroup`'s branch refs, and the Jira board's and Repositories card's worktree lists all read through it.
 - `hooks/useAgents.ts` — status poll on mount and window focus, plus the one re-ask a click against a project-visibility block provokes.
 - `hooks/useAction.ts` — the one home of a click-fired mutation's in-flight guard, `busy`, `error` and message mapping (#286, bug-19's layer 1): `RunControls`,
-  `LaunchSheet`, `OrchestrateSheet`, `ClaimRelease` and, since Jira phases 3 and 5, `JiraIssueModal`'s writes and `JiraLaunchSheet`'s Start keep only their own
+  `LaunchSheet`, `useOrchestrateDraft`, `ClaimRelease` and, since Jira phases 3 and 5, `JiraIssueModal`'s writes and `JiraLaunchSheet`'s Start keep only their own
   success and refusal branches.
 - `hooks/useOrchestratorRuns.ts` — the same cadence, plus a 5s poll while any run is fresh or still `running`, any `remote` run is `running`, or any
   `starting` or `remoteStarting` entry is present, plus a grace window after a Resume click.

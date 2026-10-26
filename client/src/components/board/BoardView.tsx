@@ -129,7 +129,7 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
   // `refresh` (Task 13): OrchestrateSheet's own Start button calls this
   // directly after both a successful start and a 409 "already running"
   // conflict, so the run chip has the fresh run ahead of the next scheduled
-  // poll rather than up to `POLL_MS` late — see OrchestrateSheet.tsx's own
+  // poll rather than up to `POLL_MS` late — see hooks/useOrchestrateDraft.ts's own
   // comment on `start` for why the conflict path needs it just as much as
   // the success path does.
   //
