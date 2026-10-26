@@ -351,7 +351,7 @@ export interface StartOrchestrateRequest {
   /** The board's item selection, sent ONLY when it is a strict subset of the
    *  project's queue — an absent `ids` means "drain everything", and the two
    *  are genuinely different instructions rather than two spellings of one
-   *  (see OrchestrateSheet's `selected`). Never an empty array: the server
+   *  (see useOrchestrateDraft's `selected`). Never an empty array: the server
    *  400s that rather than reading it as "everything", the same distinction
    *  `parseIdsArg` keeps in orchestrate.mjs. Ids only — this request has no
    *  prompt field to widen, and the server composes the prompt itself. */
@@ -544,14 +544,14 @@ export interface MergeCheckResult {
  *
  * Unlike every neighbour above, a rejection here is not this caller's
  * problem to turn into a rendered error — it is a missing HINT, not a
- * missing capability, and the one caller (OrchestrateSheet's own effect)
+ * missing capability, and the one caller (useOrchestrateDraft's own read)
  * deliberately swallows a thrown `ApiError` into "show no hint" rather than
  * anything that could block or blemish a launch that otherwise works fine.
  *
  * Shape-guarded (review fix round 1), reversing this function's original
  * "read once, rendered once, nothing to lie inside of" reasoning — that
  * reasoning is true of a CACHE but not of a RENDER, and this response feeds
- * a render directly. `OrchestrateSheet`'s hint guard is
+ * a render directly. `ModesStep`'s hint guard is
  * `!mergeCoverage.covered`, and `!` on a missing field is not "no answer",
  * it is `true`: any 200 whose body lacks `covered` — a wrong endpoint
  * answering the URL pattern, a future server refactor that renames the

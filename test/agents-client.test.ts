@@ -137,7 +137,7 @@ describe('the agents client', () => {
   // so a caller that needed to distinguish two different non-2xx OUTCOMES
   // from each other (not just get some text to show) had nothing but the
   // server's free-text message to match against — see OrchestrateSheet's
-  // own history with this (client/src/components/board/OrchestrateSheet.tsx),
+  // own history with this (client/src/hooks/useOrchestrateDraft.ts),
   // where a substring match on "already in progress" would break silently
   // the moment the server's wording changed. `ApiError` is the fix: the
   // status code is a stable part of the contract, the message is prose.
