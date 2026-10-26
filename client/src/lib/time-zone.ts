@@ -134,6 +134,23 @@ export function formatZonedClock(ms: number, zone: string): string {
 }
 
 /**
+ * The zone a reading may actually be drawn in: `stored` when this browser's engine accepts it, else `browser`. The stored id was picked on whichever device
+ * last saved it, from THAT engine's list, so a newer IANA id (`America/Coyhaique`) can reach a browser whose ICU predates it — and `Intl.DateTimeFormat`
+ * throws a `RangeError` on an id it does not know, which mid-render takes the whole board down on that device, on every reload. Falling back to the
+ * browser's own zone draws that one device as if the setting were unset; Settings still shows the stored id (`timeZoneOptions` keeps it), so the
+ * disagreement is visible where it can be fixed.
+ */
+export function readableZone(stored: string | null, browser: string): string {
+  if (stored === null) return browser;
+  try {
+    formatterFor(stored);
+    return stored;
+  } catch {
+    return browser;
+  }
+}
+
+/**
  * The Settings select's zones: every id the platform lists, plus `UTC` — which `Intl.supportedValuesOf('timeZone')` leaves out on current engines although
  * every engine accepts it — plus `current` when it is set and missing, so a stored zone this browser does not list still shows as the selected value rather
  * than the select silently reading as the first option. De-duplicated and sorted.

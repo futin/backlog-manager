@@ -8,10 +8,10 @@ import '@testing-library/jest-dom';
 import SettingsView from '../client/src/components/settings/SettingsView';
 import { TimeZoneGroup } from '../client/src/components/settings/TimeZoneGroup';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
-import { TimeZoneProvider } from '../client/src/hooks/TimeZoneContext';
+import { TimeZoneProvider, useTimeZone } from '../client/src/hooks/TimeZoneContext';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
-import { browserTimeZone } from '../client/src/lib/time-zone';
+import { browserTimeZone, formatZonedClock } from '../client/src/lib/time-zone';
 import type { AgentsStatus, TimeZoneSetting } from '../shared/types';
 
 /**
@@ -123,6 +123,35 @@ describe('TimeZoneGroup', () => {
 
     const select = (await screen.findByRole('combobox', { name: 'Time zone' })) as HTMLSelectElement;
     await waitFor(() => expect(select.value).toBe('Mars/Olympus'));
+  });
+});
+
+describe('TimeZoneProvider with a stored zone this browser rejects', () => {
+  afterEach(() => cleanup());
+
+  /** A reader the way every board surface reads: `zone` straight into a formatter, mid-render. */
+  function Clock() {
+    const { zone, stored } = useTimeZone();
+    return (
+      <p data-testid="clock">
+        {stored ?? 'unset'} · {zone} · {formatZonedClock(Date.parse('2026-09-01T22:30:00Z'), zone)}
+      </p>
+    );
+  }
+
+  it('draws in the browser zone instead of throwing mid-render', async () => {
+    // An id picked on a newer engine (`America/Coyhaique` on old ICU) reaches this browser as one `Intl` throws a RangeError on.
+    stubFetch({ get: { timeZone: 'Mars/Olympus' } });
+    render(
+      <TimeZoneProvider>
+        <Clock />
+      </TimeZoneProvider>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('clock')).toHaveTextContent(/^Mars\/Olympus/));
+    expect(screen.getByTestId('clock')).toHaveTextContent(
+      `Mars/Olympus · ${browserTimeZone()} · ${formatZonedClock(Date.parse('2026-09-01T22:30:00Z'), browserTimeZone())}`
+    );
   });
 });
 

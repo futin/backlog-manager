@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 
 import { fetchTimeZone, updateTimeZone } from '../lib/settings-api';
-import { browserTimeZone } from '../lib/time-zone';
+import { browserTimeZone, readableZone } from '../lib/time-zone';
 import { useMountedRef } from './useMountedRef';
 import { useRefreshing } from './useRefreshing';
 
@@ -9,7 +9,8 @@ import { useRefreshing } from './useRefreshing';
  * The board's one shared time zone (#241), read once in the shell and handed to every surface that draws a clock, a day or a week.
  *
  * `zone` is what every reading uses: the zone stored on the API host (`stored`) when somebody chose one on Settings › Shared, else this browser's own
- * (`browser`) — so with nothing on disk every surface draws exactly what it drew before the setting existed.
+ * (`browser`) — so with nothing on disk every surface draws exactly what it drew before the setting existed. A stored id this browser's engine rejects
+ * reads as `browser` too (`readableZone`), because a formatter built on it would throw mid-render.
  *
  * Fetched on mount and on window focus, through `useRefreshing` with no `armed` — the `useWatchdog` posture for a setting: it changes only when a person
  * changes it, so a poll would redraw identical output forever, and focus is how a tab learns another device changed it. A failed read keeps the last good
@@ -62,7 +63,7 @@ export function TimeZoneProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<TimeZoneState>(() => {
     const browser = browserTimeZone();
-    return { zone: stored ?? browser, stored, browser, save, saveError };
+    return { zone: readableZone(stored, browser), stored, browser, save, saveError };
   }, [stored, save, saveError]);
 
   return <TimeZoneContext.Provider value={value}>{children}</TimeZoneContext.Provider>;

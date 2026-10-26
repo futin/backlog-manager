@@ -1,4 +1,4 @@
-import { formatZonedClock, startOfZonedDay, timeZoneOptions, zonedDayStart, zonedParts } from '../client/src/lib/time-zone';
+import { formatZonedClock, readableZone, startOfZonedDay, timeZoneOptions, zonedDayStart, zonedParts } from '../client/src/lib/time-zone';
 
 /**
  * The zone helper every board reading goes through (#241). Every case names its zone, so nothing here depends on the `TZ` the run happens under — the
@@ -62,5 +62,19 @@ describe('timeZoneOptions', () => {
 
   it('keeps a stored zone the platform does not list', () => {
     expect(timeZoneOptions('Mars/Olympus')).toContain('Mars/Olympus');
+  });
+});
+
+describe('readableZone', () => {
+  it('is the stored zone when this engine accepts it', () => {
+    expect(readableZone('Europe/Belgrade', 'America/New_York')).toBe('Europe/Belgrade');
+  });
+
+  it('is the browser zone while nothing is stored', () => {
+    expect(readableZone(null, 'America/New_York')).toBe('America/New_York');
+  });
+
+  it('is the browser zone for a stored id this engine rejects, rather than throwing', () => {
+    expect(readableZone('Mars/Olympus', 'America/New_York')).toBe('America/New_York');
   });
 });
