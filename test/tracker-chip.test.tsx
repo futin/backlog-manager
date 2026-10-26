@@ -15,6 +15,12 @@ import type { Section } from '../client/src/lib/sections';
 import type { TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * The strip chip and its popover (the tracker strip spec, §2). The context is provided directly rather than through a stubbed fetch: what this suite owns
  * is what the chip READS off a payload, and `use-trackers.test.tsx` owns how the payload arrives. Fake timers pin `useNow`'s one-second tick.
  */
@@ -272,7 +278,8 @@ describe('TrackerPopover', () => {
     renderChip(payload());
     await user.click(chip());
     const dialog = screen.getByRole('dialog', { name: 'Tracker' });
-    expect(within(dialog).getByText(`${(4930).toLocaleString()} of ${(5000).toLocaleString()} left · resets ${resetClock(1_790_000_000)}`)).toBeInTheDocument();
+    const usage = `${(4930).toLocaleString()} of ${(5000).toLocaleString()} left · resets ${resetClock(1_790_000_000, ZONE)}`;
+    expect(within(dialog).getByText(usage)).toBeInTheDocument();
   });
 
   it("runs the popover's API bar the whole width of the panel, whatever the panel's width", async () => {

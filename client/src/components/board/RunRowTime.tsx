@@ -1,5 +1,6 @@
 import { formatSpan, isTerminalStage, itemDoneClock, itemDurationMs } from '../../lib/run-time';
 import type { RunQueueItem, RunStage } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * `RowTime`: one queue row's time reading, moved out of RunDrawer.tsx (its
@@ -98,6 +99,7 @@ export function RowTime({
   now: number | null;
   testIdPrefix?: string;
 }): JSX.Element | null {
+  const { zone } = useTimeZone();
   if (TIMELESS_STAGES.includes(item.stage)) return null;
 
   if (item.stage === 'pending') {
@@ -111,7 +113,7 @@ export function RowTime({
   const duration = itemDurationMs(item, now);
   const span = duration === null ? null : formatSpan(duration);
   const terminal = isTerminalStage(item.stage);
-  const done = terminal ? itemDoneClock(item) : null;
+  const done = terminal ? itemDoneClock(item, zone) : null;
 
   const text = terminal ? [span, done].filter((part) => part !== null).join(' · ') : span === null ? '' : `${span} elapsed`;
 

@@ -1,4 +1,5 @@
 import { RUN_CLAIMED_STAGES, RUN_STALE_MS } from '../../../shared/types';
+import { formatZonedClock } from './time-zone';
 import type { MergeMode, OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
 
 /**
@@ -182,26 +183,26 @@ function pad2(n: number): string {
 }
 
 /**
- * Wall-clock time of day for a stamp, as local `HH:MM` — the answer to "when
- * did this finish", which a duration alone cannot give.
+ * Wall-clock time of day for a stamp, as `HH:MM` in the board's shared zone —
+ * the answer to "when did this finish", which a duration alone cannot give.
  *
- * Local, not UTC, unlike `item-age.ts`'s date handling: an item's `created`
- * date is pinned to UTC there precisely so one file does not read differently
- * in two timezones, but this is the opposite question. "bug-14 merged at
- * 09:59" is only useful measured against the clock on the wall of the person
- * reading it, and that person is the one who left the run going.
+ * In `zone`, the one the board reads off `useTimeZone` (#241), not the
+ * browser's own and not UTC: "bug-14 merged at 09:59" is a fact about the
+ * work, so two devices looking at the same run must print the same clock —
+ * the zone is a fact about the work, not the screen. While nobody has chosen
+ * a zone on Settings › Shared, `zone` IS the browser's own, which is what
+ * this function read before the setting existed.
  *
- * Hand-formatted rather than `toLocaleTimeString`, matching the reasoning
- * behind this codebase's hardcoded `MONTHS`: the locale default would render
- * `9:59 AM` on one machine and `09:59` on another, and this prints into a
- * mono column where a variable-width reading breaks the alignment it exists
- * to have.
+ * Hand-formatted rather than a locale's time string (`formatZonedClock`),
+ * matching the reasoning behind this codebase's hardcoded `MONTHS`: the
+ * locale default would render `9:59 AM` on one machine and `09:59` on
+ * another, and this prints into a mono column where a variable-width reading
+ * breaks the alignment it exists to have.
  */
-export function formatClock(iso: string | undefined): string | null {
+export function formatClock(iso: string | undefined, zone: string): string | null {
   const at = parseStamp(iso);
   if (at === null) return null;
-  const date = new Date(at);
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  return formatZonedClock(at, zone);
 }
 
 /** The run fields these derivations read — a structural subset of the board's own run payload. */
@@ -450,9 +451,9 @@ export function itemQueueWaitMs(item: Pick<RunQueueItem, 'stageAt'>): number | n
  * claim from "this is when it merged", and printing one under the other's
  * label would be a lie a reader has no way to detect.
  */
-export function itemDoneClock(item: Pick<RunQueueItem, 'stage' | 'stageAt'>): string | null {
+export function itemDoneClock(item: Pick<RunQueueItem, 'stage' | 'stageAt'>, zone: string): string | null {
   if (!isTerminalStage(item.stage)) return null;
-  return formatClock(item.stageAt[item.stage]);
+  return formatClock(item.stageAt[item.stage], zone);
 }
 
 /**
@@ -584,9 +585,9 @@ export function stepperTerminal(item: Pick<RunQueueItem, 'stage'>, mergeModeEffe
  * hollow-between-filled reading above depends on a filled node meaning the
  * item went through that stage cleanly. It never left this one.
  */
-export function stepperDots(item: Pick<RunQueueItem, 'stage' | 'stageAt'>, live: boolean, terminal: 'merged' | 'branched'): StepperDot[] {
+export function stepperDots(item: Pick<RunQueueItem, 'stage' | 'stageAt'>, live: boolean, terminal: 'merged' | 'branched', zone: string): StepperDot[] {
   return stepperStages(terminal).map((stage) => {
-    const at = formatClock(item.stageAt[stage]);
+    const at = formatClock(item.stageAt[stage], zone);
     const visited = stage in item.stageAt;
     const isCurrent = stage === item.stage && !isTerminalStage(stage);
     return {

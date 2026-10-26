@@ -1,4 +1,5 @@
 import { isCompletedStage, isTerminalStage, itemDurationMs, runIsLive } from './run-time';
+import { zonedParts } from './time-zone';
 import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../../../shared/types';
 
 /**
@@ -658,44 +659,44 @@ function pad2(n: number): string {
 }
 
 /**
- * The run list's grouping key: `YYYY-MM-DD` in the VIEWER'S LOCAL time, not
- * UTC. Deliberately the opposite convention from `item-age.ts`'s `created`
- * handling (`formatCreated` pins to UTC so one file reads the same date in
- * every timezone) — this key exists to bucket runs the way a person reading
- * the Runs section actually experiences their day, the same reasoning
- * `run-time.ts`'s `formatClock` gives for using local hours: "bug-14 merged
- * at 09:59" is a fact about the wall clock of whoever left the run going,
- * and grouping "today's runs" together only works if "today" means the
- * viewer's today.
+ * The run list's grouping key: `YYYY-MM-DD` in the board's SHARED zone
+ * (`zone`, from `useTimeZone`, #241) — the same zone `run-time.ts`'s
+ * `formatClock` prints in and `run-range.ts` draws its windows in. Not UTC,
+ * because this key buckets runs the way a person reading the Runs section
+ * experiences their day; and not the browser's own zone either, because the
+ * zone is a fact about the work, not the screen — a phone and a laptop
+ * looking at the same run list must put each run under the same day. While
+ * nobody has chosen a zone, `zone` is the browser's own, which is what this
+ * read before the setting existed.
  *
  * `null` for a stamp that will not parse — the run list can safely drop such
  * a run from every day-group rather than inventing a group for it.
  */
-export function dayKey(iso: string): string | null {
+export function dayKey(iso: string, zone: string): string | null {
   const at = parseStamp(iso);
   if (at === null) return null;
-  const date = new Date(at);
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  const p = zonedParts(at, zone);
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
 }
 
 /**
- * Hardcoded rather than `toLocaleDateString`, matching `item-age.ts`'s own
+ * Hardcoded rather than a locale's own date string, matching `item-age.ts`'s own
  * `MONTHS` array and its stated reason: the Runs section is a shared view of
  * one project's shared run history, and a label that reads `mon 1 sep` on
  * one machine and `lun 1 sept.` on another (locale-default French) is a date
  * two people looking at the same run cannot talk about. A second, separate
- * array from `item-age.ts`'s rather than an import of it — that file's
- * `MONTHS` is deliberately UTC-keyed (`getUTCMonth`) for its own reasons,
- * while this one is read against LOCAL month/day, so the two are answering
- * different questions even where the twelve strings happen to be identical.
+ * array from `item-age.ts`'s rather than an import of it — that file keeps
+ * its bare dates UTC-keyed for its own reasons, while this one is read
+ * against the shared zone's month/day, so the two are answering different
+ * questions even where the twelve strings happen to be identical.
  */
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
-/** `Date#getDay()` order — index 0 is Sunday, matching the platform's own convention rather than an ISO week starting Monday. */
+/** `ZonedParts.weekday` order (the platform's `getUTCDay` convention) — index 0 is Sunday, rather than an ISO week starting Monday. */
 const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 /**
- * The run list's day-group heading: `mon 1 sep`, lowercase, local time — the
+ * The run list's day-group heading: `mon 1 sep`, lowercase, shared zone — the
  * same instant `dayKey` buckets by, spelled out for a human rather than kept
  * as a sortable string. No leading zero on the day-of-month (`1`, not `01`):
  * unlike the mono duration columns `run-time.ts` pads for alignment, this
@@ -704,9 +705,9 @@ const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
  * `null` for a stamp that will not parse, same as `dayKey` — a run with a
  * corrupt `startedAt` has no honest day to be grouped under at all.
  */
-export function dayLabel(iso: string): string | null {
+export function dayLabel(iso: string, zone: string): string | null {
   const at = parseStamp(iso);
   if (at === null) return null;
-  const date = new Date(at);
-  return `${WEEKDAYS[date.getDay()]} ${date.getDate()} ${MONTHS[date.getMonth()]}`;
+  const p = zonedParts(at, zone);
+  return `${WEEKDAYS[p.weekday]} ${p.day} ${MONTHS[p.month - 1]}`;
 }

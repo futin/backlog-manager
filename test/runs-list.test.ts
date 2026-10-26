@@ -4,6 +4,12 @@ import type { LiveRun, MergedRun } from '../client/src/lib/runs-list';
 import type { OrchestratorArchiveRun, OrchestratorRun, RemoteRun, RunStage } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * The Runs page's run-list derivations (#284 moved them out of RunsView.tsx into lib/runs-list.ts), pinned directly rather than only through
  * runs-view.test.tsx's renders. Each fixture builder fills only the fields these functions read and casts the rest away — the functions are pure and
  * never look past `project`/`runId`/`startedAt`/`status`/`fresh`/`queue`, so a fully typed run would be noise that hides what each case is about.
@@ -192,10 +198,10 @@ describe('groupByDay', () => {
     const a = row(localIso(2, 15));
     const b = row(localIso(2, 9));
     const c = row(localIso(1, 20));
-    const groups = groupByDay([a, b, c]);
+    const groups = groupByDay([a, b, c], ZONE);
     expect(groups).toEqual([
-      { key: dayKey(a.run.startedAt), label: dayLabel(a.run.startedAt), rows: [a, b] },
-      { key: dayKey(c.run.startedAt), label: dayLabel(c.run.startedAt), rows: [c] }
+      { key: dayKey(a.run.startedAt, ZONE), label: dayLabel(a.run.startedAt, ZONE), rows: [a, b] },
+      { key: dayKey(c.run.startedAt, ZONE), label: dayLabel(c.run.startedAt, ZONE), rows: [c] }
     ]);
     expect(groups[0].key).not.toBe(groups[1].key);
   });
@@ -203,13 +209,13 @@ describe('groupByDay', () => {
   it("gives an unparseable startedAt its own 'unknown' group rather than dropping it", () => {
     const good = row(localIso(2, 15));
     const bad = row('garbage');
-    const groups = groupByDay([good, bad]);
+    const groups = groupByDay([good, bad], ZONE);
     expect(groups).toHaveLength(2);
     expect(groups[1]).toEqual({ key: 'unknown', label: 'unknown', rows: [bad] });
   });
 
   it('returns no groups for no rows', () => {
-    expect(groupByDay([])).toEqual([]);
+    expect(groupByDay([], ZONE)).toEqual([]);
   });
 });
 

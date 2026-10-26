@@ -2,6 +2,10 @@ import { graceRemainingMs, isCrashed, stateLine, sweepFraction, watchdogClause, 
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 import type { RunWatchdog, WatchdogEventKind, WatchdogStatus } from '../shared/types';
 
+/** `now` and the zone `watchdogClause` takes as arguments (#241); only the spawn-clock case reads either. */
+const NOW = Date.parse('2026-09-03T16:00:00Z');
+const ZONE = 'America/New_York';
+
 /**
  * A full `RunWatchdog`, overridden per case — the same "state everything a
  * case cares about, default the rest" shape this repo's other fixture
@@ -51,32 +55,23 @@ describe('isCrashed', () => {
 
 describe('watchdogClause', () => {
   it('reads the empty string when the run has never been a watchdog subject', () => {
-    expect(watchdogClause(undefined)).toBe('');
+    expect(watchdogClause(undefined, NOW, ZONE)).toBe('');
   });
 
   it('reads "waiting for next check" before any attempt has been made', () => {
-    expect(watchdogClause(watchdog())).toBe('watchdog: waiting for next check');
+    expect(watchdogClause(watchdog(), NOW, ZONE)).toBe('watchdog: waiting for next check');
   });
 
   it('reads "attempt N/M spawned HH:MM" once a spawn has landed', () => {
     const lastSpawnAt = '2026-09-03T15:14:07Z';
-    const clause = watchdogClause(watchdog({ attempts: 1, lastSpawnAt }));
-    // Computed dynamically off the SAME instant, not a literal — a literal
-    // would pin this suite to whatever timezone happened to write it. This
-    // mirrors run-time.ts's own `formatClock`, the codebase's one local-time
-    // formatter (hand-rolled there rather than `toLocaleTimeString` on
-    // purpose, per that file's own comment, to keep the reading a fixed
-    // zero-padded 24-hour width instead of a locale-dependent one) — the
-    // implementation under test reuses that exact function, so the expected
-    // value has to be built the same way to mean anything.
-    const at = new Date(lastSpawnAt);
-    const hh = `${at.getHours()}`.padStart(2, '0');
-    const mm = `${at.getMinutes()}`.padStart(2, '0');
-    expect(clause).toBe(`watchdog: attempt 1/2 spawned ${hh}:${mm}`);
+    const clause = watchdogClause(watchdog({ attempts: 1, lastSpawnAt }), NOW, 'America/New_York');
+    // A literal now: the zone is an argument (#241), so the reading no longer depends on the zone the suite runs under. 15:14Z is 11:14 in New York in
+    // September (EDT, UTC−4).
+    expect(clause).toBe('watchdog: attempt 1/2 spawned 11:14');
   });
 
   it('reads "resume failed: <lastError>" when the last attempt was refused', () => {
-    expect(watchdogClause(watchdog({ lastError: 'busy' }))).toBe('watchdog: resume failed: busy');
+    expect(watchdogClause(watchdog({ lastError: 'busy' }), NOW, ZONE)).toBe('watchdog: resume failed: busy');
   });
 
   it('reports a failed FIRST attempt correctly: attempts still 0, lastError set', () => {
@@ -84,22 +79,22 @@ describe('watchdogClause', () => {
     // failed call ("a refused spawn started no session") — so this is a
     // real state, not a contradiction, and the failure must still win over
     // the "waiting for next check" reading attempts: 0 would otherwise imply.
-    expect(watchdogClause(watchdog({ attempts: 0, lastError: 'dashboard down' }))).toBe('watchdog: resume failed: dashboard down');
+    expect(watchdogClause(watchdog({ attempts: 0, lastError: 'dashboard down' }), NOW, ZONE)).toBe('watchdog: resume failed: dashboard down');
   });
 
   it('reads "exhausted after N — resume by hand" once the cap is reached', () => {
-    expect(watchdogClause(watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }))).toBe('watchdog: exhausted after 2 — resume by hand');
+    expect(watchdogClause(watchdog({ attempts: 2, maxAttempts: 2, exhausted: true }), NOW, ZONE)).toBe('watchdog: exhausted after 2 — resume by hand');
   });
 
   it('reads "off — resume by hand" when disabled, even with a live attempt count', () => {
     // `enabled: false` must win over a live "attempt 1/2" reading — see
     // run-watchdog.ts's own header comment on why "off" outranks a pending
     // attempt.
-    expect(watchdogClause(watchdog({ enabled: false, attempts: 1, lastSpawnAt: '2026-09-03T15:14:07Z' }))).toBe('watchdog: off — resume by hand');
+    expect(watchdogClause(watchdog({ enabled: false, attempts: 1, lastSpawnAt: '2026-09-03T15:14:07Z' }), NOW, ZONE)).toBe('watchdog: off — resume by hand');
   });
 
   it('reads "off — resume by hand" over a pending lastError too', () => {
-    expect(watchdogClause(watchdog({ enabled: false, lastError: 'busy' }))).toBe('watchdog: off — resume by hand');
+    expect(watchdogClause(watchdog({ enabled: false, lastError: 'busy' }), NOW, ZONE)).toBe('watchdog: off — resume by hand');
   });
 
   it('reads "resume refused N× — resume by hand" once the refusals reach the ceiling', () => {
@@ -109,7 +104,7 @@ describe('watchdogClause', () => {
     // sentence forever and never say that the sweeper has stopped asking.
     // `attempts: 0` is not a contradiction here — not one refusal started a
     // session.
-    expect(watchdogClause(watchdog({ attempts: 0, failures: 3, failing: true, lastError: 'remote answers are off in the dashboard' }))).toBe(
+    expect(watchdogClause(watchdog({ attempts: 0, failures: 3, failing: true, lastError: 'remote answers are off in the dashboard' }), NOW, ZONE)).toBe(
       'watchdog: resume refused 3× — resume by hand'
     );
   });
@@ -118,13 +113,17 @@ describe('watchdogClause', () => {
     // Both can hold at once — a run that spent its cap and was then refused
     // three times more — and `exhausted` stays the more permanent fact, the
     // ordering this clause already applies to `off` and `lastError`.
-    expect(watchdogClause(watchdog({ attempts: 2, maxAttempts: 2, exhausted: true, failures: 3, failing: true }))).toBe('watchdog: exhausted after 2 — resume by hand');
+    expect(watchdogClause(watchdog({ attempts: 2, maxAttempts: 2, exhausted: true, failures: 3, failing: true }), NOW, ZONE)).toBe(
+      'watchdog: exhausted after 2 — resume by hand'
+    );
   });
 
   it('reads "exhausted" even when the sweeper has since been disabled', () => {
     // Exhaustion outranks everything, including `off` — re-enabling the
     // toggle would not resume trying, since the CAP is what stopped it.
-    expect(watchdogClause(watchdog({ enabled: false, attempts: 2, maxAttempts: 2, exhausted: true }))).toBe('watchdog: exhausted after 2 — resume by hand');
+    expect(watchdogClause(watchdog({ enabled: false, attempts: 2, maxAttempts: 2, exhausted: true }), NOW, ZONE)).toBe(
+      'watchdog: exhausted after 2 — resume by hand'
+    );
   });
 });
 

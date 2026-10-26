@@ -35,6 +35,7 @@ import { WatchdogMonitor } from './WatchdogMonitor';
 import type { RunRange } from '../../lib/run-range';
 import { resumeGate } from '../../../../shared/agent';
 import type { DashboardsView, RemoteStarting, StartingRun } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * Runs — the board's third surface: history of every backlog-orchestrate run
@@ -228,6 +229,7 @@ function CountPair({ completed, total }: { completed: number; total: number }): 
  * it can never print different counts for one run (fix rounds 2 and 3).
  */
 function LiveRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: number; isSelected: boolean; onSelect: () => void }): JSX.Element {
+  const { zone } = useTimeZone();
   const { run } = row;
   const authority = pickAuthority([row.live], run);
   // bug-29: the status word, glyph and class, with `running` + a dead
@@ -249,7 +251,7 @@ function LiveRow({ row, now, isSelected, onSelect }: { row: MergedRun; now: numb
   // the one implementation of "the entry a crashed run was last working", and
   // it is what the old crashed strip printed from too.
   const reported = row.live === null ? null : lastReportedEntry(row.live.queue);
-  const clause = crashed && row.live !== null ? watchdogClause(row.live.watchdog, now) : '';
+  const clause = crashed && row.live !== null ? watchdogClause(row.live.watchdog, now, zone) : '';
 
   return (
     <button type="button" className="runs-row" data-testid={`runs-row-${run.runId}`} aria-current={isSelected ? 'true' : undefined} onClick={onSelect}>
@@ -485,6 +487,7 @@ export const RUNS_PAGE_SIZE = 25;
 
 /** `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this page's live poll is the one the shell reads, so `App` adds none. */
 export default function RunsView({ onWorking }: { onWorking?: (working: boolean) => void } = {}) {
+  const { zone } = useTimeZone();
   const { runs: archiveRuns, refresh: refreshArchive } = useOrchestratorArchive();
   // task-21: `starting` rides the same payload and the same poll `liveRuns`
   // does — the hook already ORs `starting.length > 0` into its own "keep
@@ -629,7 +632,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // which project is currently selected, and the project filter below then
   // narrows whatever the range already left in scope exactly the way it
   // always narrowed `merged` before this task existed.
-  const inScope = merged.filter((m) => inRange(m.run.startedAt, range, now));
+  const inScope = merged.filter((m) => inRange(m.run.startedAt, range, now, zone));
   const filtered = projectFilter === 'all' ? inScope : inScope.filter((m) => m.run.project === projectFilter);
   // The project filter applies to the placeholder rows; the RANGE control
   // deliberately does not. `inRange` reads `startedAt` and only `startedAt`
@@ -684,7 +687,7 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // same group rather than emitting a second heading for the same key.
   const windowed = history.slice(0, windowSize);
   const hiddenCount = history.length - windowed.length;
-  const groups = groupByDay(windowed);
+  const groups = groupByDay(windowed, zone);
 
   // Reading order top to bottom: the Live sheet first (regardless of its
   // rows' own startedAt — see splitLive's own comment for why), then history

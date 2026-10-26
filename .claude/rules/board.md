@@ -115,8 +115,8 @@ paths: ["client/src/**"]
 - **A client poller built on `useCoalescedFetch` never has two of its own requests in flight: its timer is armed by an answer, and a trigger that lands
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
   of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
-  poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive` (no `armed`: it never polls) and
-  `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) — owning the
+  poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive` and `TimeZoneProvider` (#241;
+  no `armed`: neither polls) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) — owning the
   mount + window-focus triggers once; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
   by every trigger that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout`
   re-armed `intervalMs` after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes;

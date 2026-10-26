@@ -357,6 +357,20 @@ write itself (`writeTickFile`) is a temp file in the same directory plus a `rena
 [`tick.json`'s](invariants.md#tickjson-has-exactly-one-writer-the-server-and-a-file-that-cannot-be-read-is-never-replaced) and [the
 halt's](invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it).
 
+### `settings/` — the shared time zone
+
+`GET /api/settings/timezone` answers `{ timeZone }` (`shared/types.ts`'s `TimeZoneSetting`) — the IANA zone every device draws the board in (#241), or `null`
+when nobody has chosen one and each browser keeps its own. It reads `~/.backlog-manager/settings/timezone.json` (`$BM_TIMEZONE_FILE` to override) fresh on
+every call and caches nothing; every way the file can fail to name a zone — missing, not JSON, not an object, an id the platform rejects — reads as `null`,
+the parse and shape failures with a warning. The default is `null` and NOT this host's zone: the API runs in a container whose zone is `UTC` unless `TZ` is
+set, so defaulting to it would move every reading by hours for a person who never opened Settings.
+
+`POST /api/settings/timezone` `{ timeZone }` is behind `SameOriginPostGuard` and is the file's one writer (`writeTimeZone`, temp file plus `rename`). A zone the
+platform accepts is canonicalised through `Intl.DateTimeFormat`'s `resolvedOptions()` — `etc/utc` is written and answered as `UTC` — `null` unsets it, and
+anything else (an unknown id, a non-string, a missing key, a non-object body) is a `400`, file untouched. Unlike `tick.json` and `jira.json`, a file that
+cannot be read is replaced by the next write: it holds one value and the write replaces that value whole, so there is nothing in it a write could lose. The
+server never formats or buckets a date itself; every reading is the client's (`client/src/lib/time-zone.ts`). Not an outbound-calling module.
+
 ### `health/`, `static.ts`, `security.ts`, `allowed-hosts.ts`
 
 `GET /api/health` is a plain liveness check. `static.ts` serves `client/dist` only when it has been built — registering the static module against a missing

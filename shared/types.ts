@@ -2125,6 +2125,15 @@ export interface StartingRun {
 }
 
 /**
+ * `GET /api/settings/timezone`'s answer and `POST /api/settings/timezone`'s body (#241): the ONE zone every clock, day group, week window and created date on
+ * every device reads, stored on the API host in `~/.backlog-manager/settings/timezone.json`. `null` is "unset": each browser keeps its own zone, exactly as
+ * before the setting existed. Here rather than on either side for the reason `WatchdogConfig` below gives — the server writes it and the client reads it.
+ */
+export interface TimeZoneSetting {
+  timeZone: string | null;
+}
+
+/**
  * The orchestrator watchdog's own configuration — see
  * `docs/superpowers/specs/2026-09-04-orchestrator-watchdog-design.md` §5 for
  * the full "why". Lives beside the run-payload shapes above rather than in

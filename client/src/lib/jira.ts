@@ -129,8 +129,8 @@ export function cardAgeStamp(issue: JiraIssue, now: number): string {
  * words. Lives here, with the card's age, because both are one reading of one pair of stamps and the spec's one-home rule (§6.1) says a derivation is not
  * restated in a component.
  */
-export function issueDatesLine(issue: JiraIssue, now: number): string {
-  return `${formatCreated(issue.created, now)} · ${elapsedSince(issue.updated, now) ?? issue.updated}`;
+export function issueDatesLine(issue: JiraIssue, now: number, zone: string): string {
+  return `${formatCreated(issue.created, now, zone)} · ${elapsedSince(issue.updated, now) ?? issue.updated}`;
 }
 
 export type JiraCrumb = { kind: 'root' } | { kind: 'parent'; key: string; summary: string } | { kind: 'mine' } | null;

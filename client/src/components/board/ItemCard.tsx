@@ -9,6 +9,7 @@ import { Marker, type MarkerTone } from '../ui/Marker';
 import { DispatchButton, dispatchAvailable } from './DispatchButton';
 import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
 import type { AgentsStatus, BacklogItem, RunQueueItem } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /*
  * `ATTENTION_RUN_STAGES` — the two stages that mean the run has STOPPED and
@@ -300,6 +301,7 @@ export function ItemCard({
    */
   machine?: string | null;
 }) {
+  const { zone } = useTimeZone();
   const at = now ?? Date.now();
   /* One derivation for the whole strip — see `liveBarFor` above for the
      precedence and for why a run's stage outranks the item file's own stamp.
@@ -314,7 +316,7 @@ export function ItemCard({
      entry carrying no stamp for the stage it reports. The strip still renders;
      it just drops the reading rather than printing NaN into it. */
   const elapsed = bar === null || bar.anchor === null ? null : elapsedSince(bar.anchor, at);
-  const created = formatCreated(item.created, at);
+  const created = formatCreated(item.created, at, zone);
 
   /* The marker row's own contents, built before the JSX rather than inside it,
      because whether the row exists at all is a question about this list's

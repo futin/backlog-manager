@@ -18,6 +18,7 @@ import { RowTime } from '../board/RunRowTime';
 import { StageBars } from './StageBars';
 import { StageTrack } from './StageTrack';
 import type { OrchestratorArchiveRun, OrchestratorRun } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * The Runs section's persistent right-hand pane (RunsView.tsx, Task 6) — the
@@ -136,6 +137,7 @@ export function RunDetail({
   resuming: boolean;
   onChanged: (kind: RunControlsChange) => void;
 }): JSX.Element {
+  const { zone } = useTimeZone();
   // The tail-bearing run this pane fetched for an ARCHIVED selection — null before the fetch lands, and never anything for a live-backed selection:
   // `live` itself already carries tails, so there is nothing to fetch (`load` is null, `useFetched`'s skip case).
   //
@@ -215,7 +217,7 @@ export function RunDetail({
     sub,
     dotTone,
     controlsRun
-  } = runDetailModel({ summary, live, fetchedRun }, now);
+  } = runDetailModel({ summary, live, fetchedRun }, now, zone);
 
   return (
     <>

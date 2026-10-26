@@ -851,7 +851,7 @@ describe('SettingsView', () => {
       `this device`, and the day a card on this page says anything else it is a
       card on the wrong page.
     */
-    it("renders the Shared page's three cards, each with its own scope", () => {
+    it("renders the Shared page's four cards, each with its own scope", () => {
       renderView('shared');
       // `Trackers` joined the pair in task-45: a third host-backed report, in
       // the same column as `Claude Agents` because both report and neither
@@ -861,8 +861,9 @@ describe('SettingsView', () => {
       // `Backlog tick` joined in the tick breaker, under the watchdog in the left column (the two controls), so it renders second.
       // `Dashboards` joined in multi-dashboard task 11, absorbed `Claude Agents` (whose dispatch report became its Home row) and then left for a
       // Settings page of its own, which is why Shared draws no dispatch line at all.
-      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Trackers']);
-      expect(groupScopes()).toEqual(['this server', 'this machine', 'this machine']);
+      // `Time zone` joined in #241, under the tick breaker in the same column — the third host control.
+      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Time zone', 'Trackers']);
+      expect(groupScopes()).toEqual(['this server', 'this machine', 'this server', 'this machine']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.

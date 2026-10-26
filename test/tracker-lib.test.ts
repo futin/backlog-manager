@@ -23,6 +23,12 @@ import { CLAIM_STALE_MS, RUN_STALE_MS } from '../shared/types';
 import type { ItemHolder, OrchestratorRun, ProjectSummary, RemoteRun, TrackerProjectRow } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * The board's tracker derivations (task-45). Pure functions with the clock
  * passed in, so every case here is a table row rather than a render — the same
  * shape `item-age.test.ts` and `item-stale.test.ts` have, and the reason
@@ -127,34 +133,33 @@ describe('sweepProgress', () => {
 
 describe('apiUsage', () => {
   it('is null while the platform has no limit', () => {
-    expect(apiUsage({ limit: null, remaining: null, reset: null })).toBeNull();
+    expect(apiUsage({ limit: null, remaining: null, reset: null }, ZONE)).toBeNull();
   });
 
   it('floors a use under one percent to <1%', () => {
-    const u = apiUsage({ limit: 5000, remaining: 4986, reset: null });
+    const u = apiUsage({ limit: 5000, remaining: 4986, reset: null }, ZONE);
     expect(u!.label).toBe('<1%');
     expect(u!.fraction).toBeCloseTo(0.0028, 4);
     expect(u!.left).toBe(4986);
   });
 
   it('reads one decimal from one percent up', () => {
-    expect(apiUsage({ limit: 5000, remaining: 4950, reset: null })!.label).toBe('1.0%');
-    expect(apiUsage({ limit: 5000, remaining: 4930, reset: null })!.label).toBe('1.4%');
-    expect(apiUsage({ limit: 5000, remaining: 500, reset: null })!.label).toBe('90.0%');
+    expect(apiUsage({ limit: 5000, remaining: 4950, reset: null }, ZONE)!.label).toBe('1.0%');
+    expect(apiUsage({ limit: 5000, remaining: 4930, reset: null }, ZONE)!.label).toBe('1.4%');
+    expect(apiUsage({ limit: 5000, remaining: 500, reset: null }, ZONE)!.label).toBe('90.0%');
   });
 
-  it('formats the reset as a local wall clock', () => {
+  it('formats the reset as a wall clock in the zone', () => {
     const reset = Math.floor(Date.parse('2026-09-18T12:00:00Z') / 1000);
-    expect(apiUsage({ limit: 5000, remaining: 4930, reset })!.resetsAt).toBe(
-      new Date(reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    );
-    expect(apiUsage({ limit: 5000, remaining: 4930, reset: null })!.resetsAt).toBeNull();
+    // 12:00Z is 08:00 in New York in September (EDT, UTC−4).
+    expect(apiUsage({ limit: 5000, remaining: 4930, reset }, ZONE)!.resetsAt).toBe('08:00');
+    expect(apiUsage({ limit: 5000, remaining: 4930, reset: null }, ZONE)!.resetsAt).toBeNull();
   });
 
   it('is null for a zero limit and clamps a remaining above the limit to nothing used', () => {
     // Review Focus 1: a platform answering before its first rate-limit header, or a reset landing mid-read.
-    expect(apiUsage({ limit: 0, remaining: 0, reset: null })).toBeNull();
-    const u = apiUsage({ limit: 5000, remaining: 5100, reset: null });
+    expect(apiUsage({ limit: 0, remaining: 0, reset: null }, ZONE)).toBeNull();
+    const u = apiUsage({ limit: 5000, remaining: 5100, reset: null }, ZONE);
     expect(u!.fraction).toBe(0);
     expect(u!.label).toBe('<1%');
     expect(u!.left).toBe(5100);
@@ -162,8 +167,13 @@ describe('apiUsage', () => {
 });
 
 describe('resetClock', () => {
-  it('is the same clock TrackersGroup used to draw', () => {
-    expect(resetClock(0)).toBe(new Date(0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  // #241: the shared zone, not the browser's — and the board's one HH:MM shape, where it used to be the locale's own time string.
+  it('reads the reset in the zone it is handed', () => {
+    expect(resetClock(Date.parse('2026-10-03T10:05:00Z') / 1000, 'Europe/Belgrade')).toBe('12:05');
+  });
+
+  it('is zero-padded and 24-hour', () => {
+    expect(resetClock(0, 'UTC')).toBe('00:00');
   });
 });
 

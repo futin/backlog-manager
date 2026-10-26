@@ -22,6 +22,12 @@ import { RUN_STALE_MS } from '../shared/types';
 import type { OrchestratorRun, RunQueueItem, RunStage } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * The derivations behind the run strip's and run drawer's time readings. Every
  * case here pins behaviour against a fixed `now` passed in, never the real
  * clock — and for `itemDurationMs`/`inStageMs` there is no longer any other
@@ -101,17 +107,28 @@ describe('formatSpanCompact', () => {
 });
 
 describe('formatClock', () => {
-  // Local, not UTC — the opposite call from item-age.ts's date handling, for
-  // the reason the function's own comment gives. Built from a locally
-  // constructed Date so the expectation holds under any TZ the suite runs in.
-  it('renders a stamp as local HH:MM, zero-padded', () => {
+  // In the zone it is handed (#241). Built from a locally constructed Date, which under the suite's TZ pin is the same zone as `ZONE`.
+  it('renders a stamp as HH:MM in the zone, zero-padded', () => {
     const local = new Date(2026, 7, 31, 9, 5, 30);
-    expect(formatClock(local.toISOString())).toBe('09:05');
+    expect(formatClock(local.toISOString(), ZONE)).toBe('09:05');
   });
 
   it('returns null for an unparseable or absent stamp', () => {
-    expect(formatClock('not-a-date')).toBeNull();
-    expect(formatClock(undefined)).toBeNull();
+    expect(formatClock('not-a-date', ZONE)).toBeNull();
+    expect(formatClock(undefined, ZONE)).toBeNull();
+  });
+
+  // #241: one instant, three zones — the shared setting moves the clock, the browser does not.
+  it.each([
+    ['Europe/Belgrade', '00:30'],
+    ['America/New_York', '18:30'],
+    ['Asia/Kolkata', '04:00']
+  ])('reads 2026-09-01T22:30Z in %s as %s', (zone, clock) => {
+    expect(formatClock('2026-09-01T22:30:00Z', zone)).toBe(clock);
+  });
+
+  it('is null for an absent stamp in any zone', () => {
+    expect(formatClock(undefined, 'UTC')).toBeNull();
   });
 });
 
@@ -461,14 +478,14 @@ describe('itemDoneClock', () => {
   it('renders the terminal stage arrival as local HH:MM', () => {
     const local = new Date(2026, 7, 31, 9, 59, 55);
     const item = queueItem('merged', { dispatched: at(0), merged: local.toISOString() });
-    expect(itemDoneClock(item)).toBe('09:59');
+    expect(itemDoneClock(item, ZONE)).toBe('09:59');
   });
 
   // Unlike itemDurationMs there is no fallback here: "the last thing we heard"
   // is a different claim from "this is when it merged".
   it('returns null for an active row and for a terminal stage with no stamp of its own', () => {
-    expect(itemDoneClock(queueItem('reviewing', { dispatched: at(0), reviewing: at(60_000) }))).toBeNull();
-    expect(itemDoneClock(queueItem('failed', { dispatched: at(0), inspecting: at(300_000) }))).toBeNull();
+    expect(itemDoneClock(queueItem('reviewing', { dispatched: at(0), reviewing: at(60_000) }), ZONE)).toBeNull();
+    expect(itemDoneClock(queueItem('failed', { dispatched: at(0), inspecting: at(300_000) }), ZONE)).toBeNull();
   });
 });
 
@@ -507,12 +524,12 @@ describe('stepperStages', () => {
 
 describe('stepperDots', () => {
   it('covers the seven pipeline stages in order, and nothing else', () => {
-    expect(stepperDots(queueItem('pending', {}), true, 'merged').map((d) => d.stage)).toEqual([...stepperStages('merged')]);
+    expect(stepperDots(queueItem('pending', {}), true, 'merged', ZONE).map((d) => d.stage)).toEqual([...stepperStages('merged')]);
   });
 
   it('rings the current stage of an active row, fills what it visited, leaves the rest hollow', () => {
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
-    const byStage = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, true, 'merged', ZONE).map((d) => [d.stage, d.state]));
     expect(byStage).toEqual({
       dispatched: 'filled',
       inspecting: 'filled',
@@ -538,7 +555,7 @@ describe('stepperDots', () => {
       merging: at(240_000),
       merged: at(300_000)
     });
-    const byStage = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, true, 'merged', ZONE).map((d) => [d.stage, d.state]));
     expect(byStage.fixing).toBe('hollow');
     expect(byStage.verifying).toBe('filled');
     expect(byStage.merging).toBe('filled');
@@ -548,7 +565,7 @@ describe('stepperDots', () => {
 
   it('rings nothing for a row that left the pipeline early, showing only how far it got', () => {
     const item = queueItem('parked', { dispatched: at(0), inspecting: at(60_000), parked: at(120_000) });
-    const states = stepperDots(item, true, 'merged').map((d) => d.state);
+    const states = stepperDots(item, true, 'merged', ZONE).map((d) => d.state);
     expect(states).not.toContain('current');
     expect(states.filter((s) => s === 'filled')).toHaveLength(2);
   });
@@ -556,7 +573,7 @@ describe('stepperDots', () => {
   it('labels a visited dot with its arrival time and a never-entered dot with the bare stage name', () => {
     const local = new Date(2026, 7, 31, 14, 31, 0);
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: local.toISOString(), reviewing: at(120_000) });
-    const dots = Object.fromEntries(stepperDots(item, true, 'merged').map((d) => [d.stage, d.label]));
+    const dots = Object.fromEntries(stepperDots(item, true, 'merged', ZONE).map((d) => [d.stage, d.label]));
     expect(dots.inspecting).toBe('inspecting · 14:31');
     expect(dots.fixing).toBe('fixing');
   });
@@ -574,7 +591,7 @@ describe('stepperDots', () => {
    */
   it('marks the stage a stopped run died on as stalled, leaving the rest of the row alone', () => {
     const item = queueItem('reviewing', { dispatched: at(0), inspecting: at(60_000), reviewing: at(120_000) });
-    const byStage = Object.fromEntries(stepperDots(item, false, 'merged').map((d) => [d.stage, d.state]));
+    const byStage = Object.fromEntries(stepperDots(item, false, 'merged', ZONE).map((d) => [d.stage, d.state]));
     expect(byStage).toEqual({
       dispatched: 'filled',
       inspecting: 'filled',
@@ -598,7 +615,7 @@ describe('stepperDots', () => {
       merging: at(240_000),
       merged: at(300_000)
     });
-    expect(stepperDots(item, false, 'merged').map((d) => d.state)).not.toContain('stalled');
+    expect(stepperDots(item, false, 'merged', ZONE).map((d) => d.state)).not.toContain('stalled');
   });
 
   // Branch mode's own success exit. Same six pipeline stages the item
@@ -618,7 +635,7 @@ describe('stepperDots', () => {
       merging: at(240_000),
       branched: at(300_000)
     });
-    const dots = stepperDots(item, true, 'branched');
+    const dots = stepperDots(item, true, 'branched', ZONE);
     expect(dots).toHaveLength(7);
     expect(dots[6].stage).toBe('branched');
   });
@@ -639,7 +656,7 @@ describe('stepperDots', () => {
       merging: at(240_000),
       branched: at(300_000)
     });
-    const dots = stepperDots(item, true, 'branched');
+    const dots = stepperDots(item, true, 'branched', ZONE);
     expect(dots[6].state).toBe('filled');
   });
 });

@@ -34,6 +34,7 @@ import { Select } from '../ui/Select';
 import { SpreadBar } from '../ui/SpreadBar';
 import { JiraRunMenu } from './JiraRunMenu';
 import { WorktreeRow } from './JiraWorktreeRow';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * JiraIssueModal — one Jira issue's detail, the board's two writes to Jira itself (Jira phase 3) and its session controls (Jira phase 5) — spec §6.3, §7;
@@ -157,6 +158,7 @@ export function JiraIssueModal({
   onRun: (issue: JiraIssue, action: JiraAction) => void;
   onClose: () => void;
 }) {
+  const { zone } = useTimeZone();
   const { data, reload } = useJiraContext();
   const { busy, error: writeError, run, clearError } = useAction();
   // The key the modal shows NOW, read by a write's settle (see the header) — a ref, because the settle closure was made on the render that sent it.
@@ -262,7 +264,7 @@ export function JiraIssueModal({
         {priorityLine !== '' && <Fact label="priority · sprint">{priorityLine}</Fact>}
         <Fact label="assignee · reporter">{people}</Fact>
         {src.labels.length > 0 && <Fact label="labels">{src.labels.join(', ')}</Fact>}
-        <Fact label="created · updated">{issueDatesLine(src, now)}</Fact>
+        <Fact label="created · updated">{issueDatesLine(src, now, zone)}</Fact>
         {boardNames.length > 0 && <Fact label="on boards">{boardNames.join(', ')}</Fact>}
         <Fact label="repository">
           {data === null || paths.length === 0 ? (

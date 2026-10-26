@@ -9,6 +9,12 @@ import { RunDetail } from '../client/src/components/runs/RunDetail';
 import { formatClock, formatSpanCompact } from '../client/src/lib/run-time';
 import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunStage, VerificationSummary } from '../shared/types';
 
+/**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
 /** What `RunDetail`'s `live` prop takes since task-17: the run plus the two
  *  annotations the runs endpoint adds, which are exactly what the
  *  `RunControls` in its head decides from. */
@@ -230,7 +236,7 @@ describe('RunDetail', () => {
     // finish-clock for a terminal row, so `formatClock` builds the second
     // half instead of a hand-typed HH:MM that could drift from the
     // test environment's timezone.
-    expect(screen.getByTestId('run-detail-item-time-a-1')).toHaveTextContent(`8m 00s · ${formatClock('2026-09-01T09:10:00.000Z')}`);
+    expect(screen.getByTestId('run-detail-item-time-a-1')).toHaveTextContent(`8m 00s · ${formatClock('2026-09-01T09:10:00.000Z', ZONE)}`);
   });
 
   /*
@@ -506,7 +512,7 @@ describe('RunDetail', () => {
     // excludes only `pending` — so the start point is NOT `dispatched`
     // (11:17); anchoring on that stamp instead would silently drop
     // preflight's own minute from the reading.
-    expect(time).toHaveTextContent(`25m 00s · ${formatClock('2026-09-01T11:41:00.000Z')}`);
+    expect(time).toHaveTextContent(`25m 00s · ${formatClock('2026-09-01T11:41:00.000Z', ZONE)}`);
     // The wrong, queue-wait-inclusive reading (11:41 minus the 09:00
     // `pending` stamp) would print 2h 41m — asserted absent by name, not
     // just "some other number", so a regression back to that arithmetic
@@ -1070,7 +1076,7 @@ describe('RunDetail · crashed marker', () => {
     // freezes itself on a dead heartbeat.
     render(<RunDetail summary={primarySummary()} live={crashedLive()} {...CONTROL_PROPS} />);
 
-    expect(screen.getByTestId('run-detail-crashed')).toHaveTextContent(`last heartbeat ${formatClock('2026-09-01T09:30:00.000Z')}`);
+    expect(screen.getByTestId('run-detail-crashed')).toHaveTextContent(`last heartbeat ${formatClock('2026-09-01T09:30:00.000Z', ZONE)}`);
     expect(screen.getByTestId('run-detail-crashed')).toHaveTextContent('every stage below is last reported, not current');
   });
 

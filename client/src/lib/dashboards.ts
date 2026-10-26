@@ -1,5 +1,6 @@
 import { unwrap } from './agents';
 import { formatSpanCompact } from './run-time';
+import { formatZonedClock, zonedParts } from './time-zone';
 import { USAGE_FRESH_MS } from '../../../shared/agent';
 import type {
   DashboardEntryInput,
@@ -269,21 +270,21 @@ export function statusFor(machines: MachinesStatus | null, id: string): MachineS
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /**
- * When a usage window resets, as the viewer's own wall clock: `resets 23:39` today, `resets Sat 00:05` on a later day (a window is at most a week long, so a
- * weekday names it unambiguously), `resets now` once the moment has passed — the figure is then about to be replaced, and a clock in the past would read as a
- * bug. The weekday is a fixed English table rather than `Intl` so the line, and its tests, do not move with the machine's locale. `null` for no reset time or
- * one that does not parse.
+ * When a usage window resets, as a wall clock in the board's shared zone (#241 — the clock every run time on the board prints in): `resets 23:39` today,
+ * `resets Sat 00:05` on a later day (a window is at most a week long, so a weekday names it unambiguously), `resets now` once the moment has passed — the
+ * figure is then about to be replaced, and a clock in the past would read as a bug. "Today" is `now`'s calendar day in that same zone. The weekday is a fixed
+ * English table rather than `Intl` so the line, and its tests, do not move with the machine's locale. `null` for no reset time or one that does not parse.
  */
-export function resetClockText(resetsAt: string | null, now: number): string | null {
+export function resetClockText(resetsAt: string | null, now: number, zone: string): string | null {
   if (resetsAt === null) return null;
-  const at = new Date(resetsAt);
-  if (Number.isNaN(at.getTime())) return null;
-  if (at.getTime() <= now) return 'resets now';
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
-  const today = new Date(now);
-  const sameDay = at.getFullYear() === today.getFullYear() && at.getMonth() === today.getMonth() && at.getDate() === today.getDate();
-  return sameDay ? `resets ${clock}` : `resets ${WEEKDAYS[at.getDay()]} ${clock}`;
+  const at = Date.parse(resetsAt);
+  if (Number.isNaN(at)) return null;
+  if (at <= now) return 'resets now';
+  const clock = formatZonedClock(at, zone);
+  const then = zonedParts(at, zone);
+  const today = zonedParts(now, zone);
+  const sameDay = then.year === today.year && then.month === today.month && then.day === today.day;
+  return sameDay ? `resets ${clock}` : `resets ${WEEKDAYS[then.weekday]} ${clock}`;
 }
 
 /**

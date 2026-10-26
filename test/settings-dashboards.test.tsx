@@ -11,6 +11,12 @@ import { MODELS } from '../shared/agent';
 import type { AgentsStatus, DashboardsView, MachinesStatus, MachineStatus, MachineUsage } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * Settings › Dashboards (spec 2026-10-23): the page body under the band — the Suggest card, the machine list, the selected machine's detail and the footer.
  * Rendered bare: which page and which rail entry is `settings-view.test.tsx`'s. A stub answers `GET /api/dashboards` with `view`, `GET
  * /api/dashboards/machines` with `machines` (health and usage per machine), `GET /api/agents/status` with `agents`, and every POST with whatever the case
@@ -465,8 +471,8 @@ describe('DashboardsPage', () => {
       });
       await renderPage();
       await select('Pro');
-      const fiveText = resetClockText(five, now) as string;
-      const weekText = resetClockText(week, now) as string;
+      const fiveText = resetClockText(five, now, ZONE) as string;
+      const weekText = resetClockText(week, now, ZONE) as string;
       expect(fiveText).toMatch(/^resets \d\d:\d\d$/);
       expect(weekText).toMatch(/^resets [A-Z][a-z]{2} \d\d:\d\d$/);
       expect(await within(detail()).findByText(fiveText)).toBeInTheDocument();

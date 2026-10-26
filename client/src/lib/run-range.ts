@@ -1,12 +1,17 @@
+import { startOfZonedDay, zonedDayStart, zonedParts } from './time-zone';
+
 /**
  * run-range.ts — calendar windows behind the Runs section's Today / This
  * week / This month / All range control (design doc: "Range").
  *
- * Local time, not UTC — the same reason `run-stats.ts`'s `dayKey` gives for
- * grouping the run list by the viewer's own day rather than UTC's: a run
- * that finished at 23:40 local time is "today's run" to whoever is looking
- * at the Runs section right now, and a UTC-anchored midnight would silently
- * move that run into "yesterday" for anyone west of Greenwich. `dayKey` and
+ * The board's shared zone (`zone`, from `useTimeZone`, #241), not UTC — the
+ * same reason `run-stats.ts`'s `dayKey` gives for grouping the run list by
+ * that zone's day: a run that finished at 23:40 is "today's run" to whoever is
+ * looking at the Runs section right now, and a UTC-anchored midnight would
+ * silently move that run into "yesterday" for anyone west of Greenwich. And
+ * one zone for every device, because the zone is a fact about the work, not
+ * the screen: a phone and a laptop must agree on which runs are this week's.
+ * `dayKey` and
  * this module have to agree on what "today" means for the same underlying
  * reason too — a run sitting under today's day-group heading but excluded
  * from the Today range control would be a visible self-contradiction on the
@@ -18,7 +23,7 @@
  * groupings of the same list can never disagree about which runs are
  * "today's".
  *
- * Calendar-aligned windows, not rolling ones: "today" is local midnight
+ * Calendar-aligned windows, not rolling ones: "today" is midnight in the shared zone
  * through now, not "the last 24 hours", and "this week" is Monday through
  * Sunday, not "the last 7 days". A rolling window's boundary moves on every
  * render, so a run could drift in and out of "this week" between two polls
@@ -69,46 +74,43 @@ export const RANGE_SCOPE: Record<RunRange, string> = {
 };
 
 /**
- * Local-calendar window start as epoch ms; `null` for 'all' (no window).
+ * Window start in `zone`'s calendar, as epoch ms; `null` for 'all' (no window).
  *
- * Every window is built off the SAME local midnight (`new Date(now)` plus
- * `setHours(0, 0, 0, 0)`), because "this week" and "this month" are both
- * defined relative to today's own calendar date, not to `now`'s raw
- * millisecond — the time-of-day component is exactly what a calendar-aligned
- * window discards.
+ * Every window is built off `now`'s calendar DATE in `zone`, because "this
+ * week" and "this month" are both defined relative to today's own calendar
+ * date, not to `now`'s raw millisecond — the time-of-day component is exactly
+ * what a calendar-aligned window discards.
  *
- * `week` steps that midnight back to the Monday at or before it: `getDay()`
- * reads 0 for Sunday through 6 for Saturday, so `(getDay() + 6) % 7` turns
- * Monday's 1 into a 0-day step back (a Monday is already its own week start)
- * and Sunday's 0 into a 6-day step back — the one line that makes a Sunday
- * belong to the week that started six days earlier rather than reading as
- * day zero of a new one. `setDate` on a `Date` already at local midnight
- * rolls across a month boundary correctly on its own (stepping back from
- * early in a month lands on the last days of the PREVIOUS month when the
- * offset calls for it), so no separate month-rollover handling is needed
- * here.
+ * `week` steps that date back to the Monday at or before it: `weekday` reads
+ * 0 for Sunday through 6 for Saturday, so `(weekday + 6) % 7` turns Monday's
+ * 1 into a 0-day step back (a Monday is already its own week start) and
+ * Sunday's 0 into a 6-day step back — the one line that makes a Sunday belong
+ * to the week that started six days earlier rather than reading as day zero
+ * of a new one. The step is taken on the calendar date with `Date.UTC`
+ * arithmetic, which rolls across a month boundary on its own, and only then
+ * converted to an instant by `zonedDayStart` — never by subtracting 24 h
+ * multiples from an instant, which lands an hour off whenever a DST change
+ * sits inside the week.
  *
- * `month` sets the day-of-month to 1 on that same local midnight, simpler
- * than `week`'s offset precisely because a month's start does not depend on
- * which weekday `now` happens to fall on.
+ * `month` is day 1 of that same calendar month, simpler than `week`'s offset
+ * precisely because a month's start does not depend on which weekday `now`
+ * happens to fall on.
  */
-export function rangeStart(range: RunRange, now: number): number | null {
+export function rangeStart(range: RunRange, now: number, zone: string): number | null {
   if (range === 'all') return null;
 
-  const midnight = new Date(now);
-  midnight.setHours(0, 0, 0, 0);
+  if (range === 'today') return startOfZonedDay(now, zone);
 
-  if (range === 'today') return midnight.getTime();
+  const today = zonedParts(now, zone);
 
   if (range === 'week') {
-    const daysSinceMonday = (midnight.getDay() + 6) % 7;
-    midnight.setDate(midnight.getDate() - daysSinceMonday);
-    return midnight.getTime();
+    const daysSinceMonday = (today.weekday + 6) % 7;
+    const monday = new Date(Date.UTC(today.year, today.month - 1, today.day - daysSinceMonday));
+    return zonedDayStart(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate(), zone);
   }
 
   // range === 'month'
-  midnight.setDate(1);
-  return midnight.getTime();
+  return zonedDayStart(today.year, today.month, 1, zone);
 }
 
 /**
@@ -124,8 +126,8 @@ export function rangeStart(range: RunRange, now: number): number | null {
  * bad data instead of crashing the view that renders it. The comparison is
  * `>=`, not `>`: the window's own start instant belongs to the window.
  */
-export function inRange(startedAt: string, range: RunRange, now: number): boolean {
-  const start = rangeStart(range, now);
+export function inRange(startedAt: string, range: RunRange, now: number, zone: string): boolean {
+  const start = rangeStart(range, now, zone);
   if (start === null) return true;
 
   const at = Date.parse(startedAt);

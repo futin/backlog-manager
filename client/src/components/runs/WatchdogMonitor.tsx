@@ -14,6 +14,7 @@ import { ProgressRow } from '../ui/ProgressRow';
 import { Sheet, SheetHead } from '../ui/Sheet';
 import { RUN_STALE_MS, WATCHDOG_EVENT_CAP } from '../../../../shared/types';
 import type { OrchestratorRunsPayload, RunWatchdog } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * Runs › Watchdog (task-18, spec §3) — the sweeper's live surface: what
@@ -126,6 +127,7 @@ export function WatchdogMonitor({
    *  grown twice. */
   onChanged: (project: string, kind: RunControlsChange) => void;
 }) {
+  const { zone } = useTimeZone();
   const { status, error } = useWatchdog();
 
   // Every `running` run, fresh or crashed alike — a crashed run is exactly
@@ -324,7 +326,7 @@ export function WatchdogMonitor({
           <div className="watchdog-rows" data-testid="watchdog-rows">
             {running.map((run) => {
               const crashed = isCrashed(run);
-              const clause = crashed ? watchdogClause(run.watchdog, now) : '';
+              const clause = crashed ? watchdogClause(run.watchdog, now, zone) : '';
               const reported = lastReportedEntry(run.queue);
               const age = Math.max(0, now - Date.parse(run.updatedAt));
               const beat = Number.isFinite(age) ? `heartbeat ${formatSpanCompact(age)} ago` : 'heartbeat unknown';
@@ -518,7 +520,7 @@ export function WatchdogMonitor({
                 {status.events.map((event, i) => (
                   <tr key={`${event.runId ?? 'none'}-${event.at}-${i}`}>
                     <td>
-                      <time dateTime={event.at}>{formatClock(event.at) ?? '—:—'}</time>
+                      <time dateTime={event.at}>{formatClock(event.at, zone) ?? '—:—'}</time>
                     </td>
                     <td>
                       {/* The column the payload always carried and this feed

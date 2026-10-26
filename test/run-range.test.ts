@@ -2,23 +2,26 @@ import { RUN_RANGES, RANGE_BUTTON, RANGE_SCOPE, rangeStart, inRange } from '../c
 import type { RunRange } from '../client/src/lib/run-range';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * The calendar-window arithmetic behind the Runs section's Today / This
  * week / This month / All range control (Task 1 of the Runs view redesign —
  * nothing here renders anything; `RunsView`, Task 7, is the only consumer).
  *
- * Every `now` in the blocks BELOW is built with the local `Date` constructor
- * (`new Date(2026, 8, 2, 14, 7)`), never an ISO string or `Date.UTC(...)`, so
- * that nothing here asserts anything specific to one zone: `rangeStart` reads
- * `now` through `new Date(now)` plus local getters and setters (`getDay`,
- * `setHours`, `setDate`), and a `now` built from an ISO string would already
- * be pinned to a specific offset before the arithmetic under test ever sees
- * it. 2026-08-31 is a Monday and 2026-09-06 is a Sunday — checked against a
- * real calendar, not assumed — and the week cases below depend on both.
+ * Every `now` in the first blocks is built with the local `Date` constructor
+ * (`new Date(2026, 8, 2, 14, 7)`) and read in `ZONE`, which is the zone the
+ * global `TZ` pin (`test/helpers/global-setup.ts`) makes "local" — so those
+ * cases state calendar facts (midnight, Monday, the 1st) rather than instants.
+ * 2026-08-31 is a Monday and 2026-09-06 is a Sunday — checked against a real
+ * calendar, not assumed — and the week cases below depend on both.
  *
- * The DST block at the END of this file is the deliberate exception and does
- * the opposite: it asserts absolute instants that are only correct in one
- * zone, and gets that zone from `test/helpers/global-setup.ts`, which pins it
- * for the whole run. See that file for why the pin is unconditional.
+ * The DST block and the named-zone block at the END of this file do the
+ * opposite: they assert absolute instants that are only correct in the zone
+ * each case names as `rangeStart`'s argument (#241).
  */
 
 /**
@@ -33,44 +36,44 @@ describe('rangeStart', () => {
   // Case 1: the plainest window there is — local midnight of `now`.
   it('today is local midnight of `now`', () => {
     const now = local(2026, 8, 2, 14, 7); // Wed 2 Sep, mid-afternoon
-    expect(rangeStart('today', now)).toBe(local(2026, 8, 2));
+    expect(rangeStart('today', now, ZONE)).toBe(local(2026, 8, 2));
   });
 
   // Case 2: the preceding Monday, not a rolling 7-day lookback.
   it('week starts on the Monday at or before `now`, at local midnight', () => {
     const now = local(2026, 8, 2, 14, 7); // Wed 2 Sep
-    expect(rangeStart('week', now)).toBe(local(2026, 7, 31)); // Mon 31 Aug
+    expect(rangeStart('week', now, ZONE)).toBe(local(2026, 7, 31)); // Mon 31 Aug
   });
 
   // Case 3: the case the Monday-based (not Sunday-based) rule exists for —
   // a Sunday is the LAST day of its own week, not the first day of the next.
   it('a Sunday belongs to the week that started six days earlier, not the next Monday', () => {
     const now = local(2026, 8, 6, 23, 59); // Sun 6 Sep, one minute before midnight
-    expect(rangeStart('week', now)).toBe(local(2026, 7, 31)); // still Mon 31 Aug
+    expect(rangeStart('week', now, ZONE)).toBe(local(2026, 7, 31)); // still Mon 31 Aug
   });
 
   // Case 4: the boundary is a fixed point — a Monday midnight does not step
   // back to the PREVIOUS Monday.
   it('a Monday at exact midnight is its own week start', () => {
     const now = local(2026, 7, 31, 0, 0, 0, 0); // Mon 31 Aug, exact midnight
-    expect(rangeStart('week', now)).toBe(now);
+    expect(rangeStart('week', now, ZONE)).toBe(now);
   });
 
   // Case 5a: the 1st of the month, not a rolling 30-day lookback.
   it('month starts on the 1st at local midnight', () => {
-    expect(rangeStart('month', local(2026, 8, 2, 14, 7))).toBe(local(2026, 8, 1));
+    expect(rangeStart('month', local(2026, 8, 2, 14, 7), ZONE)).toBe(local(2026, 8, 1));
   });
 
   // Case 5b: same fixed-point shape as case 4, one calendar rung up.
   it('the 1st at exact midnight is its own month start', () => {
     const now = local(2026, 8, 1, 0, 0);
-    expect(rangeStart('month', now)).toBe(now);
+    expect(rangeStart('month', now, ZONE)).toBe(now);
   });
 
   // Case 6: no window at all, independent of whatever `now` is.
   it('all has no window, regardless of now', () => {
-    expect(rangeStart('all', local(2026, 8, 2, 14, 7))).toBeNull();
-    expect(rangeStart('all', local(2020, 0, 1))).toBeNull();
+    expect(rangeStart('all', local(2026, 8, 2, 14, 7), ZONE)).toBeNull();
+    expect(rangeStart('all', local(2020, 0, 1), ZONE)).toBeNull();
   });
 });
 
@@ -79,8 +82,8 @@ describe('inRange', () => {
   it('is inclusive at the window boundary: the boundary instant is in, one ms earlier is out', () => {
     const now = local(2026, 8, 2, 14, 7); // Wed 2 Sep 14:07
     const boundary = local(2026, 8, 2); // local midnight — the 'today' window start case 1 pins
-    expect(inRange(new Date(boundary).toISOString(), 'today', now)).toBe(true);
-    expect(inRange(new Date(boundary - 1).toISOString(), 'today', now)).toBe(false);
+    expect(inRange(new Date(boundary).toISOString(), 'today', now, ZONE)).toBe(true);
+    expect(inRange(new Date(boundary - 1).toISOString(), 'today', now, ZONE)).toBe(false);
   });
 
   // Case 8 (windowed half): a stamp that will not parse can never be inside
@@ -89,7 +92,7 @@ describe('inRange', () => {
     const now = local(2026, 8, 2, 14, 7);
     const ranges: RunRange[] = ['today', 'week', 'month'];
     for (const range of ranges) {
-      expect(inRange('garbage', range, now)).toBe(false);
+      expect(inRange('garbage', range, now, ZONE)).toBe(false);
     }
   });
 
@@ -97,7 +100,7 @@ describe('inRange', () => {
   // parsed, so a corrupt `startedAt` does not hide a run from the one range
   // that is asking for literally everything.
   it("an unparseable startedAt is still in for 'all' — there is no window to fall outside of", () => {
-    expect(inRange('garbage', 'all', local(2026, 8, 2, 14, 7))).toBe(true);
+    expect(inRange('garbage', 'all', local(2026, 8, 2, 14, 7), ZONE)).toBe(true);
   });
 });
 
@@ -134,14 +137,14 @@ describe('RUN_RANGES / RANGE_BUTTON / RANGE_SCOPE', () => {
  * transition, so the local-time behaviour under one had never been pinned.
  *
  * This block needs a KNOWN zone where every case above is deliberately
- * zone-agnostic, and it gets one from `test/helpers/global-setup.ts`
- * (`America/New_York`, chosen because US transition rules are rule-derived and
+ * zone-agnostic, and it names one as the argument — `ZONE`, the same zone
+ * `test/helpers/global-setup.ts` pins (`America/New_York`, chosen because US transition rules are rule-derived and
  * stable across tzdata releases — "second Sunday in March, first Sunday in
  * November" since 2007 — so 2026-03-08 and 2026-11-01 will not move under a
  * dependency bump). Every expectation below is an absolute instant that is
- * correct in that zone and in no other, which is exactly why that pin
- * OVERRIDES an inherited `TZ` rather than deferring to one: a run under
- * `TZ=UTC` would otherwise turn these four cases red.
+ * correct in that zone and in no other. Since #241 the zone is an argument, so
+ * these cases no longer depend on the pin; case 6 still guards it, because the
+ * blocks above build `now` with the local constructor and read it in `ZONE`.
  *
  * The pin lives in `globalSetup` rather than in a `beforeAll` here because a
  * `beforeAll` DOES NOT WORK, measured rather than assumed: jest gives each
@@ -183,7 +186,7 @@ describe('rangeStart / inRange across DST transitions', () => {
   // and that is the correct answer, not an off-by-one-hour bug.
   it('week starts at the preceding Monday local midnight across spring-forward', () => {
     const now = Date.parse('2026-03-08T17:00:00Z'); // Sun 8 Mar, 12:00 EDT — transition day
-    expect(rangeStart('week', now)).toBe(Date.parse('2026-03-02T05:00:00Z')); // Mon 2 Mar 00:00 EST
+    expect(rangeStart('week', now, ZONE)).toBe(Date.parse('2026-03-02T05:00:00Z')); // Mon 2 Mar 00:00 EST
   });
 
   // Case 8: the same boundary read through `inRange`. The window's own start
@@ -192,9 +195,9 @@ describe('rangeStart / inRange across DST transitions', () => {
   // since `now` is on the far side of it.
   it('inRange holds either side of the week boundary across spring-forward', () => {
     const now = Date.parse('2026-03-08T17:00:00Z');
-    expect(inRange('2026-03-02T05:00:00Z', 'week', now)).toBe(true); // Mon 2 Mar, 00:00 EST
-    expect(inRange('2026-03-02T04:59:59Z', 'week', now)).toBe(false); // one second earlier
-    expect(inRange('2026-02-28T17:00:00Z', 'week', now)).toBe(false); // Sat 28 Feb, 12:00 EST
+    expect(inRange('2026-03-02T05:00:00Z', 'week', now, ZONE)).toBe(true); // Mon 2 Mar, 00:00 EST
+    expect(inRange('2026-03-02T04:59:59Z', 'week', now, ZONE)).toBe(false); // one second earlier
+    expect(inRange('2026-02-28T17:00:00Z', 'week', now, ZONE)).toBe(false); // Sat 28 Feb, 12:00 EST
   });
 
   // Case 9: fall-back. The month starts at 2026-11-01 00:00 EDT — still
@@ -202,6 +205,24 @@ describe('rangeStart / inRange across DST transitions', () => {
   // precedes both of that day's two 01:00s.
   it('month starts at the first of the month at local midnight across fall-back', () => {
     const now = Date.parse('2026-11-15T17:00:00Z'); // Sun 15 Nov, 12:00 EST
-    expect(rangeStart('month', now)).toBe(Date.parse('2026-11-01T04:00:00Z')); // 1 Nov 00:00 EDT
+    expect(rangeStart('month', now, ZONE)).toBe(Date.parse('2026-11-01T04:00:00Z')); // 1 Nov 00:00 EDT
+  });
+});
+
+/**
+ * #241's own case: one instant read in two zones. 23:30 UTC on Saturday 3 Oct is already 01:30 on Sunday 4 Oct in Belgrade (CEST, UTC+2), so Belgrade's
+ * today is Sunday's and its week still the one that began Monday 28 Sep — the same week as UTC's, starting two hours earlier in absolute time.
+ */
+describe('rangeStart in a named zone', () => {
+  const now = Date.parse('2026-10-03T23:30:00Z');
+
+  it.each([
+    ['Europe/Belgrade', '2026-10-03T22:00:00Z', '2026-09-27T22:00:00Z', '2026-09-30T22:00:00Z'],
+    ['UTC', '2026-10-03T00:00:00Z', '2026-09-28T00:00:00Z', '2026-10-01T00:00:00Z']
+  ])('%s: today %s, week %s, month %s', (zone, today, week, month) => {
+    expect(rangeStart('today', now, zone)).toBe(Date.parse(today));
+    expect(rangeStart('week', now, zone)).toBe(Date.parse(week));
+    expect(rangeStart('month', now, zone)).toBe(Date.parse(month));
+    expect(rangeStart('all', now, zone)).toBeNull();
   });
 });

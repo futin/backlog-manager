@@ -1,6 +1,12 @@
 import { daysSince, elapsedSince, formatCreated, formatSeconds } from '../client/src/lib/item-age';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * `now` is injected in every case below rather than mocked globally: the whole
  * function is one subtraction, and a test that has to freeze the clock to say
  * anything about it is a test of the clock. Dates are compared in UTC — the
@@ -119,16 +125,16 @@ describe('formatCreated', () => {
   const NOW = at('2026-08-28T12:00:00Z');
 
   it('drops the year for the current year, and the leading zero from the day', () => {
-    expect(formatCreated('2026-08-20', NOW)).toBe('aug 20');
-    expect(formatCreated('2026-01-05', NOW)).toBe('jan 5');
+    expect(formatCreated('2026-08-20', NOW, ZONE)).toBe('aug 20');
+    expect(formatCreated('2026-01-05', NOW, ZONE)).toBe('jan 5');
   });
 
   // Two digits, apostrophe-prefixed, and only when the year differs: the board
   // is overwhelmingly current-year items, so a repeated '26 on every card is
   // noise that crowds out the part that varies.
   it('carries a two-digit year when it is not the current one', () => {
-    expect(formatCreated('2025-12-31', NOW)).toBe("dec 31 '25");
-    expect(formatCreated('2027-03-01', NOW)).toBe("mar 1 '27");
+    expect(formatCreated('2025-12-31', NOW, ZONE)).toBe("dec 31 '25");
+    expect(formatCreated('2027-03-01', NOW, ZONE)).toBe("mar 1 '27");
   });
 
   // Verbatim rather than null or a placeholder: an unparseable `created` is a
@@ -136,21 +142,36 @@ describe('formatCreated', () => {
   // find and fix the line. Empty stays empty so the caller can drop the
   // separator with it.
   it('passes anything it cannot parse straight through', () => {
-    expect(formatCreated('', NOW)).toBe('');
-    expect(formatCreated('whenever', NOW)).toBe('whenever');
-    expect(formatCreated('2026-13-45', NOW)).toBe('2026-13-45');
+    expect(formatCreated('', NOW, ZONE)).toBe('');
+    expect(formatCreated('whenever', NOW, ZONE)).toBe('whenever');
+    expect(formatCreated('2026-13-45', NOW, ZONE)).toBe('2026-13-45');
   });
 
   // A tracker item's `created` is GitHub's full `created_at` stamp, not a bare date. It still prints as a date, and that date is the UTC one — never the
   // string's left half, which for a non-`Z` offset names a different day than the instant does.
-  it('formats a timestamp as its UTC date', () => {
-    expect(formatCreated('2026-10-01T21:43:23Z', NOW)).toBe('oct 1');
-    expect(formatCreated('2026-12-31T23:59:59Z', at('2027-01-02T12:00:00Z'))).toBe("dec 31 '26");
-    expect(formatCreated('2026-10-01T23:30:00-02:00', NOW)).toBe('oct 2');
+  // #241: a full stamp is an instant, so it reads as the date it fell on in the shared zone — no longer its UTC date. 23:30 at UTC−2 is 01:30Z on
+  // 2 Oct, which is still the evening of 1 Oct in New York.
+  it('formats a timestamp as its date in the zone', () => {
+    expect(formatCreated('2026-10-01T21:43:23Z', NOW, ZONE)).toBe('oct 1');
+    expect(formatCreated('2026-12-31T23:59:59Z', at('2027-01-02T12:00:00Z'), ZONE)).toBe("dec 31 '26");
+    expect(formatCreated('2026-10-01T23:30:00-02:00', NOW, ZONE)).toBe('oct 1');
+  });
+
+  it('a bare date never shifts, whatever the zone', () => {
+    for (const zone of ['UTC', 'Europe/Belgrade', 'America/New_York']) expect(formatCreated('2026-10-01', NOW, zone)).toBe('oct 1');
+  });
+
+  it('a full stamp late on 30 Sep is 1 Oct in Belgrade and 30 Sep in UTC', () => {
+    expect(formatCreated('2026-09-30T23:30:00Z', NOW, 'Europe/Belgrade')).toBe('oct 1');
+    expect(formatCreated('2026-09-30T23:30:00Z', NOW, 'UTC')).toBe('sep 30');
+  });
+
+  it('a full stamp from an earlier year keeps its year suffix', () => {
+    expect(formatCreated('2025-06-15T12:00:00Z', NOW, 'Europe/Belgrade')).toBe("jun 15 '25");
   });
 
   it('passes an unparseable timestamp straight through', () => {
-    expect(formatCreated('2026-10-01T25:00:00Z', NOW)).toBe('2026-10-01T25:00:00Z');
+    expect(formatCreated('2026-10-01T25:00:00Z', NOW, ZONE)).toBe('2026-10-01T25:00:00Z');
   });
 });
 

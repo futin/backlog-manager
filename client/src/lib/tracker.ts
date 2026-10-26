@@ -1,5 +1,6 @@
 import { elapsedSince } from './item-age';
 import { runIsLive } from './run-time';
+import { formatZonedClock } from './time-zone';
 import { CLAIM_STALE_MS, SYNC_INTERVALS } from '../../../shared/types';
 import type { BacklogItem, OrchestratorRun, ProjectSummary, SyncInterval, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../../../shared/types';
 
@@ -131,7 +132,7 @@ export interface ApiUsage {
   label: string;
   /** Requests left, as the platform last reported them. */
   left: number;
-  /** `reset` as a local `HH:MM`, or `null` when the platform has not said. */
+  /** `reset` as an `HH:MM` in the board's shared zone, or `null` when the platform has not said. */
   resetsAt: string | null;
 }
 
@@ -143,7 +144,7 @@ export interface ApiUsage {
  * `<1%` rather than `0.3%` or `0%` below one percent: the meter must never claim zero use once a request has been made, and a tenth of a percent is more
  * precision than a 56 px bar can show. Tone is the caller's, like `sweepProgress`' — the thresholds are a look, not a derivation.
  */
-export function apiUsage(platform: Pick<TrackerPlatform, 'limit' | 'remaining' | 'reset'>): ApiUsage | null {
+export function apiUsage(platform: Pick<TrackerPlatform, 'limit' | 'remaining' | 'reset'>, zone: string): ApiUsage | null {
   const { limit, remaining, reset } = platform;
   if (limit === null || limit <= 0 || remaining === null) return null;
   const used = Math.max(0, limit - remaining);
@@ -153,15 +154,16 @@ export function apiUsage(platform: Pick<TrackerPlatform, 'limit' | 'remaining' |
     fraction,
     label: pct < 1 ? '<1%' : `${pct.toFixed(1)}%`,
     left: remaining,
-    resetsAt: reset === null ? null : resetClock(reset)
+    resetsAt: reset === null ? null : resetClock(reset, zone)
   };
 }
 
-/** GitHub sends the reset as Unix SECONDS; the board shows a local wall clock, because the question it answers is "how long do I wait" and a reader is
- *  looking at their own clock while asking it. Moved here from `TrackersGroup.tsx` when the strip chip became its second reader, so the card and the
- *  popover print one clock. */
-export function resetClock(reset: number): string {
-  return new Date(reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/** GitHub sends the reset as Unix SECONDS; the board shows it as a wall clock, because the question it answers is "how long do I wait". In the board's
+ *  shared zone (#241) and hand-shaped `HH:MM` by `formatZonedClock` — the same clock `formatClock` prints for a run, where this used to be the locale's own
+ *  time string and so the one clock on the board that could read `2:05 PM`. Moved here from `TrackersGroup.tsx` when the strip chip became its second
+ *  reader, so the card and the popover print one clock. */
+export function resetClock(reset: number, zone: string): string {
+  return formatZonedClock(reset * 1000, zone);
 }
 
 /**

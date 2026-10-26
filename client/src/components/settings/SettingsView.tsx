@@ -6,6 +6,7 @@ import { Select } from '../ui/Select';
 import { Switch } from '../ui/Switch';
 import { DashboardsPage } from './DashboardsPage';
 import { TickGroup } from './TickGroup';
+import { TimeZoneGroup } from './TimeZoneGroup';
 import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useJiraContext } from '../../hooks/JiraContext';
@@ -157,10 +158,11 @@ const BAND_SUB: Record<SettingsScope, string> = {
 
 /**
  * The Shared page: the watchdog's file beside the registry, what this machine can currently see of each project's tracker — since task-45 — and, since the
- * tick breaker, the tick halt threshold under the watchdog.
+ * tick breaker, the tick halt threshold under the watchdog — and, since #241, the shared time zone under that.
  *
- * Three cards, and the hand-balanced columns hold up for a different reason than on Local: the left column is the two machine-wide CONTROLS (the watchdog's
- * long card over the tick breaker's one-row card), the right the one host REPORT, `Trackers`. The machines a launch can run on were a fourth card here
+ * Four cards, and the hand-balanced columns hold up for a different reason than on Local: the left column is the three machine-wide CONTROLS (the
+ * watchdog's long card over the tick breaker's and the shared time zone's one-row cards), the right the one host REPORT, `Trackers`. The machines a launch can
+ * run on were a fourth card here
  * (`Dashboards`, which had absorbed the old `Claude Agents` dispatch report as its Home row) until its list, its selection and its per-machine detail outgrew
  * a card: they are the Dashboards page now, so Shared draws no dispatch line at all and a reader looking for one is one rail entry away.
  */
@@ -172,6 +174,9 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
         {/* Under the watchdog, in its column: both are machine-wide CONTROLS — a number written to a file on the host — where the right column is host
             REPORTS. The breaker is the watchdog's sibling in subject too: one resumes a crashed run, the other stops a project that keeps failing. */}
         <TickGroup />
+        {/* The third host CONTROL (#241): one zone every device reads the board in, written to a file beside the other two. Last in the column because it
+            is the one control here that changes no machine behaviour — it only moves how readings are drawn. */}
+        <TimeZoneGroup />
       </div>
 
       <div className="set-col">

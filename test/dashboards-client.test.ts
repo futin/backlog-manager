@@ -27,6 +27,12 @@ import { useOffers } from '../client/src/hooks/useOffers';
 import type { DashboardsView, MachineOffer, MachineStatus, MachinesStatus, ProjectOffers } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * Task 8's client half of the multi-dashboard feature: the six calls, the two derivations the launch surfaces share, and the two hooks that read them. Every
  * assertion here is about what crosses the wire or what a derivation answers; how the cards look is `run-on.test.tsx`'s.
  */
@@ -349,23 +355,23 @@ describe('resetClockText', () => {
   const at = (...a: [number, number, number, number, number]): string => new Date(...a).toISOString();
 
   it('says the clock time for later today', () => {
-    expect(resetClockText(at(2026, 9, 23, 23, 39), now)).toBe('resets 23:39');
+    expect(resetClockText(at(2026, 9, 23, 23, 39), now, ZONE)).toBe('resets 23:39');
   });
 
   it('prefixes a fixed English weekday for a later day', () => {
-    expect(resetClockText(at(2026, 9, 24, 0, 5), now)).toBe('resets Sat 00:05');
-    expect(resetClockText(at(2026, 9, 25, 5, 59), now)).toBe('resets Sun 05:59');
-    expect(resetClockText(at(2026, 9, 29, 9, 0), now)).toBe('resets Thu 09:00');
+    expect(resetClockText(at(2026, 9, 24, 0, 5), now, ZONE)).toBe('resets Sat 00:05');
+    expect(resetClockText(at(2026, 9, 25, 5, 59), now, ZONE)).toBe('resets Sun 05:59');
+    expect(resetClockText(at(2026, 9, 29, 9, 0), now, ZONE)).toBe('resets Thu 09:00');
   });
 
   it('says now for a reset at or before now', () => {
-    expect(resetClockText(at(2026, 9, 23, 9, 59), now)).toBe('resets now');
-    expect(resetClockText(new Date(now).toISOString(), now)).toBe('resets now');
+    expect(resetClockText(at(2026, 9, 23, 9, 59), now, ZONE)).toBe('resets now');
+    expect(resetClockText(new Date(now).toISOString(), now, ZONE)).toBe('resets now');
   });
 
   it('is null for a missing or unparseable time', () => {
-    expect(resetClockText(null, now)).toBeNull();
-    expect(resetClockText('soon', now)).toBeNull();
+    expect(resetClockText(null, now, ZONE)).toBeNull();
+    expect(resetClockText('soon', now, ZONE)).toBeNull();
   });
 });
 

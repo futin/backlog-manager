@@ -22,6 +22,8 @@ import type { RunRange } from '../client/src/lib/run-range';
 import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { setRunsMode } from '../client/src/hooks/useRunsMode';
 import { MACHINE_STAGES, dayKey, dayLabel } from '../client/src/lib/run-stats';
+import { TimeZoneProvider } from '../client/src/hooks/TimeZoneContext';
+import { fetchTimeZone } from '../client/src/lib/settings-api';
 import type {
   AgentsStatus,
   ArchiveQueueItem,
@@ -40,6 +42,12 @@ import type {
   WatchdogStatus
 } from '../shared/types';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
+
+/**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
 
 // Task 6 consumes the two archive/live fetchers through the real hooks
 // (useOrchestratorArchive, useOrchestratorRuns) rather than through fetch
@@ -89,6 +97,14 @@ jest.mock('../client/src/lib/agents', () => ({
   (`unwrap` is `undefined` here), so it is replaced by a holder a case fills — `null` is the view-less state every pre-existing case already ran in.
 */
 const mockDashboardsView: { current: DashboardsView | null } = { current: null };
+// #241: the shared-zone case at the foot of this file mounts `TimeZoneProvider`, whose one read is this call. Mocked rather than answered through `fetch`:
+// it unwraps through `lib/agents`' `unwrap`, which the mock above leaves out.
+jest.mock('../client/src/lib/settings-api', () => ({
+  __esModule: true,
+  fetchTimeZone: jest.fn(),
+  updateTimeZone: jest.fn()
+}));
+
 jest.mock('../client/src/hooks/useDashboards', () => ({
   __esModule: true,
   useDashboards: () => ({ view: mockDashboardsView.current, error: null, refresh: () => Promise.resolve() })
@@ -575,7 +591,7 @@ describe('RunsView', () => {
     // silently pass or fail depending on the machine's timezone, exactly the
     // flakiness dayLabel's own doc comment warns about.
     const kickers = Array.from(container.querySelectorAll('.ui-ledger-day')).map((el) => el.textContent);
-    expect(kickers).toEqual([dayLabel(RUN_DONE_ALPHA.startedAt), dayLabel(RUN_DONE_BETA.startedAt)]);
+    expect(kickers).toEqual([dayLabel(RUN_DONE_ALPHA.startedAt, ZONE), dayLabel(RUN_DONE_BETA.startedAt, ZONE)]);
 
     expect(historyRowIds(container)).toEqual([`runs-row-${RUN_DONE_ALPHA.runId}`, `runs-row-${RUN_DONE_BETA.runId}`, `runs-row-${RUN_FAILED_BETA.runId}`]);
   });
@@ -1440,7 +1456,7 @@ describe('RunsView history paging (task-16)', () => {
     const boundaryDay = Array.from({ length: 4 }, (_, k) => noonDaysAgo(RUNS_PAGE_SIZE, -k));
     const { container } = await renderRunsView(pagedRuns([...distinctDays, ...boundaryDay]));
 
-    const key = dayKey(boundaryDay[0]) as string;
+    const key = dayKey(boundaryDay[0], ZONE) as string;
     expect(key).not.toBeNull();
 
     const group = () => container.querySelectorAll(`[data-testid="runs-day-${key}"]`);
@@ -2804,5 +2820,56 @@ describe('RunsView · a remote run (task-48)', () => {
       expect(screen.getByTestId(`runs-row-${LIVE_RUNS[0].runId}`)).toBeInTheDocument();
       expect(screen.queryByTestId('run-detail-invisible')).toBeNull();
     });
+  });
+});
+
+/**
+ * #241's own reading on this page: the day a run is grouped under is read in the SHARED zone the provider fetched, not the browser's. 23:30 UTC is already
+ * the next day in Belgrade in every season (UTC+1 or +2) and still the same day in New York (UTC−4 or −5), so one run draws two different day headings.
+ *
+ * The run is three days old rather than a literal date — the convention for a jsdom fixture (`test/helpers/dates.ts`) — and the expected headings are
+ * spelled off the stamp's UTC date by hand rather than through `dayLabel`, so the case does not grade the function with itself.
+ */
+describe('RunsView · the shared time zone (#241)', () => {
+  const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const label = (ms: number): string => {
+    const d = new Date(ms);
+    return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+  };
+
+  function lateRun(): { startedAt: string; utcDay: number } {
+    const d = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    d.setUTCHours(23, 30, 0, 0);
+    return { startedAt: d.toISOString(), utcDay: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) };
+  }
+
+  async function renderInZone(zone: string, startedAt: string): Promise<RenderResult> {
+    (fetchTimeZone as jest.Mock).mockResolvedValue({ timeZone: zone });
+    mockArchive.mockResolvedValue({
+      runs: [run({ runId: 'tz-run', project: RUN_DONE_BETA.project, status: 'done', startedAt, updatedAt: startedAt, queue: [item('tz-1', 'merged')] })]
+    } satisfies OrchestratorArchivePayload);
+    mockRuns.mockResolvedValue({ runs: [], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload);
+    const result = render(
+      <TimeZoneProvider>
+        <RunsView />
+      </TimeZoneProvider>
+    );
+    await screen.findByTestId('runs-list');
+    return result;
+  }
+
+  const kickers = (container: HTMLElement): (string | null)[] => Array.from(container.querySelectorAll('.ui-ledger-day')).map((el) => el.textContent);
+
+  it('Belgrade reads the next day', async () => {
+    const { startedAt, utcDay } = lateRun();
+    const { container } = await renderInZone('Europe/Belgrade', startedAt);
+    await waitFor(() => expect(kickers(container)).toEqual([label(utcDay + 24 * 60 * 60 * 1000)]));
+  });
+
+  it('New York reads the same day', async () => {
+    const { startedAt, utcDay } = lateRun();
+    const { container } = await renderInZone('America/New_York', startedAt);
+    await waitFor(() => expect(kickers(container)).toEqual([label(utcDay)]));
   });
 });
