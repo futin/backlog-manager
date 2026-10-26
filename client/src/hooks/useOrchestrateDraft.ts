@@ -99,7 +99,11 @@ export function useOrchestrateDraft({ project, source, items, spawnMaxPermission
   // makes it one rule instead of two: "auto, or the ceiling if auto is too
   // high" always lands on the same rung this way, whether it runs on the
   // server for a per-item plan or here for a whole project.
-  const [mode, setMode] = useState<PermissionMode>(clampMode('auto', spawnMaxPermission));
+  //
+  // The pick is stored and the sent value derived in render, `mergeMode`'s pattern below (#306): seeded once, `mode` would keep a pick above a ceiling that
+  // dropped while the sheet was open — sent with Start and refused by the server — and clamping it into state would lose the pick when the ceiling rose again.
+  const [pickedMode, setMode] = useState<PermissionMode>(clampMode('auto', spawnMaxPermission));
+  const mode: PermissionMode = clampMode(pickedMode, spawnMaxPermission);
   // Seeded from Settings and nowhere else — same invariant, same fields,
   // same reasoning as LaunchSheet's identical two lines (see that file's own
   // comment): a sticky per-launch pick is exactly the failure mode a stored
