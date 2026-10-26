@@ -125,7 +125,7 @@ export function LaunchSheet({ item, onClose }: { item: BacklogItem; onClose: () 
     if (!v) setFix(false);
   };
   /**
-   * The Base select's options — `GET /api/agents/branches`, the Orchestrate sheet's base picker's read (`OrchestrateSheet.tsx`, task-44), keyed on the
+   * The Base select's options — `GET /api/agents/branches`, the Orchestrate sheet's base picker's read (`useOrchestrateDraft.ts`, task-44), keyed on the
    * project so it runs once per sheet open and never again as Finish flips. Skipped (`null`) for a remote groom and for capture, which draw no picker.
    *
    * **A failure here leaves the select holding `'main'` alone and never blocks a launch** — the reasoning is that sheet's, unchanged: the list only offers

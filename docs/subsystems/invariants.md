@@ -1961,7 +1961,7 @@ The toolbar Orchestrate control **hides** on a starting entry rather than disabl
 _rendered_ toolbar button is blocked on project visibility alone. And `POST /api/agents/orchestrate` refuses a starting project with the **same**
 `RUN_IN_PROGRESS_CODE`, beside the `activeRun` throw and therefore still before `resolveIds`: it is the same lock one window earlier, and `OrchestrateSheet`
 already branches on that code to close and hand the screen to the board's run chip, which is already counting the starting entry the second press would have
-duplicated — which is exactly right here. (It was `StartingStrip` until task-37; the source-side half of this sentence lives in `OrchestrateSheet.tsx`'s own 409
+duplicated — which is exactly right here. (It was `StartingStrip` until task-37; the source-side half of this sentence lives in `hooks/useOrchestrateDraft.ts`'s own 409
 comment, and the two are meant to read the same.)
 
 `runHoldsItem` deliberately does NOT gain the parameter: its caller asks "is a run holding THIS item", which a placeholder naming no items cannot answer, and

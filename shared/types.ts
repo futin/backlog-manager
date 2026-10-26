@@ -1080,7 +1080,7 @@ export interface StopResult {
  * code of its own, `RESUME_LOCKED_CODE` below (#268).
  *
  * Exported once here rather than declared as a bare string literal in both
- * agents.service.ts (which sends it) and OrchestrateSheet.tsx (which reads
+ * agents.service.ts (which sends it) and useOrchestrateDraft.ts (which reads
  * it), so the two sides can never drift on the one string that has to
  * match exactly — the same "one implementation, every side imports it"
  * rule this file and shared/agent.ts already apply to everything else two

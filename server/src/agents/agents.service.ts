@@ -859,7 +859,7 @@ export class AgentsService {
           // mean. Every other throw in this method means something else and
           // is deliberately left uncoded; nothing about those needs
           // distinguishing by machine, and OrchestrateSheet's own retry path
-          // (client/src/components/board/OrchestrateSheet.tsx) is exactly
+          // (client/src/hooks/useOrchestrateDraft.ts) is exactly
           // right for them as-is.
           code: RUN_IN_PROGRESS_CODE
         },
@@ -1766,7 +1766,7 @@ export class AgentsService {
         // candidate either. Grooming is NOT checked: an ungroomed item is a
         // legal selection, the run re-gates it and reports it as ungroomed,
         // and that is information rather than an error (see
-        // OrchestrateSheet's own queue comment for the same reasoning on
+        // orchestrate-draft.ts's queue comment for the same reasoning on
         // the preview side).
         .filter((it) => it.status === 'open' && (it.section === 'bugs' || it.section === 'tasks'))
         .map((it) => it.id)
