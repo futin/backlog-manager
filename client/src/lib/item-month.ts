@@ -1,5 +1,6 @@
 import { MONTHS } from './item-age';
 import { lastTouched } from './item-touched';
+import { zonedParts } from './time-zone';
 import type { BacklogItem } from '../../../shared/types';
 
 /**
@@ -61,15 +62,28 @@ const groupStamp = lastTouched;
  * `YYYY-MM` for this item, or `UNDATED` when neither stamp is present or
  * parseable.
  *
+ * Two readings, the fork `formatCreated` keeps (#241, A5): a bare
+ * `YYYY-MM-DD` is a calendar date and groups under its own month in every
+ * zone, read through the UTC getters `stampMs` pinned it for; a full stamp is
+ * an instant and groups under the month it falls in in the board's shared
+ * `zone` — `2026-09-30T23:30:00Z` is October in `Europe/Belgrade` and
+ * September in `UTC` — so Archive's headings agree with the created dates on
+ * the cards under them and with every other reading on the board.
+ *
  * A sortable key, not a label: `2026-08` compares lexicographically in
  * chronological order, which is what lets `groupByMonth` below order months
  * without parsing anything a second time. Rendering is `monthLabel`'s job.
  */
-export function monthKey(item: BacklogItem): string {
-  const ms = stampMs(groupStamp(item));
+export function monthKey(item: BacklogItem, zone: string): string {
+  const stamp = groupStamp(item);
+  const ms = stampMs(stamp);
   if (ms === null) return UNDATED;
-  const date = new Date(ms);
-  return `${date.getUTCFullYear()}-${`${date.getUTCMonth() + 1}`.padStart(2, '0')}`;
+  if (DATE_ONLY.test(stamp)) {
+    const date = new Date(ms);
+    return `${date.getUTCFullYear()}-${`${date.getUTCMonth() + 1}`.padStart(2, '0')}`;
+  }
+  const p = zonedParts(ms, zone);
+  return `${p.year}-${`${p.month}`.padStart(2, '0')}`;
 }
 
 /**
@@ -125,10 +139,10 @@ export interface MonthGroup {
  * Onto copies, never in place — the array belongs to the fetched index, the
  * same discipline `sortItems` keeps in lib/board-sort.ts.
  */
-export function groupByMonth(items: BacklogItem[]): MonthGroup[] {
+export function groupByMonth(items: BacklogItem[], zone: string): MonthGroup[] {
   const byKey = new Map<string, BacklogItem[]>();
   for (const item of items) {
-    const key = monthKey(item);
+    const key = monthKey(item, zone);
     const bucket = byKey.get(key);
     if (bucket === undefined) byKey.set(key, [item]);
     else bucket.push(item);

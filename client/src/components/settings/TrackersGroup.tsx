@@ -7,6 +7,7 @@ import { useTrackersContext } from '../../hooks/TrackersContext';
 import { resetClock, trackerState } from '../../lib/tracker';
 import { DEFAULT_SYNC_INTERVAL, SYNC_INTERVALS } from '../../../../shared/types';
 import type { SyncInterval, TrackerPlatform, TrackerProjectRow } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /** The picker's options: the shared constant's keys, in its order — never a second list (spec §11's pin, `test/settings-trackers.test.tsx`). */
 const INTERVAL_OPTIONS = (Object.keys(SYNC_INTERVALS) as SyncInterval[]).map((value) => ({ value, label: value }));
@@ -50,6 +51,7 @@ const INTERVAL_OPTIONS = (Object.keys(SYNC_INTERVALS) as SyncInterval[]).map((va
  * a Jira row), and not at all before Jira has answered or while it is unconfigured.
  */
 export function TrackersGroup() {
+  const { zone } = useTimeZone();
   const { data, loading, error, saveInterval, refusals } = useTrackersContext();
   const jira = useJiraContext().data;
   // One save in flight per repo: the pill is disabled until its answer lands, so a second click cannot race the first one's refetch.
@@ -79,7 +81,7 @@ export function TrackersGroup() {
       ) : (
         <>
           {data.platforms.map((platform) => (
-            <SettingsRow key={platform.kind} name={platformName(platform.kind)} hint={platformLine(platform)} />
+            <SettingsRow key={platform.kind} name={platformName(platform.kind)} hint={platformLine(platform, zone)} />
           ))}
           {data.projects.map((project) => {
             const repo = project.source === 'github' ? project.repo : null;
@@ -128,13 +130,13 @@ function platformName(kind: string): string {
  * reason `accessReason` gives: this is the one state an operator can clear
  * from the machine they are sitting at.
  */
-function platformLine(platform: TrackerPlatform): string {
+function platformLine(platform: TrackerPlatform, zone: string): string {
   if (!platform.hasToken) return 'no token — set BM_GITHUB_TOKEN in .env and restart';
   const parts = [platform.login === null ? 'token set' : `as ${platform.login}`];
   if (platform.remaining !== null && platform.limit !== null) {
     parts.push(`${platform.remaining.toLocaleString()} of ${platform.limit.toLocaleString()} left`);
   }
-  if (platform.reset !== null) parts.push(`resets ${resetClock(platform.reset)}`);
+  if (platform.reset !== null) parts.push(`resets ${resetClock(platform.reset, zone)}`);
   // Nothing about the budget before the first request of this process: the
   // numbers are read off response headers, so "0 of 0 left" would be a
   // reading rather than an absence.

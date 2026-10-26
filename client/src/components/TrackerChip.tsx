@@ -9,6 +9,7 @@ import { useNow } from '../hooks/useNow';
 import { accessReason, apiUsage, hasTracker, pollProgress, sweepProgress, syncCycleMs } from '../lib/tracker';
 import type { Section } from '../lib/sections';
 import type { TrackerPlatform, TrackerProjectRow } from '../../../shared/types';
+import { useTimeZone } from '../hooks/TimeZoneContext';
 
 /**
  * The tracker chip (.claude/DESIGN.md §8.0's shell strip; the tracker strip spec, §2) — login, a `POLL` line timer counting down to the server's next
@@ -27,6 +28,7 @@ import type { TrackerPlatform, TrackerProjectRow } from '../../../shared/types';
  * here would be the in-page switch that rule forbids. The popover is a reading; the Settings card is one rail click away.
  */
 export function TrackerChip({ section }: { section: Section }) {
+  const { zone } = useTimeZone();
   const { data } = useTrackersContext();
   const visible = data !== null && hasTracker(data.projects);
   // A one-second tick is what a seconds readout needs, and it runs only while a tracker exists — a machine with no tracker pays for no interval.
@@ -49,7 +51,7 @@ export function TrackerChip({ section }: { section: Section }) {
   // The no-token state reads `hasToken`, never `access`: a stale payload can say every row is `no-token` while the platform already has one, and the
   // pip must say which fix is still owed. `access` is what the red pip reads.
   const pip = noToken ? 'amber' : githubRows.some((r) => r.access !== 'ok') ? 'red' : null;
-  const usage = noToken ? null : apiUsage(plat);
+  const usage = noToken ? null : apiUsage(plat, zone);
 
   return (
     <div className="tracker-chip-root">
@@ -147,7 +149,8 @@ function TrackerPopover({
   anchor: RefObject<HTMLElement>;
   onClose: () => void;
 }) {
-  const usage = platform === undefined ? null : apiUsage(platform);
+  const { zone } = useTimeZone();
+  const usage = platform === undefined ? null : apiUsage(platform, zone);
   const connected = `GitHub · ${rows.length} ${rows.length === 1 ? 'repo' : 'repos'} connected`;
 
   return (

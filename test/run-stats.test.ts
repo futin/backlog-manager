@@ -16,6 +16,12 @@ import { RUN_STALE_MS } from '../shared/types';
 import type { ArchiveQueueItem, OrchestratorArchiveRun, RunQueueItem, RunSessionUsage, RunStage } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * The derivations behind the Runs section's stat tiles and per-item stage
  * bars (Tasks 6 and 7 consume this module by these exact names). Every case
  * pins a fixed `now`/set of stamps rather than the real clock, matching
@@ -812,21 +818,41 @@ const NOON_SEP_1_2026 = new Date(2026, 8, 1, 12, 0, 0).toISOString();
 
 describe('dayKey', () => {
   it('formats a parseable stamp as a local YYYY-MM-DD key', () => {
-    expect(dayKey(NOON_SEP_1_2026)).toBe('2026-09-01');
+    expect(dayKey(NOON_SEP_1_2026, ZONE)).toBe('2026-09-01');
   });
 
   it('is null for a stamp that does not parse', () => {
-    expect(dayKey('garbage')).toBeNull();
+    expect(dayKey('garbage', ZONE)).toBeNull();
   });
 });
 
 describe('dayLabel', () => {
   it('formats a parseable stamp as "weekday day month", lowercase', () => {
-    expect(dayLabel(NOON_SEP_1_2026)).toBe('tue 1 sep');
+    expect(dayLabel(NOON_SEP_1_2026, ZONE)).toBe('tue 1 sep');
   });
 
   it('is null for a stamp that does not parse', () => {
-    expect(dayLabel('garbage')).toBeNull();
+    expect(dayLabel('garbage', ZONE)).toBeNull();
+  });
+});
+
+// #241: the day a run belongs to is read in the shared zone — half past ten at night in UTC is already Wednesday in Belgrade.
+describe('dayKey / dayLabel in a named zone', () => {
+  const stamp = '2026-09-01T22:30:00Z';
+
+  it('Belgrade reads the next day', () => {
+    expect(dayKey(stamp, 'Europe/Belgrade')).toBe('2026-09-02');
+    expect(dayLabel(stamp, 'Europe/Belgrade')).toBe('wed 2 sep');
+  });
+
+  it('UTC reads the same day', () => {
+    expect(dayKey(stamp, 'UTC')).toBe('2026-09-01');
+    expect(dayLabel(stamp, 'UTC')).toBe('tue 1 sep');
+  });
+
+  it('an unparseable stamp is null in any zone', () => {
+    expect(dayKey('garbage', 'Europe/Belgrade')).toBeNull();
+    expect(dayLabel('garbage', 'Europe/Belgrade')).toBeNull();
   });
 });
 

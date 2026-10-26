@@ -2517,7 +2517,14 @@ would silently reset every other repo to `15s`; reading it as the default is har
 a fixed object, so validation is per entry: a bad value costs its own repo its setting, never a neighbour's. No skill reads it; `backlog.mjs` learns of it only
 through the 409 the server answers while a repo is `off`.
 
-Two switches guard this file's effect, and they answer different questions. `WatchdogConfig.enabled` (the file's own field, read fresh on every tick) is the
+`settings/timezone.json` (#241, `server/src/settings/timezone-config.util.ts`) holds the one zone every device draws the board in. It joins `settings/` for
+`watchdog.json`'s reason — a value a person sets from Settings, which a server-side write must reach — and follows its posture: read fresh, never cached, every
+failure reading as the default (`null`, each browser's own zone), one writer (`writeTimeZone`, reached only from `POST /api/settings/timezone`), temp file plus
+rename. It departs from `tick.json`, `jira.json` and `dashboards.json` on one point: a file that does not parse is REPLACED by the next write rather than
+refused, because it holds one value and the write replaces that value whole — there is nothing a write could lose, and the person picking a zone is the repair.
+No skill reads it.
+
+Two switches guard `watchdog.json`, and they answer different questions. `WatchdogConfig.enabled` (the file's own field, read fresh on every tick) is the
 _user's_ switch: a disabled watchdog still arms, ticks and reports the crashed run it would have resumed — it only withholds the spawn, which is what keeps the
 strip's "off — resume by hand" clause an honest fact rather than a guess produced by nothing watching at all. `BM_WATCHDOG=off` is the _operator's_ switch: no
 timer, no reads, no spawn, full stop. It exists for one concrete, verified reason — the sweeper's boot-time scan reads `orchHome()`, which for any jest suite
@@ -4488,7 +4495,8 @@ them git spawns, which amplified the stall. `lib/coalesced-poll.ts` (`createCoal
 shell `hooks/useCoalescedFetch.ts` are now the one home of poll scheduling for `useOrchestratorRuns`, `useBoard`, `useWatchdog`, `useAgents`, `useTicks` and — since
 #285 — `useOrchestratorArchive`; none of them holds a `setInterval`. Every one of those six — and, since Settings › Dashboards, `useMachines`, a seventh that polls a minute while that page is open — enters through `hooks/useRefreshing.ts` (#285), which owns the
 board's mount + window-focus triggers once instead of each hook writing the two effects by hand; `useCoalescedFetch` stays the lower layer, used directly by
-`useJiraBoard`, which triggers on its board id rather than on mount and focus.
+`useJiraBoard`, which triggers on its board id rather than on mount and focus. `TimeZoneProvider` (#241) enters through `useRefreshing` too, with no `armed`
+like `useOrchestratorArchive`: it reads the shared zone on mount and focus and never polls, since the value moves only on a person's pick.
 
 **The timer is armed by an answer.** The next tick is a `setTimeout` set when the current request settles, `intervalMs` later, so a slow answer slows the poll
 instead of piling onto it and at most one timer is ever pending. Each hook keeps its own `armed` condition for "something is moving worth polling" exactly as

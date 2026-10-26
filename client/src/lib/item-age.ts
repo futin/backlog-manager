@@ -1,3 +1,5 @@
+import { zonedParts } from './time-zone';
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
@@ -104,21 +106,39 @@ export const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', '
  * showing what is actually on the line is what lets them find and fix it;
  * `''` stays `''` so the caller can drop the separator along with it.
  *
- * `created` has two shapes, the same fork `started` has above. A files item's is the bare `YYYY-MM-DD` `backlog.mjs new` writes, parsed as UTC midnight
- * exactly as before. A tracker item's is GitHub's full `created_at` stamp (#237 — kept whole so "Newest first" can order same-day issues), handed to
- * `Date.parse` as-is. Both then print through the same UTC month/day/year below, so a stamp reads as its UTC date: `2026-10-01T23:30:00-02:00` is `oct 2`,
- * which is why this never splits the string on `T` and trusts the left half.
+ * `created` has two shapes, the same fork `started` has above, and they are read two ways (#241, A5):
+ * - A files item's is the bare `YYYY-MM-DD` `backlog.mjs new` writes. That is a calendar date with no instant behind it, so it prints literally — parsed as
+ *   UTC midnight and read back through the UTC getters, exactly as before, so `2026-10-01` is `oct 1` in every zone. Its year test reads `now` in UTC too.
+ * - A tracker item's (and a Jira issue's) is a full stamp — GitHub's `created_at`, kept whole since #237 so "Newest first" can order same-day issues. That
+ *   IS an instant, so it reads in the board's shared `zone`, the one every run clock and day group reads in: `2026-09-30T23:30:00Z` is `oct 1` in
+ *   `Europe/Belgrade` and `sep 30` in `UTC`. It used to be pinned to UTC, a workaround for "two devices disagree" that the shared zone now solves properly;
+ *   leaving it on UTC would draw two conventions on one board. Its year test reads `now` in the same zone. It is never split on `T` with the left half
+ *   trusted, because that half is the date in whatever offset the stamp was written with, not in `zone`.
  */
-export function formatCreated(created: string, now: number = Date.now()): string {
-  const then = Date.parse(DATE_ONLY.test(created) ? `${created}T00:00:00Z` : created);
+export function formatCreated(created: string, now: number, zone: string): string {
+  const bare = DATE_ONLY.test(created);
+  const then = Date.parse(bare ? `${created}T00:00:00Z` : created);
   if (Number.isNaN(then)) return created;
 
-  const date = new Date(then);
-  const month = MONTHS[date.getUTCMonth()];
-  const day = date.getUTCDate();
-  const year = date.getUTCFullYear();
+  let month: string;
+  let day: number;
+  let year: number;
+  let thisYear: number;
+  if (bare) {
+    const date = new Date(then);
+    month = MONTHS[date.getUTCMonth()];
+    day = date.getUTCDate();
+    year = date.getUTCFullYear();
+    thisYear = new Date(now).getUTCFullYear();
+  } else {
+    const p = zonedParts(then, zone);
+    month = MONTHS[p.month - 1];
+    day = p.day;
+    year = p.year;
+    thisYear = zonedParts(now, zone).year;
+  }
 
-  if (year === new Date(now).getUTCFullYear()) return `${month} ${day}`;
+  if (year === thisYear) return `${month} ${day}`;
   return `${month} ${day} '${`${year}`.slice(-2)}`;
 }
 

@@ -9,6 +9,7 @@ import { Sheet } from '../ui/Sheet';
 import { ticked } from './DashboardSheet';
 import { AgentsStatusLines, DispatchSetupSteps } from './DispatchStatus';
 import { MachineIdentity, type ListMachine } from './DashboardsList';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * The selected machine's detail on Settings › Dashboards (spec 2026-10-23 "The page" › Detail; a `Sheet`, `.claude/DESIGN.md` §8.2 and §8.6, with §7's
@@ -45,10 +46,11 @@ function TokenLine({ tokenVar, set }: { tokenVar: string; set: boolean }) {
 }
 
 /**
- * Both windows full width, each with its reset as a local clock time under it (`resetClockText` — absolute, unlike the launch sheet's relative
- * `fiveHourResetText`). No figure: one muted line, `noUsageText`'s — specific only where the server already knows (unreachable, stale).
+ * Both windows full width, each with its reset as a clock time in the shared zone (#241) under it (`resetClockText` — absolute, unlike the launch sheet's
+ * relative `fiveHourResetText`). No figure: one muted line, `noUsageText`'s — specific only where the server already knows (unreachable, stale).
  */
 function Usage({ status, now }: { status: MachineStatus | null; now: number }) {
+  const { zone } = useTimeZone();
   if (status === null) return <p className="dash-page-muted">checking…</p>;
   const { usage } = status;
   if (usage === null) return <p className="dash-page-muted">{noUsageText(status)}</p>;
@@ -59,7 +61,7 @@ function Usage({ status, now }: { status: MachineStatus | null; now: number }) {
   return (
     <>
       {windows.map(({ label, w }) => {
-        const reset = resetClockText(w.resetsAt, now);
+        const reset = resetClockText(w.resetsAt, now, zone);
         return (
           <span key={label} className="dash-page-window">
             <Meter label={label} value={`${usagePercent(w.pct)}%`} fraction={w.pct / 100} tone={usageTone(w.pct)} width="fill" />

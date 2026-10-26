@@ -13,6 +13,7 @@ import { JiraProvider, useJiraContext } from './hooks/JiraContext';
 import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
 import { TrackersProvider } from './hooks/TrackersContext';
+import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
 import { usePersistedState } from './hooks/usePersistedState';
 import { setRunsMode } from './hooks/useRunsMode';
@@ -66,11 +67,14 @@ export function App() {
     <SettingsProvider>
       {/* The shell's one `useTrackers` (the tracker strip spec, §4): the strip chip and Settings' Trackers card read one answer on one clock. */}
       <TrackersProvider>
-        {/* The shell's one `useJira` (Jira phase 2, spec §6.1), beside the trackers' for the same reason: the rail's Jira row, the shell's hold-and-fall
-            below, the chip and both Jira pages read one answer on one clock. Above `AppShell`, because the fall is decided there. */}
-        <JiraProvider>
-          <AppShell />
-        </JiraProvider>
+        {/* The board's one shared time zone (#241), beside the trackers' for the same reason: every clock, day group and week window reads one answer. */}
+        <TimeZoneProvider>
+          {/* The shell's one `useJira` (Jira phase 2, spec §6.1), beside the trackers' for the same reason: the rail's Jira row, the shell's hold-and-fall
+              below, the chip and both Jira pages read one answer on one clock. Above `AppShell`, because the fall is decided there. */}
+          <JiraProvider>
+            <AppShell />
+          </JiraProvider>
+        </TimeZoneProvider>
       </TrackersProvider>
     </SettingsProvider>
   );

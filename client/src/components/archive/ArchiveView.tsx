@@ -22,6 +22,7 @@ import { ItemCard } from '../board/ItemCard';
 import { ItemModal } from '../board/ItemModal';
 import { LaunchSheet } from '../board/LaunchSheet';
 import type { BacklogItem, Section } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * Archive — the board's second surface: what is still actionable in principle
@@ -89,6 +90,7 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
 
 /** `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this view's run poll is the one the shell reads, so `App` adds none. */
 export default function ArchiveView({ onWorking }: { onWorking?: (working: boolean) => void } = {}) {
+  const { zone } = useTimeZone();
   const { items: index, projects, loading, error } = useBoard();
   /* Only `staleDays` is read, but the whole control comes back — `useSettings`
      falls back to the defaults outside a provider (see its own comment), which
@@ -297,7 +299,7 @@ export default function ArchiveView({ onWorking }: { onWorking?: (working: boole
                structure, and `groupByMonth` owns all three ordering rules
                (newest month first, undated last, newest-touched first inside a
                group). See lib/item-month.ts. */
-            const groups = groupByMonth(visible.filter((i) => i.section === col.section));
+            const groups = groupByMonth(visible.filter((i) => i.section === col.section), zone);
             /* Summed across the groups rather than taken off the filtered list,
                because `BoardColumn`'s count is a count of CARDS and what this
                column wraps them in is month groups — see that component's own

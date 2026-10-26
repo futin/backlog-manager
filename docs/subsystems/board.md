@@ -240,7 +240,8 @@ second copy of the run list; Ticks reads its own `/api/ticks` through `useTicks`
 
 **History** — the section's default, and named for what a reader arrives looking for rather than for its contents, which are three parts present and one part
 past. Its band counts all three states at once (`3 live · 1 starting · 28 past`) and carries the project select and the four-step range control (`RUN_RANGES`,
-`lib/run-range.ts`, calendar-aligned local-time windows on a run's `startedAt`), which scopes the figures, both lists and the wide cell together.
+`lib/run-range.ts`, calendar-aligned windows on a run's `startedAt`, read in the shared time zone since #241), which scopes the figures, both lists and the wide
+cell together.
 
 Directly under the band, the **figure strip**: five cells — runs, completed / queued, avg item work, rework / completed, verify pass — each a label, a value and
 a line saying what the figure above it means, all read from what `aggregateRuns` (`lib/run-stats.ts`) returns and nothing else. The sixth cell is full width and
@@ -386,8 +387,16 @@ to `settings/tick.json` through `POST /api/ticks/config` and drawn from the POST
 the server reports `source: "unreadable"` the `Select` is disabled and its hint names the file, because every write would be a 409; a refused save renders one
 red line under the control while the value shown stays the one the server holds.
 
-The watchdog card is one of four places Settings writes to the server — the Trackers card's sync picker above, since #17, the `Backlog tick` card's threshold,
-and the Dashboards page's four `POST /api/dashboards/*` writes — four knobs that
+The `Time zone` card (`TimeZoneGroup`, #241) sits under the tick breaker, the third host control in that column: one `Select` over the platform's zones
+(`timeZoneOptions`, plus `UTC`, plus a stored zone this browser does not list), its first option `Each browser's own (<this browser's zone>)` — unset, `null` on
+the wire. It writes `settings/timezone.json` through `POST /api/settings/timezone`, drawn from the POST's own canonical answer, and a refused save renders the
+same one red line. The value is the zone EVERY reading on the board is drawn in — a run's clocks, the Runs list's day groups and headings, the range windows,
+the tracker's and a machine's reset clocks, a card's created date for a full stamp, Archive's month groups — so a phone, a laptop and a tailnet browser read one
+clock for one run. It is read once per page load by the shell's `TimeZoneProvider` and handed out by `useTimeZone()`; `lib/time-zone.ts` is the one home of the
+zone math, and `test/time-zone-guard.test.ts` refuses a `Date`'s local getters and setters and the locale date/time formatters in every other client file.
+
+The watchdog card is one of five places Settings writes to the server — the Trackers card's sync picker above, since #17, the `Backlog tick` card's threshold,
+the `Time zone` card's zone (#241), and the Dashboards page's four `POST /api/dashboards/*` writes — four knobs that
 live in `settings/watchdog.json` beside the registry rather than in this browser, plus a `Live view` link that opens Runs › Watchdog through the same pair the
 rail's tree calls. Because it writes, it can be refused, like the sync picker: a rejected `POST /api/agents/watchdog/config` renders one red line in its own row directly under the control it was refused for, while
 every knob keeps showing the value the server actually holds. That is a separate hook field (`saveError`) from the failed-GET `error` beside it, because a
@@ -496,11 +505,20 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `sortItems`, pinned directly by `test/board-sort.test.ts`; `BoardView` keeps the storage keys, the popover's labels and the stored state.
 - `lib/runs-list.ts` (#284) — the Runs page's run-list derivations, pure: `mergeRuns` (the archive listing, the live poll and other machines' runs folded into
   one row list), `splitLive`, `sortByStartedAtDesc`, `groupByDay`, `queueCounts`, pinned directly by `test/runs-list.test.ts`; `RunsView` is the one consumer.
+- `lib/time-zone.ts` (#241) — the one home of wall-clock and calendar math: `zonedParts`, `startOfZonedDay`, `zonedDayStart` (a calendar date's first
+  instant, DST and midnight-skipping days included), `formatZonedClock`, `browserTimeZone` and `timeZoneOptions`, every one taking the zone as an argument.
+  `run-time`, `run-stats`, `run-range`, `runs-list`, `run-detail`, `run-watchdog`, `tracker`, `dashboards`, `item-age`, `item-month` and `jira` read dates
+  through it and take `zone` as a required parameter, never a default — so a caller cannot fall back to the browser's zone by forgetting it.
+  `test/time-zone-guard.test.ts` reads every other client source for a `Date`'s local getters and setters and the locale date/time formatters.
+- `hooks/TimeZoneContext.tsx` (#241) — `TimeZoneProvider`, the shell's one read of `GET /api/settings/timezone` (through `useRefreshing` with no `armed`: mount
+  and window focus, never a poll — the value changes on a person's pick), and `useTimeZone()`: `{ zone, stored, browser, save, saveError }`, `zone` being
+  `stored ?? browser`. A component mounted without the provider reads the browser's zone, which is what the jsdom suites rely on.
 - `lib/coalesced-poll.ts` and `hooks/useCoalescedFetch.ts` (#277) — the one home of poll scheduling for `useAgents`, `useBoard`, `useOrchestratorRuns`,
   `useWatchdog`, `useTicks`, `useOrchestratorArchive` and `useMachines` (all through `useRefreshing`, below), and of `useJiraBoard` directly:
   one request in flight at a time, every trigger that lands during it folded into one follow-up, and the next timer armed when an answer settles
   rather than by the wall clock. Where a hook below says "poll", read a `setTimeout` chain re-armed `intervalMs` after each answer, never a `setInterval`.
-- `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines` among them.
+- `hooks/useRefreshing.ts` (#285) — `useCoalescedFetch` plus the board's mount + window-focus triggers, the one entry those pollers go through, `useMachines`
+  among them, and `TimeZoneProvider`'s read (#241), which like `useOrchestratorArchive` passes no `armed` and never polls.
 - `hooks/useFetched.ts` (#285) — the keyed one-shot read: `idle | pending | ok | failed`, a key change reads `pending` on the render that carries it, and a
   superseded or post-unmount answer sets nothing. `useProjectSources`, the item modal's body, `LaunchSheet`'s plan and branch list, `OrchestrateSheet`'s
   merge-check, uncommitted flag and branch list, `RunDetail`'s archived run, `JiraIssueModal`'s detail and worktrees, `JiraLaunchSheet`'s prompt preview and

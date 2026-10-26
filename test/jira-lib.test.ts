@@ -71,6 +71,12 @@ import type { JiraBoard, JiraBoardStatus, JiraIssue, JiraRepoRefs, JiraSkill, Ji
 import { daysAgoStamp } from './helpers/dates';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * The client's Jira derivations (Jira phase 2). Every case builds its stamps from the clock the assertion runs under (`test/helpers/dates.ts`, and
  * `now` below), never from an absolute literal: a fixture dated the day it was written is an expiry date, not a constant.
  */
@@ -216,12 +222,12 @@ describe('issueDatesLine', () => {
   it('is the created date and the relative age of updated, the modal\'s `created · updated` value', () => {
     const at = Date.parse('2026-10-16T12:00:00Z');
     const i = issue({ created: '2026-10-02T09:00:00Z', updated: new Date(at - 4 * MINUTE).toISOString() });
-    expect(issueDatesLine(i, at)).toBe(`${formatCreated(i.created, at)} · 4m`);
+    expect(issueDatesLine(i, at, ZONE)).toBe(`${formatCreated(i.created, at, ZONE)} · 4m`);
   });
 
   it('takes the year suffix of created from the now it is given', () => {
     const i = issue({ created: '2020-06-15T10:00:00.000Z', updated: '2020-06-16T10:00:00.000Z' });
-    expect(issueDatesLine(i, Date.parse('2026-12-01T00:00:00Z'))).toBe("jun 15 '20 · " + elapsedSince(i.updated, Date.parse('2026-12-01T00:00:00Z')));
+    expect(issueDatesLine(i, Date.parse('2026-12-01T00:00:00Z'), ZONE)).toBe("jun 15 '20 · " + elapsedSince(i.updated, Date.parse('2026-12-01T00:00:00Z')));
   });
 });
 

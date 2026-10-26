@@ -18,6 +18,12 @@ import { DEFAULT_WATCHDOG_CONFIG, WATCHDOG_EVENT_CAP } from '../shared/types';
 import type { OrchestratorRunsPayload, RunQueueItem, RunStage, RunWatchdog, WatchdogEvent, WatchdogEventKind, WatchdogStatus } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * `WatchdogMonitor` (task-18, spec §3) driven standalone on its own two
  * props, with only `GET /api/agents/watchdog` stubbed — the component owns
  * `useWatchdog` and takes the live runs array from `RunsView` rather than
@@ -321,7 +327,7 @@ describe('WatchdogMonitor', () => {
     // the whole reason the monitor reads that function is that the strip and
     // this surface must not be able to disagree, and a hand-copied string
     // here would let them. The `watchdog:` prefix stays for the same reason.
-    expect(within(row).getByTestId('watchdog-clause')).toHaveTextContent(watchdogClause(annotation, NOW));
+    expect(within(row).getByTestId('watchdog-clause')).toHaveTextContent(watchdogClause(annotation, NOW, ZONE));
     expect(within(row).getByTestId('watchdog-attempts')).toHaveAttribute('aria-label', 'attempt 1 of 2');
     expect(within(row).getByTestId('watchdog-grace')).toHaveTextContent('leave alone 8m more');
     expect(row).toHaveTextContent('session sess-1');
@@ -463,14 +469,14 @@ describe('WatchdogMonitor', () => {
         .map((c) => c.textContent);
 
     expect(cells(rows[1])).toEqual([
-      formatClock(events[0].at),
+      formatClock(events[0].at, ZONE),
       `${WATCHDOG_KIND_GLYPH.spawned}${events[0].kind}`,
       projectLabel('/abs/alpha'),
       'run-a',
       events[0].detail
     ]);
     expect(cells(rows[2])).toEqual([
-      formatClock(events[1].at),
+      formatClock(events[1].at, ZONE),
       `${WATCHDOG_KIND_GLYPH.idle}${events[1].kind}`,
       projectLabel('/abs/beta'),
       '—',
@@ -479,7 +485,7 @@ describe('WatchdogMonitor', () => {
     // A sweeper-level event (arming, which is about no one run) prints an
     // em dash in both keyed cells rather than leaving them blank — a blank
     // cell reads as missing data, a dash as "not applicable".
-    expect(cells(rows[3])).toEqual([formatClock(events[2].at), `${WATCHDOG_KIND_GLYPH.armed}${events[2].kind}`, '—', '—', events[2].detail]);
+    expect(cells(rows[3])).toEqual([formatClock(events[2].at, ZONE), `${WATCHDOG_KIND_GLYPH.armed}${events[2].kind}`, '—', '—', events[2].detail]);
   });
 
   // --- 14b: the badge is the column the feed always carried and never drew --

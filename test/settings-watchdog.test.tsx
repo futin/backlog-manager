@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -157,7 +157,8 @@ describe('WatchdogGroup', () => {
     // actually landed, so waiting on ONE of them is what waits for the fetch.
     expect(await screen.findByLabelText('Enabled')).toBeInTheDocument();
     expect(screen.getByText(GROUP_TITLE)).toBeInTheDocument();
-    expect(screen.getByText(GROUP_SCOPE)).toBeInTheDocument();
+    // Read inside the watchdog's own sheet: since #241 the `Time zone` card on the same page says `this server` too.
+    expect(within(screen.getByText(GROUP_TITLE).closest('.set-group') as HTMLElement).getByText(GROUP_SCOPE)).toBeInTheDocument();
 
     // The hint is read as running text — same pattern
     // test/settings-view.test.tsx already relies on for AgentsStatusLines'

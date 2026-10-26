@@ -3,6 +3,7 @@ import { formatClock, formatSpan, inStageMs, stepperDots, stepperTerminal } from
 import type { StageSpan } from '../../lib/run-stats';
 import type { StepperDot } from '../../lib/run-time';
 import type { MergeMode, RunQueueItem } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * `StageTrack`: the seven-node, full-width stage stepper for ONE run queue
@@ -224,7 +225,8 @@ function trackValue(
   item: Pick<RunQueueItem, 'stage' | 'stageAt'>,
   now: number | null,
   spans: readonly StageSpan[],
-  terminal: 'merged' | 'branched'
+  terminal: 'merged' | 'branched',
+  zone: string
 ): { text: string; modifier: 'none' | 'when' | null } {
   if (dot.state === 'current' || dot.state === 'stalled') {
     const ms = inStageMs(item, now);
@@ -232,7 +234,7 @@ function trackValue(
   }
 
   if (dot.stage === terminal && dot.state !== 'hollow') {
-    const clock = formatClock(item.stageAt[terminal]);
+    const clock = formatClock(item.stageAt[terminal], zone);
     // A `null` clock deliberately does NOT return from here — it continues
     // to the span lookup below and, failing that, to the plain `-none` of
     // rung 4. See this function's doc comment, rung 2.
@@ -256,6 +258,7 @@ export function StageTrack({
   live: boolean;
   mergeModeEffective: MergeMode;
 }): JSX.Element | null {
+  const { zone } = useTimeZone();
   if (item.stage === 'ungroomed') return null;
 
   // The run's own success exit — usually, but this item's OWN exit when it
@@ -265,7 +268,7 @@ export function StageTrack({
   // moved on to the other mode.
   const terminal = stepperTerminal(item, mergeModeEffective);
 
-  const dots = stepperDots(item, live, terminal);
+  const dots = stepperDots(item, live, terminal, zone);
   const spans = itemStageSpans(item);
   const lastVisited = dots.reduce((last, dot, i) => (dot.state !== 'hollow' ? i : last), -1);
 
@@ -281,7 +284,7 @@ export function StageTrack({
         // reading (`stepperDots`'s own comment calls it "the most useful thing
         // the row says").
         const drawn = nodeState(dot, i, lastVisited, item.fixLoops);
-        const value = trackValue(dot, item, now, spans, terminal);
+        const value = trackValue(dot, item, now, spans, terminal, zone);
         const valueClass = ['run-track-val', value.modifier !== null && `run-track-val-${value.modifier}`].filter(Boolean).join(' ');
 
         return (

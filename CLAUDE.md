@@ -52,7 +52,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   server does write, and `POST /api/trackers/sync`, which writes the third), `hub/` (three read-only Lookout widgets at `/api/hub/widgets` via
   `lookout-widgets`, no actions), `releases/` (`GET /api/releases`, this checkout's release tags for the rail's version chip — read-only, git only — not an
   outbound-calling module), `tick/` (`tick.json`'s reader/writer and the three `/api/ticks` routes — read-only on `~/.backlog-manager/tick/`, not an
-  outbound-calling module either), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
+  outbound-calling module either), `settings/` (`settings/timezone.json`'s reader/writer and `GET`/`POST /api/settings/timezone`, the board's one shared
+  time zone), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
   route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings) that ends in a version chip opening the What's new

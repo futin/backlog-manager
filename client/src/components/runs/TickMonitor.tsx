@@ -11,6 +11,7 @@ import { Ledger } from '../ui/Ledger';
 import { Pill } from '../ui/Pill';
 import { Sheet, SheetHead } from '../ui/Sheet';
 import type { TickProject } from '../../../../shared/types';
+import { useTimeZone } from '../../hooks/TimeZoneContext';
 
 /**
  * Runs › Ticks (tick-breaker spec, "Client"; .claude/DESIGN.md §8.4 and §8.4.2) — the third Runs page, built as the Watchdog page is: its own `Band`
@@ -35,6 +36,7 @@ import type { TickProject } from '../../../../shared/types';
  * with no new payload (a tick ages out of the window), so the clock is enabled at a minute — the cadence the figure's own resolution deserves.
  */
 export function TickMonitor() {
+  const { zone } = useTimeZone();
   const { data, error, saveError, reset } = useTicks({ live: true });
   const now = useNow(true, 60_000);
 
@@ -159,7 +161,7 @@ export function TickMonitor() {
                   {activity.map((e, i) => (
                     <tr key={`${e.root}-${e.at}-${i}`}>
                       <td>
-                        <time dateTime={e.at}>{formatClock(e.at) ?? '—:—'}</time>
+                        <time dateTime={e.at}>{formatClock(e.at, zone) ?? '—:—'}</time>
                       </td>
                       <td>
                         {/* Glyph AND word, so the tone is never the only carrier; an outcome this build has no name for prints as it came. */}
@@ -189,6 +191,7 @@ export function TickMonitor() {
 
 /** One project's row — a `<div>` for the reason `WatchdogMonitor`'s rows are: the body and the Reset are two controls' worth of layout, never nested. */
 function TickRow({ project: p, pending, failure, onReset }: { project: TickProject; pending: boolean; failure: string | null; onReset: () => void }) {
+  const { zone } = useTimeZone();
   if (p.error !== undefined) {
     // Muted and button-less: an unreadable `state.json` has no verdict to reset, and a Reset on it would clear nothing a person could see.
     return (
@@ -225,14 +228,14 @@ function TickRow({ project: p, pending, failure, onReset }: { project: TickProje
         </span>
         {isHalted ? (
           <span className="watchdog-card-item">
-            {`${p.streak ?? 0} failures in a row since ${formatClock(p.haltedSince) ?? '—:—'}`}
+            {`${p.streak ?? 0} failures in a row since ${formatClock(p.haltedSince, zone) ?? '—:—'}`}
             {last !== undefined && ` · last: ${last.reason} on ${last.id}`}
           </span>
         ) : last === undefined ? (
           <span className="watchdog-card-beat">no tick yet</span>
         ) : (
           <span className="watchdog-card-item">
-            {`last tick ${formatClock(last.at) ?? '—:—'} · ${last.kind} ${last.id} → ${last.outcome} · ${p.streak ?? 0} failures in a row`}
+            {`last tick ${formatClock(last.at, zone) ?? '—:—'} · ${last.kind} ${last.id} → ${last.outcome} · ${p.streak ?? 0} failures in a row`}
           </span>
         )}
         {failure !== null && (

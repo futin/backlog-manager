@@ -9,6 +9,12 @@ import { formatClock, runClockMs } from '../client/src/lib/run-time';
 import type { ArchiveQueueItem, OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../shared/types';
 
 /**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
+/**
  * #271: `runDetailModel` is every header/summary reading of the Runs detail
  * sheet, derived without a render — so this suite runs under jest's default
  * `node` environment, and the absence of a jsdom docblock above is the point.
@@ -107,21 +113,21 @@ describe('runDetailModel — which tier the rows and the run come from', () => {
   it('1. a live entry wins over a fetched run', () => {
     const l = live([liveItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: 'T-live' }] })]);
     const fetched = run([liveItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: 'T-fetched' }] })]);
-    const m = runDetailModel({ summary: summary([archiveItem('a-1', 'merged')]), live: l, fetchedRun: fetched }, NOW);
+    const m = runDetailModel({ summary: summary([archiveItem('a-1', 'merged')]), live: l, fetchedRun: fetched }, NOW, ZONE);
     expect(m.rows[0].verify?.tail).toBe('T-live');
     expect(m.source).toBe(l);
   });
 
   it('2. with no live entry, the fetched run wins over the summary', () => {
     const fetched = run([liveItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true, tail: 'T-fetched' }] })]);
-    const m = runDetailModel({ summary: summary([archiveItem('a-1', 'merged')]), live: null, fetchedRun: fetched }, NOW);
+    const m = runDetailModel({ summary: summary([archiveItem('a-1', 'merged')]), live: null, fetchedRun: fetched }, NOW, ZONE);
     expect(m.rows[0].verify?.tail).toBe('T-fetched');
     expect(m.source).toBe(fetched);
   });
 
   it('3. with neither, the summary is the source and its rows carry no tail', () => {
     const s = summary([archiveItem('a-1', 'merged', { verification: [{ cmd: 'pnpm test', ok: true }] })]);
-    const m = runDetailModel({ summary: s, live: null, fetchedRun: null }, NOW);
+    const m = runDetailModel({ summary: s, live: null, fetchedRun: null }, NOW, ZONE);
     expect(m.rows[0].verify).toEqual({ cmd: 'pnpm test', ok: true, tail: null });
     expect(m.source).toBe(s);
   });
@@ -132,7 +138,7 @@ describe('runDetailModel — the chip row', () => {
 
   it('4. counts a fresh live run', () => {
     const l = live(sixLive(), { attention });
-    const m = runDetailModel({ summary: summary(sixArchive()), live: l, fetchedRun: null }, NOW);
+    const m = runDetailModel({ summary: summary(sixArchive()), live: l, fetchedRun: null }, NOW, ZONE);
     expect(m.merged).toBe(2);
     expect(m.branched).toEqual([m.rows[2]]);
     expect(m.branched[0].id).toBe('task-3');
@@ -147,17 +153,17 @@ describe('runDetailModel — the chip row', () => {
   it('5. a stale running entry is crashed and counts nothing as current', () => {
     const updatedAt = ago(46 * MIN);
     const l = live(sixLive(), { attention, fresh: false, updatedAt });
-    const m = runDetailModel({ summary: summary(sixArchive()), live: l, fetchedRun: null }, NOW);
+    const m = runDetailModel({ summary: summary(sixArchive()), live: l, fetchedRun: null }, NOW, ZONE);
     expect(m.active).toBe(0);
     expect(m.queued).toBe(0);
     expect(m.liveFresh).toBe(false);
     expect(m.crashed).toBe(true);
-    expect(m.lastHeartbeat).toBe(formatClock(updatedAt));
+    expect(m.lastHeartbeat).toBe(formatClock(updatedAt, ZONE));
     expect(m.statusNote).toBeNull();
   });
 
   it('6. an archived selection is never crashed and has nothing active', () => {
-    const m = runDetailModel({ summary: summary(sixArchive(), { status: 'done' }), live: null, fetchedRun: null }, NOW);
+    const m = runDetailModel({ summary: summary(sixArchive(), { status: 'done' }), live: null, fetchedRun: null }, NOW, ZONE);
     expect(m.crashed).toBe(false);
     expect(m.lastHeartbeat).toBeNull();
     expect(m.active).toBe(0);
@@ -168,17 +174,17 @@ describe('runDetailModel — the chip row', () => {
 describe('runDetailModel — the head and the facts strip', () => {
   it('7. a finished run reads wall, a finished stamp and its item count; a running one does not', () => {
     const updatedAt = ago(10 * MIN);
-    const done = runDetailModel({ summary: summary(sixArchive(), { status: 'done', updatedAt }), live: null, fetchedRun: null }, NOW);
+    const done = runDetailModel({ summary: summary(sixArchive(), { status: 'done', updatedAt }), live: null, fetchedRun: null }, NOW, ZONE);
     expect(done.finished).toBe(true);
-    expect(done.finishedClock).toBe(formatClock(updatedAt));
+    expect(done.finishedClock).toBe(formatClock(updatedAt, ZONE));
     expect(done.itemCount).toBe('6 items');
     expect(done.wallLabel).toBe('wall');
     expect(done.sub).toBe(`${RUN_ID} · 6 items`);
 
-    const one = runDetailModel({ summary: summary([archiveItem('a-1', 'merged')], { status: 'done' }), live: null, fetchedRun: null }, NOW);
+    const one = runDetailModel({ summary: summary([archiveItem('a-1', 'merged')], { status: 'done' }), live: null, fetchedRun: null }, NOW, ZONE);
     expect(one.itemCount).toBe('1 item');
 
-    const running = runDetailModel({ summary: summary(sixArchive()), live: live(sixLive()), fetchedRun: null }, NOW);
+    const running = runDetailModel({ summary: summary(sixArchive()), live: live(sixLive()), fetchedRun: null }, NOW, ZONE);
     expect(running.finished).toBe(false);
     expect(running.finishedClock).toBeNull();
     expect(running.itemCount).toBeNull();
@@ -189,7 +195,7 @@ describe('runDetailModel — the head and the facts strip', () => {
   it('8. the status note takes the first rung that is true', () => {
     const inFlight = (): RunQueueItem[] => [liveItem('task-1', 'merged'), liveItem('task-3', 'reviewing'), liveItem('task-5', 'pending')];
     const between = (): RunQueueItem[] => [liveItem('task-1', 'merged'), liveItem('task-5', 'pending')];
-    const note = (input: Parameters<typeof runDetailModel>[0]): string | null => runDetailModel(input, NOW).statusNote;
+    const note = (input: Parameters<typeof runDetailModel>[0]): string | null => runDetailModel(input, NOW, ZONE).statusNote;
 
     expect(note({ summary: summary([]), live: live(inFlight(), { pauseRequested: true }), fetchedRun: null })).toBe('pausing · finishes task-3');
     expect(note({ summary: summary([]), live: live(between(), { pauseRequested: true }), fetchedRun: null })).toBe('pausing · finishes the current item');
@@ -207,18 +213,18 @@ describe('runDetailModel — the head and the facts strip', () => {
         live: live([], { mergeMode: 'merge', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge of task-4' }),
         fetchedRun: null
       },
-      NOW
+      NOW, ZONE
     );
     expect(downgraded.modeNote).toBe('classifier denied the merge of task-4');
     expect(downgraded.modeLabel).toBe(mergeModeLabel('merge', 'branch'));
 
     const chosen = runDetailModel(
       { summary: summary([]), live: live([], { mergeMode: 'branch', mergeModeEffective: 'branch', mergeModeNote: 'left over' }), fetchedRun: null },
-      NOW
+      NOW, ZONE
     );
     expect(chosen.modeNote).toBeNull();
 
-    const plain = runDetailModel({ summary: summary([]), live: live([]), fetchedRun: null }, NOW);
+    const plain = runDetailModel({ summary: summary([]), live: live([]), fetchedRun: null }, NOW, ZONE);
     expect(plain.modeLabel).toBeNull();
     expect(plain.modeNote).toBeNull();
   });
@@ -226,13 +232,13 @@ describe('runDetailModel — the head and the facts strip', () => {
   it('10. question mode defaults to park, and decide earns the note that joins the mode note', () => {
     const absent = summary([]);
     delete (absent as Partial<OrchestratorArchiveRun>).questionMode;
-    const park = runDetailModel({ summary: absent, live: null, fetchedRun: null }, NOW);
+    const park = runDetailModel({ summary: absent, live: null, fetchedRun: null }, NOW, ZONE);
     expect(park.questionMode).toBe('park');
     expect(park.questionNote).toBeNull();
     expect(park.noteLine).toBeNull();
 
     const decideNote = 'decide mode — a question nobody could answer was decided by the run, not parked';
-    const decide = runDetailModel({ summary: summary([], { questionMode: 'decide' }), live: null, fetchedRun: null }, NOW);
+    const decide = runDetailModel({ summary: summary([], { questionMode: 'decide' }), live: null, fetchedRun: null }, NOW, ZONE);
     expect(decide.questionMode).toBe('decide');
     expect(decide.questionNote).toBe(decideNote);
 
@@ -242,7 +248,7 @@ describe('runDetailModel — the head and the facts strip', () => {
         live: live([], { questionMode: 'decide', mergeModeEffective: 'branch', mergeModeNote: 'classifier denied the merge of task-4' }),
         fetchedRun: null
       },
-      NOW
+      NOW, ZONE
     );
     expect(both.noteLine).toBe(`classifier denied the merge of task-4 · ${decideNote}`);
   });
@@ -250,7 +256,7 @@ describe('runDetailModel — the head and the facts strip', () => {
   it('11. the cost line sums the queue, pluralises sessions, and is null with no usage at all', () => {
     const one = runDetailModel(
       { summary: summary([]), live: live([liveItem('a-1', 'merged', { usage: [usageEntry(1.25, 40)] }), liveItem('a-2', 'skipped')]), fetchedRun: null },
-      NOW
+      NOW, ZONE
     );
     expect(one.usageLine).toBe([formatUsd(1.25), formatTurns(40), '1 session'].join(' · '));
 
@@ -260,18 +266,18 @@ describe('runDetailModel — the head and the facts strip', () => {
         live: live([liveItem('a-1', 'merged', { usage: [usageEntry(1, 30)] }), liveItem('a-2', 'merged', { usage: [usageEntry(0.25, 10)] })]),
         fetchedRun: null
       },
-      NOW
+      NOW, ZONE
     );
     expect(two.usageLine).toBe([formatUsd(1.25), formatTurns(40), '2 sessions'].join(' · '));
 
-    const none = runDetailModel({ summary: summary([]), live: live([liveItem('a-1', 'merged')]), fetchedRun: null }, NOW);
+    const none = runDetailModel({ summary: summary([]), live: live([liveItem('a-1', 'merged')]), fetchedRun: null }, NOW, ZONE);
     expect(none.runUsage).toBeNull();
     expect(none.usageLine).toBeNull();
   });
 
   it('12. the controls get the live entry by reference, or an honest stand-in without one', () => {
     const s = summary([archiveItem('task-1', 'merged')], { status: 'paused' });
-    const stand = runDetailModel({ summary: s, live: null, fetchedRun: null }, NOW);
+    const stand = runDetailModel({ summary: s, live: null, fetchedRun: null }, NOW, ZONE);
     expect(stand.controlsRun).toEqual({
       status: 'paused',
       project: s.project,
@@ -282,11 +288,11 @@ describe('runDetailModel — the head and the facts strip', () => {
     });
 
     const l = live([liveItem('task-1', 'reviewing')]);
-    expect(runDetailModel({ summary: s, live: l, fetchedRun: null }, NOW).controlsRun).toBe(l);
+    expect(runDetailModel({ summary: s, live: l, fetchedRun: null }, NOW, ZONE).controlsRun).toBe(l);
   });
 
   it('13. the item clock is clamped for a run that is over, and now is not', () => {
-    const m = runDetailModel({ summary: summary([], { status: 'aborted', updatedAt: ago(10 * MIN) }), live: null, fetchedRun: null }, NOW);
+    const m = runDetailModel({ summary: summary([], { status: 'aborted', updatedAt: ago(10 * MIN) }), live: null, fetchedRun: null }, NOW, ZONE);
     expect(m.clock).toBe(runClockMs(m.source, NOW));
     expect(m.clock).not.toBeNull();
     expect(m.clock as number).toBeLessThan(NOW);

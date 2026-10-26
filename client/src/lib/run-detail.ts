@@ -147,7 +147,7 @@ export type RunDetailModel = ReturnType<typeof runDetailModel>;
  * so the model is a pure function of its arguments — the same instant every
  * reading below shares, for the reason the component's `useNow` comment gives.
  */
-export function runDetailModel(input: RunDetailInput, now: number) {
+export function runDetailModel(input: RunDetailInput, now: number, zone: string) {
   const { summary, live, fetchedRun } = input;
 
   // The file header's "Data source" section names the rule; `pickAuthority`
@@ -262,7 +262,7 @@ export function runDetailModel(input: RunDetailInput, now: number) {
   const active = liveFresh ? live.queue.filter((q) => ACTIVE_RUN_STAGES.includes(q.stage)).length : 0;
   const queued = liveFresh ? live.queue.filter((q) => q.stage === 'pending').length : 0;
 
-  const startedClock = formatClock(authority.startedAt);
+  const startedClock = formatClock(authority.startedAt, zone);
   const wall = runWallMs(authority, now);
 
   // `mergeMode`/`mergeModeEffective`/`mergeModeNote` are read off `source`
@@ -315,7 +315,7 @@ export function runDetailModel(input: RunDetailInput, now: number) {
   // Read off `live`, never `authority`: an archive record carries no `fresh`
   // field, so it has no heartbeat to be judged crashed on.
   const crashed = live !== null && isCrashed(live);
-  const lastHeartbeat = crashed && live !== null ? formatClock(live.updatedAt) : null;
+  const lastHeartbeat = crashed && live !== null ? formatClock(live.updatedAt, zone) : null;
 
   // task-27. Off `source` — `authority` is the same object narrowed to
   // `RunFields`, which names no queue — so this total comes from the same
@@ -332,7 +332,7 @@ export function runDetailModel(input: RunDetailInput, now: number) {
   // silently read as finished here, and `running`/`paused` are the two this
   // sheet already forks on everywhere else.
   const finished = authority.status !== 'running' && authority.status !== 'paused';
-  const finishedClock = finished ? formatClock(authority.updatedAt) : null;
+  const finishedClock = finished ? formatClock(authority.updatedAt, zone) : null;
   // The head's own sub line: the run id, and the item count ONLY once the run
   // is over (DESIGN.md §8.4.1). While it is live the count is still moving and
   // the chip row below already carries every number that matters about it.

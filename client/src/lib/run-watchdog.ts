@@ -95,16 +95,18 @@ export function isCrashed(run: { status: OrchestratorRun['status']; fresh: boole
  * exists — a caller renders nothing for an empty string exactly as it
  * always has for a `null`.
  *
- * `now` is accepted (and defaulted to the real clock) for the same reason
- * every "describe a moment in time" function in this codebase does —
- * `elapsedSince` (item-age.ts) is the precedent — even though none of the
- * five phrasings below actually read it: the one that touches a clock at
- * all (`lastSpawnAt`) prints its own absolute wall time via `formatClock`,
- * not an age relative to now. Keeping the parameter is what lets a later
- * phrasing (say, "spawned Nm ago") add a relative reading without a
- * signature change breaking every caller that already has one pinned.
+ * `now` is accepted for the same reason every "describe a moment in time"
+ * function in this codebase does — `elapsedSince` (item-age.ts) is the
+ * precedent — even though none of the five phrasings below actually read it:
+ * the one that touches a clock at all (`lastSpawnAt`) prints its own absolute
+ * wall time via `formatClock`, in the board's shared `zone` (#241), not an
+ * age relative to now. Keeping the parameter is what lets a later phrasing
+ * (say, "spawned Nm ago") add a relative reading without a signature change
+ * breaking every caller that already has one pinned. It lost its `Date.now()`
+ * default when `zone` arrived behind it: a required parameter cannot follow a
+ * defaulted one without every caller passing `undefined` to reach it.
  */
-export function watchdogClause(w: RunWatchdog | undefined, now: number = Date.now()): string {
+export function watchdogClause(w: RunWatchdog | undefined, now: number, zone: string): string {
   void now;
 
   if (w === undefined) return '';
@@ -118,7 +120,7 @@ export function watchdogClause(w: RunWatchdog | undefined, now: number = Date.no
   if (w.failing) return `watchdog: resume refused ${w.failures}× — resume by hand`;
   if (w.lastError !== null) return `watchdog: resume failed: ${w.lastError}`;
   if (w.attempts > 0) {
-    const clock = w.lastSpawnAt === null ? null : formatClock(w.lastSpawnAt);
+    const clock = w.lastSpawnAt === null ? null : formatClock(w.lastSpawnAt, zone);
     return clock === null ? `watchdog: attempt ${w.attempts}/${w.maxAttempts} spawned` : `watchdog: attempt ${w.attempts}/${w.maxAttempts} spawned ${clock}`;
   }
   return 'watchdog: waiting for next check';

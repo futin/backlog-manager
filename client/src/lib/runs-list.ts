@@ -5,7 +5,8 @@ import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, 
 
 /**
  * runs-list.ts — the Runs page's run-list derivations: folding the archive listing, the live poll and other machines' runs into one row list, splitting
- * it into the Live and History sheets, sorting each newest-first, bucketing History by local day, and the per-row completed/total count.
+ * it into the Live and History sheets, sorting each newest-first, bucketing History by its day in the shared zone (#241), and the per-row completed/total
+ * count.
  *
  * `RunsView` is the only consumer today. These lived in RunsView.tsx until #284 moved them here, because every derivation has one home in `lib/`
  * (CLAUDE.md, Layout) and a pure function pinned by a direct unit test (test/runs-list.test.ts) cannot drift the way one exercised only through renders
@@ -246,11 +247,11 @@ export interface DayGroup {
  * opened rather than vanishing from the list a person can see is missing an
  * item elsewhere (the aggregate tiles, which do count every run in scope).
  */
-export function groupByDay(rows: readonly MergedRun[]): DayGroup[] {
+export function groupByDay(rows: readonly MergedRun[], zone: string): DayGroup[] {
   const groups: DayGroup[] = [];
   for (const row of rows) {
-    const key = dayKey(row.run.startedAt) ?? 'unknown';
-    const label = key === 'unknown' ? 'unknown' : (dayLabel(row.run.startedAt) ?? 'unknown');
+    const key = dayKey(row.run.startedAt, zone) ?? 'unknown';
+    const label = key === 'unknown' ? 'unknown' : (dayLabel(row.run.startedAt, zone) ?? 'unknown');
     const current = groups[groups.length - 1];
     if (current !== undefined && current.key === key) {
       current.rows.push(row);

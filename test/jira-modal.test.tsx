@@ -15,6 +15,12 @@ import type { JiraChildrenIndex } from '../client/src/lib/jira';
 import { daysAgoStamp } from './helpers/dates';
 import { JIRA_BUILTIN_LABELS, type AgentsStatus, type JiraAction, type JiraBoardStatus, type JiraIssue, type JiraIssueDetail, type JiraStatusPayload } from '../shared/types';
 
+/**
+ * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
+ * became an argument still hold, and so a component mounted without `TimeZoneProvider` (whose default is the browser's zone) reads the same one.
+ */
+const ZONE = 'America/New_York';
+
 /*
   Jira › the issue modal (Jira phase 2; spec §6.3 minus its controls; DESIGN.md §8.9.2) — the real modal over a mocked `fetch`. It composes `ui/Modal`, so the
   scrim, the close control and the Escape key are the shell's and are asserted here only as far as "this surface still gets them". What it owns: the facts
@@ -213,7 +219,7 @@ describe('JiraIssueModal — the read', () => {
     expect(fact('assignee · reporter')).toHaveTextContent('Ada Lovelace · Grace Hopper');
     expect(fact('labels')).toHaveTextContent('payments, refunds');
     // created is a short date, updated the board's relative age (`1d`): the fixture is 10 days old and updated 1 day ago.
-    expect(fact('created · updated')).toHaveTextContent(`${formatCreated(CARD.created)} · 1d`);
+    expect(fact('created · updated')).toHaveTextContent(`${formatCreated(CARD.created, Date.now(), ZONE)} · 1d`);
     // Only the board whose id the detail names, by NAME — `Platform` is a board the issue is not on.
     expect(fact('on boards')).toHaveTextContent('Payments');
     expect(fact('on boards')).not.toHaveTextContent('Platform');
