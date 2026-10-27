@@ -333,6 +333,16 @@ export interface BacklogItem {
    */
   planReview?: true;
   /**
+   * A TRACKER bug or task filed from outside the repository whose body no trusted groom has pinned (#341): the issue's `author_association` is not
+   * `OWNER`/`MEMBER`/`COLLABORATOR`, and no claim on it carries a `pin` equal to the hash of the body as it is now. On a public repo anybody can file an issue
+   * and edit the body they filed, so `groomed` — derived from headings alone — would otherwise hand an outsider's `## Plan` to every execute gate. Every gate
+   * that reads `planReview` reads this too, one rung before it (`unvettedBlock`), and a trusted groom's `body` write is the one thing that lifts it.
+   *
+   * **Optional, `true` or absent, and never `false`,** by `planReview`'s rule, with ONE writer: `server/src/tracker/map-issue.ts`. A files item never carries
+   * it — a file reaches `backlog/` only through a commit, and a commit is already the repository's own vetting.
+   */
+  unvetted?: true;
+  /**
    * Who holds this TRACKER item's claim right now (#225) — the newest claim, when it is unreleased, which is the same claim `started` and `phase` are read
    * from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
    *
@@ -2623,6 +2633,16 @@ export interface ClaimRecord {
    * than done (see `deriveRemoteRuns`).
    */
   finished?: ClaimFinished;
+  /**
+   * The sha256 (`bodyHash`, 64 lowercase hex) of an issue body THIS SERVER wrote through `body` while the session holding this claim held it live (#341) —
+   * the trusted record of which body a groom approved. It lives here because a claim comment is the one record on an issue that only a trusted author can
+   * carry (`parseClaim` drops an outsider's), and because the `bm:groomed-at` footer lives IN the body, where the body's author can forge it.
+   *
+   * Read by exactly one thing, `mapIssue`'s `unvetted` derivation, and only off a well-formed value: `wellFormed` does NOT refuse a record whose `pin` is
+   * malformed, because the claim still governs who holds the item and a bad pin must not cost the holder that — the mapper simply ignores a pin that is not
+   * 64 lowercase hex, which leaves the item unvetted, the fail-closed direction. `release` and `heartbeat` spread the record, so they carry it unchanged.
+   */
+  pin?: string;
 }
 
 /**
@@ -2967,6 +2987,20 @@ export interface ItemBodyRequest extends ItemWriteRequest {
    * other body patch — a person's re-groom, `import`'s second pass — must not silently clear (or set) a marker somebody else owns.
    */
   planReview?: boolean;
+  /**
+   * The calling session's id (#341) — `backlog.mjs body` sends its own. When that session holds a LIVE claim on the issue, the server pins the body it just
+   * wrote into that claim (`ClaimRecord.pin`), which is what vets an issue filed from outside the repo. Absent, or no live claim held by it → no pin, and the
+   * write still succeeds: a re-groom by hand is never refused, its item simply stays unvetted.
+   */
+  session?: string;
+}
+
+/** `POST /api/items/body`'s answer. `pinWarning` is present only when the body landed but the pin did not (#341) — a failed claim edit after a landed
+ *  PATCH — so the caller can say once that an outsider's item stays unvetted; never a refusal, because the write it reports did happen. */
+export interface ItemBodyResult {
+  id: string;
+  updatedAt: string;
+  pinWarning?: string;
 }
 
 /** `POST /api/items/comment` — appends a comment and nothing else. Execute's

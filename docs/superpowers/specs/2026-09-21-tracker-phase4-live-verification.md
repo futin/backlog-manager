@@ -2,9 +2,9 @@
 
 **2026-09-21.** First real orchestrator run on a tracker project, end to end, against `futin/test-claude-issues`, from `main` at `cb02cc2` with the
 installed plugin in sync at the same commit. Companion to [2026-09-17-tracker-backed-backlog-design.md](2026-09-17-tracker-backed-backlog-design.md) §7,
-[task-47](../../../backlog/tasks/done/task-47-tracker-backed-phase-4a-orchestrate-a-tracker-project-from-one-machine-gate-via-the-api-the-driver-s-claim-as-machine-state-push-and-pull-close-on-merged.md)
+[task-47](https://github.com/futin/backlog-manager/issues/120) (issue #120 since this repo's backlog moved to GitHub)
 and
-[task-48](../../../backlog/tasks/done/task-48-tracker-backed-phase-4b-runs-visible-from-every-machine-runs-derived-from-claim-comments-read-only-remote-runs-attention-comments-reconcile-from-claims.md),
+[task-48](https://github.com/futin/backlog-manager/issues/121) (issue #121 since this repo's backlog moved to GitHub),
 and the successor of [the phase-3 verification](2026-09-19-tracker-phase3-write-back-verification.md). As there, every line below is a claim checked
 against a live artifact — a GitHub issue or comment, `origin/main`, the board's payload, a run file or a session transcript — never asserted from code.
 

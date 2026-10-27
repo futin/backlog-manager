@@ -76,8 +76,8 @@ Reaching the board from another device is a separate, deliberate step: `pnpm run
 `~/.backlog-manager` and the project tree come in **read-only**, at their host paths, because the registry stores absolute host paths and they have to mean the
 same thing inside. One nested mount is read-write: `~/.backlog-manager/settings`, the only place the server itself writes — the watchdog config, the pause
 or stop request a live run reads back, and each tracker repo's sync interval (`tracker-sync.json`). The image also carries `git` and a system-config
-`safe.directory` — see Failure modes. The server's other settings files — `jira.json`, `tick.json` and `dashboards.json` — live in that same directory,
-for the same reason.
+`safe.directory` — see Failure modes. The server's other settings files — `jira.json`, `tick.json`, `dashboards.json` and `timezone.json` — live in that
+same directory, for the same reason.
 
 A second tree comes in read-only the same way: `BM_JIRA_REPO_ROOT` (default `~/Documents/timify-projects`), the repos a Jira project is mapped to in Setup →
 Repositories. The server reads their branches and worktrees and never writes them — `jira.mjs worktree` does, on the host. A host path that does not exist is

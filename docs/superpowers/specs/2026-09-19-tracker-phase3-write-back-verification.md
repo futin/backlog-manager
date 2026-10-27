@@ -3,7 +3,7 @@
 **2026-09-19.** Manual end-to-end test of task-46 (phase 3: write-back through the API for tracker projects) against a real GitHub repository, run
 before and immediately after merging `feature/tracker` into `main`. Companion to
 [2026-09-17-tracker-backed-backlog-design.md](2026-09-17-tracker-backed-backlog-design.md) §6–§7 and
-[task-46](../../../backlog/tasks/done/task-46-tracker-backed-phase-3-write-back-through-the-api-seven-write-routes-the-claim-protocol-backlog-mjs-api-mode-dispatch-for-tracker-items-and-the-skills-prose.md).
+[task-46](https://github.com/futin/backlog-manager/issues/118) (issue #118 since this repo's backlog moved to GitHub).
 Everything below is a claim checked against a live artifact (a GitHub issue, the board's `/api/items`, or a transcript file) — nothing here is asserted
 from reading code.
 

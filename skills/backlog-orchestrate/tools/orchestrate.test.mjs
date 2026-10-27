@@ -7827,6 +7827,60 @@ test('in-review and plan-review together list both reasons, in-review first', as
   assert.ok(row.reasons.length > 2, 'the groom reason is kept behind both');
 });
 
+// --- the unvetted guard (#341) ------------------------------------------------
+//
+// A tracker issue filed from outside the repo whose body no trusted groom has pinned arrives with `unvetted: true` on the API item. Its plan is a stranger's
+// text, and to `gateItem` a groomed one reads ready — so without the gate a run would hand it to a headless session. The gate is `planReviewGate`'s twin:
+// `ungroomed`, the sentence first, `questions` emptied, membership untouched. A hand copy of the server's `UNVETTED_REASON`, em dash and all.
+
+const UNVETTED_REASON = 'filed from outside the repo — groom it to vet the plan';
+
+test('plan on a tracker project gates an unvetted issue', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { unvetted: true }), apiItem(project, 4)];
+  const bodies = { 3: GROOMED_TASK_BODY, 4: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.deepEqual(
+    rows.filter((r) => r.gate === 'ready').map((r) => r.id),
+    ['4'],
+  );
+  const gated = rows.find((r) => r.id === '3');
+  assert.equal(gated.gate, 'ungroomed');
+  assert.equal(gated.reasons[0], UNVETTED_REASON);
+  assert.deepEqual(gated.questions, []);
+});
+
+test('--ids naming an unvetted issue gates it rather than dropping it', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { unvetted: true }), apiItem(project, 4)];
+  const bodies = { 3: GROOMED_TASK_BODY, 4: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--ids', '3', '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.deepEqual(
+    JSON.parse(out.stdout).map((r) => [r.id, r.gate, r.reasons[0]]),
+    [['3', 'ungroomed', UNVETTED_REASON]],
+  );
+});
+
+test('in-review, unvetted and plan-review together read in that order', async (t) => {
+  const { home, project } = trackerFixture(t);
+  const items = [apiItem(project, 3, { inReview: true, unvetted: true, planReview: true }), apiItem(project, 4, { unvetted: true, planReview: true })];
+  const bodies = { 3: GROOMED_TASK_BODY, 4: GROOMED_TASK_BODY };
+
+  const { out } = await withApi(gateRoutes(items, bodies), (port) => runApi(project, home, port, 'plan', '--project', project, '--json'));
+
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.deepEqual(rows.find((r) => r.id === '3').reasons, [IN_REVIEW_REASON, UNVETTED_REASON, PLAN_REVIEW_REASON]);
+  assert.deepEqual(rows.find((r) => r.id === '4').reasons, [UNVETTED_REASON, PLAN_REVIEW_REASON]);
+});
+
 // --- G-2a … G-2e: the cache a tracker queue is built from (bug-41) ----------
 //
 // `GET /api/items` is served from the poller's cache for a tracker project,

@@ -16,6 +16,7 @@ import type {
   ClaimRecord,
   ClaimResult,
   ItemBodyRequest,
+  ItemBodyResult,
   ItemClaimRequest,
   ItemCommentRequest,
   ItemCreateRequest,
@@ -802,7 +803,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * A refusal is a 409 carrying the CURRENT stamp, so the caller can re-read
    * and re-apply without a second round trip to learn it.
    */
-  async patchBody(project: RegistryProject, marker: SourceMarker, req: ItemBodyRequest): Promise<WriteOutcome<{ id: string; updatedAt: string }>> {
+  async patchBody(project: RegistryProject, marker: SourceMarker, req: ItemBodyRequest): Promise<WriteOutcome<ItemBodyResult>> {
     const ready = this.ready(marker);
     if (!ready.ok) return ready;
     const { repo, token } = ready.value;
@@ -844,6 +845,11 @@ export class GithubSource implements ItemSource, ItemWriter {
       const patched = await this.client.updateIssue(repo, number, { body: req.body }, { token });
       if (patched.status !== 200 || patched.data === null) return { ok: false as const, refusal: refusalFor(patched) };
       this.poller.absorbIssue(repo, patched.data);
+
+      /* The pin (#341) — straight after the PATCH lands and before either label move, so no later refusal on this route can skip it. The hash is of the
+         body GitHub ANSWERED, not the one the caller sent: the mapper hashes the body the cache holds, and the cache holds GitHub's copy, so hashing anything
+         else would pin a body nobody will ever read back. Inside this same chain, so no other local write to the item can land between the PATCH and the pin. */
+      const pinWarning = req.session === undefined ? undefined : await this.pinBody(repo, number, token, req.session, bodyHash(patched.data.body));
 
       /* The `runner-fix` marker, moved by the same call (task-47) — after the
          body patch, never before it, so a failed patch leaves the label
@@ -895,8 +901,33 @@ export class GithubSource implements ItemSource, ItemWriter {
         if (reread.status === 200 && reread.data !== null) this.poller.absorbIssue(repo, reread.data);
       }
 
-      return { ok: true as const, value: { id: `#${number}`, updatedAt: patched.data.updated_at } };
+      return { ok: true as const, value: { id: `#${number}`, updatedAt: patched.data.updated_at, ...(pinWarning === undefined ? {} : { pinWarning }) } };
     });
+  }
+
+  /**
+   * Write `pin` into the LIVE claim `session` holds on issue `number` (#341), answering `undefined` when that went well or there was nothing to pin, and a
+   * one-line warning when a pin was due and did not land.
+   *
+   * Only a live claim held by the very session that wrote the body: the pin says "a trusted session wrote this body while it held the item", and a claim
+   * somebody else holds — or one already released — cannot vouch for a write it did not make. No such claim is not a failure (a person re-grooming by hand
+   * holds none), so it answers `undefined` and the item simply stays unvetted until a groom that holds a claim writes it.
+   *
+   * A failed claim read or comment edit is not a refusal either: the PATCH has landed, and refusing would report a write that happened as one that did not.
+   * Unpinned is the fail-closed direction — the item reads unvetted — so the warning is the whole consequence. The claims are read fresh rather than off the
+   * cache for the reason `editClaim` reads them fresh: a claim taken a moment ago may not have been polled yet.
+   */
+  private async pinBody(repo: string, number: number, token: string, session: string, pin: string): Promise<string | undefined> {
+    const claims = await this.allClaims(repo, number, token);
+    if (!claims.ok) return `#${number}'s body was written but not pinned (${claims.refusal.error}) — it stays unvetted if an outsider filed it`;
+    const held = liveClaims(claims.value, Date.now()).find((c) => c.record.session === session);
+    if (held === undefined) return undefined;
+    const edited = await this.client.updateComment(repo, held.commentId, renderClaim({ ...held.record, pin }), { token });
+    if (edited.status !== 200 || edited.data === null) {
+      return `#${number}'s body was written but not pinned (${refusalFor(edited).error}) — it stays unvetted if an outsider filed it`;
+    }
+    this.poller.absorbComment(repo, edited.data);
+    return undefined;
   }
 
   /** Append a comment and nothing else. */

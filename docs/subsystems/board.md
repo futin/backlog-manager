@@ -492,8 +492,16 @@ both sources carry: a tracker issue while its `plan-review` label is on, a files
 mark in the write that wrote the plan, and a person removes it to approve the plan — the label through `backlog.mjs plan-review <id> off`, the files line by
 deleting it. It reuses the in-review rendering — same disabled state, same reason as title — and, in the item modal, draws nothing of its own.
 
+**An outsider's issue that no groom of ours has pinned keeps its control, disabled with `filed from outside the repo — groom it to vet the plan`** (#341).
+`unvettedBlock` (`shared/agent.ts`) sits between the two rungs above — after `inReviewBlock`, before `planReviewBlock` — because approving the plan does not
+vet it, so an item carrying both must say the reason the approval would not clear; the server's `plan`/`dispatch` read the same helper in the same order. It
+reads `BacklogItem.unvetted`, which only a tracker bug or task carries: `mapIssue` sets it when the issue's author is not `OWNER`/`MEMBER`/`COLLABORATOR` and
+the body does not hash to the pin a trusted groom's `body` write left in its claim. A files item never carries it. Same in-review rendering, and while it
+speaks `Review plan` is NOT drawn — reviewing is not the way out, grooming is
+([invariants.md](invariants.md#an-outsiders-tracker-issue-is-executable-only-while-its-body-matches-a-pin-a-groom-of-ours-wrote)).
+
 **On the card, and in the modal, a plan that awaits review is now something to act on** (#367). Given `onReview` — which `ItemCard` passes as its own
-`onOpen` — `DispatchButton` draws `Review plan` in place of the disabled chip when the plan-review rung is the one speaking (no progress and no in-review
+`onOpen` — `DispatchButton` draws `Review plan` in place of the disabled chip when the plan-review rung speaks alone (no progress, in-review or unvetted
 block above it), and a click opens the item instead of re-stating the reason; the modal's own dispatch chip stays the disabled one. Under it the modal draws
 `PlanApprove`: on a tracker item a confirm-gated `Approve plan` that posts `planReview: false` to `POST /api/items/plan-review` (`approvePlan`,
 `lib/agents.ts`) and then asks the board to re-read (`onApproved`, which BoardView passes as `refetch`, beside `onReleased`); on a files item no request, only
@@ -581,9 +589,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
 
 ## Invariants
 
-The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the five per-item dispatch blocks
-(the plan-review rung, `this plan awaits review`, the newest) and which one lets a click through, the dialog escape stack and its eight dialogs, a crashed
-run rendering as crashed, "queue wait is not work",
+The rules this surface is held to — one implementation per derivation, board-versus-archive being derived and never stored, the six per-item dispatch blocks
+(the unvetted rung, `filed from outside the repo — groom it to vet the plan`, the newest, one above `this plan awaits review`) and which one lets a
+click through, the dialog escape stack and its eight dialogs, a crashed run rendering as crashed, "queue wait is not work",
 [Settings being three pages whose page IS the scope](invariants.md#settings-is-three-pages-the-page-is-the-scope),
 [the Jira section's tree and its configured-only
 row](invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured), and [the content-width stamp that
