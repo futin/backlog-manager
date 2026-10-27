@@ -1778,7 +1778,7 @@ answer:
   not be unified. This block is checked on the board and again in `dispatch()`, the second being the one that holds: the launch sheet fetches its plan once on
   mount, so a sheet left open while a run starts still shows an enabled launch button, and only the server sees the run as it is at click time.
 
-`DispatchButton` reads all five in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the unvetted mark, then the run claim —
+`DispatchButton` reads all six in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the unvetted mark, then the run claim —
 most fundamental first, so the reason on screen names the thing to fix rather than a symptom of it. With dispatch off or the project invisible there is nothing
 worth saying about either kind of session that might hold the item. The open PR sits after the stamp and before the run claim because it, too, is on the item
 this board renders, while a run claim is the volatile fact about another worktree. The stamp and the run claim are in that order for the same reason: the
