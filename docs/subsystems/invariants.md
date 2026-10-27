@@ -1741,11 +1741,11 @@ promise in the spec and `.env.example` — with `BM_AGENTS` off the Board "rende
 not "improve" it into a disabled button on forty cards. "On the Board" is deliberate: the Jira card's `Run ▾` is the one stated exception, drawn with agents
 off for the reason [the next section](#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) gives.
 
-The per-item blocks are the opposite case and keep their button. There are **four** of them, not one, and only the first is anything `dispatchGate` itself can
+The per-item blocks are the opposite case and keep their button. There are **five** of them, not one, and only the first is anything `dispatchGate` itself can
 answer:
 
 - **The dashboard cannot see this item's project** — `dispatchGate`'s own fifth line, the section above.
-- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the four derived from the item
+- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the five derived from the item
   file itself. It is the exact mirror of the block below it: `started:` has one writer (`backlog.mjs start`) and one clearer (`stop`), so a session grooming or
   executing an item states that in the frontmatter the board is already reading — `isInProgress` had been deriving it for the card's amber bar since before
   dispatch existed, and nothing ever wired that predicate into the dispatch path. For a files item it blocks on ANY stamp, fresh or stale, matching `start`'s
@@ -1763,6 +1763,10 @@ answer:
   this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
   the server reads it too — `plan` and `dispatch()` refuse with the same sentence, `a PR is open for this item` — because the label is on the tracker, where
   any machine's spawn can see it. A files item never carries the flag; its PR guard is a named known limitation.
+- **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
+  OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
+  the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
+  machine's spawn can see. It sits after the open PR, which is the stronger fact, and before plan-review, because a groom has to vet the body first.
 - **An orchestrator run has already claimed this item** — `runClaimBlock` (`shared/agent.ts`), which reads the run payload rather than the item. It has to: a
   run works each item inside its own git worktree and nothing reaches `main` until the item merges, so while a run holds `task-7` at `reviewing` the `task-7`
   file `/api/items` scans on `main` looks untouched — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item is not lying; it is telling the
@@ -1774,7 +1778,7 @@ answer:
   not be unified. This block is checked on the board and again in `dispatch()`, the second being the one that holds: the launch sheet fetches its plan once on
   mount, so a sheet left open while a run starts still shows an enabled launch button, and only the server sees the run as it is at click time.
 
-`DispatchButton` reads all five in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the run claim —
+`DispatchButton` reads all five in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the unvetted mark, then the run claim —
 most fundamental first, so the reason on screen names the thing to fix rather than a symptom of it. With dispatch off or the project invisible there is nothing
 worth saying about either kind of session that might hold the item. The open PR sits after the stamp and before the run claim because it, too, is on the item
 this board renders, while a run claim is the volatile fact about another worktree. The stamp and the run claim are in that order for the same reason: the
