@@ -342,9 +342,12 @@ handed `runGit` as its git port, so every launch — the memo key's `rev-parse` 
 `GET /api/ticks` answers `{ config, projects }` (`shared/types.ts`'s `TicksPayload`). It reads `$BM_TICK_HOME` (else `~/.backlog-manager/tick/`) fresh on every
 call and caches nothing, and it writes nothing there: the tick home's one writer is `skills/backlog-tick/tools/tick.mjs`. One row per project directory; the
 name is the directory's `decodeURIComponent` (the project's absolute main-checkout path), and a directory whose name does not decode, decodes to a relative path
-or does not re-encode to itself is skipped rather than failing the list. A row is `{ root, name, streak, halted, haltedSince?, resetAt?, lock, recent, error? }`
+or does not re-encode to itself is skipped rather than failing the list. A row is `{ root, name, streak, halted, haltedSince?, resetAt?, lock, recent, lastDecide?,
+error? }`
 — `name` is the registry's, else the path's basename; `lock` is the lock file's `{ kind, id, host, at }` or `null`; `recent` is `state.json`'s records newest
-first; `error` is set, with `recent` empty, when `state.json` exists and cannot be read. `streak`, `halted` and `haltedSince` come from `streakOf` in
+first; `lastDecide` (#367) is `last-decide.json`'s `{ at, verdict, caps: { openPrs, maxPrs, planReview, maxPlans } }`, rebuilt field by field and absent when
+the file is missing or any field is the wrong shape — it rides on an errored row too, since it is a separate file; `error` is set, with `recent` empty, when
+`state.json` exists and cannot be read. `streak`, `halted` and `haltedSince` come from `streakOf` in
 `tick-breaker.util.ts`, the server's copy of the rule `tick.mjs decide` applies, and `config` is `{ haltAfter, source: 'file' | 'default' | 'unreadable', error?
 }` — `unreadable` reports `haltAfter` 3 for display only. `tick/` is not an outbound-calling module: files only, no network.
 

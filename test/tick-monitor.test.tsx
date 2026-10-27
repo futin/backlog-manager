@@ -276,4 +276,27 @@ describe('TickMonitor', () => {
     expect(within(target).getByRole('button', { name: 'Reset' })).toBeEnabled();
     expect(target).toHaveClass('tick-row-halted');
   });
+
+  /* #367 — the caps the last `decide` recorded, the one place an `idle` tick says it is waiting on review. The clock reads through `formatClock` in the
+     board's zone, so the assertion matches the shape around it rather than a zone-dependent HH:MM. */
+  describe('last decide caps (#367)', () => {
+    const caps = (planReview: number, maxPlans: number, openPrs: number | null): Partial<TickProject> => ({
+      lastDecide: { at: ago(30 * MIN), verdict: 'idle', caps: { openPrs, maxPrs: 3, planReview, maxPlans } }
+    });
+
+    it('prints plans and PRs against their caps, and says grooming is blocked at the plan cap', async () => {
+      await renderMonitor(payload([project(caps(2, 2, 1))]));
+      expect(screen.getByTestId('tick-row-caps').textContent).toMatch(/^plans awaiting review 2\/2 · open PRs 1\/3 · as of \d{2}:\d{2} · grooming blocked$/);
+    });
+
+    it('says nothing about grooming under the cap, and prints ? for a PR count the tick could not take', async () => {
+      await renderMonitor(payload([project(caps(1, 2, null))]));
+      expect(screen.getByTestId('tick-row-caps').textContent).toMatch(/^plans awaiting review 1\/2 · open PRs \?\/3 · as of \d{2}:\d{2}$/);
+    });
+
+    it('draws no caps line before a tick has recorded them, nor on an errored row', async () => {
+      await renderMonitor(payload([project(), project({ root: '/abs/err', name: 'err', error: 'state.json unreadable', ...caps(2, 2, 1) })]));
+      expect(screen.queryByTestId('tick-row-caps')).toBeNull();
+    });
+  });
 });

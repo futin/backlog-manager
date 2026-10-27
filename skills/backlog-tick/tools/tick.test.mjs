@@ -370,7 +370,9 @@ test('two decides racing for one lock', async (t) => {
   assert.equal(verdicts[0].reason, 'another tick');
   assert.equal(verdicts[1].verdict, 'execute');
   assert.equal(verdicts[1].id, 'bug-1');
-  assert.deepEqual(fs.readdirSync(fx.lockDir), ['lock']);
+  // the winner's lock, and the caps it counted (`last-decide.json`); the loser wrote nothing
+  assert.deepEqual(fs.readdirSync(fx.lockDir).sort(), ['last-decide.json', 'lock']);
+  assert.equal(readJson(path.join(fx.lockDir, 'last-decide.json')).verdict, 'execute');
 });
 
 // --- busy ----------------------------------------------------------------
@@ -1143,4 +1145,108 @@ test('breaker: status --json carries the five keys, and settings unreadable for 
   assert.equal(s.v.breaker.settings, 'unreadable');
   assert.equal(s.v.breaker.halted, false);
   assert.deepEqual(Object.keys(s.v.breaker).sort(), ['haltAfter', 'halted', 'resetAt', 'settings', 'streak']);
+});
+
+// --- last-decide.json ----------------------------------------------------
+
+// The board's record of the caps the last counting decide saw (#367). Written by `execute`, `groom` and the final `idle` — never by a dry run, a `busy`, a
+// `halted` idle or a `recover` — and never read back by `decide`.
+const lastDecideFile = (fx) => path.join(fx.lockDir, 'last-decide.json');
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+test('last-decide: a final idle at the plan cap records its caps, and the verdict line is unchanged', async (t) => {
+  const fx = project(t);
+  for (const n of [5, 6, 7]) item(fx, `task-${n}`, TASK_READY, { 'plan-review': 'true' });
+  commitAll(fx.root);
+  const r = await tick(fx, ['decide', '--max-plans', '3']);
+  const expected = {
+    verdict: 'idle',
+    reason: 'nothing to do: no ready bug or task; 3 plans awaiting review (cap 3)',
+    root: fx.root,
+    caps: { openPrs: 0, maxPrs: 2, planReview: 3, maxPlans: 3 },
+    dryRun: false,
+  };
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, `${JSON.stringify(expected)}\n`);
+  assert.equal(r.stderr, '');
+  const rec = readJson(lastDecideFile(fx));
+  assert.deepEqual(Object.keys(rec).sort(), ['at', 'caps', 'verdict']);
+  assert.equal(rec.verdict, 'idle');
+  assert.match(rec.at, ISO);
+  assert.deepEqual(rec.caps, { openPrs: 0, maxPrs: 2, planReview: 3, maxPlans: 3 });
+  assert.equal(fs.existsSync(fx.lockFile), false);
+});
+
+test('last-decide: an execute and a groom verdict each record their own verdict', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  commitAll(fx.root);
+  assert.equal((await decide(fx)).verdict, 'execute');
+  let rec = readJson(lastDecideFile(fx));
+  assert.equal(rec.verdict, 'execute');
+  assert.deepEqual(rec.caps, { openPrs: 0, maxPrs: 2, planReview: 0, maxPlans: 3 });
+
+  const gx = project(t);
+  item(gx, 'bug-4', BUG_RAW);
+  item(gx, 'task-5', TASK_READY, { 'plan-review': 'true' });
+  commitAll(gx.root);
+  assert.equal((await decide(gx)).verdict, 'groom');
+  rec = readJson(lastDecideFile(gx));
+  assert.equal(rec.verdict, 'groom');
+  assert.equal(rec.caps.planReview, 1);
+});
+
+test('last-decide: a dry run, a busy and a halted decide write none', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  commitAll(fx.root);
+  assert.equal((await decide(fx, ['--dry-run'])).verdict, 'execute');
+  assert.equal(fs.existsSync(lastDecideFile(fx)), false);
+
+  writeLockFile(fx, { host: 'h', verdict: { kind: 'execute', id: 'bug-9' }, base: 'main', at: ago(MIN) });
+  assert.equal((await decide(fx)).verdict, 'busy');
+  assert.equal(fs.existsSync(lastDecideFile(fx)), false);
+  fs.rmSync(fx.lockFile);
+
+  item(fx, 'bug-2', BUG_READY, { started: '2026-10-22T10:00:00Z' });
+  commitAll(fx.root);
+  assert.equal((await decide(fx)).verdict, 'busy');
+  assert.equal(fs.existsSync(lastDecideFile(fx)), false);
+
+  const hx = project(t);
+  item(hx, 'bug-9', BUG_READY);
+  commitAll(hx.root);
+  failures(hx, 3);
+  assert.equal((await decide(hx)).reason, HALTED(3, 3));
+  assert.equal(fs.existsSync(lastDecideFile(hx)), false);
+});
+
+test('last-decide: a write that fails is one stderr line, and the verdict and exit code stand', async (t) => {
+  const fx = project(t);
+  const before = await tick(fx, ['decide']);
+  fs.rmSync(lastDecideFile(fx));
+  // a directory where the file goes: the rename onto it fails
+  fs.mkdirSync(lastDecideFile(fx), { recursive: true });
+  const r = await tick(fx, ['decide']);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, before.stdout);
+  assert.equal(r.v.verdict, 'idle');
+  const lines = r.stderr.trim().split('\n');
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^tick: could not record caps: /);
+});
+
+test('last-decide: decide never reads it — a garbage file changes no verdict', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  item(fx, 'bug-4', BUG_RAW);
+  commitAll(fx.root);
+  const clean = await decide(fx, ['--dry-run']);
+  fs.mkdirSync(fx.lockDir, { recursive: true });
+  for (const garbage of ['not json', '{"at": 1}', JSON.stringify({ at: ago(MIN), verdict: 'idle', caps: { openPrs: 9, maxPrs: 0, planReview: 99, maxPlans: 0 } })]) {
+    fs.writeFileSync(lastDecideFile(fx), garbage);
+    assert.deepEqual(await decide(fx, ['--dry-run']), clean);
+  }
+  assert.equal((await decide(fx)).id, 'bug-1');
+  assert.equal(readJson(lastDecideFile(fx)).verdict, 'execute');
 });

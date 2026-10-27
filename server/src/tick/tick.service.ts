@@ -5,14 +5,15 @@ import { Injectable } from '@nestjs/common';
 import { RegistryService } from '../registry/registry.service';
 import { readTickFile, streakOf, tickFile, tickHome, writeTickFile } from './tick-breaker.util';
 import { TICK_HALT_LIMITS } from '../../../shared/types';
-import type { TickConfig, TickLock, TickProject, TickRecentEntry, TicksPayload } from '../../../shared/types';
+import type { TickConfig, TickLastDecide, TickLock, TickProject, TickRecentEntry, TicksPayload } from '../../../shared/types';
 
 /**
  * `GET /api/ticks`'s one builder, and the reset's one stamp. The payload is built on EVERY call and cached nowhere — the `readWatchdogConfig` reasoning: a
  * `tick.mjs` records an outcome or a person hand-edits `tick.json` at any moment, and a cache here would show a halted project as healthy until a restart.
  *
  * What it reads, and what it never writes: the tick home (`BM_TICK_HOME`) has exactly one writer, `tick.mjs`, so this service only ever READS under it —
- * one directory per project, named `encodeURIComponent(<abs main-checkout path>)` (`projectDir()` in `tick-lib.mjs`), holding `state.json` and `lock`. The
+ * one directory per project, named `encodeURIComponent(<abs main-checkout path>)` (`projectDir()` in `tick-lib.mjs`), holding `state.json`, `lock` and
+ * `last-decide.json`. The
  * only file it writes is `settings/tick.json`, and only through `writeTickFile`. `streak`/`halted`/`haltedSince` are derived here from each project's
  * `recent` and are never stored; a Reset is a `resetAt` timestamp, nothing else.
  */
@@ -88,6 +89,23 @@ function readLock(dir: string): TickLock | null {
   return { kind: str(verdict.kind), id: str(verdict.id), host: str(lock.host), at: str(lock.at) };
 }
 
+const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * `last-decide.json` (#367), or `undefined` for anything but a whole, well-shaped record — absent, unreadable, not JSON, or any field of the wrong type. Never
+ * an error on the row: it is a display record `tick.mjs` writes and never reads, and a broken one must not hide the breaker state `error` exists to show.
+ * Rebuilt field by field rather than passed through, so an extra key a hand edit left never reaches the client.
+ */
+function readLastDecide(dir: string): TickLastDecide | undefined {
+  const read = slurp(join(dir, 'last-decide.json'));
+  if (read.kind !== 'ok' || !isObject(read.value)) return undefined;
+  const { at, verdict, caps } = read.value;
+  if (typeof at !== 'string' || typeof verdict !== 'string' || !isObject(caps)) return undefined;
+  const { openPrs, maxPrs, planReview, maxPlans } = caps;
+  if (!isCount(planReview) || !isCount(maxPlans) || !isCount(maxPrs) || !(openPrs === null || isCount(openPrs))) return undefined;
+  return { at, verdict, caps: { openPrs, maxPrs, planReview, maxPlans } };
+}
+
 @Injectable()
 export class TickService {
   constructor(private readonly registry: RegistryService) {}
@@ -118,6 +136,9 @@ export class TickService {
     const history = readHistory(dir);
     const row: TickProject = { root, name, lock, recent: [] };
     if (resetAt !== undefined) row.resetAt = resetAt;
+    // Before the error return: a row whose `state.json` is broken still shows the caps its last decide counted.
+    const lastDecide = readLastDecide(dir);
+    if (lastDecide !== undefined) row.lastDecide = lastDecide;
     if (!history.ok) {
       row.error = history.error;
       return row;

@@ -238,6 +238,14 @@ function TickRow({ project: p, pending, failure, onReset }: { project: TickProje
             {`last tick ${formatClock(last.at, zone) ?? '—:—'} · ${last.kind} ${last.id} → ${last.outcome} · ${p.streak ?? 0} failures in a row`}
           </span>
         )}
+        {/* #367 — the caps the last `decide` saw, which is the one place a tick that keeps answering `idle` says why: grooming waits while the plans
+            awaiting review fill `--max-plans`. Absent until a tick has recorded them (`last-decide.json` is written by `decide`, not `record`). */}
+        {p.lastDecide !== undefined && (
+          <span className="watchdog-card-beat" data-testid="tick-row-caps">
+            {`plans awaiting review ${p.lastDecide.caps.planReview}/${p.lastDecide.caps.maxPlans} · open PRs ${p.lastDecide.caps.openPrs ?? '?'}/${p.lastDecide.caps.maxPrs} · as of ${formatClock(p.lastDecide.at, zone) ?? '—:—'}`}
+            {p.lastDecide.caps.planReview >= p.lastDecide.caps.maxPlans && ' · grooming blocked'}
+          </span>
+        )}
         {failure !== null && (
           <span className="tick-row-fail" role="alert">
             {failure}

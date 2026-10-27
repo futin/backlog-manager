@@ -2384,9 +2384,21 @@ export interface TickConfig {
 }
 
 /**
+ * `last-decide.json`: the caps the project's last COUNTING `tick.mjs decide` saw — one that printed `execute`, `groom` or the final `idle`, never a dry run,
+ * a `busy`, a halted idle or a `recover`. A display record (#367): `maxPlans` is a dashboard job flag only `decide` sees, so this is the board's one way to
+ * know the review cap. `openPrs` is `null` when the tick could not count open PRs.
+ */
+export interface TickLastDecide {
+  at: string;
+  verdict: string;
+  caps: { openPrs: number | null; maxPrs: number; planReview: number; maxPlans: number };
+}
+
+/**
  * One project under the tick home. `streak`/`halted`/`haltedSince` are absent exactly when `error` is set (an unreadable `state.json` — nothing honest to
  * derive them from). `resetAt` is the stamp the project's last Reset wrote, present only when one is on file. `recent` is NEWEST FIRST, the reverse of how
- * `state.json` stores it.
+ * `state.json` stores it. `lastDecide` is present only when `last-decide.json` exists AND has its shape — read independently of `state.json`, so an `error`
+ * row still carries it, and a broken one never sets `error`: it is a display record, and must not hide the breaker state `error` exists for.
  */
 export interface TickProject {
   root: string;
@@ -2397,6 +2409,7 @@ export interface TickProject {
   resetAt?: string;
   lock: TickLock | null;
   recent: TickRecentEntry[];
+  lastDecide?: TickLastDecide;
   error?: string;
 }
 

@@ -460,6 +460,22 @@ export async function abortClaim(project: string, id: string): Promise<ItemAbort
 }
 
 /**
+ * The item modal's **Approve plan** (#367) — `POST /api/items/plan-review` with `planReview: false`, lifting the `plan-review` label a tick's groom put on a
+ * TRACKER item. `abortClaim`'s shape and its reasons: the route, its guard and the GitHub write (with the cache re-read) are the server's, and `unwrap` turns
+ * a refusal — a files project, a sync-off repo — into an `ApiError` carrying the server's own sentence. A files item never reaches this: the board writes no
+ * item file, so its approval is a copied prompt (`planApprovePrompt`, `lib/plan-review.ts`).
+ */
+export async function approvePlan(project: string, id: string): Promise<{ id: string; planReview: boolean }> {
+  return unwrap<{ id: string; planReview: boolean }>(
+    await fetch('/api/items/plan-review', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project, id, planReview: false })
+    })
+  );
+}
+
+/**
  * The strip's manual "Resume" button — `POST /api/agents/resume`, `origin:
  * 'board'` server-side (`AgentsService.resume()`). One field, matching the
  * request itself: there is no `prompt`/`ids`/`model` for a caller to send,

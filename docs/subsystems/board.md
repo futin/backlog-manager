@@ -490,7 +490,19 @@ closes the issue, or by `backlog.mjs review <id> off`. A files item never carrie
 next rung, after `inReviewBlock` and before the run claim, so an item carrying both says the PR. It reads `BacklogItem.planReview`, which — unlike `inReview` —
 both sources carry: a tracker issue while its `plan-review` label is on, a files item while its frontmatter has a `plan-review:` line. The tick's groom adds the
 mark in the write that wrote the plan, and a person removes it to approve the plan — the label through `backlog.mjs plan-review <id> off`, the files line by
-deleting it. It reuses the in-review rendering — same disabled state, same reason as title — and draws nothing of its own on the card.
+deleting it. It reuses the in-review rendering — same disabled state, same reason as title — and, in the item modal, draws nothing of its own.
+
+**On the card, and in the modal, a plan that awaits review is now something to act on** (#367). Given `onReview` — which `ItemCard` passes as its own
+`onOpen` — `DispatchButton` draws `Review plan` in place of the disabled chip when the plan-review rung is the one speaking (no progress and no in-review
+block above it), and a click opens the item instead of re-stating the reason; the modal's own dispatch chip stays the disabled one. Under it the modal draws
+`PlanApprove`: on a tracker item a confirm-gated `Approve plan` that posts `planReview: false` to `POST /api/items/plan-review` (`approvePlan`,
+`lib/agents.ts`) and then asks the board to re-read (`onApproved`, which BoardView passes as `refetch`, beside `onReleased`); on a files item no request, only
+a `Copy prompt` for a Claude session, because the board never writes item files (`planApprovePrompt`, `lib/plan-review.ts`). So the modal reflects the
+approval, BoardView hands it the FRESH item — found in the payload by project and id during render, the click's snapshot only when the payload no longer has
+it — never an effect that calls `setOpen`. The band adds `PlanReviewChip` after the run chip: `N plans awaiting review`, with the tick's `--max-plans` cap and
+` · tick blocked` once a tick has recorded its caps (`TickProject.lastDecide`, read through `useTicks({ live: false })`); `planReviewTally` and
+`planReviewReading` are the arithmetic. Runs › Ticks prints the same caps per project row: `plans awaiting review N/M · open PRs N/M · as of HH:MM`, and
+` · grooming blocked` at the plan cap.
 
 **The toolbar's Orchestrate control is drawn for a tracker project too, since task-47 (phase 4a).** Task-46 kept it off with a fifth condition,
 `projectIsFiles` (`lib/tracker.ts`), because a tracker project could not then be orchestrated at all; phase 4a made it orchestratable, so that predicate is

@@ -162,6 +162,46 @@ describe('the tick breaker routes', () => {
       expect(a).toMatchObject({ streak: 2, halted: false, resetAt: T(1) });
     });
 
+    describe('lastDecide (#367)', () => {
+      const LAST = { at: T(9), verdict: 'idle', caps: { openPrs: null, maxPrs: 2, planReview: 3, maxPlans: 3 } };
+      const writeLast = (root: string, raw: string): void => writeFileSync(join(projectDir(root), 'last-decide.json'), raw);
+      const get = async (): Promise<TicksPayload> => (await request((await createApp()).getHttpServer()).get('/api/ticks').expect(200)).body as TicksPayload;
+
+      it('carries a valid last-decide.json as written', async () => {
+        writeState(ROOT_A, []);
+        writeLast(ROOT_A, JSON.stringify(LAST));
+        expect(row(await get(), ROOT_A).lastDecide).toEqual(LAST);
+      });
+
+      it('has no lastDecide key when the file is absent', async () => {
+        writeState(ROOT_A, []);
+        expect(row(await get(), ROOT_A)).not.toHaveProperty('lastDecide');
+      });
+
+      it.each([
+        ['a wrong-typed at', '{"at": 1}'],
+        ['non-JSON', '{ nope'],
+        ['a string count', JSON.stringify({ ...LAST, caps: { ...LAST.caps, planReview: '3' } })],
+        ['an openPrs that is neither number nor null', JSON.stringify({ ...LAST, caps: { ...LAST.caps, openPrs: 'x' } })],
+        ['no caps', JSON.stringify({ at: T(9), verdict: 'idle' })],
+      ])('drops %s without setting error', async (_label, raw) => {
+        writeState(ROOT_A, [rec(1, 'failed')]);
+        writeLast(ROOT_A, raw);
+        const a = row(await get(), ROOT_A);
+        expect(a).not.toHaveProperty('lastDecide');
+        expect(a).not.toHaveProperty('error');
+        expect(a.streak).toBe(1);
+      });
+
+      it('still carries it on a row whose state.json errored', async () => {
+        writeFileSync(join(projectDir(ROOT_A), 'state.json'), '{ nope');
+        writeLast(ROOT_A, JSON.stringify(LAST));
+        const a = row(await get(), ROOT_A);
+        expect(a.error).toMatch(/state\.json: not valid JSON/);
+        expect(a.lastDecide).toEqual(LAST);
+      });
+    });
+
     it('still renders every project’s figures when tick.json is unreadable', async () => {
       writeState(ROOT_A, [rec(1, 'failed'), rec(2, 'failed'), rec(3, 'failed')]);
       mkdirSync(dirname(file), { recursive: true });

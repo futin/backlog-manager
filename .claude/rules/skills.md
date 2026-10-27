@@ -17,7 +17,8 @@ paths: ["skills/**", "agents/**"]
   none of them — the run-state home, the retro home (for deltas), `registry.json` (for project names) and, by recorded lease id alone, one driver transcript per
   run. Why: [invariants.md](docs/subsystems/invariants.md#backlog-managerretro-has-exactly-one-writer-and-the-retro-never-writes-run-state)
 - **`~/.backlog-manager/tick/` has exactly one writer, `tick.mjs`, and `backlog-tick` never writes the orchestrator's run-state directory.** The directory is
-  `<home>/<project-key>/` with a `lock` and a `state.json`, the key being `encodeURIComponent(<absolute main-checkout path>)` — the key `orchestrate.mjs`'s
+  `<home>/<project-key>/` with a `lock`, a `state.json` and a `last-decide.json` (the caps `decide` saw, a display record it never reads back), the key
+  being `encodeURIComponent(<absolute main-checkout path>)` — the key `orchestrate.mjs`'s
   `projectDir` computes — and `$BM_TICK_HOME` overrides the home for the reason `$BM_ORCH_HOME` and `$BM_RETRO_HOME` exist. Only `tick-state.mjs` writes there,
   every write a temp file in the same directory plus a `rename`/`link`, never in place. `decide` opens the run-state home read-only, to see a `running` or
   `paused` run, and nothing else: no `run.json`, no control file, no sidecar. The tool is self-contained by the same rule every skill's is: it imports nothing

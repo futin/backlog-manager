@@ -316,6 +316,48 @@ describe('DispatchButton', () => {
     expect(btn.getAttribute('title')).not.toContain('orchestrator run');
   });
 
+  /* #367 — the card's FOURTH reading: given `onReview`, a plan awaiting review draws `Review plan`, which opens the item (where the plan and Approve are)
+     instead of a disabled execute that only says why it will not run. It replaces only the plan-review rung; every rung above it still wins. */
+  describe('Review plan (#367)', () => {
+    it('draws Review plan for a plan awaiting review, and a click opens the item without dispatching or reaching the card', async () => {
+      const onReview = jest.fn();
+      const onDispatch = jest.fn();
+      const onCard = jest.fn();
+      render(
+        <div onClick={onCard}>
+          <DispatchButton item={fakeItem({ source: 'github', planReview: true })} status={READY} onDispatch={onDispatch} onReview={onReview} />
+        </div>
+      );
+      const chip = screen.getByTestId('review-plan');
+      expect(chip.textContent).toBe('Review plan');
+      expect(screen.queryByRole('button', { name: 'execute' })).toBeNull();
+      await userEvent.click(chip);
+      expect(onReview).toHaveBeenCalledTimes(1);
+      expect(onDispatch).not.toHaveBeenCalled();
+      expect(onCard).not.toHaveBeenCalled();
+    });
+
+    it('keeps the in-review reading when the item also has an open PR', () => {
+      render(<DispatchButton item={fakeItem({ source: 'github', inReview: true, planReview: true })} status={READY} onDispatch={() => {}} onReview={() => {}} />);
+      expect(screen.queryByTestId('review-plan')).toBeNull();
+      expect(screen.getByRole('button', { name: 'execute' })).toHaveAttribute('title', expect.stringContaining('a PR is open for this item'));
+    });
+
+    it('keeps the in-progress reading when a session is working the item', () => {
+      render(
+        <DispatchButton item={fakeItem({ planReview: true, started: STARTED, phase: 'execute' })} status={READY} onDispatch={() => {}} onReview={() => {}} />
+      );
+      expect(screen.queryByTestId('review-plan')).toBeNull();
+      expect(screen.getByRole('button', { name: 'execute' })).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('draws the plain execute chip for an item with no mark', () => {
+      render(<DispatchButton item={fakeItem({ source: 'github' })} status={READY} onDispatch={() => {}} onReview={() => {}} />);
+      expect(screen.queryByTestId('review-plan')).toBeNull();
+      expect(screen.getByRole('button', { name: 'execute' })).not.toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
   /* And the other half: project visibility still outranks it. A reason naming
      a running session would send the reader to look for a session when what
      actually needs fixing is which projects the dashboard can see. */

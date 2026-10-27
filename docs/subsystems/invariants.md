@@ -193,7 +193,8 @@ Spec: [2026-09-06-backlog-retro-design.md](../superpowers/specs/2026-09-06-backl
 **backlog-tick** (spec: [2026-10-22-backlog-tick-design.md](../superpowers/specs/2026-10-22-backlog-tick-design.md)). The fourth directory under
 `~/.backlog-manager/` a tool owns outright, and it keeps the relationship the other three do: `registry.json` has `backlog.mjs`, `run.json` has
 `orchestrate.mjs`, `retro/` has `retro.mjs record`, and `tick/<project-key>/` has `tick.mjs` — in fact `tick-state.mjs`, the one file in the skill that writes.
-Two files live there per project, `lock` and `state.json`; the key is `encodeURIComponent` of the absolute main-checkout path, the key `orchestrate.mjs`'s
+Three files live there per project, `lock`, `state.json` and `last-decide.json` — the last (#367) a display record of the caps `decide` saw, written without
+the lock and never read back by the tool, so it can never steer a verdict; the key is `encodeURIComponent` of the absolute main-checkout path, the key `orchestrate.mjs`'s
 `projectDir` computes, so one project is one name across both tools without either importing the other. `$BM_TICK_HOME` overrides the home, for the reason
 `$BM_ORCH_HOME` and `$BM_RETRO_HOME` exist: a test process, or somebody poking at the tool by hand, must never write into a real machine's tick history, and
 above all never into a lock a scheduled step is holding.

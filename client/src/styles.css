@@ -507,6 +507,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .board-run-chip:hover { background: var(--strip-hi) }
 .board-run-chip-line { font-size: 12px; font-weight: 500; white-space: nowrap }
 .board-run-chip-mark { font-size: 12px; line-height: 1; color: var(--ink3) }
+/* #367 — the band's plan-review reading: RunChip's geometry without its affordance, since it opens nothing (§8.3). */
+.board-plan-chip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; color: var(--ink) }
 
 /* A centred flex line, not plain centred text: the loading fallback puts an icon
    beside the word, and `vertical-align` would not align it — an inline SVG's
@@ -1236,6 +1238,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* #225's claim control, under the dispatch one: the chip, or the inline confirm that replaces it, with a refusal on the line below. */
 .item-facts-claim { display: flex; flex-direction: column; align-items: flex-start; gap: 6px }
 .item-claim-note { margin: 0; font-size: 12px; color: var(--ink3) }
+.item-plan-prompt { font-size: 12px; color: var(--ink2); user-select: all; overflow-wrap: anywhere }
 
 /* The Jira issue modal's own additions (§8.9.2) — everything else in it is the item modal's `.item-facts*` / `.item-body*` above. The key row sits over the
    facts list: the key at 13/500 --ink2 (the card's own key reading), the link out beside it in the body's link colour at 12. */

@@ -3,6 +3,7 @@ import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { disabledReason } from '../../lib/gate-view';
 import { progressBlock } from '../../lib/item-progress';
 import { Chevron } from '../ui/Chevron';
+import { Chip } from '../ui/Chip';
 import { GatedChip } from '../ui/GatedChip';
 
 /**
@@ -78,13 +79,17 @@ export function dispatchAvailable(item: BacklogItem, status: AgentsStatus | null
  * execute `--cyan`, capture `--magenta`) — carried by the label's own class
  * rather than by a rule reaching into `.ui-chip`, which is the restatement
  * `test/design-guards.test.ts`'s guard 7 exists to refuse.
+ *
+ * A FOURTH reading since #367 (DESIGN.md §8.3): on the card, when the plan-review rung is the one speaking, the disabled chip becomes an enabled
+ * **Review plan** that opens the item modal, where the plan is rendered and Approve lives. See `onReview`.
  */
 export function DispatchButton({
   item,
   status,
   onDispatch,
   runBlock = null,
-  reverify
+  reverify,
+  onReview
 }: {
   item: BacklogItem;
   status: AgentsStatus | null;
@@ -136,6 +141,16 @@ export function DispatchButton({
    * was before this existed.
    */
   reverify?: () => Promise<AgentsStatus>;
+  /**
+   * The card's Review plan (#367): given, and the plan-review rung the one speaking — no `started:` stamp and no open PR outranking it — the disabled
+   * action chip becomes an enabled `Review plan` that calls this. It reads past `gateBlock` (project visibility) on purpose: approving a plan dispatches
+   * nothing, so a dashboard that cannot see the project is no reason to hide the way to read it. The environment-level `return null` still hides it — that
+   * rule is about the whole control on every card, and the card itself still opens the modal.
+   *
+   * Optional, and the modal's copy passes none: inside the modal the plan is already on screen and Approve sits under this chip, so there it stays today's
+   * disabled `this plan awaits review`.
+   */
+  onReview?: () => void;
 }) {
   const action = deriveAction(item);
   /* The same two rules `dispatchAvailable` states, read through it rather than
@@ -175,7 +190,10 @@ export function DispatchButton({
      outranks the volatile run claim, while a live session's stamp still names the more immediate fact. */
   /* The plan-review rung (backlog-tick) follows it, the same ladder as the server's: a plan written unattended carries the mark until a person approves it,
      and it reuses the in-review rendering — same disabled state, same reason as title and described-by. In-review first, so an item holding both says the PR. */
-  const itemBlock = progressBlock(item, Date.now()) ?? inReviewBlock(item) ?? planReviewBlock(item) ?? runBlock;
+  const progress = progressBlock(item, Date.now());
+  const inReview = inReviewBlock(item);
+  const itemBlock = progress ?? inReview ?? planReviewBlock(item) ?? runBlock;
+  const reviewing = onReview !== undefined && progress === null && inReview === null && planReviewBlock(item) !== null;
 
   return (
     <>
@@ -216,33 +234,41 @@ export function DispatchButton({
           if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
         }}
       >
-        {/* The disabled mechanics — the disabled flag, the described reason, the busy state and bug-13's re-ask — are `GatedChip`'s (#272); this
-            component keeps the policy: its gate, re-run over the fresh status, and the two blocks a click can never clear. */}
-        <GatedChip
-          size={28}
-          gateBlock={gateBlock}
-          otherBlock={itemBlock}
-          idleTitle={`dispatch ${action} to a Claude session`}
-          reverify={reverify}
-          // Through the same gate, so a status that came back with dispatch off or the dashboard gone opens nothing either. `itemBlock` cannot
-          // have changed in the meantime: one half is on the item file this board is rendering, the other is a prop.
-          recheck={(fresh) => dispatchGate(item, fresh).control === 'enabled'}
-          onActivate={onDispatch}
-        >
-          {(blocked) => (
-            <>
-              {/* The action IS the tone class: `groom` and `execute` are the two
+        {reviewing ? (
+          /* #367: the one rung with somewhere to send the reader. The same wrapper stops the click and Enter/Space, so opening the modal from here
+             does not ALSO fire the card's own open — one modal, opened once. */
+          <Chip size={28} data-testid="review-plan" title="read the plan, then approve it" onClick={onReview}>
+            <span className="dispatch-word">Review plan</span>
+          </Chip>
+        ) : (
+          /* The disabled mechanics — the disabled flag, the described reason, the busy state and bug-13's re-ask — are `GatedChip`'s (#272); this
+            component keeps the policy: its gate, re-run over the fresh status, and the two blocks a click can never clear. */
+          <GatedChip
+            size={28}
+            gateBlock={gateBlock}
+            otherBlock={itemBlock}
+            idleTitle={`dispatch ${action} to a Claude session`}
+            reverify={reverify}
+            // Through the same gate, so a status that came back with dispatch off or the dashboard gone opens nothing either. `itemBlock` cannot
+            // have changed in the meantime: one half is on the item file this board is rendering, the other is a prop.
+            recheck={(fresh) => dispatchGate(item, fresh).control === 'enabled'}
+            onActivate={onDispatch}
+          >
+            {(blocked) => (
+              <>
+                {/* The action IS the tone class: `groom` and `execute` are the two
                   AgentAction values plus `capture`, so the palette can never drift
                   from the derivation. `blocked` replaces the tone rather than
                   joining it — a dimmed word is the disabled reading, and a
                   --mustard word at 45% opacity would be a third colour nobody
                   chose. */}
-              <span className={blocked ? 'dispatch-word blocked' : `dispatch-word ${action}`}>{actionLabel(item, action)}</span>
-              {/* `Chevron` is aria-hidden: the accessible name is the action word alone. */}
-              <Chevron dir="right" className="dispatch-mark" />
-            </>
-          )}
-        </GatedChip>
+                <span className={blocked ? 'dispatch-word blocked' : `dispatch-word ${action}`}>{actionLabel(item, action)}</span>
+                {/* `Chevron` is aria-hidden: the accessible name is the action word alone. */}
+                <Chevron dir="right" className="dispatch-mark" />
+              </>
+            )}
+          </GatedChip>
+        )}
       </span>
     </>
   );
