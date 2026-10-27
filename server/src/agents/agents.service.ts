@@ -31,6 +31,7 @@ import {
   isQuestionMode,
   modesUpTo,
   planReviewBlock,
+  unvettedBlock,
   pickFrom,
   projectDispatchGate,
   runClaimBlock,
@@ -383,9 +384,12 @@ export class AgentsService {
       // item, and `dispatch` below refuses it with the same sentence.
       // The plan-review rung (backlog-tick) follows it, in the client's order: a plan written unattended and not yet approved, refused by `dispatch` below with
       // the same sentence. In-review first, so an item holding both says the PR reason.
+      // The unvetted rung (#341) sits between those two, the client's order again: an outsider's issue no trusted groom has pinned, which approving the
+      // plan would not clear — so its reason reads before plan-review's.
       blocked:
         dispatchBlock(item, status) ??
         inReviewBlock(item) ??
+        unvettedBlock(item) ??
         planReviewBlock(item) ??
         runClaimBlock(item, runs, starting) ??
         this.poller.syncOffBlock(item.projectPath) ??
@@ -525,6 +529,11 @@ export class AgentsService {
     // close the PR, or `backlog.mjs review <id> off`), with no upstream to blame.
     const inReview = inReviewBlock(item);
     if (inReview !== null) throw new HttpException({ error: inReview }, 409);
+
+    // The unvetted block (#341), re-checked for the same reason: an outsider may have edited the body since the sheet's plan was read, which un-pins it.
+    // Same uncoded 409 — a person resolves it by grooming the item, whose `body` write pins it. Between in-review and plan-review, the ladder's order.
+    const unvetted = unvettedBlock(item);
+    if (unvetted !== null) throw new HttpException({ error: unvetted }, 409);
 
     // The plan-review block (backlog-tick), re-checked for the same reason: a tick may have written a plan and marked the item since the sheet's plan was read.
     // Same uncoded 409 — a person resolves it by removing the label (or the `plan-review:` line) once they have read the plan. After in-review, the ladder's order.

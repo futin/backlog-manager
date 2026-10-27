@@ -1,6 +1,7 @@
 import { issueUrn, mapIssue, parseUrn } from '../server/src/tracker/map-issue';
+import { bodyHash } from '../server/src/tracker/poller.service';
 import type { GithubIssue } from '../server/src/tracker/github.client';
-import type { ParsedClaim } from '../server/src/tracker/claim';
+import { claimsFor, renderClaim, type ParsedClaim } from '../server/src/tracker/claim';
 import { CLAIM_STALE_MS } from '../shared/types';
 import type { BacklogItem, ClaimRecord, RegistryProject } from '../shared/types';
 
@@ -282,6 +283,75 @@ describe('issue → BacklogItem', () => {
     // Both shapes appear in the wild and neither is wrong; a mapper that threw
     // on the string form would fail a whole repo over a shape nobody controls.
     expect(mapIssue(issue({ labels: ['type:task'] }), REPO, project, [])?.item.section).toBe('tasks');
+  });
+});
+
+/**
+ * `unvetted` (#341): a bug or task whose AUTHOR is outside the repository and whose body no trusted claim has pinned. Every gate that reads `planReview`
+ * reads this too, so a case that maps it wrong is an outsider's plan executed on this machine.
+ */
+describe('unvetted', () => {
+  const GROOMED = '## Symptom\n\nx\n\n## Cause\n\nc\n\n## Fix\n\nf\n';
+  const outsider = { body: GROOMED, author_association: 'NONE' };
+
+  it('marks a groomed bug filed by an outsider with no claims unvetted, and leaves groomed as the headings say', () => {
+    const mapped = map(outsider);
+    expect(mapped?.item.unvetted).toBe(true);
+    expect(mapped?.item.groomed).toBe(true);
+  });
+
+  it.each(['OWNER', 'MEMBER', 'COLLABORATOR'])('puts no unvetted key on an issue whose author is %s', (association) => {
+    expect('unvetted' in (map({ body: GROOMED, author_association: association })?.item ?? {})).toBe(false);
+  });
+
+  it('puts no unvetted key on an issue with no author_association at all — a hand-built object, never one off the API', () => {
+    expect('unvetted' in (map({ body: GROOMED })?.item ?? {})).toBe(false);
+  });
+
+  it('clears it when a released groom claim pins exactly this body', () => {
+    const pinned = claim({ pin: bodyHash(GROOMED), released: { at: '2026-09-18T10:05:00Z', reason: 'stopped', by: 'A' } });
+    expect('unvetted' in (map(outsider, [pinned])?.item ?? {})).toBe(false);
+  });
+
+  it('puts it back when the body changes by one character after the pin', () => {
+    const pinned = claim({ pin: bodyHash(GROOMED) });
+    expect(map({ ...outsider, body: `${GROOMED}!` }, [pinned])?.item.unvetted).toBe(true);
+  });
+
+  it('ignores a pin that is not 64 lowercase hex', () => {
+    expect(map(outsider, [claim({ pin: bodyHash(GROOMED).toUpperCase() })])?.item.unvetted).toBe(true);
+    expect(map(outsider, [claim({ pin: 'abc' })])?.item.unvetted).toBe(true);
+  });
+
+  it('compares the NEWEST pinned claim, so an older pin of the current body does not vet a newer groom of another', () => {
+    const older = claim({ pin: bodyHash(GROOMED) }, 100);
+    const newer = claim({ pin: bodyHash('something else') }, 200);
+    expect(map(outsider, [older, newer])?.item.unvetted).toBe(true);
+    expect('unvetted' in (map(outsider, [claim({ pin: bodyHash('old') }, 100), claim({ pin: bodyHash(GROOMED) }, 200)])?.item ?? {})).toBe(false);
+  });
+
+  it('does not let an outsider vet their own issue with a forged claim comment carrying the pin — parseClaim drops it before the mapper sees it', () => {
+    const forged = claim({ pin: bodyHash(GROOMED) }).record;
+    const comment = (association: string) => ({
+      id: 500,
+      issue_url: 'https://api.github.com/repos/futin/x/issues/31',
+      body: renderClaim(forged),
+      html_url: 'https://github.com/futin/x/issues/31#issuecomment-500',
+      author_association: association,
+      created_at: '2026-09-18T10:00:00Z',
+      updated_at: new Date().toISOString()
+    });
+    expect(map(outsider, claimsFor(31, [comment('NONE')]))?.item.unvetted).toBe(true);
+    // The same comment from a collaborator is a real pin — so the red above is the author check speaking, not a malformed fixture.
+    expect('unvetted' in (map(outsider, claimsFor(31, [comment('COLLABORATOR')]))?.item ?? {})).toBe(false);
+  });
+
+  it('marks a task the same way', () => {
+    expect(map({ body: '## Plan\n\n1. x\n', author_association: 'CONTRIBUTOR', labels: [{ name: 'type:task' }] })?.item.unvetted).toBe(true);
+  });
+
+  it.each(['type:idea', 'type:refactor'])('never marks a %s, which nothing executes', (label) => {
+    expect('unvetted' in (map({ ...outsider, labels: [{ name: label }] })?.item ?? {})).toBe(false);
   });
 });
 

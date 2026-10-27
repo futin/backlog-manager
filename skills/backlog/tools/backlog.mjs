@@ -3145,7 +3145,11 @@ export async function main(argv) {
           const found = (index.items ?? []).find((it) => it.projectPath === project && it.id === wanted)
           if (found !== undefined && ANCHORED_SECTIONS.has(found.section)) stamped = stampGroomedAt(body, sha)
         }
-        const payload = { project, id: wanted, body: stamped, ifUpdatedAt }
+        /* `session` (#341) is this session's id — the same `sessionIdentity()` that `show` prints as `this-session` and `start`/`heartbeat` claim under.
+           The server pins the issue's body to this session's LIVE claim when it holds one: a body a trusted session wrote under its own claim is what vets an
+           item filed from outside the repo, and the claim is the only proof the server has of who is writing. Sent on every body write, never behind a flag,
+           because a groom that forgot a flag would leave an outsider's item unvetted with nothing saying so. */
+        const payload = { project, id: wanted, body: stamped, ifUpdatedAt, session: sessionIdentity() }
         /* Sent only when a flag said so, so a groom with no opinion leaves the label exactly as it is (task-47). That is the third state
            `ItemBodyRequest.runnerFix` declares, and it is the common one: most body patches are re-grooms and plan rewrites that have nothing to say about
            whether the item repairs the runner. */
@@ -3155,6 +3159,11 @@ export async function main(argv) {
         if (wantPlanReview) payload.planReview = true
         const patched = await apiPost('body', payload)
         console.log(patched.updatedAt)
+        /* The write landed (200) but a pin that was due did not — this session holds a live claim, and reading the claims or editing its comment failed —
+           and the server says why in `pinWarning`. (No live claim of this session's is not a warning: the item simply stays unvetted.) One stderr line and
+           still exit 0: the body IS written, and failing the command would send a groom back to re-apply a write that already succeeded. stdout stays the
+           one `updatedAt` line a caller parses. */
+        if (patched && typeof patched.pinWarning === 'string' && patched.pinWarning !== '') console.error(`warning: ${patched.pinWarning}`)
       } catch (e) {
         if (e instanceof BacklogError && e.status === 409) {
           const now = e.payload && typeof e.payload.updatedAt === 'string' ? e.payload.updatedAt : 'unknown'

@@ -158,8 +158,17 @@ function heartbeatCeiling(comment: GithubComment): number | null {
  */
 const TRUSTED_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
+/**
+ * The one trust rule over an `author_association` (#341), for a comment and an issue alike: `OWNER`, `MEMBER` or `COLLABORATOR`, or absent. Absent is trusted
+ * for the reason above — every comment and every issue the API returns states one, so only an object built here carries none. `mapIssue` reads it on the
+ * issue's author to decide `unvetted`; `trustedAuthor` reads it on a claim comment's. One function, so the two can never disagree about who is inside.
+ */
+export function trustedAssociation(assoc: string | undefined): boolean {
+  return assoc === undefined || TRUSTED_ASSOCIATIONS.has(assoc);
+}
+
 function trustedAuthor(comment: GithubComment): boolean {
-  return comment.author_association === undefined || TRUSTED_ASSOCIATIONS.has(comment.author_association);
+  return trustedAssociation(comment.author_association);
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);

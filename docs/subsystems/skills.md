@@ -125,7 +125,7 @@ What each verb does differently, and the five that exist only here:
 | `heartbeat`      | new — says this session still holds the item; refused (exit `1`) on another session's claim, naming both sessions and, when the claim recorded one, both machines (bug-45, bug-46). Files mode: exit `1` |
 | `abort`          | new — releases a LIVE claim this machine's own dead session left behind (bug-48): refused unless the claim's `host` equals `hostIdentity()` and Claude Code's session registry (`<configDir>/sessions/*.json`) holds no running entry for the holder — and refused as `cannot tell` when that registry is unreadable, malformed, or has no running entry for the aborting session itself (bug-49); a board-dispatched `claude -p` session between turns has no entry either, and reads as gone; releases with `reason: 'aborted'` and no `counters`. A dead claim exits `0` saying the next `start` retires it. Files mode: exit `1`, naming `stop <id> --abandon` |
 | `comment`        | new — appends a comment. Files mode: exit `1`                                                                                                      |
-| `body`           | new — groom's body patch, behind `--if-updated-at`; a bug's or task's body gets exactly one `bm:groomed-at` footer (#322). Files mode: exit `1`     |
+| `body`           | new — groom's body patch, behind `--if-updated-at`; a bug's or task's body gets exactly one `bm:groomed-at` footer (#322). It always sends its own session id, so a session holding the claim pins the body it wrote (#341); a `pinWarning` is one stderr line, still exit `0`. Files mode: exit `1`     |
 | `drift`          | both modes — files reads the item file, API mode the body and its footer; GET requests only (#322)                                               |
 | `import`         | files mode ONLY — the command that moves a project INTO API mode; refused (already tracker-backed) once there                                      |
 | `review`         | new — `review <id> on\|off` sets or clears the `in-review` label through `POST /api/items/review` (execute `pr` mode). Files mode: exit `1`         |
@@ -241,6 +241,14 @@ appended when a Reset is on file — and `status --json` carries it as `breaker:
 line), and every gate that could execute the item refuses it with `this plan awaits review` until a person removes the mark — `backlog.mjs plan-review <id>
 off`, or delete-and-commit on a files project. A tick's groom never promotes an idea, never rejects, never commits and never asks a question. Why it is built
 this way: [invariants.md](invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review).
+
+**A plan an outsider wrote is gated the same way, one rung earlier** (#341). A tracker bug or task whose issue author is not `OWNER`/`MEMBER`/`COLLABORATOR`
+carries `unvetted` on its API item until a trusted groom's `body` write pins the body it wrote (below), and every gate that reads `planReview` reads it too,
+with `filed from outside the repo — groom it to vet the plan`: `trackerExecuteCandidate` in `tick.mjs` skips it; `orchestrate.mjs`'s `unvettedGate` (a
+hand-kept copy of `UNVETTED_REASON`) turns it `ungroomed` in `trackerCandidates`, applied over `planReviewGate` and under `inReviewGate` so the reasons read
+in-review, unvetted, plan-review; and `backlog-execute` refuses an item whose `show --json` carries `item.unvetted`. Removing `plan-review` does not lift it,
+and a tick never grooms one — an outsider's bug with Cause and Fix filled is already `groomed`, so it is a person's groom, or a trusted session's
+([invariants.md](invariants.md#an-outsiders-tracker-issue-is-executable-only-while-its-body-matches-a-pin-a-groom-of-ours-wrote)).
 
 **State lives in `~/.backlog-manager/tick/<project-key>/`** (`$BM_TICK_HOME`): a `lock`, a `last-decide.json` (#367 — the caps the last `decide` that took the
 lock, or answered `idle`, saw, for the board's plan-review reading; written without the lock and never read back) and a `state.json` recording each item the

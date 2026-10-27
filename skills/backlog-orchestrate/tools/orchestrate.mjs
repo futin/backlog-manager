@@ -1936,8 +1936,10 @@ function trackerById(mine) {
 //   * `hoisted` reads `item.runnerFix`, the label, where the files walk reads
 //     a frontmatter key.
 //
-// And one addition the files walk has no counterpart for: `item.inReview`, the
-// `in-review` label, gates the item through `inReviewGate` (execute `pr` mode).
+// And two additions the files walk has no counterpart for: `item.inReview`, the
+// `in-review` label, gates the item through `inReviewGate` (execute `pr` mode),
+// and `item.unvetted`, an outsider-filed issue no trusted groom has pinned,
+// gates it through `unvettedGate` (#341).
 //
 // Ordering is bugs then tasks, oldest ISSUE NUMBER first — the same rule the
 // files walk applies to its own `<prefix>-<n>` numbers, and for the same
@@ -2037,7 +2039,9 @@ function trackerCandidates(projectRoot, { ids, drift = false, base = BASE_REF_DE
       id,
       title: item.title,
       hoisted: item.runnerFix === true,
-      ...inReviewGate(item, planReviewGate(item.planReview === true, gateItem(item.section, text, projectRoot))),
+      // Three per-item marks, innermost applied first so each outer one puts its reason in front: plan-review, then unvetted (#341), then in-review.
+      // The reasons therefore read in-review, unvetted, plan-review — the order `shared/agent.ts`'s ladder checks them in.
+      ...inReviewGate(item, unvettedGate(item, planReviewGate(item.planReview === true, gateItem(item.section, text, projectRoot)))),
       planHash: planHash(planSection(text, item.section) ?? ''),
       ...(drift ? { drift: planDrift({ projectRoot, body: text, frontmatter, section: item.section, base }) } : {})
     };
@@ -2075,6 +2079,23 @@ const PLAN_REVIEW_REASON = 'this plan awaits review';
 function planReviewGate(flag, verdict) {
   if (flag !== true) return verdict;
   return { ...verdict, gate: 'ungroomed', reasons: [PLAN_REVIEW_REASON, ...verdict.reasons], questions: [] };
+}
+
+// The unvetted guard's sentence (#341) — a third HAND-KEPT copy, of `UNVETTED_REASON` in `shared/agent.ts`, for the same reason as the two above: this file
+// cannot import it. The board's Run button, the server's plan/dispatch ladder, this gate and backlog-execute's own refusal all say it.
+const UNVETTED_REASON = 'filed from outside the repo — groom it to vet the plan';
+
+// A tracker issue filed by someone outside the repo (author association not OWNER/MEMBER/COLLABORATOR) whose body no trusted groom has pinned carries
+// `unvetted` on the API item. Its plan is text a stranger wrote, and a run that executes it hands a stranger's instructions to a headless session with this
+// machine's tools — so it reads ready to `gateItem` and must not reach dispatch. Shaped exactly like `planReviewGate` — `ungroomed`, the reason first,
+// `questions` emptied, membership untouched — so no new verdict reaches `RunStage`, and `--ids` naming one says why rather than silently running nothing.
+// It reads the item, not a flag, because only the tracker path can carry it: a files item is written into the repo by somebody with commit access, so the
+// files walk never calls it. The caller applies it OVER `planReviewGate` and UNDER `inReviewGate`, so an item with all three marks reads in-review, then
+// unvetted, then plan-review: an open PR is the strongest fact, and "a stranger wrote this" outranks "a person has not read it yet" because approving a
+// plan-review mark does not vet the body — only a trusted groom's `body` write, which pins it, does.
+function unvettedGate(item, verdict) {
+  if (item.unvetted !== true) return verdict;
+  return { ...verdict, gate: 'ungroomed', reasons: [UNVETTED_REASON, ...verdict.reasons], questions: [] };
 }
 
 // --- the claim, as this machine's state on a tracker item (task-47) ------

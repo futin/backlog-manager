@@ -54,6 +54,22 @@ paths: ["server/src/tracker/**"]
   release — `--abandon` sends no `counters` key at all, which is not the same as zeros. The mapper reads `started`/`phase` from an UNRELEASED claim without
   consulting its heartbeat ("any stamp, fresh or stale") and the counters from the newest claim regardless of release. Why:
   [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
+- **An outsider's tracker issue is executable only while its body matches a pin a groom of ours wrote.** `trustedAssociation(assoc)`
+  (`server/src/tracker/claim.ts`) is the ONE trust rule over an `author_association`, for an issue and a claim comment alike — `OWNER`/`MEMBER`/`COLLABORATOR`,
+  or absent — and `trustedAuthor` calls it. `GithubIssue.author_association` is read off every issue. `mapIssue` sets `BacklogItem.unvetted: true`
+  (spread-absent otherwise, `planReview`'s rule, one writer) through `isUnvetted` exactly when the section is `bugs` or `tasks`, the issue's author is
+  untrusted, and the newest PARSED claim whose `pin` is 64 lowercase hex (`PIN_SHAPE`) — released claims included, an outsider's claim comment already dropped
+  by `parseClaim` — does not equal `bodyHash(issue.body)` (`poller.service.ts`, the one body hasher), or no such claim exists. `groomed` is untouched: still
+  headings only. The pin is `ClaimRecord.pin`, written only by `GithubSource.pinBody` from `patchBody`, inside the same per-URN `writeChain`, straight after the
+  PATCH lands and before either label move: when the request's `session` holds a LIVE claim (`liveClaims`, read fresh via `allClaims`), that claim comment is
+  re-rendered with `pin = bodyHash(<body GitHub's PATCH answered>)`; no `session`, or no live claim held by it, writes nothing and the body still lands; a
+  failed claim read or edit after the PATCH answers 201 with `pinWarning` (`ItemBodyResult`), never a refusal. `wellFormed` does NOT refuse a bad `pin` — the
+  mapper ignores it, which reads unvetted — and `release`/`heartbeat` spread the record, so the pin survives both. The rung is `unvettedBlock`
+  (`shared/agent.ts`, `UNVETTED_REASON` = `filed from outside the repo — groom it to vet the plan`), AFTER `inReviewBlock` and BEFORE `planReviewBlock` in
+  `DispatchButton` (which then draws no `Review plan`) and both `AgentsService` ladders (`plan`'s `blocked`, `dispatch`'s uncoded 409); `orchestrate.mjs` keeps
+  a hand copy and `unvettedGate` in `trackerCandidates` (over `planReviewGate`, under `inReviewGate`), `tick.mjs`'s `trackerExecuteCandidate` skips `unvetted`,
+  and `backlog-execute` refuses it. Removing `plan-review` does not vet; only a trusted session's `body` write under its own live claim does. Why:
+  [invariants.md](docs/subsystems/invariants.md#an-outsiders-tracker-issue-is-executable-only-while-its-body-matches-a-pin-a-groom-of-ours-wrote)
 - **The GitHub token never leaves the server, and the poller is armed only while something is connected.** `BM_GITHUB_TOKEN` is read by `githubToken()`
   (`server/src/tracker/token.util.ts`) per call and cached nowhere; no route returns it and the browser never talks to `api.github.com` — the credential's
   sibling of "the browser never talks to the dashboard", stated separately because one is about an origin and the other about a secret. `docker-compose.yml`

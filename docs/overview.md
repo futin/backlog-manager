@@ -56,6 +56,8 @@ guarantee is untouched by it. `settings/` also holds `jira.json`, which the serv
 list of other machines a launch can go to, which the server alone reads and writes through four guarded routes under `/api/dashboards` — no skill reads it
 ([workflows/remote-machine.md](workflows/remote-machine.md)). And it holds `tick.json`, the tick breaker's halt threshold and per-project resets, which travels
 server → tool like the control file: the server writes it through two guarded routes (`POST /api/ticks/config` and `/reset`), and `tick.mjs` only reads it.
+Last, `timezone.json`, the board's one shared time zone, which the server alone reads and writes through `POST /api/settings/timezone`; every reading
+of it is the client's, and no skill reads it.
 
 ### The API — [full doc](subsystems/api.md)
 
@@ -101,6 +103,9 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   `state.json`, `lock` and `last-decide.json`) and never writes under it, and the two guarded POSTs that write `tick.json`. Not an outbound-calling module.
 - **`releases/`** — `GET /api/releases`, this checkout's own `vX.Y.Z` tags for the rail's version chip, read through release-kit's reader with every git call
   going through `runGit`. Read-only and git only, so not an outbound-calling module either; [full doc](subsystems/releases.md).
+- **`settings/`** — `GET` and a guarded `POST /api/settings/timezone`, the reader and writer of `settings/timezone.json`, the zone every clock, day group
+  and date on the board is drawn in (#241). The server only stores, validates and canonicalises the IANA id; it never formats a date itself. Not an
+  outbound-calling module.
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins
   the inline theme script by hash; and every route, read or write, is gated by a `Host` allowlist, which is what a page that rebinds DNS onto loopback cannot
   pass.

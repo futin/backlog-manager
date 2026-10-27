@@ -98,6 +98,10 @@ means re-read and re-apply** — `show --json` again, redo your edit against the
 is refused. A refused `body` must leave the claim in place for the retry; releasing it means the retry needs a second `start`, and that leaves a second claim
 comment on the issue that is never deleted.
 
+**`body` pins the issue's body to your live claim** — which is why it runs before `stop` — and that pin is what vets an item filed from outside the repo
+(`"unvetted":true` in `show --json`): no execute gate runs one until a groom of ours has pinned it. Without a live claim of this session's the write still
+lands, unpinned; a pin that was due and failed is one `warning:` line on stderr, and `body` still exits `0`.
+
 **Promote** is two calls rather than a write-then-move: file the new task with `new tasks "<title>" --body /tmp/task.md --from #<n>`, then close the original
 with `move #<n> done --outcome /tmp/promoted.md`, whose text is `Promoted to #45.` The closing comment is what `promoted-to:` was in frontmatter; the server
 prepends the matching `_From #<n>._` line to the new issue.

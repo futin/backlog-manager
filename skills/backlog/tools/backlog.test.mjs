@@ -4793,10 +4793,11 @@ test('API mode: body sends the caller-s ifUpdatedAt, and a 409 says to read it a
   fs.writeFileSync(file, '# new body\n')
 
   const ok = await withApi({ '/api/items/body': { status: 201, body: { id: '#31', updatedAt: '2026-09-18T11:00:00Z' } } }, async (port) =>
-    await runNode(dir, apiEnv(port), 'body', '31', '--body', file, '--if-updated-at', '2026-09-18T10:00:00Z'),
+    await runNode(dir, apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' }), 'body', '31', '--body', file, '--if-updated-at', '2026-09-18T10:00:00Z'),
   )
   assert.equal(ok.out.status, 0)
-  assert.deepEqual(ok.requests[0].body, { project: dir, id: '#31', body: '# new body\n', ifUpdatedAt: '2026-09-18T10:00:00Z' })
+  // `session` rides every body write (#341): it is what the server pins the body to.
+  assert.deepEqual(ok.requests[0].body, { project: dir, id: '#31', body: '# new body\n', ifUpdatedAt: '2026-09-18T10:00:00Z', session: 'sess-mine' })
 
   const stale = await withApi({ '/api/items/body': { status: 409, body: { error: 'changed', updatedAt: '2026-09-18T11:30:00Z' } } }, async (port) =>
     await runNode(dir, apiEnv(port), 'body', '31', '--body', file, '--if-updated-at', '2026-09-18T10:00:00Z'),
@@ -4929,6 +4930,41 @@ test('API mode: body --plan-review sends planReview true, and the key is absent 
   )
   assert.equal(plain.out.status, 0, plain.out.stderr)
   assert.equal('planReview' in plain.requests[0].body, false)
+})
+
+/* #341. The server pins an issue's body to the writing session's live claim, and that pin is what vets an item filed from outside the repo — so `body` has to
+   say WHICH session is writing, and it must be the very id `show` prints as `this-session` (the one `start` claimed under), or the server would compare a
+   claim against a stranger. And a write that landed but could not be pinned is a 200 with `pinWarning`: one stderr line, exit 0, stdout untouched. */
+test('API mode: body sends the session show prints, and a pinWarning is one stderr line on an exit 0', async () => {
+  const { dir } = trackerFixture()
+  const bodyFile = path.join(dir, 'body.md')
+  fs.writeFileSync(bodyFile, '## Plan\n\nreal work\n')
+  const env = (port) => apiEnv(port, { CLAUDE_CODE_SESSION_ID: 'sess-mine' })
+  const showRoutes = {
+    '/api/items': { body: { items: [apiItem({ projectPath: dir })], errors: [] } },
+    '/api/items/body': { body: '# body\n' },
+    '/api/items/claim': { body: null },
+  }
+  const { out: shown } = await withApi(showRoutes, async (port) => await runNode(dir, env(port), 'show', '31', '--json'))
+  assert.equal(shown.status, 0, shown.stderr)
+  const session = JSON.parse(shown.stdout).session
+
+  const pinned = await withApi({ '/api/items/body': { body: { id: '#31', updatedAt: '2026-09-19T10:00:00Z' } } }, async (port) =>
+    await runNode(dir, env(port), 'body', '31', '--body', bodyFile, '--if-updated-at', '2026-09-19T09:00:00Z'),
+  )
+  assert.equal(pinned.out.status, 0, pinned.out.stderr)
+  const post = pinned.requests.find((r) => r.method === 'POST' && r.path === '/api/items/body')
+  assert.equal(post.body.session, session)
+  assert.equal(post.body.session, 'sess-mine')
+  assert.equal(pinned.out.stderr, '', 'a pinned write says nothing on stderr')
+
+  const warning = "#31's body was written but not pinned (GitHub answered 502) — it stays unvetted if an outsider filed it"
+  const unpinned = await withApi({ '/api/items/body': { body: { id: '#31', updatedAt: '2026-09-19T10:00:00Z', pinWarning: warning } } }, async (port) =>
+    await runNode(dir, env(port), 'body', '31', '--body', bodyFile, '--if-updated-at', '2026-09-19T09:00:00Z'),
+  )
+  assert.equal(unpinned.out.status, 0, unpinned.out.stderr)
+  assert.equal(unpinned.out.stdout.trim(), '2026-09-19T10:00:00Z')
+  assert.equal(unpinned.out.stderr, `warning: ${warning}\n`)
 })
 
 test('API mode: new --plan-review sends planReview true, and the key is absent without it', async () => {

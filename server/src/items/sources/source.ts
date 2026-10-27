@@ -4,6 +4,7 @@ import type {
   ClaimRefused,
   ClaimResult,
   ItemBodyRequest,
+  ItemBodyResult,
   ItemClaimRequest,
   ItemCommentRequest,
   ItemCreateRequest,
@@ -209,7 +210,7 @@ export interface ItemWriter {
    * this name is an implementation constraint and is deliberately not visible
    * in the HTTP surface.
    */
-  patchBody(project: RegistryProject, marker: SourceMarker, req: ItemBodyRequest): Promise<WriteOutcome<{ id: string; updatedAt: string }>>;
+  patchBody(project: RegistryProject, marker: SourceMarker, req: ItemBodyRequest): Promise<WriteOutcome<ItemBodyResult>>;
 
   /** Append a comment. Execute's failure path: the Outcome is recorded and the
    *  item does not move. */

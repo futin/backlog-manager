@@ -581,13 +581,16 @@ function filesExecuteCandidate({ root }, base, state) {
 }
 
 // Tracker: the API's own rows for this project. The body is fetched only for an issue that passed every other check, and one whose body cannot be read is
-// passed over this tick — its failure record cannot be checked against it.
+// passed over this tick — its failure record cannot be checked against it. Three API marks take an issue out besides an ungroomed body: `planReview` (a plan
+// nobody has approved), `inReview` (a PR already open) and `unvetted` (#341 — filed from outside the repo and not yet pinned by a trusted groom, so its plan is
+// a stranger's text; the server's `UNVETTED_REASON` gate says the same). An unvetted groomed bug is no groom candidate either (`groomed` is true), so a tick
+// never vets one: that is a person's or a trusted session's groom.
 async function trackerExecuteCandidate({ root }, mine, state) {
   const items = mine
     .filter((it) => it.status === 'open' && (it.section === 'bugs' || it.section === 'tasks'))
     .map((it) => ({ ...it, runnerFix: it.runnerFix === true }));
   for (const it of orderExecute(items)) {
-    if (it.groomed !== true || it.planReview === true || it.inReview === true) continue;
+    if (it.groomed !== true || it.planReview === true || it.inReview === true || it.unvetted === true) continue;
     if (executeTaken(root, it.id)) continue;
     const body = await issueBody(it.path);
     if (body === null) continue;
