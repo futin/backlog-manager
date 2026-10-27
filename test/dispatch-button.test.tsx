@@ -302,6 +302,18 @@ describe('DispatchButton', () => {
     expect(btn.getAttribute('title')).not.toContain('awaits review');
   });
 
+  /* The unvetted rung (#341): an outsider's issue no trusted groom has pinned. Between in-review and plan-review, so an item holding plan-review too says
+     the reason an approval would not clear. */
+  it('disables with the unvetted reason, ahead of plan-review and behind in-review', () => {
+    const { unmount } = render(<DispatchButton item={fakeItem({ source: 'github', unvetted: true, planReview: true })} status={READY} onDispatch={() => {}} />);
+    const btn = screen.getByRole('button', { name: 'execute' });
+    expect(btn).toHaveAttribute('aria-disabled', 'true');
+    expect(btn).toHaveAttribute('title', expect.stringContaining('filed from outside the repo — groom it to vet the plan'));
+    unmount();
+    render(<DispatchButton item={fakeItem({ source: 'github', inReview: true, unvetted: true })} status={READY} onDispatch={() => {}} />);
+    expect(screen.getByRole('button', { name: 'execute' })).toHaveAttribute('title', expect.stringContaining('a PR is open for this item'));
+  });
+
   it("prefers the plan-review reason over a run's when an item carries both", () => {
     render(
       <DispatchButton
@@ -335,6 +347,12 @@ describe('DispatchButton', () => {
       expect(onReview).toHaveBeenCalledTimes(1);
       expect(onDispatch).not.toHaveBeenCalled();
       expect(onCard).not.toHaveBeenCalled();
+    });
+
+    it('offers no Review plan on an unvetted item — approving the plan would not vet it', () => {
+      render(<DispatchButton item={fakeItem({ source: 'github', unvetted: true, planReview: true })} status={READY} onDispatch={() => {}} onReview={() => {}} />);
+      expect(screen.queryByTestId('review-plan')).toBeNull();
+      expect(screen.getByRole('button', { name: 'execute' })).toHaveAttribute('title', expect.stringContaining('filed from outside the repo'));
     });
 
     it('keeps the in-review reading when the item also has an open PR', () => {

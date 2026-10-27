@@ -309,6 +309,45 @@ describe('an item whose plan awaits review', () => {
 });
 
 /**
+ * The unvetted guard (#341): an issue filed by an outsider whose body no trusted groom has pinned, driven through the real association and mapper. The plan
+ * answers `blocked` with the one shared sentence and `dispatch` refuses with the same uncoded 409. Read after in-review and before plan-review, so an issue
+ * holding both of the latter two says the unvetted reason.
+ */
+describe('an item filed from outside the repo', () => {
+  beforeEach(async () => {
+    gh.issues.get(31)!.author_association = 'NONE';
+    await app.get(TrackerPollerService).tick();
+  });
+
+  it('is blocked in the plan with the unvetted reason', async () => {
+    const res = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(res.body.action).toBe('execute');
+    expect(res.body.blocked).toBe('filed from outside the repo — groom it to vet the plan');
+  });
+
+  it('409s dispatch with the unvetted reason, and spawns nothing', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
+      .expect(409);
+    expect(res.body).toEqual({ error: 'filed from outside the repo — groom it to vet the plan' });
+    expect(spawned.some((u) => u.endsWith('/api/spawn'))).toBe(false);
+  });
+
+  it('says the unvetted reason before the plan-review one when the issue carries both', async () => {
+    gh.issues.get(31)!.labels.push({ name: 'plan-review' });
+    await app.get(TrackerPollerService).tick();
+    const plan = await request(app.getHttpServer()).post('/api/agents/plan').send({ itemPath: `gh:${FAKE_REPO}#31` }).expect(201);
+    expect(plan.body.blocked).toBe('filed from outside the repo — groom it to vet the plan');
+    const res = await request(app.getHttpServer())
+      .post('/api/agents/dispatch')
+      .send({ itemPath: `gh:${FAKE_REPO}#31`, action: 'execute', prompt: 'x', permissionMode: 'acceptEdits' })
+      .expect(409);
+    expect(res.body).toEqual({ error: 'filed from outside the repo — groom it to vet the plan' });
+  });
+});
+
+/**
  * #227 — the item-claim block, re-checked by `dispatch` for a tracker item the way `runClaimBlock` is. A live claim, a run's claim and a claim held by a
  * session the board itself dispatched all refuse; a STALE hand claim proceeds — the spawned session's `start` retires it — unless this machine can show
  * the holder is still running.

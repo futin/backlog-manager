@@ -16,7 +16,7 @@ interactive exits that say "tell the user" become the final message.
 
 Each of these ends the final message with one line starting `failed:`, then the reason, and nothing after it:
 
-- the refusal gate — an unplanned task or bug, `a PR is open for this item`, `this plan awaits review`;
+- the refusal gate — an unplanned task or bug, `a PR is open for this item`, `this plan awaits review`, `filed from outside the repo — groom it to vet the plan`;
 - `start` refused: a lost claim race ends the session as "Losing the claim race" says, with the holder in the reason;
 - an unknown or doubled `--finish`, an unusable `<base>`, or any other refusal `references/pr-mode.md` §1–§3 raises;
 - a failed verification, including `Plan no longer holds:` — the `## Outcome` is written as SKILL.md says, and the reason is its first line;

@@ -37,7 +37,7 @@ paths: ["skills/**", "agents/**"]
   frontmatter line on a files project, written in the SAME write as the plan — `backlog.mjs body|new --plan-review`, or the frontmatter groom prints — so no
   moment exists where an approved-looking plan has no mark, and every gate refuses it with one sentence, `this plan awaits review` (`PLAN_REVIEW_REASON`,
   `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and the execute skill): the board's Run, the server's `plan`/`dispatch` ladder
-  (`planReviewBlock`, always after `inReviewBlock`), the orchestrator's queue and `backlog-execute`'s own refusal. A tick never merges, never commits a groom,
+  (`planReviewBlock`, always after `inReviewBlock`), the orchestrator's queue and `backlog-execute`'s own refusal. An outsider-filed tracker item carries a rung between those two, `unvettedBlock` (`UNVETTED_REASON`, #341), lifted only by a groom's pinned `body` write. A tick never merges, never commits a groom,
   never promotes an idea, never rejects, never asks and never leaves anything running. Why:
   [invariants.md](docs/subsystems/invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review)
 - **The only `started:` marker a tick clears is the one a killed tick left, identified by the verdict in its own stale lock.** A lock older than `--lock-ttl`

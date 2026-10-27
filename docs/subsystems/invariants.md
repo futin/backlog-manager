@@ -254,7 +254,7 @@ committing. Every gate that could execute the item reads the one flag and refuse
 `shared/agent.ts`, with hand-kept copies in `orchestrate.mjs` and in the execute skill's text, pinned to it by `test/agents-shared.test.ts`): the board's Run
 button, the server's `plan` and `dispatch` ladder (an uncoded 409), the orchestrator's queue — which turns the item `ungroomed` with that reason, the way
 `in-review` does, so no new verdict reaches the run's stages — and `backlog-execute`'s own refusal. The rung is `planReviewBlock`, always AFTER `inReviewBlock`:
-an item carrying both says the PR, the stronger fact, since a PR means the plan was already approved and executed. The mark is read as the tool reads
+an item carrying both says the PR, the stronger fact, since a PR means the plan was already approved and executed. Between the two sits `unvettedBlock` (#341), on a tracker item an outsider filed whose body no groom has pinned. The mark is read as the tool reads
 `runner-fix:`, by PRESENCE: a `plan-review: yes` that silently did not gate would be the failure the mark exists to prevent. Where it is read matters on a files
 project — the board reads the working tree, so a line deleted but not yet committed still disables Run (the conservative direction), while the tick and the
 orchestrator read `<base>`, the tree an execute worktree is cut from, so approval there is delete-and-commit.
@@ -1718,7 +1718,7 @@ answers `200`. A healthy dashboard plus an unreachable one is the signature of t
 
 Its `POST /api/spawn` takes a `dirName` resolved against projects active inside its `LOOKBACK_HOURS` (24 by default), so a quiet repo has no key to send.
 Accepted, not worked around: the alternative is teaching that app to take an absolute path, which widens the widest write surface it has. This is one of the
-four blocks that leave a control on screen (the other three are a local skill session's `started:` stamp, an open PR and a live run's claim — see the
+five blocks that leave a control on screen (the other four are a local skill session's `started:` stamp, an open PR, an outsider's issue no groom has pinned and a live run's claim — see the
 `dispatchGate` section below): the button's own `title` and its visually-hidden `aria-describedby` span carry the per-item reason (it names the path, and
 nothing else in the UI does), while Settings lists the host-level setup — including the two fixes for this one, a session in that repo or a higher
 `LOOKBACK_HOURS`. That reason states the missing path as fact and the lookback only as a likelihood ("the dashboard does not list X — most likely no Claude
@@ -1741,11 +1741,11 @@ promise in the spec and `.env.example` — with `BM_AGENTS` off the Board "rende
 not "improve" it into a disabled button on forty cards. "On the Board" is deliberate: the Jira card's `Run ▾` is the one stated exception, drawn with agents
 off for the reason [the next section](#run--on-a-jira-card-is-never-hidden-for-the-dashboards-sake) gives.
 
-The per-item blocks are the opposite case and keep their button. There are **four** of them, not one, and only the first is anything `dispatchGate` itself can
+The per-item blocks are the opposite case and keep their button. There are **five** of them, not one, and only the first is anything `dispatchGate` itself can
 answer:
 
 - **The dashboard cannot see this item's project** — `dispatchGate`'s own fifth line, the section above.
-- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the four derived from the item
+- **A local skill session already holds this item** — `progressBlock` (`client/src/lib/item-progress.ts`), and the only one of the five derived from the item
   file itself. It is the exact mirror of the block below it: `started:` has one writer (`backlog.mjs start`) and one clearer (`stop`), so a session grooming or
   executing an item states that in the frontmatter the board is already reading — `isInProgress` had been deriving it for the card's amber bar since before
   dispatch existed, and nothing ever wired that predicate into the dispatch path. For a files item it blocks on ANY stamp, fresh or stale, matching `start`'s
@@ -1763,6 +1763,10 @@ answer:
   this rung the item reads ready and a click starts a second execution of work already waiting on a reviewer. Unlike `progressBlock` it lives in `shared/` and
   the server reads it too — `plan` and `dispatch()` refuse with the same sentence, `a PR is open for this item` — because the label is on the tracker, where
   any machine's spawn can see it. A files item never carries the flag; its PR guard is a named known limitation.
+- **An outsider filed this item and no groom has pinned its body** — `unvettedBlock` (`shared/agent.ts`, #341): a tracker bug or task whose author is not
+  OWNER, MEMBER or COLLABORATOR, mapped to `unvetted: true` until a live claim of ours carries `pin` equal to the body's hash. It reads `UNVETTED_REASON`, and
+  the server's `plan` and `dispatch()` refuse with the same sentence, for the same reason the open PR does: the mark is derived from the tracker, which any
+  machine's spawn can see. It sits after the open PR, which is the stronger fact, and before plan-review, because a groom has to vet the body first.
 - **An orchestrator run has already claimed this item** — `runClaimBlock` (`shared/agent.ts`), which reads the run payload rather than the item. It has to: a
   run works each item inside its own git worktree and nothing reaches `main` until the item merges, so while a run holds `task-7` at `reviewing` the `task-7`
   file `/api/items` scans on `main` looks untouched — no `started:`, no `phase:`, nothing `isInProgress` could key off. The item is not lying; it is telling the
@@ -1774,7 +1778,7 @@ answer:
   not be unified. This block is checked on the board and again in `dispatch()`, the second being the one that holds: the launch sheet fetches its plan once on
   mount, so a sheet left open while a run starts still shows an enabled launch button, and only the server sees the run as it is at click time.
 
-`DispatchButton` reads all five in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the run claim —
+`DispatchButton` reads all six in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the unvetted mark, then the run claim —
 most fundamental first, so the reason on screen names the thing to fix rather than a symptom of it. With dispatch off or the project invisible there is nothing
 worth saying about either kind of session that might hold the item. The open PR sits after the stamp and before the run claim because it, too, is on the item
 this board renders, while a run claim is the volatile fact about another worktree. The stamp and the run claim are in that order for the same reason: the
@@ -4081,6 +4085,51 @@ for a files item is "ANY stamp, fresh or stale" (`progressBlock`), and what reti
 issue. A mapper that expired claims on its own would show an item as free while the next `claim` call still had to fight for it. The BOARD ages it instead
 (#227): `claimReading` on the client reads `holder.heartbeat` by the reader's clock, so a stale claim still carries `started` and reads `stale`, not `executing`. The counters come off the
 newest claim whether or not it is released, because they are the item's running totals rather than a fact about who holds it.
+
+## An outsider's tracker issue is executable only while its body matches a pin a groom of ours wrote
+
+#341, from the 2026-10-24 audit (one new security Important, two still open from the one before) — #266's pieces 3 and 4, the half #362 left for a design
+pass after closing the claim-comment half. **The hole.** A tracker project may sit on a PUBLIC repository, and `backlog.mjs connect` installs issue forms that
+apply `type:*` for whoever files them. Readiness was decided from labels and headings alone: `groomed` is `deriveGroomed` over the body, and every execute gate
+— `trackerExecuteCandidate` in the tick, the orchestrator's `trackerCandidates`, the board's Run, the server's `plan`/`dispatch` re-check, execute's own
+refusal — trusts it. So a stranger could file a Task, fill `## Plan` and `## Done when`, and the next idle tick would run `backlog-execute --finish pr` on it:
+a stranger's instructions handed to a headless session with this machine's tools, its `Done when` commands shelled out. Separately, nothing recorded WHICH
+body a groom approved, so an issue's author could rewrite the plan after a person had read it, and execute would read the live body.
+
+**Why the gate is on the AUTHOR, not on every issue.** On GitHub only an issue's author and accounts with write access can edit its body. A trusted author
+(`OWNER`/`MEMBER`/`COLLABORATOR`) therefore means every possible editor of that body is trusted, and the only issues that need a vetting record are the ones an
+outsider filed. Gating every issue instead was weighed and rejected: it would have locked every already-groomed item on every tracker board until somebody
+re-groomed it, to close a hole that only exists for one kind of author. The trust rule is ONE function, `trustedAssociation`, shared with `trustedAuthor` —
+the claim-comment check #362 added — so "who is inside the repo" cannot mean one thing for a comment and another for an issue. Absent is trusted there for
+the same reason: every issue and comment the API returns states an association, so only an object built in a test lacks one.
+
+**Why the pin lives in the claim comment, and not in the body.** The obvious record — the `bm:groomed-at` footer `body` already writes — lives IN the body, and
+the body's author can type it; it also names a commit, not a body. The claim comment is the one record on an issue that only a trusted account can carry:
+`parseClaim` drops every comment whose author is outside the repo, so an outsider can neither forge a pin nor post one. It is also already server-written and
+per-session, old builds ignore an unknown key in it (`v: 1` passes unknown fields through, the precedent `host` and `run` set), and a second comment kind would
+have needed its own parser, its own trust check and its own place in the poller. A released claim still counts — a groom's claim is released by its own
+`stop`, and the pin has to outlive that — and the newest well-formed pin is the one compared, so a later groom supersedes an earlier one.
+
+**Why it is written at `body`, not at `stop`.** The pin has to be the hash of the body THIS server wrote, and only the `body` route knows that body: it hashes
+GitHub's own PATCH response, inside the same per-URN write chain, so no other local write to the item lands between the PATCH and the pin. Pinning at `stop`
+from a fresh read would capture whatever the issue says at the moment of stop — including an outsider's edit made between the groom's write and its release,
+which is exactly the edit the pin exists to catch. And it is written only into a LIVE claim the calling session holds: the pin says "a trusted session wrote
+this body while it held the item", and a claim somebody else holds, or one already released, cannot vouch for a write it did not make. That is also why the
+caller's `session` rides on the request — the claim is the only proof the server has of who is writing.
+
+**Why `groomed` keeps its meaning.** Folding vetting into `groomed` would have reused every gate for free, but it would break "groomed is derived from headings"
+and draw an outsider's filled-in bug as ungroomed, which is false — it HAS a plan; nobody trusted has read it. So `unvetted` is a separate flag on the ladder
+`planReview` already built, in every place that ladder sits, and one rung ABOVE plan-review: approving a plan does not vet it, so an item carrying both must
+say the reason the approval would not clear. For the same reason removing `plan-review` does not vet — the approval route has no claim to write into — and the
+tick does not groom an unvetted bug (it is `groomed`, so it is no groom candidate): vetting a stranger's plan is a person's groom, or a trusted session's.
+
+**Every failure points closed.** No session on the request, or no live claim held by it: no pin, the write still lands, and the item stays unvetted — a
+re-groom by hand is never refused. A claim read or edit that fails after the PATCH landed: a 201 carrying `pinWarning`, never a refusal, because the write it
+reports did happen, and the item stays unvetted. A malformed `pin` is ignored by the mapper rather than refused by `wellFormed`, because the claim still
+governs who holds the item and a bad pin must not cost the holder that; ignored means unvetted. A body edited after the pin hashes differently and gates every
+reader off until a trusted groom pins it again — which is also what closes "execute reads the live body": the session reads the same cached copy the flag was
+derived from. Ideas, refactors and out-of-scope never carry the flag (nothing executes them, and a refactor's promotion files a new, trusted issue), and a
+files item never does — a file reaches `backlog/` only through a commit, which is already the repository's own vetting.
 
 ## `orchestrator:queued` is a plan, never a claim
 
