@@ -11,7 +11,8 @@ registers the project's absolute path in `~/.backlog-manager/registry.json`. Thi
 fixed columns — refactoring, ideas, bugs, tasks. Items that were decided against are not on the board at all: out-of-scope is a record rather than queue work,
 and it lives in Archive.
 
-`/backlog-orchestrate` is the largest of the seven and the only one that merges. Told to drain a project's groomed queue, it works every ready bug and task
+`/backlog-orchestrate` is the largest of the seven and the only one that merges — `/backlog-execute` and `/backlog-groom` in `--finish pr` mode open a PR
+and may arm GitHub auto-merge on it, but GitHub does that merge, never the skill. Told to drain a project's groomed queue, it works every ready bug and task
 one at a time — each in its own git worktree and its own headless `/backlog-execute` session — then commits that item, has it reviewed and verified, and merges
 it into the run's base branch before the next one starts — `main` unless the run was started with `--base <ref>`, which lets a whole phased feature be drained
 onto a branch with `main` never written. Told to leave branches instead, it stops at a reviewed `backlog/<id>` branch per item and merges nothing at all. On
@@ -23,8 +24,8 @@ watchdog that resumes a crashed run.
 - **The app writes no item files.** Filing, grooming, executing and moving items all happen through the skills — at the CLI, inside Claude Code, or in a session
   the board itself spawned. What the board can do is start that work (a dispatch, or an orchestrator run — on this machine or on another machine's dashboard),
   pause, resume or stop a run, and save its own server-side settings under `~/.backlog-manager/settings/` (the run watchdog's, the tick breaker's, the remote
-  dashboards list, the Jira setup); every item on screen is rendered from what is already on disk. A project connected to a tracker has no item files at
-  all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
+  dashboards list, the Jira setup, the shared time zone); every item on screen is rendered from what is already on disk. A project connected to a tracker
+  has no item files at all: there the skills' writes reach GitHub through this app's API, which holds the credential — see [Architecture](#architecture).
 
 **Docs.** [`docs/overview.md`](docs/overview.md) is the map and the one place that lists them all: the architecture in brief, the rationale behind the rules
 ([`docs/subsystems/invariants.md`](docs/subsystems/invariants.md)), and the two procedures — [running the app](docs/workflows/development.md) and
@@ -86,8 +87,8 @@ No database to start first.
 ### Configuration
 
 Everything lives in `.env`, and `.env.example` documents each key — except the rows marked "Not in `.env.example`" below (`BM_ORCH_HOME`,
-`BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`, `BM_TICK_FILE`, `BM_DASHBOARDS_FILE` and `BM_AGENTS_TOKEN_<NAME>`), which are read straight from
-the process environment.
+`BM_ORCH_CONTROL_HOME`, `BM_TRACKER_SYNC_FILE`, `BM_JIRA_FILE`, `BM_TICK_FILE`, `BM_TICK_HOME`, `BM_DASHBOARDS_FILE`, `BM_TIMEZONE_FILE` and
+`BM_AGENTS_TOKEN_<NAME>`), which are read straight from the process environment.
 
 | Key                           | Default                                             | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -116,6 +117,8 @@ the process environment.
 | `BM_JIRA_FILE`                | `~/.backlog-manager/settings/jira.json`             | The per-machine Jira settings (`{ boards, repos, repoDefaults, skills }`). The server reads it and writes it through six guarded routes, `POST /api/jira/boards`, `/boards/delete`, `/repos`, `/repo-defaults`, `/skills` and `/skills/delete`. Not in `.env.example`                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `BM_TICK_FILE`                | `~/.backlog-manager/settings/tick.json`             | The tick breaker's settings: how many failed ticks in a row halt a project (Settings › Shared › Backlog tick) and when each project was last Reset (Runs › Ticks). The server writes it through `POST /api/ticks/config` and `/reset`; `tick.mjs` reads it. A file that cannot be read is never replaced. Not in `.env.example` |
 | `BM_DASHBOARDS_FILE`          | `~/.backlog-manager/settings/dashboards.json`       | The other machines' dashboards this board can start work on, plus the strategy, threshold and prefer order its machine suggestion reads. The server writes it from Settings › Dashboards; a file that cannot be read is never replaced, and its remotes are ignored until it is fixed. No file means home-only. Not in `.env.example` |
+| `BM_TICK_HOME`                | `~/.backlog-manager/tick/`                          | Where `tick.mjs` keeps each project's `state.json` and lock — its one writer. The server only reads it, per call, for Runs › Ticks and a project's halt; a Reset is written to `tick.json`, never here. Not in `.env.example` |
+| `BM_TIMEZONE_FILE`            | `~/.backlog-manager/settings/timezone.json`         | The board's one shared time zone (Settings › Shared), which every clock, day group and date on the board is drawn in. The server writes it through `POST /api/settings/timezone`; no file, or one that does not parse, means each browser keeps its own zone. Not in `.env.example` |
 | `BM_MACHINE_NAME`             | `<user>@<host>`                                     | The machine name a tracker claim records, read by `backlog.mjs` and `orchestrate.mjs` from their own environment, and by this server (through compose) only for the board's **Release claim** on a session it did not dispatch, which it refuses unless the claim's host equals this name — or, for a STALE claim, only to ask the dashboard whether a holder on this machine is still working before releasing it or dispatching over it. Set it in both places. On a public repository the claim comment publishes it, so set a name you chose rather than publish your OS username and hostname |
 
 A project outside `BM_PROJECT_ROOT` is invisible to the container and is reported as missing on `/api/projects` rather than silently dropped from the board —
@@ -349,5 +352,5 @@ drop the image at `docs/board.png`._
     - .env.example
     - pnpm-workspace.yaml
   kind: readme
-  verified: 5a74ebf0f276cf9103c7a744f913c01f02e178f5
+  verified: 89449e00e7317c0a5e13792120b7cd2d22863a1b
 -->

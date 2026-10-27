@@ -4,8 +4,9 @@ Nest, one process, every route under `/api`. It owns nine things: reading the re
 them (the files on disk, or a polled GitHub repo), reading the orchestrator's run state, polling the trackers projects are connected to, polling the Jira
 boards `~/.backlog-manager/settings/jira.json` defines (`jira/`), serving the Hub's three read-only Lookout widgets (`hub/`), reading this app's own release tags (`releases/`), deriving the tick breaker's board from the tick home (`tick/`), and — behind a switch that is off
 by default — asking another local process to start a Claude Code session, which since multi-dashboard may be a process on another machine. It writes no item
-file and no run file; the only bytes it owns are six files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
-`tracker-sync.json`, since Jira phase 2 `jira.json`, for the tick breaker `tick.json` and, for the machine list, `dashboards.json`. Its writes to
+file and no run file; the only bytes it owns are seven files under `~/.backlog-manager/settings/` — the watchdog config, the per-project control file,
+`tracker-sync.json`, since Jira phase 2 `jira.json`, for the tick breaker `tick.json`, for the machine list `dashboards.json` and, for the board's one
+time zone, `timezone.json` (`settings/`). Its writes to
 Jira itself (phase 3's issue assign and transition) are calls, not files.
 
 ## Modules
