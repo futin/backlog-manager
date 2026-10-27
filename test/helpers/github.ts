@@ -97,9 +97,10 @@ export class FakeGithub {
    * GitHub does; this is how a case makes ONE request fail — a rate limit on
    * the poller's per-issue read, say — without teaching the router a failure
    * mode per endpoint. `headers` are sent verbatim, so an
-   * `x-ratelimit-remaining: 0` reaches the client's rate bookkeeping.
+   * `x-ratelimit-remaining: 0` reaches the client's rate bookkeeping. `message` replaces the body's sentence, because a secondary limit is told
+   * apart from the hourly one by that sentence alone (`GithubClient.request`), never by a header.
    */
-  failNext: { fragment: string; status: number; headers?: Record<string, string> } | null = null;
+  failNext: { fragment: string; status: number; headers?: Record<string, string>; message?: string } | null = null;
 
   /** Rows per page. GitHub's own maximum is 100; a case that wants to prove a
    *  caller follows `Link` lowers this to 1. */
@@ -185,7 +186,7 @@ export class FakeGithub {
     if (this.failNext !== null && url.includes(this.failNext.fragment)) {
       const failure = this.failNext;
       this.failNext = null;
-      return new Response(JSON.stringify({ message: 'failed on purpose' }), { status: failure.status, headers: failure.headers });
+      return new Response(JSON.stringify({ message: failure.message ?? 'failed on purpose' }), { status: failure.status, headers: failure.headers });
     }
     const { status, payload, next, etag } = this.route(method, url, body, headers['if-none-match']);
     const out: Record<string, string> = {};

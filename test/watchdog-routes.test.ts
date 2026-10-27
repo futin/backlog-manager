@@ -12,7 +12,7 @@ import { WatchdogService } from '../server/src/agents/watchdog.service';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { makeProject, makeRegistry } from './helpers/store';
+import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { DEFAULT_WATCHDOG_CONFIG } from '../shared/types';
 import type { OrchestratorRun } from '../shared/types';
@@ -93,13 +93,9 @@ describe('the two watchdog routes', () => {
    *  BOARD resume records in it. */
   const state = (): WatchdogStateService => app!.get(WatchdogStateService);
 
-  /** `<BM_ORCH_HOME>/<encodeURIComponent(project)>/run.json` — the exact
-   *  layout orchestrate.mjs's own projectDir()/runFilePath() write, same
-   *  helper watchdog-sweep.test.ts already has. */
+  /** `<BM_ORCH_HOME>/<encodeURIComponent(project)>/run.json`, through `writeRunFile` (test/helpers/store.ts). */
   function writeRun(run: OrchestratorRun): void {
-    const dir = join(orchRoot, encodeURIComponent(run.project));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchRoot, run.project, run);
   }
 
   function writeConfig(raw: unknown): void {

@@ -233,8 +233,11 @@ async function runAsync(cwd, home, ...args) {
 // reconcile tests below exercise real worktree/branch plumbing, so only
 // they call this. A throwaway local identity (`-c user.email=…`) keeps this
 // independent of whatever global git config this machine happens to have.
+// `core.autocrlf=false` for the same reason: a global `input` (or `true`)
+// normalises CRLF to LF at `add`, so a fixture that commits CRLF bytes would
+// store LF instead, and a later CRLF-to-LF rewrite would be an empty commit.
 function commitEverything(project, message) {
-  spawnSync('git', ['-C', project, 'add', '-A'], { encoding: 'utf8' });
+  spawnSync('git', ['-C', project, '-c', 'core.autocrlf=false', 'add', '-A'], { encoding: 'utf8' });
   const result = spawnSync('git', ['-C', project, '-c', 'user.email=test@example.com', '-c', 'user.name=Test', 'commit', '-q', '-m', message], {
     encoding: 'utf8'
   });

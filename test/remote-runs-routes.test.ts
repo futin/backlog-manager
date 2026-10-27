@@ -12,7 +12,7 @@ import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { FAKE_REPO, FakeGithub } from './helpers/github';
 import { listenLoopback } from './helpers/app';
-import { makeProject, makeRegistry } from './helpers/store';
+import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { ClaimRecord, ClaimRun, OrchestratorRun, OrchestratorRunsPayload } from '../shared/types';
@@ -53,9 +53,7 @@ function claim(over: Partial<ClaimRecord> = {}): ClaimRecord {
 }
 
 function writeRun(run: OrchestratorRun): void {
-  const dir = join(orchHome, encodeURIComponent(run.project));
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+  writeRunFile(orchHome, run.project, run);
 }
 
 /** One app over `projects`; the fake is seeded BEFORE this, and one poll tick

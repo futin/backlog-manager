@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -15,7 +15,7 @@ import { stopSessionName } from '../server/src/agents/agents.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { FakeGithub } from './helpers/github';
-import { makeProject, makeRegistry } from './helpers/store';
+import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, RunQueueItem } from '../shared/types';
 
@@ -47,14 +47,8 @@ describe('POST /api/agents/stop', () => {
   const realFetch = global.fetch;
   let sent: string[];
 
-  function projectDir(project: string): string {
-    return join(orchHome, encodeURIComponent(project));
-  }
-
   function writeRun(run: OrchestratorRun): void {
-    const dir = projectDir(run.project);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchHome, run.project, run);
   }
 
   const runningRun = (over: Partial<OrchestratorRun> = {}): OrchestratorRun => ({

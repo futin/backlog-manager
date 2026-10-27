@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -14,6 +14,7 @@ import {
   missingSparsePaths,
   publishBlocker,
   publishedDigests,
+  pruneOldVersions,
   readInstall
 } from './sync-plugin.mjs';
 
@@ -206,4 +207,30 @@ test('missingSparsePaths stays quiet when it cannot see a declaration', () => {
   assert.deepEqual(missingSparsePaths({}, MARKETPLACE), []);
   assert.deepEqual(missingSparsePaths({ extraKnownMarketplaces: {} }, MARKETPLACE), []);
   assert.deepEqual(missingSparsePaths(settingsWith(['skills']), 'some-other-marketplace'), []);
+});
+
+// The prune's three survivors: the version just installed, a copy a running session still has open (`.in_use`), and anything that is not a directory —
+// the versions directory is the plugin cache's, and a stray file in it is not a version this script made.
+test('pruneOldVersions removes only stale version directories, keeping the installed one, an in-use one and any plain file', () => {
+  const versions = mkdtempSync(join(tmpdir(), 'bm-prune-'));
+  try {
+    for (const name of ['0.1.0', '0.1.1', '0.2.0']) mkdirSync(join(versions, name));
+    writeFileSync(join(versions, '0.1.1', '.in_use'), '');
+    writeFileSync(join(versions, 'notes.txt'), 'not a version');
+
+    const removed = pruneOldVersions(join(versions, '0.2.0'), '0.2.0');
+
+    assert.equal(removed.length, 1);
+    assert.match(removed[0], /^0\.1\.0 \(/);
+    assert.equal(existsSync(join(versions, '0.1.0')), false);
+    assert.equal(existsSync(join(versions, '0.1.1')), true);
+    assert.equal(existsSync(join(versions, '0.2.0')), true);
+    assert.equal(existsSync(join(versions, 'notes.txt')), true);
+  } finally {
+    rmSync(versions, { recursive: true, force: true });
+  }
+});
+
+test('pruneOldVersions answers nothing when the versions directory does not exist', () => {
+  assert.deepEqual(pruneOldVersions(join(tmpdir(), 'bm-prune-missing', 'nope', '0.2.0'), '0.2.0'), []);
 });

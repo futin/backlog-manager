@@ -19,7 +19,7 @@ import { DEFAULT_MODEL } from '../shared/agent';
 import type { OrchestratorRun, RemoteRun } from '../shared/types';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
-import { makeProject, makeRegistry } from './helpers/store';
+import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import homeSpawnFixture from './fixtures/orchestrate-home-spawn.json';
 
@@ -129,9 +129,7 @@ describe('POST /api/agents/orchestrate with a machine', () => {
 
   /** A local run file for the tracker project — the exact layout `orchestrate.mjs` writes under `BM_ORCH_HOME`. */
   function writeLocalRun(over: Partial<OrchestratorRun>): void {
-    const dir = join(process.env.BM_ORCH_HOME as string, encodeURIComponent(trackerPath));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...fixture, project: trackerPath, ...over }));
+    writeRunFile(process.env.BM_ORCH_HOME as string, trackerPath, { ...fixture, project: trackerPath, ...over });
   }
 
   /** A run Pro drives, as `RemoteRunsService` would derive it from Pro's claims — stubbed at the service, deriving one being remote-runs.test.ts's job. */

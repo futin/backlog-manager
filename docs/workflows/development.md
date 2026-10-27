@@ -135,6 +135,10 @@ item to the Archive and the query that wanted it throws, on a tree nobody touche
 [invariants.md](../subsystems/invariants.md#a-fixture-date-is-relative-to-the-clock-the-assertion-runs-under)). `test/fixture-clock.test.ts` reads every
 `test/*.test.tsx` and fails on a literal, because a new one is green for thirty days and no behavioural test can be the guard.
 
+A suite that needs a run file on disk writes it through `writeRunFile(orchHome, project, run)` (`test/helpers/store.ts`), which puts `run.json` where
+`orchestrate.mjs`'s own `runFilePath()` does and writes a string verbatim for the corrupt-file cases; `runStateDir` is the same directory for a suite that
+needs its siblings. That script is standalone with no package boundary into the TS project, so the layout is restated once there instead of in every suite.
+
 ## Failure modes
 
 **Vite won't start.** `esbuild`'s install script was skipped: it has to be named in `allowBuilds` in [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml), and

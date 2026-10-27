@@ -534,6 +534,8 @@ test('isLockFailure is true only for a lock git could not take', () => {
   assert.equal(isLockFailure("error: cannot lock ref 'refs/remotes/origin/main': is at 1 but expected 2"), true)
   assert.equal(isLockFailure("cannot lock ref 'refs/remotes/origin/main'"), true)
   assert.equal(isLockFailure("Unable to create '/r/.git/shallow.lock': File exists."), true)
+  // git 2.53's batched fetch reports the same held ref lock in these words.
+  assert.equal(isLockFailure('error: fetching ref refs/remotes/origin/main failed: reference already exists'), true)
   assert.equal(isLockFailure("fatal: 'origin' does not appear to be a git repository"), false)
   assert.equal(isLockFailure(''), false)
 })
@@ -952,7 +954,8 @@ test('worktree: a fetch that cannot take its ref lock is retried, then reported,
   fs.writeFileSync(lock, '')
   const out = runWorktree(wtArgs(fx, 'new', 'TIMIFY-123-lock', 'main'), { BM_JIRA_FETCH_RETRY_MS: '10' })
   assert.equal(out.status, 0, out.stderr)
-  assert.ok(out.json.notes.some((n) => n.startsWith('fetch failed: ') && n.includes('cannot lock ref')), out.json.notes.join(' | '))
+  // The note must carry the lock failure itself, in whichever words this git uses for it (`cannot lock ref` before 2.53, `reference already exists` after).
+  assert.ok(out.json.notes.some((n) => n.startsWith('fetch failed: ') && isLockFailure(n)), out.json.notes.join(' | '))
   assert.equal(git(out.json.worktree, 'rev-parse', 'HEAD'), stale, 'cut from the refs as of the last fetch')
 })
 
