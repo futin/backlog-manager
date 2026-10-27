@@ -7061,6 +7061,29 @@ for (const [label, value, why] of [
   });
 }
 
+// #343: `check-ref-format --branch` accepts `$(…)`, so a branch named that exists and passed both earlier checks — and the driver pastes `<base>` unquoted
+// into its shell templates. The branch is REAL here, so the refusal is proven to come from the shape check, not from show-ref.
+test('init --base refuses an existing branch whose name a shell would expand — exit 1, nothing written', (t) => {
+  const { home, project } = basedFixture(t);
+  assert.equal(spawnSync('git', ['-C', project, 'branch', 'feat$(id)'], { encoding: 'utf8' }).status, 0);
+
+  const out = run(project, home, 'init', '--project', project, '--base', 'feat$(id)');
+
+  assert.equal(out.status, 1, `expected exit 1, got ${out.status}: ${out.stdout}${out.stderr}`);
+  assert.match(out.stderr, /"feat\$\(id\)" is not a valid branch name \(only letters, digits, \. _ \/ - are allowed\)/);
+  assert.equal(fs.existsSync(runFile(home, project)), false, 'init wrote a run file for a base it refused');
+});
+
+test('init --base still accepts a branch made only of letters, digits, . _ / and -', (t) => {
+  const { home, project } = basedFixture(t);
+  assert.equal(spawnSync('git', ['-C', project, 'branch', 'feat/x-1.2_y'], { encoding: 'utf8' }).status, 0);
+
+  const out = run(project, home, 'init', '--project', project, '--base', 'feat/x-1.2_y');
+
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).base, 'feat/x-1.2_y');
+});
+
 test('init --base refuses a base that is neither a branch nor the branch HEAD is on, even in a repo with no commits', (t) => {
   // The narrow half of the unborn-HEAD allowance: a commitless repo accepts
   // the branch HEAD points at, and nothing else. Without this case the

@@ -9,7 +9,7 @@ import { TrackerPollerService } from '../tracker/poller.service';
 import { DispatchRecordsService } from '../items/dispatch-records.service';
 import { scanProject } from '../items/scan.util';
 import { resolveSource } from '../items/sources/resolve.util';
-import { proveBaseBranch, resolveBaseBranch } from '../items/base-branch.util';
+import { BASE_BRANCH_SHAPE, proveBaseBranch, resolveBaseBranch } from '../items/base-branch.util';
 import { parseUrn } from '../tracker/map-issue';
 import { runGit } from '../git-run.util';
 import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
@@ -1947,7 +1947,9 @@ export class AgentsService {
    * neither copy is redundant, see that function):
    *
    *   1. **It is a legal branch name** (`git check-ref-format --branch`, plus
-   *      a leading-`-` refusal in JS before git is asked at all).
+   *      a leading-`-` refusal in JS before git is asked at all, and since
+   *      #343 `BASE_BRANCH_SHAPE` ahead of git — a well-formed ref is not a
+   *      shell-inert string, see base-branch.util.ts).
    *
    *      First, deliberately — but the reason is NOT that check 2 would
    *      otherwise read it as an option. It would not: `refs/heads/${base}`
@@ -2036,7 +2038,8 @@ export class AgentsService {
     if (entry === undefined) throw new HttpException({ error: 'project is not registered' }, 404);
     const out = await runGit(['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/']);
     if (out === null) return { branches: [] };
-    return { branches: out.split('\n').map((b) => b.trim()).filter((b) => b !== '') };
+    // Filtered by the launch's own shape check (#343): a branch `proveBaseBranch` would 400 is never offered, or the sheet disagrees with itself.
+    return { branches: out.split('\n').map((b) => b.trim()).filter((b) => BASE_BRANCH_SHAPE.test(b)) };
   }
 
   /**
