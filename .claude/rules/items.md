@@ -16,7 +16,11 @@ paths: ["server/src/items/**", "server/src/git-run.util.ts", "server/src/release
   `optional()` as a non-empty string or a 400 naming the field: absent is a value (a caller that sends none writes no `host` key at all), but a blank or a
   non-string is a mistake worth hearing about. It is never derived here — a hostname read in the compose stack is a container id. `release` takes the same
   optional `host` through the same `optional()` (bug-48), as the assertion behind the release rule's third clause; the liveness proof that makes it narrow lives
-  in `backlog.mjs abort`, never here, because this process can see neither the caller's filesystem nor its process table. `GithubSource` keeps a `Map<urn,
+  in `backlog.mjs abort`, never here, because this process can see neither the caller's filesystem nor its process table. `body` takes an optional `session`
+  (#341) through the same `optional()` — `backlog.mjs body` always sends its own: when that session holds a LIVE claim on the issue, `GithubSource.pinBody`
+  writes `pin` (`bodyHash` of the body GitHub's PATCH answered) into that claim comment inside the same per-URN chain, straight after the PATCH; no session or
+  no live claim held by it pins nothing, and a failed claim read or edit after a landed PATCH is a 201 carrying `pinWarning` (`ItemBodyResult`), never a
+  refusal. `GithubSource` keeps a `Map<urn,
   Promise>` so two local sessions never race on one item, and every response is absorbed into the poller's cache — but a write never moves `polledAt`, because
   nothing was polled. The token stays in the process; no response carries it. The eighth, `queue` (task-52), takes `{ project, id, queued }` with `queued` a
   literal boolean or a 400, adds or removes `orchestrator:queued` through `ItemWriter.queue` on the same per-URN chain, and answers a REMOVAL's GitHub 404 as

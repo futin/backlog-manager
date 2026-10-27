@@ -529,6 +529,26 @@ export function inReviewBlock(item: BacklogItem): string | null {
 }
 
 /**
+ * The unvetted guard's one sentence (#341), ONE string everywhere like the two around it: the board's Run button, the server's plan/dispatch ladder, the
+ * orchestrator's gate reason, backlog-tick's skip and execute's refusal. `orchestrate.mjs` carries a hand-kept copy pinned to this constant by a jest twin
+ * test, and execute's SKILL.md quotes it, so a change here is a change in both.
+ */
+export const UNVETTED_REASON = 'filed from outside the repo — groom it to vet the plan';
+
+/**
+ * Why this item cannot be dispatched because it is a tracker bug or task filed from outside the repository whose body no trusted groom has pinned, or null.
+ * `mapIssue` derives `unvetted` from the issue author's `author_association` and the pin a groom's `body` write leaves in its claim; without this rung an
+ * outsider who fills in `## Plan` would have it executed on this machine, and an edit after the groom would be executed unread.
+ *
+ * Per-item, on the same ladder as the two around it, in all three places that read them — the client's `DispatchButton` and the server's `plan` and
+ * `dispatch` re-check — AFTER `inReviewBlock` (a PR is the stronger fact) and BEFORE `planReviewBlock`: approving a plan does not vet it, so an item carrying
+ * both must say the reason the approval would not clear. Reads the flag alone, like both neighbours; a files item never carries it.
+ */
+export function unvettedBlock(item: BacklogItem): string | null {
+  return item.unvetted === true ? UNVETTED_REASON : null;
+}
+
+/**
  * The plan-review guard's one sentence, and — like `IN_REVIEW_REASON` — ONE string everywhere: the board's Run button, the server's plan/dispatch ladder, the
  * orchestrator's gate reason and backlog-tick's own skip reason. `orchestrate.mjs` carries a hand-kept copy (a plugin skill's `tools/` is a standalone copy
  * of what was pushed and cannot import this file), pinned to this constant by a jest twin test, so a change here is a change in that copy too.

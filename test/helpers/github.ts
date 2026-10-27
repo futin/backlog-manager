@@ -48,6 +48,8 @@ export interface FakeIssue {
   updated_at: string;
   labels: { name: string }[];
   assignees: { login: string }[];
+  /** The author's association (#341). Absent unless a case sets it, which `trustedAssociation` reads as trusted — so every existing fixture stays vetted. */
+  author_association?: string;
 }
 
 export interface FakeComment {

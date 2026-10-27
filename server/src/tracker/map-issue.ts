@@ -1,5 +1,6 @@
 import { deriveGroomed } from '../items/parse.util';
-import { newestClaim, type ParsedClaim } from './claim';
+import { newestClaim, trustedAssociation, type ParsedClaim } from './claim';
+import { bodyHash } from './poller.service';
 import { IN_REVIEW_LABEL, PLAN_REVIEW_LABEL, QUEUED_LABEL } from './labels';
 import type { GithubIssue } from './github.client';
 import type { BacklogItem, ClaimCounters, RegistryProject, Section } from '../../../shared/types';
@@ -125,6 +126,34 @@ const SECTION_BY_LABEL: Record<string, Section> = {
  * lifecycle this board knows, and one arriving as an untyped idea would put a
  * row on the board that nobody filed.
  */
+/** A pin worth comparing: `bodyHash`'s shape, 64 lowercase hex. Anything else in `ClaimRecord.pin` is ignored rather than trusted (#341). */
+const PIN_SHAPE = /^[0-9a-f]{64}$/;
+
+/**
+ * Is this issue a bug or a task whose body no trusted session has vouched for (#341)?
+ *
+ * `groomed` is derived from headings alone, and on a public repo anybody may file an issue — through the forms `connect` installs, which apply `type:*`
+ * themselves — and fill those headings in. Every execute gate trusts `groomed`, so without this an outsider's `## Plan` ran on the operator's machine. The
+ * rule is narrow on purpose: only the author and write-access accounts can edit an issue body, so a TRUSTED author means every possible editor is trusted, and
+ * only an untrusted author's issue needs a pin at all. Gating every issue instead would have locked every already-groomed item on the board until a re-groom.
+ *
+ * The pin is the newest PARSED claim carrying a well-shaped one — released claims included, because a groom's claim is released by its own `stop` and the
+ * pin must outlive that. `claims` arrive through `parseClaim`, which has already dropped every claim comment an outsider wrote, so an outsider cannot forge
+ * one; and the comparison is against the body as it is NOW, so an edit made after the groom hashes differently and gates every reader off until a trusted
+ * groom pins it again. Ideas, refactors and out-of-scope never carry it: nothing executes them, and a refactor's promotion writes a new, trusted issue.
+ */
+function isUnvetted(section: Section, issue: GithubIssue, claims: readonly ParsedClaim[]): boolean {
+  if (section !== 'bugs' && section !== 'tasks') return false;
+  if (trustedAssociation(issue.author_association)) return false;
+  let pinned: ParsedClaim | null = null;
+  for (const claim of claims) {
+    const pin = claim.record.pin;
+    if (typeof pin !== 'string' || !PIN_SHAPE.test(pin)) continue;
+    if (pinned === null || claim.commentId > pinned.commentId) pinned = claim;
+  }
+  return pinned === null || pinned.record.pin !== bodyHash(issue.body);
+}
+
 export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProject, claims: readonly ParsedClaim[]): MappedIssue | null {
   if (issue.pull_request !== undefined && issue.pull_request !== null) return null;
 
@@ -256,6 +285,8 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // The same spread (backlog-tick). `planReview` has a second writer, `scan.util.ts`, for a files item's `plan-review: true` line, so the absence is
     // arranged in both places and `'planReview' in item` means the same on either source.
     ...(planReview ? { planReview: true as const } : {}),
+    // #341 — the same spread, one writer (this one), and read by every gate that reads `planReview`, one rung before it. See `isUnvetted` for the rule.
+    ...(isUnvetted(section, issue, claims) ? { unvetted: true as const } : {}),
     // #225 — the holding claim, off the same `held` reading `started` and `phase` use, spread-absent for the reason the two above give. Optional keys
     // inside it are spread too, so a claim with no `host` or `run` carries no such key. `dispatched` is not set here: the mapper knows claims, not which
     // sessions this server spawned — `GithubSource.list` adds it.

@@ -13,7 +13,9 @@ import {
   IN_REVIEW_REASON,
   inReviewBlock,
   PLAN_REVIEW_REASON,
+  UNVETTED_REASON,
   planReviewBlock,
+  unvettedBlock,
   isAgentAction,
   isExecuteFinish,
   isItemId,
@@ -1210,5 +1212,39 @@ describe('planReviewBlock', () => {
   it('is the same sentence backlog-execute refuses with', () => {
     const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
     expect(skill).toContain(PLAN_REVIEW_REASON);
+  });
+});
+
+/*
+ * The unvetted guard (#341): a tracker bug or task filed from outside the repository whose body no trusted groom has pinned. One sentence again, shared by
+ * the board's button, the server's two ladders, the orchestrator's hand-kept copy and execute's refusal — and one rung, between in-review and plan-review.
+ */
+describe('unvettedBlock', () => {
+  it('names the vetting a groom gives for an item carrying the flag', () => {
+    expect(unvettedBlock(fakeItem({ unvetted: true }))).toBe('filed from outside the repo — groom it to vet the plan');
+    expect(UNVETTED_REASON).toBe('filed from outside the repo — groom it to vet the plan');
+  });
+
+  it('is null for an item without the flag', () => {
+    expect(unvettedBlock(fakeItem())).toBeNull();
+    expect(unvettedBlock(fakeItem({ source: 'github', planReview: true }))).toBeNull();
+  });
+
+  /* The ladder's order, as every reader composes it: a PR first, then the vetting, then the review. Approving a plan does not vet it, so an item holding
+     both must say the reason the approval would not clear. */
+  it('reads after in-review and before plan-review', () => {
+    const ladder = (item: BacklogItem): string | null => inReviewBlock(item) ?? unvettedBlock(item) ?? planReviewBlock(item);
+    expect(ladder(fakeItem({ inReview: true, unvetted: true, planReview: true }))).toBe(IN_REVIEW_REASON);
+    expect(ladder(fakeItem({ unvetted: true, planReview: true }))).toBe(UNVETTED_REASON);
+  });
+
+  it('is the same sentence the orchestrator gate carries by hand', () => {
+    const tool = readFileSync(join(__dirname, '..', 'skills', 'backlog-orchestrate', 'tools', 'orchestrate.mjs'), 'utf8');
+    expect(tool).toContain(`const UNVETTED_REASON = '${UNVETTED_REASON}';`);
+  });
+
+  it('is the same sentence backlog-execute refuses with', () => {
+    const skill = readFileSync(join(__dirname, '..', 'skills', 'backlog-execute', 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+    expect(skill).toContain(UNVETTED_REASON);
   });
 });

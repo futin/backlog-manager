@@ -563,6 +563,19 @@ test('tracker: in-review, plan-review and an execute/<n> branch skip the issue',
   assert.equal((await pick(items({}))).id, '#13');
 });
 
+// #341: an outsider-filed issue no trusted groom has pinned arrives `unvetted: true`. Groomed or not, its plan is a stranger's text, so the tick never
+// executes it — and since it reads groomed, it is no groom candidate either: with nothing else open the tick has no unit at all.
+test('tracker: an unvetted groomed bug is never the execute pick, and a trusted one beside it is', async (t) => {
+  const fx = project(t, { tracker: true });
+  const pick = (list) => withApi(trackerRoutes(fx, list), (port) => decide(fx, ['--dry-run'], { port }));
+  const alone = await pick([apiItem(fx, 12, { unvetted: true })]);
+  assert.notEqual(alone.verdict, 'execute');
+  assert.equal(alone.verdict, 'idle');
+  const beside = await pick([apiItem(fx, 12, { unvetted: true }), apiItem(fx, 13)]);
+  assert.equal(beside.verdict, 'execute');
+  assert.equal(beside.id, '#13');
+});
+
 test('tracker: a groom/<n> branch or .worktrees/groom-<n> tree skips the issue for groom', async (t) => {
   const fx = project(t, { tracker: true });
   const items = [apiItem(fx, 12, { groomed: false }), apiItem(fx, 13, { section: 'refactors', groomed: null })];

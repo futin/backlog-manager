@@ -7,7 +7,7 @@ import { ItemsModule } from '../server/src/items/items.module';
 import { GithubSource } from '../server/src/items/sources/github.source';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { GithubClient } from '../server/src/tracker/github.client';
-import { TrackerPollerService } from '../server/src/tracker/poller.service';
+import { TrackerPollerService, bodyHash } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { parseClaim, renderClaim } from '../server/src/tracker/claim';
 import { FakeGithub } from './helpers/github';
@@ -1903,5 +1903,71 @@ describe('body.planReview', () => {
     const res = await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, planReview: 'yes' }).expect(400);
     expect(res.body).toEqual({ error: 'planReview must be a boolean' });
     expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+  });
+});
+
+/* The pin (#341): a groom's `body` write, made by a session holding the item's live claim, records the hash of the body GitHub answered in that claim —
+ * the one trusted record of which body a groom approved, which `mapIssue` compares to clear `unvetted` on an outsider's issue. */
+describe('body.session — the pin', () => {
+  it('pins the hash of the body GitHub answered into the live claim the calling session holds', async () => {
+    const issue = gh.issue();
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'groomed text', ifUpdatedAt: issue.updated_at, session: 'A' }).expect(201);
+    expect(claimIn(100)?.pin).toBe(bodyHash(gh.issues.get(31)?.body));
+    expect(claimIn(100)?.pin).toBe(bodyHash('groomed text'));
+    expect('pinWarning' in res.body).toBe(false);
+  });
+
+  it('writes the body and edits no claim when no session is sent', async () => {
+    const issue = gh.issue();
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+    await post('body', { project: trackerPath, id: '#31', body: 'groomed text', ifUpdatedAt: issue.updated_at }).expect(201);
+    expect(gh.issues.get(31)?.body).toBe('groomed text');
+    expect(gh.matching('/issues/comments/100', 'PATCH')).toEqual([]);
+    expect(claimIn(100)?.pin).toBeUndefined();
+  });
+
+  it('writes the body and pins nothing when the session holds no live claim — another session’s, or its own released one', async () => {
+    const issue = gh.issue();
+    gh.claim(record({ session: 'B' }), 31, 100);
+    gh.claim(record({ session: 'A', released: { at: new Date().toISOString(), reason: 'stopped', by: 'A' } }), 31, 101);
+    await sync();
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'groomed text', ifUpdatedAt: issue.updated_at, session: 'A' }).expect(201);
+    expect(gh.issues.get(31)?.body).toBe('groomed text');
+    expect(gh.matching('/issues/comments/', 'PATCH')).toEqual([]);
+    expect('pinWarning' in res.body).toBe(false);
+  });
+
+  it('answers 201 with a pinWarning when the claim edit fails after the PATCH landed', async () => {
+    const issue = gh.issue();
+    gh.claim(record({ session: 'A' }), 31, 100);
+    await sync();
+    gh.failNext = { fragment: '/issues/comments/100', status: 500 };
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'groomed text', ifUpdatedAt: issue.updated_at, session: 'A' }).expect(201);
+    expect(gh.issues.get(31)?.body).toBe('groomed text');
+    expect(res.body.pinWarning).toMatch(/^#31's body was written but not pinned/);
+    expect(claimIn(100)?.pin).toBeUndefined();
+  });
+
+  it('400s a blank session, and patches nothing', async () => {
+    const issue = gh.issue();
+    await sync();
+    const res = await post('body', { project: trackerPath, id: '#31', body: 'v1', ifUpdatedAt: issue.updated_at, session: ' ' }).expect(400);
+    expect(res.body).toEqual({ error: 'session must be a non-empty string' });
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+  });
+
+  it('keeps the pin through a later heartbeat and release', async () => {
+    const pin = bodyHash('groomed text');
+    gh.issue();
+    gh.claim(record({ session: 'A', pin }), 31, 100);
+    await sync();
+    await post('heartbeat', { project: trackerPath, id: '#31', commentId: 100, session: 'A' }).expect(201);
+    expect(claimIn(100)?.pin).toBe(pin);
+    await post('release', { project: trackerPath, id: '#31', commentId: 100, session: 'A', reason: 'stopped' }).expect(201);
+    expect(claimIn(100)?.released?.reason).toBe('stopped');
+    expect(claimIn(100)?.pin).toBe(pin);
   });
 });
