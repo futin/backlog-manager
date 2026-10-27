@@ -1,4 +1,4 @@
-import { actionLabel, deriveAction, dispatchGate, inReviewBlock, planReviewBlock } from '../../../../shared/agent';
+import { actionLabel, deriveAction, dispatchGate, inReviewBlock, planReviewBlock, unvettedBlock } from '../../../../shared/agent';
 import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { disabledReason } from '../../lib/gate-view';
 import { progressBlock } from '../../lib/item-progress';
@@ -190,10 +190,13 @@ export function DispatchButton({
      outranks the volatile run claim, while a live session's stamp still names the more immediate fact. */
   /* The plan-review rung (backlog-tick) follows it, the same ladder as the server's: a plan written unattended carries the mark until a person approves it,
      and it reuses the in-review rendering — same disabled state, same reason as title and described-by. In-review first, so an item holding both says the PR. */
+  /* The unvetted rung (#341) sits between them: an outsider's issue that no trusted groom has pinned. Before plan-review, because approving the plan does
+     not vet it — so an item carrying both says the reason the approval would not clear, and never offers `Review plan` as if reviewing were the way out. */
   const progress = progressBlock(item, Date.now());
   const inReview = inReviewBlock(item);
-  const itemBlock = progress ?? inReview ?? planReviewBlock(item) ?? runBlock;
-  const reviewing = onReview !== undefined && progress === null && inReview === null && planReviewBlock(item) !== null;
+  const unvetted = unvettedBlock(item);
+  const itemBlock = progress ?? inReview ?? unvetted ?? planReviewBlock(item) ?? runBlock;
+  const reviewing = onReview !== undefined && progress === null && inReview === null && unvetted === null && planReviewBlock(item) !== null;
 
   return (
     <>

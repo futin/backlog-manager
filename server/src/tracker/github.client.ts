@@ -434,6 +434,11 @@ export interface GithubIssue {
   labels: ({ name: string } | string)[];
   assignees?: { login: string }[] | null;
   pull_request?: unknown;
+  /** The issue AUTHOR's relationship to the repository, as GitHub states it on every issue it returns — `GithubComment.author_association`'s vocabulary.
+   *  `mapIssue` reads it (#341): only the author and accounts with write access can edit an issue body, so an author outside `OWNER`/`MEMBER`/`COLLABORATOR`
+   *  is the one case whose body nobody trusted wrote. Optional, and absent read as "not stated", for the comment field's reason: only a hand-built issue
+   *  carries none. */
+  author_association?: string;
 }
 
 /**

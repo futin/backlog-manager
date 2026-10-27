@@ -7,7 +7,7 @@ import { isMergeMode, isQuestionMode } from '../../../shared/agent';
 import { CLAIM_FINISHED_STATUSES, MERGE_MODES, QUESTION_MODES } from '../../../shared/types';
 import type { CreatedItem } from './sources/source';
 import { answer } from './write-answer.util';
-import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, Section } from '../../../shared/types';
+import type { ClaimCounters, ClaimFinished, ClaimFinishedStatus, ClaimResult, ClaimRun, ItemBodyResult, Section } from '../../../shared/types';
 
 // Re-exported so `agents/items-abort.service.ts` keeps borrowing `writable` and `answer` from one import line. The mapping itself moved to
 // `write-answer.util.ts` in #270, because `ItemsService.readClaim` needs it too and a service importing a controller that injects that same service is a
@@ -209,7 +209,7 @@ export class ItemsWriteController {
   /** Groom's route — the ONE route that rewrites an item's body (§6.4), behind
    *  an `ifUpdatedAt` check against a fresh read. */
   @Post('body')
-  async body(@Body() body: Record<string, unknown> | undefined): Promise<{ id: string; updatedAt: string }> {
+  async body(@Body() body: Record<string, unknown> | undefined): Promise<ItemBodyResult> {
     const raw = body ?? {};
     const project = required(raw.project, 'project');
     const id = required(raw.id, 'id');
@@ -230,9 +230,12 @@ export class ItemsWriteController {
       throw new HttpException({ error: 'planReview must be a boolean' }, 400);
     }
     const planReview = raw.planReview as boolean | undefined;
+    // #341: the caller's own session, so a groom holding the item's claim pins the body it wrote. `optional`, like `host`: absent is a value (no pin is
+    // attempted), a blank is a mistake worth a 400.
+    const session = optional(raw.session, 'session');
 
     const w = writable(this.items.writerFor(project));
-    return answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix, planReview }));
+    return answer(await w.writer.patchBody(w.project, w.marker, { project, id, body: itemBody, ifUpdatedAt, runnerFix, planReview, session }));
   }
 
   /** Append a comment. Execute's failure path: the Outcome is recorded and the
