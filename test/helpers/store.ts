@@ -49,3 +49,26 @@ export function makeRegistry(projects: { name: string; path: string }[]): string
 export function item(id: string, title: string, body: string, extra = ''): string {
   return `---\nid: ${id}\ntitle: ${title}\ncreated: 2026-08-20\n${extra}---\n\n${body}`;
 }
+
+/**
+ * `<orchHome>/<encodeURIComponent(project)>/` — the directory orchestrate.mjs's own `projectDir()` makes for a project. Duplicated here, once, rather than
+ * imported: that script is standalone, with no exported package boundary into this TS project, so every run-state suite used to carry its own copy.
+ */
+export function runStateDir(orchHome: string, project: string): string {
+  return join(orchHome, encodeURIComponent(project));
+}
+
+/**
+ * Writes a project's `run.json` exactly where orchestrate.mjs's `runFilePath()` puts it, and answers the file's path. The one way a suite puts a run file on
+ * disk: before it, seventeen suites each hand-wrote the layout, and a change to it would have meant seventeen edits that each had to agree.
+ *
+ * `run` is serialised as the tool writes it (two-space JSON), except a string, which is written VERBATIM — the corrupt-file cases need bytes that do not
+ * parse, and a helper that only took an object could never produce them. `project` is passed separately rather than read off `run` for the same reason.
+ */
+export function writeRunFile(orchHome: string, project: string, run: unknown): string {
+  const dir = runStateDir(orchHome, project);
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'run.json');
+  writeFileSync(file, typeof run === 'string' ? run : JSON.stringify(run, null, 2));
+  return file;
+}

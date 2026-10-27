@@ -11,7 +11,7 @@ import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { TrackerPollerService } from '../server/src/tracker/poller.service';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { listenLoopback } from './helpers/app';
-import { makeProject, makeRegistry } from './helpers/store';
+import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, TrackersPayload } from '../shared/types';
 
@@ -34,9 +34,7 @@ let filesPath: string;
 const env = { ...process.env };
 
 function writeRun(project: string, status: OrchestratorRun['status']): void {
-  const dir = join(orchHome, encodeURIComponent(project));
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...fixture, project, status, runId: 'run-20260928-120000' }, null, 2));
+  writeRunFile(orchHome, project, { ...fixture, project, status, runId: 'run-20260928-120000' });
 }
 
 async function build(projects: { name: string; path: string }[]): Promise<void> {

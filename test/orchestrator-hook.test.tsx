@@ -410,6 +410,38 @@ describe('useOrchestratorRuns', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // --- a failed poll keeps the last good queue on screen ------------------
+
+  /* A dropped request keeps the last good queue on screen and the poll alive: the hook's `.catch` swallows it, and the coalesced poll re-arms on a
+     rejection exactly as on an answer (`p.then(settled, settled)`, lib/coalesced-poll.ts). Blanking a run that is still running because one request
+     dropped, or a poll that never ticks again after one, are the two ways this path could regress. */
+  it('keeps the last landed runs through a failed poll, and the next tick lands normally', async () => {
+    const good = payload(true);
+    let call = 0;
+    const fetchMock = jest.fn(() => {
+      call += 1;
+      // The second request is the one that drops: a network error, the shape a mid-restart box answers with.
+      if (call === 2) return Promise.reject(new TypeError('fetch failed'));
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(good) } as Response);
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useOrchestratorRuns());
+    await flush();
+    expect(result.current.runs).toEqual(good.runs);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.runs).toEqual(good.runs);
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result.current.runs).toEqual(good.runs);
+  });
+
   // --- orchestrator-watchdog design §6.3: a CRASHED run still polls -------
   //
   // `status: 'running', fresh: false` is exactly `isCrashed` (lib/run-watchdog.ts):

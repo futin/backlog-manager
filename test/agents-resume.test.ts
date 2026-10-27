@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -10,7 +10,7 @@ import { AgentsService } from '../server/src/agents/agents.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { projectDispatchGate } from '../shared/agent';
 import { listenLoopback } from './helpers/app';
-import { makeProject, makeRegistry } from './helpers/store';
+import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { pauseRequestEffective, readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../shared/types';
@@ -86,17 +86,9 @@ describe('POST /api/agents/resume', () => {
   const env = { ...process.env };
   const realFetch = global.fetch;
 
-  // Same layout orchestrate.mjs's own projectDir()/runFilePath() write, and
-  // the same helper orchestrator-start.test.ts already uses:
-  // <root>/<encodeURIComponent(absolute project path)>/run.json.
-  function projectDir(project: string): string {
-    return join(orchHome, encodeURIComponent(project));
-  }
-
+  // `writeRunFile` (test/helpers/store.ts) puts it where orchestrate.mjs's own runFilePath() does.
   function writeRun(run: OrchestratorRun): void {
-    const dir = projectDir(run.project);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchHome, run.project, run);
   }
 
   beforeEach(async () => {

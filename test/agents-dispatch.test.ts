@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -9,7 +9,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { item, makeProject, makeRegistry } from './helpers/store';
+import { item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import homeSpawnFixture from './fixtures/dispatch-home-spawn.json';
 import { DispatchRecordsService } from '../server/src/items/dispatch-records.service';
@@ -135,11 +135,8 @@ describe('POST /api/agents/dispatch', () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  /* The exact layout orchestrate.mjs's own runFilePath() writes, duplicated
-     here for the reason orchestrator-start.test.ts's copy already records:
-     that script is standalone, with no exported package boundary into this
-     TS project. `bug-2` is the id every dispatch case below acts on, so the
-     queue holds exactly that one entry at whatever stage the case is about. */
+  /* Written through `writeRunFile` (test/helpers/store.ts), the one copy of orchestrate.mjs's runFilePath() layout. `bug-2` is the id every dispatch
+     case below acts on, so the queue holds exactly that one entry at whatever stage the case is about. */
   function writeRun(stage: RunStage, over: Partial<OrchestratorRun> = {}): void {
     const run: OrchestratorRun = {
       ...runFixture,
@@ -148,9 +145,7 @@ describe('POST /api/agents/dispatch', () => {
       queue: [{ ...runFixture.queue[0], id: 'bug-2', stage }],
       ...over
     };
-    const dir = join(orchHome, encodeURIComponent(run.project));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchHome, run.project, run);
   }
 
   const bugPath = (name: string) => join(projectPath, 'backlog', 'bugs/open', name);

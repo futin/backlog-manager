@@ -1,5 +1,5 @@
-import { readAgentsConfig } from '../server/src/agents/config.util';
-import { dashboardError, resumeSessionName } from '../server/src/agents/agents.service';
+import { authHeaders, readAgentsConfig } from '../server/src/agents/config.util';
+import { dashboardError, orchestrateSessionName, resumeSessionName } from '../server/src/agents/agents.service';
 import { appendFinishClause, composePrompt, sessionName } from '../server/src/agents/prompt.util';
 import { COMMIT_RULE, FINISH_FLAG, defuseFinishFlags, finishClause } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
@@ -56,6 +56,18 @@ describe('readAgentsConfig', () => {
 
   it('falls back to the loopback default on an empty url', () => {
     expect(readAgentsConfig({ BM_AGENTS_URL: '   ' }).url).toBe('http://127.0.0.1:4173');
+  });
+});
+
+/* An empty token must send no header at all: `Bearer ` with nothing after it is a credential the dashboard would reject, where no header is the
+   unauthenticated call a token-less dashboard accepts. */
+describe('authHeaders', () => {
+  it('sends no authorization header for an empty token', () => {
+    expect(authHeaders(readAgentsConfig({ BM_AGENTS: 'on' }))).toEqual({});
+  });
+
+  it('sends the token as a bearer when one is set', () => {
+    expect(authHeaders(readAgentsConfig({ BM_AGENTS_TOKEN: 's3cret' }))).toEqual({ authorization: 'Bearer s3cret' });
   });
 });
 
@@ -241,6 +253,18 @@ describe('sessionName', () => {
 
   it('stays inside the cap for a project name long enough to blow it', () => {
     const name = sessionName(fakeItem({ project: 'a'.repeat(80), id: 'task-1' }));
+    expect(name).toMatch(DASHBOARD_NAME_RE);
+    expect(name).toHaveLength(DASHBOARD_NAME_CAP);
+  });
+});
+
+describe('orchestrateSessionName', () => {
+  it('labels the row with the project path-s basename', () => {
+    expect(orchestrateSessionName('/abs/alpha')).toBe('orchestrate alpha');
+  });
+
+  it('stays inside the cap for a project path long enough to blow it', () => {
+    const name = orchestrateSessionName(`/abs/${'a'.repeat(80)}`);
     expect(name).toMatch(DASHBOARD_NAME_RE);
     expect(name).toHaveLength(DASHBOARD_NAME_CAP);
   });

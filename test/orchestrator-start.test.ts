@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -8,7 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { item, makeProject, makeRegistry } from './helpers/store';
+import { item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { RUN_IN_PROGRESS_CODE } from '../shared/types';
 import type { OrchestratorRun } from '../shared/types';
@@ -100,20 +100,9 @@ describe('POST /api/agents/orchestrate', () => {
   const env = { ...process.env };
   const realFetch = global.fetch;
 
-  // The exact layout orchestrate.mjs's own projectDir()/runFilePath() write,
-  // and the same helper orchestrator-runs.test.ts (Task 8) already uses:
-  // <root>/<encodeURIComponent(absolute project path)>/run.json. Duplicated
-  // here rather than imported for the same reason as that file's own
-  // comment — orchestrate.mjs is a standalone script with no exported
-  // package boundary into this TS project.
-  function projectDir(project: string): string {
-    return join(orchHome, encodeURIComponent(project));
-  }
-
+  // `writeRunFile` (test/helpers/store.ts) puts it where orchestrate.mjs's own runFilePath() does.
   function writeRun(run: OrchestratorRun): void {
-    const dir = projectDir(run.project);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchHome, run.project, run);
   }
 
   beforeEach(async () => {

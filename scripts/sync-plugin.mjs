@@ -200,7 +200,8 @@ function du(dir) {
 // The old `directory` source left a full ~215MB copy of the repo per
 // version and nothing reaped them. The sparse git source makes new copies
 // small, but the fat ones from before are still on disk, so the prune stays.
-function pruneOldVersions(installPath, keptVersion) {
+// Exported for sync-plugin.test.mjs, which pins the three entries it must never remove.
+export function pruneOldVersions(installPath, keptVersion) {
   const versionsDir = dirname(installPath);
   if (!existsSync(versionsDir)) return [];
   const removed = [];

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -8,7 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { makeRegistry } from './helpers/store';
+import { makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
 
@@ -46,9 +46,7 @@ describe('/api/hub/widgets', () => {
     process.env.BM_ORCH_CONTROL_HOME = join(tmpRoot, 'settings', 'orchestrator-control');
 
     // One fresh running run, so the `run` tile has something to reduce. Its heartbeat is stamped from the clock this case runs under.
-    const dir = join(orchHome, encodeURIComponent(fixture.project));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...fixture, status: 'running', updatedAt: new Date().toISOString() }, null, 2));
+    writeRunFile(orchHome, fixture.project, { ...fixture, status: 'running', updatedAt: new Date().toISOString() });
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)

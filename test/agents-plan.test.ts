@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -8,7 +8,7 @@ import request from 'supertest';
 import { AppModule } from '../server/src/app.module';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { item, makeProject, makeRegistry } from './helpers/store';
+import { item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun, RunStage } from '../shared/types';
 import { COMMIT_RULE } from '../shared/agent';
@@ -98,10 +98,7 @@ describe('POST /api/agents/plan', () => {
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  /* The layout orchestrate.mjs's own runFilePath() writes — duplicated here
-     for the reason test/orchestrator-start.test.ts's copy records: that
-     script is standalone, with no exported package boundary into this TS
-     project. */
+  /* Written through `writeRunFile` (test/helpers/store.ts), the one copy of orchestrate.mjs's runFilePath() layout. */
   function writeRun(id: string, stage: RunStage): void {
     const run: OrchestratorRun = {
       ...runFixture,
@@ -109,9 +106,7 @@ describe('POST /api/agents/plan', () => {
       updatedAt: new Date().toISOString(),
       queue: [{ ...runFixture.queue[0], id, stage }]
     };
-    const dir = join(orchHome, encodeURIComponent(run.project));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchHome, run.project, run);
   }
 
   const post = (body: unknown) =>
