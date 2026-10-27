@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { runUsageTotals } from '../client/src/lib/run-stats';
 import { ATTENTION_LINE, deriveRemoteRuns, parseAttention, readClaimState } from '../server/src/orchestrator/remote-runs.util';
 import { renderClaim } from '../server/src/tracker/claim';
 import type { GithubComment } from '../server/src/tracker/github.client';
@@ -222,6 +223,72 @@ describe('readClaimState', () => {
     expect(readClaimState('garbage')).toEqual({});
     expect(readClaimState(undefined)).toEqual({});
     expect(readClaimState({ stage: 'teleporting', stageAt: { merged: 'x', bogus: 'y', fixing: 3 } })).toEqual({ stageAt: { merged: 'x' } });
+  });
+
+  /* #342 — array members are checked against the shape `orchestrate.mjs` writes, not merely "is an object": the Runs page renders `cmd` as a React child
+   * and folds `costUsd`/`turns` as numbers, so `{cmd:{}}` blanked the run's detail sheet and an entry missing `costUsd` turned the run's cost into NaN. */
+  const USAGE = {
+    sessionId: 's-1',
+    kind: 'execute',
+    costUsd: 1.25,
+    turns: 12,
+    inputTokens: 100,
+    outputTokens: 200,
+    cacheReadTokens: 300,
+    cacheCreationTokens: 400,
+    durationMs: 5000,
+    model: 'claude-opus-5-5',
+    peakContextTokens: 9000,
+    endedAt: '2026-09-19T11:30:00.000Z'
+  };
+
+  it('#342: a verification member must carry a string cmd, a boolean ok and a string tail', () => {
+    const good = { cmd: 'pnpm test', ok: true, tail: 'x' };
+    const state = readClaimState({
+      verification: [good, { cmd: {}, ok: true, tail: '' }, { cmd: 'a', ok: 'yes', tail: '' }, { cmd: 'b', ok: false }, 'str', null]
+    });
+    expect(state.verification).toEqual([good]);
+  });
+
+  it('#342: a usage member with a missing, string or NaN number, an unknown kind or a negative loop is dropped', () => {
+    const { costUsd: _dropped, ...noCost } = USAGE;
+    const state = readClaimState({
+      usage: [USAGE, noCost, { ...USAGE, costUsd: 'NaN' }, { ...USAGE, turns: Number.NaN }, { ...USAGE, kind: 'other' }, { ...USAGE, loop: -1 }]
+    });
+    expect(state.usage).toEqual([USAGE]);
+  });
+
+  it('#342: every nullable usage field null, a loop and no peakContextTokens key — kept', () => {
+    const { peakContextTokens: _absent, ...rest } = USAGE;
+    const nulls = {
+      ...rest,
+      kind: 'fix',
+      loop: 2,
+      sessionId: null,
+      costUsd: null,
+      turns: null,
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheCreationTokens: null,
+      durationMs: null,
+      model: null
+    };
+    expect(readClaimState({ usage: [nulls] }).usage).toEqual([nulls]);
+  });
+
+  it('#342: an unknown key on a member passes through, the forward-compatibility rule wellFormed follows', () => {
+    const verify = { cmd: 'pnpm test', ok: true, tail: '', exitCode: 0 };
+    const usage = { ...USAGE, futureField: 'x' };
+    expect(readClaimState({ verification: [verify], usage: [usage] })).toEqual({ verification: [verify], usage: [usage] });
+  });
+
+  it('#342: through deriveRemoteRuns, malformed members leave empty arrays and the run cost is null, never NaN', () => {
+    const runs = derive([claimComment(3, { state: { stage: 'verifying', verification: [{ cmd: {} }], usage: [{ kind: 'execute' }] } })]);
+    const [item] = runs[0].queue;
+    expect(item.verification).toEqual([]);
+    expect(item.usage).toEqual([]);
+    expect(runUsageTotals(runs[0])).toBeNull();
   });
 });
 

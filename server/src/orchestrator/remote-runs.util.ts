@@ -69,6 +69,32 @@ function isRunStage(value: unknown): value is RunStage {
 
 const isString = (v: unknown): v is string => typeof v === 'string';
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+/** `Number.isFinite`, not `typeof`, so a hand-edited `NaN` or `Infinity` cannot reach `foldUsage`'s sums either. */
+const isFiniteOrNull = (v: unknown): boolean => v === null || (typeof v === 'number' && Number.isFinite(v));
+
+/** The shape `orchestrate.mjs verify` writes. `cmd` is rendered as text by the run detail sheet, so an object there is a React crash, not a blank cell. */
+function isRunVerification(v: unknown): v is RunVerification {
+  return isObject(v) && isString(v.cmd) && typeof v.ok === 'boolean' && isString(v.tail);
+}
+
+const USAGE_KINDS: ReadonlySet<unknown> = new Set<RunSessionUsage['kind']>(['execute', 'retry', 'fix']);
+const USAGE_NUMBERS = ['costUsd', 'turns', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'durationMs'] as const;
+
+/**
+ * The shape `orchestrate.mjs usage` writes. Every number field must be PRESENT — a finite number or `null` — because `foldUsage` tells "not measured" from
+ * "measured" by `!== null`, so an absent `costUsd` (`undefined`) slipped past that test and turned the whole run's cost into `NaN` (#342).
+ */
+function isRunSessionUsage(v: unknown): v is RunSessionUsage {
+  if (!isObject(v)) return false;
+  if (!USAGE_KINDS.has(v.kind)) return false;
+  if (v.sessionId !== null && !isString(v.sessionId)) return false;
+  if (v.model !== null && !isString(v.model)) return false;
+  if (!isString(v.endedAt)) return false;
+  if (!USAGE_NUMBERS.every((key) => isFiniteOrNull(v[key]))) return false;
+  if (v.loop !== undefined && !(typeof v.loop === 'number' && Number.isInteger(v.loop) && v.loop >= 0)) return false;
+  if (v.peakContextTokens !== undefined && !isFiniteOrNull(v.peakContextTokens)) return false;
+  return true;
+}
 
 /**
  * `ClaimRecord.state` → the `ClaimState` fields that have the right shape, and
@@ -80,8 +106,10 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
  * editable by hand by anyone with write access. A reader that refused the
  * whole claim over one odd field would make a run disappear from every other
  * machine over a detail; this one keeps what it can read and lets the drawn
- * item say less. Array members are checked only as far as "is an object" —
- * the Runs page renders them, it never decides on them.
+ * item say less. Array members are checked against their declared shape and a
+ * member that fails is dropped alone: the Runs page renders `cmd` as text and
+ * folds `costUsd`/`turns` as numbers, and a member that was merely "an object"
+ * crashed the one and NaN'd the other (#342). Unknown keys pass through.
  */
 export function readClaimState(raw: unknown): ClaimState {
   if (!isObject(raw)) return {};
@@ -99,8 +127,8 @@ export function readClaimState(raw: unknown): ClaimState {
     if (value === null || isString(value)) out[key] = value;
   }
   if (typeof raw.fixLoops === 'number' && Number.isInteger(raw.fixLoops) && raw.fixLoops >= 0) out.fixLoops = raw.fixLoops;
-  if (Array.isArray(raw.verification)) out.verification = raw.verification.filter(isObject) as unknown as RunVerification[];
-  if (Array.isArray(raw.usage)) out.usage = raw.usage.filter(isObject) as unknown as RunSessionUsage[];
+  if (Array.isArray(raw.verification)) out.verification = raw.verification.filter(isRunVerification);
+  if (Array.isArray(raw.usage)) out.usage = raw.usage.filter(isRunSessionUsage);
   if (Array.isArray(raw.assumptions)) {
     out.assumptions = raw.assumptions.filter((a): a is { question: string; answer: string } => isObject(a) && isString(a.question) && isString(a.answer));
   }
