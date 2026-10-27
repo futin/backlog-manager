@@ -100,7 +100,9 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   decide HEAD-dependence, so it fails closed and a new `git -C "$PWD"` line goes red until someone adds it with its reason. `base` is required on
   `OrchestratorRun`, carried spawn → prompt → `init` → run file, and an older run file's absent `base` is resolved to `'main'` **once**, in
   `sanitizeMergeFields`. Validity is checked twice, same
-  order both times (`resolveBase`, `assertUsableBase`): legal ref name first, then `refs/heads/<base>` exists. The ordering is for what the value does NEXT, not
+  order both times (`resolveBase`, `assertUsableBase`): legal ref name first — the shell-inert shape `[A-Za-z0-9._/-]`, no leading `-` (#343;
+  `BASE_BRANCH_SHAPE`, hand-copied as `BASE_SHAPE` and tick.mjs's `REF_SHAPE`), then `check-ref-format --branch` — then `refs/heads/<base>` exists, and the
+  base picker (`AgentsService.branches`) lists only names matching that shape. The ordering is for what the value does NEXT, not
   for the existence check — `refs/heads/<base>` can never start with a `-`, and membership alone refuses every value the name check does; the base is
   substituted for `<base>` in SKILL.md's shell commands, which is where a leading `-` or whitespace would bite. Neither check alone is the rule:
   `check-ref-format --branch` accepts `origin/main`, a SHA and any unknown name. A missing branch is a refusal, never a create. Why:

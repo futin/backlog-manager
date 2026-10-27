@@ -81,6 +81,7 @@ const ALL_SECTIONS = Object.keys(SECTION_PREFIX);
 const FILE_ITEM_ID = /^(?:bug|idea|task|ref|oos)-\d+$/;
 
 // A ref the tool will put after `git show` and into the skill's args. Shaped narrowly on purpose: a leading `-` would be read by git as an option.
+// Twins, byte-equal since #343: `BASE_BRANCH_SHAPE` in `server/src/items/base-branch.util.ts` and `BASE_SHAPE` in `backlog-orchestrate/tools/orchestrate.mjs`.
 const REF_SHAPE = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
 
 class UsageError extends Error {}

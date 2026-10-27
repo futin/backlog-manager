@@ -2807,7 +2807,7 @@ function branchExists(projectRoot, branch) {
   return spawnSync('git', ['-C', projectRoot, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0;
 }
 
-// task-44: the two checks a run-scoped base must pass, in this order, before
+// task-44: the checks a run-scoped base must pass, in this order, before
 // `init` writes anything. A base is not just a gate any more — it is the ref
 // item worktrees are cut from and finished items are merged INTO — so only an
 // existing LOCAL branch will do. A tag and a SHA cannot move; a
@@ -2841,9 +2841,32 @@ function branchExists(projectRoot, branch) {
 // another program's argument parser is one that can be revised by that
 // program's next release. `git check-ref-format` has no `--` separator to fall
 // back on (it exits 129 on one), so this is the only way to own the property.
+//
+// A third check since #343, between those two: `BASE_SHAPE`. Well-formed as a
+// ref is not the same as inert in a shell, and the shell is where the value
+// ends up — SKILL.md's templates paste `<base>` bare (`pull --ff-only origin
+// <base>`, `push origin <base>`, `merge --no-edit <base>`). Measured on this
+// machine's git (2026-10-27): `check-ref-format --branch` ACCEPTS `feat$(id)`,
+// `a;b`, a backtick, both quotes, `&`, `|`, `<`, `>`, `!`, `#` and `{}`, and
+// refuses only spaces, `~^:?*[\`, control characters, `..` and `@{`. So a
+// collaborator's branch named `feat$(cmd)`, fetched and picked, passed every
+// check here and was then expanded by the driver. The shape is an allowlist,
+// not a denylist of metacharacters, because a denylist is wrong the first time
+// it misses one; it runs before git is spawned, so git never sees such a value.
+// A hand copy, byte-equal with `BASE_BRANCH_SHAPE` in
+// `server/src/items/base-branch.util.ts` (the board's gate) and `REF_SHAPE` in
+// `skills/backlog-tick/tools/tick.mjs` — a skill's tools import neither.
+const BASE_SHAPE = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
+
 function assertUsableBase(projectRoot, base) {
   if (typeof base !== 'string' || base === '' || base.startsWith('-')) {
     throw new OrchestrateError(`--base must be an existing local branch: ${JSON.stringify(base ?? null)} is not a valid branch name`, 1);
+  }
+  if (!BASE_SHAPE.test(base)) {
+    throw new OrchestrateError(
+      `--base must be an existing local branch: ${JSON.stringify(base)} is not a valid branch name (only letters, digits, . _ / - are allowed)`,
+      1
+    );
   }
   if (spawnSync('git', ['check-ref-format', '--branch', base]).status !== 0) {
     throw new OrchestrateError(`--base must be an existing local branch: ${JSON.stringify(base)} is not a valid branch name`, 1);
@@ -3205,7 +3228,7 @@ function cmdInit(argv) {
   //
   // Re-checked here rather than trusted from the caller because this tool is
   // driven by hand as well as by POST /api/agents/orchestrate. The endpoint
-  // runs its own copy of the same two checks (`resolveBase`,
+  // runs its own copy of the same checks (`resolveBase`,
   // agents.service.ts) and that is not redundancy to be collapsed: the
   // endpoint's copy exists to refuse a bad request BEFORE it spawns a headless
   // session, and this one exists because a terminal is not the endpoint.

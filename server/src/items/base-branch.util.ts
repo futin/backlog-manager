@@ -33,9 +33,23 @@ import { runGit } from '../git-run.util';
  * caller cannot prove the base exists, and an unproven base must never reach a
  * prompt. The `'main'` carve-out above still answers without asking git.
  *
+ * A third check since #343, ahead of git: the base must match `BASE_BRANCH_SHAPE` below. A base that passes here does not stay a git argument — it is composed
+ * into a spawn prompt and pasted, unquoted, into the driver's shell templates (`pull --ff-only origin <base>`, `push origin <base>`, `gh pr create --base
+ * <base>`). `check-ref-format --branch` is a statement about refs, not about shells: measured, it accepts `feat$(id)`, `a;b`, a backtick, both quotes, `&`,
+ * `|`, `<`, `>`, `!`, `#` and `{}`. So the shape is an ALLOWLIST — the set `tick.mjs` already holds its own `--base` to — rather than a denylist of
+ * metacharacters, which is wrong the first time it misses one.
+ *
  * Uncoded 400s, messages pinned by test/base-branch.test.ts and
  * test/uncommitted.test.ts.
  */
+
+/**
+ * The characters a base may contain (#343): letters, digits, `.`, `_`, `/` and `-`, never leading with `-`. No shell expands or splits a string made of only
+ * these, so every base that can reach a template is inert there. Byte-equal with two hand copies that must stay equal to it: `REF_SHAPE` in
+ * `skills/backlog-tick/tools/tick.mjs` and `BASE_SHAPE` in `skills/backlog-orchestrate/tools/orchestrate.mjs` (a skill tool cannot import from the server).
+ * Exported for `AgentsService.branches`, so the picker never offers a base the launch would refuse.
+ */
+export const BASE_BRANCH_SHAPE = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
 export async function resolveBaseBranch(base: unknown, projectPath: string | undefined): Promise<string> {
   if (base === undefined || base === '' || base === 'main') return 'main';
   return proveBaseBranch(base, projectPath);
@@ -60,8 +74,16 @@ export async function proveBaseBranch(base: unknown, projectPath: string | undef
   // renders a non-string (a `42` a Partial-typed body cannot rule out) as
   // `42` rather than `"42"`, which a template interpolation would not.
   const shown = JSON.stringify(typeof base === 'string' ? base.slice(0, 40) : base);
-  if (typeof base !== 'string' || base.startsWith('-')) {
+  // `''` is refused here rather than by the shape check below, so it keeps the plain message it had when check-ref-format was the one refusing it.
+  if (typeof base !== 'string' || base === '' || base.startsWith('-')) {
     throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);
+  }
+  // Before check-ref-format, so git is never spawned with a string that would be refused anyway — see the header comment for why git's own check is not it.
+  if (!BASE_BRANCH_SHAPE.test(base)) {
+    throw new HttpException(
+      { error: `base must be an existing local branch — ${shown} is not a valid branch name (only letters, digits, . _ / - are allowed)` },
+      400
+    );
   }
   if ((await runGit(['check-ref-format', '--branch', base])) === null) {
     throw new HttpException({ error: `base must be an existing local branch — ${shown} is not a valid branch name` }, 400);

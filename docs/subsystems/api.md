@@ -229,7 +229,8 @@ the machine is `home`.
 - `GET /api/agents/merge-check` — a local, read-only look at whether a project's main tree is in a state that can receive a merge.
 - `GET /api/agents/branches?project=` — that project's local branch names, for the Orchestrate sheet's base picker. Read per request, cached nowhere, and
   deliberately not annotated with which tree holds which branch: the sheet needs names, and where a branch is checked out is a question the run answers at merge
-  time.
+  time. Only names matching `BASE_BRANCH_SHAPE` (letters, digits, `.` `_` `/` `-`) are listed — every route that proves a base 400s anything else before git
+  is asked, because the base ends up unquoted in the driver's shell commands (#343).
 
 #### `agents/dashboards/` — the machine list and where a launch goes
 

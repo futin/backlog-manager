@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -7,7 +7,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
-import { proveBaseBranch, resolveBaseBranch } from '../server/src/items/base-branch.util';
+import { BASE_BRANCH_SHAPE, proveBaseBranch, resolveBaseBranch } from '../server/src/items/base-branch.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
 import { item, makeProject, makeRegistry } from './helpers/store';
@@ -244,6 +244,14 @@ describe('POST /api/agents/orchestrate — base', () => {
     expect(res.body.branches.sort()).toEqual(['feature/x', 'main']);
   });
 
+  it('drops a branch the launch would refuse for its shape, so the picker never offers one (#343)', async () => {
+    // `feat$(id)` passes `git check-ref-format --branch`, so git creates it happily — but `proveBaseBranch` refuses it, and a picker that listed it would
+    // offer the sheet a base its own launch then 400s.
+    execFileSync('git', ['-C', projectPath, 'branch', 'feat$(id)']);
+    const res = await request(app.getHttpServer()).get(`/api/agents/branches?project=${encodeURIComponent(projectPath)}`).expect(200);
+    expect(res.body.branches.sort()).toEqual(['feature/x', 'main']);
+  });
+
   it('400s on a blank project and 404s on an unregistered one — told apart deliberately', async () => {
     await request(app.getHttpServer()).get('/api/agents/branches?project=').expect(400);
     await request(app.getHttpServer()).get('/api/agents/branches?project=%2Fnot%2Fregistered').expect(404);
@@ -296,6 +304,39 @@ describe('proveBaseBranch / resolveBaseBranch', () => {
     expect(await status(proveBaseBranch('-x', root))).toMatchObject({ status: 400 });
     expect(await status(proveBaseBranch(42, root))).toMatchObject({ status: 400 });
     expect(await status(proveBaseBranch('main', undefined))).toMatchObject({ status: 400 });
+  });
+
+  // #343: `git check-ref-format --branch` accepts every one of these, so each is created as a REAL branch first — the refusal is then proven to come from
+  // the shape check, not from show-ref finding nothing. Every one would be expanded or split by the shell the driver pastes `<base>` into.
+  const unsafe = ['feat$(id)', 'a;b', 'a`id`', "a'b", 'a|b', 'a&b', 'a>b'];
+  const badShape = (shown: string) => ({
+    status: 400,
+    error: `base must be an existing local branch — ${shown} is not a valid branch name (only letters, digits, . _ / - are allowed)`
+  });
+
+  it.each(unsafe)('refuses %s by its shape even though the branch exists', async (name) => {
+    const root = repo('main');
+    execFileSync('git', ['-C', root, 'branch', name]);
+    expect(await status(proveBaseBranch(name, root))).toEqual(badShape(JSON.stringify(name)));
+  });
+
+  it('resolveBaseBranch gives the same shape refusal, and an existing branch inside the allowed set still passes', async () => {
+    const root = repo('main');
+    execFileSync('git', ['-C', root, 'branch', 'feat$(id)']);
+    execFileSync('git', ['-C', root, 'branch', 'feat/x-1.2_y']);
+    expect(await status(resolveBaseBranch('feat$(id)', root))).toEqual(badShape('"feat$(id)"'));
+    expect(await status(proveBaseBranch('feat/x-1.2_y', root))).toBe('feat/x-1.2_y');
+  });
+
+  it('the two skill tools hold byte-equal hand copies of BASE_BRANCH_SHAPE', () => {
+    // A skill's tools import neither server/ nor shared/, so the copies are kept equal by hand — and by this read of their source, since a tool that widened
+    // its copy would let `init --base` or a tick's `--base` accept a value the board refuses.
+    const copy = (file: string, name: string) => {
+      const m = readFileSync(join(__dirname, '..', file), 'utf8').match(new RegExp(`^const ${name} = (/.*/);$`, 'm'));
+      return m?.[1];
+    };
+    expect(copy('skills/backlog-orchestrate/tools/orchestrate.mjs', 'BASE_SHAPE')).toBe(String(BASE_BRANCH_SHAPE));
+    expect(copy('skills/backlog-tick/tools/tick.mjs', 'REF_SHAPE')).toBe(String(BASE_BRANCH_SHAPE));
   });
 
   it('resolveBaseBranch is unchanged: main still answers without asking git, even in a master-trunk repo', async () => {

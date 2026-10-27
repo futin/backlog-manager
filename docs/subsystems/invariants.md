@@ -776,6 +776,14 @@ first is also what makes a refusal say "that is not a ref name" rather than "no 
 `check-ref-format --branch` **accepts** `origin/main`, a 40-hex SHA and any unknown name, all three of which only `git show-ref --verify` then refuses. A run merges **into** its base, and only a local branch can move — so a tag, a SHA and a remote-tracking ref are all refused, and a missing branch is a
 refusal rather than an instruction to create one.
 
+A well-formed ref is not a shell-inert string, and since #343 both copies check that too, ahead of `check-ref-format`: the base must match
+`^[A-Za-z0-9._/][A-Za-z0-9._/-]*$` (`BASE_BRANCH_SHAPE` in `base-branch.util.ts`, hand-copied as `BASE_SHAPE` in `orchestrate.mjs` and already held by
+`tick.mjs`'s `REF_SHAPE`). Measured on 2026-10-27, `check-ref-format --branch` accepts `feat$(id)`, `a;b`, a backtick, both quotes, `&`, `|`, `<`, `>`, `!`,
+`#` and `{}`, and the driver pastes `<base>` unquoted into its templates (`pull --ff-only origin <base>`, `push origin <base>`), so a collaborator's branch
+named `feat$(cmd)`, fetched and picked, reached a shell. It is an allowlist rather than a denylist of metacharacters because a denylist is wrong the first time
+it misses one, and the templates stay unquoted because every value that can reach them is now inert there. The Orchestrate sheet's picker filters by the same
+constant, so it never offers a base the launch would refuse. The cost is that a real branch carrying `+`, `@`, `,`, `=` or `%` cannot be a base.
+
 ## Undoing an already-completed orchestrator merge is `git revert -m 1`, never `git reset --hard`
 
 This was proved empirically before the skill was written, not reasoned out in the abstract: a pre-implementation spike ran `git reset --hard` to undo a
