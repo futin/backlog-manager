@@ -351,6 +351,24 @@ describe('DispatchButton', () => {
       expect(screen.getByRole('button', { name: 'execute' })).toHaveAttribute('aria-disabled', 'true');
     });
 
+    // Review plan opens the item and dispatches nothing, so a project the dashboard cannot see is no reason to withhold it: it reads past the visibility gate.
+    it('draws an enabled Review plan even when the dashboard cannot see the project', async () => {
+      const onReview = jest.fn();
+      render(
+        <DispatchButton
+          item={fakeItem({ source: 'github', planReview: true })}
+          status={{ ...READY, projectPaths: ['/abs/other'] }}
+          onDispatch={() => {}}
+          onReview={onReview}
+        />
+      );
+      const chip = screen.getByTestId('review-plan');
+      expect(chip).not.toHaveAttribute('aria-disabled', 'true');
+      expect(chip).toBeEnabled();
+      await userEvent.click(chip);
+      expect(onReview).toHaveBeenCalledTimes(1);
+    });
+
     it('draws the plain execute chip for an item with no mark', () => {
       render(<DispatchButton item={fakeItem({ source: 'github' })} status={READY} onDispatch={() => {}} onReview={() => {}} />);
       expect(screen.queryByTestId('review-plan')).toBeNull();
