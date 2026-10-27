@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -9,7 +9,7 @@ import { AppModule } from '../server/src/app.module';
 import { readPauseRequest, writePauseRequest } from '../server/src/orchestrator/pause-control.util';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { makeProject, makeRegistry } from './helpers/store';
+import { makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
 
@@ -37,14 +37,8 @@ describe('POST /api/agents/pause', () => {
   const realFetch = global.fetch;
   let fetchStub: jest.Mock;
 
-  function projectDir(project: string): string {
-    return join(orchHome, encodeURIComponent(project));
-  }
-
   function writeRun(run: OrchestratorRun): void {
-    const dir = projectDir(run.project);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchHome, run.project, run);
   }
 
   const runningRun = (over: Partial<OrchestratorRun> = {}): OrchestratorRun => ({

@@ -4539,12 +4539,21 @@ function registryFixture(entries = [], { self = true } = {}) {
 }
 
 /** This process's start time the way the registry records it on Linux — field 22 of `/proc/<pid>/stat` — or a date string where there is no `/proc`,
- *  which is the shape macOS writes and which the CLI never compares. */
+ *  which is the shape macOS writes and which the CLI never compares.
+ *
+ *  Derived independently of `procStartOf`, which splits after the LAST `)`: an oracle copied from the code under test agrees with it whatever the index
+ *  is. Here the prefix is rebuilt from what it is made of — the pid and `/proc/self/comm` — and stripped exactly, so the stat line is the fields in order
+ *  and field 22 is 1-based field 22. */
 function selfProcStart() {
   try {
     const stat = fs.readFileSync('/proc/self/stat', 'utf8')
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19]
-  } catch {
+    const comm = fs.readFileSync('/proc/self/comm', 'utf8').replace(/\n$/, '')
+    const prefix = `${process.pid} (${comm}) `
+    assert.ok(stat.startsWith(prefix), `unexpected /proc/self/stat prefix: ${stat.slice(0, 40)}`)
+    const fields = [String(process.pid), `(${comm})`, ...stat.slice(prefix.length).trim().split(' ')]
+    return fields[22 - 1]
+  } catch (e) {
+    if (e instanceof assert.AssertionError) throw e
     return new Date().toString()
   }
 }
@@ -4619,15 +4628,34 @@ test('API mode: abort releases when the registry file naming the holder points a
   assert.equal(requests.filter((r) => r.path === '/api/items/release').length, 1)
 })
 
-// A reused pid: running, but not the process the file was written for. Only Linux can tell, from `/proc/<pid>/stat`; elsewhere the pid test stands alone.
-test('API mode: abort releases when the holder-s pid is running but its procStart differs (Linux only)', { skip: !fs.existsSync('/proc/self/stat') }, async () => {
+// A reused pid: running, but not the process the file was written for. Only Linux can tell, from `/proc/<pid>/stat`; elsewhere the pid test stands alone,
+// and a running pid reads as the session — the safe direction, a refusal rather than a seizure. Run on every platform, asserting the one it is on, so a
+// macOS run checks its own half instead of skipping.
+test('API mode: abort releases when the holder-s pid is running but its procStart differs, and refuses where there is no /proc to tell', async () => {
+  const hasProc = fs.existsSync('/proc/self/stat')
   const { dir } = trackerFixture()
   const { config } = registryFixture([{ pid: process.pid, sessionId: 'sess-gone', procStart: String(Number(selfProcStart()) + 1) }])
 
   const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
 
-  assert.equal(out.status, 0, out.stderr)
-  assert.equal(requests.filter((r) => r.path === '/api/items/release').length, 1)
+  if (hasProc) {
+    assert.equal(out.status, 0, out.stderr)
+    assert.equal(requests.filter((r) => r.path === '/api/items/release').length, 1)
+  } else {
+    assert.equal(out.status, 1)
+    assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
+  }
+})
+
+// macOS's shape on any platform: `procStart` is a date string, never compared, so a running pid alone reads as the live session and `abort` refuses.
+test('API mode: abort refuses when the holder-s pid is running and its procStart is the macOS date shape', async () => {
+  const { dir } = trackerFixture()
+  const { config } = registryFixture([{ pid: process.pid, sessionId: 'sess-gone', procStart: 'Mon Oct 26 2026 09:00:00 GMT+0000' }])
+
+  const { out, requests } = await withApi(abortableClaim(), async (port) => await runNode(dir, abortEnv(port, config), 'abort', '31'))
+
+  assert.equal(out.status, 1)
+  assert.deepEqual(requests.filter((r) => r.path === '/api/items/release'), [])
 })
 
 /* Fail CLOSED on a registry this build cannot read or does not understand: a misread there turns every live neighbour into a dead one. Three shapes of

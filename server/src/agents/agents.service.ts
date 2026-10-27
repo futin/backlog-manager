@@ -2306,9 +2306,9 @@ export async function itemClaimBlock(id: string, holder: { session: string; host
  * on 100% of dispatches without a single request actually failing. Space-
  * separated for that reason, not the more obvious `orchestrate:<project>`.
  * Sliced to the same 60-character cap `sessionName` uses, for the same
- * reason: over the cap is the same silent drop.
+ * reason: over the cap is the same silent drop. Exported for test/agents-prompt.test.ts, which pins the cap beside `resumeSessionName`'s.
  */
-function orchestrateSessionName(projectPath: string): string {
+export function orchestrateSessionName(projectPath: string): string {
   return `orchestrate ${basename(projectPath)}`.slice(0, 60);
 }
 

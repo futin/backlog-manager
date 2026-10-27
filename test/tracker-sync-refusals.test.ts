@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -14,7 +14,7 @@ import { writeSyncInterval } from '../server/src/tracker/sync-config.util';
 import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { FakeGithub, FAKE_REPO } from './helpers/github';
 import { listenLoopback } from './helpers/app';
-import { item, makeProject, makeRegistry } from './helpers/store';
+import { item, makeProject, makeRegistry, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import type { OrchestratorRun } from '../shared/types';
 
@@ -182,9 +182,7 @@ describe('dispatch, orchestrate and resume', () => {
   });
 
   it('resume refuses a paused run of the project and spawns nothing (Review Focus 1)', async () => {
-    const dir = join(orchHome, encodeURIComponent(trackerPath));
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...fixture, project: trackerPath, status: 'paused', updatedAt: new Date().toISOString() }, null, 2));
+    writeRunFile(orchHome, trackerPath, { ...fixture, project: trackerPath, status: 'paused', updatedAt: new Date().toISOString() });
     const res = await post('/api/agents/resume', { project: trackerPath }).expect(409);
     expect(res.body.error).toBe(SENTENCE);
     expect(didSpawn()).toBe(false);

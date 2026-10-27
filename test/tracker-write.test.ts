@@ -317,6 +317,18 @@ describe('state', () => {
     expect(gh.matching('/issues/31', 'PATCH')[0].body).toEqual({ state: 'closed', state_reason: 'not_planned' });
   });
 
+  /* The Outcome comment is the record of the work; an issue closed without it would read as finished with nothing saying how. So a failed comment
+     write is the whole answer, and the close never happens. */
+  it('refuses through the refusal table and closes nothing when the outcome comment fails', async () => {
+    gh.issue();
+    await sync();
+    gh.failNext = { fragment: '/issues/31/comments', status: 500 };
+    const res = await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'it worked' }).expect(502);
+    expect(res.body.status).toBe(500);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+    expect(gh.issues.get(31)?.state).toBe('open');
+  });
+
   it('posts no comment for an empty outcome', async () => {
     gh.issue();
     await sync();
@@ -516,6 +528,31 @@ describe('comment', () => {
     expect(res.body.commentId).toBe(100);
     expect(res.body.url).toContain('#issuecomment-100');
     expect(gh.comments.get(100)?.body).toBe('a note');
+  });
+
+  it('answers 404 for an issue that does not exist, and posts no comment', async () => {
+    await sync();
+    await post('comment', { project: trackerPath, id: '#31', body: 'a note' }).expect(404);
+    expect(gh.matching('/comments', 'POST')).toEqual([]);
+  });
+
+  it('answers 502 carrying the upstream status when the comment write is not a 201, and absorbs nothing', async () => {
+    gh.issue();
+    await sync();
+    gh.failNext = { fragment: '/issues/31/comments', status: 502 };
+    const res = await post('comment', { project: trackerPath, id: '#31', body: 'a note' }).expect(502);
+    expect(res.body).toEqual({ error: 'failed on purpose', status: 502 });
+    expect(gh.comments.size).toBe(0);
+  });
+
+  /* A secondary limit carries no reset header and no zero `remaining` — only GitHub's sentence says what it is — so without the `secondary` branch of
+     `refusalFor` it would fall through to `upstream` and answer a 502, which a caller reads as "GitHub is broken" rather than "wait a minute". */
+  it('answers 429 for a secondary rate limit on the write, with no reset time', async () => {
+    gh.issue();
+    await sync();
+    gh.failNext = { fragment: '/issues/31/comments', status: 429, message: 'You have exceeded a secondary rate limit' };
+    const res = await post('comment', { project: trackerPath, id: '#31', body: 'a note' }).expect(429);
+    expect(res.body).toEqual({ error: 'secondary rate limit — try again in a minute', resetAt: null });
   });
 });
 

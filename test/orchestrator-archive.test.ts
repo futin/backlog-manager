@@ -10,13 +10,10 @@ import { OrchestratorService } from '../server/src/orchestrator/orchestrator.ser
 import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { WatchdogStateService } from '../server/src/orchestrator/watchdog-state.service';
 import type { OrchestratorRun, RunQueueItem, RunVerification } from '../shared/types';
+import { runStateDir, writeRunFile } from './helpers/store';
 
-// Same layout orchestrate.mjs's own projectDir()/runFilePath() write:
-// <root>/<encodeURIComponent(absolute project path)>/run.json, plus a
-// sibling runs/ directory for archived runs. Duplicated from
-// orchestrator-runs.test.ts's identical helper rather than imported — that
-// tool has no exported package boundary into this TS project, so the path
-// shape is a cross-language contract every consuming suite re-states.
+// Same layout orchestrate.mjs's own projectDir()/runFilePath() write: <root>/<encodeURIComponent(absolute project path)>/run.json, plus a sibling runs/
+// directory for archived runs. Its one copy is test/helpers/store.ts's `runStateDir`/`writeRunFile`.
 //
 // Module-scope (not nested inside a describe): both describe blocks below —
 // OrchestratorService.archive (Task 1) and OrchestratorController.archivedRun
@@ -24,7 +21,7 @@ import type { OrchestratorRun, RunQueueItem, RunVerification } from '../shared/t
 // scratch BM_ORCH_HOME, so this is one fixture harness shared by both rather
 // than a second one built for the detail endpoint.
 function projectDir(orchHome: string, project: string): string {
-  return join(orchHome, encodeURIComponent(project));
+  return runStateDir(orchHome, project);
 }
 
 // One RunVerification with a non-trivial tail, so a test asserting the tail
@@ -83,9 +80,7 @@ function makeRun(overrides: Partial<OrchestratorRun> = {}): OrchestratorRun {
 }
 
 function writeCurrent(orchHome: string, run: OrchestratorRun): void {
-  const dir = projectDir(orchHome, run.project);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+  writeRunFile(orchHome, run.project, run);
 }
 
 // `content` is `unknown` rather than `OrchestratorRun` on purpose — several

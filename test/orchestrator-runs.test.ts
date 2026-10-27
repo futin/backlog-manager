@@ -12,7 +12,7 @@ import { RemoteStartingService } from '../server/src/orchestrator/remote-startin
 import { StartingRunsService } from '../server/src/orchestrator/starting-runs.service';
 import { REGISTRY_FILE } from '../server/src/registry/registry.service';
 import { listenLoopback } from './helpers/app';
-import { makeRegistry } from './helpers/store';
+import { makeRegistry, runStateDir, writeRunFile } from './helpers/store';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { runClaimBlock } from '../shared/agent';
 import type { BacklogItem, OrchestratorRun, RemoteRun } from '../shared/types';
@@ -31,22 +31,14 @@ describe('GET /api/orchestrator/runs', () => {
   let controlRoot: string;
   const env = { ...process.env };
 
-  // The exact layout orchestrate.mjs's own projectDir()/runFilePath() write:
-  // <root>/<encodeURIComponent(absolute project path)>/run.json, plus a
-  // sibling runs/ directory for archived runs. Duplicated here rather than
-  // imported from the .mjs tool because that tool is a standalone script
-  // with no exported package boundary into this TS project — the fixture
-  // and this path shape are the cross-language contract, not a shared module.
+  // The layout orchestrate.mjs's own projectDir()/runFilePath() write — <root>/<encodeURIComponent(absolute project path)>/run.json, plus a sibling runs/
+  // directory for archived runs — has its one copy in test/helpers/store.ts (`runStateDir`, `writeRunFile`).
   function projectDir(project: string): string {
-    return join(orchHome, encodeURIComponent(project));
+    return runStateDir(orchHome, project);
   }
 
   function writeRun(run: OrchestratorRun): string {
-    const dir = projectDir(run.project);
-    mkdirSync(dir, { recursive: true });
-    const file = join(dir, 'run.json');
-    writeFileSync(file, JSON.stringify(run, null, 2));
-    return file;
+    return writeRunFile(orchHome, run.project, run);
   }
 
   /** The pause-request file's own layout (task-17) — flat under
@@ -182,9 +174,7 @@ describe('GET /api/orchestrator/runs', () => {
     // must keep rendering as a plain, uneventful merge run, not as one with
     // `undefined` fields the board has never been told how to draw.
     const { mergeMode: _mergeMode, mergeModeEffective: _mergeModeEffective, mergeModeNote: _mergeModeNote, ...legacyRun } = fixture;
-    const dir = projectDir(fixture.project);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...legacyRun, updatedAt: new Date().toISOString() }, null, 2));
+    writeRunFile(orchHome, fixture.project, { ...legacyRun, updatedAt: new Date().toISOString() });
 
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect(res.body.runs[0].mergeMode).toBe('merge');
@@ -205,9 +195,7 @@ describe('GET /api/orchestrator/runs', () => {
     // `undefined` through a field typed `string`, and the first one to render
     // it would print nothing where a branch name belongs.
     const { base: _base, ...legacyRun } = fixture;
-    const dir = projectDir(fixture.project);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify({ ...legacyRun, updatedAt: new Date().toISOString() }, null, 2));
+    writeRunFile(orchHome, fixture.project, { ...legacyRun, updatedAt: new Date().toISOString() });
 
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect(res.body.runs[0].base).toBe('main');
@@ -238,9 +226,7 @@ describe('GET /api/orchestrator/runs', () => {
     // is a reading of a run that already happened, and refusing to render
     // history helps nobody.
     const run = { ...fixture, updatedAt: new Date().toISOString(), mergeMode: 'nonsense' };
-    const dir = projectDir(fixture.project);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+    writeRunFile(orchHome, fixture.project, run);
 
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect(res.body.runs[0].mergeMode).toBe('merge');
@@ -252,9 +238,7 @@ describe('GET /api/orchestrator/runs', () => {
     async function readBack(over: Record<string, unknown>, drop: string[] = []): Promise<OrchestratorRun> {
       const run: Record<string, unknown> = { ...fixture, updatedAt: new Date().toISOString(), ...over };
       for (const key of drop) delete run[key];
-      const dir = projectDir(fixture.project);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'run.json'), JSON.stringify(run, null, 2));
+      writeRunFile(orchHome, fixture.project, run);
       const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
       return res.body.runs[0];
     }
@@ -324,9 +308,7 @@ describe('GET /api/orchestrator/runs', () => {
     const good: OrchestratorRun = { ...fixture, project: '/abs/good', updatedAt: new Date().toISOString() };
     writeRun(good);
 
-    const badDir = projectDir('/abs/bad');
-    mkdirSync(badDir, { recursive: true });
-    writeFileSync(join(badDir, 'run.json'), '{ this is not json');
+    writeRunFile(orchHome, '/abs/bad', '{ this is not json');
 
     const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
     expect(res.body.runs).toHaveLength(1);
