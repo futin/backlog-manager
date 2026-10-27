@@ -374,9 +374,11 @@ export function ensureExcludeLines(commonDir, patterns) {
 /**
  * Did git fail because it could not take a lock? Two Starts in one repo at once can collide inside git — `fetch` locks each ref it updates (and
  * `shallow` in a shallow clone) — and only that failure is worth a second try; a missing remote or a refused login would fail the same way twice.
+ * Git 2.53's batched fetch words a ref lock it could not take as `fetching ref <ref> failed: reference already exists` (measured: an existing
+ * `refs/remotes/origin/main.lock`, files backend) where older git says `cannot lock ref`; both are the same collision, so both earn the retry.
  */
 export function isLockFailure(stderr) {
-  return /cannot lock ref|unable to create '[^']*\.lock'/i.test(stderr)
+  return /cannot lock ref|unable to create '[^']*\.lock'|fetching ref \S+ failed: reference already exists/i.test(stderr)
 }
 
 // The pause before the one retry. 1 s by default; the environment knob exists so a test does not wait a whole second, and a value that is not a
