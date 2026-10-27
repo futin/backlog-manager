@@ -18,6 +18,7 @@ import {
   releaseLock,
   removeLock,
   restoreClaim,
+  writeLastDecide,
   writeLock,
 } from './tick-state.mjs';
 
@@ -226,4 +227,26 @@ test('restoreClaim: links back when the path is free, leaves a newer lock alone,
   restoreClaim(dir, claimed);
   assert.deepEqual(fs.readdirSync(dir), ['lock']);
   assert.equal(fs.readFileSync(path.join(dir, 'lock'), 'utf8'), newer);
+});
+
+test('writeLastDecide replaces the whole record, creating the directory, and leaves no tmp file', (t) => {
+  const dir = fixture(t);
+  const rec = (verdict, planReview) => ({ at: AT, verdict, caps: { openPrs: null, maxPrs: 2, planReview, maxPlans: 3 } });
+  writeLastDecide(dir, rec('idle', 3));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'last-decide.json'), 'utf8')), rec('idle', 3));
+  writeLastDecide(dir, rec('groom', 1));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'last-decide.json'), 'utf8')), rec('groom', 1));
+  assert.deepEqual(fs.readdirSync(dir), ['last-decide.json']);
+});
+
+test('writeLastDecide never touches state.json or the lock', (t) => {
+  const dir = fixture(t);
+  writeLock(dir, lock('bug-1'));
+  recordOutcome(dir, 'bug-1', { at: AT, kind: 'execute', outcome: 'ok', hash: 'h', reason: null });
+  const state = fs.readFileSync(path.join(dir, 'state.json'), 'utf8');
+  const held = fs.readFileSync(path.join(dir, 'lock'), 'utf8');
+  writeLastDecide(dir, { at: AT, verdict: 'execute', caps: { openPrs: 0, maxPrs: 2, planReview: 0, maxPlans: 3 } });
+  assert.equal(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'), state);
+  assert.equal(fs.readFileSync(path.join(dir, 'lock'), 'utf8'), held);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['last-decide.json', 'lock', 'state.json']);
 });

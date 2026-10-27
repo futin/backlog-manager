@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 
 import { useAgents } from '../../hooks/useAgents';
 import { useBoard } from '../../hooks/useBoard';
+import { useTicks } from '../../hooks/useTicks';
+import { planReviewTally } from '../../lib/plan-review';
 import { useDashboards } from '../../hooks/useDashboards';
 import { useNow } from '../../hooks/useNow';
 import { machineLabelByHost, machineLabelById } from '../../lib/dashboards';
@@ -33,6 +35,7 @@ import { ItemModal } from './ItemModal';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
 import { RunChip } from './RunChip';
+import { PlanReviewChip } from './PlanReviewChip';
 import type { BacklogItem, RunStage, Section } from '../../../../shared/types';
 
 /* PROJECT_KEY is imported, not declared here: Archive reads the same one, and
@@ -111,6 +114,10 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
  */
 export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () => void; onWorking?: (working: boolean) => void }) {
   const { items: index, projects, loading, error, refetch } = useBoard();
+  /* #367 — the tick's recorded caps, for the band's plan-review reading. `live: false`: a tick records its caps at most once per scheduled run, so the
+     mount + focus reads `useRefreshing` gives every board poller are the right cadence, and the 15 s poll Runs › Ticks arms would be traffic for nothing. A
+     failed read leaves `data` null, and the chip reads bare counts with no cap rather than going away. */
+  const { data: ticks } = useTicks({ live: false });
   /* Task 5: only `staleDays` is read here, but the whole control comes back —
      `useSettings` falls back to the defaults outside a provider (see its own
      comment), which is what lets every board test that never mounts one still
@@ -195,6 +202,11 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
 
   const all = index?.items ?? [];
   const registered = projects ?? [];
+  /* #367 — the modal draws the FRESH copy of the item it was opened on, found in the payload by project and id during render, and the snapshot only
+     when the payload no longer carries it. `open` is the snapshot a click took; without this, approving a plan re-read the board and the modal kept
+     offering `Review plan` and `Approve plan` on an item that no longer carries the mark — ClaimRelease papers over the same staleness with a note, which
+     the dispatch chip above it cannot. Derived here, never an effect that calls `setOpen`: an effect paints one stale frame and then a second render. */
+  const openItem = open === null ? null : (all.find((i) => i.projectPath === open.projectPath && i.id === open.id) ?? open);
 
   /* One assignment for the whole board, built here rather than per card: the
      hue a project gets depends on which projects were registered before it, so
@@ -600,6 +612,7 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
             about runs, in one control that opens Runs; absent entirely when
             the payload carries no run and no starting entry. */}
         <RunChip runs={runs} starting={starting} remoteStarting={remoteStartingChip} onOpen={() => onOpenRuns?.()} />
+        <PlanReviewChip tallies={planReviewTally(all, ticks?.projects ?? [])} projectValue={projectValue === ALL ? null : projectValue} />
         <input
           type="search"
           className="board-band-search"
@@ -726,25 +739,27 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
         </div>
       )}
 
-      {open !== null && (
+      {openItem !== null && (
         <ItemModal
-          item={open}
+          item={openItem}
           hues={hues}
           onClose={() => setOpen(null)}
           agents={agents}
           // Goes through `openLaunchSheet`, not `setDispatching` directly —
           // see that function's own comment for why.
-          onDispatch={() => openLaunchSheet(open)}
-          runBlock={runBlockFor(open)}
+          onDispatch={() => openLaunchSheet(openItem)}
+          runBlock={runBlockFor(openItem)}
           reverify={reverifyAgents}
           /* The poll-age line for the project THIS item belongs to (the band
              printed it too until #228 moved that reading to the strip chip): the modal shows a body that came out of the poller's cache, so
              it says how old that cache is right beside it (spec §5.5). Derived
              here rather than in the modal because this view owns the clock and
              the project list, exactly as it does for `runBlock` and `now`. */
-          trackerLine={trackerLineFor(open)}
+          trackerLine={trackerLineFor(openItem)}
           // #225 — a released claim reads on the next payload, not on the next poll tick.
           onReleased={refetch}
+          // #367 — an approved plan reads on the next payload, and `openItem` hands the modal that fresh copy.
+          onApproved={refetch}
           remoteHosts={remoteHosts}
         />
       )}

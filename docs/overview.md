@@ -98,7 +98,7 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   `settings=shared|local|dashboards`, honoured only beside `section=settings`: the launch sheets' "Run on" card links to the Dashboards page with it, because
   the viewer's stored scope defaults to `local`.
 - **`tick/`** — the tick breaker's three routes under `/api/ticks`: a `GET` that reads the tick home `tick.mjs` writes (one directory per project, holding
-  `state.json` and `lock`) and never writes under it, and the two guarded POSTs that write `tick.json`. Not an outbound-calling module.
+  `state.json`, `lock` and `last-decide.json`) and never writes under it, and the two guarded POSTs that write `tick.json`. Not an outbound-calling module.
 - **`releases/`** — `GET /api/releases`, this checkout's own `vX.Y.Z` tags for the rail's version chip, read through release-kit's reader with every git call
   going through `runGit`. Read-only and git only, so not an outbound-calling module either; [full doc](subsystems/releases.md).
 - **`static.ts` / `security.ts` / `allowed-hosts.ts`** — the built client is served only if it was built; the served build carries a CSP whose `script-src` pins

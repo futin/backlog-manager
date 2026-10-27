@@ -1,7 +1,7 @@
 // The only writer under `tickHome()`: one lock, and one record of what the last ticks did to which item.
 //
 // The same relationship `registry.json` has with `backlog.mjs` and `run.json` has with `orchestrate.mjs`, stated for a fourth directory: nothing else writes
-// `<tickHome>/<project-key>/lock` or `state.json`. Every write is a temp file in the SAME directory and a `rename`/`link` — never an in-place write — so a
+// `<tickHome>/<project-key>/lock`, `state.json` or `last-decide.json`. Every write is a temp file in the SAME directory and a `rename`/`link` — never an in-place write — so a
 // crash mid-write leaves the previous bytes, or nothing, and a concurrent reader never sees half a file.
 //
 // `dir` is the project's own directory (`projectDir(tickHome(), root)`), made by the caller's choice of path and created here on first write.
@@ -11,6 +11,7 @@ import path from 'node:path';
 
 const LOCK_FILE = 'lock';
 const STATE_FILE = 'state.json';
+const LAST_DECIDE_FILE = 'last-decide.json';
 
 // How much history `state.json` keeps. The per-item records in `items` are the working set; `recent` is only what the tick's own report shows an operator, and
 // an unbounded one would grow for as long as the project lives.
@@ -219,6 +220,17 @@ export function forgetItem(dir, id) {
   delete state.items[id];
   writeState(dir, state);
   return true;
+}
+
+// --- the last decide's caps ----------------------------------------------
+
+// What the last counting `decide` saw: `{ at, verdict, caps: { openPrs, maxPrs, planReview, maxPlans } }`. A display record for the board (`GET /api/ticks`),
+// because `--max-plans` is a dashboard job flag only `decide` ever sees — so without it the board could count the plans awaiting review but never say what
+// the cap is. A file of its own and not a `state.json` key: `decide` writes it on paths that hold no lock (a final `idle`), and a read-modify-write of the
+// file `record` writes under the lock would race it. A whole-file replace needs no read, so two writers can only ever leave one whole record or the other.
+// Nothing in `tick.mjs` reads it back: no verdict may depend on a display record.
+export function writeLastDecide(dir, rec) {
+  writeAtomic(path.join(dir, LAST_DECIDE_FILE), JSON.stringify(rec, null, 2) + '\n');
 }
 
 // --- the content hash ----------------------------------------------------

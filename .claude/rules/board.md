@@ -74,7 +74,9 @@ paths: ["client/src/**"]
   tracker issue labelled `in-review`; the server's `plan`/`dispatch` read the same helper), an orchestrator claim (`runClaimBlock`).
   Exactly one lets the click through, and only when it speaks alone: the visibility block re-asks the status through `useReverify`
   (`client/src/hooks/useReverify.ts`), whose one caller is `GatedChip` (`components/ui/GatedChip.tsx`, rule in `lib/gate-view.ts`), which `DispatchButton` and
-  the toolbar Orchestrate control both compose (bug-13, bug-16, #272); the other blocks keep swallowing it. Why:
+  the toolbar Orchestrate control both compose (bug-13, bug-16, #272); the other blocks keep swallowing it. The plan-review rung (`planReviewBlock`, after
+  in-review) is the one that changes the button rather than disabling it, and only on the card: given `onReview`, it draws `Review plan`, which opens the item
+  (#367). Why:
   [invariants.md](docs/subsystems/invariants.md#environment-level-blocks-hide-the-dispatch-control-per-item-ones-disable-it)
 - **Run ▾ on a Jira card is never hidden for the dashboard's sake: Copy prompt is its second exit, and only Start hides.** `JiraRunMenu`
   (`components/jira/JiraRunMenu.tsx`) is one component for the card's marker row and the issue modal's controls row, and it reads `runChipState` (`lib/jira.ts`)

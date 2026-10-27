@@ -242,8 +242,9 @@ line), and every gate that could execute the item refuses it with `this plan awa
 off`, or delete-and-commit on a files project. A tick's groom never promotes an idea, never rejects, never commits and never asks a question. Why it is built
 this way: [invariants.md](invariants.md#a-tick-does-one-unit-only-when-idle-and-never-executes-a-plan-that-awaits-review).
 
-**State lives in `~/.backlog-manager/tick/<project-key>/`** (`$BM_TICK_HOME`): a `lock` and a `state.json` recording each item the tick failed on by content
-hash, so an item that cannot be done is skipped until it changes — by the same kind of unit, except that a failed groom holds back execute too, because its
+**State lives in `~/.backlog-manager/tick/<project-key>/`** (`$BM_TICK_HOME`): a `lock`, a `last-decide.json` (#367 — the caps the last `decide` that took the
+lock, or answered `idle`, saw, for the board's plan-review reading; written without the lock and never read back) and a `state.json` recording each item the
+tick failed on by content hash, so an item that cannot be done is skipped until it changes — by the same kind of unit, except that a failed groom holds back execute too, because its
 plan may be one nobody reviewed; a person who has reviewed it runs `forget`. `decide` refuses a linked worktree; `record`, `status` and `forget` follow one
 to its main checkout, because an execute's `--finish pr` leaves the session inside its own tree, and `record` exits `3` when the lock names another id. The tool
 is self-contained — it imports from no other skill, `server/` or `shared/`, runs

@@ -500,7 +500,10 @@ export function ItemCard({
                 design marks nothing by hover. `dispatchable` above is the same
                 predicate the control itself returns null on, so the row and the
                 chip can never disagree about whether there is one. */}
-            {onDispatch && <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} />}
+            {onDispatch && (
+              // `onOpen` as `onReview` (#367): a plan awaiting review is read and approved in the item modal, so its chip opens the modal.
+              <DispatchButton item={item} status={agents ?? null} onDispatch={onDispatch} runBlock={runBlock} reverify={reverify} onReview={onOpen} />
+            )}
           </div>
         )}
       </div>

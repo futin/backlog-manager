@@ -19,7 +19,7 @@
 //   - **It imports nothing from another skill's `tools/`, nor from `server/` or `shared/`**, and shells out to neither `orchestrate.mjs` nor `backlog.mjs`: an
 //     install is a copy of whatever shipped, and a prune of one skill must never break another (CLAUDE.md Invariants). Every borrowed rule is a TWIN with a
 //     comment naming its original, in `tick-lib.mjs` or below.
-//   - **It never writes outside `tickHome()`.** The lock and `state.json` are `tick-state.mjs`'s, and only there.
+//   - **It never writes outside `tickHome()`.** The lock, `state.json` and `last-decide.json` are `tick-state.mjs`'s, and only there.
 //
 // Async on purpose, and safe to end with `process.exitCode = await main(...)` for the reason `backlog.mjs` and `jira.mjs` give (the skill-CLI exit invariant):
 // every `fetch` is awaited to completion with `connection: close`, its timeout is an `AbortSignal.timeout` (an unref'd timer), and every child is `spawnSync`,
@@ -41,6 +41,7 @@ import {
   recordOutcome,
   releaseLock,
   restoreClaim,
+  writeLastDecide,
   writeLock,
 } from './tick-state.mjs';
 
@@ -439,7 +440,7 @@ async function cmdDecide(argv) {
   }
   if (pick !== null) {
     const args = `${pick.id} --finish pr${opts.base === null ? '' : ` --base ${opts.base}`} ${MARKER}`;
-    return act(dir, ctx, base, now, opts, say, { kind: 'execute', id: pick.id, reason: `execute ${pick.id}`, skill: 'backlog-execute', args });
+    return act(dir, ctx, base, now, opts, caps, say, { kind: 'execute', id: pick.id, reason: `execute ${pick.id}`, skill: 'backlog-execute', args });
   }
 
   // 6. Groom, when the plan-review pile has room.
@@ -453,21 +454,34 @@ async function cmdDecide(argv) {
   if (groom !== null) {
     const args = groom.section === 'bugs' ? `${groom.id}, plan the fix ${MARKER}` : `${groom.id}, promote it to a task ${MARKER}`;
     const reason = `groom ${groom.id} (execute: ${executeWhy})`;
-    return act(dir, ctx, base, now, opts, say, { kind: 'groom', id: groom.id, reason, skill: 'backlog-groom', args });
+    return act(dir, ctx, base, now, opts, caps, say, { kind: 'groom', id: groom.id, reason, skill: 'backlog-groom', args });
   }
 
   // 7. Nothing.
+  if (!opts.dryRun) recordCaps(dir, 'idle', caps, now);
   return say('idle', `nothing to do: ${executeWhy}; ${groomWhy}`);
+}
+
+// The caps this decide counted, for the board (`last-decide.json`, tick-state.mjs). Written only where `caps.planReview` was counted and a verdict that
+// is not a dry run is about to print — a taken unit or the final `idle` — so the board's "as of" is the last tick that actually looked at the pile. A display
+// record must never cost a tick its verdict: a failed write is one stderr line, and the JSON line and the exit code are the ones it would have had anyway.
+function recordCaps(dir, verdict, caps, now) {
+  try {
+    writeLastDecide(dir, { at: new Date(now).toISOString(), verdict, caps: { ...caps } });
+  } catch (e) {
+    process.stderr.write(`tick: could not record caps: ${e.message}\n`);
+  }
 }
 
 // 8. Take the lock and hand out the unit. A dry run takes nothing. `false` from `writeLock` is a second tick that got there between this one's read and its
 // write: it holds the lock now, and this tick stands down.
-function act(dir, ctx, base, now, opts, say, unit) {
+function act(dir, ctx, base, now, opts, caps, say, unit) {
   if (!opts.dryRun) {
     // The base COMMIT, not its name (tick-state.mjs's `Lock`): `record` and a recovery hash the blob at the commit `decide` read, so an item committed between
     // the two cannot make a failure look like one on the new text.
     const lock = { host: os.hostname(), verdict: { kind: unit.kind, id: unit.id }, base: commitOf(ctx.root, base) ?? base, at: new Date(now).toISOString() };
     if (!writeLock(dir, lock)) return say('busy', 'another tick');
+    recordCaps(dir, unit.kind, caps, now);
   }
   return say(unit.kind, unit.reason, { id: unit.id, skill: unit.skill, args: unit.args });
 }
