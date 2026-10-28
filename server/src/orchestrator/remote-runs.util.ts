@@ -72,8 +72,11 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 /** `Number.isFinite`, not `typeof`, so a hand-edited `NaN` or `Infinity` cannot reach `foldUsage`'s sums either. */
 const isFiniteOrNull = (v: unknown): boolean => v === null || (typeof v === 'number' && Number.isFinite(v));
 
-/** The shape `orchestrate.mjs verify` writes. `cmd` is rendered as text by the run detail sheet, so an object there is a React crash, not a blank cell. */
-function isRunVerification(v: unknown): v is RunVerification {
+/**
+ * The shape `orchestrate.mjs verify` writes. `cmd` is rendered as text by the run detail sheet, so an object there is a React crash, not a blank cell.
+ * Exported for `orchestrator.service.ts`'s `sanitizeQueue`, which holds a local run file's rows to the same rule (#349) — one predicate, not two copies.
+ */
+export function isRunVerification(v: unknown): v is RunVerification {
   return isObject(v) && isString(v.cmd) && typeof v.ok === 'boolean' && isString(v.tail);
 }
 

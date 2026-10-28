@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
@@ -497,5 +497,56 @@ describe('malformed registry entries and unreadable item paths', () => {
 
   it('404s a directory named *.md inside a registered store, not a 500', async () => {
     await request(app.getHttpServer()).get('/api/items/body').query({ path: dirNamedMd }).expect(404);
+  });
+});
+
+describe('a registry that cannot be read (#349)', () => {
+  let app: INestApplication;
+  let registry: string;
+  let warn: jest.SpyInstance;
+
+  const delta = makeProject('delta', [{ leaf: 'bugs/open', filename: 'bug-1-real.md', content: item('bug-1', 'real', '## Symptom\n\nx\n') }]);
+  const good = JSON.stringify({ projects: [{ name: 'delta', path: delta, createdAt: '2026-08-26T00:00:00.000Z' }] });
+
+  beforeAll(async () => {
+    registry = join(mkdtempSync(join(tmpdir(), 'bm-brokenreg-')), 'registry.json');
+    const moduleRef = await Test.createTestingModule({ imports: [ItemsModule] })
+      .overrideProvider(REGISTRY_FILE)
+      .useValue(registry)
+      .compile();
+    app = moduleRef.createNestApplication();
+    await app.init();
+    await listenLoopback(app);
+  });
+
+  beforeEach(() => {
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => warn.mockRestore());
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('a missing file is an empty board, 200 on both routes', async () => {
+    rmSync(registry, { force: true });
+    expect((await request(app.getHttpServer()).get('/api/projects').expect(200)).body).toEqual([]);
+    expect(((await request(app.getHttpServer()).get('/api/items').expect(200)).body as ItemsIndex).items).toEqual([]);
+  });
+
+  it.each([['{"projects": ['], ['[]'], ['null'], ['{"projects": 1}']])('%s is a 503 naming registry.json on both routes', async (content) => {
+    writeFileSync(registry, content);
+    for (const route of ['/api/projects', '/api/items']) {
+      const res = await request(app.getHttpServer()).get(route).expect(503);
+      expect((res.body as { error: string }).error).toContain('registry.json');
+    }
+  });
+
+  it('a repaired file serves the projects again on the next request', async () => {
+    writeFileSync(registry, '{"projects": [');
+    await request(app.getHttpServer()).get('/api/projects').expect(503);
+    writeFileSync(registry, good);
+    const projects = (await request(app.getHttpServer()).get('/api/projects').expect(200)).body as ProjectSummary[];
+    expect(projects.map((p) => p.name)).toEqual(['delta']);
   });
 });

@@ -13,6 +13,7 @@ import {
   MAX_REMOTES,
   STRATEGIES,
   dashboardsFile,
+  keptRows,
   normaliseOrder,
   readDashboardsFile,
   subsetOf,
@@ -155,7 +156,7 @@ export class DashboardsService {
     if (typeof entry === 'string') throw bad(entry);
     const { replaces } = body;
     if (replaces !== undefined && replaces !== null && typeof replaces !== 'string') throw bad('replaces must be a string');
-    return this.edit((cur) => {
+    return this.edit((cur, raw) => {
       const list = cur.dashboards;
       const target = typeof replaces === 'string' ? replaces : entry.name;
       const at = list.findIndex((d) => d.name === target);
@@ -165,9 +166,15 @@ export class DashboardsService {
       if (at < 0 && list.length >= MAX_REMOTES) throw bad(`at most ${MAX_REMOTES} dashboards`);
       const dashboards = at < 0 ? [...list, entry] : list.map((d, i) => (i === at ? entry : d));
       const order = (cur.order ?? []).map((id) => (at >= 0 && id === list[at].name ? entry.name : id));
+      // On disk: the raw row the view drew is replaced where it stands, or the new row goes after every raw row — invalid, shadowed and past-the-cap rows
+      // included, all left where they were.
+      const rows = rawRows(raw);
+      const rawAt = at < 0 ? -1 : keptRowAt(raw, target);
+      if (rawAt < 0) rows.push(entry);
+      else rows[rawAt] = entry;
       return {
-        ...cur,
-        dashboards,
+        ...raw,
+        dashboards: rows,
         order: normaliseOrder(
           order,
           dashboards.map((d) => d.name)
@@ -181,12 +188,17 @@ export class DashboardsService {
     if (!isPlainObject(body)) throw bad('bad body');
     const { name } = body;
     if (typeof name !== 'string') throw bad('name must be a string');
-    return this.edit((cur) => {
+    return this.edit((cur, raw) => {
       if (!cur.dashboards.some((d) => d.name === name)) throw new HttpException({ error: `no dashboard named "${name}"` }, 404);
       const dashboards = cur.dashboards.filter((d) => d.name !== name);
+      // Only the row the view drew goes. A later row of the same lowercased name that the reader dropped as a duplicate is no longer shadowed and is live on
+      // the next read if it validates — it was hidden, never deleted, and deleting it too would remove a row nobody asked to remove.
+      const rows = rawRows(raw);
+      const rawAt = keptRowAt(raw, name);
+      if (rawAt >= 0) rows.splice(rawAt, 1);
       return {
-        ...cur,
-        dashboards,
+        ...raw,
+        dashboards: rows,
         order: normaliseOrder(
           cur.order,
           dashboards.map((d) => d.name)
@@ -223,14 +235,15 @@ export class DashboardsService {
       if (body.efforts !== null && !efforts) throw bad(`efforts must be a non-empty subset of ${EFFORTS.join(', ')}`);
       patch.efforts = efforts;
     }
-    return this.edit((cur) => {
-      const home: Record<string, unknown> = { ...cur.home };
+    return this.edit((_cur, raw) => {
+      // From the RAW home, so a key the reader does not know (or one it dropped) survives a patch that did not name it.
+      const home: Record<string, unknown> = isPlainObject(raw.home) ? { ...raw.home } : {};
       for (const [key, value] of Object.entries(patch)) {
         if (value === null) delete home[key];
         else home[key] = value;
       }
-      const next: DashboardsFile = { ...cur };
-      if (Object.keys(home).length) next.home = home as HomeEntry;
+      const next: Record<string, unknown> = { ...raw };
+      if (Object.keys(home).length) next.home = home;
       else delete next.home;
       return next;
     });
@@ -250,8 +263,8 @@ export class DashboardsService {
       throw bad('threshold must be an integer 1–100');
     if (order !== undefined && (!Array.isArray(order) || order.some((id) => typeof id !== 'string')))
       throw bad('order must list configured machines once each');
-    return this.edit((cur) => {
-      const next: DashboardsFile = { ...cur };
+    return this.edit((cur, raw) => {
+      const next: Record<string, unknown> = { ...raw };
       if (strategy !== undefined) next.strategy = strategy as SuggestStrategy;
       if (threshold !== undefined) next.threshold = threshold;
       if (order !== undefined) {
@@ -264,12 +277,23 @@ export class DashboardsService {
     });
   }
 
-  // The one write path: read the file as it is NOW (an unreadable one refuses, naming the file), let `mutate` produce the next value or throw its 400/404, write
-  // it, and answer the fresh view so the card draws the server's value and not an optimistic one.
-  private edit(mutate: (cur: DashboardsFile) => DashboardsFile): DashboardsView {
+  // The one write path: read the file as it is NOW (an unreadable one refuses, naming the file), let `mutate` decide against the normalised view — the clash
+  // test, MAX_REMOTES, the 404s, the complete-order rule — and produce the next RAW object, or throw its 400/404; write it, and answer the fresh view so the
+  // card draws the server's value and not an optimistic one. `mutate` gets the raw object and changes only what it was asked to (the file util's header).
+  private edit(mutate: (cur: DashboardsFile, raw: Record<string, unknown>) => Record<string, unknown>): DashboardsView {
     const read = readDashboardsFile();
     if (read.source === 'unreadable') throw new DashboardsFileUnreadable(dashboardsFile(), read.reason);
-    writeDashboardsFile(mutate(read.value));
+    writeDashboardsFile(mutate(read.value, read.raw));
     return this.view();
   }
+}
+
+// The raw `dashboards` array, copied — or a fresh one when the file has none (or a hand edit made it a non-array, which holds no row to keep).
+function rawRows(raw: Record<string, unknown>): unknown[] {
+  return Array.isArray(raw.dashboards) ? [...(raw.dashboards as unknown[])] : [];
+}
+
+// The raw index of the row the view drew under `name` — `keptRows`' own walk, so it is the row the reader kept and never a shadowed duplicate. -1 when absent.
+function keptRowAt(raw: Record<string, unknown>, name: string): number {
+  return keptRows(raw.dashboards).find((k) => k.entry.name === name)?.at ?? -1;
 }

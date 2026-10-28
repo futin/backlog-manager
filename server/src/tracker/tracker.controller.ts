@@ -4,7 +4,7 @@ import { originRepo } from './origin.util';
 import { TrackerPollerService } from './poller.service';
 import { isRepo } from './github.client';
 import { resolveSource } from '../items/sources/resolve.util';
-import { RegistryService } from '../registry/registry.service';
+import { RegistryService, registryProjectsOr503 } from '../registry/registry.service';
 import type { TrackerProjectRow, TrackersPayload } from '../../../shared/types';
 
 /**
@@ -21,6 +21,9 @@ import type { TrackerProjectRow, TrackersPayload } from '../../../shared/types';
  * caller-supplied path. It discloses strictly less than `/api/projects`
  * already does to the same reader — plus one login and a rate-limit count,
  * and **never the token**.
+ *
+ * A registry that cannot be read is a 503, as on `/api/projects` (#349): this
+ * card would otherwise draw "nothing registered yet" for a broken file.
  *
  * Every read is per request and cached nowhere: the registry, each project's
  * marker, and each files project's `origin`. The one thing that IS cached —
@@ -42,7 +45,7 @@ export class TrackerController {
     // git spawn per FILES project, async since #277 — can run concurrently
     // rather than one after another: N projects on a slow bind mount would
     // otherwise cost N times the slow read. Still per request, memoised nowhere.
-    const entries = this.registry.load().projects.map((project) => ({ project, resolved: resolveSource(project.path, KNOWN) }));
+    const entries = registryProjectsOr503(this.registry).map((project) => ({ project, resolved: resolveSource(project.path, KNOWN) }));
     const origins = await Promise.all(entries.map(({ project, resolved }) => (resolved.kind === 'files' ? originRepo(project.path) : null)));
 
     for (const [index, { project, resolved }] of entries.entries()) {

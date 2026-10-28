@@ -11689,3 +11689,139 @@ test('#322 tracker: the mark is the API body\'s plan hash, a footer-only re-stam
     assert.equal(gateOf(await runApi(project, home, port, 'plan', '--project', project, '--json')).gate, 'ready');
   });
 });
+
+// --- #349: the run lock serialising verify's and watch's read-modify-writes -------------------------------------------------------------------------------
+//
+// `verify` runs detached beside a `watch` heartbeating the same run.json (SKILL.md §8), and both used to be blind read-modify-writes: a tick that read before
+// verify's write and wrote after it put back the old `verification` array. Both now go through `mutateRun`, behind `<dir>/run.json.lock`.
+
+function runLockFile(home, project) {
+  return path.join(home, encodeURIComponent(project), 'run.json.lock');
+}
+
+// `runAsync` with extra environment — the lock's deadline is overridable so the timeout case stays fast.
+async function runAsyncEnv(cwd, home, extraEnv, ...args) {
+  const proc = spawn('node', [SCRIPT, ...args], {
+    cwd,
+    env: { ...process.env, BM_ORCH_HOME: home, CLAUDE_CODE_SESSION_ID: TEST_SESSION_ID, ...extraEnv }
+  });
+  let stdout = '';
+  let stderr = '';
+  proc.stdout.on('data', (d) => {
+    stdout += d;
+  });
+  proc.stderr.on('data', (d) => {
+    stderr += d;
+  });
+  const [status] = await once(proc, 'exit');
+  return { status, stdout, stderr };
+}
+
+function verifyWorktree(t, commands) {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-orch-lock-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(worktree, 'backlog'), { recursive: true });
+  fs.writeFileSync(path.join(worktree, 'backlog', 'verify.json'), JSON.stringify({ commands }));
+  return worktree;
+}
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('verify waits on a run lock held by a live pid, writing nothing, and writes its rows once the lock is released', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const worktree = verifyWorktree(t, ['node -e "process.exit(0)"']);
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
+
+  // This test process's own pid: alive for the whole case, so the lock is never broken as dead.
+  fs.writeFileSync(runLockFile(home, project), `${process.pid}\n${new Date().toISOString()}\n`);
+  const pending = runAsyncEnv(project, home, {}, 'verify', 'task-1', '--cwd', worktree, '--json');
+  await delay(600);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before, 'verify wrote run.json while the lock was held');
+  fs.rmSync(runLockFile(home, project));
+
+  const out = await pending;
+  assert.equal(out.status, 0, out.stderr);
+  const rows = JSON.parse(out.stdout);
+  assert.deepEqual(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].verification, rows);
+  assert.equal(fs.existsSync(runLockFile(home, project)), false);
+});
+
+test('verify breaks a run lock whose holder pid is dead, writes its rows, and leaves no lock behind', (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const worktree = verifyWorktree(t, ['node -e "process.exit(0)"']);
+
+  // A child that has already exited and been reaped by spawnSync: its pid names no process.
+  const dead = spawnSync(process.execPath, ['-e', ''], { encoding: 'utf8' }).pid;
+  fs.writeFileSync(runLockFile(home, project), `${dead}\n${new Date().toISOString()}\n`);
+
+  const out = run(project, home, 'verify', 'task-1', '--cwd', worktree, '--json');
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue[0].verification.length, 1);
+  // Neither the lock nor the temp stamp it was linked from, nor the aside a break renamed it to, is left behind.
+  assert.deepEqual(fs.readdirSync(path.dirname(runLockFile(home, project))).filter((n) => n.startsWith('run.json.lock')), []);
+});
+
+test('verify exits 1 naming run.json.lock when a live holder keeps the lock past BM_RUN_LOCK_TIMEOUT_MS, leaving run.json byte-identical', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-1', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const worktree = verifyWorktree(t, ['node -e "process.exit(0)"']);
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
+  fs.writeFileSync(runLockFile(home, project), `${process.pid}\n${new Date().toISOString()}\n`);
+  t.after(() => fs.rmSync(runLockFile(home, project), { force: true }));
+
+  const out = await runAsyncEnv(project, home, { BM_RUN_LOCK_TIMEOUT_MS: '300' }, 'verify', 'task-1', '--cwd', worktree, '--json');
+  assert.equal(out.status, 1, out.stderr);
+  assert.match(out.stderr, /run\.json\.lock/);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before);
+  // The holder's lock is still the holder's: a timed-out waiter never removes it.
+  assert.equal(fs.readFileSync(runLockFile(home, project), 'utf8').split('\n')[0], String(process.pid));
+});
+
+test('watch waits on a held run lock before heartbeating, then heartbeats once it is released and leaves no lock behind', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-9', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  const before = fs.readFileSync(runFile(home, project), 'utf8');
+  const child = spawnChild(t, 30_000);
+
+  fs.writeFileSync(runLockFile(home, project), `${process.pid}\n${new Date().toISOString()}\n`);
+  const pending = runAsyncEnv(project, home, {}, 'watch', 'task-9', '--pid', String(child.pid), '--jsonl', STREAM_INIT, '--interval-ms', '50', '--budget-ms', '300');
+  await delay(600);
+  assert.equal(fs.readFileSync(runFile(home, project), 'utf8'), before, 'watch heartbeated while the lock was held');
+  fs.rmSync(runLockFile(home, project));
+
+  const out = await pending;
+  assert.equal(out.status, 3, out.stderr);
+  const after = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8'));
+  assert.ok(Date.parse(after.updatedAt) > Date.parse(JSON.parse(before).updatedAt), 'updatedAt did not advance after the lock was released');
+  assert.equal(fs.existsSync(runLockFile(home, project)), false);
+});
+
+test('verify beside a fast-ticking watch on the same item keeps every row it printed, run after run', async (t) => {
+  const { home, project } = orchFixture(t);
+  seedReadyTask(project, 'task-9', 'Some task');
+  assert.equal(run(project, home, 'init', '--project', project).status, 0);
+  // The watch's budget counts ticks, not wall time (elapsed += interval-ms), so 30 ticks of 20 ms each, every one a locked read-modify-write, overlap the
+  // 800 ms suite without the round outliving the child it watches.
+  const worktree = verifyWorktree(t, ['node -e "setTimeout(() => {}, 800)"', 'node -e "process.exit(0)"']);
+
+  for (let round = 0; round < 4; round++) {
+    const child = spawnChild(t, 120_000);
+    const watching = runAsyncEnv(project, home, {}, 'watch', 'task-9', '--pid', String(child.pid), '--jsonl', STREAM_INIT, '--interval-ms', '20', '--budget-ms', '600');
+    const out = await runAsyncEnv(project, home, {}, 'verify', 'task-9', '--cwd', worktree, '--json');
+    const watched = await watching;
+    child.kill('SIGKILL');
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(watched.status, 3, watched.stderr);
+    const printed = JSON.parse(out.stdout);
+    const onDisk = JSON.parse(fs.readFileSync(runFile(home, project), 'utf8')).queue.find((q) => q.id === 'task-9').verification;
+    for (const row of printed) assert.ok(onDisk.some((r) => JSON.stringify(r) === JSON.stringify(row)), `round ${round}: a printed row is missing from run.json`);
+    assert.equal(onDisk.length, printed.length * (round + 1), `round ${round}: run.json lost rows`);
+  }
+  assert.equal(fs.existsSync(runLockFile(home, project)), false);
+});
