@@ -4596,7 +4596,9 @@ server's clock (the soonest syncing board's `polledAt` plus its interval plus `u
 `JIRA_STATUS_FLOOR_MS`, and no timer at all while unconfigured or with no syncing board), not re-armed a fixed interval after an answer; a focus read, that
 timer's read and a Setup save's `reload` can overlap, and it keeps the newest-read-wins sequence counter instead. Unlike `/api/trackers` the route reads no
 git — it answers from memory, the env and `jira.json` — so the overlap costs a cheap read, not a spawn. `useJiraBoard`, the Board page's issue list, has no
-server clock to chase and IS built on `useCoalescedFetch`.
+server clock to chase and IS built on `useCoalescedFetch`. Both exceptions cover the fetch SCHEDULING, not the focus subscription: `useRefreshing`,
+`useTrackers` and `useJira` all subscribe through one hook, `useWindowFocus` (#376), so what differs between them is what a focus asks for, never how it is
+heard.
 
 ## ui-kit draws the version chip and the What's new drawer; this board only maps its tokens and places the chip
 

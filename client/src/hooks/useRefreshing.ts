@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 import { useCoalescedFetch } from './useCoalescedFetch';
+import { useWindowFocus } from './useWindowFocus';
 
 /**
  * The board's refresh cadence in one place (#285): `useCoalescedFetch`'s stable trigger, fired once on mount and once per window `focus` — the entry
@@ -26,13 +27,7 @@ export function useRefreshing<T>(task: () => Promise<T>, opts: { armed?: boolean
     void trigger();
   }, [trigger]);
 
-  useEffect(() => {
-    const onFocus = (): void => {
-      void trigger();
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [trigger]);
+  useWindowFocus(trigger);
 
   return trigger;
 }
