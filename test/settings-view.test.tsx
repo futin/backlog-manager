@@ -10,7 +10,7 @@ import '@testing-library/jest-dom';
 
 import { readStyles, ruleBlock } from './helpers/css-rule';
 
-import SettingsView from '../client/src/components/settings/SettingsView';
+import SettingsView, { SWATCHES } from '../client/src/components/settings/SettingsView';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { JiraContext } from '../client/src/hooks/JiraContext';
@@ -157,6 +157,36 @@ describe('SettingsView', () => {
     renderView();
     expect(screen.queryByText(/Bionic/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Fixation/)).not.toBeInTheDocument();
+  });
+
+  /* #350 — a stored value between the stops (LIMITS honours one on purpose) matched no option, so the row selected nothing and showed no current value. */
+  it('lists and selects an off-step text size and staleness window', () => {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ fontScale: 105, staleDays: 45 }));
+    renderView();
+    const size = screen.getByText('Text size').closest('.set-row') as HTMLElement;
+    expect(within(size).getByRole('button', { name: '105%' })).toHaveAttribute('aria-pressed', 'true');
+    const stale = screen.getByText('Archive after').closest('.set-row') as HTMLElement;
+    expect(within(stale).getByRole('button', { name: '45d' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  /* #350 — the swatches mirror shared/theme.css by hand (the swatch paints a palette that is not applied, so it cannot read live properties), and the
+     mirror drifted: amber and nightshift painted another token as their accent. `--accent` is `var(--cyan)` in every theme, so the third band is `--cyan`. */
+  it('paints each theme swatch from that theme’s own board, strip and accent', () => {
+    const css = readFileSync(join(__dirname, '../shared/theme.css'), 'utf8');
+    const block = (selector: string): string => {
+      const at = css.indexOf(`${selector}{`);
+      if (at < 0) throw new Error(`no ${selector} block in theme.css`);
+      return css.slice(at, css.indexOf('}', at));
+    };
+    const token = (body: string, name: string): string => {
+      const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8})`).exec(body);
+      if (m === null) throw new Error(`no --${name} in block`);
+      return m[1].toLowerCase();
+    };
+    for (const id of ['midnight', 'graphite', 'amber', 'nightshift', 'daylight'] as const) {
+      const body = block(id === 'midnight' ? ':root,[data-theme="midnight"]' : `[data-theme="${id}"]`);
+      expect([id, SWATCHES[id].map((c) => c.toLowerCase())]).toEqual([id, [token(body, 'board'), token(body, 'strip'), token(body, 'cyan')]]);
+    }
   });
 
   it('changes density and text size', async () => {
@@ -504,7 +534,7 @@ describe('SettingsView', () => {
       await userEvent.tab();
       expect(JSON.parse(localStorage.getItem('backlog-manager.settings') ?? '{}').linkBase).toBe('https://box.ts.net:5174');
 
-      // The input carries `key={settings.linkBase}` (SettingsView.tsx) so it
+      // The input is keyed on the stored link and a commit counter (SettingsView.tsx) so it
       // re-seeds from the clamped value on every commit — here, the
       // trailing slash just typed is gone from the box too, not only from
       // storage. That commit changed the key and remounted the input, so
@@ -524,6 +554,23 @@ describe('SettingsView', () => {
       // was refused.
       const fieldAfterRefusal = screen.getByLabelText('Dashboard link');
       expect(fieldAfterRefusal).toHaveValue('http://127.0.0.1:5174');
+    });
+
+    /* #350 — the input re-seeded on `key={settings.linkBase}`, which only changes when the STORED value does. A commit that clamps back to the value
+       already stored kept the key, so React kept the node and the box went on showing the typed text. Both cases below start from the stored default. */
+    it('re-seeds the dashboard link when a commit clamps back to the value already stored', async () => {
+      renderView();
+      const field = await screen.findByLabelText('Dashboard link');
+      await userEvent.clear(field);
+      await userEvent.type(field, 'http://127.0.0.1:5174/');
+      await userEvent.tab();
+      expect(screen.getByLabelText('Dashboard link')).toHaveValue('http://127.0.0.1:5174');
+
+      const again = screen.getByLabelText('Dashboard link');
+      await userEvent.clear(again);
+      await userEvent.type(again, 'javascript:alert(1)');
+      await userEvent.tab();
+      expect(screen.getByLabelText('Dashboard link')).toHaveValue('http://127.0.0.1:5174');
     });
 
     it('offers a default model and effort, both starting on the CLI default', async () => {

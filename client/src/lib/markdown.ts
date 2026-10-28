@@ -135,11 +135,14 @@ function escapeHtml(s: string): string {
  * Configured once at module scope so every parse gets it, not just one
  * component's — `renderMarkdown` below is the one entry point, and `marked.use`
  * runs exactly once, when this module first loads:
- *  - `html` drops every raw HTML token — block-level and inline both route
- *    through this one renderer method — so a pasted `<script>`, `<svg
- *    onload>`, `<iframe srcdoc>`, HTML comment, etc. renders as nothing
- *    rather than as markup, wherever it sits (list item, blockquote, table
- *    cell, heading, ...).
+ *  - `html` never emits markup for a raw HTML token — block-level and inline
+ *    both route through this one renderer method — wherever it sits (list
+ *    item, blockquote, table cell, heading, ...). An HTML comment renders as
+ *    nothing, because tracker bodies end in `<!-- bm:… -->` footers that are
+ *    bookkeeping, not prose. Any other raw HTML — a pasted `<script>`, `<svg
+ *    onload>`, `<iframe srcdoc>`, and the far commoner `Promise<void>` that
+ *    marked also reads as a tag — renders as escaped literal text (#350):
+ *    dropping it outright made a generic in prose vanish from the body.
  *  - `link` renders a disallowed (or entity-hidden) scheme as plain text
  *    with no `<a>` at all; an allowed one gets a hand-built, escaped anchor
  *    rather than marked's default.
@@ -150,8 +153,8 @@ function escapeHtml(s: string): string {
  */
 marked.use({
   renderer: {
-    html() {
-      return '';
+    html({ text }) {
+      return text.trimStart().startsWith('<!--') ? '' : escapeHtml(text);
     },
     link({ href, title, tokens }) {
       const text = this.parser.parseInline(tokens);
@@ -172,9 +175,9 @@ marked.use({
  * unchanged in Jira phase 2 so the Jira issue modal's description goes through the same sanitiser rather than a second `marked` configuration.
  *
  * `marked` is synchronous unless handed async extensions — none here — so the `async: false` cast is safe. The result is meant for
- * `dangerouslySetInnerHTML`: safe not because the source is "local" (an item body is LLM-written, not vetted), but because the `marked.use()` above drops
- * raw HTML outright and hand-builds every link/image tag with its href/src escaped, so neither a literal nor an entity-hidden scheme survives to reach the
- * browser's own HTML parser.
+ * `dangerouslySetInnerHTML`: safe not because the source is "local" (an item body is LLM-written, not vetted), but because the `marked.use()` above never
+ * emits raw HTML as markup — a comment renders as nothing, any other tag as escaped text — and hand-builds every link/image tag with its href/src escaped,
+ * so neither a literal nor an entity-hidden scheme survives to reach the browser's own HTML parser.
  */
 export function renderMarkdown(source: string): string {
   return marked.parse(source, { async: false }) as string;

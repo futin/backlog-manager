@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
@@ -52,6 +53,23 @@ describe('NumberField', () => {
     rerender(<NumberField value={90} min={1} max={365} onCommit={jest.fn()} label="Stale after" />);
 
     expect(screen.getByRole('spinbutton', { name: 'Stale after' })).toHaveValue(90);
+  });
+
+  /* #350 — the input re-seeded on `key={value}` alone, so a commit the parent clamped back to the value it already held kept the key, React kept the
+     node, and the box went on showing the out-of-range number that was typed. */
+  it('re-seeds after a commit the parent clamps back to the value it already holds', async () => {
+    function Clamped() {
+      const [v, setV] = useState(365);
+      return <NumberField value={v} min={1} max={365} onCommit={(n) => setV(Math.min(365, n))} label="Stale after" />;
+    }
+    render(<Clamped />);
+
+    const field = screen.getByRole('spinbutton', { name: 'Stale after' });
+    await userEvent.clear(field);
+    await userEvent.type(field, '999');
+    await userEvent.tab();
+
+    expect(screen.getByRole('spinbutton', { name: 'Stale after' })).toHaveValue(365);
   });
 
   it('draws the unit only when given', () => {

@@ -467,6 +467,21 @@ describe('ArchiveView', () => {
     expect(within(card).getByRole('button', { name: 'groom' })).toBeInTheDocument();
   });
 
+  /* #350 — the Board's half of this was #367: `open` is the snapshot a click took, and the modal has to draw the fresh copy the payload carries now, or a
+     refetch that changed the item leaves the modal on the old row until it is reopened. */
+  it('draws the fresh copy of the open item after a refetch changes it', async () => {
+    await renderArchive();
+    await userEvent.click(within(column('Bugs')).getByText('stale bug').closest('.board-card') as HTMLElement);
+    expect(document.querySelector('.item-body-title')).toHaveTextContent('stale bug');
+
+    stubItems(ITEMS.map((i) => (i.id === 'bug-1' ? { ...i, title: 'renamed bug' } : i)));
+    window.dispatchEvent(new Event('focus'));
+
+    // The card proves the refetch landed, so a modal still on `stale bug` is the snapshot and not a payload that never arrived.
+    await within(column('Bugs')).findByText('renamed bug');
+    expect(document.querySelector('.item-body-title')).toHaveTextContent('renamed bug');
+  });
+
   it('offers capture on a rejected card — the path that revives it as a new item', async () => {
     await renderArchive();
     // Not groom, and not a move: `moveItem` refuses every move out of

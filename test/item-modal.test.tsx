@@ -222,7 +222,7 @@ describe('ItemModal', () => {
     expect(screen.getByText('second body')).toBeInTheDocument();
   });
 
-  it('drops raw HTML instead of passing it to dangerouslySetInnerHTML', async () => {
+  it('never passes raw HTML to dangerouslySetInnerHTML as markup', async () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({
         ok: true,
@@ -232,8 +232,38 @@ describe('ItemModal', () => {
     render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('safe text')).toBeInTheDocument());
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    expect(document.querySelector('.item-body')?.innerHTML).not.toContain('onerror');
+    // No ELEMENT carries the handler. Since #350 the tag renders as escaped literal text, so the word `onerror` is on screen as prose — which is
+    // inert: it is a text node, and the browser's parser never builds an attribute out of `&lt;img … onerror=…&gt;`.
+    expect(document.querySelector('.item-body [onerror]')).toBeNull();
     expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+  });
+
+  /* #350 — marked reads prose like `Promise<void>` as an inline HTML tag, and the renderer used to drop every HTML token, so the generic vanished from the
+     body. Raw HTML now renders as escaped text — never as markup, so the case above still holds — and only a comment renders as nothing, because tracker
+     bodies end in `<!-- bm:… -->` footers that are bookkeeping, not prose. */
+  describe('raw HTML in a body (#350)', () => {
+    it('keeps a generic in prose as literal text', () => {
+      expect(renderMarkdown('returns Promise<void> here')).toContain('Promise&lt;void&gt;');
+    });
+
+    it('renders a tag as escaped text, never as an element', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('<img src=x onerror="window.__pwned=1">');
+      expect(host.querySelector('img')).toBeNull();
+      expect(host.querySelector('[onerror]')).toBeNull();
+    });
+
+    it('renders a block HTML comment as nothing', () => {
+      const html = renderMarkdown('text\n\n<!-- bm:groomed-at abc -->\n');
+      expect(html).not.toContain('bm:groomed-at');
+      expect(html).not.toContain('&lt;!--');
+    });
+
+    it('renders an inline HTML comment as nothing', () => {
+      const html = renderMarkdown('a <!-- x --> b');
+      expect(html).not.toMatch(/\bx\b/);
+      expect(html).not.toContain('&lt;!--');
+    });
   });
 
   it('neutralizes a javascript: href instead of rendering it as a clickable link', async () => {

@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 /**
  * NumberField — one of the 36 px control family (.claude/DESIGN.md §8.2, §8.6).
  *
@@ -8,6 +10,10 @@
  * refusal handing back the stored figure). `disabled` is for a card that can
  * show its figure but cannot save one (the Dashboards page on an unreadable
  * file); absent, the markup is what it always was.
+ *
+ * The key also carries a commit counter, bumped on every blur: a commit the
+ * parent clamps back to the value it already holds leaves `value` unchanged,
+ * and a key of `value` alone kept the out-of-range number on screen (#350).
  */
 export function NumberField({
   value,
@@ -26,6 +32,7 @@ export function NumberField({
   label?: string;
   disabled?: boolean;
 }) {
+  const [commits, setCommits] = useState(0);
   return (
     <>
       <input
@@ -36,8 +43,11 @@ export function NumberField({
         min={min}
         max={max}
         disabled={disabled}
-        key={value} /* re-seed when the value changes from elsewhere (e.g. Reset) */
-        onBlur={(e) => onCommit(Number(e.currentTarget.value))}
+        key={`${value}:${commits}`} /* re-seed when the value changes from elsewhere (e.g. Reset), and after every commit */
+        onBlur={(e) => {
+          onCommit(Number(e.currentTarget.value));
+          setCommits((n) => n + 1);
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();
         }}
