@@ -14,7 +14,8 @@ import {
   fetchOrchestratorArchive,
   fetchOrchestratorRuns,
   fetchWatchdog,
-  pauseOrchestrate
+  pauseOrchestrate,
+  stopOrchestrate
 } from '../client/src/lib/agents';
 import RunsView, { RUNS_PAGE_SIZE } from '../client/src/components/runs/RunsView';
 import { RANGE_BUTTON, RUN_RANGES } from '../client/src/lib/run-range';
@@ -78,6 +79,9 @@ jest.mock('../client/src/lib/agents', () => ({
   // hook's mount effect throws the first time anyone clicks the switch.
   fetchWatchdog: jest.fn(),
   pauseOrchestrate: jest.fn(),
+  // #344: the Stop confirm cases below. Never resolved by any case — each one asserts the call was NOT made — but listed for the same reason as the
+  // rest: an un-listed export is `undefined`, and a regression that did fire it should fail on the assertion, not on a TypeError.
+  stopOrchestrate: jest.fn(),
   cancelPauseOrchestrate: jest.fn(),
   resumeOrchestrate: jest.fn(),
   ApiError: class ApiError extends Error {
@@ -1709,6 +1713,76 @@ describe('RunsView history paging (task-16)', () => {
 
     await waitFor(() => expect(mockPause).toHaveBeenCalledWith(LIVE_RUNS[0].project));
     await waitFor(() => expect(mockRuns.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  /*
+    #344: the detail sheet is keyed on project + runId. Unkeyed, React reused the one `RunDetail` — and the `RunControls` inside it — across a selection
+    change, swapping only the props, so run A's open Stop confirm was drawn on run B's sheet and its accept, closing over the CURRENT props, stopped B. A
+    stop cannot be undone, so the case pins the remount from the outside: the confirm is gone the moment another row is selected.
+
+    Two live, `running` runs in different projects, because a Stop control is drawn only for a run that has one — a selection that moved onto a finished run
+    would lose the confirm through a different branch of `RunControls` and prove nothing about the key.
+  */
+  const RUN_LIVE_BETA = run({
+    runId: 'run-20260826-090000',
+    project: '/abs/beta',
+    status: 'running',
+    startedAt: '2026-08-26T09:00:00.000Z',
+    updatedAt: '2026-08-31T12:05:00.000Z',
+    current: true,
+    queue: [item('b-9', 'reviewing', { stageAt: { pending: '2026-08-26T09:00:00.000Z', reviewing: '2026-08-26T09:05:00.000Z' } })]
+  });
+  const TWO_LIVE: OrchestratorRunsPayload['runs'] = [
+    LIVE_RUNS[0],
+    {
+      ...LIVE_RUNS[0],
+      runId: RUN_LIVE_BETA.runId,
+      project: RUN_LIVE_BETA.project,
+      startedAt: RUN_LIVE_BETA.startedAt,
+      updatedAt: RUN_LIVE_BETA.updatedAt,
+      queue: [liveQueueItem('b-9', 'reviewing')]
+    }
+  ];
+
+  it('drops an open Stop confirm when the selection moves to another run (#344)', async () => {
+    await renderRunsView([...ARCHIVE_RUNS, RUN_LIVE_BETA], TWO_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+    const slot = screen.getByTestId('run-detail-slot');
+    await userEvent.click(within(slot).getByTestId('run-controls-stop'));
+    expect(within(slot).getByTestId('run-controls-stop-confirm')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE_BETA.runId}`));
+
+    expect(within(slot).queryByTestId('run-controls-stop-confirm')).not.toBeInTheDocument();
+    expect(within(slot).getByTestId('run-controls-stop')).toBeInTheDocument();
+    expect(stopOrchestrate as jest.Mock).not.toHaveBeenCalled();
+  });
+
+  it("keeps an open Stop confirm across a poll that re-renders the same run (#344)", async () => {
+    await renderRunsView([...ARCHIVE_RUNS, RUN_LIVE_BETA], TWO_LIVE);
+
+    await userEvent.click(screen.getByTestId(`runs-row-${RUN_LIVE.runId}`));
+    const slot = screen.getByTestId('run-detail-slot');
+    await userEvent.click(within(slot).getByTestId('run-controls-stop'));
+    expect(within(slot).getByTestId('run-controls-stop-confirm')).toBeInTheDocument();
+
+    // A refreshed payload — new objects, a moved `updatedAt` — for the same project + runId: what the 5 s poll hands over while a person reads the
+    // question. A key built from anything that changes per poll would remount here and drop the confirm out from under them.
+    const before = mockRuns.mock.calls.length;
+    mockRuns.mockResolvedValue({
+      runs: TWO_LIVE.map((r) => ({ ...r, updatedAt: '2026-08-31T12:06:00.000Z' })),
+      starting: [],
+      remote: [],
+      remoteStarting: []
+    } satisfies OrchestratorRunsPayload);
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await waitFor(() => expect(mockRuns.mock.calls.length).toBeGreaterThan(before));
+
+    expect(within(slot).getByTestId('run-controls-stop-confirm')).toBeInTheDocument();
+    expect(stopOrchestrate as jest.Mock).not.toHaveBeenCalled();
   });
   // --- task-18/38: the section's two PAGES -----------------------------------
   //
