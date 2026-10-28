@@ -823,12 +823,168 @@ export function readRun(dir) {
 // The random suffix (rather than just the pid) guards against two writes
 // racing inside the same process across two commands run back to back in a
 // test, where the pid alone is constant.
+//
+// Atomic per write is not serialised across writes: every caller is a
+// read-modify-write, and two processes that each read, mutate and write
+// leave whichever wrote last (#349). The driver protocol sequences almost
+// every writer — one command at a time, from one session — so a plain
+// `readRun` → mutate → `writeRunAtomic` is safe for them. The one pairing
+// that runs CONCURRENTLY by design is `verify` with `watch` heartbeating the
+// same run file beside it (SKILL.md §8), and both go through `mutateRun`
+// below. A future writer that can run alongside another must use
+// `mutateRun` too, never a bare read and write.
 function writeRunAtomic(dir, run) {
   fs.mkdirSync(dir, { recursive: true });
   const file = runFilePath(dir);
   const tmp = path.join(dir, `.run.json.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
   fs.writeFileSync(tmp, JSON.stringify(run, null, 2) + '\n');
   fs.renameSync(tmp, file);
+}
+
+// --- the run lock (#349) ----------------------------------------------------
+//
+// `<dir>/run.json.lock`, created with `wx` so exactly one process holds it,
+// holding the holder's pid and an ISO time. It guards a read-modify-write of
+// run.json and nothing longer: a read, an in-memory change and one
+// `writeRunAtomic` — never a test suite, a network call or a subprocess —
+// so a holder keeps it for milliseconds and a waiter's 20 ms retry is cheap.
+//
+// A lock is broken, not waited out, when its holder pid is not alive (a
+// process killed mid-section can never release it) or its mtime is older
+// than RUN_LOCK_STALE_MS — far longer than any critical section, so an aged
+// lock is a dead one whose pid has been reused. A leftover lock therefore
+// needs no cleanup from `abort` or `init`: the next acquire breaks it.
+// Nothing else reads it: `archivedRunFiles` reads only `runs/`, and a lock a
+// killed holder left behind is moved by `init`'s `archiveSidecars` into
+// `runs/<stem>/` like any other sidecar — harmless, since `init` archives
+// only a finished run, which no writer is touching, and nothing reads it there.
+//
+// The lock is created by `link`ing a fully written temp stamp into place,
+// never by `open(wx)` then `write`: between those two syscalls the file exists
+// and is empty, and a waiter reading it then would judge the torn stamp
+// breakable and break a live lock. A break renames the lock aside first and
+// deletes it only if the aside holds the bytes it judged — two waiters that
+// both judged the same dead lock cannot have the slower one delete the lock
+// the faster one has just created; that one is put back instead.
+//
+// A deadline miss is exit 1 naming the lock file, with run.json untouched:
+// a writer that cannot get the lock must not write around it, or the lock
+// guarantees nothing. `BM_RUN_LOCK_TIMEOUT_MS` shortens the deadline so the
+// tests that pin it stay fast.
+const RUN_LOCK_RETRY_MS = 20;
+const RUN_LOCK_STALE_MS = 30_000;
+
+function runLockPath(dir) {
+  return path.join(dir, 'run.json.lock');
+}
+
+function runLockTimeoutMs() {
+  const raw = Number(process.env.BM_RUN_LOCK_TIMEOUT_MS);
+  return Number.isInteger(raw) && raw > 0 ? raw : 5_000;
+}
+
+// The stamp at `file` when the lock can be broken — its holder is dead, its
+// stamp is unreadable, or it is older than any critical section can be —
+// else `null`. The stamp is what `breakRunLock` checks it is removing.
+function runLockBreakable(file) {
+  let text;
+  let mtimeMs;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+    mtimeMs = fs.statSync(file).mtimeMs;
+  } catch (e) {
+    // Released between our failed create and this read: nothing to break,
+    // and the next create attempt will simply succeed.
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+  if (Date.now() - mtimeMs > RUN_LOCK_STALE_MS) return text;
+  const pid = Number(String(text).split('\n')[0]);
+  // A hand-written stamp names no process to wait for. Only a stamp naming a
+  // positive integer pid is waited on, and only while it is alive.
+  if (!Number.isInteger(pid) || pid <= 0) return text;
+  return pidAlive(pid) ? null : text;
+}
+
+// Removes the lock only if it still holds `judged`: renamed aside under a
+// name unique to this process, compared, then deleted — or linked back when
+// another waiter broke the judged lock first and this rename took the fresh
+// one it created. A link refused with EEXIST means a third process holds the
+// lock now; the aside is then dropped, as the stale lock it replaced was.
+function breakRunLock(file, judged) {
+  const aside = `${file}.broken-${process.pid}-${Date.now()}`;
+  try {
+    fs.renameSync(file, aside);
+  } catch (e) {
+    if (e.code === 'ENOENT') return;
+    throw e;
+  }
+  try {
+    if (fs.readFileSync(aside, 'utf8') !== judged) {
+      try {
+        fs.linkSync(aside, file);
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw e;
+      }
+    }
+  } finally {
+    fs.rmSync(aside, { force: true });
+  }
+}
+
+function withRunLock(dir, fn) {
+  fs.mkdirSync(dir, { recursive: true });
+  const file = runLockPath(dir);
+  const deadline = Date.now() + runLockTimeoutMs();
+  const stamp = `${file}.${process.pid}`;
+  fs.writeFileSync(stamp, `${process.pid}\n${nowISO()}\n`);
+  try {
+    for (;;) {
+      try {
+        fs.linkSync(stamp, file);
+        break;
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw e;
+      }
+      const judged = runLockBreakable(file);
+      if (judged !== null) {
+        breakRunLock(file, judged);
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new OrchestrateError(`${file}: held by another process past ${runLockTimeoutMs()} ms — run.json was not written`, 1);
+      }
+      sleepSync(RUN_LOCK_RETRY_MS);
+    }
+  } finally {
+    // The link, once made, is the lock; the temp name was only its source.
+    fs.rmSync(stamp, { force: true });
+  }
+  try {
+    return fn();
+  } finally {
+    // Unlink only our own lock: if this one was broken as stale and taken by
+    // another process, deleting it would release THEIR critical section.
+    try {
+      if (Number(fs.readFileSync(file, 'utf8').split('\n')[0]) === process.pid) fs.rmSync(file, { force: true });
+    } catch {
+      /* already gone — nothing to release */
+    }
+  }
+}
+
+// lock → readRun → assertDriver → mutate(run) → writeRunAtomic → unlock, and
+// answers the run as written. `mutate` returning `false` (exactly) skips the
+// write — the stop path in `watch` that has nothing to persist — so the read
+// and the decision still happen under the lock. `mutate` must make no
+// network or subprocess call: the lock is held for its whole length.
+function mutateRun(dir, mutate) {
+  return withRunLock(dir, () => {
+    const run = readRun(dir);
+    assertDriver(run);
+    if (mutate(run) !== false) writeRunAtomic(dir, run);
+    return run;
+  });
 }
 
 // --- the driver lease (bug-19) ---------------------------------------------
@@ -5654,34 +5810,59 @@ function cmdWatch(argv) {
     // freshly-discovered session id (if any) land in the SAME write, via
     // applyQueueItemFields — the exact function `stage --session` itself
     // uses (see that function's own header comment for why that reuse
-    // matters, not just that it is convenient).
-    const run = readRun(dir);
-    assertDriver(run);
+    // matters, not just that it is convenient). Under the run lock (#349),
+    // because `verify` writes this same file concurrently: a tick that read
+    // before verify's write and wrote after it used to put back the item's
+    // old `verification` array. The stop check reads inside the lock too;
+    // the kill and the tracker heartbeat run after it is released.
+    let stopRequested = false;
+    let run;
+    try {
+      run = mutateRun(dir, (current) => {
+        /* bug-39: the tick that keeps the run alive is also the tick that learns
+           a person ended it — within one `--interval-ms` rather than at the next
+           item boundary, which a session forty minutes into a build never
+           reaches.
 
-    /* bug-39: the tick that keeps the run alive is also the tick that learns
-       a person ended it — within one `--interval-ms` rather than at the next
-       item boundary, which a session forty minutes into a build never
-       reaches.
+           **This is the one place in the system that holds a live child's pid**,
+           which is why the kill belongs here and nowhere else. It is the pid this
+           very command was GIVEN (`--pid`), recorded by the dispatch that started
+           the child — never a pattern. A `pkill -f`-shaped teardown matches every
+           process on the machine and a headless run has no way to know which of
+           them belong to the person at the keyboard.
 
-       **This is the one place in the system that holds a live child's pid**,
-       which is why the kill belongs here and nowhere else. It is the pid this
-       very command was GIVEN (`--pid`), recorded by the dispatch that started
-       the child — never a pattern. A `pkill -f`-shaped teardown matches every
-       process on the machine and a headless run has no way to know which of
-       them belong to the person at the keyboard.
+           Before the heartbeat write, deliberately: a run being stopped should
+           not have its `updatedAt` pushed forward by the very tick that noticed,
+           because that freshness is read by `takeOverRun` and would extend the
+           window in which an abort from anywhere else is refused.
 
-       Before the heartbeat write, deliberately: a run being stopped should
-       not have its `updatedAt` pushed forward by the very tick that noticed,
-       because that freshness is read by `takeOverRun` and would extend the
-       window in which an abort from anywhere else is refused.
+           `SIGTERM`, not `SIGKILL`: the child is a `claude -p` process that owns
+           a transcript it is still appending to, and `usage`/`denials` read that
+           file afterwards. A refusal to signal (the child raced away, or the pid
+           is no longer ours) is swallowed — the exit code is what the caller acts
+           on, and a stop that could not reach the child still has to reach
+           `--abort`. */
+        if (stopRequestEffective(readPauseRequest(current.project), current)) {
+          stopRequested = true;
+          if (newlyFoundSessionId === null) return false;
+          applyQueueItemFields(findQueueItem(current, itemId), { session: newlyFoundSessionId });
+          return true;
+        }
+        if (newlyFoundSessionId !== null) {
+          applyQueueItemFields(findQueueItem(current, itemId), { session: newlyFoundSessionId });
+        }
+        current.updatedAt = nowISO();
+        return true;
+      });
+    } catch (e) {
+      // Only the stop path's session-id write is best-effort (bug-50 below); a
+      // lock timeout, a foreign driver or a failed heartbeat write still ends
+      // the watch, exactly as before the lock existed.
+      if (!stopRequested) throw e;
+      console.error(`could not record ${itemId}'s session id ${newlyFoundSessionId} before stopping: ${e.message}`);
+    }
 
-       `SIGTERM`, not `SIGKILL`: the child is a `claude -p` process that owns
-       a transcript it is still appending to, and `usage`/`denials` read that
-       file afterwards. A refusal to signal (the child raced away, or the pid
-       is no longer ours) is swallowed — the exit code is what the caller acts
-       on, and a stop that could not reach the child still has to reach
-       `--abort`. */
-    if (stopRequestEffective(readPauseRequest(run.project), run)) {
+    if (stopRequested) {
       try {
         process.kill(pid, 'SIGTERM');
       } catch {
@@ -5696,24 +5877,10 @@ function cmdWatch(argv) {
          run's freshness to decide whether an abort from elsewhere is refused, and a stop that pushed it forward would extend the window in which the abort
          that ends this run is turned away. A session id is not a freshness signal and no predicate branches on it, so writing it costs that protection
          nothing. Best-effort in the same spirit as the kill above: a run file that cannot be written is not a reason to withhold EXIT_STOP_REQUESTED from a
-         caller whose child has already been signalled. */
-      if (newlyFoundSessionId !== null) {
-        try {
-          applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId });
-          writeRunAtomic(dir, run);
-        } catch (e) {
-          console.error(`could not record ${itemId}'s session id ${newlyFoundSessionId} before stopping: ${e.message}`);
-        }
-      }
+         caller whose child has already been signalled. Written inside the `mutateRun` above, before this kill, so the lock is never held across it. */
       console.error(`a stop was requested for this run — signalled pid ${pid} and stopped watching ${itemId}. End the run with \`--abort\` (\`references/stopping.md\`, "Stopping").`);
       return EXIT_STOP_REQUESTED;
     }
-
-    if (newlyFoundSessionId !== null) {
-      applyQueueItemFields(findQueueItem(run, itemId), { session: newlyFoundSessionId });
-    }
-    run.updatedAt = nowISO();
-    writeRunAtomic(dir, run);
 
     /* task-47: the tick that keeps the RUN alive keeps the CLAIM alive too.
        This is the one heartbeat that matters most — a dispatched session can
@@ -6052,21 +6219,24 @@ function cmdVerify(argv) {
 
   // Re-read HERE, after the commands, instead of reusing the object from the
   // validation above. `verify` is the one command in this tool whose middle
-  // can last many minutes, and backlog-orchestrate's §8 now runs it detached
+  // can last many minutes, and backlog-orchestrate's §8 runs it detached
   // with `watch` heartbeating the SAME run file every 30s alongside it —
   // holding a run object across the whole suite would make this write quietly
-  // revert every heartbeat that landed while the tests ran. Re-reading
-  // collapses the read-modify-write to the microseconds either side of this
-  // line, which is the window every other writer in this file already has.
+  // revert every heartbeat that landed while the tests ran. The re-read and
+  // the write happen under the run lock (`mutateRun`, #349), and the lock —
+  // not the shortness of the window — is the guarantee: a short window is
+  // still a window, and a `watch` tick that read before this write and wrote
+  // after it used to put back the old `verification`, dropping every row the
+  // suite just produced. The suite itself runs OUTSIDE the lock.
   // Still one atomic write of all the rows at once, never a row at a time:
   // an interrupted verify must leave the run file exactly as it found it, so
   // the merge gate can never read a half-written verification.
-  const run = readRun(dir);
-  assertDriver(run);
-  const item = findQueueItem(run, itemId);
-  item.verification = item.verification.concat(rows);
-  run.updatedAt = nowISO();
-  writeRunAtomic(dir, run);
+  let item;
+  const run = mutateRun(dir, (current) => {
+    item = findQueueItem(current, itemId);
+    item.verification = item.verification.concat(rows);
+    current.updatedAt = nowISO();
+  });
   // task-47, as in `stage`, `usage` and `assume`. The verification rows are
   // the one part of a queue item another machine most wants to see — they are
   // the evidence behind a merge — so publishing them is the point rather than

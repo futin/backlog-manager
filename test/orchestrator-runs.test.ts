@@ -232,6 +232,15 @@ describe('GET /api/orchestrator/runs', () => {
     expect(res.body.runs[0].mergeMode).toBe('merge');
   });
 
+  it('gives a queue item with no verification key an empty array rather than passing the hole to the browser (#349)', async () => {
+    // `run-detail.ts` reads `q.verification.length`; an item without the array would throw there instead of on the server.
+    const { verification: _dropped, ...bare } = fixture.queue[0];
+    writeRunFile(orchHome, fixture.project, { ...fixture, updatedAt: new Date().toISOString(), queue: [bare] });
+
+    const res = await request(app.getHttpServer()).get('/api/orchestrator/runs').expect(200);
+    expect(res.body.runs[0].queue[0].verification).toEqual([]);
+  });
+
   // spec P4/P5. The two PR fields are read at the same two sites as the merge fields and degrade the same way — a reading of a run that already happened, so
   // a bad byte becomes `null` rather than a 500 — but `prUrl` is held to `isPrUrl` and not just `typeof === 'string'`, because the client renders it as an href.
   describe('prTarget and prUrl', () => {

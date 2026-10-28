@@ -112,7 +112,8 @@ paths: ["server/src/agents/**", "shared/agent.ts"]
   home only, no remote, no picker anywhere, and `GET /api/dashboards/offers` fetches no usage) and `unreadable` (an I/O error that is not ENOENT, text that is
   not JSON, or JSON that is not a plain object — `tick.json`'s strictness): every remote is then ignored, all four POSTs throw `DashboardsFileUnreadable` BEFORE
   any write and answer `409` naming the file, leaving it byte-identical. A readable file drops an invalid entry, a case-insensitive duplicate (the first wins)
-  and anything past the eighth, never an error. Tokens are env-only — `BM_AGENTS_TOKEN_<NAME uppercased>` for a remote, `BM_AGENTS_TOKEN` for home — and appear
+  and anything past the eighth, never an error — in the VIEW only: every POST edits the raw file (`DashboardsFileRead.raw`, located by `keptRows`) and keeps
+  every row and key it did not change (#349). Tokens are env-only — `BM_AGENTS_TOKEN_<NAME uppercased>` for a remote, `BM_AGENTS_TOKEN` for home — and appear
   in no file, view or error: `DashboardsView` carries `tokenSet` and `tokenVar` (the variable's name), and `MachineOffer` is built field by field so a machine's
   config is never spread into it. **A request without `machine`, or with `machine: "home"`, is today's home launch, byte for byte.** A remote launch (`dispatch`
   and `orchestrate` alike; `DashboardsService.machines()` resolves the id, an id it does not know is a `400`) is accepted for a GitHub tracker project only,

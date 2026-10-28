@@ -185,7 +185,10 @@ worktree` makes the same checks on the host.
 
 ### `registry/`
 
-Read-only view of the registry file, re-read on every request so a capture made mid-session shows up on the next fetch.
+Read-only view of the registry file, re-read on every request so a capture made mid-session shows up on the next fetch. `read()` answers three ways (#349):
+`default` for a missing file (an empty board — nothing registered yet), `file`, and `unreadable` for an I/O error, text that is not JSON, or JSON without a
+`projects` array. `GET /api/projects`, `GET /api/items` and `GET /api/trackers` turn `unreadable` into a `503` naming the file (`registryProjectsOr503`), so
+the board says it is unavailable instead of drawing a broken file as "no projects"; `load()` keeps its empty projection for the internal callers.
 
 ### `agents/`
 

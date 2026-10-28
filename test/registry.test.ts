@@ -30,6 +30,40 @@ describe('RegistryService', () => {
     expect(new RegistryService(tmpFile('{"projects": 7}')).load()).toEqual({ projects: [] });
   });
 
+  describe('read() — the three-way answer the board renders (#349)', () => {
+    let warn: jest.SpyInstance;
+    beforeEach(() => {
+      warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => warn.mockRestore());
+
+    it('a missing file is `default` and empty — a fresh install, not a broken one', () => {
+      const read = new RegistryService('/nope/registry.json').read();
+      expect(read).toEqual({ source: 'default', value: { projects: [] } });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('a truncated file is `unreadable`, its reason names the file, and load() is still empty', () => {
+      const file = tmpFile('{"projects": [');
+      const service = new RegistryService(file);
+      const read = service.read();
+      expect(read.source).toBe('unreadable');
+      expect(read.source === 'unreadable' && read.reason).toContain(file);
+      expect(service.load()).toEqual({ projects: [] });
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it.each([['[]'], ['null'], ['{"projects": 1}']])('%s is `unreadable`', (content) => {
+      expect(new RegistryService(tmpFile(content)).read().source).toBe('unreadable');
+    });
+
+    it('one good and one bad entry is `file`, with the good entry only', () => {
+      const good = { name: 'ok', path: '/abs/ok', createdAt: '2026-08-26T00:00:00.000Z' };
+      const read = new RegistryService(tmpFile(JSON.stringify({ projects: [good, { name: 1 }] }))).read();
+      expect(read).toEqual({ source: 'file', value: { projects: [good] } });
+    });
+  });
+
   it('drops entries whose name/path/createdAt are not all strings', () => {
     // The shape that used to survive: Array.isArray(projects) held, so
     // {name: 1, path: 2} reached join(2, 'backlog') in ItemsService and 500'd

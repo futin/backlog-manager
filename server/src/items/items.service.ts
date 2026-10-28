@@ -1,6 +1,6 @@
 import { HttpException, Inject, Injectable } from '@nestjs/common';
 
-import { RegistryService } from '../registry/registry.service';
+import { RegistryService, registryProjectsOr503 } from '../registry/registry.service';
 import { resolveSource } from './sources/resolve.util';
 import type { SourceMarker } from './sources/resolve.util';
 import { parseUrn } from '../tracker/map-issue';
@@ -77,7 +77,7 @@ export class ItemsService {
   async index(): Promise<ItemsIndex> {
     const items: ItemsIndex['items'] = [];
     const errors: string[] = [];
-    for (const project of this.registry.load().projects) {
+    for (const project of registryProjectsOr503(this.registry)) {
       const resolved = resolveSource(project.path, this.known);
       // A missing store is /api/projects' news (flagged there), not a scan
       // error to repeat on every item fetch.
@@ -107,7 +107,7 @@ export class ItemsService {
 
   async projects(): Promise<ProjectSummary[]> {
     const summaries: ProjectSummary[] = [];
-    for (const project of this.registry.load().projects) {
+    for (const project of registryProjectsOr503(this.registry)) {
       const resolved = resolveSource(project.path, this.known);
       // `missing` keeps exactly its old meaning — no backlog/ directory at
       // all — so an unsupported marker is `missing: false`: the store is

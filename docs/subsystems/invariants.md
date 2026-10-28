@@ -45,6 +45,12 @@ live — a cache would show a run frozen at whatever moment the server last happ
 `orchestrate.mjs`'s own "Hard limits" section states the rule for the skill side too — never hand-edit the run file, never `rm` it to get past an exit code `4`,
 never write it from the server or the client.
 
+One writer is not one writer PROCESS: `verify` runs detached beside the driver's `watch`, and each used to do a blind read-modify-write of the same file, so a
+heartbeat that read before verify's write and wrote after it put the item's old `verification` array back (#349). Both now go through `mutateRun`, which
+holds `<dir>/run.json.lock` (created `wx`, stamped with the pid) across the re-read and the write; a lock whose pid is dead or whose stamp is older than 30 s
+is broken, and a waiter past `BM_RUN_LOCK_TIMEOUT_MS` (default 5000) exits `1` naming the lock with nothing written. `writeRunAtomic` alone is atomic per
+write, never serialised across writes — a third writer that can run concurrently with these goes through `mutateRun` too. The reader never takes the lock.
+
 The same one reader now also covers `runs/`, the archive directory `cmdInit` writes to when a new run supersedes a finished one (`archiveStem`,
 `orchestrate.mjs`) — before this feature nothing ever read it back, so a project's whole run history sat on disk with no surface showing it beyond the drawer's
 own `pastRuns` count. `OrchestratorService.archive()` walks every project directory under `orchHome()`, reading both `run.json` and every `runs/*.json` sibling
@@ -2053,7 +2059,10 @@ every remote it might have held, and the four POSTs answer `409` naming the file
 byte-identical. The stop is the point: rewriting from defaults would turn a stray comma into "no remotes" with nothing on disk left to recover the entries from,
 and falling back to the last good read would send a launch somewhere the file on disk no longer says. A readable file is read forgivingly entry by entry — an
 invalid entry, a case-insensitive duplicate (the first wins) and anything past the eighth is dropped, never an error — because a remote that cannot be
-launched to is a card the person can see and fix, where a thrown error would blank the whole list.
+launched to is a card the person can see and fix, where a thrown error would blank the whole list. That repair is a VIEW, never written back (#349): every
+POST edits the raw file it read and keeps every row and key it did not change — a dropped row, a shadowed duplicate, a ninth entry, a key this version does
+not know — because the old write-the-view shape erased a person's hand-edited row the first time they saved an unrelated setting. `jira.json`'s writer
+keeps the same contract.
 
 **Tokens are env-only, and no response carries one.** A remote's token is `BM_AGENTS_TOKEN_<NAME uppercased>`, home's is `BM_AGENTS_TOKEN`, and neither is in
 the file, the view or any error: `DashboardsView` carries `tokenSet` (a boolean) and `tokenVar` (the variable's NAME, so the card can say which one to set), and
