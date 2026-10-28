@@ -222,8 +222,9 @@ export class GithubSource implements ItemSource, ItemWriter {
    * the section (spec §5.3), so creating with the right one is what puts the
    * item in the right column on every machine. `out-of-scope` is the exception
    * and is the tracker's spelling of `oos-N`: no type label at all, and a close
-   * with `state_reason: 'not_planned'` in the same call, because "rejected" is
-   * a closed state on a tracker rather than a directory.
+   * with `state_reason: 'not_planned'` in a second call straight after the
+   * create (see below), because "rejected" is a closed state on a tracker
+   * rather than a directory.
    *
    * `from` is prepended to the body as `_From #<n>._`, which is GitHub's own
    * cross-link syntax — it renders as a link and shows up in the cited issue's
@@ -258,10 +259,20 @@ export class GithubSource implements ItemSource, ItemWriter {
     // behind — reported as the refusal it is, rather than cleaned up, because
     // deleting somebody's issue to tidy up a half-finished write is a worse
     // outcome than an issue sitting in the wrong column with a message
-    // explaining it.
+    // explaining it. The refusal names that issue and how to finish it (#348): one that named only the HTTP failure sent the operator back to
+    // `new out-of-scope`, which filed a duplicate, since the hand path has no idempotency key (`import` has its footer). The KIND is unchanged, so the
+    // status and the CLI's exit code are what they were. No title-and-body search for the orphan on a retry — a fuzzy match over somebody's issues — when
+    // this message makes the retry unnecessary.
     if (req.section === 'out-of-scope') {
       const closed = await this.client.updateIssue(repo, issue.number, { state: 'closed', state_reason: 'not_planned' }, { token });
-      if (closed.status !== 200 || closed.data === null) return { ok: false, refusal: refusalFor(closed) };
+      if (closed.status !== 200 || closed.data === null) {
+        const refusal = refusalFor(closed);
+        const n = issue.number;
+        return {
+          ok: false,
+          refusal: { ...refusal, error: `#${n} was filed but not closed: ${refusal.error} — finish it with backlog.mjs move #${n} out-of-scope; do not re-run new` }
+        };
+      }
       issue = closed.data;
     }
 
@@ -284,6 +295,12 @@ export class GithubSource implements ItemSource, ItemWriter {
    * something still holds the item, which is worth seeing rather than tidying
    * away. The `type:*` label stays too, which is what makes a rejected issue's
    * original type recoverable where the file store loses it.
+   *
+   * Safe to replay (#348). The issue is read FRESH, never from the poller — a close made on another machine can read `open` in the cache for a whole sync
+   * interval — and the closed states refuse exactly what `moveItem` in backlog.mjs refuses: anything over `not_planned` (rejection is terminal), and
+   * `done` over `completed` or no reason. `out-of-scope` over a done issue is the one move out of a closed state, as in the files store. And the outcome
+   * is posted only when no comment on the issue already carries it: a close that failed AFTER its comment landed leaves the issue open with the comment
+   * on it, which no closed-guard can see, and the retry — or `import`'s resume repair — would otherwise post it twice.
    */
   async state(project: RegistryProject, marker: SourceMarker, req: ItemStateRequest): Promise<WriteOutcome<{ id: string; status: string; url: string }>> {
     const ready = this.ready(marker);
@@ -294,13 +311,29 @@ export class GithubSource implements ItemSource, ItemWriter {
     if (number === null) return { ok: false, refusal: { refused: 'not-found', error: `${req.id} does not name an issue in ${repo}` } };
 
     return this.writeChain(project, issueUrn(repo, number), async () => {
-      const found = await this.issueNow(repo, number, token);
-      if (!found.ok) return found;
+      const fresh = await this.client.issue(repo, number, { token });
+      if (fresh.status !== 200 || fresh.data === null) return { ok: false as const, refusal: refusalFor(fresh) };
+      this.poller.absorbIssue(repo, fresh.data);
+      const found = fresh.data;
+
+      if (found.state === 'closed') {
+        // `completed` and no reason are both done — the mapper's reading, for the reason it gives (GitHub only began sending reasons in 2022).
+        const done = found.state_reason === null || found.state_reason === undefined || found.state_reason === 'completed';
+        if (!done) {
+          return { ok: false as const, refusal: { refused: 'conflict' as const, error: `#${number} is already out-of-scope — rejection is terminal` } };
+        }
+        if (req.status === 'done') return { ok: false as const, refusal: { refused: 'conflict' as const, error: `#${number} is already done` } };
+      }
 
       if (typeof req.outcome === 'string' && req.outcome.trim() !== '') {
-        const posted = await this.client.createComment(repo, number, req.outcome, { token });
-        if (posted.status !== 201 || posted.data === null) return { ok: false as const, refusal: refusalFor(posted) };
-        this.poller.absorbComment(repo, posted.data);
+        const comments = await this.allComments(repo, number, token);
+        if (!comments.ok) return comments;
+        const outcome = req.outcome.trim();
+        if (!comments.value.some((c) => typeof c.body === 'string' && c.body.trim() === outcome)) {
+          const posted = await this.client.createComment(repo, number, req.outcome, { token });
+          if (posted.status !== 201 || posted.data === null) return { ok: false as const, refusal: refusalFor(posted) };
+          this.poller.absorbComment(repo, posted.data);
+        }
       }
 
       const reason = req.status === 'done' ? 'completed' : 'not_planned';
@@ -956,7 +989,7 @@ export class GithubSource implements ItemSource, ItemWriter {
    * label and a claim taking it off can never interleave into an issue that
    * reads both queued and in progress.
    *
-   * No `issueNow` first, unlike `comment` and `state`, and on purpose: this
+   * No `issueNow` first, unlike `comment` (and `state`, which reads the issue fresh), and on purpose: this
    * route has no opinion about the issue's state. A closed issue is not
    * refused — a sweep removing a stale label from one is a cleanup worth doing
    * — and an add on an issue that does not exist is answered by GitHub's own
@@ -1153,6 +1186,14 @@ export class GithubSource implements ItemSource, ItemWriter {
    *  Fresh because the protocol's whole job is to see a comment posted a second
    *  ago, which no cache can promise. */
   private async allClaims(repo: string, number: number, token: string): Promise<WriteOutcome<ParsedClaim[]>> {
+    const comments = await this.allComments(repo, number, token);
+    if (!comments.ok) return comments;
+    return { ok: true, value: claimsFor(number, comments.value) };
+  }
+
+  /** Every comment on one issue, fresh and paginated to the end, absorbed into the cache — `allClaims`'s read, and `state`'s outcome dedupe (#348), which
+   *  must see a comment a failed close left behind seconds ago. */
+  private async allComments(repo: string, number: number, token: string): Promise<WriteOutcome<GithubComment[]>> {
     const comments: GithubComment[] = [];
     let page = await this.client.issueComments(repo, number, { token });
     for (;;) {
@@ -1162,7 +1203,7 @@ export class GithubSource implements ItemSource, ItemWriter {
       page = await this.client.page<GithubComment[]>(page.next, { token });
     }
     for (const comment of comments) this.poller.absorbComment(repo, comment);
-    return { ok: true, value: claimsFor(number, comments) };
+    return { ok: true, value: comments };
   }
 
   /**

@@ -100,9 +100,10 @@ export class FakeGithub {
    * the poller's per-issue read, say — without teaching the router a failure
    * mode per endpoint. `headers` are sent verbatim, so an
    * `x-ratelimit-remaining: 0` reaches the client's rate bookkeeping. `message` replaces the body's sentence, because a secondary limit is told
-   * apart from the hourly one by that sentence alone (`GithubClient.request`), never by a header.
+   * apart from the hourly one by that sentence alone (`GithubClient.request`), never by a header. `method`, when given, narrows the match to that verb: a
+   * fresh `GET` of an issue and the `PATCH` that closes it share one URL (#348), and a case about the close must not fail the read in front of it.
    */
-  failNext: { fragment: string; status: number; headers?: Record<string, string>; message?: string } | null = null;
+  failNext: { fragment: string; status: number; method?: string; headers?: Record<string, string>; message?: string } | null = null;
 
   /** Rows per page. GitHub's own maximum is 100; a case that wants to prove a
    *  caller follows `Link` lowers this to 1. */
@@ -185,7 +186,7 @@ export class FakeGithub {
     const body = init?.body === undefined ? undefined : (JSON.parse(String(init.body)) as Record<string, unknown>);
     const headers = (init?.headers ?? {}) as Record<string, string>;
     this.calls.push({ method, url, body, ifNoneMatch: headers['if-none-match'] });
-    if (this.failNext !== null && url.includes(this.failNext.fragment)) {
+    if (this.failNext !== null && url.includes(this.failNext.fragment) && (this.failNext.method === undefined || this.failNext.method === method)) {
       const failure = this.failNext;
       this.failNext = null;
       return new Response(JSON.stringify({ message: failure.message ?? 'failed on purpose' }), { status: failure.status, headers: failure.headers });

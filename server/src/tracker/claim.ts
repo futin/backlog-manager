@@ -348,8 +348,20 @@ export function winner(live: readonly ParsedClaim[]): ParsedClaim | null {
  * The newest-claim fallback is not a convenience. With nothing live the
  * counters live on the newest claim, and `stop`'s released and stale paths
  * depend on getting exactly that claim back. `newestClaim` itself is unchanged:
- * `claim`'s counter seed and the mapper still want it.
+ * `claim`'s counter seed and the mapper's counters still want it.
  */
 export function currentClaim(claims: readonly ParsedClaim[], nowMs: number): ParsedClaim | null {
   return winner(liveClaims(claims, nowMs)) ?? newestClaim(claims);
+}
+
+/**
+ * The claim the MAPPER names as the holder (#348): `winner` over the UNRELEASED claims, with no clock. `null` when every claim is released.
+ *
+ * Not `currentClaim`: the mapper is pure and has no clock, and its rule is "any stamp, fresh or stale" — a stale claim is retired by the protocol at the
+ * moment another session contests the issue, never by a board read. Lowest rather than newest for `currentClaim`'s reason (bug-58): in a race window the
+ * loser's comment is newer and still unreleased until the loser deletes it, so the newest named the loser. A won claim releases every stale other, so
+ * once the protocol completes the lowest unreleased claim IS the winner.
+ */
+export function heldClaim(claims: readonly ParsedClaim[]): ParsedClaim | null {
+  return winner(claims.filter((c) => c.record.released === undefined));
 }

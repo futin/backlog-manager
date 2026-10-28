@@ -343,8 +343,8 @@ export interface BacklogItem {
    */
   unvetted?: true;
   /**
-   * Who holds this TRACKER item's claim right now (#225) — the newest claim, when it is unreleased, which is the same claim `started` and `phase` are read
-   * from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
+   * Who holds this TRACKER item's claim right now (#225) — the lowest-id unreleased claim (`heldClaim`, #348), which is the same claim `started` and `phase`
+   * are read from. Absent for a files item, an unclaimed issue and a released claim, by the spread `runnerFix` uses, so `'holder' in item` means what it says.
    *
    * It carries the `heartbeat` rather than a liveness verdict because liveness is a function of the clock the READER holds: the client decides "live" against
    * `CLAIM_STALE_MS` at render time (`claimReading` in `client/src/lib/tracker.ts`, which `claimControl`, the card bar and the board rank all read — #227), the way it already ages `queued`. `dispatched` is `true` when this

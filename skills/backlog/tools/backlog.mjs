@@ -3551,8 +3551,9 @@ export async function main(argv) {
 
         // Already on the tracker, so this item's `create` is not made a second time — the footer said so, and a duplicate issue is the one failure a resume
         // exists to prevent. One repair happens here and nothing else: a `done/` or `out-of-scope/` file whose issue is still open is a run that died between
-        // `create` and its close, and the close is idempotent from the operator's point of view because the issue carries neither the comment nor the closed
-        // state yet. (A born-rejected `oos-N` is closed by its `create`, so the index never reports one open.)
+        // `create` and its close, and the repair is safe to make because the server's `state` is safe to replay (#348): it posts the outcome only when no
+        // comment on the issue already carries it — a run that died after its comment landed but before its close left exactly that — and refuses an issue
+        // already closed. (A born-rejected `oos-N` is closed by its `create`, so the index never reports one open.)
         // The counters are deliberately NOT re-billed — `claim`/`release` would add a second copy of them, and a doubled record of work is worse than one that
         // is merely missing a repair this command cannot detect.
         if (map.has(item.id)) {

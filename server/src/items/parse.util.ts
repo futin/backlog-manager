@@ -60,6 +60,10 @@ export function parseFrontmatter(text: string): { fm: Frontmatter; body: string 
  * skills following prose instructions, and "## cause" must not read as
  * ungroomed. Returns '' both for a missing heading and an empty section —
  * callers cannot tell the two apart, and for grooming they mean the same.
+ *
+ * The END boundary is matched after `trimStart`, like the start (#348): an indented `  ## Fix` found as a start but read past as a boundary was swallowed
+ * by the section above it, which then read as filled. `extractSection` in `orchestrate.mjs` and both `drift-lib.mjs` copies already end there, so without
+ * this the board called a bug groomed that the orchestrate gate refused.
  */
 export function sectionText(body: string, heading: string): string {
   const lines = body.split('\n');
@@ -67,7 +71,7 @@ export function sectionText(body: string, heading: string): string {
   const start = lines.findIndex((l) => l.trim().toLowerCase() === wanted);
   if (start === -1) return '';
   const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => l.startsWith('## '));
+  const end = rest.findIndex((l) => l.trimStart().startsWith('## '));
   return rest
     .slice(0, end === -1 ? undefined : end)
     .join('\n')

@@ -1,5 +1,5 @@
 import { deriveGroomed } from '../items/parse.util';
-import { newestClaim, trustedAssociation, type ParsedClaim } from './claim';
+import { heldClaim, newestClaim, trustedAssociation, type ParsedClaim } from './claim';
 import { bodyHash } from './poller.service';
 import { IN_REVIEW_LABEL, PLAN_REVIEW_LABEL, QUEUED_LABEL } from './labels';
 import type { GithubIssue } from './github.client';
@@ -200,23 +200,28 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
   const status = !closed ? 'open' : reason === null || reason === 'completed' ? 'done' : 'terminal';
   if (status === 'terminal') section = 'out-of-scope';
 
-  // The newest claim on this issue — the one with the highest comment id,
-  // released or not. It answers two independent questions, and keeping them
-  // apart is the rule (task-46):
+  // Two independent questions, and keeping them apart is the rule (task-46). Since #348 they also read two different claims:
   //
-  //   * **Is somebody holding this right now?** Only an UNRELEASED claim fills
-  //     `started`/`phase`. Its heartbeat age is deliberately NOT consulted: the
-  //     board's rule for a files item is "ANY stamp, fresh or stale" (see
+  //   * **Is somebody holding this right now?** `heldClaim` — the LOWEST-id
+  //     UNRELEASED claim — fills `started`/`phase`/`holder`. Lowest, not newest,
+  //     because that is who the protocol says holds it: in a race window the
+  //     loser's comment is newer and still unreleased until the loser deletes
+  //     it, so reading the newest named the loser (a groom's phase on an item an
+  //     execute holds), and a newer RELEASED claim hid an older unreleased
+  //     holder outright. bug-58 fixed the same mistake for the read route with
+  //     `currentClaim`. Heartbeat age is deliberately NOT consulted: the board's
+  //     rule for a files item is "ANY stamp, fresh or stale" (see
   //     `progressBlock`), and the thing that retires a stale claim is the
   //     protocol, at the moment another session contests the issue. A mapper
   //     that expired claims on its own would show an item as free while the
   //     next `claim` call still had to fight for it.
-  //   * **What has this item accumulated?** The counters come off the newest
-  //     claim whether or not it is released, because they are the item's running
-  //     totals — the tracker's answer to the four frontmatter counters, which a
-  //     files item keeps after a `stop` too.
+  //   * **What has this item accumulated?** The counters come off the NEWEST
+  //     claim — highest comment id — whether or not it is released, because they
+  //     are the item's running totals, seeded forward claim to claim — the
+  //     tracker's answer to the four frontmatter counters, which a files item
+  //     keeps after a `stop` too.
+  const held = heldClaim(claims);
   const newest = newestClaim(claims);
-  const held = newest !== null && newest.record.released === undefined;
   const counters: ClaimCounters = newest?.record.counters ?? { groomElapsed: 0, executeElapsed: 0, groomTokens: 0, executeTokens: 0 };
 
   const item: BacklogItem = {
@@ -231,10 +236,10 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // (`ageDaysSince`) derive the UTC day from the stamp, and the board's
     // string comparator orders the two shapes as they are.
     created: issue.created_at,
-    // Filled from the claim since task-46 — see `newest` above for which
+    // Filled from the claim since task-46 — see `held` above for which
     // question each of these answers. An issue nobody has ever claimed reads
     // exactly as it did in phase 2: `''`, `''`, four zeros.
-    started: held ? newest.record.at : '',
+    started: held !== null ? held.record.at : '',
     updated: issue.updated_at,
     // Always `''`. There is no commit behind an issue, so the client's
     // `lastTouched` precedence (`updated ?? lastCommit ?? created`) falls
@@ -242,7 +247,7 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // rather than, say, `created_at`: a value here would be a git date that
     // no git ever produced.
     lastCommit: '',
-    phase: held ? newest.record.phase : '',
+    phase: held !== null ? held.record.phase : '',
     groomElapsed: counters.groomElapsed,
     executeElapsed: counters.executeElapsed,
     groomTokens: counters.groomTokens,
@@ -290,13 +295,13 @@ export function mapIssue(issue: GithubIssue, repo: string, project: RegistryProj
     // #225 — the holding claim, off the same `held` reading `started` and `phase` use, spread-absent for the reason the two above give. Optional keys
     // inside it are spread too, so a claim with no `host` or `run` carries no such key. `dispatched` is not set here: the mapper knows claims, not which
     // sessions this server spawned — `GithubSource.list` adds it.
-    ...(held
+    ...(held !== null
       ? {
           holder: {
-            session: newest.record.session,
-            ...(typeof newest.record.host === 'string' && newest.record.host.length > 0 ? { host: newest.record.host } : {}),
-            heartbeat: newest.record.heartbeat,
-            ...(newest.record.run !== undefined ? { run: newest.record.run.runId } : {})
+            session: held.record.session,
+            ...(typeof held.record.host === 'string' && held.record.host.length > 0 ? { host: held.record.host } : {}),
+            heartbeat: held.record.heartbeat,
+            ...(held.record.run !== undefined ? { run: held.record.run.runId } : {})
           }
         }
       : {})

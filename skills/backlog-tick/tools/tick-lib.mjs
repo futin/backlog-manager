@@ -101,14 +101,15 @@ export function isMarked(value) {
 // --- groomed -------------------------------------------------------------
 
 // Twin: `sectionText` in server/src/items/parse.util.ts. The text under one `## Heading`, up to the next `## ` line or end of body, trimmed; case-insensitive on
-// the heading; `''` for a missing heading and an empty section alike — callers cannot tell the two apart, and for grooming they mean the same.
+// the heading; `''` for a missing heading and an empty section alike — callers cannot tell the two apart, and for grooming they mean the same. The end boundary
+// is matched after `trimStart` (#348), so an indented `  ## Fix` ends the section above it instead of being swallowed by it.
 function sectionText(body, heading) {
   const lines = body.split('\n');
   const wanted = `## ${heading}`.toLowerCase();
   const start = lines.findIndex((l) => l.trim().toLowerCase() === wanted);
   if (start === -1) return '';
   const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => l.startsWith('## '));
+  const end = rest.findIndex((l) => l.trimStart().startsWith('## '));
   return rest
     .slice(0, end === -1 ? undefined : end)
     .join('\n')
