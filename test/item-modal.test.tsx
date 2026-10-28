@@ -264,6 +264,33 @@ describe('ItemModal', () => {
       expect(html).not.toMatch(/\bx\b/);
       expect(html).not.toContain('&lt;!--');
     });
+
+    // marked flags every text token lexed between an inline raw-block opener (`<script>`, `<pre>`, `<style>`, `<textarea>`) and its closer as
+    // `escaped`, and its default text renderer emits such a token verbatim. A tag that does not close before the closer is lexed as text, not html, so the
+    // `html` renderer never sees it — the text path has to escape too (#350 review).
+    it.each([
+      ['script', 'a <script> <img src=x onerror="window.__pwned=1"// </script> b'],
+      ['pre', 'a <pre> <svg onload="window.__pwned=1"// </pre> b']
+    ])('renders a tag inside an inline <%s> as escaped text', (_raw, source) => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(source);
+      expect(host.querySelector('[onerror], [onload]')).toBeNull();
+      expect(host.querySelector('img, svg')).toBeNull();
+    });
+
+    it('escapes plain text exactly once', () => {
+      expect(renderMarkdown('a & b < c')).toBe('<p>a &amp; b &lt; c</p>\n');
+    });
+
+    // marked builds a loose task item's checkbox into a token it marks `escaped` after lexing; escaping every text token at render time instead of at
+    // walk time would print that checkbox as `&lt;input …&gt;`.
+    it('keeps a loose task list checkbox as an input', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('- [x] done & dusted\n\n- [ ] next\n');
+      expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
+      expect(host.textContent).not.toContain('<input');
+      expect(host.textContent).toContain('done & dusted');
+    });
   });
 
   it('neutralizes a javascript: href instead of rendering it as a clickable link', async () => {

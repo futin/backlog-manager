@@ -135,7 +135,7 @@ keys and an `Ascending`/`Descending` switch, each key arriving in its natural di
 composing `Modal`: a facts column (project dot and name, id, section, the created / updated / last-commit stamps, `groomed`, tags, the `in progress since`
 reading while a session holds the item, the elapsed and token counters when present, the file path, the dispatch control) beside the item's rendered Markdown
 body, folding above it under 700 px. The body goes through `renderMarkdown` (`client/src/lib/markdown.ts`), the sanitising `marked` configuration hoisted
-out of `ItemModal` in Jira phase 2 so the Jira issue modal renders a ticket's description through the same function: raw HTML never renders as markup — a comment renders as nothing and any other tag as escaped literal text, so `Promise<void>` survives in prose (#350) — a link may name only
+out of `ItemModal` in Jira phase 2 so the Jira issue modal renders a ticket's description through the same function: raw HTML never renders as markup — a comment renders as nothing and any other tag as escaped literal text, so `Promise<void>` survives in prose, and text marked lexes inside an inline `<script>`/`<pre>` is escaped too (#350) — a link may name only
 `http`, `https` or `mailto` (or no scheme), and an image may name no scheme at all, so the board makes no outbound fetch on a viewer's behalf.
 
 Beside the band's title sits the **run chip** (`RunChip`), the Board's whole account of orchestrator runs since the run strip, the starting strip and the run

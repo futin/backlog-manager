@@ -101,7 +101,8 @@ function escapeHtml(s: string): string {
  * (`server/src/items/allow.util.ts`) only decides which *paths* are
  * readable; it says nothing about the *bytes* inside them.
  *
- * marked renders raw HTML tokens verbatim and does not escape `&` in hrefs,
+ * marked renders raw HTML tokens verbatim — and the text it lexes between an
+ * inline `<script>` or `<pre>` and its closer — and does not escape `&` in hrefs,
  * which turns a `dangerouslySetInnerHTML` that receives its output into a same-origin XSS
  * vector two different ways:
  *  - A body containing `<img src=x onerror=…>`, `<svg onload=…>`, a raw
@@ -143,6 +144,15 @@ function escapeHtml(s: string): string {
  *    onload>`, `<iframe srcdoc>`, and the far commoner `Promise<void>` that
  *    marked also reads as a tag — renders as escaped literal text (#350):
  *    dropping it outright made a generic in prose vanish from the body.
+ *  - `walkTokens` clears `escaped` on every lexed `text` token, so the text
+ *    renderer escapes it. marked sets that flag on all text between an inline
+ *    `<script>`/`<pre>`/`<style>`/`<textarea>` opener and its closer, and then
+ *    emits such text verbatim — and a tag that does not close before the
+ *    closer (`<img src=x onerror=…//`) is lexed as text, not html, so the
+ *    `html` renderer above never sees it. Not a `text` renderer override:
+ *    marked builds its own `escaped: true` tokens AFTER lexing (a loose list's
+ *    paragraph, a task checkbox) from text it already escaped, and those must
+ *    stay verbatim; `walkTokens` runs before the parser makes them.
  *  - `link` renders a disallowed (or entity-hidden) scheme as plain text
  *    with no `<a>` at all; an allowed one gets a hand-built, escaped anchor
  *    rather than marked's default.
@@ -152,6 +162,9 @@ function escapeHtml(s: string): string {
  *    href, differing only in which allowlist they hand it.
  */
 marked.use({
+  walkTokens(token) {
+    if (token.type === 'text' && token.escaped) token.escaped = false;
+  },
   renderer: {
     html({ text }) {
       return text.trimStart().startsWith('<!--') ? '' : escapeHtml(text);
