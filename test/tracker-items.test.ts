@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
@@ -316,5 +317,19 @@ describe('GET /api/trackers', () => {
     // The files project's temp directory is not a git repo, so there is no
     // origin and nothing to suggest — `null`, never a guessed command.
     expect(rows.find((r) => r.name === 'files')).toMatchObject({ source: 'files', repo: null, connect: null });
+  });
+  it('answers 503 naming registry.json when the registry cannot be read (#349)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const broken = join(mkdtempSync(join(tmpdir(), 'bm-brokenreg-')), 'registry.json');
+    writeFileSync(broken, '{"projects": [');
+    const brokenApp = await build(broken);
+    try {
+      const res = await request(brokenApp.getHttpServer()).get('/api/trackers').expect(503);
+      expect((res.body as { error: string }).error).toContain('registry.json');
+    } finally {
+      brokenApp.get(TrackerPollerService).disarm();
+      await brokenApp.close();
+      warn.mockRestore();
+    }
   });
 });

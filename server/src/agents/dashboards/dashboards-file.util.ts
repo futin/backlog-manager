@@ -23,6 +23,11 @@ import type { DashboardEntry, DashboardsFile, HomeEntry, SuggestStrategy } from 
  * rule, completes the order) so every caller sees one shape, while `writeDashboardsFile` stores exactly what a route hands it — the routes validate a POST
  * body strictly (a 400, not a repair) before they get here. The reader also enforces list-level rules by dropping (first name wins
  * case-insensitively, at most 8 remotes); a POST that breaks them is a 400 at the route, not here.
+ *
+ * The repair is a VIEW, never written back (#349). The reader hands back the raw parsed object beside the normalised one, and every write edits the raw object —
+ * exactly the keys and the one row it changes — and keeps everything else, rows the view dropped and unknown top-level keys included. That is `jira.json`'s
+ * writer contract (`jira/config.util.ts`'s header); before it, moving the threshold slider wrote the normalised list back and a hand-written row the reader
+ * had dropped was gone from disk for good.
  */
 
 export const DEFAULT_STRATEGY: SuggestStrategy = 'prefer';
@@ -46,7 +51,9 @@ export function tokenVar(name: string): string {
   return `BM_AGENTS_TOKEN_${name.toUpperCase()}`;
 }
 
-export type DashboardsFileRead = { source: 'file' | 'default'; value: DashboardsFile } | { source: 'unreadable'; reason: string };
+export type DashboardsFileRead =
+  | { source: 'file' | 'default'; value: DashboardsFile; raw: Record<string, unknown> }
+  | { source: 'unreadable'; reason: string };
 
 /** Thrown by `writeDashboardsFile` when the file EXISTS but cannot be read; a route maps it to 409, and an I/O failure in the write itself stays a 500. */
 export class DashboardsFileUnreadable extends Error {
@@ -168,21 +175,31 @@ function clampThreshold(v: unknown): number {
   return Math.min(100, Math.max(1, v));
 }
 
-function normalise(obj: Record<string, unknown>): DashboardsFile {
-  // An entry that fails `validateEntry` is dropped, not repaired and not fatal: one bad row in a hand-edited list must not take the good ones with it, and a
-  // dropped remote is the fail-closed direction (work goes to home, never to a machine the rule did not vouch for). Two more rules, for the same reason: the
-  // FIRST entry per lowercased name wins and a later one is dropped (names are machine ids and, uppercased, token env vars, so `Pro` and `pro` would share a
-  // token and be indistinguishable on the wire), and only the first MAX_REMOTES valid entries are kept. Both run before `order` is normalised, so it sees
-  // only the ids that survived. The routes refuse both as a 400 on a POST; this is the reader's repair for a file a person edited by hand.
-  const dashboards: DashboardEntry[] = [];
+/**
+ * The rows the reader keeps, each with its index in the RAW `dashboards` array — so a writer can find the one raw row the view drew and change only that.
+ *
+ * An entry that fails `validateEntry` is dropped, not repaired and not fatal: one bad row in a hand-edited list must not take the good ones with it, and a
+ * dropped remote is the fail-closed direction (work goes to home, never to a machine the rule did not vouch for). Two more rules, for the same reason: the
+ * FIRST entry per lowercased name wins and a later one is dropped (names are machine ids and, uppercased, token env vars, so `Pro` and `pro` would share a
+ * token and be indistinguishable on the wire), and only the first MAX_REMOTES valid entries are kept. Both run before `order` is normalised, so it sees
+ * only the ids that survived. The routes refuse both as a 400 on a POST; this is the reader's repair for a file a person edited by hand, and it is never
+ * written back — the dropped rows stay on disk (see the header).
+ */
+export function keptRows(rows: unknown): { entry: DashboardEntry; at: number }[] {
+  const kept: { entry: DashboardEntry; at: number }[] = [];
   const seen = new Set<string>();
-  for (const raw of Array.isArray(obj.dashboards) ? obj.dashboards : []) {
-    if (dashboards.length >= MAX_REMOTES) break;
+  for (const [at, raw] of (Array.isArray(rows) ? rows : []).entries()) {
+    if (kept.length >= MAX_REMOTES) break;
     const entry = validateEntry(raw);
     if (typeof entry === 'string' || seen.has(entry.name.toLowerCase())) continue;
     seen.add(entry.name.toLowerCase());
-    dashboards.push(entry);
+    kept.push({ entry, at });
   }
+  return kept;
+}
+
+function normalise(obj: Record<string, unknown>): DashboardsFile {
+  const dashboards = keptRows(obj.dashboards).map((k) => k.entry);
   const value: DashboardsFile = { dashboards };
   const home = normaliseHome(obj.home);
   if (home) value.home = home;
@@ -198,7 +215,7 @@ function normalise(obj: Record<string, unknown>): DashboardsFile {
 /**
  * The three answers, never a throw:
  *   - no file                                  → `default`, home only — the common case, and what every board had before this feature;
- *   - a file that parses to a plain object     → `file`, normalised (see the header);
+ *   - a file that parses to a plain object     → `file`, normalised (see the header), with the raw object beside it for the writers;
  *   - anything else (EISDIR, EACCES, not JSON, `[]`, `null`) → `unreadable` with a reason; callers ignore every remote and refuse writes.
  */
 export function readDashboardsFile(file: string = dashboardsFile()): DashboardsFileRead {
@@ -206,7 +223,7 @@ export function readDashboardsFile(file: string = dashboardsFile()): DashboardsF
   try {
     text = readFileSync(file, 'utf8');
   } catch (e) {
-    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return { source: 'default', value: normalise({}) };
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return { source: 'default', value: normalise({}), raw: {} };
     return { source: 'unreadable', reason: e instanceof Error ? e.message : String(e) };
   }
   let parsed: unknown;
@@ -216,7 +233,7 @@ export function readDashboardsFile(file: string = dashboardsFile()): DashboardsF
     return { source: 'unreadable', reason: `${file} does not parse as JSON: ${e instanceof Error ? e.message : String(e)}` };
   }
   if (!isPlainObject(parsed)) return { source: 'unreadable', reason: `${file} is not a JSON object` };
-  return { source: 'file', value: normalise(parsed) };
+  return { source: 'file', value: normalise(parsed), raw: parsed };
 }
 
 /**
@@ -224,7 +241,7 @@ export function readDashboardsFile(file: string = dashboardsFile()): DashboardsF
  * SAME directory, so the rename is atomic on one filesystem, a concurrent reader sees the old complete file or the new one and never half of one, and the rename
  * IS the cleanup — no temp file is left behind. A failure before the rename leaves the old file as it was.
  */
-export function writeDashboardsFile(next: DashboardsFile, file: string = dashboardsFile()): void {
+export function writeDashboardsFile(next: DashboardsFile | Record<string, unknown>, file: string = dashboardsFile()): void {
   const current = readDashboardsFile(file);
   if (current.source === 'unreadable') throw new DashboardsFileUnreadable(file, current.reason);
   const dir = dirname(file);

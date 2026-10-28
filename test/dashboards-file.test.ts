@@ -59,7 +59,7 @@ describe('dashboardsFile / tokenVar', () => {
 describe('readDashboardsFile', () => {
   it('a missing file is the default: home only, prefer, 80', () => {
     const r = readDashboardsFile(file);
-    expect(r).toEqual({ source: 'default', value: { dashboards: [], order: ['home'], strategy: 'prefer', threshold: 80 } });
+    expect(r).toEqual({ source: 'default', value: { dashboards: [], order: ['home'], strategy: 'prefer', threshold: 80 }, raw: {} });
   });
 
   it('a file that does not parse is unreadable', () => {
@@ -263,7 +263,7 @@ describe('writeDashboardsFile', () => {
     };
     writeDashboardsFile(next, file);
     const r = readDashboardsFile(file);
-    expect(r).toEqual({ source: 'file', value: next });
+    expect(r).toEqual({ source: 'file', value: next, raw: JSON.parse(JSON.stringify(next)) });
     expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]);
   });
 

@@ -280,6 +280,77 @@ describe('the dashboards settings routes', () => {
     });
   });
 
+  // #349: the reader's repair is a view, never written back. Every write edits the raw file and keeps what it did not change — a row the reader dropped as
+  // invalid, a later duplicate it shadowed, a row past the cap, an unknown top-level key and an unknown home key.
+  describe('a write keeps what the reader dropped', () => {
+    const alpha = { ...pro, name: 'alpha', host: 'alpha-host' };
+    const invalid = { name: 'Bad', url: 'not a url' };
+    const dupe = { ...pro, name: 'ALPHA', host: 'alpha-dupe' };
+    const fixture = { dashboards: [alpha, invalid, dupe], order: ['alpha', 'home'], home: { flavour: 'kept' }, note: 'keep me' };
+    const disk = (): Record<string, unknown> & { dashboards: Record<string, unknown>[] } => JSON.parse(readFileSync(file, 'utf8'));
+
+    it('a threshold save leaves every raw row and the unknown key alone', async () => {
+      writeFixture(fixture);
+      await createApp();
+      const res = await post('/settings', { threshold: 42 }).expect(200);
+      expect(res.body.dashboards.map((d: { name: string }) => d.name)).toEqual(['alpha']);
+      const after = disk();
+      expect(after.dashboards).toEqual(fixture.dashboards);
+      expect(after.note).toBe('keep me');
+      expect(after.home).toEqual({ flavour: 'kept' });
+      expect(after.threshold).toBe(42);
+    });
+
+    it('a home label save patches the raw home, keeping its unknown key, and every row', async () => {
+      writeFixture(fixture);
+      await createApp();
+      await post('/home', { label: 'Max' }).expect(200);
+      const after = disk();
+      expect(after.home).toEqual({ flavour: 'kept', label: 'Max' });
+      expect(after.dashboards).toEqual(fixture.dashboards);
+      expect(after.note).toBe('keep me');
+    });
+
+    it('a new entry is appended after every raw row', async () => {
+      writeFixture(fixture);
+      await createApp();
+      await post('/entries', { entry: { ...pro, name: 'beta', host: 'beta-host' } }).expect(200);
+      const after = disk();
+      expect(after.dashboards.slice(0, 3)).toEqual(fixture.dashboards);
+      expect(after.dashboards[3]).toMatchObject({ name: 'beta', host: 'beta-host' });
+      expect(after.note).toBe('keep me');
+    });
+
+    it('a rename replaces the row in place, the order follows, and the shadowed duplicate stays on disk', async () => {
+      writeFixture(fixture);
+      await createApp();
+      await post('/entries', { entry: { ...alpha, name: 'gamma' }, replaces: 'alpha' }).expect(200);
+      const after = disk();
+      expect(after.dashboards.map((d) => d.name)).toEqual(['gamma', 'Bad', 'ALPHA']);
+      expect(after.dashboards.slice(1)).toEqual([invalid, dupe]);
+      expect(after.order).toEqual(['gamma', 'home']);
+      expect(after.note).toBe('keep me');
+    });
+
+    it('a delete removes only the kept row, and the duplicate it shadowed is live on the next read', async () => {
+      writeFixture(fixture);
+      await createApp();
+      await post('/entries/delete', { name: 'alpha' }).expect(200);
+      expect(disk().dashboards).toEqual([invalid, dupe]);
+      const view = (await request(app!.getHttpServer()).get('/api/dashboards').expect(200)).body as DashboardsView;
+      expect(view.dashboards.map((d) => d.name)).toEqual(['ALPHA']);
+    });
+
+    it('a threshold save keeps all nine valid rows on disk while the view still shows eight', async () => {
+      const nine = Array.from({ length: 9 }, (_, i) => ({ ...pro, name: `M${i + 1}`, host: `m${i + 1}` }));
+      writeFixture({ dashboards: nine });
+      await createApp();
+      const res = await post('/settings', { threshold: 55 }).expect(200);
+      expect(res.body.dashboards).toHaveLength(8);
+      expect(disk().dashboards).toEqual(nine);
+    });
+  });
+
   describe('an unreadable file', () => {
     it('is a 409 naming the file on every POST, and its bytes are never touched', async () => {
       mkdirSync(dirname(file), { recursive: true });

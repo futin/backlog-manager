@@ -460,3 +460,56 @@ describe('OrchestratorController.archivedRun', () => {
     expect(result?.runId).toBe(runId);
   });
 });
+
+// #349: `isPlausibleRun` checks only that `queue` is an array, so a hand-edited or pre-`verification` run file used to hand `toArchiveEntry` an item with no
+// `verification` array — a TypeError, and a 500 for the whole Archive page. The reader now normalises each queue item where it reads the file.
+describe('a queue item without a well-formed verification array', () => {
+  let tmpRoot: string;
+  let orchHome: string;
+  const env = { ...process.env };
+  let service: OrchestratorService;
+  const project = '/abs/project-v';
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'bm-orch-archive-verif-'));
+    orchHome = join(tmpRoot, 'orchestrator');
+    process.env.BM_ORCH_HOME = orchHome;
+    service = new OrchestratorService(new WatchdogStateService(), new StartingRunsService());
+  });
+
+  afterEach(() => {
+    process.env = { ...env };
+    rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  // The item with no `verification` key at all, beside one whose rows are intact.
+  function legacyRun(runId: string): Record<string, unknown> {
+    const { verification: _dropped, ...bare } = queueItem({ id: 'bug-2' });
+    return { ...makeRun({ project, runId }), queue: [queueItem({ id: 'bug-1' }), bare] };
+  }
+
+  it('archives a current run.json whose item lacks the key: 200-shaped, that item [] and the other intact', () => {
+    writeRunFile(orchHome, project, legacyRun('run-20260901-150701'));
+    const result = service.archive();
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0].queue.map((q) => q.verification)).toEqual([[{ cmd: 'pnpm test', ok: true }], []]);
+  });
+
+  it('archives the same file under runs/, and its detail carries verification []', () => {
+    writeArchived(orchHome, project, 'run-20260831-211011.json', legacyRun('run-20260831-211011'));
+    expect(service.archive().runs[0].queue[1].verification).toEqual([]);
+    const detail = service.archivedRun(project, 'run-20260831-211011');
+    expect(detail?.queue[1].verification).toEqual([]);
+    expect(detail?.queue[0].verification).toEqual([verification()]);
+  });
+
+  it.each([['a string', 'x'], ['a malformed row', [{ cmd: 1 }]]])('%s becomes []', (_label, value) => {
+    writeRunFile(orchHome, project, { ...makeRun({ project }), queue: [{ ...queueItem(), verification: value }] });
+    expect(service.archive().runs[0].queue[0].verification).toEqual([]);
+  });
+
+  it('drops a null queue entry and renders the rest', () => {
+    writeRunFile(orchHome, project, { ...makeRun({ project }), queue: [null, queueItem({ id: 'bug-9' })] });
+    expect(service.archive().runs[0].queue.map((q) => q.id)).toEqual(['bug-9']);
+  });
+});

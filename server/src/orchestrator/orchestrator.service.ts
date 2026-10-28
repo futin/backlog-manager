@@ -7,6 +7,7 @@ import { isMergeMode, isPrUrl } from '../../../shared/agent';
 import { RUN_STALE_MS } from '../../../shared/types';
 import type { OrchestratorArchivePayload, OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload } from '../../../shared/types';
 import { pauseRequestEffective, readPauseRequest, stopRequestEffective } from './pause-control.util';
+import { isRunVerification } from './remote-runs.util';
 import { StartingRunsService } from './starting-runs.service';
 import { WatchdogStateService } from './watchdog-state.service';
 
@@ -77,8 +78,8 @@ function isPlausibleRun(value: unknown): value is OrchestratorRun {
  * render history helps nobody and a single bad byte on disk must not 500 an
  * entire project's run list.
  *
- * Applied at every site that hands a parsed run file back to a caller —
- * `runs()`'s own inline loop, and `readOneRun()` further down in this file
+ * Applied at every site that hands a parsed run file back to a caller, with
+ * `sanitizeQueue` beside it — `runs()`'s own inline loop, and `readOneRun()` further down in this file
  * (shared by `archive()` and `archivedRun()`) — rather than folded
  * into `isPlausibleRun` itself: that guard's job is "safe enough to read the
  * handful of fields this service touches directly," not "every field is
@@ -120,6 +121,24 @@ function sanitizeMergeFields(run: OrchestratorRun): OrchestratorRun {
     base: typeof run.base === 'string' && run.base !== '' ? run.base : 'main',
     prTarget: typeof run.prTarget === 'string' && run.prTarget !== '' ? run.prTarget : null,
     prUrl: isPrUrl(run.prUrl) ? run.prUrl : null
+  };
+}
+
+/**
+ * The queue's half of the same degrade-don't-throw reading, applied beside `sanitizeMergeFields` at the same two sites (#349). `isPlausibleRun` checks only
+ * that `queue` is an array, so a hand-edited or pre-`verification` run file could hand `toArchiveEntry` an item with no `verification` array — a TypeError out
+ * of `archive()`, a 500 for the whole Archive page rather than a skip of one file — and hand `run-detail.ts` the same item in the browser, where
+ * `q.verification.length` throws instead. Here every run that leaves this service has a queue of plain objects whose `verification` is an array of
+ * well-formed rows: a non-object entry is dropped, a non-array `verification` becomes `[]`, and a row failing `isRunVerification` — the predicate the remote
+ * path already filters with — is filtered out. Not folded into `isPlausibleRun` for the reason above: one bad queue item must not hide the whole run.
+ */
+function sanitizeQueue(run: OrchestratorRun): OrchestratorRun {
+  const queue: unknown[] = run.queue;
+  return {
+    ...run,
+    queue: queue
+      .filter((item): item is OrchestratorRun['queue'][number] => typeof item === 'object' && item !== null && !Array.isArray(item))
+      .map((item) => ({ ...item, verification: Array.isArray(item.verification) ? item.verification.filter(isRunVerification) : [] }))
   };
 }
 
@@ -230,7 +249,7 @@ function readOneRun(path: string, label: string, expectMiss = false): Orchestrat
     console.warn(`orchestrator: ${label} parsed but is not a run, skipping`);
     return null;
   }
-  return sanitizeMergeFields(parsed);
+  return sanitizeQueue(sanitizeMergeFields(parsed));
 }
 
 /**
@@ -353,7 +372,7 @@ export class OrchestratorService {
         continue;
       }
 
-      const run = sanitizeMergeFields(parsed);
+      const run = sanitizeQueue(sanitizeMergeFields(parsed));
       const fresh = run.status === 'running' && Date.now() - Date.parse(run.updatedAt) < RUN_STALE_MS;
       const pastRuns = countPastRuns(join(dir, 'runs'));
       // `annotate()` returns undefined for every run but the crashed one
