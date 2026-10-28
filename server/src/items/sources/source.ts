@@ -185,9 +185,10 @@ export interface ItemWriter {
   /** `move <id> done|out-of-scope`. A non-empty `outcome` is posted as a
    *  comment FIRST, so the issue's timeline reads in the order the work
    *  happened. Labels and claims are untouched — release is the only thing that
-   *  clears `in-progress`. Safe to replay (#348): an issue already closed is
-   *  refused as `moveItem` refuses it, and an outcome some comment already
-   *  carries is not posted again. */
+   *  clears `in-progress`. Safe to replay (#348): an issue closed
+   *  `not_planned` is refused as `moveItem` refuses it, `done` over a done
+   *  issue (GitHub's close on a `Fixes #<n>` push) succeeds without re-closing,
+   *  and an outcome some comment already carries is not posted again. */
   state(project: RegistryProject, marker: SourceMarker, req: ItemStateRequest): Promise<WriteOutcome<{ id: string; status: string; url: string }>>;
 
   /** Take the issue, by the protocol in `server/src/tracker/claim.ts`. */

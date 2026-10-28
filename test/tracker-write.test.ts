@@ -360,14 +360,20 @@ describe('state', () => {
     expect(gh.matching('/labels', 'DELETE')).toEqual([]);
   });
 
-  /* #348 — `state` mirrors `moveItem` in backlog.mjs, which throws `already done` and `already out-of-scope — rejection is terminal`. Without the guard a
-     replay re-commented and re-PATCHed, and a `done` over a rejection turned `not_planned` into `completed`: a terminal item came back as done. */
-  it('refuses done on an issue already closed completed, and writes nothing', async () => {
+  /* #348 — `state` mirrors `moveItem` in backlog.mjs where a replay would do harm: over `not_planned` it refuses, since a `done` there turned a terminal
+     rejection into `completed`. `done` over a done issue is the one place it does NOT mirror `moveItem`'s `already done`: an orchestrator merge carries
+     `Fixes #<n>`, GitHub closes the issue on the push, and only then does `stage <n> merged` call this route with the Outcome — a refusal there exits 9
+     and parks an item that merged. So it succeeds, posts the Outcome (once), and leaves the close GitHub made alone. */
+  it('takes done on an issue already closed completed as done: posts the outcome, does not re-close', async () => {
     gh.issue({ state: 'closed', state_reason: 'completed' });
     await sync();
-    const res = await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'again' }).expect(409);
-    expect(res.body.error).toBe('#31 is already done');
-    expect(gh.matching('/comments', 'POST')).toEqual([]);
+    await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'merged by the run' }).expect(201);
+    expect(gh.matching('/comments', 'POST')).toHaveLength(1);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+    expect(gh.issues.get(31)?.state_reason).toBe('completed');
+    // And a replay of it writes nothing at all.
+    await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'merged by the run' }).expect(201);
+    expect(gh.matching('/comments', 'POST')).toHaveLength(1);
     expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
   });
 
@@ -410,9 +416,10 @@ describe('state', () => {
   it('refuses on a fresh read even while the cached copy still says open', async () => {
     gh.issue();
     await sync();
-    gh.issues.set(31, { ...gh.issues.get(31)!, state: 'closed', state_reason: 'completed' });
+    gh.issues.set(31, { ...gh.issues.get(31)!, state: 'closed', state_reason: 'not_planned' });
     await post('state', { project: trackerPath, id: '#31', status: 'done' }).expect(409);
     expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+    expect(gh.issues.get(31)?.state_reason).toBe('not_planned');
   });
 
   it('shows the item as closed on the next read with no poll tick', async () => {

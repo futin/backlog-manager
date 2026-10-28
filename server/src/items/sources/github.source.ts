@@ -297,10 +297,13 @@ export class GithubSource implements ItemSource, ItemWriter {
    * original type recoverable where the file store loses it.
    *
    * Safe to replay (#348). The issue is read FRESH, never from the poller — a close made on another machine can read `open` in the cache for a whole sync
-   * interval — and the closed states refuse exactly what `moveItem` in backlog.mjs refuses: anything over `not_planned` (rejection is terminal), and
-   * `done` over `completed` or no reason. `out-of-scope` over a done issue is the one move out of a closed state, as in the files store. And the outcome
-   * is posted only when no comment on the issue already carries it: a close that failed AFTER its comment landed leaves the issue open with the comment
-   * on it, which no closed-guard can see, and the retry — or `import`'s resume repair — would otherwise post it twice.
+   * interval — and anything over `not_planned` is refused, as `moveItem` in backlog.mjs refuses it: rejection is terminal, and a `done` there would turn
+   * it into `completed`. `out-of-scope` over a done issue is the one move out of a closed state, as in the files store. `done` over a done issue is NOT
+   * refused, unlike `moveItem`'s `already done`: an orchestrator merge carries `Fixes #<n>`, so GitHub closes the issue on the push, and only then does
+   * `stage <n> merged` arrive here with the Outcome — a refusal would exit 9 and park an item that merged. It posts the Outcome and leaves GitHub's close
+   * alone (no PATCH). And the outcome is posted only when no comment on the issue already carries it: a close that failed AFTER its comment landed
+   * leaves the issue open with the comment on it, which no closed-guard can see, and the retry — or `import`'s resume repair — would otherwise post it
+   * twice.
    */
   async state(project: RegistryProject, marker: SourceMarker, req: ItemStateRequest): Promise<WriteOutcome<{ id: string; status: string; url: string }>> {
     const ready = this.ready(marker);
@@ -316,13 +319,11 @@ export class GithubSource implements ItemSource, ItemWriter {
       this.poller.absorbIssue(repo, fresh.data);
       const found = fresh.data;
 
-      if (found.state === 'closed') {
-        // `completed` and no reason are both done — the mapper's reading, for the reason it gives (GitHub only began sending reasons in 2022).
-        const done = found.state_reason === null || found.state_reason === undefined || found.state_reason === 'completed';
-        if (!done) {
-          return { ok: false as const, refusal: { refused: 'conflict' as const, error: `#${number} is already out-of-scope — rejection is terminal` } };
-        }
-        if (req.status === 'done') return { ok: false as const, refusal: { refused: 'conflict' as const, error: `#${number} is already done` } };
+      // `completed` and no reason are both done — the mapper's reading, for the reason it gives (GitHub only began sending reasons in 2022).
+      const closedDone =
+        found.state === 'closed' && (found.state_reason === null || found.state_reason === undefined || found.state_reason === 'completed');
+      if (found.state === 'closed' && !closedDone) {
+        return { ok: false as const, refusal: { refused: 'conflict' as const, error: `#${number} is already out-of-scope — rejection is terminal` } };
       }
 
       if (typeof req.outcome === 'string' && req.outcome.trim() !== '') {
@@ -335,6 +336,9 @@ export class GithubSource implements ItemSource, ItemWriter {
           this.poller.absorbComment(repo, posted.data);
         }
       }
+
+      // Already closed the way it was asked to be — GitHub's close-on-push, or a replay of this call. Nothing left to PATCH.
+      if (closedDone && req.status === 'done') return { ok: true as const, value: { id: `#${number}`, status: req.status, url: found.html_url } };
 
       const reason = req.status === 'done' ? 'completed' : 'not_planned';
       const closed = await this.client.updateIssue(repo, number, { state: 'closed', state_reason: reason }, { token });
