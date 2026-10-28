@@ -1,4 +1,5 @@
 import { isCrashed } from './run-watchdog';
+import { PIPELINE_STAGES } from '../../../shared/types';
 import type { MergeMode, OrchestratorRun, RunStage } from '../../../shared/types';
 
 /**
@@ -25,8 +26,11 @@ import type { MergeMode, OrchestratorRun, RunStage } from '../../../shared/types
  * restating another. It lived in ItemCard.tsx until #271 moved it here,
  * beside the stage tone and glyph tables: `lib/` imports nothing from
  * `components/`, and the detail sheet's model is a `lib/` module.
+ *
+ * It IS `PIPELINE_STAGES` (shared/types.ts) — the same array, re-bound under the name its readers already use — because "being worked right now"
+ * is exactly the pipeline, and a hand copy here would be the one a new stage forgets.
  */
-export const ACTIVE_RUN_STAGES: readonly RunStage[] = ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
+export const ACTIVE_RUN_STAGES: readonly RunStage[] = PIPELINE_STAGES;
 
 /**
  * The visual register a run stage is read in. Six tones, not fifteen: a

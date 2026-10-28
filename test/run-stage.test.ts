@@ -1,4 +1,5 @@
 import {
+  ACTIVE_RUN_STAGES,
   RUN_STATUS_CLASS,
   RUN_STATUS_GLYPH,
   STAGE_TONE,
@@ -8,6 +9,9 @@ import {
   stageChipClass,
   stageGlyph
 } from '../client/src/lib/run-stage';
+import { MACHINE_STAGES } from '../client/src/lib/run-stats';
+import { stepperStages } from '../client/src/lib/run-time';
+import { PIPELINE_STAGES, RUN_CLAIMED_STAGES } from '../shared/types';
 import type { OrchestratorRun, RunStage } from '../shared/types';
 
 /** Sorted, so `Object.keys(...).sort()` can be compared against it directly
@@ -285,5 +289,30 @@ describe('mergeModeLabel', () => {
     expect(mergeModeLabel('merge', 'merge')).toBeNull();
     expect(mergeModeLabel('branch', 'branch')).toBe('branch mode');
     expect(mergeModeLabel('merge', 'branch')).toBe('branch mode (downgraded)');
+  });
+});
+
+/*
+ * #376: four stage lists used to spell the pipeline out by hand. They are built from `PIPELINE_STAGES` now; these pin that each still holds exactly
+ * what it held before, in the same order, so the derivation changed no member and no position.
+ */
+describe('the stage lists built from PIPELINE_STAGES', () => {
+  it('keeps RUN_CLAIMED_STAGES at its eight members, in pipeline order', () => {
+    expect(RUN_CLAIMED_STAGES).toEqual(['pending', 'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging']);
+  });
+
+  it('keeps MACHINE_STAGES at the last seven of those', () => {
+    expect(MACHINE_STAGES).toEqual(RUN_CLAIMED_STAGES.slice(1));
+  });
+
+  it('binds ACTIVE_RUN_STAGES to the PIPELINE_STAGES array itself, not a copy', () => {
+    expect(ACTIVE_RUN_STAGES).toBe(PIPELINE_STAGES);
+  });
+
+  it.each(['merged', 'branched'] as const)('starts stepperStages(%s) with the six pipeline stages and ends it in that terminal', (terminal) => {
+    const stages = stepperStages(terminal);
+    expect(stages.slice(0, 6)).toEqual(['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging']);
+    expect(stages).toHaveLength(7);
+    expect(stages[6]).toBe(terminal);
   });
 });

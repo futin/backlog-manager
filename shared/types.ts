@@ -1403,6 +1403,17 @@ export type RunStage =
   | 'parked';
 
 /**
+ * The six stages an item passes through under the orchestrator's hands, in pipeline order — from the moment its execute session is dispatched to the
+ * moment its merge (or, in branch mode, its branch) is being made.
+ *
+ * This is the one hand-written spelling of the pipeline. Every other stage list that restates it — `RUN_CLAIMED_STAGES` below, the client's
+ * `ACTIVE_RUN_STAGES` (lib/run-stage.ts), `MACHINE_STAGES` (lib/run-stats.ts) and `stepperStages` (lib/run-time.ts) — is built from it, because four
+ * hand-written copies are four places a new stage has to be remembered and three of them would be forgotten. A new pipeline stage is added here and
+ * nowhere else. `ATTENTION_RUN_STAGES` and `RUN_HELD_STAGES` (shared/agent.ts) are not restatements of the pipeline and are not built from it.
+ */
+export const PIPELINE_STAGES: readonly RunStage[] = ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
+
+/**
  * The stages at which a run still OWNS the item — the eight non-terminal
  * members of `RunStage` above, and the whole input to `runClaimBlock`
  * (shared/agent.ts), which is what disables a card's dispatch control while
@@ -1434,8 +1445,11 @@ export type RunStage =
  * badge" and correctly EXCLUDES `pending`/`preflight` (a badge that flickers
  * on for the fraction of a poll cycle preflight takes is noise). They overlap
  * by six members today and are answering different questions.
+ *
+ * Built from `PIPELINE_STAGES` above — the two before-the-pipeline stages, then the pipeline itself — so a new pipeline stage reaches this list without
+ * anyone remembering to add it here.
  */
-export const RUN_CLAIMED_STAGES: readonly RunStage[] = ['pending', 'preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
+export const RUN_CLAIMED_STAGES: readonly RunStage[] = ['pending', 'preflight', ...PIPELINE_STAGES];
 
 /**
  * The two `RunStage` values that mean the run has STOPPED and will not restart
