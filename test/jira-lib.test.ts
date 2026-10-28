@@ -6,6 +6,7 @@ import { act, renderHook } from '@testing-library/react';
 import { setJiraPage, useJiraPage } from '../client/src/hooks/useJiraPage';
 import {
   JIRA_429_RED_MS,
+  failureOf,
   JIRA_BOARD_FILTER_FROM,
   JIRA_COLUMNS,
   JIRA_CUSTOM_QUERY,
@@ -1023,6 +1024,22 @@ describe('the launch sheet wire', () => {
     expect(modelEffortFlags('', '')).toEqual({});
     expect(Object.keys(modelEffortFlags('opus', ''))).toEqual(['model']);
     expect(modelEffortFlags('opus', 'high')).toEqual({ model: 'opus', effort: 'high' });
+  });
+});
+
+describe('failureOf', () => {
+  const res = (status: number, json: () => Promise<unknown>): Response => ({ ok: false, status, json }) as unknown as Response;
+
+  it('reads the server sentence', async () => {
+    await expect(failureOf(res(409, () => Promise.resolve({ error: 'nope' })))).resolves.toBe('nope');
+  });
+
+  it('falls back to the status on an empty sentence', async () => {
+    await expect(failureOf(res(409, () => Promise.resolve({ error: '' })))).resolves.toBe('HTTP 409');
+  });
+
+  it('falls back to the status on a body that is not JSON', async () => {
+    await expect(failureOf(res(502, () => Promise.reject(new SyntaxError('Unexpected token <'))))).resolves.toBe('HTTP 502');
   });
 });
 

@@ -1,3 +1,4 @@
+import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
 import { pollAge } from './tracker';
 import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
@@ -792,15 +793,13 @@ export function isJiraStatusPayload(value: unknown): value is JiraStatusPayload 
 
 // ── The wire (Jira phase 5 — the launch sheet and the modal read one issue the same way) ────────────────────────────────────────────────────────────
 
-/** The sentence a failed read or write carries: the server's `{ error }` when it sent one, else the HTTP status, else whatever the network said. */
+/**
+ * The sentence a failed read or write carries: the server's `{ error }` when it sent one, else the HTTP status, else whatever the network said. The
+ * reading itself is `errorOf` (lib/http.ts), the board's one reader of a refusal's sentence; a body that is not JSON reads as `null` and so falls to the status.
+ */
 export async function failureOf(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: unknown };
-    if (typeof body.error === 'string' && body.error !== '') return body.error;
-  } catch {
-    /* not JSON — fall through to the status */
-  }
-  return `HTTP ${res.status}`;
+  const body: unknown = await res.json().catch(() => null);
+  return errorOf(body, `HTTP ${res.status}`);
 }
 
 /**

@@ -189,6 +189,16 @@ describe('the agents client', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).code).toBeUndefined();
   });
+
+  // #376: `unwrap` reads its sentence through `errorOf` (lib/http.ts), so an empty `error` falls through to the status sentence instead of an empty
+  // message, while a `code` beside it still survives.
+  it('falls back to the status sentence on an empty error, keeping the code', async () => {
+    stub({ ok: false, status: 409, body: { error: '', code: 'busy' } });
+    const err = await startOrchestrate({ project: '/abs/alpha' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message).toBe('request failed (409)');
+    expect((err as ApiError).code).toBe('busy');
+  });
 });
 
 // The hook (test/orchestrator-hook.test.tsx) exercises fetchOrchestratorRuns
