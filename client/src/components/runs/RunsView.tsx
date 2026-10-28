@@ -1115,7 +1115,13 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
               <Sheet as="aside" className="runs-detail">
                 <div data-testid="run-detail-slot">
                   {selectedRow !== undefined && (
+                    // The `key` is load-bearing, not tidiness (#344). Without it React reused this one `RunDetail` — and the `RunControls` inside it —
+                    // across a selection change and swapped only the props, so run A's open Stop confirm was drawn on run B's sheet, and its accept,
+                    // closing over the current props, stopped B. Keyed, a new selection remounts the sheet and every piece of per-run state in it starts
+                    // over, including any added later. `runKey` is the builder the list rows key on, so the sheet and its row cannot key differently;
+                    // and it is project + runId alone, so the same run re-rendered by a poll, or moving from live to archived, keeps an open confirm.
                     <RunDetail
+                      key={runKey(selectedRow.run.project, selectedRow.run.runId)}
                       summary={selectedRow.run}
                       live={selectedRow.live}
                       remote={selectedRow.remote}
