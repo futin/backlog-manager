@@ -295,6 +295,19 @@ describe('create', () => {
     expect(created?.section).toBe('out-of-scope');
     expect(created?.status).toBe('terminal');
   });
+
+  /* #348 — the close after the create failed, and the issue is left open and untyped (deleting it to tidy up is the worse outcome, see `create`). The
+     refusal names it and says how to finish it: a refusal that named only the HTTP failure sent the operator back to `new out-of-scope`, which filed a
+     duplicate — the hand path has no idempotency key. The kind stays the original one, so the status and the CLI's exit code do not move. */
+  it('names the filed-but-open issue and its recovery when the out-of-scope close fails', async () => {
+    await sync();
+    gh.failNext = { fragment: '/issues/77', status: 500, method: 'PATCH' };
+    const res = await post('create', { project: trackerPath, section: 'out-of-scope', title: 'no thanks', body: 'b' }).expect(502);
+    expect(res.body.status).toBe(500);
+    expect(res.body.error).toContain('#77');
+    expect(res.body.error).toContain('move #77 out-of-scope');
+    expect(gh.issues.get(77)?.state).toBe('open');
+  });
 });
 
 describe('state', () => {
@@ -322,7 +335,7 @@ describe('state', () => {
   it('refuses through the refusal table and closes nothing when the outcome comment fails', async () => {
     gh.issue();
     await sync();
-    gh.failNext = { fragment: '/issues/31/comments', status: 500 };
+    gh.failNext = { fragment: '/issues/31/comments', status: 500, method: 'POST' };
     const res = await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'it worked' }).expect(502);
     expect(res.body.status).toBe(500);
     expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
@@ -345,6 +358,68 @@ describe('state', () => {
     await post('state', { project: trackerPath, id: '#31', status: 'done' }).expect(201);
     expect(gh.issues.get(31)?.labels.map((l) => l.name)).toContain('in-progress');
     expect(gh.matching('/labels', 'DELETE')).toEqual([]);
+  });
+
+  /* #348 — `state` mirrors `moveItem` in backlog.mjs where a replay would do harm: over `not_planned` it refuses, since a `done` there turned a terminal
+     rejection into `completed`. `done` over a done issue is the one place it does NOT mirror `moveItem`'s `already done`: an orchestrator merge carries
+     `Fixes #<n>`, GitHub closes the issue on the push, and only then does `stage <n> merged` call this route with the Outcome — a refusal there exits 9
+     and parks an item that merged. So it succeeds, posts the Outcome (once), and leaves the close GitHub made alone. */
+  it('takes done on an issue already closed completed as done: posts the outcome, does not re-close', async () => {
+    gh.issue({ state: 'closed', state_reason: 'completed' });
+    await sync();
+    await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'merged by the run' }).expect(201);
+    expect(gh.matching('/comments', 'POST')).toHaveLength(1);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+    expect(gh.issues.get(31)?.state_reason).toBe('completed');
+    // And a replay of it writes nothing at all.
+    await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'merged by the run' }).expect(201);
+    expect(gh.matching('/comments', 'POST')).toHaveLength(1);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+  });
+
+  it('refuses either status on an issue already closed not_planned, and leaves the reason alone', async () => {
+    gh.issue({ state: 'closed', state_reason: 'not_planned' });
+    await sync();
+    for (const status of ['done', 'out-of-scope']) {
+      const res = await post('state', { project: trackerPath, id: '#31', status, outcome: 'again' }).expect(409);
+      expect(res.body.error).toBe('#31 is already out-of-scope — rejection is terminal');
+    }
+    expect(gh.matching('/comments', 'POST')).toEqual([]);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+    expect(gh.issues.get(31)?.state_reason).toBe('not_planned');
+  });
+
+  /* The one transition out of a closed state the files tool allows: done → out-of-scope. */
+  it('rejects an issue already closed completed, with one outcome comment', async () => {
+    gh.issue({ state: 'closed', state_reason: 'completed' });
+    await sync();
+    await post('state', { project: trackerPath, id: '#31', status: 'out-of-scope', outcome: 'not after all' }).expect(201);
+    expect(gh.issues.get(31)?.state_reason).toBe('not_planned');
+    expect(gh.matching('/comments', 'POST')).toHaveLength(1);
+  });
+
+  /* The partial failure the closed-guard alone cannot catch: the comment landed, the close did not, so the issue is still OPEN. The retry — or `import`'s
+     resume repair — must find the comment already there and post nothing, then close. */
+  it('posts the outcome once across a retry after the close failed', async () => {
+    gh.issue();
+    await sync();
+    gh.failNext = { fragment: '/issues/31', status: 403, method: 'PATCH', headers: { 'x-ratelimit-remaining': '0' } };
+    await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'it worked' }).expect(429);
+    expect(gh.issues.get(31)?.state).toBe('open');
+
+    await post('state', { project: trackerPath, id: '#31', status: 'done', outcome: 'it worked' }).expect(201);
+    expect(gh.issues.get(31)?.state).toBe('closed');
+    expect([...gh.comments.values()].filter((c) => c.body === 'it worked')).toHaveLength(1);
+  });
+
+  /* The guard reads the issue FRESH: the poller's copy can say open for a whole sync interval after another machine closed it. */
+  it('refuses on a fresh read even while the cached copy still says open', async () => {
+    gh.issue();
+    await sync();
+    gh.issues.set(31, { ...gh.issues.get(31)!, state: 'closed', state_reason: 'not_planned' });
+    await post('state', { project: trackerPath, id: '#31', status: 'done' }).expect(409);
+    expect(gh.matching('/issues/31', 'PATCH')).toEqual([]);
+    expect(gh.issues.get(31)?.state_reason).toBe('not_planned');
   });
 
   it('shows the item as closed on the next read with no poll tick', async () => {

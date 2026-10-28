@@ -73,6 +73,19 @@ describe('sectionText', () => {
   it('matches headings case-insensitively', () => {
     expect(sectionText('## cause\n\nx\n', 'Cause')).toBe('x');
   });
+
+  /* #348: the start match was already trimmed, the end match was not — so an indented heading was found as a START but read past as a BOUNDARY, and the
+     section before it swallowed it. Cause then read as `## Fix\nreal fix`, filled and not unknown, and the board called a bug with an empty Cause groomed
+     while the orchestrate gate (`extractSection`, which trims) refused it. */
+  it('ends a section at an indented ## heading, as the orchestrate gate does', () => {
+    const body = '## Cause\n\n  ## Fix\nreal fix\n';
+    expect(sectionText(body, 'Cause')).toBe('');
+    expect(deriveGroomed('bugs', body)).toBe(false);
+  });
+
+  it('still finds an indented heading as the start of its own section', () => {
+    expect(sectionText('  ## Plan\nsteps\n', 'Plan')).toBe('steps');
+  });
 });
 
 describe('deriveGroomed', () => {

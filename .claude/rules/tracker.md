@@ -5,7 +5,7 @@ paths: ["server/src/tracker/**"]
 # Mechanism for the rules scoped to these paths — the headline is in CLAUDE.md, the reasoning in docs/subsystems/invariants.md
 
 - **The claim protocol is one comment per session per issue, and the LOWEST live comment id wins.** `server/src/tracker/claim.ts` is the one implementation of
-  what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`, `currentClaim`);
+  what a claim IS (render, parse, `claimsFor`, `isLive`, `newestClaim`, `winner`, `currentClaim`, `heldClaim`);
   `GithubSource.claim` is the one implementation of taking one. **`parseClaim` trusts no comment on its say-so** (#266): an `author_association` other
   than `OWNER`/`MEMBER`/`COLLABORATOR` is not a claim (absent is trusted — only a hand-built comment lacks it), nor is a record whose fields lack the shape
   their writers give them (`run` and `finished` held to the write routes' vocabularies), and a heartbeat past the comment's `updated_at` plus
@@ -51,7 +51,7 @@ paths: ["server/src/tracker/**"]
   all three 409s carries `host`, and `show` prints `claim-host:`/`this-host:`. A refusal that has no holder host degrades WHOLE — it names neither machine —
   because naming ours beside their blank invites the reading that a claim nothing local accounts for is litter. The four counters live in the claim (§6.4: never in the body), are SEEDED by the server from the
   newest prior claim and are BILLED by the CLI on
-  release — `--abandon` sends no `counters` key at all, which is not the same as zeros. The mapper reads `started`/`phase` from an UNRELEASED claim without
+  release — `--abandon` sends no `counters` key at all, which is not the same as zeros. The mapper reads `started`/`phase` from the LOWEST-id UNRELEASED claim (`heldClaim`, #348) without
   consulting its heartbeat ("any stamp, fresh or stale") and the counters from the newest claim regardless of release. Why:
   [invariants.md](docs/subsystems/invariants.md#the-claim-protocol-lowest-live-comment-id-wins)
 - **An outsider's tracker issue is executable only while its body matches a pin a groom of ours wrote.** `trustedAssociation(assoc)`

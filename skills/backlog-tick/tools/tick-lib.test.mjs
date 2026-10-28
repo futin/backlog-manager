@@ -23,6 +23,13 @@ test('deriveGroomed matches the server', () => {
   assert.equal(deriveGroomed('refactors', '## Plan\nx'), null);
 });
 
+// #348: the twin of `sectionText`'s indented-boundary case in test/parse.test.ts — an indented `  ## Fix` ends Cause, so Cause reads empty and the bug is
+// not groomed. Untrimmed, Cause swallowed the heading and a tick could pick a bug the orchestrate gate refuses.
+test('deriveGroomed ends a section at an indented ## heading', () => {
+  assert.equal(deriveGroomed('bugs', '## Cause\n\n  ## Fix\nreal fix\n'), false);
+  assert.equal(deriveGroomed('tasks', '  ## Plan\nsteps\n'), true);
+});
+
 test('deriveGroomed is a byte copy of parse.util.ts', () => {
   const server = fs.readFileSync(PARSE_UTIL, 'utf8');
   assert.ok(server.includes(UNKNOWN.source), 'the twin UNKNOWN regex source must appear verbatim in server/src/items/parse.util.ts');

@@ -397,11 +397,50 @@ describe('the claim fields', () => {
     expect(map({}, [stale])?.item.started).toBe('2026-09-18T10:00:00Z');
   });
 
-  /* The newest is the HIGHEST comment id, not the last one in the array. */
-  it('reads the newest claim by comment id, whatever order they arrive in', () => {
+  /* Order is by comment id, never by array position — for both readings: the holder is the LOWEST unreleased id, the counters the HIGHEST id. */
+  it('reads the holder and the counters by comment id, whatever order they arrive in', () => {
     const older = claim({ phase: 'groom', at: '2026-09-18T09:00:00Z' }, 40);
-    const newer = claim({ phase: 'execute', at: '2026-09-18T10:00:00Z' }, 99);
-    expect(map({}, [newer, older])?.item.phase).toBe('execute');
+    const newer = claim({ phase: 'execute', at: '2026-09-18T10:00:00Z', counters: COUNTERS }, 99);
+    const mapped = map({}, [newer, older])?.item;
+    expect(mapped?.phase).toBe('groom');
+    expect(mapped?.executeTokens).toBe(4000);
+  });
+
+  /* #348 — the holder is the claim protocol's: the LOWEST unreleased id (`heldClaim`), the rule `currentClaim` gave the read route in bug-58. In a race
+     window the loser's comment is newer and still unreleased until the loser deletes it — for the whole stale window when that delete fails — and a
+     mapper reading the newest named the loser: here a groom's phase on an item an execute holds. */
+  it('takes started and phase from the lowest unreleased claim, not the newest', () => {
+    const winner = claim({ phase: 'execute', at: '2026-09-18T09:00:00Z', session: 'W' }, 100);
+    const loser = claim({ phase: 'groom', at: '2026-09-18T09:00:01Z', session: 'L' }, 200);
+    const mapped = map({}, [winner, loser])?.item;
+    expect(mapped?.started).toBe('2026-09-18T09:00:00Z');
+    expect(mapped?.phase).toBe('execute');
+    expect(mapped?.holder?.session).toBe('W');
+  });
+
+  /* A newer RELEASED claim used to hide an older unreleased holder: `held` was read off the newest claim alone, so the card read free. The two questions
+     now read two claims — the hold from 100, the totals from 200. */
+  it('reads an older unreleased claim as held under a newer released one, and the counters from the newer', () => {
+    const holder = claim({ phase: 'execute', at: '2026-09-18T09:00:00Z' }, 100);
+    const released = claim({ phase: 'groom', counters: COUNTERS, released: { at: '2026-09-18T11:00:00Z', reason: 'stopped', by: 'B' } }, 200);
+    const mapped = map({}, [holder, released])?.item;
+    expect(mapped?.started).toBe('2026-09-18T09:00:00Z');
+    expect(mapped?.phase).toBe('execute');
+    expect(mapped?.groomElapsed).toBe(5);
+    expect(mapped?.executeTokens).toBe(4000);
+  });
+
+  it('reads a newer unreleased claim as held under an older released one', () => {
+    const released = claim({ phase: 'groom', released: { at: '2026-09-18T09:30:00Z', reason: 'stopped', by: 'A' } }, 100);
+    const holder = claim({ phase: 'execute', at: '2026-09-18T10:00:00Z' }, 200);
+    const mapped = map({}, [released, holder])?.item;
+    expect(mapped?.started).toBe('2026-09-18T10:00:00Z');
+    expect(mapped?.phase).toBe('execute');
+  });
+
+  it('still holds on one unreleased claim whose heartbeat is a day old — the mapper consults no clock', () => {
+    const old = claim({ heartbeat: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() });
+    expect(map({}, [old])?.item.started).toBe('2026-09-18T10:00:00Z');
   });
 
   /* `in-progress` is CONSUMED since task-46: the claim renders it as the

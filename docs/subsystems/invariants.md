@@ -4097,7 +4097,8 @@ the session holding this issue alive — and today's answer is the same number. 
 without touching run semantics. It is a known tension rather than a solved problem: nothing heartbeats a hand groom automatically, so the skills' prose asks
 for `heartbeat` between long steps and the protocol retires whatever stops answering.
 
-**The mapper reads liveness NOWHERE.** `mapIssue` fills `started`/`phase` from an UNRELEASED claim without consulting its heartbeat, because the board's rule
+**The mapper reads liveness NOWHERE.** `mapIssue` fills `started`/`phase` from the lowest-id UNRELEASED claim (`heldClaim` — lowest for bug-58's reason:
+a race loser's comment is newer and stays unreleased until it is deleted; #348) without consulting its heartbeat, because the board's rule
 for a files item is "ANY stamp, fresh or stale" (`progressBlock`), and what retires a stale claim is the PROTOCOL, at the moment another session contests the
 issue. A mapper that expired claims on its own would show an item as free while the next `claim` call still had to fight for it. The BOARD ages it instead
 (#227): `claimReading` on the client reads `holder.heartbeat` by the reader's clock, so a stale claim still carries `started` and reads `stale`, not `executing`. The counters come off the
