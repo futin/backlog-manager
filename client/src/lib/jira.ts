@@ -14,7 +14,9 @@ import type {
   JiraIssue,
   JiraIssueDetail,
   JiraLiveSession,
+  JiraProjectRef,
   JiraRepoDefaults,
+  JiraRepoDefaultsWriteResult,
   JiraRepoRefs,
   JiraSkill,
   JiraStatusCategory,
@@ -649,7 +651,7 @@ export function boardsForSetup(boards: readonly JiraBoardStatus[]): JiraBoardSta
 }
 
 /** The projects Setup still owes a repository: every one the status carries whose key has no `repos` entry. */
-export function unmappedProjects(status: Pick<JiraStatusPayload, 'projects' | 'repos'>): { key: string; name: string }[] {
+export function unmappedProjects(status: Pick<JiraStatusPayload, 'projects' | 'repos'>): JiraProjectRef[] {
   return status.projects.filter((p) => !Object.prototype.hasOwnProperty.call(status.repos, p.key));
 }
 
@@ -890,14 +892,14 @@ export async function saveRepoDefaults(
   path: string,
   base: string | null,
   namePattern: string | null
-): Promise<{ path: string; base: string | null; namePattern: string | null }> {
+): Promise<JiraRepoDefaultsWriteResult> {
   const res = await fetch('/api/jira/repo-defaults', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ path, base, namePattern })
   });
   if (!res.ok) throw new Error(await failureOf(res));
-  return (await res.json()) as { path: string; base: string | null; namePattern: string | null };
+  return (await res.json()) as JiraRepoDefaultsWriteResult;
 }
 
 // ── The branch choice (Jira repo/branch, spec §5) ───────────────────────────────────────────────────────────────────────────────────────────────────

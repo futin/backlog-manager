@@ -9,11 +9,11 @@ import { ModesStep } from '../client/src/components/board/orchestrate/ModesStep'
 import { OrderStep } from '../client/src/components/board/orchestrate/OrderStep';
 import type { OrchestrateDraft } from '../client/src/hooks/useOrchestrateDraft';
 import type { RunOnState } from '../client/src/hooks/useRunOn';
-import { EFFORT_OPTIONS, MODEL_OPTIONS, type UncommittedItems } from '../client/src/lib/agents';
+import { EFFORT_OPTIONS, MODEL_OPTIONS } from '../client/src/lib/agents';
 import { mergeModeOptionLabels } from '../client/src/lib/merge-mode';
 import { arrangeOrder, orchestrateQueue, resolveSelection, uncommittedFates } from '../client/src/lib/orchestrate-draft';
 import { daysAgoDate } from './helpers/dates';
-import type { BacklogItem } from '../shared/types';
+import type { BacklogItem, UncommittedItems } from '../shared/types';
 
 /**
  * #306 — each Orchestrate step rendered ALONE, from a hand-built `OrchestrateDraft`: the capability the split exists to buy. No `SettingsProvider`, no fetch

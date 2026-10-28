@@ -5,10 +5,10 @@ import { resolveSource } from './sources/resolve.util';
 import type { SourceMarker } from './sources/resolve.util';
 import { parseUrn } from '../tracker/map-issue';
 import { ITEM_SOURCES, type ItemSource, type ItemWriter, type SourceSummary } from './sources/source';
-import { uncommittedItemPaths, type UncommittedItems } from './uncommitted.util';
+import { uncommittedItemPaths } from './uncommitted.util';
 import { resolveBaseBranch } from './base-branch.util';
 import { answer } from './write-answer.util';
-import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts, SourceKind } from '../../../shared/types';
+import type { BacklogItem, ClaimResult, ItemsIndex, ProjectSummary, RegistryProject, SectionCounts, SourceKind, UncommittedItems } from '../../../shared/types';
 
 /**
  * All reads walk the registry and the stores per request, like guide-manager's

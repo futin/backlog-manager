@@ -382,6 +382,31 @@ export interface ItemsIndex {
   errors: string[];
 }
 
+/**
+ * Body of `GET /api/items/uncommitted` (task-32) — which of a project's item files differ from the picked base (`main` unless chosen otherwise, #254), so the
+ * Orchestrate sheet can flag the rows whose bytes on disk are not the bytes a run will act on. Answered by `uncommittedItemPaths`
+ * (`server/src/items/uncommitted.util.ts`, whose header says why the question is deliberately the broad one) and read by the client's `fetchUncommitted`, which
+ * shape-guards it (`isUncommittedItems`) because the answer feeds a render that asserts a fact about someone's repository.
+ *
+ * Not "the rows that run is going to skip": only the rows ABSENT from `main` are skipped, while a row present there and merely edited since is gated and
+ * executed on `main`'s copy. The sheet's own note is the one place that states the fates, each only when a row has it (`absent` below says which).
+ */
+export interface UncommittedItems {
+  /** Absolute item-file paths, built from the registry's own project path verbatim with the same construction `scanProject` uses, so they compare equal to
+   *  `BacklogItem.path` without either side calling `realpath`. */
+  paths: string[];
+  /** The subset of `paths` whose path `main` does not hold at all, so a run refuses it with `not committed on main` and skips it (#235). Absolute, built
+   *  with the same construction as `paths` from the same relative strings, so the two compare with `Set.has` byte for byte. Every other entry of `paths` is
+   *  STALE — present at `main` with older bytes, which the run gates and executes — and is deliberately not named on the wire, so the two lists cannot
+   *  disagree about it (Decision 3 in the util's header). */
+  absent: string[];
+  /** False whenever this read could not be made — no git, not a repo, the project is not the repo toplevel, no `main` ref, a timeout — and, since task-45,
+   *  whenever it could not be ASKED: a tracker project has no item files, so `ItemsService.uncommitted` answers this shape without reaching the util at all.
+   *  The client renders NOTHING on `known: false`: an absent answer must never read as "nothing is uncommitted", since this feeds a render that asserts a
+   *  fact about someone's repo. */
+  known: boolean;
+}
+
 export type SectionCounts = Record<Section, number>;
 
 export interface ProjectSummary {
@@ -581,6 +606,21 @@ export type JiraAccess = 'ok' | 'unconfigured' | 'unsupported' | 'unauthorized' 
  */
 export type JiraTokenKind = 'classic' | 'scoped';
 
+/**
+ * A wire type with every key kept and every value made `unknown` and optional — what a client read of an UNTRUSTED body holds before its runtime guard has
+ * proved anything (#375). Typing that read as `Unchecked<TheSharedType>` rather than a re-spelled `{ issues?: unknown; … }` couples the guard to the shared
+ * declaration: rename a field there and the guard's `body.<old name>` stops typechecking, where a hand-spelled inline type would keep compiling and quietly
+ * read `undefined` at runtime. A union is flattened, not distributed — the keys of every arm, each `unknown` — because a guard probes the body before it knows
+ * which arm it holds, and a distributed union would refuse every key that is not on all the arms.
+ */
+export type Unchecked<T> = { [K in T extends unknown ? keyof T : never]?: unknown };
+
+/** A Jira project as every surface of ours names one: its key and its display name (a project the board has only a key for carries the key as its name). */
+export interface JiraProjectRef {
+  key: string;
+  name: string;
+}
+
 /** One issue as the board draws it. Filled by exactly the sweep's field list (§4), so a board render costs no per-issue call. */
 export interface JiraIssue {
   key: string;
@@ -588,7 +628,7 @@ export interface JiraIssue {
   /** `https://<site>/browse/<key>` — the one place the site rather than the gateway is a link target. */
   url: string;
   summary: string;
-  project: { key: string; name: string };
+  project: JiraProjectRef;
   /** `level` is Jira's hierarchy level (-1 subtask, 0 standard, 1 epic, …); `subtask` is the flag Jira carries beside it. */
   type: { name: string; level: number; subtask: boolean };
   status: { name: string; category: JiraStatusCategory };
@@ -775,7 +815,7 @@ export interface JiraStatusPayload {
   /** Normalised repo path → its defaults; only paths with at least one value are present. `{}` while unconfigured. */
   repoDefaults: Record<string, JiraRepoDefaults>;
   /** The union of project keys seen on any board cache and the mapped keys — no outbound call. */
-  projects: { key: string; name: string }[];
+  projects: JiraProjectRef[];
   skills: JiraSkill[];
   /** `sweep` is every call the last tick made, however many boards it swept; `last429At` is an ISO instant or `null`. */
   calls: { sweep: number; last429At: string | null };
@@ -787,6 +827,34 @@ export interface JiraStatusPayload {
    * know `$HOME`; the compose stack passes the host's `HOME` through, so the container's `homedir()` is the host's.
    */
   home: string | null;
+}
+
+/** `GET /api/jira/boards/:id/issues` — a board's cached list, and when it was last swept (`null` before the first sweep lands). */
+export interface JiraBoardIssuesPayload {
+  issues: JiraIssue[];
+  polledAt: string | null;
+}
+
+/**
+ * `GET /api/jira/jql/check` — the board sheet's check line. A JQL Jira rejects is the `ok: false` arm of a 200, not a 4xx: the sheet shows it inline as an
+ * answer, and a 4xx would read as the check itself having failed. `count` is Jira's approximate count, not a sweep.
+ */
+export type JiraJqlCheckResult = JiraJqlCheckOk | JiraJqlCheckBad;
+export interface JiraJqlCheckOk {
+  ok: true;
+  count: number;
+}
+export interface JiraJqlCheckBad {
+  ok: false;
+  /** Jira's own parse errors, joined with `; `, or the 400 its count answered. */
+  message: string;
+}
+
+/** 200 body of `POST /api/jira/repo-defaults` — the entry as stored: the path normalised, each default `null` when unset (the write is a full replace). */
+export interface JiraRepoDefaultsWriteResult {
+  path: string;
+  base: string | null;
+  namePattern: string | null;
 }
 
 /** What a board with no `interval` of its own polls at. Jira allows more headroom than GitHub, so the default is `1m`, not `DEFAULT_SYNC_INTERVAL`. */
@@ -963,6 +1031,80 @@ export interface AgentDispatchRequest {
 /** 201 body of `POST /api/agents/dispatch` — the dashboard's minted session id. */
 export interface AgentDispatchResult {
   sessionId: string;
+}
+
+/**
+ * Body of `POST /api/agents/orchestrate` (Task 9), as the client composes it — the board's "drain the queue" call: one project, no item, no caller-supplied
+ * prompt (the server composes the prompt itself; see `AgentsService.ORCHESTRATE_PROMPT`).
+ *
+ * This is the NARROW shape. The server's `AgentOrchestrateRequest` (`server/src/agents/agents.service.ts`) is derived from it with `permissionMode`,
+ * `mergeMode` and `questionMode` widened to `string` and `ids` to `unknown`, because it reads a body it cannot trust and its `resolve*` methods are the one
+ * place each of those becomes the union; a caller composing the request on the client already has the real unions in scope, so there is no reason to widen
+ * them just to send them over the wire. Every other field is this declaration's own on both sides, and a compile-time assertion beside the server type fails
+ * the typecheck when the two key sets disagree in either direction.
+ */
+export interface StartOrchestrateRequest {
+  /** The registered project's absolute path — `RegistryProject.path`, the same string `OrchestratorRun.project` carries. Never a dashboard dirName: that key
+   *  is resolved from this one value, the same way dispatch resolves it from an item's projectPath. */
+  project: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: PermissionMode;
+  /**
+   * Sent on every launch, including when it equals the default (`'merge'`) — an absent field would mean the same thing today, but the request is the sheet's
+   * explicit answer to "what should this run do", and inferring it server-side from an absent field would put that one decision in two places.
+   */
+  mergeMode?: MergeMode;
+  /**
+   * What the run should do with an item's open questions when nobody is there to answer them. Sent on every launch for `mergeMode`'s reason: absent resolves
+   * to `'park'` server-side, so an omitted field would land on the same value an untouched sheet shows — but the value is written verbatim into `run.json` and
+   * read out of the archive months later, where "the runner was told to park" and "nobody said" are different claims.
+   */
+  questionMode?: QuestionMode;
+  /**
+   * The branch this run gates at, cuts worktrees from and merges into. Absent means `main`.
+   *
+   * Plain `string`, not a union — unlike `mergeMode` and `questionMode`, whose vocabularies are fixed and compiled in. A branch list is a fact about one
+   * project at one moment, so there is nothing for the client to narrow against; the server proves the value instead (`resolveBase`), against a closed
+   * vocabulary it cannot enumerate in advance — the branches that exist in one registered project right now — so it is proved the way `ids` is, not clamped
+   * the way a two-member enum is. That matters, because this is the first field whose CALLER-SUPPLIED TEXT reaches the composed prompt.
+   *
+   * Sent on every launch, including the untouched `'main'`, for the same reason its two neighbours are.
+   */
+  base?: string;
+  /** The board's item selection, sent ONLY when it is a strict subset of the project's queue — an absent `ids` means "drain everything", and the two are
+   *  genuinely different instructions rather than two spellings of one (see useOrchestrateDraft's `selected`). Never an empty array: the server 400s that
+   *  rather than reading it as "everything", the same distinction `parseIdsArg` keeps in orchestrate.mjs, one layer down. Ids only — this request has no
+   *  prompt field to widen, and the server composes the prompt itself. */
+  ids?: string[];
+  /**
+   * The machine to run on: a configured remote's name (`ProjectOffers.machines[].machine`). Absent — or `home` in any case — means this machine, and such a
+   * body walks today's path gate for gate to a byte-identical spawn; the client sends nothing rather than `'home'`, so a home-only board's request is
+   * byte-identical to what it was before multi-dashboard. Anything else is resolved per request by `DashboardsService.machine`, and an unknown name is a 400.
+   * A remote run is PR mode only (`mergeMode: 'pr'`), and `lockedFor` (`client/src/lib/dashboards.ts`) is what the sheet reads to enforce that before the
+   * request is made.
+   */
+  machine?: string;
+}
+
+/**
+ * Body of `GET /api/agents/merge-check` (Task 6) — a read-only guess at whether a project's Claude Code settings already grant `git merge`, so the orchestrate
+ * sheet can hint at the one-time setup that makes a `merge`-mode run's last step reliable. Answered by `mergeCheck` (`server/src/agents/merge-check.util.ts`,
+ * whose header says what "covered" can and cannot promise) and shape-guarded on the client by `isMergeCheckResult`.
+ */
+export interface MergeCheckResult {
+  covered: boolean;
+  /** Absolute path of the settings file whose `permissions.allow` entry covers the merge, or `null` when nothing does. Display-only data for the sheet's
+   *  setup hint — the client only ever reads it, never writes it (the design's own non-goal: the sheet must never offer to write the file for the user). */
+  source: string | null;
+}
+
+/**
+ * Body of `GET /api/agents/branches` — one registered project's local branch names, for the launch sheets' base pickers. Empty on every git failure (a
+ * timeout included), never an error; the client's `fetchBranches` reads it as `Unchecked<AgentBranchesPayload>` and keeps only the non-empty strings.
+ */
+export interface AgentBranchesPayload {
+  branches: string[];
 }
 
 /**

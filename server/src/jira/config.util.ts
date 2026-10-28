@@ -12,6 +12,7 @@ import {
   type JiraBoard,
   type JiraQuery,
   type JiraRepoDefaults,
+  type JiraRepoDefaultsWriteResult,
   type JiraSkill,
   type SyncInterval
 } from '../../../shared/types';
@@ -432,7 +433,7 @@ export function parseReposWrite(body: unknown, home: string): Parsed<{ project: 
  * A base is Table A plus one rule of its own (`defaultBaseProblem`, final review M1): `base is a branch name, without origin/`. The tool adds `origin/`
  * itself, so a stored prefix made every Start exit 4.
  */
-export function parseRepoDefaultsWrite(body: unknown, home: string): Parsed<{ path: string; base: string | null; namePattern: string | null }> {
+export function parseRepoDefaultsWrite(body: unknown, home: string): Parsed<JiraRepoDefaultsWriteResult> {
   if (!isRecord(body)) return { ok: false, error: 'body must be a JSON object' };
   if (typeof body.path !== 'string' || body.path.trim() === '') return { ok: false, error: 'path is required' };
   const path = normaliseRepoPath(body.path, home);

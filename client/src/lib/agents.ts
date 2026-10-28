@@ -1,20 +1,22 @@
 import type {
+  AgentBranchesPayload,
   AgentDispatchRequest,
   AgentDispatchResult,
   AgentPlan,
   AgentsStatus,
   ExecuteFinish,
   ItemAbortResult,
-  MergeMode,
+  MergeCheckResult,
   OrchestratorArchivePayload,
   OrchestratorArchiveRun,
   OrchestratorRun,
   OrchestratorRunsPayload,
   PauseResult,
-  PermissionMode,
-  QuestionMode,
+  StartOrchestrateRequest,
   StartingRun,
   StopResult,
+  Unchecked,
+  UncommittedItems,
   WatchdogConfig,
   WatchdogStatus
 } from '../../../shared/types';
@@ -293,78 +295,6 @@ export async function fetchArchivedRun(project: string, runId: string): Promise<
 }
 
 /**
- * Body of `POST /api/agents/orchestrate` (Task 9). Mirrors the server's own
- * `AgentOrchestrateRequest` (server/src/agents/agents.service.ts) field for
- * field, but is declared here rather than promoted into shared/types.ts
- * alongside `AgentDispatchRequest`: that file's own comment on the server
- * type defers promotion until "a second consumer needs it", and this
- * client-only declaration is exactly that second consumer without requiring
- * a change to the server side, which is out of scope for the task that added
- * this function. `permissionMode` is narrower here than the server's plain
- * `string`: the server is validating a body it cannot trust, but a caller
- * composing this request on the client already has the real `PermissionMode`
- * union in scope (see `AgentDispatchRequest` above), so there is no reason
- * to widen it back to `string` just to send it over the wire.
- */
-export interface StartOrchestrateRequest {
-  project: string;
-  model?: string;
-  effort?: string;
-  permissionMode?: PermissionMode;
-  /**
-   * Narrower than the server's plain `string` for the same reason
-   * `permissionMode` above is: the server is validating a body it cannot
-   * trust, but a caller composing this request on the client already has
-   * the real `MergeMode` union in scope (see `shared/types.ts`), so there
-   * is no reason to widen it back to `string` just to send it over the
-   * wire. Sent on every launch, including when it equals the default
-   * (`'merge'`) — an absent field would mean the same thing today, but the
-   * request is the sheet's explicit answer to "what should this run do",
-   * and inferring it server-side from an absent field would put that one
-   * decision in two places.
-   */
-  mergeMode?: MergeMode;
-  /**
-   * What the run should do with an item's open questions when nobody is
-   * there to answer them. Narrowed from the server's `string` for
-   * `mergeMode`'s reason above, and sent on every launch for it too: absent
-   * resolves to `'park'` server-side, so an omitted field would land on the
-   * same value an untouched sheet shows — but the value is written verbatim
-   * into `run.json` and read out of the archive months later, where "the
-   * runner was told to park" and "nobody said" are different claims.
-   */
-  questionMode?: QuestionMode;
-  /**
-   * The branch this run gates at, cuts worktrees from and merges into.
-   *
-   * Plain `string`, not a union — unlike `mergeMode` and `questionMode`
-   * above, whose vocabularies are fixed and compiled in. A branch list is a
-   * fact about one project at one moment, so there is nothing for the client
-   * to narrow against; the server proves the value instead (`resolveBase`).
-   *
-   * Sent on every launch, including the untouched `'main'`, for the same
-   * reason its two neighbours are: the request is the sheet's explicit answer
-   * to "what should this run do", and an omitted field would put that one
-   * decision in two places.
-   */
-  base?: string;
-  /** The board's item selection, sent ONLY when it is a strict subset of the
-   *  project's queue — an absent `ids` means "drain everything", and the two
-   *  are genuinely different instructions rather than two spellings of one
-   *  (see useOrchestrateDraft's `selected`). Never an empty array: the server
-   *  400s that rather than reading it as "everything", the same distinction
-   *  `parseIdsArg` keeps in orchestrate.mjs. Ids only — this request has no
-   *  prompt field to widen, and the server composes the prompt itself. */
-  ids?: string[];
-  /**
-   * The machine to run on: a configured remote's name (`ProjectOffers.machines[].machine`). Absent means this machine — and the client sends nothing rather than
-   * `'home'` for it, so a home-only board's request is byte-identical to what it was before multi-dashboard. An unknown name is a 400 server-side. A remote run
-   * is PR mode only (`mergeMode: 'pr'`), and `lockedFor` (`lib/dashboards.ts`) is what the sheet reads to enforce that before the request is made.
-   */
-  machine?: string;
-}
-
-/**
  * The board's "drain the whole queue" call — one project, no item, no
  * caller-supplied prompt (the server drops one if sent; see
  * AgentsService.ORCHESTRATE_PROMPT). POST, not GET, for the same reason
@@ -481,7 +411,7 @@ export async function approvePlan(project: string, id: string): Promise<{ id: st
  * request itself: there is no `prompt`/`ids`/`model` for a caller to send,
  * because `resume()` builds the whole spawn from a compile-time constant —
  * see `AgentsService.RESUME_PROMPT`'s own comment for why this request has
- * nothing to widen the way `StartOrchestrateRequest` above does.
+ * nothing to widen the way `StartOrchestrateRequest` (shared/types.ts) does.
  */
 export async function resumeOrchestrate(project: string): Promise<AgentDispatchResult> {
   return unwrap<AgentDispatchResult>(
@@ -525,25 +455,6 @@ export function modelEffortFlags(model: string, effort: string): { model?: strin
  */
 export function sessionUrl(linkBase: string, sessionId: string): string {
   return `${linkBase.replace(/\/+$/, '')}/?session=${encodeURIComponent(sessionId)}`;
-}
-
-/**
- * Body of `GET /api/agents/merge-check` (Task 6). Mirrors the server's own
- * `MergeCheckResult` (server/src/agents/merge-check.util.ts) field for
- * field, but is declared here rather than promoted into shared/types.ts —
- * the same call `StartOrchestrateRequest` above already makes, for the same
- * reason: promotion waits for a second consumer to need it, and this
- * client-only declaration is exactly that second consumer without touching
- * the server side, which this task was never asked to do.
- */
-export interface MergeCheckResult {
-  covered: boolean;
-  /** Absolute path of the settings file whose `permissions.allow` entry
-   *  covers `git merge`, or `null` when nothing does. Read-only, display-only
-   *  data for the orchestrate sheet's setup hint — this client only ever
-   *  reads it, never writes it (the design's own non-goal: the sheet must
-   *  never offer to write the file for the user). */
-  source: string | null;
 }
 
 /**
@@ -603,8 +514,8 @@ function isMergeCheckResult(data: unknown): data is MergeCheckResult {
  * offer alternatives to it.
  */
 export async function fetchBranches(project: string): Promise<string[]> {
-  const data = await unwrap<{ branches?: unknown }>(await fetch(`/api/agents/branches?project=${encodeURIComponent(project)}`));
-  const list = (data as { branches?: unknown }).branches;
+  const data = await unwrap<Unchecked<AgentBranchesPayload>>(await fetch(`/api/agents/branches?project=${encodeURIComponent(project)}`));
+  const list = data.branches;
   if (!Array.isArray(list)) return [];
   return list.filter((b): b is string => typeof b === 'string' && b !== '');
 }
@@ -619,44 +530,6 @@ export async function fetchMergeCheck(project: string): Promise<MergeCheckResult
     throw new Error('malformed /api/agents/merge-check response');
   }
   return data;
-}
-
-/**
- * Body of `GET /api/items/uncommitted` (task-32) — which of a project's item
- * files differ from the picked base (`main` unless chosen otherwise, #254), so the Orchestrate sheet can flag the rows whose
- * bytes on disk are not the bytes a run will act on.
- *
- * Not "the rows that run is going to skip", which is what this said for one
- * review round: only the rows ABSENT from `main` are skipped, while a row
- * present there and merely edited since is gated and executed on `main`'s
- * copy. The sheet's own note is the one place that states the fates, each
- * only when a row has it (`absent` below says which); see
- * `server/src/items/uncommitted.util.ts`'s header for why the question is
- * deliberately the broad one.
- *
- * Declared here rather than promoted into shared/types.ts, the same call
- * `MergeCheckResult` above already makes and for the same reason: promotion
- * waits for a second consumer, and there is exactly one — the sheet.
- *
- * The endpoint is not under `/api/agents`, and this module is still the right
- * home: it is the board's same-origin fetch layer, it owns `unwrap`/`ApiError`,
- * and it already holds this same sheet's other on-open read.
- */
-export interface UncommittedItems {
-  /** Absolute item-file paths, comparable to `BacklogItem.path` verbatim —
-   *  the server builds them from the registry's own project path with the
-   *  same construction `scanProject` uses, so neither side calls realpath. */
-  paths: string[];
-  /** The subset of `paths` whose path `main` does not hold at all, so a run
-   *  refuses it with `not committed on main` and skips it (#235). Same
-   *  construction as `paths`, so it compares with `Set.has` the same way;
-   *  every flagged path NOT in it is stale — present at `main` with older
-   *  bytes, which the run gates and executes. */
-  absent: string[];
-  /** False whenever the server could not make the read at all: no git, not a
-   *  repo, the project is not the repo toplevel, no `main` ref. The sheet
-   *  renders nothing in that case — see the guard below. */
-  known: boolean;
 }
 
 /**
@@ -689,6 +562,10 @@ function isUncommittedItems(data: unknown): data is UncommittedItems {
 }
 
 /**
+ * `GET /api/items/uncommitted` (task-32), whose body is `UncommittedItems` (shared/types.ts). The endpoint is not under `/api/agents`, and this module is
+ * still the right home for the call: it is the board's same-origin fetch layer, it owns `unwrap`/`ApiError`, and it already holds this same sheet's other
+ * on-open read.
+ *
  * `base` is the sheet's picked base, sent on every call — `main` included —
  * for the reason the launch body sends it on every launch: the server treats
  * `main` as the default either way, and an always-present parameter is one
