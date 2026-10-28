@@ -135,7 +135,7 @@ keys and an `Ascending`/`Descending` switch, each key arriving in its natural di
 composing `Modal`: a facts column (project dot and name, id, section, the created / updated / last-commit stamps, `groomed`, tags, the `in progress since`
 reading while a session holds the item, the elapsed and token counters when present, the file path, the dispatch control) beside the item's rendered Markdown
 body, folding above it under 700 px. The body goes through `renderMarkdown` (`client/src/lib/markdown.ts`), the sanitising `marked` configuration hoisted
-out of `ItemModal` in Jira phase 2 so the Jira issue modal renders a ticket's description through the same function: raw HTML is dropped, a link may name only
+out of `ItemModal` in Jira phase 2 so the Jira issue modal renders a ticket's description through the same function: raw HTML never renders as markup — a comment renders as nothing and any other tag as escaped literal text, so `Promise<void>` survives in prose, and text marked lexes inside an inline `<script>`/`<pre>` is escaped too (#350) — a link may name only
 `http`, `https` or `mailto` (or no scheme), and an image may name no scheme at all, so the board makes no outbound fetch on a viewer's behalf.
 
 Beside the band's title sits the **run chip** (`RunChip`), the Board's whole account of orchestrator runs since the run strip, the starting strip and the run
@@ -507,7 +507,7 @@ block above it), and a click opens the item instead of re-stating the reason; th
 `lib/agents.ts`) and then asks the board to re-read (`onApproved`, which BoardView passes as `refetch`, beside `onReleased`); on a files item no request, only
 a `Copy prompt` for a Claude session, because the board never writes item files (`planApprovePrompt`, `lib/plan-review.ts`). So the modal reflects the
 approval, BoardView hands it the FRESH item — found in the payload by project and id during render, the click's snapshot only when the payload no longer has
-it — never an effect that calls `setOpen`. The band adds `PlanReviewChip` after the run chip: `N plans awaiting review`, with the tick's `--max-plans` cap and
+it — never an effect that calls `setOpen`; ArchiveView, the other host of `ItemModal`, derives its open item the same way (#350). The band adds `PlanReviewChip` after the run chip: `N plans awaiting review`, with the tick's `--max-plans` cap and
 ` · tick blocked` once a tick has recorded its caps (`TickProject.lastDecide`, read through `useTicks({ live: false })`); `planReviewTally` and
 `planReviewReading` are the arithmetic. Runs › Ticks prints the same caps per project row: `plans awaiting review N/M · open PRs N/M · as of HH:MM`, and
 ` · grooming blocked` at the plan cap.

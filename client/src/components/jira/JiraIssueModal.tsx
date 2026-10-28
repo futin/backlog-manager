@@ -103,7 +103,7 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * unreachable: timeout`), because a column that blanked on a Jira blip would take the readable half down with the unreadable one.
  *
  * **The browser never talks to Jira.** The one request is to `/api/jira/issue/…`; the link out is the issue's `url` as the SERVER built it, rendered as
- * given in a new tab with no referrer, and the description goes in through `renderMarkdown` — the sanitising renderer that drops raw HTML and refuses a
+ * given in a new tab with no referrer, and the description goes in through `renderMarkdown` — the sanitising renderer that never emits raw HTML as markup and refuses a
  * `javascript:` href (see its header), which matters more here than on a backlog item, because this text was typed by anyone with access to the Jira site.
  *
  * **State belongs to a key.** The held answer is stamped with the issue key it was read for, and only that key's answer is read: reopening the modal on

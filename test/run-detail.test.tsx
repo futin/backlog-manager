@@ -317,6 +317,17 @@ describe('RunDetail', () => {
     expect(screen.getByTestId('run-detail-verify-a-2')).toHaveAttribute('open');
   });
 
+  /* #350 — JSX drops the line break between the command span and the verdict span, and the summary is a default list-item box with no gap of its own, so
+     the two ran together as `pnpm testok`. The space is a real text node, so `textContent` is what a reader sees. */
+  it('separates the verification command from its verdict with a space', () => {
+    mockFetchArchivedRun.mockImplementation(() => new Promise(() => {}));
+
+    render(<RunDetail summary={primarySummary()} live={null} {...CONTROL_PROPS} />);
+
+    expect(screen.getByTestId('run-detail-verify-a-1').querySelector('summary')?.textContent).toBe('pnpm test ok');
+    expect(screen.getByTestId('run-detail-verify-a-2').querySelector('summary')?.textContent).toBe('pnpm test failed');
+  });
+
   it('live run renders tails without fetching', async () => {
     const full = primaryFull({ a2: 'LIVE_TAIL' });
 

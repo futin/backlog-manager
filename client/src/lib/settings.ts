@@ -244,6 +244,18 @@ export const FONT_SCALES = [90, 100, 110, 120];
  */
 export const STALE_WINDOWS = [7, 14, 30, 90];
 
+/**
+ * A stop row's options: `stops` as they are when `current` is one of them, otherwise
+ * `stops` plus `current`, ascending. LIMITS honours a hand-edited value between or
+ * beyond the stops on purpose, and a row built from the stops alone matched no option
+ * for it — nothing selected, and no current value on screen (#350). Listing it is the
+ * same call `landingOptions` makes for a stored Jira landing; the value is never
+ * snapped to a stop.
+ */
+export function stopsWith(stops: readonly number[], current: number): number[] {
+  return stops.includes(current) ? [...stops] : [...stops, current].sort((a, b) => a - b);
+}
+
 /** The key this app's own settings live under. */
 export const SETTINGS_STORAGE_KEY = 'backlog-manager.settings';
 

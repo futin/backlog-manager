@@ -222,7 +222,7 @@ describe('ItemModal', () => {
     expect(screen.getByText('second body')).toBeInTheDocument();
   });
 
-  it('drops raw HTML instead of passing it to dangerouslySetInnerHTML', async () => {
+  it('never passes raw HTML to dangerouslySetInnerHTML as markup', async () => {
     (global.fetch as jest.Mock).mockImplementation(() =>
       Promise.resolve({
         ok: true,
@@ -232,8 +232,65 @@ describe('ItemModal', () => {
     render(<ItemModal item={ITEM} hues={HUES} onClose={() => {}} />);
     await waitFor(() => expect(screen.getByText('safe text')).toBeInTheDocument());
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
-    expect(document.querySelector('.item-body')?.innerHTML).not.toContain('onerror');
+    // No ELEMENT carries the handler. Since #350 the tag renders as escaped literal text, so the word `onerror` is on screen as prose — which is
+    // inert: it is a text node, and the browser's parser never builds an attribute out of `&lt;img … onerror=…&gt;`.
+    expect(document.querySelector('.item-body [onerror]')).toBeNull();
     expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+  });
+
+  /* #350 — marked reads prose like `Promise<void>` as an inline HTML tag, and the renderer used to drop every HTML token, so the generic vanished from the
+     body. Raw HTML now renders as escaped text — never as markup, so the case above still holds — and only a comment renders as nothing, because tracker
+     bodies end in `<!-- bm:… -->` footers that are bookkeeping, not prose. */
+  describe('raw HTML in a body (#350)', () => {
+    it('keeps a generic in prose as literal text', () => {
+      expect(renderMarkdown('returns Promise<void> here')).toContain('Promise&lt;void&gt;');
+    });
+
+    it('renders a tag as escaped text, never as an element', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('<img src=x onerror="window.__pwned=1">');
+      expect(host.querySelector('img')).toBeNull();
+      expect(host.querySelector('[onerror]')).toBeNull();
+    });
+
+    it('renders a block HTML comment as nothing', () => {
+      const html = renderMarkdown('text\n\n<!-- bm:groomed-at abc -->\n');
+      expect(html).not.toContain('bm:groomed-at');
+      expect(html).not.toContain('&lt;!--');
+    });
+
+    it('renders an inline HTML comment as nothing', () => {
+      const html = renderMarkdown('a <!-- x --> b');
+      expect(html).not.toMatch(/\bx\b/);
+      expect(html).not.toContain('&lt;!--');
+    });
+
+    // marked flags every text token lexed between an inline raw-block opener (`<script>`, `<pre>`, `<style>`, `<textarea>`) and its closer as
+    // `escaped`, and its default text renderer emits such a token verbatim. A tag that does not close before the closer is lexed as text, not html, so the
+    // `html` renderer never sees it — the text path has to escape too (#350 review).
+    it.each([
+      ['script', 'a <script> <img src=x onerror="window.__pwned=1"// </script> b'],
+      ['pre', 'a <pre> <svg onload="window.__pwned=1"// </pre> b']
+    ])('renders a tag inside an inline <%s> as escaped text', (_raw, source) => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown(source);
+      expect(host.querySelector('[onerror], [onload]')).toBeNull();
+      expect(host.querySelector('img, svg')).toBeNull();
+    });
+
+    it('escapes plain text exactly once', () => {
+      expect(renderMarkdown('a & b < c')).toBe('<p>a &amp; b &lt; c</p>\n');
+    });
+
+    // marked builds a loose task item's checkbox into a token it marks `escaped` after lexing; escaping every text token at render time instead of at
+    // walk time would print that checkbox as `&lt;input …&gt;`.
+    it('keeps a loose task list checkbox as an input', () => {
+      const host = document.createElement('div');
+      host.innerHTML = renderMarkdown('- [x] done & dusted\n\n- [ ] next\n');
+      expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
+      expect(host.textContent).not.toContain('<input');
+      expect(host.textContent).toContain('done & dusted');
+    });
   });
 
   it('neutralizes a javascript: href instead of rendering it as a clickable link', async () => {
