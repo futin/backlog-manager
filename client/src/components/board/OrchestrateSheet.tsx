@@ -48,7 +48,7 @@ type Step = 1 | 2 | 3;
  *     dispatch's `action` is re-derived server-side rather than trusted.
  *   - LaunchSheet's dispatch body is keyed on `itemPath` + `action` and
  *     carries a `remoteControl` checkbox; `StartOrchestrateRequest`
- *     (lib/agents.ts) has neither — see agents.service.ts's own comment on
+ *     (shared/types.ts) has neither — see agents.service.ts's own comment on
  *     why a board-started run deliberately never gets a remote-control
  *     channel.
  *   - LaunchSheet's success state replaces the form with a session link and

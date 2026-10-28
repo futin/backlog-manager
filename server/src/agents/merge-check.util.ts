@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import type { MergeCheckResult } from '../../../shared/types';
+
 /**
  * merge-check.util.ts — a read-only guess at whether a project's Claude Code
  * settings already grant the one Bash capability an orchestrator run needs to
@@ -59,12 +61,9 @@ import { join } from 'node:path';
  * A bare `Bash` entry (no parens at all) is Claude Code's own "allow every
  * command" wildcard and always covers.
  */
-export interface MergeCheckResult {
-  covered: boolean;
-  /** Absolute path of the settings file the covering entry came from, or
-   *  `null` when nothing covers it. */
-  source: string | null;
-}
+
+// `MergeCheckResult`, the shape `mergeCheck` answers — `source` is the absolute path of the ONE settings file the covering entry came from, per the paragraph
+// above — is declared in shared/types.ts (#375), because the client reads the same body and one declaration makes a renamed field fail the typecheck.
 
 /**
  * Commands of the four shapes a merge-mode run issues — see the file header.

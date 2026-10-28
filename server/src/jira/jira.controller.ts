@@ -3,7 +3,17 @@ import { Controller, Get, HttpException, Param, Query, Res } from '@nestjs/commo
 import type { Response } from 'express';
 
 import { isJiraKey, parseJiraActionParam } from '../../../shared/types';
-import type { JiraIssue, JiraIssueDetail, JiraRepoRefs, JiraStatusPayload, JiraWorkspace, JiraWorktreesPayload } from '../../../shared/types';
+import type {
+  JiraBoardIssuesPayload,
+  JiraIssue,
+  JiraIssueDetail,
+  JiraJqlCheckResult,
+  JiraProjectRef,
+  JiraRepoRefs,
+  JiraStatusPayload,
+  JiraWorkspace,
+  JiraWorktreesPayload
+} from '../../../shared/types';
 import { renderTicketBlock } from './block';
 import { parseBranchChoice, resolveWorkspace } from './branch-choice.util';
 import { JIRA_JQL_MAX_CHARS, isJiraId, normaliseRepoPath, readJiraConfig } from './config.util';
@@ -53,7 +63,7 @@ export class JiraController {
    * the caller has no business learning which.
    */
   @Get('boards/:id/issues')
-  boardIssues(@Param('id') id: string): { issues: JiraIssue[]; polledAt: string | null } {
+  boardIssues(@Param('id') id: string): JiraBoardIssuesPayload {
     if (!isJiraId('b', id)) throw new HttpException({ error: 'unknown board' }, 404);
     this.requireConfigured();
     const board = this.poller.boardIssues(id);
@@ -98,7 +108,7 @@ export class JiraController {
 
   /** `GET /api/jira/projects` — every project the credentials can see, sorted by key. */
   @Get('projects')
-  async projects(): Promise<{ key: string; name: string }[]> {
+  async projects(): Promise<JiraProjectRef[]> {
     this.requireConfigured();
     return unwrapJira(await this.poller.projects());
   }
@@ -109,7 +119,7 @@ export class JiraController {
    * `JIRA_JQL_MAX_CHARS` (P11), because a query that long is a paste accident, not a filter.
    */
   @Get('jql/check')
-  async checkJql(@Query('jql') jql: unknown): Promise<{ ok: true; count: number } | { ok: false; message: string }> {
+  async checkJql(@Query('jql') jql: unknown): Promise<JiraJqlCheckResult> {
     if (typeof jql !== 'string' || jql.trim() === '') throw new HttpException({ error: 'jql is required' }, 400);
     if (jql.length > JIRA_JQL_MAX_CHARS) throw new HttpException({ error: `jql is too long (max ${JIRA_JQL_MAX_CHARS})` }, 400);
     this.requireConfigured();

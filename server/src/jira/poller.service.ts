@@ -9,9 +9,12 @@ import {
   type JiraAccess,
   type JiraBoard,
   type JiraBoardFailure,
+  type JiraBoardIssuesPayload,
   type JiraIssue,
   type JiraIssueDetail,
   type JiraIssueWriteResult,
+  type JiraJqlCheckResult,
+  type JiraProjectRef,
   type JiraStatusPayload,
   type JiraTransition
 } from '../../../shared/types';
@@ -354,7 +357,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /** A board's cached list: `null` for a board `jira.json` does not hold, an empty list with `polledAt: null` for one not swept yet. */
-  boardIssues(id: string): { issues: JiraIssue[]; polledAt: string | null } | null {
+  boardIssues(id: string): JiraBoardIssuesPayload | null {
     if (!readJiraConfig().boards.some((b) => b.id === id)) return null;
     const cache = this.caches.get(id);
     return cache === undefined ? { issues: [], polledAt: null } : { issues: cache.issues, polledAt: cache.polledAt };
@@ -446,7 +449,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * Every project the credentials can see, sorted by key. Paged by `startAt` (P13), never by following the `nextPage` URL Jira hands back: the client builds
    * every URL itself, so Basic auth is never sent to an address that came out of a response body.
    */
-  async projects(): Promise<JiraResult<{ key: string; name: string }[]>> {
+  async projects(): Promise<JiraResult<JiraProjectRef[]>> {
     const gate = this.gate();
     if ('refused' in gate) return gate.refused;
     const byKey = new Map<string, string>();
@@ -471,7 +474,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
    * is where an unbounded query is refused, since it parses fine (P8). Both of those answers are `ok: true` with a verdict inside; only a failure to ASK is
    * a `JiraResult` failure.
    */
-  async checkJql(jql: string): Promise<JiraResult<{ ok: true; count: number } | { ok: false; message: string }>> {
+  async checkJql(jql: string): Promise<JiraResult<JiraJqlCheckResult>> {
     const gate = this.gate();
     if ('refused' in gate) return gate.refused;
     const parsed = await this.client.parseJql(gate.auth, jql);
@@ -939,7 +942,7 @@ export class JiraPollerService implements OnApplicationBootstrap, OnApplicationS
   }
 
   /** The union of project keys on the cached boards and the mapped keys, sorted; a name from a cached issue when there is one, else the key. */
-  private projectsOf(config: JiraConfig): { key: string; name: string }[] {
+  private projectsOf(config: JiraConfig): JiraProjectRef[] {
     const names = new Map<string, string>();
     for (const board of config.boards) {
       for (const issue of this.caches.get(board.id)?.issues ?? []) if (!names.has(issue.project.key)) names.set(issue.project.key, issue.project.name);

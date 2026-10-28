@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { JiraIssue, SyncInterval } from '../../../shared/types';
+import type { JiraBoardIssuesPayload, JiraIssue, SyncInterval, Unchecked } from '../../../shared/types';
 import { useJiraContext } from './JiraContext';
 import { BOARD_TRACKER_POLL_MS } from './useBoard';
 import { useCoalescedFetch } from './useCoalescedFetch';
@@ -45,8 +45,8 @@ export interface JiraBoardState {
 
 interface Held {
   id: string;
-  issues: JiraIssue[];
-  polledAt: string | null;
+  issues: JiraBoardIssuesPayload['issues'];
+  polledAt: JiraBoardIssuesPayload['polledAt'];
   error: boolean;
 }
 
@@ -68,10 +68,10 @@ export function useJiraBoard(id: string | null, interval: SyncInterval | null, n
       const res = await fetch(`/api/jira/boards/${encodeURIComponent(asked)}/issues`);
       if (res.status === 404 && mounted.current && idRef.current === asked) reloadStatusRef.current();
       if (!res.ok) throw new Error(String(res.status));
-      const body = (await res.json()) as { issues?: unknown; polledAt?: unknown };
+      const body = (await res.json()) as Unchecked<JiraBoardIssuesPayload>;
       if (!Array.isArray(body.issues)) throw new Error('malformed board response');
       const polledAt = typeof body.polledAt === 'string' ? body.polledAt : null;
-      if (mounted.current && idRef.current === asked) setHeld({ id: asked, issues: body.issues as JiraIssue[], polledAt, error: false });
+      if (mounted.current && idRef.current === asked) setHeld({ id: asked, issues: body.issues as JiraBoardIssuesPayload['issues'], polledAt, error: false });
     } catch {
       if (mounted.current && idRef.current === asked) {
         setHeld((prev) => {

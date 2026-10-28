@@ -2,8 +2,7 @@ import { Controller, Get, HttpException, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { ItemsService } from './items.service';
-import type { UncommittedItems } from './uncommitted.util';
-import type { ClaimResult, ItemsIndex, ProjectSummary } from '../../../shared/types';
+import type { ClaimResult, ItemsIndex, ProjectSummary, UncommittedItems } from '../../../shared/types';
 
 /**
  * Everything lives under /api on purpose: dev-mode Vite proxies exactly one
