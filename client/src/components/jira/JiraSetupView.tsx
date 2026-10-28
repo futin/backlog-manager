@@ -4,7 +4,7 @@ import { useJiraContext } from '../../hooks/JiraContext';
 import { useNow } from '../../hooks/useNow';
 import { JIRA_BOARD_FILTER_FROM, JIRA_BOARD_KEY, boardRowLine, boardsForSetup } from '../../lib/jira';
 import type { JiraPage } from '../../lib/jira-page';
-import type { JiraBoard, JiraBoardStatus } from '../../../../shared/types';
+import type { JiraBoard, JiraBoardStatus, JiraProjectRef } from '../../../../shared/types';
 import { Band } from '../ui/Band';
 import { Chip } from '../ui/Chip';
 import { Pill } from '../ui/Pill';
@@ -94,7 +94,7 @@ function useProjectsOnce(): JiraProjectList {
         const res = await fetch('/api/jira/projects');
         const body: unknown = await res.json().catch(() => null);
         if (!live) return;
-        if (res.ok && Array.isArray(body)) setState({ list: body as { key: string; name: string }[], error: null });
+        if (res.ok && Array.isArray(body)) setState({ list: body as JiraProjectRef[], error: null });
         else setState({ list: null, error: errorOf(body, `the project list could not be read (HTTP ${res.status})`) });
       } catch {
         if (live) setState({ list: null, error: 'the project list could not be read — the server did not answer' });

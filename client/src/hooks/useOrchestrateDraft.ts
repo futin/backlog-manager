@@ -4,7 +4,7 @@ import { useAction } from './useAction';
 import { useFetched } from './useFetched';
 import { useRunOn, type RunOnState } from './useRunOn';
 import { useSettings } from './useSettings';
-import { ApiError, fetchBranches, fetchMergeCheck, fetchUncommitted, startOrchestrate, type MergeCheckResult } from '../lib/agents';
+import { ApiError, fetchBranches, fetchMergeCheck, fetchUncommitted, startOrchestrate } from '../lib/agents';
 import { mergeModeOptionLabels } from '../lib/merge-mode';
 import {
   arrangeOrder,
@@ -23,7 +23,7 @@ import {
 } from '../lib/orchestrate-draft';
 import { clampMode, modesUpTo } from '../../../shared/agent';
 import { RUN_IN_PROGRESS_CODE } from '../../../shared/types';
-import type { BacklogItem, MergeMode, PermissionMode, ProjectSummary, QuestionMode } from '../../../shared/types';
+import type { BacklogItem, MergeCheckResult, MergeMode, PermissionMode, ProjectSummary, QuestionMode } from '../../../shared/types';
 
 /**
  * Everything the Orchestrate sheet's three step views and its footer read (#306) — one props currency, so each view renders alone from a hand-built one

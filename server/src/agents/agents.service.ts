@@ -18,7 +18,7 @@ export { authHeaders, dashboardError, message } from './config.util';
 import { DashboardStatusService } from './dashboard-status.service';
 import { DashboardsService, type Machine } from './dashboards/dashboards.service';
 import { filesBackedReason, OffersService, REMOTE_BUDGET } from './dashboards/offers.service';
-import { mergeCheck as checkMergeCoverage, type MergeCheckResult } from './merge-check.util';
+import { mergeCheck as checkMergeCoverage } from './merge-check.util';
 import {
   clampMode,
   deriveAction,
@@ -46,16 +46,19 @@ import { RemoteStartingService } from '../orchestrator/remote-starting.service';
 import { RemoteRunsService } from '../orchestrator/remote-runs.service';
 import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
+  AgentBranchesPayload,
   AgentDispatchRequest,
   AgentDispatchResult,
   AgentPlan,
   AgentsStatus,
   BacklogItem,
+  MergeCheckResult,
   MergeMode,
   OrchestratorRun,
   PauseResult,
   PermissionMode,
   QuestionMode,
+  StartOrchestrateRequest,
   StopResult
 } from '../../../shared/types';
 
@@ -195,77 +198,46 @@ const RESUME_PROMPT = '/backlog-orchestrate --resume';
 const STOP_PROMPT = '/backlog-orchestrate --abort';
 
 /**
- * Body of `POST /api/agents/orchestrate`, already reduced to exactly the
- * fields that survive the controller's field-by-field rebuild — see
- * AgentsController.orchestrate(). Not declared in shared/types.ts alongside
- * AgentDispatchRequest: that one has a client-side twin because the launch
- * sheet builds its request field by field from a form, and nothing on the
- * client needs this shape yet (a later task's board control has the project
- * already in hand and can compose this request directly). Promote it to
- * shared/ if and when a second consumer needs it.
+ * Body of `POST /api/agents/orchestrate`, already reduced to exactly the fields that survive the controller's field-by-field rebuild — see
+ * AgentsController.orchestrate(). The WIDENED twin of the client's `StartOrchestrateRequest` (shared/types.ts, where every field is documented): the same
+ * keys, with the four a body this service cannot trust could hold anything in widened to what it actually might hold. Every other field — `project`,
+ * `model`, `effort`, `base`, `machine` — is the shared field itself, so the two cannot drift apart on a field neither side narrows; and
+ * `OrchestrateRequestKeysMatch` below fails the typecheck the moment the key sets differ, in either direction.
  */
-export interface AgentOrchestrateRequest {
-  /** The registered project's absolute path — RegistryProject.path, the same
-   *  string OrchestratorRun.project carries. Never a dashboard dirName: that
-   *  key is resolved from this one value, the same way dispatch resolves it
-   *  from an item's projectPath. */
-  project: string;
-  model?: string;
-  effort?: string;
+export interface AgentOrchestrateRequest extends Omit<StartOrchestrateRequest, OrchestrateWidenedKey> {
+  /** `string`, not `PermissionMode`: arrives straight off a request body this service cannot trust, and `clampMode` is where it becomes the union. */
   permissionMode?: string;
   /**
-   * `string | undefined`, not `MergeMode | undefined`: this arrives straight
-   * off a request body this service cannot trust, the same reason `ids`
-   * below is `unknown` rather than `string[]` — the client's own
-   * `StartOrchestrateRequest` (client/src/lib/agents.ts) is the one that
-   * gets to type this narrower, because a caller composing that request
-   * already has the real `MergeMode` union in scope. `resolveMergeMode` is
-   * the only place this field is read and the only place it is allowed to
-   * become a `MergeMode` — see that method for the validation rule, which
-   * deliberately differs from every neighbouring field.
+   * `string | undefined`, not `MergeMode | undefined`: this arrives straight off a request body this service cannot trust, the same reason `ids` below is
+   * `unknown` rather than `string[]`. `resolveMergeMode` is the only place this field is read and the only place it is allowed to become a `MergeMode` — see
+   * that method for the validation rule, which deliberately differs from every neighbouring field.
    */
   mergeMode?: string;
   /**
-   * `string | undefined` for exactly the reason `mergeMode` above is: this
-   * arrives straight off a request body this service cannot trust.
-   * `resolveQuestionMode` is the only place it is read and the only place it
-   * is allowed to become a `QuestionMode` — and, like its neighbour and
-   * unlike `model`/`effort`, an unrecognised value there is a 400 rather
-   * than a drop.
+   * `string | undefined` for exactly the reason `mergeMode` above is. `resolveQuestionMode` is the only place it is read and the only place it is allowed to
+   * become a `QuestionMode` — and, like its neighbour and unlike `model`/`effort`, an unrecognised value there is a 400 rather than a drop.
    */
   questionMode?: string;
   /**
-   * The branch this run should gate at, cut worktrees from and merge into.
-   * Absent means `main`.
-   *
-   * `string | undefined` for the same untrusted-body reason `mergeMode` and
-   * `questionMode` above are, but note where the resemblance stops:
-   * `resolveBase` validates this against a closed vocabulary it cannot
-   * enumerate in advance — the branches that happen to exist in one
-   * registered project right now — so it is proved the way `ids` is proved,
-   * not clamped the way a two-member enum is. That difference is the whole
-   * of `resolveBase`'s doc comment and it matters, because this is the first
-   * field whose CALLER-SUPPLIED TEXT reaches the composed prompt.
+   * `unknown` rather than `string[]`: this arrives straight off a request body, and the narrowing is the point — see `resolveIds`, which is the only place
+   * this value is read and the only place it is allowed to become a string. An explicitly EMPTY array is not the same as an absent one and is refused rather
+   * than folded into "everything"; that is the same distinction `parseIdsArg` keeps in orchestrate.mjs, for the same reason, one layer down.
    */
-  base?: string;
-  /** The board's item selection, or absent for "the whole queue".
-   *
-   *  `unknown` rather than `string[]`: this arrives straight off a request
-   *  body, and the narrowing is the point — see `resolveIds`, which is the
-   *  only place this value is read and the only place it is allowed to
-   *  become a string. An explicitly EMPTY array is not the same as an absent
-   *  one and is refused rather than folded into "everything"; that is the
-   *  same distinction `parseIdsArg` keeps in orchestrate.mjs, for the same
-   *  reason, one layer down. */
   ids?: unknown;
-  /**
-   * Multi-dashboard task 6 — which machine runs the drain: absent (the client omits it for home) or `home` in any case is this machine, and such a body
-   * walks today's path gate for gate to a byte-identical spawn; anything else is a remote's name from the settings file, resolved per request by
-   * `DashboardsService.machine`. Typed `string` as dispatch's twin is, and checked with `typeof` all the same, because the controller forwards it
-   * unvalidated: a non-string is a 400, never a quiet fallback to home.
-   */
-  machine?: string;
 }
+
+/** The four fields `AgentOrchestrateRequest` widens. Everything else it takes from `StartOrchestrateRequest` as is. */
+type OrchestrateWidenedKey = 'permissionMode' | 'mergeMode' | 'questionMode' | 'ids';
+
+/**
+ * Compile-time only, and required rather than optional: `Omit` alone does not couple the two key sets, because omitting a key the shared type no longer has
+ * is silent — rename `mergeMode` in shared/types.ts and the widened `mergeMode` here would live on as a field no client sends. So both directions are checked:
+ * a key `AgentOrchestrateRequest` has that `StartOrchestrateRequest` lacks, and the reverse. Either one makes `SameKeys` `false`, and `Assert<false>` fails
+ * `pnpm run typecheck`. A type alias emits no JavaScript, so a running orchestrator sees an identical build.
+ */
+type SameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] extends [never, never] ? true : false;
+type Assert<T extends true> = T;
+export type OrchestrateRequestKeysMatch = Assert<SameKeys<AgentOrchestrateRequest, StartOrchestrateRequest>>;
 
 @Injectable()
 export class AgentsService {
@@ -2033,7 +2005,7 @@ export class AgentsService {
    * `{ branches: [] }`, exactly as a non-zero exit does — an empty picker, not
    * a 500 and not a frozen server.
    */
-  async branches(project: string): Promise<{ branches: string[] }> {
+  async branches(project: string): Promise<AgentBranchesPayload> {
     const entry = this.registry.load().projects.find((p) => p.path === project);
     if (entry === undefined) throw new HttpException({ error: 'project is not registered' }, 404);
     const out = await runGit(['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/']);

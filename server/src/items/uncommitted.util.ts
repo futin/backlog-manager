@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { runGit } from '../git-run.util';
+import type { UncommittedItems } from '../../../shared/types';
 
 /**
  * uncommitted.util.ts — which item files the working tree holds in a state a
@@ -92,28 +93,8 @@ import { runGit } from '../git-run.util';
  */
 export const UNCOMMITTED_BASE_REF = 'main';
 
-export interface UncommittedItems {
-  /** Absolute paths, built from `projectPath` verbatim so they compare equal
-   *  to `BacklogItem.path` without either side calling `realpath`. */
-  paths: string[];
-  /** The subset of `paths` whose path `main` does not hold at all, so a run
-   *  refuses it with `not committed on main` and skips it. Absolute, built
-   *  with the same construction as `paths` from the same relative strings,
-   *  so the two compare with `Set.has` byte for byte. Every other entry of
-   *  `paths` is STALE — present at `main` with older bytes, which the run
-   *  gates and executes — and is deliberately not named on the wire, so the
-   *  two lists cannot disagree about it (Decision 3 in the header). */
-  absent: string[];
-  /** False whenever this read could not be made — no git, not a repo, the
-   *  project is not the repo toplevel, no `main` ref, a timeout — and, since
-   *  task-45, whenever it could not be ASKED: a tracker project has no item
-   *  files, so `ItemsService.uncommitted` answers this shape without reaching
-   *  this module at all. The client
-   *  renders NOTHING on `known: false`: an absent answer must never read as
-   *  "nothing is uncommitted", since this feeds a render that asserts a fact
-   *  about someone's repo. */
-  known: boolean;
-}
+// `UncommittedItems`, the shape this module answers, is declared in shared/types.ts (#375): the client reads the same body, and one declaration is what
+// makes a field renamed on either side fail the typecheck.
 
 /** Fresh object per call — a shared constant would be one mutation away from
  *  leaking a previous caller's `paths` array. */

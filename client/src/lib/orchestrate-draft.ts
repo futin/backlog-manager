@@ -1,6 +1,6 @@
 import { deriveAction, type AgentAction } from '../../../shared/agent';
-import type { BacklogItem, MergeMode, PermissionMode, ProjectSummary, QuestionMode } from '../../../shared/types';
-import { modelEffortFlags, type StartOrchestrateRequest, type UncommittedItems } from './agents';
+import type { BacklogItem, MergeMode, PermissionMode, ProjectSummary, QuestionMode, StartOrchestrateRequest, UncommittedItems } from '../../../shared/types';
+import { modelEffortFlags } from './agents';
 
 /**
  * orchestrate-draft.ts — the Orchestrate sheet's derivations, pure (#306). Every value here used to be computed inline in `OrchestrateSheet`'s render body;

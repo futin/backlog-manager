@@ -2,7 +2,7 @@ import { Body, Controller, HttpCode, HttpException, Post, UseGuards } from '@nes
 import { homedir } from 'node:os';
 
 import { isJiraKey } from '../../../shared/types';
-import type { JiraBoard, JiraIssueWriteResult, JiraSkill } from '../../../shared/types';
+import type { JiraBoard, JiraIssueWriteResult, JiraRepoDefaultsWriteResult, JiraSkill } from '../../../shared/types';
 import { SameOriginPostGuard } from '../agents/origin.guard';
 import {
   JIRA_TRANSITION_ID_MAX_CHARS,
@@ -115,7 +115,7 @@ export class JiraWriteController {
   @Post('repo-defaults')
   @HttpCode(200)
   @UseGuards(SameOriginPostGuard)
-  saveRepoDefaults(@Body() body: unknown): { path: string; base: string | null; namePattern: string | null } {
+  saveRepoDefaults(@Body() body: unknown): JiraRepoDefaultsWriteResult {
     const parsed = parseRepoDefaultsWrite(body, homedir());
     if (!parsed.ok) throw new HttpException({ error: parsed.error }, 400);
     this.requireConfigured();

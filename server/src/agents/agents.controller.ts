@@ -1,14 +1,13 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards } from '@nestjs/common';
 
 import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
-import type { MergeCheckResult } from './merge-check.util';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
 import { writeWatchdogConfig } from '../orchestrator/watchdog-config.util';
 import { isAgentAction } from '../../../shared/agent';
-import type { AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
+import type { AgentBranchesPayload, AgentDispatchRequest, AgentDispatchResult, AgentPlan, AgentsStatus, MergeCheckResult, PauseResult, StopResult, WatchdogConfig, WatchdogStatus } from '../../../shared/types';
 
 /**
  * Under /api like every other controller — test/vite-proxy.test.ts asserts it
@@ -548,7 +547,7 @@ export class AgentsController {
    * reader than `/api/projects` already does.
    */
   @Get('branches')
-  branches(@Query('project') project: string | undefined): Promise<{ branches: string[] }> {
+  branches(@Query('project') project: string | undefined): Promise<AgentBranchesPayload> {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
     return this.agents.branches(trimmed);
