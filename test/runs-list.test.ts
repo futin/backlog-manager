@@ -1,7 +1,20 @@
-import { STATUS_ORDER, groupByDay, mergeRuns, parseStartedAt, queueCounts, runKey, sortByStartedAtDesc, splitLive } from '../client/src/lib/runs-list';
+import {
+  STATUS_ORDER,
+  freshRunKey,
+  groupByDay,
+  mergeRuns,
+  parseStartedAt,
+  pickSelected,
+  queueCounts,
+  runKey,
+  scopeRuns,
+  sortByStartedAtDesc,
+  splitLive,
+  windowHistory
+} from '../client/src/lib/runs-list';
 import { dayKey, dayLabel } from '../client/src/lib/run-stats';
 import type { LiveRun, MergedRun } from '../client/src/lib/runs-list';
-import type { OrchestratorArchiveRun, OrchestratorRun, RemoteRun, RunStage } from '../shared/types';
+import type { OrchestratorArchiveRun, OrchestratorRun, RemoteRun, RemoteStarting, RunStage, StartingRun } from '../shared/types';
 
 /**
  * The zone every reading below is taken in (#241) — the global `TZ` pin (`test/helpers/global-setup.ts`), so the expected values written before the zone
@@ -233,5 +246,93 @@ describe('queueCounts', () => {
 
   it('reads 0 of 0 for an empty queue', () => {
     expect(queueCounts({ queue: [] })).toEqual({ completed: 0, total: 0 });
+  });
+});
+
+/*
+ * #376: the composition RunsView strings the building blocks above into, moved out of the component so each of its ordering rules fails a test that names
+ * it rather than only a render that happens to draw the right rows.
+ */
+describe('freshRunKey', () => {
+  it('is the same string whichever order the fresh runs arrive in', () => {
+    const a = live({ project: '/p/a', runId: 'r1' });
+    const b = live({ project: '/p/b', runId: 'r2' });
+    expect(freshRunKey([a, b])).toBe(freshRunKey([b, a]));
+    expect(freshRunKey([a, b])).toBe([runKey('/p/a', 'r1'), runKey('/p/b', 'r2')].sort().join('\n'));
+  });
+
+  it('leaves a non-fresh run out', () => {
+    const a = live({ project: '/p/a', runId: 'r1' });
+    expect(freshRunKey([a, live({ project: '/p/b', runId: 'r2', fresh: false })])).toBe(freshRunKey([a]));
+  });
+});
+
+describe('scopeRuns', () => {
+  const NOW = new Date(2026, 8, 10, 15).getTime();
+  const merged: MergedRun[] = [
+    { run: archive({ project: '/p/a', runId: 'a-today', startedAt: new Date(2026, 8, 10, 9).toISOString() }), live: null, isLive: false, remote: false },
+    { run: archive({ project: '/p/a', runId: 'a-old', startedAt: new Date(2026, 8, 2, 9).toISOString() }), live: null, isLive: false, remote: false },
+    { run: archive({ project: '/p/b', runId: 'b-today', startedAt: new Date(2026, 8, 10, 10).toISOString() }), live: null, isLive: false, remote: false }
+  ];
+  const starting: StartingRun[] = [
+    { project: '/p/a', requestedAt: new Date(2026, 8, 1).toISOString() } as StartingRun,
+    { project: '/p/b', requestedAt: new Date(2026, 8, 10, 14).toISOString() } as StartingRun
+  ];
+  const remoteStarting: RemoteStarting[] = [
+    { kind: 'orchestrate', project: '/p/a', machine: 'm1', itemId: null, requestedAt: new Date(2026, 8, 1).toISOString() },
+    { kind: 'dispatch', project: '/p/a', machine: 'm1', itemId: 'bug-1', requestedAt: new Date(2026, 8, 10).toISOString() }
+  ];
+  const scope = scopeRuns({ merged, starting, remoteStarting, range: 'today', projectFilter: '/p/a', now: NOW, zone: ZONE });
+
+  it('lists every project in the select, whatever the range and the filter leave', () => {
+    expect(scope.projects).toEqual(['/p/a', '/p/b']);
+  });
+
+  it('drops a run of the filtered project that started outside the range', () => {
+    expect(scope.filtered.map((m) => m.run.runId)).toEqual(['a-today']);
+  });
+
+  it('keeps a starting entry of the filtered project whatever the range, and drops another project’s', () => {
+    expect(scope.startingRows.map((s) => s.project)).toEqual(['/p/a']);
+    expect(scope.remoteStartingRows.map((e) => [e.project, e.kind])).toEqual([['/p/a', 'orchestrate']]);
+  });
+
+  it('splits Live from History after the filter', () => {
+    const going = live({ project: '/p/b', runId: 'b-today', startedAt: new Date(2026, 8, 10, 10).toISOString() });
+    const withLive = merged.map((m) => (m.run.project === '/p/b' ? { ...m, live: going, isLive: true } : m));
+    const filteredA = scopeRuns({ merged: withLive, starting, remoteStarting, range: 'all', projectFilter: '/p/a', now: NOW, zone: ZONE });
+    expect(filteredA.live).toEqual([]);
+    expect(filteredA.history.map((m) => m.run.runId)).toEqual(['a-today', 'a-old']);
+    const all = scopeRuns({ merged: withLive, starting, remoteStarting, range: 'all', projectFilter: 'all', now: NOW, zone: ZONE });
+    expect(all.live.map((m) => m.run.runId)).toEqual(['b-today']);
+    expect(all.startingRows).toHaveLength(2);
+  });
+});
+
+describe('windowHistory', () => {
+  it('groups only the window and counts the rest as hidden', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => row(localIso(1 + Math.floor(i / 5), 23 - (i % 5)))).reverse();
+    const history = sortByStartedAtDesc(rows);
+    const { groups, hiddenCount } = windowHistory(history, 25, ZONE);
+    expect(hiddenCount).toBe(5);
+    expect(groups.reduce((n, g) => n + g.rows.length, 0)).toBe(25);
+    expect(groups.flatMap((g) => g.rows)).toEqual(history.slice(0, 25));
+  });
+});
+
+describe('pickSelected', () => {
+  const rows = [row('2026-09-03T10:00:00.000Z'), row('2026-09-02T10:00:00.000Z')];
+
+  it('returns the row the selection names', () => {
+    expect(pickSelected(rows, { project: '/p/a', runId: '2026-09-02T10:00:00.000Z' })).toBe(rows[1]);
+  });
+
+  it('falls back to the first row when the selection names nothing visible', () => {
+    expect(pickSelected(rows, { project: '/p/b', runId: '2026-09-02T10:00:00.000Z' })).toBe(rows[0]);
+    expect(pickSelected(rows, null)).toBe(rows[0]);
+  });
+
+  it('is undefined over an empty list', () => {
+    expect(pickSelected([], { project: '/p/a', runId: 'x' })).toBeUndefined();
   });
 });

@@ -530,7 +530,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `test/orchestrate-draft.test.ts`; and the hook that holds the sheet's run state, its three `useFetched` reads and `start`, returning the one `OrchestrateDraft`
   the three step views render from (`test/orchestrate-steps.test.tsx` renders each alone).
 - `lib/runs-list.ts` (#284) — the Runs page's run-list derivations, pure: `mergeRuns` (the archive listing, the live poll and other machines' runs folded into
-  one row list), `splitLive`, `sortByStartedAtDesc`, `groupByDay`, `queueCounts`, pinned directly by `test/runs-list.test.ts`; `RunsView` is the one consumer.
+  one row list), `splitLive`, `sortByStartedAtDesc`, `groupByDay`, `queueCounts`, and since #376 the composition RunsView strings them into — `freshRunKey`
+  (the archive-refresh signal), `scopeRuns` (range before project, the starting placeholders filtered by project only, the split after filtering),
+  `windowHistory` (task-16's window, History alone) and `pickSelected` — pinned directly by `test/runs-list.test.ts`; `RunsView` is the one consumer.
 - `lib/time-zone.ts` (#241) — the one home of wall-clock and calendar math: `zonedParts`, `startOfZonedDay`, `zonedDayStart` (a calendar date's first
   instant, DST and midnight-skipping days included), `formatZonedClock`, `browserTimeZone` and `timeZoneOptions`, every one taking the zone as an argument.
   `run-time`, `run-stats`, `run-range`, `runs-list`, `run-detail`, `run-watchdog`, `tracker`, `dashboards`, `item-age`, `item-month` and `jira` read dates
