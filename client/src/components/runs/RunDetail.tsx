@@ -697,6 +697,9 @@ export function RunDetail({
                 <details className="run-drawer-item-verify" data-testid={`run-detail-verify-${row.id}`} open={!row.verify.ok}>
                   <summary className="run-drawer-item-verify-summary">
                     <span className="run-drawer-item-verify-cmd">{row.verify.cmd}</span>
+                    {/* A real space (#350): JSX drops the line break between the two spans and the summary has no gap of its own, so without it the
+                        line read `pnpm testok`. A text node rather than a flex gap, because a flex summary loses its disclosure marker in Chromium. */}
+                    {' '}
                     <span className={row.verify.ok ? 'run-drawer-item-verify-ok' : 'run-drawer-item-verify-bad'}>{row.verify.ok ? 'ok' : 'failed'}</span>
                   </summary>
                   <span className="run-drawer-item-verify-tail">{row.verify.tail ?? ''}</span>

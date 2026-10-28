@@ -145,7 +145,8 @@ export function ItemModal({
   const staleAge = staleHolder === undefined ? null : elapsedSince(staleHolder.heartbeat, at);
 
   /* `renderMarkdown` (`lib/markdown.ts`) is the sanitising renderer: the HTML goes in via dangerouslySetInnerHTML below, and that is safe because the
-     renderer drops raw HTML outright and hand-builds every link/image tag with its href/src escaped — see its header. */
+     renderer never emits raw HTML as markup (a comment renders as nothing, any other tag as escaped text) and hand-builds every link/image tag with its
+     href/src escaped — see its header. */
   const html = body === null ? '' : renderMarkdown(body);
 
   const facts = (

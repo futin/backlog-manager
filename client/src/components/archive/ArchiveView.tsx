@@ -146,6 +146,10 @@ export default function ArchiveView({ onWorking }: { onWorking?: (working: boole
   const [project, setProject] = usePersistedState<string>(PROJECT_KEY, ALL);
 
   const all = index?.items ?? [];
+  /* #350 — the modal draws the FRESH copy of the item it was opened on, found in the payload by project and id during render, and the snapshot only when
+     the payload no longer carries it: BoardView's #367 rule, applied to the second surface that hosts `ItemModal`. `open` is the snapshot a click took, so
+     a poll or focus refetch that changed the item left the modal on the old row until it was reopened. Derived here, never an effect that calls `setOpen`. */
+  const openItem = open === null ? null : (all.find((i) => i.projectPath === open.projectPath && i.id === open.id) ?? open);
   const registered = projects ?? [];
 
   /* Keyed on `projects`, not on `registered` — see BoardView's identical memo:
@@ -360,14 +364,14 @@ export default function ArchiveView({ onWorking }: { onWorking?: (working: boole
         </div>
       )}
 
-      {open !== null && (
+      {openItem !== null && (
         <ItemModal
-          item={open}
+          item={openItem}
           hues={hues}
           onClose={() => setOpen(null)}
           agents={agents}
-          onDispatch={() => setDispatching(open)}
-          runBlock={runBlockFor(open)}
+          onDispatch={() => setDispatching(openItem)}
+          runBlock={runBlockFor(openItem)}
           reverify={reverifyAgents}
         />
       )}

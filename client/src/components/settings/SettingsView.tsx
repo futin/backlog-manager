@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
@@ -14,7 +16,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
 import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
 import { mergeModeOptionLabels } from '../../lib/merge-mode';
-import { FONT_SCALES, STALE_WINDOWS, THEMES, type ContentWidth, type Landing, type SettingsScope, type ThemeId } from '../../lib/settings';
+import { FONT_SCALES, STALE_WINDOWS, THEMES, stopsWith, type ContentWidth, type Landing, type SettingsScope, type ThemeId } from '../../lib/settings';
 import { EFFORTS, MODELS } from '../../../../shared/agent';
 import { JIRA_BUILTIN_LABELS, MERGE_MODES } from '../../../../shared/types';
 import type { QuestionMode } from '../../../../shared/types';
@@ -24,12 +26,17 @@ import type { QuestionMode } from '../../../../shared/types';
  * the `[data-theme]` blocks in shared/theme.css, kept here because it is
  * presentation: the swatch has to paint a palette that is NOT currently applied,
  * so it cannot read the live custom properties.
+ *
+ * The accent is each theme's `--cyan`, because `--accent` is `var(--cyan)` in every
+ * theme — amber and nightshift override `--cyan`, not `--accent`. Those two once
+ * mirrored `--amber` and `--green` instead and nothing noticed (#350); exported so
+ * test/settings-view.test.tsx can hold all five against theme.css.
  */
-const SWATCHES: Record<ThemeId, [string, string, string]> = {
+export const SWATCHES: Record<ThemeId, [string, string, string]> = {
   midnight: ['#0c1220', '#182238', '#55d0dd'],
   graphite: ['#111214', '#1f2124', '#6fc5cf'],
-  amber: ['#0a0805', '#1a150c', '#ffb03a'],
-  nightshift: ['#07120d', '#12251b', '#4fe09a'],
+  amber: ['#0a0805', '#1a150c', '#ffc76b'],
+  nightshift: ['#07120d', '#12251b', '#54cfba'],
   daylight: ['#f4f4f3', '#ffffff', '#306c0f']
 };
 
@@ -266,7 +273,7 @@ function LocalPage() {
             <SettingsRow name="Text size" hint="Scales the whole board, not just type — the rail, the cards and the spacing move with it.">
               <Segmented
                 value={settings.fontScale}
-                options={FONT_SCALES.map((v) => ({ value: v, label: `${v}%` }))}
+                options={stopsWith(FONT_SCALES, settings.fontScale).map((v) => ({ value: v, label: `${v}%` }))}
                 onChange={(fontScale) => update({ fontScale })}
                 label="Text size"
                 pill
@@ -306,7 +313,7 @@ function LocalPage() {
             >
               <Segmented
                 value={settings.staleDays}
-                options={STALE_WINDOWS.map((v) => ({ value: v, label: `${v}d` }))}
+                options={stopsWith(STALE_WINDOWS, settings.staleDays).map((v) => ({ value: v, label: `${v}d` }))}
                 onChange={(staleDays) => update({ staleDays })}
                 label="Archive after"
                 pill
@@ -411,6 +418,8 @@ function OrchestratorGroup() {
  */
 function DispatchGroup() {
   const { settings, update } = useSettings();
+  /* Bumped on a Dashboard link commit of new text, so the input's key moves even when the commit clamps back to the value already stored (#350). */
+  const [linkCommits, setLinkCommits] = useState(0);
   const jira = useJiraContext().data;
   /* The row exists only while Jira does (§8.9.2's rule for the rail entry): a default for a menu nobody can open is a setting with no reader. `jira` is
      null until the status answers, and that is not "configured" either. The shown value goes through `resolveJiraAction` so a stored skill id that has
@@ -534,8 +543,19 @@ function DispatchGroup() {
           // again after mount, so it would go on showing the untouched
           // keystrokes forever — silently disagreeing with what is actually
           // stored and about to be used as the "open dashboard" href.
-          key={settings.linkBase}
-          onBlur={(e) => update({ linkBase: e.currentTarget.value })}
+          // The commit counter is half the key because the stored value alone
+          // does not move when `clampOrigin` maps the typed text back to what
+          // is already stored — a trailing slash on the current origin, or a
+          // refused scheme while the default is stored — and an unchanged key
+          // kept the stale node (#350). It moves only when the typed text
+          // differs from what is stored, the one case there is anything to
+          // re-seed; NumberField follows the same rule.
+          key={`${settings.linkBase}:${linkCommits}`}
+          onBlur={(e) => {
+            const typed = e.currentTarget.value;
+            update({ linkBase: typed });
+            if (typed !== settings.linkBase) setLinkCommits((n) => n + 1);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
           }}

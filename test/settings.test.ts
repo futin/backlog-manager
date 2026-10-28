@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { SECTIONS } from '../client/src/lib/sections';
-import { CONTENT_WIDTHS, DEFAULT_SETTINGS, FONT_SCALES, LIMITS, SETTINGS_SCOPES, STALE_WINDOWS, THEMES, clampSettings } from '../client/src/lib/settings';
+import { CONTENT_WIDTHS, DEFAULT_SETTINGS, FONT_SCALES, LIMITS, SETTINGS_SCOPES, STALE_WINDOWS, THEMES, clampSettings, stopsWith } from '../client/src/lib/settings';
 import { EFFORTS, MODELS } from '../shared/agent';
 
 describe('clampSettings', () => {
@@ -422,5 +422,20 @@ describe('the default theme', () => {
       expect(run(() => '{not json')).toBe('daylight');
       expect(run(() => { throw new Error('blocked'); })).toBe('daylight');
     });
+  });
+});
+
+/* #350 — LIMITS honours a hand-edited value between the stops, so a stop row built from the stops alone had no option for it and selected nothing. */
+describe('stopsWith', () => {
+  it('returns the stops unchanged when the current value is one of them', () => {
+    expect(stopsWith([90, 100, 110, 120], 100)).toEqual([90, 100, 110, 120]);
+  });
+
+  it('adds an off-step value in order', () => {
+    expect(stopsWith([90, 100, 110, 120], 105)).toEqual([90, 100, 105, 110, 120]);
+  });
+
+  it('adds a value past the last stop at the end', () => {
+    expect(stopsWith([7, 14, 30, 90], 365)).toEqual([7, 14, 30, 90, 365]);
   });
 });
