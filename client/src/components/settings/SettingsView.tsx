@@ -418,7 +418,7 @@ function OrchestratorGroup() {
  */
 function DispatchGroup() {
   const { settings, update } = useSettings();
-  /* Bumped on every Dashboard link commit, so the input's key moves even when the commit clamps back to the value already stored (#350). */
+  /* Bumped on a Dashboard link commit of new text, so the input's key moves even when the commit clamps back to the value already stored (#350). */
   const [linkCommits, setLinkCommits] = useState(0);
   const jira = useJiraContext().data;
   /* The row exists only while Jira does (§8.9.2's rule for the rail entry): a default for a menu nobody can open is a setting with no reader. `jira` is
@@ -547,11 +547,14 @@ function DispatchGroup() {
           // does not move when `clampOrigin` maps the typed text back to what
           // is already stored — a trailing slash on the current origin, or a
           // refused scheme while the default is stored — and an unchanged key
-          // kept the stale node (#350).
+          // kept the stale node (#350). It moves only when the typed text
+          // differs from what is stored, the one case there is anything to
+          // re-seed; NumberField follows the same rule.
           key={`${settings.linkBase}:${linkCommits}`}
           onBlur={(e) => {
-            update({ linkBase: e.currentTarget.value });
-            setLinkCommits((n) => n + 1);
+            const typed = e.currentTarget.value;
+            update({ linkBase: typed });
+            if (typed !== settings.linkBase) setLinkCommits((n) => n + 1);
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
