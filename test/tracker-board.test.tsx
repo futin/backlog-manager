@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
-import { queuedStripFor, type LiveBar } from '../client/src/components/board/ItemCard';
+import { queuedStripFor, type LiveBar } from '../client/src/lib/live-bar';
 import { daysAgoDate, daysAgoStamp } from './helpers/dates';
 import { pickProject, pickStatus } from './helpers/filter-bar';
 import { BOARD_TRACKER_POLL_MS } from '../client/src/hooks/useBoard';

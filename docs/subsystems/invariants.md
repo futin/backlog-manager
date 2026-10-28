@@ -1788,8 +1788,8 @@ answer:
   `preflight` included, because a pending item is already the run's and a manual session that grooms or archives it first leaves the run dispatching into an
   item that moved under it. The seven exits (`merged`, `branched`, `failed`, `skipped`, `needs-answers`, `ungroomed`, `parked`) are out — the run is finished
   with the item, and a human picking it up by hand is the intended next move, `parked` most of all. That list is deliberately NOT `ACTIVE_RUN_STAGES` (client
-  `ItemCard.tsx`), which answers "does this card show a live stage badge" and correctly excludes `pending`/`preflight`; the two overlap by six members and must
-  not be unified. This block is checked on the board and again in `dispatch()`, the second being the one that holds: the launch sheet fetches its plan once on
+  `lib/run-stage.ts`), which answers "does this card show a live stage badge" and correctly excludes `pending`/`preflight`; the two overlap by six members and must
+  not be unified — both are built from `PIPELINE_STAGES` (`shared/types.ts`, #376), the one hand-written spelling of those six, so they share a source, not a list. This block is checked on the board and again in `dispatch()`, the second being the one that holds: the launch sheet fetches its plan once on
   mount, so a sheet left open while a run starts still shows an enabled launch button, and only the server sees the run as it is at click time.
 
 `DispatchButton` reads all six in one order — environment-hidden, then project visibility, then the in-progress stamp, then the open PR, then the unvetted mark, then the run claim —

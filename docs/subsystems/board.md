@@ -457,7 +457,7 @@ treats a remote host's claim as a board-dispatched one: `ClaimRelease` offers St
 
 **A stale claim reads stale (#227).** The mapper still fills `started`/`phase` from any unreleased claim, so every reader that means "is somebody on this"
 asks `claimReading` (`lib/tracker.ts`) — `'live' | 'stale' | null` by the reader's clock — as its second question. A stale holder draws the card's live strip as
-`stale · no heartbeat <age> · <host>` in the stale queued band's muted pair instead of the hatched `executing` one (`liveBarFor`); ranks 2 and drops out of the
+`stale · no heartbeat <age> · <host>` in the stale queued band's muted pair instead of the hatched `executing` one (`liveBarFor`, `lib/live-bar.ts`, reading `liveKind`'s `stale`); ranks 2 and drops out of the
 Status filter's "In progress" (`isLiveWork` in `lib/item-progress.ts`, which `liveRank` reads with the board's clock); and reads `stale claim` in the item modal
 in place of `in progress`. It does NOT leave the board — `leavesBoard` is unchanged, because the release control lives on the Board and Archive has none. The
 clock's own gate, `hasLive`, reads the rank UNAGED: a claim that is live now has to keep the clock running to be seen going stale. `progressBlock` lets dispatch
@@ -468,7 +468,7 @@ the board's own session holds, still blocks.
 `orchestrator:queued` label maps to `BacklogItem.queued`, and `queuedReading` (`lib/tracker.ts`) turns it into `'live' | 'stale' | null`: `'live'` while the
 item's project has a local run that is `paused`, or `running` and not crashed, or a live remote run for the same repo; `'stale'` when the label is there and no
 live run holds the project — a crash, a run that died on another machine without its Stop, a label added by hand. The card draws it as a band across its
-top edge, `.board-card-queued` (`queuedStripFor`, `ItemCard.tsx`): the live strip's geometry as a neutral ink band (`--ink2` fill, `--strip` text), reading `queued` for the first and a
+top edge, `.board-card-queued` (`queuedStripFor`, `lib/live-bar.ts`): the live strip's geometry as a neutral ink band (`--ink2` fill, `--strip` text), reading `queued` for the first and a
 lighter `queued · stale` on `--hairline2` (its title saying no live run holds it and where to remove it) for the second. Any live strip wins over it — a run stage past `pending`,
 or the claim's `grooming`/`executing` during the poll the label takes to clear — and it is outside `liveRank`'s live set, so a queued card neither floats up its
 column nor counts as In progress. It is a reading, never
