@@ -3,6 +3,7 @@ import {
   apiUsage,
   claimControl,
   claimReading,
+  countdownReading,
   hasSyncingTracker,
   hasTracker,
   itemSyncOff,
@@ -11,8 +12,10 @@ import {
   queuedReading,
   remoteBadge,
   resetClock,
+  rowReading,
   staleTakeover,
   sweepProgress,
+  sweepReading,
   syncCycleMs,
   syncOffReason,
   TRACKER_CYCLE_MS,
@@ -128,6 +131,59 @@ describe('sweepProgress', () => {
   it('is null when no github row has polled', () => {
     expect(sweepProgress([row(), row(), row({ source: 'files', polledAt: stamp(1_000) })], NOW)).toBeNull();
     expect(sweepProgress([], NOW)).toBeNull();
+  });
+});
+
+// #376: the three rungs every poll clock ends in, and the tracker chip's two readings that end in them, moved here out of TrackerChip.tsx.
+describe('countdownReading', () => {
+  it('is an empty green bar with the pending word before any progress', () => {
+    expect(countdownReading(null, '…')).toEqual({ value: '…', fraction: null, tone: 'green' });
+  });
+
+  it('is a full amber bar once overdue', () => {
+    expect(countdownReading({ leftS: 0, fraction: 1, overdue: true }, '…')).toEqual({ value: 'overdue', fraction: 1, tone: 'amber' });
+  });
+
+  it('reads the seconds left and the fraction, green, otherwise', () => {
+    expect(countdownReading({ leftS: 12, fraction: 0.4, overdue: false }, '…')).toEqual({ value: '12s', fraction: 0.4, tone: 'green' });
+  });
+});
+
+describe('sweepReading', () => {
+  it('reads sync off, amber, when every repo is off', () => {
+    expect(sweepReading([row({ interval: 'off', polledAt: stamp(1_000) }), row({ interval: 'off' })], NOW)).toEqual({
+      value: 'sync off',
+      fraction: null,
+      tone: 'amber'
+    });
+  });
+
+  it('reads failing, red and full, when every live repo is failing', () => {
+    const rows = [row({ access: 'forbidden', polledAt: stamp(1_000) }), row({ access: 'error' }), row({ interval: 'off' })];
+    expect(sweepReading(rows, NOW)).toEqual({ value: 'failing', fraction: 1, tone: 'red' });
+  });
+
+  it('reads … before any repo has polled', () => {
+    expect(sweepReading([row(), row()], NOW)).toEqual({ value: '…', fraction: null, tone: 'green' });
+  });
+
+  it('counts down on the newest stamp otherwise', () => {
+    expect(sweepReading([row({ polledAt: stamp(5_000) })], NOW)).toEqual({ value: '12s', fraction: pollProgress(stamp(5_000), NOW)!.fraction, tone: 'green' });
+  });
+});
+
+describe('rowReading', () => {
+  it('reads sync off for an off repo even when its access is failing', () => {
+    expect(rowReading(row({ interval: 'off', access: 'forbidden' }), NOW)).toEqual({ value: 'sync off', fraction: null, tone: 'amber' });
+  });
+
+  it('reads the access sentence, red and full, for a failing repo', () => {
+    const failing = row({ access: 'forbidden', polledAt: stamp(1_000) });
+    expect(rowReading(failing, NOW)).toEqual({ value: accessReason(failing), fraction: 1, tone: 'red' });
+  });
+
+  it('reads connecting… before the repo has polled', () => {
+    expect(rowReading(row(), NOW)).toEqual({ value: 'connecting…', fraction: null, tone: 'green' });
   });
 });
 

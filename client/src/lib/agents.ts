@@ -21,6 +21,7 @@ import type {
   WatchdogStatus
 } from '../../../shared/types';
 import { EFFORTS, MODELS } from '../../../shared/agent';
+import { errorOf } from './http';
 import { EXECUTE_FINISHES } from '../../../shared/types';
 
 /**
@@ -85,7 +86,7 @@ export class ApiError extends Error {
 export async function unwrap<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => null)) as ({ error?: unknown; code?: unknown } & T) | null;
   if (!res.ok) {
-    const error = typeof data?.error === 'string' ? data.error : `request failed (${res.status})`;
+    const error = errorOf(data, `request failed (${res.status})`);
     const code = typeof data?.code === 'string' ? data.code : undefined;
     throw new ApiError(error, res.status, code);
   }

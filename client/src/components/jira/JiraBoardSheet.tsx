@@ -4,6 +4,7 @@ import { useJiraContext } from '../../hooks/JiraContext';
 import { useMountedRef } from '../../hooks/useMountedRef';
 import { useNow } from '../../hooks/useNow';
 import { JIRA_CUSTOM_QUERY, JIRA_QUERY_PRESETS, type JiraQueryPreset } from '../../lib/jira';
+import { errorOf, postJson } from '../../lib/http';
 import { pollAge } from '../../lib/tracker';
 import {
   DEFAULT_JIRA_INTERVAL,
@@ -79,20 +80,6 @@ interface QueryRowState {
 export type JiraProjectList = { list: JiraProjectRef[] | null; error: string | null };
 
 const INTERVAL_OPTIONS = (Object.keys(SYNC_INTERVALS) as SyncInterval[]).map((value) => ({ value, label: value }));
-
-/**
- * The `error` sentence of a refused write or read, or `fallback` when the body carries none (a proxy's HTML 502, an empty body). Exported for Setup's project
- * read, so a refusal reads the same way wherever this page reports one.
- */
-export function errorOf(body: unknown, fallback: string): string {
-  return typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string' ? (body as { error: string }).error : fallback;
-}
-
-/** Every write here goes out as JSON: the server's `SameOriginPostGuard` refuses any other content type with a 403. Exported for the Repositories card's write. */
-export async function postJson(url: string, body: unknown): Promise<{ ok: boolean; status: number; body: unknown }> {
-  const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  return { ok: res.ok, status: res.status, body: await res.json().catch(() => null) };
-}
 
 export function JiraBoardSheet({
   board,

@@ -6,10 +6,8 @@ import { Meter } from './ui/Meter';
 import { Popover } from './ui/Popover';
 import { useJiraContext } from '../hooks/JiraContext';
 import { useNow } from '../hooks/useNow';
-import { accessPhrase, boardsByName, callsReading, failurePhrase, polledPhrase, soonestBoard, sweepLine } from '../lib/jira';
+import { accessPhrase, boardsByName, callsReading, failurePhrase, jiraPollReading, polledPhrase, sweepLine } from '../lib/jira';
 import type { Section } from '../lib/sections';
-import { pollProgress } from '../lib/tracker';
-import { SYNC_INTERVALS } from '../../../shared/types';
 import type { JiraBoardStatus, JiraStatusPayload } from '../../../shared/types';
 
 /**
@@ -75,7 +73,7 @@ export function JiraChip({ section }: { section: Section }) {
         <span className="tracker-name">{first === '' ? 'Jira' : `Jira · ${first}`}</span>
         <span className="tracker-meters" id={metersId}>
           {/* The space keeps the description `POLL 12s CALLS 12` rather than `…12sCALLS…`; `.tracker-meters` is flex, so it renders as nothing. */}
-          <Meter label="POLL" {...pollReading(data.boards, now)} />{' '}
+          <Meter label="POLL" {...jiraPollReading(data.boards, now)} />{' '}
           <Meter label="CALLS" value={String(data.calls.sweep)} fraction={calls.fraction} tone={calls.red ? 'red' : 'green'} />
         </span>
         <Chevron dir={open ? 'up' : 'down'} className="tracker-caret" />
@@ -87,24 +85,6 @@ export function JiraChip({ section }: { section: Section }) {
 
 /** The one initial — the first letter of the (trimmed) name, `?` for none — in one place for the chip and its popover. */
 const initialOf = (name: string): string => (name === '' ? '?' : name.charAt(0).toUpperCase());
-
-type Reading = { value: string; fraction: number | null; tone: 'green' | 'amber' | 'red' };
-
-/**
- * The chip's POLL reading: `pollProgress` on the soonest syncing board's own interval (`SYNC_INTERVALS`, not the GitHub cycle — Jira has no slack constant to
- * add, and a board is restamped at its interval). An empty bar with no syncing board — `—` when there are no boards at all, `sync off` (amber, the state
- * `TrackerChip` names the same way) when every board is off — and `…` before the soonest one has polled, an empty bar because nothing has been read yet.
- * `overdue` is a full amber bar after two silent intervals, `pollProgress`' own threshold.
- */
-function pollReading(boards: readonly JiraBoardStatus[], now: number): Reading {
-  const soonest = soonestBoard(boards, now);
-  if (soonest === null) return boards.length === 0 ? { value: '—', fraction: null, tone: 'green' } : { value: 'sync off', fraction: null, tone: 'amber' };
-  const interval = SYNC_INTERVALS[soonest.interval];
-  const progress = interval === null ? null : pollProgress(soonest.polledAt, now, interval);
-  if (progress === null) return { value: '…', fraction: null, tone: 'green' };
-  if (progress.overdue) return { value: 'overdue', fraction: 1, tone: 'amber' };
-  return { value: `${progress.leftS}s`, fraction: progress.fraction, tone: 'green' };
-}
 
 /**
  * The popover's content, a component of its own so its `Popover` MOUNTS only while open — `TrackerPopover`'s shape and its reason: mounted last it is

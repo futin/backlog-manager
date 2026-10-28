@@ -30,7 +30,7 @@ import { Segmented } from '../ui/Segmented';
 import { BoardColumn } from './BoardColumn';
 import type { BoardColumnSlug } from './BoardColumn';
 import { ItemCard } from './ItemCard';
-import type { RunCardState } from './ItemCard';
+import type { RunCardState } from '../../lib/live-bar';
 import { ItemModal } from './ItemModal';
 import { LaunchSheet } from './LaunchSheet';
 import { OrchestrateSheet } from './OrchestrateSheet';
@@ -252,7 +252,7 @@ export default function BoardView({ onOpenRuns, onWorking }: { onOpenRuns?: () =
      `matches` and `hasLive` just below now need the run's own view of an item:
      the Status filter's "In progress" and the board's ticking clock both have
      to count orchestrated work, and an orchestrated item's FILE says nothing
-     about the run working it (ItemCard's `liveBarFor` has the full finding).
+     about the run working it (`liveBarFor` in lib/live-bar.ts has the full finding).
 
      orchestrator-watchdog (design §6.2): stays exactly this — freshness-based,
      feeding cards, badges and `runClaimBlock` alone — because a crashed run

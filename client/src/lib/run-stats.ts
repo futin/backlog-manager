@@ -1,5 +1,6 @@
 import { isCompletedStage, isTerminalStage, itemDurationMs, runIsLive } from './run-time';
 import { zonedParts } from './time-zone';
+import { PIPELINE_STAGES } from '../../../shared/types';
 import type { OrchestratorArchiveRun, OrchestratorRun, RunQueueItem, RunSessionUsage, RunStage } from '../../../shared/types';
 
 /**
@@ -222,8 +223,11 @@ export function runWallMs(run: Pick<OrchestratorArchiveRun, 'status' | 'startedA
  * carve-out when it was added: it is a terminal arrival exactly like
  * `merged` already was, so the sentence that always excluded one success
  * exit already covered both without changing a word of its reasoning.
+ *
+ * Built as `preflight` then `PIPELINE_STAGES` (shared/types.ts), so the order — which `StageBars` draws its rows in — follows the one hand-written
+ * pipeline rather than a copy of it.
  */
-export const MACHINE_STAGES: readonly RunStage[] = ['preflight', 'dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging'];
+export const MACHINE_STAGES: readonly RunStage[] = ['preflight', ...PIPELINE_STAGES];
 
 /** A run's (or several runs', via `sumStageTotals`) per-stage machine-time total, keyed by `RunStage`. */
 export type StageTotals = Partial<Record<RunStage, number>>;

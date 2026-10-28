@@ -457,8 +457,8 @@ treats a remote host's claim as a board-dispatched one: `ClaimRelease` offers St
 
 **A stale claim reads stale (#227).** The mapper still fills `started`/`phase` from any unreleased claim, so every reader that means "is somebody on this"
 asks `claimReading` (`lib/tracker.ts`) — `'live' | 'stale' | null` by the reader's clock — as its second question. A stale holder draws the card's live strip as
-`stale · no heartbeat <age> · <host>` in the stale queued band's muted pair instead of the hatched `executing` one (`liveBarFor`); ranks 2 and drops out of the
-Status filter's "In progress" (`isLiveWork` in `lib/item-progress.ts`, which `liveRank` reads with the board's clock); and reads `stale claim` in the item modal
+`stale · no heartbeat <age> · <host>` in the stale queued band's muted pair instead of the hatched `executing` one (`liveBarFor`, `lib/live-bar.ts`, reading `liveKind`'s `stale`); ranks 2 and drops out of the
+Status filter's "In progress" (`liveRank`, reading `liveKind`'s `stale` with the board's clock — the same test `isLiveWork` in `lib/item-progress.ts` makes for the item modal); and reads `stale claim` in the item modal
 in place of `in progress`. It does NOT leave the board — `leavesBoard` is unchanged, because the release control lives on the Board and Archive has none. The
 clock's own gate, `hasLive`, reads the rank UNAGED: a claim that is live now has to keep the clock running to be seen going stale. `progressBlock` lets dispatch
 through over a stale hand claim — the spawned session's `start` retires it — and the Launch sheet says so (`staleTakeover`); a stale claim a run holds, or one
@@ -468,7 +468,7 @@ the board's own session holds, still blocks.
 `orchestrator:queued` label maps to `BacklogItem.queued`, and `queuedReading` (`lib/tracker.ts`) turns it into `'live' | 'stale' | null`: `'live'` while the
 item's project has a local run that is `paused`, or `running` and not crashed, or a live remote run for the same repo; `'stale'` when the label is there and no
 live run holds the project — a crash, a run that died on another machine without its Stop, a label added by hand. The card draws it as a band across its
-top edge, `.board-card-queued` (`queuedStripFor`, `ItemCard.tsx`): the live strip's geometry as a neutral ink band (`--ink2` fill, `--strip` text), reading `queued` for the first and a
+top edge, `.board-card-queued` (`queuedStripFor`, `lib/live-bar.ts`): the live strip's geometry as a neutral ink band (`--ink2` fill, `--strip` text), reading `queued` for the first and a
 lighter `queued · stale` on `--hairline2` (its title saying no live run holds it and where to remove it) for the second. Any live strip wins over it — a run stage past `pending`,
 or the claim's `grooming`/`executing` during the poll the label takes to clear — and it is outside `liveRank`'s live set, so a queued card neither floats up its
 column nor counts as In progress. It is a reading, never
@@ -530,7 +530,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   `test/orchestrate-draft.test.ts`; and the hook that holds the sheet's run state, its three `useFetched` reads and `start`, returning the one `OrchestrateDraft`
   the three step views render from (`test/orchestrate-steps.test.tsx` renders each alone).
 - `lib/runs-list.ts` (#284) — the Runs page's run-list derivations, pure: `mergeRuns` (the archive listing, the live poll and other machines' runs folded into
-  one row list), `splitLive`, `sortByStartedAtDesc`, `groupByDay`, `queueCounts`, pinned directly by `test/runs-list.test.ts`; `RunsView` is the one consumer.
+  one row list), `splitLive`, `sortByStartedAtDesc`, `groupByDay`, `queueCounts`, and since #376 the composition RunsView strings them into — `freshRunKey`
+  (the archive-refresh signal), `scopeRuns` (range before project, the starting placeholders filtered by project only, the split after filtering),
+  `windowHistory` (task-16's window, History alone) and `pickSelected` — pinned directly by `test/runs-list.test.ts`; `RunsView` is the one consumer.
 - `lib/time-zone.ts` (#241) — the one home of wall-clock and calendar math: `zonedParts`, `startOfZonedDay`, `zonedDayStart` (a calendar date's first
   instant, DST and midnight-skipping days included), `formatZonedClock`, `browserTimeZone` and `timeZoneOptions`, every one taking the zone as an argument.
   `run-time`, `run-stats`, `run-range`, `runs-list`, `run-detail`, `run-watchdog`, `tracker`, `dashboards`, `item-age`, `item-month` and `jira` read dates

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isJiraStatusPayload, soonestBoard } from '../lib/jira';
 import { SYNC_INTERVALS, type JiraStatusPayload } from '../../../shared/types';
 import { TRACKER_FETCH_SLACK_MS } from './useTrackers';
+import { useWindowFocus } from './useWindowFocus';
 
 /**
  * `GET /api/jira` — the shell's one instance (Jira phase 2, §6), provided through `JiraContext` to the rail (which draws the Jira entry only while
@@ -102,11 +103,7 @@ export function useJira(): JiraState {
     };
   }, [reload, clear]);
 
-  useEffect(() => {
-    const onFocus = (): void => reload();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [reload]);
+  useWindowFocus(reload);
 
   return { ...state, reload };
 }

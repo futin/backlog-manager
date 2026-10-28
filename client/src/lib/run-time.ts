@@ -1,4 +1,4 @@
-import { RUN_CLAIMED_STAGES, RUN_STALE_MS } from '../../../shared/types';
+import { PIPELINE_STAGES, RUN_CLAIMED_STAGES, RUN_STALE_MS } from '../../../shared/types';
 import { formatZonedClock } from './time-zone';
 import type { MergeMode, OrchestratorRun, RunQueueItem, RunStage } from '../../../shared/types';
 
@@ -56,10 +56,10 @@ const MS_PER_HOUR = 60 * MS_PER_MINUTE;
  * reviewed branch — so the shape stays seven dots either way; only the word
  * the last one carries changes. `terminal` is therefore a parameter here,
  * not a second hard-coded array: see `stepperDots` below for why it is
- * required, with no default.
+ * required, with no default. The six fixed dots are `PIPELINE_STAGES` (shared/types.ts), spread rather than restated.
  */
 export function stepperStages(terminal: 'merged' | 'branched'): readonly RunStage[] {
-  return ['dispatched', 'inspecting', 'reviewing', 'fixing', 'verifying', 'merging', terminal];
+  return [...PIPELINE_STAGES, terminal];
 }
 
 /**

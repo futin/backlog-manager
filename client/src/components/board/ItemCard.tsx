@@ -1,182 +1,12 @@
 import { elapsedSince, formatCreated } from '../../lib/item-age';
-import { isInProgress, progressLabel } from '../../lib/item-progress';
-import { ACTIVE_RUN_STAGES } from '../../lib/run-stage';
-import { claimReading } from '../../lib/tracker';
+import { liveBarFor, queuedStripFor, type RunCardState } from '../../lib/live-bar';
 import type { ProjectHues } from '../../lib/project-hue';
 import { Dot } from '../ui/Dot';
 import { LiveStrip } from '../ui/LiveStrip';
 import { Marker, type MarkerTone } from '../ui/Marker';
 import { DispatchButton, dispatchAvailable } from './DispatchButton';
-import { ATTENTION_RUN_STAGES } from '../../../../shared/types';
-import type { AgentsStatus, BacklogItem, RunQueueItem } from '../../../../shared/types';
+import type { AgentsStatus, BacklogItem } from '../../../../shared/types';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
-
-/*
- * `ATTENTION_RUN_STAGES` — the two stages that mean the run has STOPPED and
- * will not restart until a person does something — used to be declared right
- * here, as the exact opposite claim to the six above. bug-11 moved it to
- * shared/types.ts beside `RUN_CLAIMED_STAGES`, where its own doc comment now
- * gives the reasoning; `client/src/lib/item-stale.ts` reads it to keep an
- * item a run is blocked on out of Archive, and a lib module cannot import a
- * React component.
- *
- * The card's use of it is unchanged; the rendering rule it used to encode is
- * not. The two lists chose the live strip's COLOUR until task-37 — amber for a
- * blocked run, cyan for a running one — and DESIGN.md §8.3 takes that second
- * tone away: one `--fill-live` hatched fill covers both, and the stage word
- * alone carries the distinction, because this design marks state by ink and
- * never by accent (§5). What the two lists still decide is whether there is a
- * strip at all, and which word is on it.
- */
-
-/**
- * What this card needs from a fresh run's queue entry: the stage, and the
- * first-arrival stamps to age it against. A narrow pick rather than the whole
- * `RunQueueItem` because everything else on that shape (sessionId, worktree,
- * verification output, questions) belongs to the Runs section's detail, and a
- * card that accepted it would invite reading fields the card has no room to
- * render.
- */
-export type RunCardState = Pick<RunQueueItem, 'stage' | 'stageAt'>;
-
-/** The bar's three volatile facts, in a shape a test can assert directly. */
-export type LiveBar = {
-  /** The word(s) the bar prints: a run stage, or `progressLabel`'s wording. */
-  label: string;
-  /**
-   * `run` → the orchestrator is working it, unattended; `human` → a person is
-   * involved, either because a hand session holds the file or because the run
-   * has stopped and is waiting on one.
-   *
-   * It no longer picks a fill: DESIGN.md §8.3 draws one `--fill-live` strip for
-   * both. It is kept because it is the precedence's own verdict in a shape a
-   * test can read without a render, and because the card still marks the two
-   * apart in its markup (`data-tone`) for anything that needs to tell them
-   * apart without re-deriving the two stage lists.
-   *
-   * `stale` (#227) is the one tone the stylesheet DOES read: a tracker claim whose heartbeat is past `CLAIM_STALE_MS`. It is not a third kind of worker but
-   * the absence of one, so it drops the hatch and wears the stale queued band's muted ink — the amber `executing` strip on a card nobody has touched for
-   * a day is the lie #227 was filed against.
-   */
-  tone: 'run' | 'human' | 'stale';
-  /** The stamp to age against, or null when nothing here can be aged. */
-  anchor: string | null;
-  /** The bar's title attribute — the one place the exact stamp is legible. */
-  title: string;
-};
-
-/**
- * Which bar a card wears, or null for none. Exported and pure so the
- * precedence below is testable without a render, and so the ordering is
- * stated once in one place rather than as nested ternaries in JSX.
- *
- * The precedence, top wins:
- *   1. an attention stage  → human, labelled with the stage
- *   2. an active stage     → run, labelled with the stage
- *   3. `isInProgress(item)` → human, labelled by `progressLabel` (unchanged)
- *   4. none of those       → no bar
- *
- * Run facts outrank the file's own marker (1–2 over 3) because the run payload
- * is re-polled every 5s while it is fresh, where a `started:` stamp can be
- * arbitrarily stale — a leftover hand-run stamp must not mask a live run's
- * actual stage. In practice the two rarely co-occur at all: `backlog-execute`
- * runs inside the per-item worktree and stamps the worktree's copy of the item
- * file, never the main tree's copy this board renders (task-9's own Goal
- * section has the full finding), which is exactly why a run's stage is the
- * ONLY thing that can say an orchestrated item is live.
- *
- * The two stage lists and the hand session's own words are deliberately NOT
- * merged into one list, and DESIGN.md §8.3 says so outright: `reviewing` is a
- * `RunStage` (shared/types.ts) and `grooming`/`executing`/`in progress` are
- * `progressLabel`'s own three (`client/src/lib/item-progress.ts:39-43`), off a
- * `phase:` key. They are two axes that happen to print in the same 24 px strip.
- *
- * The anchor prefers `stageAt.dispatched` over the current stage's own
- * arrival, and that is not a fallback ordering — it is the reading. `stageAt`
- * keeps FIRST arrivals only (shared/types.ts), so a `fixing` → `reviewing`
- * loop does not re-stamp either one; anchoring on the current stage would
- * still under-report a long item as "2m in reviewing" rather than "40m in the
- * orchestrator's hands", which is the analogue of `started:` and the thing a
- * reader scanning a column actually wants. `needs-answers` needs the fallback
- * because its route (pending → preflight → needs-answers) never visits
- * `dispatched` at all, and there the current stage's arrival IS the right
- * reading: how long it has been waiting on you.
- */
-export function liveBarFor(item: BacklogItem, run: RunCardState | undefined, now: number): LiveBar | null {
-  const stage = run?.stage;
-  if (stage !== undefined && (ATTENTION_RUN_STAGES.includes(stage) || ACTIVE_RUN_STAGES.includes(stage))) {
-    const anchor = run?.stageAt.dispatched ?? run?.stageAt[stage] ?? null;
-    return {
-      label: stage,
-      tone: ATTENTION_RUN_STAGES.includes(stage) ? 'human' : 'run',
-      anchor,
-      // The stage word is already on the bar, so the title's job is only the
-      // stamp behind it — omitted entirely rather than trailing an `undefined`
-      // when there is none, the same rule the elapsed reading follows.
-      title: anchor === null ? stage : `${stage} since ${anchor}`
-    };
-  }
-  /* #227: a tracker claim past its heartbeat window still carries `started`/`phase` (the mapper sets them for ANY unreleased claim, because an item shown
-     as free while `claim` would have to retire somebody first is the other lie), so row 3 below would paint it `executing` forever. It is checked here,
-     between the run's rows and the hand session's, and reads the heartbeat rather than `started`: how long the item has been worked is not the question
-     once nobody is working it — how long it has been silent is. The age is in the label and `anchor` is null, so the card prints no second, ticking
-     reading beside it. A run-held claim falls here too once its run stage is gone: the run surfaces already say crashed, and this card should agree. */
-  if (claimReading(item, now) === 'stale' && item.holder !== undefined) {
-    const age = elapsedSince(item.holder.heartbeat, now);
-    const host = item.holder.host === undefined || item.holder.host === '' ? '' : ` · ${item.holder.host}`;
-    return {
-      label: `stale · no heartbeat${age === null ? '' : ` ${age}`}${host}`,
-      tone: 'stale',
-      anchor: null,
-      title: `claim stale — no heartbeat since ${item.holder.heartbeat}`
-    };
-  }
-  if (isInProgress(item)) {
-    return {
-      label: progressLabel(item),
-      tone: 'human',
-      anchor: item.started,
-      // Literal `in progress`, not `progressLabel`'s wording: this string
-      // names the stored KEY the stamp came from, which is the same key
-      // whether the phase reads grooming, executing or nothing at all.
-      title: `in progress since ${item.started}`
-    };
-  }
-  return null;
-}
-
-/** What the queued strip prints, in a shape a test can assert directly — `LiveBar`'s sibling, minus the stamp, because the label carries none. */
-export type QueuedStrip = {
-  word: string;
-  /** Mirrors `queuedReading`: `live` while a live run holds the project, `stale` when none does. The stylesheet dims the second by this attribute. */
-  state: 'live' | 'stale';
-  /** Only the stale strip has one: its word alone cannot say what to do about it. */
-  title?: string;
-};
-
-/**
- * The `orchestrator:queued` strip, or null for none. A SIBLING of `liveBarFor` and deliberately not a fifth row of its precedence, though it paints in the
- * same 24 px band: `liveBarFor`'s set of cards is, by construction, `liveRank`'s `< 2` half (lib/board-sort.ts) — the column order, the Status filter's "In
- * progress" and the board clock all at once — and a queued item is none of those. Nobody is on it; the label is a plan, never a claim (invariants.md).
- *
- * So the one precedence rule between the two lives here, in the `bar` argument: any live bar wins. That is what makes the claim beat the label. A claim
- * removes the label, but the tracker cache can hold both facts for a poll, and during that poll the card must read `executing`, not `queued`; the same goes
- * for a run that has moved the item past `pending`. `pending` itself draws no live bar (`ACTIVE_RUN_STAGES` leaves it out), so a queued item a run has not
- * reached yet keeps this strip — which is exactly what the label means.
- *
- * No elapsed reading on the right: the label has no timestamp to age, and the band stays empty there rather than inventing one.
- */
-export function queuedStripFor(queued: 'live' | 'stale' | null | undefined, bar: LiveBar | null): QueuedStrip | null {
-  if (bar !== null) return null;
-  if (queued === 'live') return { word: 'queued', state: 'live' };
-  if (queued === 'stale')
-    return {
-      word: 'queued · stale',
-      state: 'stale',
-      title: 'orchestrator:queued is set but no live run holds it — remove the label on GitHub, or stop the crashed run if it is this machine’s'
-    };
-  return null;
-}
 
 /**
  * The two `kind:` values a refactor may carry. An enum here rather than a
@@ -256,7 +86,7 @@ export function ItemCard({
    * no such run currently says anything about it. Looked up by BoardView, not
    * derived here — this component stays a pure function of whatever it is
    * handed, the same discipline `now` above already follows, and `liveBarFor`
-   * carries the long version of why the source is a run payload rather than
+   * (lib/live-bar.ts) carries the long version of why the source is a run payload rather than
    * anything on `item` itself.
    *
    * The stage AND its stamps, in one prop rather than two: they are two
@@ -303,9 +133,9 @@ export function ItemCard({
 }) {
   const { zone } = useTimeZone();
   const at = now ?? Date.now();
-  /* One derivation for the whole strip — see `liveBarFor` above for the
+  /* One derivation for the whole strip — see `liveBarFor` (lib/live-bar.ts) for the
      precedence and for why a run's stage outranks the item file's own stamp.
-     `isInProgress` is no longer read directly here: it is row 3 of that
+     `isInProgress` is no longer read directly here: it is row 4 of that
      precedence, and reading it separately is how a card ends up wearing one
      state and printing another. */
   const bar = liveBarFor(item, run, at);
@@ -352,7 +182,7 @@ export function ItemCard({
        this board, which is the rule shared/types.ts states and this is the
        one place that reads the field at all. */
       item.untyped ? { tone: 'untyped' as const, word: 'untyped' } : null,
-      /* No `queued` marker: the orchestrator:queued label is drawn as the card's top band now (`queuedStripFor` above), and a word here as well would
+      /* No `queued` marker: the orchestrator:queued label is drawn as the card's top band now (`queuedStripFor`, lib/live-bar.ts), and a word here as well would
        draw one fact twice. */
       item.status === 'done' ? { tone: 'done' as const, word: 'done' } : null,
       stale ? { tone: 'stale' as const, word: 'stale' } : null,

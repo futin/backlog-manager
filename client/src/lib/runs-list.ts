@@ -1,7 +1,11 @@
+import { projectLabel } from './project-label';
+import { inRange } from './run-range';
+import { orchestrateStarting } from './remote-starting';
 import { remoteAsArchive, remoteAsLive } from './remote-run';
 import { dayKey, dayLabel } from './run-stats';
 import { isCompletedStage } from './run-time';
-import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RemoteRun, RunStage } from '../../../shared/types';
+import type { RunRange } from './run-range';
+import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, RemoteRun, RemoteStarting, RunStage, StartingRun } from '../../../shared/types';
 
 /**
  * runs-list.ts — the Runs page's run-list derivations: folding the archive listing, the live poll and other machines' runs into one row list, splitting
@@ -12,6 +16,10 @@ import type { OrchestratorArchiveRun, OrchestratorRun, OrchestratorRunsPayload, 
  * (CLAUDE.md, Layout) and a pure function pinned by a direct unit test (test/runs-list.test.ts) cannot drift the way one exercised only through renders
  * can. A pure module: it imports nothing from `components/` and nothing React. The doc comments below came with the code — only their pointers into RunsView changed — and they are the record
  * of bug-29, M3 and task-38/48, which is why they run long.
+ *
+ * #376 moved the COMPOSITION here too — `freshRunKey`, `scopeRuns`, `windowHistory` and `pickSelected`, the order RunsView strings the building blocks
+ * together in. Until then each rule of that order (range before project, the placeholders never ranged, the split after filtering, the window between the
+ * split and the grouping) was pinned only through renders; their reasoning moved with them, onto each function's doc comment.
  */
 
 /** One row of the merged run list: the archive's own record of the run, plus the live entry backing it, if the live payload has one at all. */
@@ -324,4 +332,117 @@ export function queueCounts(run: { queue: readonly { stage: RunStage }[] }): { c
     completed: run.queue.filter((q) => isCompletedStage(q.stage)).length,
     total: run.queue.length
   };
+}
+
+/**
+ * The set of currently-FRESH live runs, as one string — the "did run history just move" signal RunsView keys its archive refresh on (I3's fix).
+ *
+ * The set of currently-FRESH live runIds is exactly the "did anything change at a run boundary" signal the design doc's own reasoning already grants
+ * `useOrchestratorArchive`: a run starting adds a key, a run finishing (or going stale) removes one. Joined into one sorted string, not compared as an
+ * array, because `liveRuns` is a brand-new array reference on every 5s poll tick even when its fresh SET hasn't changed at all — depending on the array
+ * itself would re-fire the effect (and re-fetch the archive) every 5s for no reason, exactly the redundant-request cost `useOrchestratorArchive` was built
+ * to avoid. Newline-joined, since a key is `project` + `runId` and a project path can hold a comma.
+ */
+export function freshRunKey(liveRuns: readonly LiveRun[]): string {
+  return liveRuns
+    .filter((r) => r.fresh)
+    .map((r) => runKey(r.project, r.runId))
+    .sort()
+    .join('\n');
+}
+
+/** What `scopeRuns` reads: the merged list, the two placeholder lists, and the page's range and project controls against one clock and zone. */
+export interface RunsScopeInput {
+  merged: readonly MergedRun[];
+  starting: readonly StartingRun[];
+  remoteStarting: readonly RemoteStarting[] | undefined;
+  range: RunRange;
+  projectFilter: string;
+  now: number;
+  zone: string;
+}
+
+/** What `scopeRuns` hands back — every list the Runs page draws, before the History window. */
+export interface RunsScope {
+  projects: string[];
+  filtered: MergedRun[];
+  startingRows: StartingRun[];
+  remoteStartingRows: RemoteStarting[];
+  live: MergedRun[];
+  history: MergedRun[];
+}
+
+/**
+ * The Runs page's two controls applied to its corpus, in the one order that is correct. Four rules, each of which a render could get wrong unnoticed:
+ *
+ * `projects` — every project seen anywhere in the (unfiltered) merged list, computed off `merged`, not off the ranged or filtered list, so narrowing
+ * EITHER the range or the project filter never removes an option that would switch back: a project with no runs in the selected range must still appear in
+ * the select, or there would be no way to widen back to it.
+ *
+ * Range scoping runs BEFORE the project filter, not merely alongside it: `inRange` reads only `startedAt` (lib/run-range.ts's own file header states why
+ * that field, and no other, is what a range window is keyed on), so this pass can run directly off `merged` with no dependency on which project is currently
+ * selected, and the project filter then narrows whatever the range already left in scope exactly the way it always narrowed `merged` before the range
+ * existed.
+ *
+ * The project filter applies to the placeholder rows; the RANGE control deliberately does not. `inRange` reads `startedAt` and only `startedAt`, a starting
+ * entry has no `startedAt` at all — it has `requestedAt`, the moment THIS process was asked — and every one of the four windows the page offers ends at now,
+ * so an entry marked seconds ago is inside all four by construction. Rendering it regardless of range is therefore not an exemption from the range rule, it
+ * is that rule's own answer, reached without teaching `inRange` a second date field it would then have to justify. This filters `starting`, never `merged`:
+ * a placeholder is not a run, so it stays out of `filtered`, out of the selection, out of `aggregateRuns`/`sumStageTotals` and out of `projects`. A window
+ * that showed a number for it would be inventing one. Multi-dashboard task 10's `remoteStartingRows` — launches on other machines — is a SECOND list beside
+ * `startingRows` and never merged into it: `startingRows.length` is the local `N starting` count, which a launch elsewhere is not. Same project filter, for
+ * the same reason: a filtered page lists nothing about other projects.
+ *
+ * The split is computed AFTER filtering, not before: a project filter that hides the only going run in scope must not leave a phantom Live sheet over an
+ * empty rows list, and the design's own "newest VISIBLE run" wording for the default selection (`pickSelected`) only makes sense read against whatever the
+ * filter currently shows.
+ */
+export function scopeRuns(input: RunsScopeInput): RunsScope {
+  const { merged, starting, remoteStarting, range, projectFilter, now, zone } = input;
+  const projects = Array.from(new Set(merged.map((m) => m.run.project))).sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)));
+  const inScope = merged.filter((m) => inRange(m.run.startedAt, range, now, zone));
+  const filtered = projectFilter === 'all' ? inScope : inScope.filter((m) => m.run.project === projectFilter);
+  const startingRows = projectFilter === 'all' ? [...starting] : starting.filter((s) => s.project === projectFilter);
+  const remoteStartingRows = orchestrateStarting(remoteStarting).filter((e) => projectFilter === 'all' || e.project === projectFilter);
+  const { live, history } = splitLive(filtered);
+  return { projects, filtered, startingRows, remoteStartingRows, live, history };
+}
+
+/**
+ * task-16's window over History, and the ONE place it applies. Which lists are windowed and which deliberately are not is the whole rule, and it is the
+ * kind of thing fix rounds 2 and 3 in RunsView already went wrong on (a call site quietly reading a different source than its neighbours), so it is worth
+ * stating outright:
+ *
+ *   windowed  — `groupByDay`'s input, and nothing else. The list is a window; every other reader wants the whole corpus.
+ *   NOT       — the Live rows. A run still going since three days ago must render regardless of its own startedAt, which is the entire reason `splitLive`
+ *               exists; paging that row away is the exact failure that split was written to prevent. The "one run per project" invariant caps the Live
+ *               sheet at one row per registered project, so it cannot grow the way history can and leaves no hole in the bound.
+ *   NOT       — the ordered rows and the selection (`pickSelected` — selection survives a reset that pushes its row out of the window), `filtered` (the
+ *               aggregate tiles and the wide machine-time tile). A window is a RENDERING decision and must not move a single number in the tiles.
+ *
+ * The slice lands between `splitLive` and `groupByDay` and nowhere else, which is what makes a boundary falling mid-day render correctly: window first, group
+ * second, so a partially-revealed day renders its own heading over exactly the rows revealed and the next `load more` extends that same group rather than
+ * emitting a second heading for the same key.
+ */
+export function windowHistory(history: readonly MergedRun[], windowSize: number, zone: string): { groups: DayGroup[]; hiddenCount: number } {
+  const windowed = history.slice(0, windowSize);
+  return { groups: groupByDay(windowed, zone), hiddenCount: history.length - windowed.length };
+}
+
+/**
+ * The row the detail sheet describes. `orderedRows` is the reading order top to bottom — the Live sheet first, then History newest-first — so the default is
+ * whatever leads that order: the going run if one is visible, otherwise the newest historical row, the concrete, order-following meaning of "the newest run
+ * (live one wins if present)".
+ *
+ * The design brief's own wording is "defaulting to the newest VISIBLE run" — visible, not newest overall — which is exactly why the caller hands in the
+ * FILTERED, ordered list rather than `merged`. A `selected` pointer that no longer names a row in the current filter (the project filter just changed out from
+ * under it, or the row it named was dropped by a refetch) falls back the same way: `find` returns `undefined` and the first row in reading order takes over
+ * rather than the detail pane silently pointing at a run the list can no longer show. `project` is matched with `runId` because the id is a second-precision
+ * timestamp, not a global counter, and two projects' state directories could in principle hold the same one.
+ */
+export function pickSelected(
+  orderedRows: readonly MergedRun[],
+  selected: { project: string; runId: string } | null
+): MergedRun | undefined {
+  return (selected !== null ? orderedRows.find((r) => r.run.project === selected.project && r.run.runId === selected.runId) : undefined) ?? orderedRows[0];
 }

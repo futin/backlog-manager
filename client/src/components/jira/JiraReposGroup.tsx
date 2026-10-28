@@ -10,7 +10,8 @@ import { Chip } from '../ui/Chip';
 import { Pill } from '../ui/Pill';
 import { Select } from '../ui/Select';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
-import { errorOf, postJson, type JiraProjectList } from './JiraBoardSheet';
+import { errorOf, postJson } from '../../lib/http';
+import type { JiraProjectList } from './JiraBoardSheet';
 import { WorktreeRow } from './JiraWorktreeRow';
 
 /**

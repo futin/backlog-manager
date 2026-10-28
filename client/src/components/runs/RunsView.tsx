@@ -11,10 +11,10 @@ import { machineLabelByHost } from '../../lib/dashboards';
 import { projectLabel } from '../../lib/project-label';
 import { pickAuthority } from '../../lib/run-authority';
 import { runInvisibleElsewhere } from '../../lib/remote-run';
-import { orchestrateStarting, startingOnText } from '../../lib/remote-starting';
-import { STATUS_ORDER, groupByDay, mergeRuns, queueCounts, runKey, splitLive } from '../../lib/runs-list';
+import { startingOnText } from '../../lib/remote-starting';
+import { STATUS_ORDER, freshRunKey, mergeRuns, pickSelected, queueCounts, runKey, scopeRuns, windowHistory } from '../../lib/runs-list';
 import type { MergedRun } from '../../lib/runs-list';
-import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES, inRange } from '../../lib/run-range';
+import { RANGE_BUTTON, RANGE_SCOPE, RUN_RANGES } from '../../lib/run-range';
 import { RUN_STATUS_GLYPH, runDotTone, runStatusChip } from '../../lib/run-stage';
 import { useRunsMode } from '../../hooks/useRunsMode';
 import { aggregateRuns, formatUsd, runStageTotals, runUsageTotals, runWallMs, sumStageTotals } from '../../lib/run-stats';
@@ -103,8 +103,9 @@ import { useTimeZone } from '../../hooks/TimeZoneContext';
  * persisted, so a reload always opens back on "all runs" rather than
  * silently reopening on whatever a person left it on). It scopes the tiles,
  * the list, AND a new sixth tile together, composed with — not instead of —
- * the existing project filter: range narrows `merged` down to `inScope`
- * first, then the project filter narrows `inScope` down to `filtered`
+ * the existing project filter: range narrows `merged` down to its in-scope
+ * rows first, then the project filter narrows those down to `filtered`
+ * (both inside `scopeRuns`, lib/runs-list.ts, since #376)
  * exactly as it always narrowed `merged` before this task, so "this
  * project, this week" and "everything, today" are both just the same two
  * filters applied in the same fixed order. The sixth cell (`Figure wide`,
@@ -575,37 +576,25 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
   // a project's very first run, the page kept reading "no runs yet" while
   // the Board showed it live a click away.
   //
-  // The set of currently-FRESH live runIds is exactly the "did anything
-  // change at a run boundary" signal the design doc's own reasoning already
-  // grants this hook: a run starting adds a key, a run finishing (or going
-  // stale) removes one. Comma-joined into one sorted string, not compared as
-  // an array, because `liveRuns` is a brand-new array reference on every 5s
-  // poll tick even when its fresh SET hasn't changed at all — depending on
-  // the array itself would re-fire this effect (and re-fetch the archive)
-  // every 5s for no reason, exactly the redundant-request cost
-  // `useOrchestratorArchive` was built to avoid.
-  const freshRunKey = liveRuns
-    .filter((r) => r.fresh)
-    .map((r) => runKey(r.project, r.runId))
-    .sort()
-    .join('\n');
+  // The fresh runs' key — lib/runs-list.ts's `freshRunKey` says why a string and not the array.
+  const freshKey = freshRunKey(liveRuns);
 
   // Skips the call this effect would otherwise make on the very FIRST
   // render: `useOrchestratorArchive`'s own mount-time fetch already covers
   // "what does history look like right now", so re-fetching again before
-  // `freshRunKey` has had any chance to actually CHANGE would just be a
+  // `freshKey` has had any chance to actually CHANGE would just be a
   // second, redundant request for the same instant. `useRef`'s initializer
-  // captures whatever `freshRunKey` is on this component's first call, so
-  // the effect's own first run always finds `lastFreshRunKey.current`
+  // captures whatever `freshKey` is on this component's first call, so
+  // the effect's own first run always finds `lastFreshKey.current`
   // already equal to it and does nothing; only a LATER render, where
-  // `freshRunKey` has moved on from that captured value, updates the ref and
+  // `freshKey` has moved on from that captured value, updates the ref and
   // fires the refresh.
-  const lastFreshRunKey = useRef(freshRunKey);
+  const lastFreshKey = useRef(freshKey);
   useEffect(() => {
-    if (lastFreshRunKey.current === freshRunKey) return;
-    lastFreshRunKey.current = freshRunKey;
+    if (lastFreshKey.current === freshKey) return;
+    lastFreshKey.current = freshKey;
     refreshArchive();
-  }, [freshRunKey, refreshArchive]);
+  }, [freshKey, refreshArchive]);
 
   // One clock reading for the whole render, threaded into every derivation
   // that needs "now" below (the aggregate tiles and every row's own wall
@@ -618,97 +607,22 @@ export default function RunsView({ onWorking }: { onWorking?: (working: boolean)
 
   const merged = mergeRuns(archiveRuns, liveRuns, remoteRuns, (host) => machineLabelByHost(dashboards, host));
 
-  // Every project seen anywhere in the (unfiltered) merged list — computed
-  // off `merged`, not off `inScope`/`filtered` below, so narrowing EITHER
-  // the range or the project filter never removes an option that would
-  // switch back: a project with no runs in the selected range must still
-  // appear in this select, or there would be no way to widen back to it.
-  const projects = Array.from(new Set(merged.map((m) => m.run.project))).sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)));
+  // The page's two controls over its corpus, in the one correct order — lib/runs-list.ts's `scopeRuns` holds the four rules and why.
+  const { projects, filtered, startingRows, remoteStartingRows, live: liveRows, history } = scopeRuns({
+    merged,
+    starting,
+    remoteStarting,
+    range,
+    projectFilter,
+    now,
+    zone
+  });
+  // task-16's window, over `history` alone — `windowHistory` says which lists are windowed and which must not be.
+  const { groups, hiddenCount } = windowHistory(history, windowSize, zone);
 
-  // Range scoping runs BEFORE the project filter, not merely alongside it:
-  // `inRange` reads only `startedAt` (lib/run-range.ts's own file header
-  // states why that field, and no other, is what a range window is keyed
-  // on), so this pass can run directly off `merged` with no dependency on
-  // which project is currently selected, and the project filter below then
-  // narrows whatever the range already left in scope exactly the way it
-  // always narrowed `merged` before this task existed.
-  const inScope = merged.filter((m) => inRange(m.run.startedAt, range, now, zone));
-  const filtered = projectFilter === 'all' ? inScope : inScope.filter((m) => m.run.project === projectFilter);
-  // The project filter applies to the placeholder rows; the RANGE control
-  // deliberately does not. `inRange` reads `startedAt` and only `startedAt`
-  // (lib/run-range.ts's own header states why no other field is a legitimate
-  // window key), a starting entry has no `startedAt` at all — it has
-  // `requestedAt`, the moment THIS process was asked — and every one of the
-  // four windows this view offers ends at now, so an entry marked seconds
-  // ago is inside all four by construction. Rendering it regardless of range
-  // is therefore not an exemption from the range rule, it is that rule's own
-  // answer, reached without teaching `inRange` a second date field it would
-  // then have to justify.
-  //
-  // Note this filters `starting`, never `merged`/`filtered`: a placeholder is
-  // not a run, so it stays out of `orderedRows`, out of `selectedRow`, out of
-  // `aggregateRuns`/`sumStageTotals` and out of the `projects` option list
-  // below. A window that showed a number for it would be inventing one.
-  const startingRows = projectFilter === 'all' ? starting : starting.filter((s) => s.project === projectFilter);
-  // Multi-dashboard task 10: launches on other machines, a SECOND list beside `startingRows` and never merged into it — `startingRows.length` is the local
-  // `N starting` count, which a launch elsewhere is not. Same project filter, for the same reason: a filtered page lists nothing about other projects.
-  const remoteStartingRows = orchestrateStarting(remoteStarting).filter((e) => projectFilter === 'all' || e.project === projectFilter);
-  // The split is computed AFTER filtering, not before: a project filter that
-  // hides the only going run in scope must not leave a phantom Live sheet
-  // over an empty rows list, and the design's own "newest VISIBLE run"
-  // wording for the default selection below only makes sense read against
-  // whatever the filter currently shows.
-  const { live: liveRows, history } = splitLive(filtered);
-  // task-16's window, and the ONE place it applies. Which lists are windowed
-  // and which deliberately are not is the whole rule, and it is the kind of
-  // thing fix rounds 2 and 3 in this file already went wrong on (a call site
-  // quietly reading a different source than its neighbours), so it is worth
-  // stating outright:
-  //
-  //   windowed  — `groupByDay`'s input, and nothing else. The list is a
-  //               window; every other reader wants the whole corpus.
-  //   NOT       — `liveRows`. A run still going since three days ago must
-  //               render regardless of its own startedAt, which is the
-  //               entire reason `splitLive` exists; paging that row away is
-  //               the exact failure that split was written to prevent. The
-  //               "one run per project" invariant caps the Live sheet at one
-  //               row per registered project, so it cannot grow the way
-  //               history can and leaves no hole in the bound.
-  //   NOT       — `orderedRows`/`selectedRow` (selection survives a reset
-  //               that pushes its row out of the window), `filtered` (the
-  //               aggregate tiles and the wide machine-time tile). A window
-  //               is a RENDERING decision and must not move a single number
-  //               in the tiles.
-  //
-  // The slice lands between `splitLive` and `groupByDay` and nowhere else,
-  // which is what makes a boundary falling mid-day render correctly: window
-  // first, group second, so a partially-revealed day renders its own heading
-  // over exactly the rows revealed and the next `load more` extends that
-  // same group rather than emitting a second heading for the same key.
-  const windowed = history.slice(0, windowSize);
-  const hiddenCount = history.length - windowed.length;
-  const groups = groupByDay(windowed, zone);
-
-  // Reading order top to bottom: the Live sheet first (regardless of its
-  // rows' own startedAt — see splitLive's own comment for why), then history
-  // newest-day-first. Selection defaults to whatever leads that order — the
-  // fresh run if one is visible, otherwise the newest historical row — which
-  // is the concrete, order-following meaning of "the newest run (live one
-  // wins if present)" now that "live wins" is a real precedence rather than
-  // a same-millisecond tie-break.
+  // Reading order top to bottom, and the selection resolved against it UNWINDOWED — `pickSelected` says why the visible list and not `merged`.
   const orderedRows = [...liveRows, ...history];
-
-  // The design brief's own wording is "defaulting to the newest VISIBLE run"
-  // — visible, not newest overall — which is exactly why this is derived
-  // from `orderedRows` (the FILTERED, ordered list) rather than from
-  // `merged` directly. A `selected` pointer that no longer names a row in
-  // the current filter (the project filter just changed out from under it,
-  // or the row it named was dropped by a refetch) falls back the same way:
-  // `find` returns `undefined` and the first row in reading order takes over
-  // rather than the detail pane silently pointing at a run the list can no
-  // longer show.
-  const selectedRow =
-    (selected !== null ? orderedRows.find((r) => r.run.project === selected.project && r.run.runId === selected.runId) : undefined) ?? orderedRows[0];
+  const selectedRow = pickSelected(orderedRows, selected);
 
   // Fix round 3: this used to be `filtered.map((m) => m.run)` — the
   // ARCHIVE record for every run, live-backed or not. A re-review caught

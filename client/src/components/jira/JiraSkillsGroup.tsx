@@ -8,7 +8,7 @@ import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
 import { Pill } from '../ui/Pill';
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
-import { errorOf, postJson } from './JiraBoardSheet';
+import { errorOf, postJson } from '../../lib/http';
 
 /**
  * The six names the server substitutes into a template (spec §6.4, and §5.4 for the last three, which carry the branch choice made on Run), in the order the

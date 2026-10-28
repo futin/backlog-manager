@@ -9,11 +9,9 @@
  * audit's gap 2). The render tests stay where they are: they pin the stored key reaching the track, which no unit test can.
  *
  * Pure by construction — no React, no `localStorage`, nothing from `components/` or `hooks/`. `lib/` imports nothing from `components/`, the same reason
- * `ACTIVE_RUN_STAGES` lives in `lib/run-stage.ts` and `SortDir` moved here out of FilterBar.tsx.
+ * `ACTIVE_RUN_STAGES` lives in `lib/run-stage.ts`, `liveKind` in `lib/live-bar.ts`, and `SortDir` moved here out of FilterBar.tsx.
  */
-import { isInProgress, isLiveWork } from './item-progress';
-import { ACTIVE_RUN_STAGES } from './run-stage';
-import { ATTENTION_RUN_STAGES } from '../../../shared/types';
+import { liveKind } from './live-bar';
 import type { BacklogItem, RunStage } from '../../../shared/types';
 
 export type SortKey = 'created' | 'name' | 'project';
@@ -104,7 +102,7 @@ export function resolveSortKey(stored: unknown): SortKey {
  *   1 — a fresh run is working it (`ACTIVE_RUN_STAGES`), or a hand-run session
  *       has stamped `started:` on the file (`isInProgress`) and, on a tracker
  *       item, its claim still has a heartbeat inside `CLAIM_STALE_MS`
- *       (`isLiveWork`, #227).
+ *       (`liveKind`'s `hand` rather than its `stale`, #227).
  *   2 — everything else — a stale tracker claim among it.
  *
  * Rank 0 sits above running work because it is the only one of the three that
@@ -118,10 +116,12 @@ export function resolveSortKey(stored: unknown): SortKey {
  *
  * Three readers, and they must not disagree: this rank orders the columns, its
  * `< 2` half is the Status filter's `started` predicate, and the same `< 2` half
- * gates the board's clock (`hasLive`). It is also, by construction, exactly the
- * set of cards `liveBarFor` (ItemCard.tsx) draws a bar for — the rank and the
- * marker are the same claim, one sorted and one painted, which is why neither
- * restates the other's stage lists.
+ * gates the board's clock (`hasLive`). Its `< 2` half is the set of cards
+ * `liveBarFor` (lib/live-bar.ts) draws a bar for MINUS the `stale` ones: a stale
+ * tracker claim is drawn, so a person sees it and can release it, but nobody is
+ * working it, so it neither floats up a column nor counts as In progress (#227).
+ * The rank and the bar read one classification, `liveKind` (lib/live-bar.ts), so
+ * neither restates the other's stage lists; they differ only in what `stale` means.
  *
  * The card's queued band (`queuedStripFor`) paints in the same place and is
  * deliberately NOT in that set: an `orchestrator:queued` item is a plan nobody
@@ -134,8 +134,9 @@ export function resolveSortKey(stored: unknown): SortKey {
  * so the card can be seen going stale later. Every other reader passes `now`.
  */
 export function liveRank(item: BacklogItem, stage: RunStage | undefined, now: number | null): 0 | 1 | 2 {
-  if (stage !== undefined && ATTENTION_RUN_STAGES.includes(stage)) return 0;
-  if ((stage !== undefined && ACTIVE_RUN_STAGES.includes(stage)) || (now === null ? isInProgress(item) : isLiveWork(item, now))) return 1;
+  const kind = liveKind(item, stage, now);
+  if (kind === 'attention') return 0;
+  if (kind === 'run' || kind === 'hand') return 1;
   return 2;
 }
 

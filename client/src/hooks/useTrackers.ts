@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { hasSyncingTracker, isTrackersPayload, syncCycleMs, TRACKER_CYCLE_MS } from '../lib/tracker';
 import type { SyncInterval, TrackersPayload } from '../../../shared/types';
+import { useWindowFocus } from './useWindowFocus';
 
 /**
  * `GET /api/trackers` — the shell's one instance (the tracker strip spec, §4), provided through `TrackersContext` to the strip chip and to Shared
@@ -155,11 +156,7 @@ export function useTrackers(): TrackersState {
     };
   }, [reload, clear]);
 
-  useEffect(() => {
-    const onFocus = (): void => reload();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [reload]);
+  useWindowFocus(reload);
 
   /*
    * Refetch on success, and ONLY on success: the refetch is what moves the pill, and a refusal must leave the old value selected with the reason beside it —

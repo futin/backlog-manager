@@ -198,6 +198,52 @@ export function accessReason(project: Pick<ProjectSummary, 'access' | 'detail'>)
 }
 
 /**
+ * A poll clock's reading as a `Meter` draws it: the word, the bar's fill (`null` for an empty bar) and its tone. One type for the tracker chip and the Jira
+ * chip, which each declared their own copy of it before #376.
+ */
+export type PollReading = { value: string; fraction: number | null; tone: 'green' | 'amber' | 'red' };
+
+/**
+ * The three rungs every poll clock ends in, once the reading-specific rungs above it (`sync off`, `failing`, an access sentence, no boards) have passed:
+ * no progress yet is an empty green bar with `pending` as its word — empty, not full, because nothing has been read yet; `overdue` is a full amber bar after
+ * two silent cycles (`pollProgress`' own threshold); otherwise the seconds left with the fraction, green. `pending` is the one word the callers differ on —
+ * `…` for a chip, `connecting…` for one repo's popover row.
+ *
+ * Shared by `sweepReading` and `rowReading` here and `jiraPollReading` (lib/jira.ts), which each spelled these three rungs out by hand (#376).
+ */
+export function countdownReading(progress: PollProgress | null, pending: string): PollReading {
+  if (progress === null) return { value: pending, fraction: null, tone: 'green' };
+  if (progress.overdue) return { value: 'overdue', fraction: 1, tone: 'amber' };
+  return { value: `${progress.leftS}s`, fraction: progress.fraction, tone: 'green' };
+}
+
+/**
+ * The tracker chip's POLL reading, in precedence order. `failing` beats the clock when EVERY repo is failing — no poll can succeed, so a countdown would promise a
+ * sweep that will not land. `…` before the first poll: an empty bar, not a full one, because nothing has been read yet. `overdue` is a full amber bar
+ * after two silent cycles (`pollProgress`' own threshold).
+ *
+ * `sync off` comes first, and only when EVERY repo is off (#17): nothing is being polled, so neither a countdown nor `failing` would be true, and amber
+ * because it is a state writes are refused in, not a neutral one. Otherwise off repos drop out of both remaining readings — a repo nobody polls cannot be
+ * failing now, and its stamp says when sync stopped, not when the next sweep lands.
+ */
+export function sweepReading(rows: TrackerProjectRow[], now: number): PollReading {
+  const live = rows.filter((r) => r.interval !== 'off');
+  if (live.length === 0) return { value: 'sync off', fraction: null, tone: 'amber' };
+  if (live.every((r) => r.access !== 'ok')) return { value: 'failing', fraction: 1, tone: 'red' };
+  return countdownReading(sweepProgress(rows, now), '…');
+}
+
+/** One repo's line timer in the tracker chip's popover — `sweepReading`'s rules for one row, with the access sentence in place of `failing`, on the row's own interval
+ *  (#17), and `sync off` for a repo this machine no longer polls — before the access reason, which describes a poll that is no longer being made. */
+export function rowReading(row: TrackerProjectRow, now: number): PollReading {
+  const cycle = syncCycleMs(row.interval);
+  if (cycle === null) return { value: 'sync off', fraction: null, tone: 'amber' };
+  const reason = accessReason(row);
+  if (reason !== null) return { value: reason, fraction: 1, tone: 'red' };
+  return countdownReading(pollProgress(row.polledAt, now, cycle), 'connecting…');
+}
+
+/**
  * Why nothing may be written to this project's tracker from this machine, or `null` (#17, spec §8): the sentence the server's `syncOffBlock` composes, byte
  * for byte, and the client's ONE home of it. The client cannot import the server's composer, so both sides pin the literal in a test and a wording change
  * goes red on both. `null` for every interval but `off`, and for a row with no repo — a files project has no sync to turn off.

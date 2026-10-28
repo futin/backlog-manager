@@ -5,7 +5,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 
 import BoardView from '../client/src/components/board/BoardView';
-import { liveBarFor } from '../client/src/components/board/ItemCard';
+import { liveBarFor } from '../client/src/lib/live-bar';
 import rawFixture from './fixtures/orchestrator-run.json';
 import { daysAgoDate } from './helpers/dates';
 import { pickStatus } from './helpers/filter-bar';
