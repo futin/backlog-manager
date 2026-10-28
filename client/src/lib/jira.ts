@@ -1,6 +1,6 @@
 import { errorOf } from './http';
 import { elapsedSince, formatCreated } from './item-age';
-import { pollAge } from './tracker';
+import { countdownReading, pollAge, pollProgress, type PollReading } from './tracker';
 import { DEFAULT_NAME_PATTERN, branchCarriesKey, branchNameProblem, renderBranchPattern, shellQuote, slugOf } from '../../../shared/jira-branch';
 import { SYNC_INTERVALS, jiraActionParam } from '../../../shared/types';
 import type {
@@ -541,6 +541,20 @@ export function soonestBoard(boards: readonly JiraBoardStatus[], _now: number): 
     }
   }
   return best;
+}
+
+/**
+ * The Jira chip's POLL reading: `pollProgress` on the soonest syncing board's own interval (`SYNC_INTERVALS`, not the GitHub cycle — Jira has no slack constant to
+ * add, and a board is restamped at its interval). An empty bar with no syncing board — `—` when there are no boards at all, `sync off` (amber, the state
+ * `TrackerChip` names the same way) when every board is off — and `…` before the soonest one has polled, an empty bar because nothing has been read yet.
+ * `overdue` is a full amber bar after two silent intervals, `pollProgress`' own threshold. Those last three rungs are `countdownReading` (lib/tracker.ts).
+ */
+export function jiraPollReading(boards: readonly JiraBoardStatus[], now: number): PollReading {
+  const soonest = soonestBoard(boards, now);
+  if (soonest === null) return boards.length === 0 ? { value: '—', fraction: null, tone: 'green' } : { value: 'sync off', fraction: null, tone: 'amber' };
+  const interval = SYNC_INTERVALS[soonest.interval];
+  const progress = interval === null ? null : pollProgress(soonest.polledAt, now, interval);
+  return countdownReading(progress, '…');
 }
 
 const byName = (a: JiraBoardStatus, b: JiraBoardStatus): number => a.name.localeCompare(b.name);

@@ -7,6 +7,7 @@ import { setJiraPage, useJiraPage } from '../client/src/hooks/useJiraPage';
 import {
   JIRA_429_RED_MS,
   failureOf,
+  jiraPollReading,
   JIRA_BOARD_FILTER_FROM,
   JIRA_COLUMNS,
   JIRA_CUSTOM_QUERY,
@@ -448,6 +449,25 @@ describe('soonestBoard', () => {
     const polled = board({ id: 'b_polled', interval: '15s', polledAt: ago(now, 14 * SECOND) });
     const fresh = board({ id: 'b_fresh', interval: '5m', polledAt: null });
     expect(soonestBoard([polled, fresh], now)?.id).toBe('b_fresh');
+  });
+});
+
+// #376: the Jira chip's POLL reading, moved here out of JiraChip.tsx; its last three rungs are `countdownReading` (lib/tracker.ts).
+describe('jiraPollReading', () => {
+  it('reads — on an empty green bar with no boards', () => {
+    expect(jiraPollReading([], Date.now())).toEqual({ value: '—', fraction: null, tone: 'green' });
+  });
+
+  it('reads sync off, amber, when every board is off', () => {
+    expect(jiraPollReading([board({ interval: 'off' }), board({ id: 'b_2', interval: 'off' })], Date.now())).toEqual({
+      value: 'sync off',
+      fraction: null,
+      tone: 'amber'
+    });
+  });
+
+  it('reads … for a syncing board that has never polled', () => {
+    expect(jiraPollReading([board({ interval: '1m', polledAt: null })], Date.now())).toEqual({ value: '…', fraction: null, tone: 'green' });
   });
 });
 
