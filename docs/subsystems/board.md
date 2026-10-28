@@ -458,7 +458,7 @@ treats a remote host's claim as a board-dispatched one: `ClaimRelease` offers St
 **A stale claim reads stale (#227).** The mapper still fills `started`/`phase` from any unreleased claim, so every reader that means "is somebody on this"
 asks `claimReading` (`lib/tracker.ts`) — `'live' | 'stale' | null` by the reader's clock — as its second question. A stale holder draws the card's live strip as
 `stale · no heartbeat <age> · <host>` in the stale queued band's muted pair instead of the hatched `executing` one (`liveBarFor`, `lib/live-bar.ts`, reading `liveKind`'s `stale`); ranks 2 and drops out of the
-Status filter's "In progress" (`isLiveWork` in `lib/item-progress.ts`, which `liveRank` reads with the board's clock); and reads `stale claim` in the item modal
+Status filter's "In progress" (`liveRank`, reading `liveKind`'s `stale` with the board's clock — the same test `isLiveWork` in `lib/item-progress.ts` makes for the item modal); and reads `stale claim` in the item modal
 in place of `in progress`. It does NOT leave the board — `leavesBoard` is unchanged, because the release control lives on the Board and Archive has none. The
 clock's own gate, `hasLive`, reads the rank UNAGED: a claim that is live now has to keep the clock running to be seen going stale. `progressBlock` lets dispatch
 through over a stale hand claim — the spawned session's `start` retires it — and the Launch sheet says so (`staleTakeover`); a stale claim a run holds, or one

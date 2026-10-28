@@ -102,7 +102,7 @@ export function resolveSortKey(stored: unknown): SortKey {
  *   1 — a fresh run is working it (`ACTIVE_RUN_STAGES`), or a hand-run session
  *       has stamped `started:` on the file (`isInProgress`) and, on a tracker
  *       item, its claim still has a heartbeat inside `CLAIM_STALE_MS`
- *       (`isLiveWork`, #227).
+ *       (`liveKind`'s `hand` rather than its `stale`, #227).
  *   2 — everything else — a stale tracker claim among it.
  *
  * Rank 0 sits above running work because it is the only one of the three that

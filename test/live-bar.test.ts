@@ -1,4 +1,5 @@
 import { liveRank } from '../client/src/lib/board-sort';
+import { isLiveWork } from '../client/src/lib/item-progress';
 import { liveBarFor, liveKind } from '../client/src/lib/live-bar';
 import { CLAIM_STALE_MS } from '../shared/types';
 import type { BacklogItem, RunStage } from '../shared/types';
@@ -98,5 +99,17 @@ describe('liveRank against liveBarFor', () => {
   it.each(cases)('ranks %s live exactly when it draws a bar that is not stale', (_label, item, stage) => {
     const bar = liveBarFor(item, stage === undefined ? undefined : { stage, stageAt }, NOW);
     expect(liveRank(item, stage, NOW) < 2).toBe(bar !== null && bar.tone !== 'stale');
+  });
+});
+
+/* The item modal reads `isLiveWork`; the board reads `liveKind`. Both answer "is somebody working this" for an item with no run stage, so they must agree
+   on every claim — a live one, a stale one, a files stamp — or the modal and the card would describe the same claim two ways. */
+describe('isLiveWork against liveKind', () => {
+  it.each([
+    ['a live tracker claim', liveClaim()],
+    ['a stale tracker claim', staleClaim()],
+    ['a started files item', fakeItem({ started: '2026-10-15T09:00:00Z' })]
+  ])('agrees on %s', (_label, item) => {
+    expect(isLiveWork(item, NOW)).toBe(liveKind(item, undefined, NOW) === 'hand');
   });
 });

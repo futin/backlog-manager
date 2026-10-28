@@ -20,9 +20,14 @@ export function isInProgress(item: BacklogItem): boolean {
  *
  * Two predicates rather than one widened, because they answer different questions and both are still asked. `isInProgress` is "does a claim stand" — the
  * item modal's facts, `leavesBoard`/`isStale` (an item with ANY unreleased claim keeps its place on the board, where the release control is) and
- * `progressLabel` all want that. This is "is it being worked": the column rank, the Status filter's "In progress" and the card's live bar read it, since a
- * claim nobody has heartbeated for `CLAIM_STALE_MS` is litter the protocol retires at the next `start`, and drawing it as work in flight is what left #15
- * untouched for a day. A files item has no `holder`, so `claimReading` is `null` for it and this is `isInProgress` exactly — its "ANY stamp" rule stands.
+ * `progressLabel` all want that. This is "is it being worked", since a claim nobody has heartbeated for `CLAIM_STALE_MS` is litter the protocol retires at
+ * the next `start`, and drawing it as work in flight is what left #15 untouched for a day. A files item has no `holder`, so `claimReading` is `null` for it
+ * and this is `isInProgress` exactly — its "ANY stamp" rule stands.
+ *
+ * Its one reader is the item modal's `in progress` / `stale claim` line (`ItemModal.tsx`). The board's three readers — the column rank, the Status filter's
+ * "In progress" and the card's live bar — ask the same question through `liveKind` (`lib/live-bar.ts`, #376), whose `stale` rung is this test's negation
+ * for an in-progress item: it has to tell `stale` from `hand` from a run stage in one ordered pass, which a boolean cannot. Change what "stale" means in
+ * one and the other must follow, or the modal and the card will disagree about the same claim.
  */
 export function isLiveWork(item: BacklogItem, now: number): boolean {
   return isInProgress(item) && claimReading(item, now) !== 'stale';
