@@ -47,3 +47,27 @@ test('the launcher runs the files under its root, passes the exit code through, 
   assert.notEqual(bad.status, 0)
   assert.deepEqual(fs.readdirSync(work), ['probe.test.mjs'])
 })
+
+// #346: the run-as-main guard once compared argv[1] with `new URL(import.meta.url).pathname`, which stays percent-encoded — so from a checkout whose path
+// held a space or a non-ASCII character the launcher never called main(), spawned no `node --test`, and exited 0: `test:skills` and the node half of
+// `pnpm test` reported PASS having run nothing. The launcher has no relative imports, so a copy of it runs standalone from such a directory. The passing
+// probe must exit 0 AND name its test, so this case cannot pass merely because the launcher crashed; the failing probe must exit non-zero.
+//
+// `realpathSync` because node resolves the main module through symlinks before it builds `import.meta.url`, while argv[1] keeps the spelling it was given:
+// on macOS `os.tmpdir()` sits under `/var`, a symlink to `/private/var`, so an unresolved copy would miss the guard for that reason instead of this one —
+// and every other run-as-main guard in the repo makes the same unresolved comparison.
+test('the launcher runs its files from a directory whose path holds a space and a non-ASCII character', () => {
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'launch-')))
+  const dir = path.join(work, 'dir with space é')
+  fs.mkdirSync(dir)
+  const copy = path.join(dir, 'test-tmpdir.mjs')
+  fs.copyFileSync(LAUNCHER, copy)
+  const file = path.join(dir, 'probe.test.mjs')
+  fs.writeFileSync(file, "import { test } from 'node:test'\ntest('probe-under-space', () => { if (process.env.PROBE_FAIL) throw new Error('x') })\n")
+  const ok = spawnSync(process.execPath, [copy, file], { encoding: 'utf8', env: { ...cleanEnv, TMPDIR: work } })
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr)
+  assert.match(ok.stdout, /probe-under-space/)
+  const bad = spawnSync(process.execPath, [copy, file], { encoding: 'utf8', env: { ...cleanEnv, TMPDIR: work, PROBE_FAIL: '1' } })
+  assert.notEqual(bad.status, 0, bad.stdout + bad.stderr)
+  assert.match(bad.stdout, /probe-under-space/)
+})
