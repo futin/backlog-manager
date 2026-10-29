@@ -211,7 +211,8 @@ export function readWatchdogConfig(file: string = watchdogFile()): WatchdogConfi
 /**
  * Merge `patch` over the current effective config, clamp the result, and
  * write it atomically — the one write path for this file, called by
- * `POST /api/agents/watchdog/config` (design §5.3) and by nothing else.
+ * `POST /api/agents/watchdog/config` (design §5.3), through
+ * `WatchdogService.configure`, and by nothing else.
  * `patch` is `unknown`, not `Partial<WatchdogConfig>`, for the same reason
  * `clampWatchdogConfig`'s `raw` is: a controller only proves a request body
  * is AN object, not that it is the RIGHT one, so every field the patch

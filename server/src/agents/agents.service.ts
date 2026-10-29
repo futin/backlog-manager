@@ -1,24 +1,17 @@
-import { homedir } from 'node:os';
-import { basename } from 'node:path';
 import { HttpException, Injectable } from '@nestjs/common';
 
-import { RegistryService } from '../registry/registry.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ItemsService } from '../items/items.service';
 import { TrackerPollerService } from '../tracker/poller.service';
 import { DispatchRecordsService } from '../items/dispatch-records.service';
-import { scanProject } from '../items/scan.util';
-import { resolveSource } from '../items/sources/resolve.util';
-import { BASE_BRANCH_SHAPE, proveBaseBranch, resolveBaseBranch } from '../items/base-branch.util';
-import { parseUrn } from '../tracker/map-issue';
-import { runGit } from '../git-run.util';
+import { proveBaseBranch } from '../items/base-branch.util';
 import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
-// Re-exported so every importer from before multi-dashboard task 4 moved them into config.util.ts (to break a module cycle) is untouched.
-export { authHeaders, dashboardError, message } from './config.util';
+import { itemClaimBlock } from './dashboard-sessions.util';
+import { machineChoiceBlock, remoteDefaultModel, remoteGateBlock } from './machine-choice.util';
 import { DashboardStatusService } from './dashboard-status.service';
 import { DashboardsService, type Machine } from './dashboards/dashboards.service';
 import { filesBackedReason, OffersService, REMOTE_BUDGET } from './dashboards/offers.service';
-import { mergeCheck as checkMergeCoverage } from './merge-check.util';
+import { OrchestrateArgsService } from './orchestrate-args.service';
 import {
   clampMode,
   deriveAction,
@@ -26,9 +19,6 @@ import {
   FINISH_FLAG,
   inReviewBlock,
   isExecuteFinish,
-  isItemId,
-  isMergeMode,
-  isQuestionMode,
   modesUpTo,
   planReviewBlock,
   unvettedBlock,
@@ -39,25 +29,21 @@ import {
   MODELS,
   DEFAULT_MODEL
 } from '../../../shared/agent';
-import { appendFinishClause, composePrompt, sessionName } from './prompt.util';
+import { appendFinishClause, composePrompt, orchestrateSessionName, resumeSessionName, sessionName, stopSessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
 import { RemoteRunsService } from '../orchestrator/remote-runs.service';
-import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
+import { RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
-  AgentBranchesPayload,
   AgentDispatchRequest,
   AgentDispatchResult,
   AgentPlan,
   AgentsStatus,
   BacklogItem,
-  MergeCheckResult,
-  MergeMode,
   OrchestratorRun,
   PauseResult,
   PermissionMode,
-  QuestionMode,
   StartOrchestrateRequest,
   StopResult
 } from '../../../shared/types';
@@ -242,7 +228,6 @@ export type OrchestrateRequestKeysMatch = Assert<SameKeys<AgentOrchestrateReques
 @Injectable()
 export class AgentsService {
   constructor(
-    private readonly registry: RegistryService,
     private readonly orchestrator: OrchestratorService,
     /**
      * bug-19 — the resume lock's home, and the reason this is
@@ -266,6 +251,12 @@ export class AgentsService {
      * about dispatch, so there is no cycle for Nest to refuse.
      */
     private readonly items: ItemsService,
+    /**
+     * #388 — "is this orchestrate request legal": the `ids`, base, merge-mode and question-mode resolvers `spawnOrchestrate` runs in its refusal order,
+     * and the two reads behind the Orchestrate sheet (`branches`, `mergeCheck`), which the controller calls directly. They need only the registry and
+     * the item adapters, which is why `RegistryService` is no longer injected here. Injects nothing from this module, so no cycle.
+     */
+    private readonly orchestrateArgs: OrchestrateArgsService,
     /** #225 — written by `dispatch` alone; see `DispatchRecordsService` for why it lives in `ItemsModule`. */
     private readonly dispatches: DispatchRecordsService,
     /**
@@ -952,19 +943,19 @@ export class AgentsService {
     // start at all, and case 8 of the design's server-validation table
     // (task-4-brief.md) pins the lock winning over it, same as it wins over
     // an ids problem.
-    const ids = await this.resolveIds(req.project, req.ids);
+    const ids = await this.orchestrateArgs.resolveIds(req.project, req.ids);
     // A remote's is always `pr` — the 400 at the top of `orchestrate` already refused any other value — so it appends `--merge-mode pr`.
-    const mergeMode = m.home ? this.resolveMergeMode(req.mergeMode, req.project) : 'pr';
+    const mergeMode = m.home ? this.orchestrateArgs.resolveMergeMode(req.mergeMode, req.project) : 'pr';
     // Beside resolveMergeMode, after the lock, for the identical reason the
     // comment directly above gives: a malformed `questionMode` is a problem
     // with what the run should contain, not with whether it may start, so
     // the coded RUN_IN_PROGRESS_CODE 409 must still win over it.
-    const questionMode = this.resolveQuestionMode(req.questionMode);
+    const questionMode = this.orchestrateArgs.resolveQuestionMode(req.questionMode);
     // Beside the other two resolvers and after the lock, for the identical
     // reason both comments above give: a base naming no branch is a problem
     // with what the run should contain, not with whether it may start, so the
     // coded RUN_IN_PROGRESS_CODE 409 must still win over it.
-    const base = await this.resolveBase(req.base, req.project);
+    const base = await this.orchestrateArgs.resolveBase(req.base, req.project);
 
     return this.spawn(cfg, {
       project: dirName,
@@ -1645,507 +1636,6 @@ export class AgentsService {
    * backlog/ is not an item here either.
    */
   /**
-   * Narrows `POST /api/agents/orchestrate`'s `ids` into the list the prompt
-   * is composed from, or `undefined` for "no restriction — drain the whole
-   * queue". Throws rather than returning a failure: every rejection below is
-   * the caller's answer, and there is no partial success worth reporting.
-   *
-   * This is what lets a caller influence a prompt at all without weakening
-   * the "the orchestrate spawn prompt is a server-side constant" invariant.
-   * Two independent checks stand between a request body and that string:
-   *
-   *   1. `isItemId` (shared/agent.ts) — shape. What survives is a bare
-   *      identifier: no whitespace, no path separator, no shell
-   *      metacharacter, no newline to split a one-line prompt with.
-   *   2. Membership — this project's own scanned items, filtered to open
-   *      bugs and tasks. What survives names a file that actually exists in
-   *      the store the run is about to be pointed at.
-   *
-   * Shape alone would be far too weak (`bug-999` passes it), and membership
-   * alone would be doing a directory scan over attacker-shaped strings. Both
-   * together mean the only thing a caller can put in the prompt is the id of
-   * one of this project's real, runnable items.
-   *
-   * 400 vs 409 follows the split dispatch already makes: 400 when the
-   * request is malformed (not a list, an empty list, something that is not
-   * an id), 409 when the request is well-formed and the FILES disagree with
-   * it (no such item, archived, wrong section, another project's item). The
-   * 409s are deliberately uncoded — `RUN_IN_PROGRESS_CODE`, this route's one
-   * 409 code, says "a run for this project is alive right now", which is
-   * not what an id disagreement means, and nothing here needs to be told
-   * apart from the others by a machine.
-   */
-  private async resolveIds(project: string, ids: unknown): Promise<string[] | undefined> {
-    if (ids === undefined || ids === null) return undefined;
-    if (!Array.isArray(ids)) {
-      throw new HttpException({ error: 'ids must be an array of item ids' }, 400);
-    }
-    if (ids.length === 0) {
-      // The one refusal that is easy to get wrong in the other direction.
-      // Reading `[]` as "everything" would turn a reader who unchecked every
-      // box on the board into a full unattended drain of their backlog —
-      // the exact inversion `parseIdsArg`'s own comment (orchestrate.mjs)
-      // exists to prevent one layer down.
-      throw new HttpException({ error: 'ids must name at least one item — omit ids entirely to run the whole queue' }, 400);
-    }
-    /* task-47. A TRACKER project's ids take a different proof and a different
-       spelling, and both differences are here rather than spread over the
-       method:
-
-         * **Shape.** `#31`, this project's own URN and a BARE `31` are all
-           accepted. The first two are `isItemId`'s already; bare digits get
-           their own check, because `isItemId` deliberately does not admit them
-           — `31` on its own is not an item id anywhere else in this app, and
-           widening that predicate to accept one would make every caller of it
-           accept a number.
-         * **Membership.** Proved against `ItemsService`, never `scanProject`:
-           a tracker project has no item files, and the files scan would find
-           nothing and 409 every id.
-         * **Spelling.** Every accepted id is NORMALISED TO BARE DIGITS before
-           it reaches the composition. That is what keeps CLAUDE.md's `#`
-           paragraph true: the orchestrate prompt is the one composition that
-           concatenates caller text, `orchestrate.mjs` reads its argv as
-           tokens, and SKILL.md substitutes those tokens into fenced shell
-           commands where `#` opens a comment. The refusal that used to stop a
-           `#` reaching the prompt is gone; this normalisation is what stands
-           in its place, and it is stronger — nothing is refused for carrying a
-           `#`, it simply never survives to the prompt.
-
-       A files project takes neither branch and is byte-identical to what it
-       was, which O-L3 pins by reusing the existing composition cases. */
-    if (this.items.isTrackerProject(project)) return this.resolveTrackerIds(project, ids);
-
-    for (const id of ids) {
-      if (!isItemId(id)) {
-        // Echoed back truncated and JSON-quoted: a client bug is far easier
-        // to find when the error names the value that broke, and this body
-        // goes back to the same caller that sent it. Bounded because the
-        // value is arbitrary and there is no reason to reflect a megabyte of
-        // it into a log.
-        const shown = JSON.stringify(typeof id === 'string' ? id.slice(0, 40) : id);
-        throw new HttpException({ error: `ids must all be item ids like task-3 — ${shown} is not one` }, 400);
-      }
-    }
-
-    // Scoped to the ONE project being orchestrated, deliberately unlike
-    // findItem's registry-wide walk: an id is only meaningful inside a
-    // store, `bug-2` exists in most of them, and accepting another
-    // project's item here would hand `--ids` an id that `orchestrate.mjs
-    // init` then exits 1 on — inside a headless session that has already
-    // been spawned, where nobody is watching. Raw string compare on the
-    // path, matching the deliberately-not-realpath rule the dashboard
-    // membership check follows (see CLAUDE.md); a `project` naming nothing
-    // in the registry simply has no runnable items, and every id then gets
-    // the same honest refusal below.
-    const entry = this.registry.load().projects.find((p) => p.path === project);
-    const runnable = new Set(
-      (entry === undefined ? [] : (await scanProject(entry)).items)
-        // Exactly orchestrate.mjs's own candidate set: open, and one of the
-        // two sections GATE_SECTIONS names. Ideas, refactors and
-        // out-of-scope have nothing to execute by definition — the same
-        // limit backlog-execute refuses on — and an archived item is not a
-        // candidate either. Grooming is NOT checked: an ungroomed item is a
-        // legal selection, the run re-gates it and reports it as ungroomed,
-        // and that is information rather than an error (see
-        // orchestrate-draft.ts's queue comment for the same reasoning on
-        // the preview side).
-        .filter((it) => it.status === 'open' && (it.section === 'bugs' || it.section === 'tasks'))
-        .map((it) => it.id)
-    );
-
-    const seen: string[] = [];
-    for (const id of ids as string[]) {
-      if (!runnable.has(id)) {
-        // One message for all four ways this can fail (absent, archived,
-        // wrong section, another project's) — telling them apart would be
-        // telling the caller what exists where, and none of the four
-        // changes what they have to do about it: reopen the board and pick
-        // again.
-        throw new HttpException({ error: `${id} is not an open bug or task in this project` }, 409);
-      }
-      // De-duplicated rather than refused, first-seen order kept. A repeated
-      // id is not something a caller can act on and the run would work the
-      // item once either way, but a prompt naming it twice is a confusing
-      // thing to leave in a transcript nobody is watching. Order is load
-      // bearing: `--ids` runs items IN THE ORDER GIVEN, overriding the
-      // tool's own bugs-then-tasks ordering (orchestrate.mjs, SKILL.md §1),
-      // so this loop must never reorder what it was handed.
-      //
-      // `buildGatedQueue` reserves exactly one exception to that, and it is
-      // the tool's to make, never this loop's: an item marked `runner-fix:`
-      // is hoisted to the front of whatever list arrives, because executing
-      // it repairs machinery the rest of the run depends on. The caller's
-      // relative order survives among everything else. That narrowing is
-      // deliberate and it is aimed at precisely this code path — the board
-      // sends `ids` for any strict subset of its checkboxes, so what arrives
-      // here is a *selection*, not an ordering, and nobody chose the
-      // sequence it came in. Which is also why the exception belongs in the
-      // tool: a second copy of "hoist the runner fix" here would have to
-      // re-read every item's frontmatter at `<base>` to know which one that
-      // is, and the two copies would drift the first time either rule moved.
-      if (!seen.includes(id)) seen.push(id);
-    }
-    return seen;
-  }
-
-  /**
-   * `resolveIds` for a TRACKER project (task-47) — the same two-check
-   * arrangement (shape, then membership) over a different vocabulary, and one
-   * step the files path does not have: normalisation.
-   *
-   * The three accepted spellings all mean the same issue and all become the
-   * same bare number. `#31` is what a person types and what the board draws;
-   * `gh:owner/repo#31` is what `BacklogItem.path` carries, which is what the
-   * sheet has to hand; `31` is what a run's queue calls it. Accepting all
-   * three and emitting one is the whole job — refusing two of them would push
-   * the translation onto the board, where a second copy of it would drift.
-   *
-   * 400 vs 409 follows exactly the split the files path makes: 400 for a shape
-   * that is not an id at all, 409 for a well-formed id the project disagrees
-   * with. The 409 sentence is the files one, word for word, because it is the
-   * same fact and the caller does the same thing about it.
-   *
-   * Membership comes from `ItemsService.index()` filtered to this project's
-   * registry path — a raw string compare, the deliberately-not-realpath rule
-   * every membership check in this app follows. It is one read of every
-   * registered project rather than a per-project call because the service
-   * offers no narrower one; the cost is a cache read per tracker project and
-   * a directory scan per files project, on a route that then spawns a headless
-   * session.
-   */
-  /**
-   * The `owner/repo` a tracker project's marker names, or `null` — read through
-   * `ItemsService.writerFor`, the same per-request marker resolution every item
-   * write gates on, rather than a second `resolveSource` call here (bug #270).
-   * `null` only for a marker without a usable string `repo`, which no URN can
-   * match, so `resolveTrackerIds` refuses every URN for it.
-   */
-  private trackerRepoOf(project: string): string | null {
-    const lookup = this.items.writerFor(project);
-    if (lookup.kind !== 'writer') return null;
-    const repo = lookup.marker.repo;
-    return typeof repo === 'string' && repo !== '' ? repo : null;
-  }
-
-  private async resolveTrackerIds(project: string, ids: unknown[]): Promise<string[]> {
-    const wanted: string[] = [];
-    for (const id of ids) {
-      // Bare digits FIRST, and checked here rather than inside `isItemId`: see
-      // `resolveIds`' own comment for why that predicate must not learn them.
-      const bare = typeof id === 'string' && /^\d+$/.test(id) ? id : null;
-      if (bare !== null) {
-        wanted.push(bare);
-        continue;
-      }
-      if (!isItemId(id)) {
-        const shown = JSON.stringify(typeof id === 'string' ? id.slice(0, 40) : id);
-        throw new HttpException({ error: `ids must all be item ids like #31 — ${shown} is not one` }, 400);
-      }
-      // A URN names its repository as well as its number, and the repository
-      // has to be THIS project's (bug #270). Reading only the digits after the
-      // `#` turned `gh:other/repo#31` into this project's #31 — an issue the
-      // caller never named, worked by a run on this project's credential. Same
-      // refusal and sentence as `backlog.mjs`'s `trackerId`, and a 400 beside
-      // the file-id one below for the same reason: it is not an id this project
-      // could ever name. Case-insensitive, because GitHub resolves `Futin/X`
-      // and `futin/x` to one repository, so refusing a case difference would
-      // refuse the right issue.
-      const urn = parseUrn(id as string);
-      if (urn !== null) {
-        const own = this.trackerRepoOf(project);
-        if (own === null || urn.repo.toLowerCase() !== own.toLowerCase()) {
-          throw new HttpException({ error: `${String(id)} names ${urn.repo}, but this project is connected to ${own ?? 'no repository'}` }, 400);
-        }
-      }
-      // `#31` and a URN proved above both end in the number, and `isItemId`
-      // has already proved the whole string against an anchored shape — so
-      // taking the digits after the last `#` is reading a value that has been
-      // proved, never parsing an unproved one.
-      const at = (id as string).lastIndexOf('#');
-      const digits = at === -1 ? '' : (id as string).slice(at + 1);
-      if (!/^\d+$/.test(digits)) {
-        // A files-shaped id (`task-3`) in a tracker project — `isItemId`
-        // accepts it and this project has nothing it could name. Its own
-        // sentence rather than the 409 below, because the caller has the wrong
-        // vocabulary rather than the wrong item.
-        throw new HttpException({ error: `${String(id)} is a file id — a tracker project's items are named #<n>` }, 400);
-      }
-      wanted.push(digits);
-    }
-
-    const index = await this.items.index();
-    const runnable = new Set(
-      index.items
-        .filter((it) => it.projectPath === project && it.status === 'open' && (it.section === 'bugs' || it.section === 'tasks'))
-        .map((it) => String(it.id).replace(/^#/, ''))
-    );
-
-    const seen: string[] = [];
-    for (const id of wanted) {
-      if (!runnable.has(id)) {
-        throw new HttpException({ error: `${id} is not an open bug or task in this project` }, 409);
-      }
-      // De-duplicated, first-seen order kept — the files path's rule and its
-      // reasoning verbatim, and it matters more here: three spellings of one
-      // issue collapse to one number, so a selection naming `#31` and
-      // `gh:owner/repo#31` arrives as a duplicate that no caller can see.
-      if (!seen.includes(id)) seen.push(id);
-    }
-    return seen;
-  }
-
-  /**
-   * `req.base`, turned into a branch name `orchestrate.mjs init` can be told
-   * to run with, or a 400 if it cannot be. Task-44 / design §3.1.
-   *
-   * - absent (`undefined` or `''`) → `'main'` — today's behaviour, for every
-   *   caller written before this field existed.
-   * - an existing local branch in THIS project → that value.
-   * - anything else, of any type → reject.
-   *
-   * **This is `resolveIds`' kind of proof, not `resolveMergeMode`'s kind of
-   * clamp, and the distinction is the reason this method is as long as it
-   * is.** `mergeMode` and `questionMode` each append a COMPILE-TIME LITERAL
-   * chosen by a guard: whatever the caller sent, the only text that can reach
-   * the prompt is ` --merge-mode branch`, spelled in this file. No
-   * caller-supplied character survives that channel, so validating the input
-   * is about selecting the right outcome, and a clamp would do. A base is
-   * different in kind: the caller's own text is what gets appended. It
-   * therefore has to be *proved* the way an id is — against the real world,
-   * before composition — rather than merely recognised.
-   *
-   * Two checks, in this order, mirroring `assertUsableBase` in
-   * `orchestrate.mjs` (the tool re-checks because it is also driven by hand;
-   * neither copy is redundant, see that function):
-   *
-   *   1. **It is a legal branch name** (`git check-ref-format --branch`, plus
-   *      a leading-`-` refusal in JS before git is asked at all, and since
-   *      #343 `BASE_BRANCH_SHAPE` ahead of git — a well-formed ref is not a
-   *      shell-inert string, see base-branch.util.ts).
-   *
-   *      First, deliberately — but the reason is NOT that check 2 would
-   *      otherwise read it as an option. It would not: `refs/heads/${base}`
-   *      can never begin with a `-` however the caller spells the base, and
-   *      measuring confirms membership alone refuses every value this check
-   *      does. The ordering earns its place downstream. A base that survives
-   *      this method is composed into the spawn prompt and then substituted
-   *      for `<base>` in SKILL.md's own shell commands — `git worktree add
-   *      … <base>`, `git -C … merge --no-edit <base>` — where a leading `-`
-   *      or embedded whitespace genuinely would be read as an option or split
-   *      an argument. Proving well-formedness BEFORE composition is what
-   *      keeps that safe, and running it first is what makes the refusal say
-   *      "that is not a ref name" rather than "no such branch".
-   *
-   *      So: belt-and-braces for this call, load-bearing for what the value
-   *      goes on to do. Both are pinned by message in base-branch.test.ts,
-   *      because a status-only assertion cannot tell the two checks apart.
-   *   2. **`refs/heads/<base>` exists in this project** (`git show-ref
-   *      --verify --quiet`). A tag, a 40-hex SHA and `origin/main` all PASS
-   *      check 1 — measured, not assumed — and are refused only here. That is
-   *      why neither check alone is the rule. A run merges INTO its base, and
-   *      only a local branch can move.
-   *
-   * The project is resolved through the registry with the same raw string
-   * compare `resolveIds` uses, deliberately not realpath (CLAUDE.md). An
-   * unregistered `project` has no branches, so every base then gets the same
-   * honest refusal — which is the right answer, since such a project cannot
-   * be orchestrated at all.
-   *
-   * **Never creates the branch.** A missing base is a refusal, not an
-   * instruction: an endpoint that spawns unattended sessions is not an
-   * endpoint that invents refs (design, non-goals).
-   *
-   * Uncoded 400, like `resolveMergeMode`'s and for the same reason —
-   * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
-   * gives.
-   */
-  private async resolveBase(base: string | undefined, project: string): Promise<string> {
-    // The two checks live in `resolveBaseBranch` since #254, shared with
-    // `GET /api/items/uncommitted`, which must accept exactly the bases this
-    // route accepts. The `'main'` short-circuit lives there too, and this is
-    // still why it is load-bearing rather than an optimisation: the
-    // composition appends NOTHING for `'main'`, so there is no caller text
-    // for the two checks to protect — they exist to prove a string that is
-    // about to be concatenated into a prompt, and this one never is.
-    //
-    // Treating it differently would also be a live regression: the
-    // Orchestrate sheet sends `base` on EVERY launch, `'main'` included, so a
-    // validated `'main'` would run `show-ref refs/heads/main` against the
-    // project on every ordinary run — and 400 every one of them in a
-    // repository whose trunk is named something else. That board worked
-    // before this field existed and must keep working; the client becoming
-    // explicit about a default is not a reason to start refusing it.
-    //
-    // The tool still checks it at `init` (`assertUsableBase`), which is the
-    // right place: that is where the run actually happens, and it has the
-    // repository in hand rather than a registry entry.
-    //
-    // Async since #277: the two checks spawn git without blocking the event
-    // loop, and a timeout on either is a failed check — the same 400 a missing
-    // branch gets.
-    return resolveBaseBranch(base, this.registry.load().projects.find((p) => p.path === project)?.path);
-  }
-
-  /**
-   * This project's local branch names, for the Orchestrate sheet's base
-   * picker. `git for-each-ref` rather than `git branch --list`: plumbing with
-   * script-shaped output instead of porcelain that marks the checked-out one
-   * with an asterisk and may abbreviate.
-   *
-   * Read per request and cached nowhere — the same rule `uncommitted` follows
-   * and for the same reason: a branch created in the seconds since the sheet
-   * opened must be pickable without restarting the server.
-   *
-   * Deliberately NOT annotated with which tree holds which branch. The sheet
-   * needs names; "where is this branch checked out" is a question about
-   * merge time, and §9 of SKILL.md answers it then, from the run, rather than
-   * from a snapshot taken when a picker was drawn.
-   *
-   * Async and time-bounded since #277 (`runGit`): a timeout answers
-   * `{ branches: [] }`, exactly as a non-zero exit does — an empty picker, not
-   * a 500 and not a frozen server.
-   */
-  async branches(project: string): Promise<AgentBranchesPayload> {
-    const entry = this.registry.load().projects.find((p) => p.path === project);
-    if (entry === undefined) throw new HttpException({ error: 'project is not registered' }, 404);
-    const out = await runGit(['-C', entry.path, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/']);
-    if (out === null) return { branches: [] };
-    // Filtered by the launch's own shape check (#343): a branch `proveBaseBranch` would 400 is never offered, or the sheet disagrees with itself.
-    return { branches: out.split('\n').map((b) => b.trim()).filter((b) => BASE_BRANCH_SHAPE.test(b)) };
-  }
-
-  /**
-   * `req.mergeMode`, turned into a `MergeMode` `orchestrate.mjs init` can be
-   * told to run with, or a 400 if it cannot be. Design §2.3
-   * (2026-09-04-orchestrator-merge-mode-design.md):
-   *
-   * - absent (`undefined` or `''`) → `'merge'` — today's behaviour, for
-   *   every caller written before this field existed.
-   * - a member of `MERGE_MODES` → that value, except that `pr` also needs
-   *   the project to be a tracker project (spec P3: a files project has no
-   *   remote ruleset to route around, and the tool refuses it too).
-   * - anything else → reject.
-   *
-   * This is deliberately NOT `pickFrom`'s drop-on-unknown rule, even though
-   * `model` and `effort` — resolved via `pickFrom` in `orchestrate()`'s own
-   * spawn call — use exactly that rule for what looks like the identical
-   * shape of problem. The difference is what
-   * dropping resolves TO: an unrecognised model or effort falls through to
-   * "the CLI's own default", a harmless no-op. An unrecognised `mergeMode`
-   * would fall through to the absent branch above and resolve to `'merge'`
-   * — and `merge` is the irreversible direction: it commits this run's
-   * verified items into `main`, undoable afterwards only by `git revert -m
-   * 1`, never `git reset --hard` (see CLAUDE.md's invariant on undoing a
-   * completed orchestrator merge, and the data loss that rule exists to
-   * prevent). A caller bug — a stale enum on an old board tab, a typo, a
-   * future client sending a mode this build has never heard of — must not
-   * be able to select that outcome silently. Absent is different from
-   * unrecognised and gets the opposite answer for the same reason
-   * `permissionMode`'s default-before-clamp treats them oppositely just
-   * above in `orchestrate()`: absent is not a bug, it is every request ever
-   * written before `mergeMode` existed, so it defaults rather than rejects.
-   * Only `undefined` and `''` count as absent, matching `pickFrom`'s own
-   * "no pick submits the empty string" convention (see that function) —
-   * anything else, including the non-string a `Partial`-typed body cannot
-   * rule out, is a real value that simply is not one of `MERGE_MODES`, so
-   * it is rejected outright rather than defaulted or floored.
-   *
-   * Uncoded, like every 400 and most 409s this endpoint throws:
-   * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
-   * gives, reserved for the fact that a run is alive (see the two locks in
-   * `orchestrate()`, and the code's own doc comment) — nothing about a
-   * malformed enum needs telling apart from any other 4xx.
-   */
-  private resolveMergeMode(mergeMode: string | undefined, project: string): MergeMode {
-    if (mergeMode === undefined || mergeMode === '') return 'merge';
-    if (isMergeMode(mergeMode)) {
-      // The source check is by what the project RESOLVES to, through the one
-      // `known` set `ItemsService` owns — `github` is the only tracker kind
-      // today, and anything else (`files`, a marker this build cannot honour,
-      // an unreadable one, no store at all) is refused rather than guessed
-      // at. `unsupported` in particular must not read as files-and-therefore-
-      // fine: both refusals are the same sentence. Uncoded, like the enum 400
-      // below, and after the run locks for the same reason that one is.
-      if (mergeMode === 'pr' && this.items.sourceOf(project) !== 'github') {
-        throw new HttpException({ error: 'mergeMode pr needs a tracker project — this project\'s backlog is not backed by a GitHub repo' }, 400);
-      }
-      return mergeMode;
-    }
-    // Echoed back truncated and JSON-quoted, matching resolveIds's own
-    // convention just above: a client bug is far easier to find when the
-    // error names the value that broke, and this body goes back to the
-    // same caller that sent it. `JSON.stringify` also renders a non-string
-    // value (case 7's `42`) sensibly, which a template-literal interpolation
-    // would not.
-    const shown = JSON.stringify(typeof mergeMode === 'string' ? mergeMode.slice(0, 40) : mergeMode);
-    throw new HttpException({ error: `mergeMode must be ${MERGE_MODES.join(', ')} — ${shown} is not one` }, 400);
-  }
-
-  /**
-   * `req.questionMode`, turned into a `QuestionMode` `orchestrate.mjs init`
-   * can be told to run with, or a 400 if it cannot be. Design §2.3
-   * (2026-09-05-orchestrate-question-mode-design.md), mirroring
-   * `resolveMergeMode` above row for row:
-   *
-   * - absent (`undefined` or `''`) → `'park'` — today's behaviour, for every
-   *   caller written before this field existed.
-   * - a member of `QUESTION_MODES` → that value.
-   * - anything else, of any type → reject.
-   *
-   * **400 rather than drop-on-unknown**, and the argument is this field's
-   * own rather than a copy of its neighbour's. `model` and `effort` drop an
-   * unrecognised value because dropping them means "let the CLI decide",
-   * which is a coherent thing to have happen. This value is written verbatim
-   * into `run.json` by `init` and read back out of the archive months later,
-   * so silently resolving a typo'd `decide` to `park` would put a claim in
-   * the archive that no caller ever made — and the archive's whole job here
-   * is answering "was this item's plan written by a human or filled in by
-   * the runner?". Absent is not a bug: it is every request written before
-   * this field existed, which is exactly the distinction a 400 preserves and
-   * a clamp destroys.
-   *
-   * Uncoded, like `resolveMergeMode`'s own 400 and for the same reason:
-   * `RUN_IN_PROGRESS_CODE` stays the one machine-readable answer this route
-   * gives.
-   */
-  private resolveQuestionMode(questionMode: string | undefined): QuestionMode {
-    if (questionMode === undefined || questionMode === '') return 'park';
-    if (isQuestionMode(questionMode)) return questionMode;
-    // The same truncate-and-JSON.stringify echo convention resolveMergeMode
-    // and resolveIds both use — which is also what renders a non-string
-    // sensibly (`42`, not `"42"`), something a template-literal
-    // interpolation would get wrong.
-    const shown = JSON.stringify(typeof questionMode === 'string' ? questionMode.slice(0, 40) : questionMode);
-    throw new HttpException({ error: `questionMode must be decide or park — ${shown} is not one` }, 400);
-  }
-
-  /**
-   * GET /api/agents/merge-check's whole implementation. Registry-gated
-   * first, exactly like `resolveIds` above: a raw string compare against
-   * the registry's own `path` field, not a realpath compare —
-   * matching the "deliberately not realpath" rule CLAUDE.md pins on
-   * `dispatchGate`'s membership check. That choice is load-bearing here in
-   * a way it merely mirrors there: realpath-ing an unregistered path
-   * before comparing it would itself BE the filesystem touch
-   * test/merge-check.test.ts's unregistered-project case proves never
-   * happens — the gate has to stay a pure in-memory compare against a
-   * registry already loaded into this process, or the ordering the test
-   * checks collapses back into "eventually degrades to false", which is a
-   * weaker guarantee than "never asked at all".
-   *
-   * `homedir()` is read fresh on every call rather than once at
-   * construction, the same "read per call, never cache" posture
-   * `RegistryService.load()` and `orchHome()` both take: the developer's
-   * actual `~/.claude/settings.json` can change between two clicks of the
-   * same sheet, same as the registry file can.
-   */
-  mergeCheck(project: string): MergeCheckResult {
-    const entry = this.registry.load().projects.find((p) => p.path === project);
-    if (entry === undefined) throw new HttpException({ error: 'not found' }, 404);
-    return checkMergeCoverage(entry.path, homedir());
-  }
-
-  /**
    * One item by the ref a request named — a filesystem path or, since task-46,
    * a `gh:<owner>/<repo>#<n>` URN.
    *
@@ -2159,174 +1649,4 @@ export class AgentsService {
   private async findItem(requestPath: string): Promise<BacklogItem | null> {
     return this.items.find(requestPath);
   }
-
-}
-
-/** The dashboard's session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
-const SESSIONS_TIMEOUT_MS = 15_000;
-
-/**
- * The dashboard's session list as `id → status` — `'unknown'` for an entry with no status string — or a 502 when it cannot be read. One fetch and one parse
- * for every reader: #225's case B and #227's stale probe ask for one session's status (`dashboardSessionStatus`), and Jira's live-map reconciler asks for all
- * of them at once, so none of them can disagree with another about what the list said.
- */
-export async function dashboardSessions(cfg: AgentsConfig): Promise<Map<string, string>> {
-  let res: Response;
-  try {
-    res = await fetch(`${cfg.url}/api/sessions`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
-  } catch (e) {
-    throw new HttpException({ error: dashboardError(e, 'the dashboard session list', SESSIONS_TIMEOUT_MS) }, 502);
-  }
-  if (!res.ok) throw new HttpException({ error: `the dashboard session list answered ${res.status}` }, 502);
-  const body = (await res.json().catch(() => null)) as { sessions?: unknown } | null;
-  if (!Array.isArray(body?.sessions)) throw new HttpException({ error: 'the dashboard session list carried no sessions' }, 502);
-  const out = new Map<string, string>();
-  for (const s of body.sessions as { id?: unknown; status?: unknown }[]) {
-    // The first entry for an id wins, as `Array.find` did before this was a map.
-    if (typeof s?.id === 'string' && !out.has(s.id)) out.set(s.id, typeof s.status === 'string' ? s.status : 'unknown');
-  }
-  return out;
-}
-
-/**
- * A session's status in the dashboard's session list — `null` when the list does not carry it, `'unknown'` for an entry with no status string — or a
- * 502 when the list cannot be read. #225's case B asked this first (`ItemsAbortService`); #227's stale probe asks it too, through `staleClaimProbe` below,
- * and there is one copy so the two can never disagree about what the list said.
- */
-export async function dashboardSessionStatus(cfg: AgentsConfig, session: string): Promise<string | null> {
-  return (await dashboardSessions(cfg)).get(session) ?? null;
-}
-
-/**
- * #227's guard for a STALE claim nobody dispatched: the refusal sentence when this machine can show the holder is still running, else `null`. Never throws.
- *
- * A stale claim is forfeit by protocol — any `start`, on any machine, retires it with no confirm — so this is only an extra guard, and it refuses on a
- * POSITIVE answer alone: the claim was taken on this machine (`host` equals `BM_MACHINE_NAME`, both non-empty — the `sameHost` rule, absence never
- * matches) and the dashboard reports the holder `working` or `question`. That is a late heartbeat, not a dead session. Every other outcome — agents off,
- * no machine name, a foreign or absent host, a dashboard that is unreachable or does not know the session, any other status — answers `null` and the
- * protocol's own rule stands. The opposite default from #225's case B on purpose: that one releases a LIVE claim, so every unknown there must refuse.
- */
-export async function staleClaimProbe(holder: { session: string; host?: string }): Promise<string | null> {
-  const cfg = readAgentsConfig();
-  const machine = (process.env.BM_MACHINE_NAME ?? '').trim();
-  if (!cfg.enabled || machine === '' || typeof holder.host !== 'string' || holder.host === '' || holder.host !== machine) return null;
-  let status: string | null;
-  try {
-    status = await dashboardSessionStatus(cfg, holder.session);
-  } catch {
-    return null;
-  }
-  return status === 'working' || status === 'question'
-    ? `session ${holder.session} is ${status} on this machine — its heartbeat is late, not stopped; stop it before taking its claim`
-    : null;
-}
-
-/**
- * A remote launch's model/effort refusal (multi-dashboard task 5), `null` to proceed. On a REMOTE machine any value outside that machine's list is a 400,
- * unknown names included: the remote dashboard drops a name outside its own fixed list without a word, and a name inside that list but outside what the
- * account can run would start a session that fails — either way nobody would hear about it (spec, "Models and efforts are per machine"). `undefined` and
- * `''` are "no pick" — the two spellings `pickFrom` documents as the sheet's Default — and are not refused. Never called for home, whose `pickFrom` drop
- * is unchanged. Exported for `orchestrate`'s remote launch to share one wording with this one.
- */
-export function machineChoiceBlock(m: Machine, model: unknown, effort: unknown): string | null {
-  const outside = (value: unknown, list: readonly string[]): boolean =>
-    value !== undefined && value !== '' && !(typeof value === 'string' && list.includes(value));
-  if (outside(model, m.models)) return `model "${String(model)}" is not in ${m.label}'s list (${m.models.join(', ')})`;
-  if (outside(effort, m.efforts)) return `effort "${String(effort)}" is not in ${m.label}'s list (${m.efforts.join(', ')})`;
-  return null;
-}
-
-/**
- * The model a remote launch with no pick runs on: `DEFAULT_MODEL`, as home's does, when the machine lists it — otherwise the machine's first listed model,
- * because sending `DEFAULT_MODEL` to an account whose list leaves it out is exactly the silent failure the list exists to prevent. Never `undefined`: home
- * never sends a spawn without a model either (`DEFAULT_MODEL`'s own comment), and a remote must not fall to the CLI's own default instead.
- */
-function remoteDefaultModel(m: Machine): string {
-  return m.models.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : (m.models[0] ?? DEFAULT_MODEL);
-}
-
-/** `dispatchBlock`'s flattening of the gate, for a remote: the same `projectDispatchGate`, asked about the project's path on THAT machine. */
-function remoteGateBlock(status: AgentsStatus, remotePath: string): string | null {
-  const gate = projectDispatchGate(status, remotePath);
-  return gate.control === 'enabled' ? null : gate.reason;
-}
-
-/**
- * The dispatch route's item-claim refusal for a tracker item (#227), `null` to proceed. The server half of the client's `progressBlock`
- * (`client/src/lib/item-progress.ts`), in the same order:
- *
- * - a run holds it — the run owns its items for the whole item, stale or not: a stale run claim is a crashed run, the watchdog's and `--resume`'s;
- * - the board dispatched the holder — its `claude -p` waiting on a reply has no process and sends no heartbeat, so staleness alone must not unblock it;
- * - a live claim — somebody is on it;
- * - a stale one — `staleClaimProbe`; the spawned session's own `start` retires the claim when it proceeds.
- */
-export async function itemClaimBlock(id: string, holder: { session: string; host?: string; heartbeat: string; run?: string }, dispatched: boolean): Promise<string | null> {
-  if (holder.run !== undefined) return `${id} is held by orchestrator run ${holder.run} — stop the run, not the item`;
-  if (dispatched) return `the board's own session ${holder.session} holds this item — Stop & release it first`;
-  const beat = Date.parse(holder.heartbeat);
-  if (!Number.isNaN(beat) && Date.now() - beat < CLAIM_STALE_MS) return `${id} is in progress — session ${holder.session} holds its claim`;
-  return staleClaimProbe(holder);
-}
-
-/**
- * The `-n` name an orchestrate run's dashboard row is labelled with —
- * `sessionName`'s (prompt.util.ts) counterpart for a whole project rather
- * than one item, needed because `orchestrate()` has no `BacklogItem` to
- * build that one from. Same dashboard constraint, same reason:
- * `sessionName`'s own comment explains that the dashboard's
- * `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` allows neither `:` nor `/`,
- * and a name that fails it is not rejected but silently dropped to
- * `undefined` — the exact failure mode `sessionName` itself was rewritten
- * once to fix, after an earlier `bl:<project>/<id>` spelling was discarded
- * on 100% of dispatches without a single request actually failing. Space-
- * separated for that reason, not the more obvious `orchestrate:<project>`.
- * Sliced to the same 60-character cap `sessionName` uses, for the same
- * reason: over the cap is the same silent drop. Exported for test/agents-prompt.test.ts, which pins the cap beside `resumeSessionName`'s.
- */
-export function orchestrateSessionName(projectPath: string): string {
-  return `orchestrate ${basename(projectPath)}`.slice(0, 60);
-}
-
-/**
- * `orchestrateSessionName`'s counterpart for a resumed run — same
- * `basename(projectPath)`, same 60-character cap for the same silent-drop
- * reason (see that function's own comment), and the same reason to exist at
- * all: `resume()` has no `BacklogItem` to build a name from either. The one
- * addition is the `origin` prefix, and it is the whole reason `resume()`
- * takes an `origin` parameter in the first place — the dashboard's session
- * list is the one durable trail this feature leaves behind (this app writes
- * nothing to `run.json`; see the class doc comment on `resume()`), so a row
- * reading "watchdog resume alpha" versus "resume alpha" is the only place a
- * reader can later tell "the sweeper did this while nobody was watching"
- * apart from "I clicked the button" — see the design's own §3 for why that
- * distinction is worth a name change rather than a fifth field on the
- * run-payload's `RunWatchdog`.
- *
- * The prefix-to-basename separator is a plain space, not the middle dot
- * (`·`, U+00B7) the design doc originally wrote it with. `orchestrateSessionName`
- * above already tells this story once for `:` and `/`; it applies just as
- * exactly to `·`, which is also outside `NAME_RE`'s
- * `[A-Za-z0-9][A-Za-z0-9 ._-]*` character class. A name that fails that
- * regex is not rejected — `parseSpawnRequest` on the dashboard side drops it
- * to `undefined` and the row falls back to the bare project name, silently,
- * with no failed request anywhere to notice. That is exactly the failure
- * this field exists to prevent (see the comment above): a middle-dot name
- * would make every resumed session's row indistinguishable from a
- * hand-started one, defeating `origin`'s only purpose without ever
- * producing an error. Do not "restore" the middle dot for readability — a
- * space reads fine and, unlike `·`, the dashboard actually keeps it.
- */
-export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
-  const prefix = origin === 'watchdog' ? 'watchdog resume' : 'resume';
-  return `${prefix} ${basename(projectPath)}`.slice(0, 60);
-}
-
-/**
- * The abort session's row name (bug-39) — `resumeSessionName`'s sibling, with
- * no `origin` because there is only one: a stop is always a person's, and
- * nothing automated ever sends one. Same `slice(0, 60)` and same plain-space
- * separator, for the reasons that function's comment gives at length.
- */
-export function stopSessionName(projectPath: string): string {
-  return `stop ${basename(projectPath)}`.slice(0, 60);
 }

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { OnApplicationShutdown } from '@nestjs/common';
 
 import { JiraLiveService } from '../jira/live.service';
-import { dashboardSessions } from './agents.service';
+import { dashboardSessions } from './dashboard-sessions.util';
 import { readAgentsConfig } from './config.util';
 
 /** How often the reconciler asks the dashboard, while the map holds a confirmed session (spec §3). */

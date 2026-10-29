@@ -8,7 +8,7 @@ import { HttpException } from '@nestjs/common';
 import request from 'supertest';
 
 import { AppModule } from '../server/src/app.module';
-import { AgentsService } from '../server/src/agents/agents.service';
+import { OrchestrateArgsService } from '../server/src/agents/orchestrate-args.service';
 import { GIT_TIMEOUT_MS, __setGitTimeoutMs } from '../server/src/git-run.util';
 import { resolveBaseBranch } from '../server/src/items/base-branch.util';
 import { __gitSpawnCount, __resetGitDateMemo, lastCommitDates } from '../server/src/items/git-dates.util';
@@ -174,8 +174,8 @@ describe('git is async: a slow git never blocks the event loop', () => {
     await loopStaysFree(() => resolveBaseBranch('side', root));
   });
 
-  it('AgentsService.branches', async () => {
-    const agents = app.get(AgentsService, { strict: false });
+  it('OrchestrateArgsService.branches', async () => {
+    const agents = app.get(OrchestrateArgsService, { strict: false });
     fakeOn({ sleep: 0.5 });
     await loopStaysFree(() => agents.branches(root));
   });
@@ -217,7 +217,7 @@ describe('a timeout lands in each call site’s existing failure branch', () => 
     await expect(originRepo(root)).resolves.toBeNull();
   });
 
-  it('AgentsService.branches: an empty list', async () => {
+  it('OrchestrateArgsService.branches: an empty list', async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(REGISTRY_FILE)
       .useValue(makeRegistry([{ name: 'alpha', path: root }]))
@@ -225,7 +225,7 @@ describe('a timeout lands in each call site’s existing failure branch', () => 
     const app = moduleRef.createNestApplication();
     await app.init();
     try {
-      const agents = app.get(AgentsService, { strict: false });
+      const agents = app.get(OrchestrateArgsService, { strict: false });
       __setGitTimeoutMs(100);
       fakeOn({ sleep: 3 });
       await expect(agents.branches(root)).resolves.toEqual({ branches: [] });

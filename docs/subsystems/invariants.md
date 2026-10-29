@@ -778,7 +778,7 @@ shapes, each recorded there with the reason it is HEAD-independent, and anything
 falls on. That is the honest generality available here, and it is the one that catches the command nobody has written yet — the first version of the guard
 looked for `$PWD` lines mentioning `HEAD`, which the reverted `branch -d` passed.
 
-Both halves of the base's own validity are checked twice, in the same order, by `resolveBase` (`agents.service.ts`) on the way in and `assertUsableBase`
+Both halves of the base's own validity are checked twice, in the same order, by `resolveBase` (`orchestrate-args.service.ts`) on the way in and `assertUsableBase`
 (`orchestrate.mjs`) at `init`. Neither copy is redundant: the endpoint's exists to refuse a bad request **before** it spawns a headless session, and the tool's
 exists because a terminal is not the endpoint. The order is deliberate, and the honest reason is a downstream one: `git check-ref-format --branch` runs first
 **not** because `git show-ref --verify` would otherwise read the value as an option — it interpolates into `refs/heads/<base>`, which can never begin with a
@@ -1635,7 +1635,7 @@ true of two flags out of three and is true of two out of four. Each is appended 
 before any of these fields existed composes the byte-identical prompt it always did. The board's Orchestrate sheet can narrow a run to a subset of the queue, which means the
 spawned session has to be told `/backlog-orchestrate task-3 bug-7` rather than the bare trigger — `--ids` is a flag `orchestrate.mjs`'s own `init` and `plan`
 have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide]`. What makes that safe is that the server never _accepts_
-prompt text, it _composes_ the prompt out of the constant plus values that have passed two independent checks (`resolveIds`, `agents.service.ts`):
+prompt text, it _composes_ the prompt out of the constant plus values that have passed two independent checks (`resolveIds`, `orchestrate-args.service.ts`):
 
 1. **Shape** — `isItemId` (`shared/agent.ts`), the same `^[a-z]+-\d+$` `backlog.mjs`'s own `ID_SHAPE` enforces. What survives is a bare identifier: no
    whitespace, no path separator, no shell metacharacter, and no newline to split the one-line prompt with.
@@ -2367,7 +2367,7 @@ Three phases, and no standing interval backs any of them:
 
 - **Armed** — a `setTimeout` chain is pending because at least one `run.json` reads `status: "running"`, fresh or crashed alike. Arms on a boot-time scan, on
   every `GET /api/orchestrator/runs` whose payload already holds a `running` run (the read the board already makes on mount, focus and its own poll), on a
-  successful `orchestrate`/`resume` spawn, and on every `POST /api/agents/watchdog/config` save (`agents.controller.ts`'s `watchdogConfig`), which calls `arm()`
+  successful `orchestrate`/`resume` spawn, and on every `POST /api/agents/watchdog/config` save (`WatchdogService.configure`, since #388), which calls `arm()`
   and then an unawaited `tick()` regardless of which field changed or what it changed to. That fourth trigger is not a restatement of the first three: `arm()`
   alone is a no-op whenever a timer is already pending (`watchdog.service.ts`'s own guard, `if (this.timer !== null || this.inFlight !== null) return;`), which
   is exactly the state a watchdog already watching a crashed-but-disabled run sits in — so an operator flipping `enabled` back on in Settings for an
@@ -3756,7 +3756,7 @@ That block stopped being source-blind in #227, and the asymmetry is deliberate. 
 the tracker claim can be aged: `progressBlock` lets dispatch through over a STALE hand claim, because the protocol already lets any `start` retire it with no
 confirm and the spawned session's own `start` does exactly that, while a files stamp still blocks on ANY stamp, fresh or stale. Two stale tracker holders keep
 the block — a run (a stale run claim is a crashed run, the watchdog's and `--resume`'s) and a session this server dispatched (a `claude -p` waiting on a reply
-sends no heartbeat, so its age says nothing). And the server now re-checks a tracker item's claim at dispatch (`itemClaimBlock`, `agents.service.ts`, in
+sends no heartbeat, so its age says nothing). And the server now re-checks a tracker item's claim at dispatch (`itemClaimBlock`, `dashboard-sessions.util.ts`, in
 `progressBlock`'s order, a stale claim going through `staleClaimProbe`), because the sheet's plan was read once and the claim moves under it; a files item is
 not re-checked there, since its stamp has no heartbeat to age and no holder to name, and refusing it is `start`'s job.
 
@@ -3860,7 +3860,7 @@ the `release` route never parses — so no HTTP body can reach it, and the one c
 `not claimed` on the reasoning that the protocol retires it at the next `start` — while the board went on showing it held and offered no way to let go of it.
 A stale claim is forfeit by protocol: any `start`, on any machine, retires it with no confirm, so the board doing the same behind a confirm adds no authority.
 A holder this server dispatched still goes through case A, because its heartbeat age says nothing. Any other goes through `staleClaimProbe`
-(`agents.service.ts`), which refuses only on a POSITIVE answer — the claim's `host` is this machine's and the dashboard reports the holder `working` or
+(`dashboard-sessions.util.ts`), which refuses only on a POSITIVE answer — the claim's `host` is this machine's and the dashboard reports the holder `working` or
 `question`, a late heartbeat rather than a dead session — and proceeds on every unknown, agents off included: case B releases a LIVE claim, so every unknown
 there must refuse; here the claim is already forfeit and the probe is only a guard. The release is `reason: 'stale'`, `by: 'board'`, with no `authority`
 (`release` refuses only a live claim held by somebody else), and it unassigns the issue like `aborted` does, since nothing replaces the assignee after it. The
@@ -4508,7 +4508,7 @@ in 58 ms while `/api/items` waits 1.1 s on a fake `git` that sleeps for a second
 Each call site already had exactly one failure branch, and each degrades rather than throws, so `runGit` answers `null` for a timeout, a non-zero exit, a spawn
 error (`ENOENT`, a `cwd` that is not a directory) and an oversized output alike, and a timeout lands in whatever that site did with `null` before:
 `lastCommitDates` → the empty map (every caller reads it as "fall back to `created`"), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
-`resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list, and `ReleasesService`'s four reads (2026-10-16, the release
+`resolveBaseBranch` → the same 400 a missing branch gets, `OrchestrateArgsService.branches` → an empty list, and `ReleasesService`'s four reads (2026-10-16, the release
 chip) — `for-each-ref` → the empty shape, `describe` → `current: null` with the releases kept, `remote get-url` → no `url`, `rev-parse` → the answer is not
 memoised. A command that succeeds and prints nothing answers `''`, not `null`, so `show-ref --quiet` callers test `!== null`. Nobody added a "timed out" branch,
 because none of the nine has a reason to treat a slow repository

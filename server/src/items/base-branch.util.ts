@@ -47,7 +47,7 @@ import { runGit } from '../git-run.util';
  * The characters a base may contain (#343): letters, digits, `.`, `_`, `/` and `-`, never leading with `-`. No shell expands or splits a string made of only
  * these, so every base that can reach a template is inert there. Byte-equal with two hand copies that must stay equal to it: `REF_SHAPE` in
  * `skills/backlog-tick/tools/tick.mjs` and `BASE_SHAPE` in `skills/backlog-orchestrate/tools/orchestrate.mjs` (a skill tool cannot import from the server).
- * Exported for `AgentsService.branches`, so the picker never offers a base the launch would refuse.
+ * Exported for `OrchestrateArgsService.branches`, so the picker never offers a base the launch would refuse.
  */
 export const BASE_BRANCH_SHAPE = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
 export async function resolveBaseBranch(base: unknown, projectPath: string | undefined): Promise<string> {

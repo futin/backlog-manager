@@ -1,6 +1,5 @@
-import { authHeaders, readAgentsConfig } from '../server/src/agents/config.util';
-import { dashboardError, orchestrateSessionName, resumeSessionName } from '../server/src/agents/agents.service';
-import { appendFinishClause, composePrompt, sessionName } from '../server/src/agents/prompt.util';
+import { authHeaders, dashboardError, readAgentsConfig } from '../server/src/agents/config.util';
+import { appendFinishClause, composePrompt, orchestrateSessionName, resumeSessionName, sessionName } from '../server/src/agents/prompt.util';
 import { COMMIT_RULE, FINISH_FLAG, defuseFinishFlags, finishClause } from '../shared/agent';
 import type { BacklogItem } from '../shared/types';
 
