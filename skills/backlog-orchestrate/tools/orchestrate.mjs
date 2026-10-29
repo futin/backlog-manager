@@ -2736,7 +2736,7 @@ function readGateDoneWhen(dir, itemId) {
 // invocation that backgrounds the child, because `$!` is only readable in the
 // call that backgrounded it. Named here, in one place, because `cmdAbort` now
 // DEPENDS on it: until bug-43 nothing read `logs/` at all, so a rename in
-// SKILL.md's prose was free. `orchestrate.test.mjs` guards the seam from the
+// SKILL.md's prose was free. `orchestrate-control.test.mjs` guards the seam from the
 // other side by asserting every launch line still writes this exact name.
 function dispatchPidPath(dir, itemId) {
   return path.join(dir, 'logs', `${itemId}.pid`);
@@ -2745,7 +2745,7 @@ function dispatchPidPath(dir, itemId) {
 // bug-52: the dispatched child's stream-json log, the pid file's sibling — SKILL.md's §4 dispatch line redirects the child's stdout here, and `watch` is
 // handed this path as `--jsonl`. Only that one line: §5's retry writes `<id>-retry-<n>.jsonl` instead, and its id reaches the run file through the retry's
 // own `watch`. Named here for the reason `dispatchPidPath` is — `cmdAbort` reads it, so a rename in SKILL.md's prose is no longer free, and
-// `orchestrate.test.mjs` asserts the dispatch line still writes this exact name.
+// `orchestrate-control.test.mjs` asserts the dispatch line still writes this exact name.
 function dispatchJsonlPath(dir, itemId) {
   return path.join(dir, 'logs', `${itemId}.jsonl`);
 }
@@ -3043,7 +3043,7 @@ function assertUsableBase(projectRoot, base) {
 // says) with no such ref on disk, so `show-ref` correctly answers "no" for a
 // repository nobody has committed to. Refusing that would change `init`'s
 // behaviour in a fresh repository from "write a run with an empty queue" —
-// which is tested, and is the state every `orchestrate.test.mjs` fixture is in
+// which is tested, and is the state every `orchestrate*.test.mjs` fixture is in
 // — to exit 1, for a base nobody chose and that names the branch the
 // repository is literally on. That is a regression dressed up as strictness.
 //

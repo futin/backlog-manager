@@ -125,7 +125,7 @@ async function decide(fx, args = [], opts = {}) {
   return r.v;
 }
 
-// The fake API, shaped after orchestrate.test.mjs's: a route is a fixed `{ status?, body }` or a function of the request URL returning one; a string body is
+// The fake API, shaped after orchestrate-test-lib.mjs's: a route is a fixed `{ status?, body }` or a function of the request URL returning one; a string body is
 // served `text/plain`, as the real `/api/items/body` serves Markdown.
 async function withApi(routes, fn) {
   const server = http.createServer((req, res) => {

@@ -2,7 +2,7 @@
 // child process with all four homes pinned to this test's own throwaway
 // directories, so nothing here can read — let alone write — a developer's
 // real `~/.backlog-manager` or `~/.claude/projects`. The pattern is
-// orchestrate.test.mjs's `orchFixture`, widened from one home to four.
+// orchestrate-test-lib.mjs's `orchFixture`, widened from one home to four.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

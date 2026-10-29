@@ -772,7 +772,7 @@ genuinely may stay there are HEAD-independent by construction, and the list is s
 `worktree` verb (repo-wide administration), and a `diff`/`log` given an explicit `<base>...backlog/<id>` range — the range being part of what makes it safe,
 not incidental to it.
 
-So `orchestrate.test.mjs` guards that list as a **closed allowlist** rather than hunting the bad shape: a text guard cannot decide HEAD-dependence, which is a
+So `orchestrate-prompts.test.mjs` guards that list as a **closed allowlist** rather than hunting the bad shape: a text guard cannot decide HEAD-dependence, which is a
 fact about git's semantics and not about the string, but it can fail closed. Every `git -C "$PWD"` line in SKILL.md must match one of the four permitted
 shapes, each recorded there with the reason it is HEAD-independent, and anything else goes red until whoever added it works out which side of the line it
 falls on. That is the honest generality available here, and it is the one that catches the command nobody has written yet — the first version of the guard
@@ -895,7 +895,7 @@ is what was refused — so the rest of the queue skips a merge just shown to fai
 **That note is fixed text naming which of the two sites asked, not the classifier's own message** (bug-31). The denial's second half is a free-text `Reason:`
 written by a model, and §4's rule — prose this run did not compose never rides a shell command line — reaches a `--note` value exactly as it reaches a prompt.
 What `mergeModeNote` has to answer is "why is this run in branch mode", and which call was refused is the whole of that answer; the `Reason:` text itself stays
-in the driver's own transcript beside the command that provoked it. `orchestrate.test.mjs`'s `every --detail and --note value is the driver's own words` reads
+in the driver's own transcript beside the command that provoked it. `orchestrate-prompts.test.mjs`'s `every --detail and --note value is the driver's own words` reads
 this file too, so the two copies of the command cannot drift apart again — which is how they drifted in the first place.
 
 `parked` is wrong here, and correcting it is what this whole feature exists for. Parked means a human must look at the work. Nothing is wrong with the work —
@@ -1290,7 +1290,7 @@ skipped, and a pointer that sits in a section a resumed run never reads is not t
 subcommand** (`merge-check`, `leftover`, `worktree`, `cleanup`, `inspect`), because prose a tool call can replace is the one saving that costs nothing in
 behaviour — and the sequence is then unit-tested against real repositories, which the prose never was.
 
-Moving text is where a rule gets lost, so each statement the body keeps has a `[needle, rule]` pair in `orchestrate.test.mjs` and a guard keeps `bug-N` /
+Moving text is where a rule gets lost, so each statement the body keeps has a `[needle, rule]` pair in `orchestrate-prompts.test.mjs` and a guard keeps `bug-N` /
 `task-N` / `#N` / run-id (`run-YYYYMMDD-HHMMSS`) history out of the prose, fenced blocks (``` or ~~~) exempt. The first fails by the rule's name when a later trim drops it; the second is what makes the convention checkable
 rather than hoped for. What this section deliberately does **not** add is a size budget. The body's size is reported on every test run (`t.diagnostic`, never
 an assertion) so growth is visible where the work happens, but a hard cap has compressed load-bearing rules away twice on this machine, and the one failure
@@ -1333,11 +1333,21 @@ descend, so there the same property is enforced rather than kept. `backlog-retro
 process, and `retro-lib.test.mjs` for the modules under `tools/lib/` — and BOTH sit at the `tools/` level for exactly this reason:
 `tools/lib/retro-lib.test.mjs` would read as the natural home, match neither glob, and never run, with no red anywhere to say so.
 
+`backlog-orchestrate`'s suite is split across ten `orchestrate*.test.mjs` files, all at the `tools/` level for the same reason, with the harness they share in
+`orchestrate-test-lib.mjs` — a name the glob deliberately does not match, so the lib is imported and never run as a suite (#390). The split exists because
+`node --test` runs files in parallel and the tests inside one file one after another, and concurrency inside a file buys nothing here: the helpers block on
+`spawnSync`, which stalls that file's event loop. As one file it was the whole node run's wall time — 205 s alone on an idle 4-core machine, every other
+suite long finished — and it grew with its test count. Measured on a loaded 10-core Mac (load average ~20, an endpoint scanner on every spawn): the old file
+alone 446 s, the largest new file alone 69 s, and `test:skills` 549 s → 370 s, a run that used about one core, so the scanner rather than the split bounded it.
+The lib names no doc path: `scripts/ci-scope.mjs` picks a docs-only PR's node suites by scanning each SUITE's source, so `SKILL.md`, `references/` and the
+like stay in the suites that read them, and an `invariants.md` edit now runs `orchestrate-prompts.test.mjs` (~10 s) where it ran the whole 446 s file. A new
+orchestrate case goes into the file for its topic; a file that grows past ~60 s on an idle run is split again rather than grown.
+
 Cases that pin a skill's PROSE — `backlog-groom`'s stamp order and its closing `Groomed on disk only` line, `backlog-execute`'s pre-review checks and the
 `agents/backlog-reviewer.md` half that reads them — have no suite of their own to sit in: those two skills ship a `SKILL.md` and no `tools/`, and `agents/` is
 not under `skills/` at all, so nothing they own is within the node runner's reach. They live in `skills/backlog/tools/backlog.test.mjs`, which is within it,
 rather than in a `tools/` directory invented to hold a test for a skill that has no tool. The `Groomed on disk only` cases go one step further and assert
-`skills/backlog-orchestrate/SKILL.md`'s half of the seam in that same suite although orchestrate has `orchestrate.test.mjs` of its own, because the rule is
+`skills/backlog-orchestrate/SKILL.md`'s half of the seam in that same suite although orchestrate has `orchestrate*.test.mjs` of its own, because the rule is
 two skills agreeing on one sentence, and a suite that reads only one half is green while the halves drift apart; the reviewer/execute pair is the same shape.
 Reading another skill's file as text is not importing it — no module edge is created — so the "one skill's `tools/` may never import another's" rule (the
 reason `linkedWorktreeInfo` exists twice, in the registry section above) is untouched.
@@ -3014,7 +3024,7 @@ that edit is to close the handle — not to bring `process.exit()` back**, which
 Three cases, because each covers something the others cannot:
 
 - One behaviour test per tool, each driving the real CLI through `spawnSync` (a real pipe) with a fixture deliberately larger than 65,536 bytes:
-  `backlog.test.mjs`'s `board --json` over 250 seeded items, and `orchestrate.test.mjs`'s `status --json` over a 250-item committed queue. Both assert the
+  `backlog.test.mjs`'s `board --json` over 250 seeded items, and `orchestrate-usage.test.mjs`'s `status --json` over a 250-item committed queue. Both assert the
   measured byte count, not just that the JSON parses — a fixture that lands under the buffer is vacuous, and a test that redirected to a file could not fail on
   this bug at all. Both were observed red at exactly 65,536 bytes before the fix.
 - A source guard in `backlog.test.mjs` reading all three tools as text (`backlog.mjs`, `orchestrate.mjs`, `retro.mjs`), asserting each sets
