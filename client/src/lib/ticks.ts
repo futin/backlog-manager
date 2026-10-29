@@ -9,18 +9,22 @@ import type { TickConfig, TickProject, TickRecentEntry, TicksPayload } from '../
 
 const DAY_MS = 24 * 3_600_000;
 
+/** The numbers the Settings card can set — any subset of them in one write. */
+export type TickConfigPatch = Partial<Pick<TickConfig, 'haltAfter' | 'maxPlans' | 'maxPrs'>>;
+
 /**
  * `unwrap`'s `as T` only promises a shape; this makes it true for the fields the Ticks page and the Settings card dereference — the same posture
  * `isWatchdogStatus` takes, and for the same reason: `useTicks` caches the payload in state, so a bad one would lie to every reader for as long as it sticks.
- * Checked at the field level (config's two fields, each project's identity, `lock` present, `recent` an array), not every entry's own keys — nothing here
- * branches on an entry beyond `at`/`outcome`, and the derivations below tolerate an `at` that does not parse.
+ * Checked at the field level (config's three numbers and its source, each project's identity, `lock` present, `recent` an array), not every entry's own
+ * keys — nothing here branches on an entry beyond `at`/`outcome`, and the derivations below tolerate an `at` that does not parse.
  */
 function isTicksPayload(data: unknown): data is TicksPayload {
   if (typeof data !== 'object' || data === null) return false;
   const p = data as TicksPayload;
   const c = p.config as TickConfig | undefined;
   if (typeof c !== 'object' || c === null) return false;
-  if (typeof c.haltAfter !== 'number' || !(c.source === 'default' || c.source === 'file' || c.source === 'unreadable')) return false;
+  if (typeof c.haltAfter !== 'number' || typeof c.maxPlans !== 'number' || typeof c.maxPrs !== 'number') return false;
+  if (!(c.source === 'default' || c.source === 'file' || c.source === 'unreadable')) return false;
   if (!Array.isArray(p.projects)) return false;
   return p.projects.every(
     (row) =>
@@ -45,11 +49,12 @@ export async function fetchTicks(): Promise<TicksPayload> {
   return ticksFrom(await fetch('/api/ticks'), '/api/ticks');
 }
 
-/** `POST /api/ticks/config` — the Settings card's one write. The server validates (an integer, else 400) and clamps; the answer is the whole payload, so the
- *  caller never needs a second GET to see what stuck. */
-export async function updateTickConfig(haltAfter: number): Promise<TicksPayload> {
+/** `POST /api/ticks/config` — the Settings card's one write, carrying exactly the keys `patch` names (one per pick; a key it leaves out keeps its value on
+ *  file). The server validates (each present key an integer, else 400) and clamps; the answer is the whole payload, so the caller never needs a second GET to
+ *  see what stuck. */
+export async function updateTickConfig(patch: TickConfigPatch): Promise<TicksPayload> {
   return ticksFrom(
-    await fetch('/api/ticks/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ haltAfter }) }),
+    await fetch('/api/ticks/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) }),
     '/api/ticks/config'
   );
 }

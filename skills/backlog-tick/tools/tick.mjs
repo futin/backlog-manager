@@ -10,7 +10,8 @@
 // `decide` prints ONE JSON line and exits 0 for every verdict — `execute`, `groom`, `recover`, `busy`, `idle` — because a verdict is an answer, not a
 // failure: the `backlog-tick` skill reads it and acts. Exit 1 is a usage error; exit 2 is the tool itself failing (an unreadable `state.json`, say), which
 // the skill must stop on rather than read as "nothing to do"; exit 3 is `record` finding the lock held under another id — the outcome written, the lock left
-// (see `cmdRecord`). The design is docs/superpowers/specs/2026-10-22-backlog-tick-design.md; this header keeps only what the code needs.
+// (see `cmdRecord`). An omitted `--max-prs` / `--max-plans` falls back to `tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick), then to 2 / 3:
+// a flag is a fact about one schedule, the setting the machine's default for every job that does not say (#378). The design is docs/superpowers/specs/2026-10-22-backlog-tick-design.md; this header keeps only what the code needs.
 //
 // What this file never does, each for a reason worth keeping:
 //   - **It never writes git.** Every git call is a read (`rev-parse`, `show`, `ls-tree`, `show-ref`, `symbolic-ref`, `worktree list`). The tick's
@@ -28,7 +29,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { HALT_DEFAULT, readTickSettings, streakOf } from './tick-breaker.mjs';
+import { HALT_DEFAULT, MAX_PLANS_DEFAULT, MAX_PRS_DEFAULT, readTickSettings, streakOf } from './tick-breaker.mjs';
 import { apiBase, deriveGroomed, isMarked, orchHome, orderExecute, orderGroom, projectDir, projectSource, readFrontmatter, tickHome } from './tick-lib.mjs';
 import {
   claimStaleLock,
@@ -49,10 +50,9 @@ const USAGE = `usage:
   tick.mjs decide [--max-prs M] [--max-plans N] [--base <ref>] [--lock-ttl <minutes>] [--dry-run]
   tick.mjs record <id> ok|failed --kind groom|execute [--reason <text>]
   tick.mjs status [--json]
-  tick.mjs forget <id>`;
+  tick.mjs forget <id>
+an omitted --max-prs / --max-plans is tick.json's maxPrs / maxPlans (Settings › Shared › Backlog tick), else 2 / 3`;
 
-const DEFAULT_MAX_PRS = 2;
-const DEFAULT_MAX_PLANS = 3;
 // Three hours: comfortably above any sane job `timeout:`, so a lock this old belongs to a tick the dashboard killed (spec, "A tick the dashboard killed").
 const DEFAULT_LOCK_TTL_MIN = 180;
 const DEFAULT_BASE = 'main';
@@ -324,8 +324,9 @@ function intFlag(name, value, min) {
   return n;
 }
 
+// An unflagged cap is `null`, not a default: the default is `tick.json`'s, and that file is read only at step 3b, once the lock is settled (`cmdDecide`).
 function parseDecide(argv) {
-  const opts = { maxPrs: DEFAULT_MAX_PRS, maxPlans: DEFAULT_MAX_PLANS, base: null, lockTtl: DEFAULT_LOCK_TTL_MIN, dryRun: false };
+  const opts = { maxPrs: null, maxPlans: null, base: null, lockTtl: DEFAULT_LOCK_TTL_MIN, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') opts.dryRun = true;
@@ -385,6 +386,11 @@ async function cmdDecide(argv) {
   // derived from `recent` and the settings on every call, which is why raising N or a Reset takes effect at the next tick with no record written.
   const settings = readTickSettings();
   if (!settings.ok) return say('idle', `${settings.file} unreadable — fix or remove it by hand`);
+  // The caps resolve here, the first moment the settings are known: a job's flag, else the machine's setting (whose own fallback is 2 / 3). Every verdict
+  // printed before this line carries the flag or `null` for a cap it never needed — none of them counts anything, and `last-decide.json` is written only after
+  // counting, so the board always shows the cap the tick actually applied.
+  caps.maxPrs = opts.maxPrs ?? settings.maxPrs;
+  caps.maxPlans = opts.maxPlans ?? settings.maxPlans;
   const state = readState(dir);
   const { streak } = streakOf(state.recent, settings.resetAt[root]);
   if (streak >= settings.haltAfter) return say('idle', haltedReason(streak, settings.haltAfter));
@@ -434,7 +440,7 @@ async function cmdDecide(argv) {
   let executeWhy;
   let pick = null;
   if (caps.openPrs === null) executeWhy = 'cannot count open PRs';
-  else if (caps.openPrs >= opts.maxPrs) executeWhy = `${caps.openPrs} open execute PRs (cap ${opts.maxPrs})`;
+  else if (caps.openPrs >= caps.maxPrs) executeWhy = `${caps.openPrs} open execute PRs (cap ${caps.maxPrs})`;
   else {
     pick = tracker ? await trackerExecuteCandidate(ctx, mine, state) : filesExecuteCandidate(ctx, base, state);
     if (pick === null) executeWhy = 'no ready bug or task';
@@ -447,7 +453,7 @@ async function cmdDecide(argv) {
   // 6. Groom, when the plan-review pile has room.
   let groomWhy;
   let groom = null;
-  if (caps.planReview >= opts.maxPlans) groomWhy = `${caps.planReview} plans awaiting review (cap ${opts.maxPlans})`;
+  if (caps.planReview >= caps.maxPlans) groomWhy = `${caps.planReview} plans awaiting review (cap ${caps.maxPlans})`;
   else {
     groom = tracker ? await trackerGroomCandidate(ctx, mine, state) : filesGroomCandidate(ctx, state);
     if (groom === null) groomWhy = 'no ungroomed bug or refactor';
@@ -762,12 +768,16 @@ function cmdStatus(argv) {
   // it reports `settings: 'unreadable'`, with the default N and no reset, and never `halted` (the rule `decide` applies is "idle, name the file", not "halt").
   const settings = readTickSettings();
   const haltAfter = settings.ok ? settings.haltAfter : HALT_DEFAULT;
+  // The machine's caps as a job with no cap flags would apply them — `status` takes no flags, so this is the setting, never a job's override.
+  const capsSource = settings.ok ? settings.source : 'unreadable';
+  const maxPlans = settings.ok ? settings.maxPlans : MAX_PLANS_DEFAULT;
+  const maxPrs = settings.ok ? settings.maxPrs : MAX_PRS_DEFAULT;
   const resetAt = settings.ok ? (settings.resetAt[root] ?? null) : null;
   const { streak, since } = streakOf(state.recent, resetAt);
   const halted = settings.ok && streak >= haltAfter;
   if (json) {
     const breaker = { streak, haltAfter, halted, resetAt, settings: settings.ok ? settings.source : 'unreadable' };
-    process.stdout.write(`${JSON.stringify({ lock, recent, breaker })}\n`);
+    process.stdout.write(`${JSON.stringify({ lock, recent, breaker, caps: { maxPlans, maxPrs, source: capsSource } })}\n`);
     return 0;
   }
   const lines = [];
@@ -780,6 +790,7 @@ function cmdStatus(argv) {
       ? `breaker: HALTED — ${streak} failures in a row (halt after ${haltAfter}) since ${since}${reset}`
       : `breaker: ${streak} of ${haltAfter} failures in a row${reset}`,
   );
+  lines.push(`caps: plans ${maxPlans}, PRs ${maxPrs} (${capsSource === 'file' ? 'tick.json' : capsSource})`);
   if (recent.length === 0) lines.push('no outcomes recorded');
   for (const e of recent) lines.push(`${e.at}  ${e.outcome.padEnd(6)}  ${e.kind.padEnd(7)}  ${e.id}${e.reason ? `  ${e.reason}` : ''}`);
   process.stdout.write(`${lines.join('\n')}\n`);

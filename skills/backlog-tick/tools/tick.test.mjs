@@ -196,7 +196,10 @@ function writeLockFile(fx, lock) {
 
 const ago = (ms) => new Date(Date.now() - ms).toISOString();
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+// The caps a verdict carries once step 3b has read `tick.json` (absent here, so the defaults) but before anything was counted…
 const CAPS = { openPrs: null, maxPrs: 2, planReview: null, maxPlans: 3 };
+// …and before 3b: an unflagged cap is not resolved yet, because the setting it falls back to has not been read (#378).
+const UNRESOLVED = { openPrs: null, maxPrs: null, planReview: null, maxPlans: null };
 
 // --- not a project -------------------------------------------------------
 
@@ -204,7 +207,7 @@ test('not a git repository, not a main checkout, no backlog store', async (t) =>
   const fx = project(t);
   const plain = path.join(fx.base, 'plain');
   fs.mkdirSync(plain);
-  assert.deepEqual(await decide(fx, [], { cwd: plain }), { verdict: 'idle', reason: 'not a git repository', root: null, caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx, [], { cwd: plain }), { verdict: 'idle', reason: 'not a git repository', root: null, caps: UNRESOLVED, dryRun: false });
 
   git(fx.root, 'worktree', 'add', '-q', path.join(fx.base, 'linked'), '-b', 'linked');
   assert.equal((await decide(fx, [], { cwd: path.join(fx.base, 'linked') })).reason, 'not a main checkout');
@@ -228,7 +231,7 @@ test('a subdirectory of the project resolves to the project root', async (t) => 
 test('tracker project with the stack down is idle before any lock', async (t) => {
   const fx = project(t, { tracker: true });
   writeLockFile(fx, { host: 'h', verdict: { kind: 'groom', id: '#3' }, base: 'main', at: ago(10 * 60 * MIN) });
-  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: 'stack down', root: fx.root, caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: 'stack down', root: fx.root, caps: UNRESOLVED, dryRun: false });
   // the stale lock was not even looked at
   assert.ok(fs.existsSync(fx.lockFile));
   fs.rmSync(fx.lockFile);
@@ -335,7 +338,7 @@ test('fresh lock → busy another tick', async (t) => {
   commitAll(fx.root);
   const lock = { host: 'h', verdict: { kind: 'execute', id: 'bug-9' }, base: 'main', at: ago(MIN) };
   writeLockFile(fx, lock);
-  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'another tick', root: fx.root, caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'busy', reason: 'another tick', root: fx.root, caps: UNRESOLVED, dryRun: false });
   assert.deepEqual(readJson(fx.lockFile), lock);
 });
 
@@ -807,7 +810,7 @@ test('recover a killed groom: recorded failed, lock gone, stop when the marker i
   const file = item(fx, 'bug-3', BUG_RAW, { started: '2026-10-22T10:00:00Z', phase: 'groom' });
   writeLockFile(fx, staleLock('groom', 'bug-3'));
   const v = await decide(fx);
-  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, root: fx.root, caps: CAPS, dryRun: false });
+  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, root: fx.root, caps: UNRESOLVED, dryRun: false });
   const rec = readJson(fx.stateFile).items['bug-3'];
   assert.equal(rec.outcome, 'failed');
   assert.equal(rec.kind, 'groom');
@@ -856,7 +859,7 @@ test('dry-run recover writes nothing', async (t) => {
   const lock = staleLock('groom', 'bug-3');
   writeLockFile(fx, lock);
   const v = await decide(fx, ['--dry-run']);
-  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, root: fx.root, caps: CAPS, dryRun: true });
+  assert.deepEqual(v, { verdict: 'recover', reason: 'recovered a killed groom on bug-3', id: 'bug-3', stop: true, root: fx.root, caps: UNRESOLVED, dryRun: true });
   assert.deepEqual(readJson(fx.lockFile), lock);
   assert.deepEqual(fs.readdirSync(fx.lockDir), ['lock']);
 });
@@ -864,7 +867,7 @@ test('dry-run recover writes nothing', async (t) => {
 test('an unreadable lock is removed and nothing is recorded', async (t) => {
   const fx = project(t);
   writeLockFile(fx, 'not json');
-  assert.deepEqual(await decide(fx), { verdict: 'recover', reason: 'removed an unreadable lock', stop: false, root: fx.root, caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'recover', reason: 'removed an unreadable lock', stop: false, root: fx.root, caps: UNRESOLVED, dryRun: false });
   assert.deepEqual(fs.readdirSync(fx.lockDir), []);
   // parseable JSON with no usable verdict is the same case
   writeLockFile(fx, { host: 'h', verdict: { kind: 'merge', id: 'bug-1' }, at: ago(4 * 60 * MIN) });
@@ -1080,7 +1083,7 @@ test('breaker: a reset later than every record un-halts, and only for its own pr
 test('breaker: a tracker project with the stack down says stack down, not halted', async (t) => {
   const fx = project(t, { tracker: true });
   failures(fx, 3);
-  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: 'stack down', root: fx.root, caps: CAPS, dryRun: false });
+  assert.deepEqual(await decide(fx), { verdict: 'idle', reason: 'stack down', root: fx.root, caps: UNRESOLVED, dryRun: false });
 });
 
 test('breaker: an unreadable tick.json is idle naming the file, whatever the streak', async (t) => {
@@ -1262,4 +1265,94 @@ test('last-decide: decide never reads it — a garbage file changes no verdict',
   }
   assert.equal((await decide(fx)).id, 'bug-1');
   assert.equal(readJson(lastDecideFile(fx)).verdict, 'execute');
+});
+
+// --- the caps from tick.json (#378) --------------------------------------
+
+// Precedence is a job's flag > `tick.json` > the built-in 3 / 2, resolved at step 3b. These cases write the setting through `writeTickFile` (the fixture's
+// `BM_TICK_FILE`), exactly as the server would leave it.
+
+test('caps: no tick.json keeps the built-in defaults — one plan in review still leaves room to groom', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-4', BUG_RAW);
+  item(fx, 'task-5', TASK_READY, { 'plan-review': 'true' });
+  commitAll(fx.root);
+  const v = await decide(fx, ['--dry-run']);
+  assert.equal(v.verdict, 'groom');
+  assert.equal(v.id, 'bug-4');
+  assert.deepEqual(v.caps, { openPrs: 0, maxPrs: 2, planReview: 1, maxPlans: 3 });
+});
+
+test('caps: tick.json maxPlans is the review cap, and last-decide records it', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-4', BUG_RAW);
+  item(fx, 'task-5', TASK_READY, { 'plan-review': 'true' });
+  commitAll(fx.root);
+  writeTickFile(fx, { maxPlans: 1 });
+  const v = await decide(fx);
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, 'nothing to do: no ready bug or task; 1 plans awaiting review (cap 1)');
+  assert.equal(v.caps.maxPlans, 1);
+  assert.equal(readJson(lastDecideFile(fx)).caps.maxPlans, 1);
+});
+
+test('caps: a job flag beats tick.json', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-4', BUG_RAW);
+  item(fx, 'task-5', TASK_READY, { 'plan-review': 'true' });
+  commitAll(fx.root);
+  writeTickFile(fx, { maxPlans: 1, maxPrs: 1 });
+  const v = await decide(fx, ['--dry-run', '--max-plans', '5']);
+  assert.equal(v.verdict, 'groom');
+  assert.equal(v.id, 'bug-4');
+  assert.equal(v.caps.maxPlans, 5);
+  // the cap the flag did not name still comes from the file
+  assert.equal(v.caps.maxPrs, 1);
+});
+
+test('caps: tick.json maxPrs is the execute cap', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  commitAll(fx.root);
+  setGh(fx, [{ headRefName: 'execute/bug-7' }]);
+  writeTickFile(fx, { maxPrs: 1 });
+  const v = await decide(fx, ['--dry-run']);
+  assert.equal(v.verdict, 'idle');
+  assert.equal(v.reason, 'nothing to do: 1 open execute PRs (cap 1); no ungroomed bug or refactor');
+  assert.equal(v.caps.maxPrs, 1);
+  // with the default 2 the same open PR leaves room
+  writeTickFile(fx, {});
+  assert.equal((await decide(fx, ['--dry-run'])).id, 'bug-1');
+});
+
+test('caps: an unreadable tick.json is still idle naming the file, its caps unresolved', async (t) => {
+  const fx = project(t);
+  item(fx, 'bug-1', BUG_READY);
+  commitAll(fx.root);
+  writeTickFile(fx, '{ "maxPlans": ');
+  assert.deepEqual(await decide(fx), {
+    verdict: 'idle',
+    reason: `${fx.tickFile} unreadable — fix or remove it by hand`,
+    root: fx.root,
+    caps: UNRESOLVED,
+    dryRun: false,
+  });
+});
+
+test('caps: status reports the machine caps and where they came from', async (t) => {
+  const fx = project(t);
+  let s = await tick(fx, ['status', '--json']);
+  assert.equal(s.status, 0, s.stderr);
+  assert.deepEqual(s.v.caps, { maxPlans: 3, maxPrs: 2, source: 'default' });
+  assert.match((await tick(fx, ['status'])).stdout, /^caps: plans 3, PRs 2 \(default\)$/m);
+
+  writeTickFile(fx, { maxPlans: 5, maxPrs: 4 });
+  s = await tick(fx, ['status', '--json']);
+  assert.deepEqual(s.v.caps, { maxPlans: 5, maxPrs: 4, source: 'file' });
+  assert.match((await tick(fx, ['status'])).stdout, /^caps: plans 5, PRs 4 \(tick\.json\)$/m);
+
+  writeTickFile(fx, 'nope');
+  s = await tick(fx, ['status', '--json']);
+  assert.equal(s.status, 0);
+  assert.deepEqual(s.v.caps, { maxPlans: 3, maxPrs: 2, source: 'unreadable' });
 });

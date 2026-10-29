@@ -54,7 +54,8 @@ per project, holding a pause request or a stop request (bug-39) — flows server
 guarantee is untouched by it. `settings/` also holds `jira.json`, which the server reads and writes through six guarded config routes (`POST /api/jira/boards`, `/boards/delete`,
 `/repos`, `/skills`, `/skills/delete` and `/repo-defaults`), and a hand edit still lands ([subsystems/jira.md](subsystems/jira.md)), and `dashboards.json`, the
 list of other machines a launch can go to, which the server alone reads and writes through four guarded routes under `/api/dashboards` — no skill reads it
-([workflows/remote-machine.md](workflows/remote-machine.md)). And it holds `tick.json`, the tick breaker's halt threshold and per-project resets, which travels
+([workflows/remote-machine.md](workflows/remote-machine.md)). And it holds `tick.json`, the tick breaker's halt threshold, the tick's default plan-review and open-PR caps (a job's
+`--max-plans` / `--max-prs` flag still wins) and per-project resets, which travels
 server → tool like the control file: the server writes it through two guarded routes (`POST /api/ticks/config` and `/reset`), and `tick.mjs` only reads it.
 Last, `timezone.json`, the board's one shared time zone, which the server alone reads and writes through `POST /api/settings/timezone`; every reading
 of it is the client's, and no skill reads it.

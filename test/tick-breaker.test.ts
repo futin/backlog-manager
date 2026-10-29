@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { TickFileUnreadable, readTickFile, streakOf, tickFile, tickHome, writeTickFile } from '../server/src/tick/tick-breaker.util';
-import { TICK_HALT_LIMITS } from '../shared/types';
+import { TICK_CAP_LIMITS, TICK_HALT_LIMITS } from '../shared/types';
 
 // The streak table and the file cases below are the SAME rows and expectations `skills/backlog-tick/tools/tick-breaker.test.mjs` pins for the skill's copy of
 // the rule. Two copies, one table: a change to the rule on one side fails the other side's suite rather than letting `tick.mjs decide` stop a project the
@@ -76,6 +76,12 @@ describe('TICK_HALT_LIMITS', () => {
   });
 });
 
+describe('TICK_CAP_LIMITS', () => {
+  it('is 1–10 for both caps, default 3 plans and 2 PRs — the numbers tick-breaker.mjs hand-copies', () => {
+    expect(TICK_CAP_LIMITS).toEqual({ maxPlans: { min: 1, max: 10, default: 3 }, maxPrs: { min: 1, max: 10, default: 2 } });
+  });
+});
+
 describe('readTickFile / writeTickFile', () => {
   let dir: string;
   beforeEach(() => {
@@ -92,17 +98,41 @@ describe('readTickFile / writeTickFile', () => {
 
   describe('readTickFile', () => {
     it('an absent file is the default', () => {
-      expect(readTickFile(join(dir, 'nope.json'))).toEqual({ ok: true, haltAfter: 3, resetAt: {}, source: 'default' });
+      expect(readTickFile(join(dir, 'nope.json'))).toEqual({ ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'default' });
     });
 
     it('a file is read, haltAfter clamped and non-integers read as 3', () => {
-      expect(readTickFile(withFile({ haltAfter: 5 }))).toEqual({ ok: true, haltAfter: 5, resetAt: {}, source: 'file' });
+      expect(readTickFile(withFile({ haltAfter: 5 }))).toEqual({ ok: true, haltAfter: 5, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
       expect(readTickFile(withFile({ haltAfter: 0 }))).toMatchObject({ haltAfter: 1 });
       expect(readTickFile(withFile({ haltAfter: 42 }))).toMatchObject({ haltAfter: 10 });
       expect(readTickFile(withFile({ haltAfter: '7' }))).toMatchObject({ haltAfter: 3 });
       expect(readTickFile(withFile({ haltAfter: 2.5 }))).toMatchObject({ haltAfter: 3 });
       // a file with no haltAfter at all is still a file
-      expect(readTickFile(withFile({}))).toEqual({ ok: true, haltAfter: 3, resetAt: {}, source: 'file' });
+      expect(readTickFile(withFile({}))).toEqual({ ok: true, haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: {}, source: 'file' });
+    });
+
+    // PINNED: the same rows as `CAP_CLAMP` in `tick-breaker.test.mjs`, so the board and `tick.mjs decide` read a hand-edited cap the same way.
+    const CAP_CLAMP: Array<[unknown, number | 'default']> = [
+      [0, 1],
+      [11, 10],
+      [99, 10],
+      [-3, 1],
+      [5, 5],
+      ['5', 'default'],
+      [2.5, 'default'],
+      [null, 'default']
+    ];
+    it.each(CAP_CLAMP)('the caps clamp %j → %s', (raw, want) => {
+      expect(readTickFile(withFile({ maxPlans: raw, maxPrs: raw }))).toMatchObject({
+        maxPlans: want === 'default' ? 3 : want,
+        maxPrs: want === 'default' ? 2 : want
+      });
+    });
+
+    it('reads both caps from the file, each defaulting on its own', () => {
+      expect(readTickFile(withFile({ maxPlans: 5, maxPrs: 4 }))).toMatchObject({ haltAfter: 3, maxPlans: 5, maxPrs: 4 });
+      expect(readTickFile(withFile({ haltAfter: 4 }))).toMatchObject({ haltAfter: 4, maxPlans: 3, maxPrs: 2 });
+      expect(readTickFile(withFile({ maxPlans: 7 }))).toMatchObject({ maxPlans: 7, maxPrs: 2 });
     });
 
     it('a resetAt entry that is not a parseable string is dropped', () => {
@@ -142,25 +172,39 @@ describe('readTickFile / writeTickFile', () => {
     it('from absent, a resetAt-only patch creates the file with haltAfter 3', () => {
       const file = join(dir, 'settings', 'tick.json');
       writeTickFile({ resetAt: { '/p': T(1) } }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 3, resetAt: { '/p': T(1) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 3, maxPlans: 3, maxPrs: 2, resetAt: { '/p': T(1) } });
     });
 
     it('from absent, a haltAfter-only patch writes an empty resetAt', () => {
       const file = join(dir, 'tick.json');
       writeTickFile({ haltAfter: 5 }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 5, resetAt: {} });
+      expect(onDisk(file)).toEqual({ haltAfter: 5, maxPlans: 3, maxPrs: 2, resetAt: {} });
     });
 
     it('patching haltAfter keeps an existing resetAt', () => {
       const file = withFile({ haltAfter: 3, resetAt: { '/p': T(1), '/q': T(2) } });
       writeTickFile({ haltAfter: 7 }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 7, resetAt: { '/p': T(1), '/q': T(2) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 7, maxPlans: 3, maxPrs: 2, resetAt: { '/p': T(1), '/q': T(2) } });
     });
 
     it('patching one resetAt key keeps the others, and the file’s haltAfter', () => {
       const file = withFile({ haltAfter: 6, resetAt: { '/p': T(1), '/q': T(2) } });
       writeTickFile({ resetAt: { '/p': T(9) } }, file);
-      expect(onDisk(file)).toEqual({ haltAfter: 6, resetAt: { '/p': T(9), '/q': T(2) } });
+      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 3, maxPrs: 2, resetAt: { '/p': T(9), '/q': T(2) } });
+    });
+
+    it('patching one cap keeps haltAfter, resetAt and the other cap', () => {
+      const file = withFile({ haltAfter: 6, maxPrs: 4, resetAt: { '/p': T(1) } });
+      writeTickFile({ maxPlans: 4 }, file);
+      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 4, maxPrs: 4, resetAt: { '/p': T(1) } });
+      writeTickFile({ maxPrs: 1 }, file);
+      expect(onDisk(file)).toEqual({ haltAfter: 6, maxPlans: 4, maxPrs: 1, resetAt: { '/p': T(1) } });
+    });
+
+    it('clamps an out-of-range cap to the nearest bound', () => {
+      const file = join(dir, 'tick.json');
+      writeTickFile({ maxPrs: 50, maxPlans: 0 }, file);
+      expect(onDisk(file)).toMatchObject({ maxPrs: 10, maxPlans: 1 });
     });
 
     it('clamps an out-of-range haltAfter to the nearest bound', () => {
@@ -175,6 +219,7 @@ describe('readTickFile / writeTickFile', () => {
       for (const bad of ['{ nope', '[1,2]', 'null', '"text"']) {
         const file = withFile(bad);
         expect(() => writeTickFile({ haltAfter: 5 }, file)).toThrow(TickFileUnreadable);
+        expect(() => writeTickFile({ maxPlans: 4 }, file)).toThrow(TickFileUnreadable);
         expect(() => writeTickFile({ resetAt: { '/p': T(1) } }, file)).toThrow(TickFileUnreadable);
         expect(readFileSync(file, 'utf8')).toBe(bad);
         expect(readdirSync(dir)).toEqual(['tick.json']);
@@ -205,7 +250,7 @@ describe('readTickFile / writeTickFile', () => {
     it('writes a trailing newline and 2-space JSON, like the other settings files', () => {
       const file = join(dir, 'tick.json');
       writeTickFile({ haltAfter: 4 }, file);
-      expect(readFileSync(file, 'utf8')).toBe('{\n  "haltAfter": 4,\n  "resetAt": {}\n}\n');
+      expect(readFileSync(file, 'utf8')).toBe('{\n  "haltAfter": 4,\n  "maxPlans": 3,\n  "maxPrs": 2,\n  "resetAt": {}\n}\n');
     });
   });
 });

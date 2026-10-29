@@ -235,8 +235,11 @@ one tool call and one line. Three properties make that safe, and each is a refus
 
 **At most one unit.** `tick.mjs decide` prints ONE verdict: `execute <id>`, `groom <id>`, `recover`, `busy` or `idle`. Execute wins over groom, because a ready
 item is worth more than a plan for another; a groom runs only while fewer than N items carry `plan-review`, and an execute only while fewer than M `execute/*`
-pull requests are open. The caps are what stop the morning stack — twenty plans to read, a dozen PRs that conflict with each other — and they are trigger flags
-(`--max-plans`, `--max-prs`, defaults 3 and 2), not code, because the right number is a fact about one schedule. The open-PR count is the one read that can fail
+pull requests are open. The caps are what stop the morning stack — twenty plans to read, a dozen PRs that conflict with each other — and they are settings,
+not code. Each resolves in one order: the trigger flag (`--max-plans`, `--max-prs`), else `tick.json`'s `maxPlans` / `maxPrs` (Settings › Shared › Backlog
+tick, an integer 1–10), else 3 and 2 (#378). The flag wins because a number written into one schedule's prompt is a fact about that schedule; the setting exists
+because most schedules say nothing, and changing a machine-wide limit by editing every job's prompt was the friction it removed. The setting's floor is 1, not
+0 — "never groom" is a schedule that should not exist, not a cap — while the flag still accepts 0 for the one job that wants it. The open-PR count is the one read that can fail
 quietly, so every failure is a cap: no `gh`, a non-zero exit, output that does not parse, or a result that reaches the `--limit 500` ceiling (which may have
 been cut) reads `cannot count open PRs` and execute is skipped, never assumed zero. The lock is the other half: `decide` writes it only on `execute` or `groom`,
 so an `idle` or `busy` tick — and every `--dry-run` — leaves nothing behind that could block the next one, and `record` releases it. It closes the window
@@ -303,12 +306,13 @@ recovers nothing it cannot prove.
 ## `tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced
 
 **The tick breaker** (spec: [2026-10-22-tick-breaker-design.md](../superpowers/specs/2026-10-22-tick-breaker-design.md)).
-`~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is `{ "haltAfter": <int>, "resetAt": { "<abs main-checkout path>": "<ISO>" } }` — how many
-failed ticks in a row halt a project, and when a person last Reset each one. It is the fourth file the server owns under `settings/` and it keeps the
+`~/.backlog-manager/settings/tick.json` (`$BM_TICK_FILE` to override) is `{ "haltAfter": <int>, "maxPlans": <int>, "maxPrs": <int>, "resetAt": { "<abs
+main-checkout path>": "<ISO>" } }` — how many failed ticks in a row halt a project, the two caps a tick job applies when its prompt carries no flag (#378), and
+when a person last Reset each one. It is the fourth file the server owns under `settings/` and it keeps the
 relationship the other three have with their reader: the server writes it (`writeTickFile`, the only write path, behind `POST /api/ticks/config` and `/reset`),
 and `tick.mjs` reads it (`readTickSettings`) for `decide` and `status`, while the server reads it only to answer `GET /api/ticks` and to merge its own write. It
 lives under `settings/` for the reason `watchdog.json` does, though it is not a watchdog setting: that directory is the one read-write mount the container has,
-and the tick home beside it is deliberately read-only to the server. One file holds both the number and the resets because they have the same writer and the
+and the tick home beside it is deliberately read-only to the server. One file holds the numbers and the resets because they have the same writer and the
 same reader; `orchestrator-control/` is split per project only because its reader is per run.
 
 **A file that cannot be read is never replaced, and it is a stricter reading than `jira.json`'s.** `jira.json` reads a parsed non-object as empty, because there
@@ -316,8 +320,8 @@ is nothing in it to lose. Here a person who has hand-edited their way to `[]` or
 re-arm a breaker they had just reset — so an I/O error that is not `ENOENT`, text that is not JSON, and JSON that is not a plain object are all UNREADABLE, and
 every surface says so rather than guessing. `POST /api/ticks/config` and `/reset` answer `409` naming the file and leave it byte-identical
 (`TickFileUnreadable`, thrown before any write: rewriting from defaults would turn a stray comma into "3, no resets" with nothing on disk left to recover the
-old values from); `GET /api/ticks` answers `source: "unreadable"` with the error and `haltAfter: 3` for display only, and the Settings Select is disabled with a
-hint that names the file; and `tick.mjs decide` answers `idle`, reason `<path> unreadable — fix or remove it by hand`, so NO project ticks until a person has
+old values from); `GET /api/ticks` answers `source: "unreadable"` with the error and `haltAfter: 3` (the caps at 3 and 2) for display only, and the Settings
+Selects are disabled with a hint that names the file; and `tick.mjs decide` answers `idle`, reason `<path> unreadable — fix or remove it by hand`, so NO project ticks until a person has
 looked. That last one is the point of the rule, and it is a stop rather than a fallback because each fallback is wrong in the unsafe direction: a default N
 would un-halt a project whose written N was 1 or 2, and dropping the resets would re-halt one a person had just cleared. Stopping is the `state.json` posture —
 nothing runs, and nothing is lost. The Ticks page's own figures are unaffected, because they read `state.json`.

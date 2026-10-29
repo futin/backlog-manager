@@ -28,7 +28,7 @@ function project(over: Partial<TickProject> = {}): TickProject {
 }
 
 function payload(projects: TickProject[], config: Partial<TicksPayload['config']> = {}): TicksPayload {
-  return { config: { haltAfter: 3, source: 'default', ...config }, projects };
+  return { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default', ...config }, projects };
 }
 
 /** One halted project, one quiet one with a lock and one that has never ticked — `recent` newest first, as the server sends it. */

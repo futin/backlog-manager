@@ -213,7 +213,8 @@ reports `record`. The skill never runs by hand and never decides anything itself
 open), `groom <id>` (an ungroomed bug's fix, or a refactor promoted to a task, while fewer than `--max-plans` items carry `plan-review`), `recover` (a lock
 older than `--lock-ttl` minutes was found and claimed), `busy` (the project is occupied — a `running` or `paused` run, a board-started run with no run file, a
 `started:` marker anywhere in the main checkout or a linked worktree, a live claim or a fresh remote run) or `idle` (nothing worth starting, or a tracker
-project whose stack is down — or whose tracker cache the tool cannot trust yet, #332). Execute wins over groom.
+project whose stack is down — or whose tracker cache the tool cannot trust yet, #332). Execute wins over groom. An omitted `--max-prs` / `--max-plans` is
+`tick.json`'s `maxPrs` / `maxPlans` (Settings › Shared › Backlog tick, 1–10), else 2 / 3 — the flag always wins (#378).
 
 **A tracker project's index is believed only once the poller has read its repo.** The server's cache is in memory and per repo, so after every restart
 `/api/items` lists no rows for a project until that repo's first sync lands — and an empty list read as it stands is `nothing to do`. So `decide` also reads
@@ -235,7 +236,9 @@ project costs one call and no API traffic, a stale lock is still recovered while
 `server/src/tick/tick-breaker.util.ts` carries the second copy, and one `streakOf` table is pinned on each side
 ([invariants.md](invariants.md#a-tick-halt-is-derived-from-the-records-and-the-reset-time-never-stored-and-only-a-persons-reset-clears-it)). `status` prints the
 reading as one line — `breaker: N of M failures in a row` or `breaker: HALTED — N failures in a row (halt after M) since <at>`, with ` (reset <resetAt>)`
-appended when a Reset is on file — and `status --json` carries it as `breaker: { streak, haltAfter, halted, resetAt, settings }`.
+appended when a Reset is on file — and `status --json` carries it as `breaker: { streak, haltAfter, halted, resetAt, settings }`. A second line,
+`caps: plans N, PRs M (tick.json|default|unreadable)`, is what a flagless `decide` would apply, and `status --json` carries it as
+`caps: { maxPlans, maxPrs, source }`.
 
 **Unattended means a gate.** A groom a tick runs lands the plan in the same write as the `plan-review` mark (a label, or a `plan-review: true` frontmatter
 line), and every gate that could execute the item refuses it with `this plan awaits review` until a person removes the mark — `backlog.mjs plan-review <id>

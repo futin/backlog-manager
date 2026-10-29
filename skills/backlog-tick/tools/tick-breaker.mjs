@@ -1,4 +1,5 @@
-// The tick's failure breaker: what counts as "N failures in a row", and the settings file that says what N is. Read-only — nothing here writes a byte.
+// The tick's failure breaker — what counts as "N failures in a row" — and the settings file, `tick.json`, which says what N is and what the two caps are
+// when a job's `--max-plans` / `--max-prs` flag does not (#378). Read-only — nothing here writes a byte.
 //
 // This is ONE OF TWO COPIES of the streak rule. The other is `server/src/tick/tick-breaker.util.ts` (it cites this file back), and they are two
 // copies and not one import because a plugin skill's `tools/` may never import from `server/` or `shared/` (CLAUDE.md Invariants — an install is a copy of
@@ -16,6 +17,14 @@ export const HALT_DEFAULT = 3;
 export const HALT_MIN = 1;
 export const HALT_MAX = 10;
 
+// The two caps' machine-wide defaults and their range — the SECOND hand copy of `TICK_CAP_LIMITS` in `shared/types.ts` (the first, which the server's
+// `tick-breaker.util.ts` reads), for the same no-import reason as the streak rule above. The range is the setting's, never the flag's: `--max-plans 0` still
+// means "this job never grooms", a schedule-level choice `parseDecide` accepts as it always did, while a machine default of 0 would silently stop every job.
+export const MAX_PLANS_DEFAULT = 3;
+export const MAX_PRS_DEFAULT = 2;
+export const CAP_MIN = 1;
+export const CAP_MAX = 10;
+
 // --- where the settings live ---------------------------------------------
 
 // `$BM_TICK_FILE` when set, else `~/.backlog-manager/settings/tick.json`. Read per call and cached nowhere, like `tickHome()` in `tick-lib.mjs`: the override
@@ -29,8 +38,13 @@ export function tickSettingsFile() {
 // An integer clamps into 1–10; anything else — a string, a float, null, a missing key — is the default. A hand-edited `"7"` or `2.5` is not guessed at: the
 // file's author most likely meant something, and 3 is the documented default. (The server's POST is stricter: a non-integer is a 400.)
 export function clampHaltAfter(v) {
-  if (!Number.isInteger(v)) return HALT_DEFAULT;
-  return Math.min(HALT_MAX, Math.max(HALT_MIN, v));
+  return clampSetting(v, HALT_DEFAULT, HALT_MIN, HALT_MAX);
+}
+
+// The one clamp rule every number in `tick.json` follows — `haltAfter` and both caps — so a hand-edited `"5"` reads the same way whichever key it sits under.
+export function clampSetting(v, fallback, min, max) {
+  if (!Number.isInteger(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
 }
 
 // An ISO string `Date.parse` accepts, as ms since epoch, else `NaN`. One place so the walk and the settings reader cannot disagree about "parseable".
@@ -40,7 +54,8 @@ function atMs(v) {
 
 // The three shapes of answer:
 //   - no file                      → `{ ok: true, source: 'default' }` — the project has never been configured, which is the common case;
-//   - a file that parses to a plain object → `{ ok: true, source: 'file' }` with `haltAfter` clamped and `resetAt` reduced to its usable entries;
+//   - a file that parses to a plain object → `{ ok: true, source: 'file' }` with `haltAfter`, `maxPlans` and `maxPrs` clamped and `resetAt` reduced to its
+//     usable entries;
 //   - ANYTHING else (an I/O error that is not ENOENT — EISDIR, EACCES —, text that is not JSON, JSON that is an array or `null`) → `{ ok: false, file, error }`.
 // The last is never read as the default: a settings file somebody left half-written is evidence of an edit in flight, and treating it as "3, no resets" would
 // silently re-arm a breaker the person had just reset. `decide` answers `idle` naming the file instead. Never throws.
@@ -49,7 +64,9 @@ export function readTickSettings(file = tickSettingsFile()) {
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch (e) {
-    if (e && e.code === 'ENOENT') return { ok: true, haltAfter: HALT_DEFAULT, resetAt: {}, source: 'default' };
+    if (e && e.code === 'ENOENT') {
+      return { ok: true, haltAfter: HALT_DEFAULT, maxPlans: MAX_PLANS_DEFAULT, maxPrs: MAX_PRS_DEFAULT, resetAt: {}, source: 'default' };
+    }
     return { ok: false, file, error: e instanceof Error ? e.message : String(e) };
   }
   let parsed;
@@ -65,7 +82,14 @@ export function readTickSettings(file = tickSettingsFile()) {
     // trusts `resetAt` for display print a value the rule ignored.
     for (const [project, at] of Object.entries(parsed.resetAt)) if (!Number.isNaN(atMs(at))) resetAt[project] = at;
   }
-  return { ok: true, haltAfter: clampHaltAfter(parsed.haltAfter), resetAt, source: 'file' };
+  return {
+    ok: true,
+    haltAfter: clampHaltAfter(parsed.haltAfter),
+    maxPlans: clampSetting(parsed.maxPlans, MAX_PLANS_DEFAULT, CAP_MIN, CAP_MAX),
+    maxPrs: clampSetting(parsed.maxPrs, MAX_PRS_DEFAULT, CAP_MIN, CAP_MAX),
+    resetAt,
+    source: 'file'
+  };
 }
 
 // --- the streak ----------------------------------------------------------

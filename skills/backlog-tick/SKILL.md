@@ -29,7 +29,8 @@ which, and keeps the lock and the memory of what failed; this session only carri
 
 ## 1. Decide
 
-Pass the trigger's flags through unchanged — `--max-prs M`, `--max-plans N`, `--base <ref>`, `--lock-ttl <minutes>`, `--dry-run` — and none it did not carry:
+Pass the trigger's flags through unchanged — `--max-prs M`, `--max-plans N`, `--base <ref>`, `--lock-ttl <minutes>`, `--dry-run` — and none it did not carry
+(an omitted cap is the board's Settings › Shared › Backlog tick value, else 2 PRs and 3 plans — never invent one):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/backlog-tick/tools/tick.mjs" decide <the trigger's flags>

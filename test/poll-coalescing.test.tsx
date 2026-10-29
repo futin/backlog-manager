@@ -74,7 +74,7 @@ function watchdog(phase: WatchdogPhase): WatchdogStatus {
 
 // The tick breaker's page payload. Both `Kind`s answer the same body: `useTicks` has no arming condition beyond `live`, so there is no "quiet" world for the
 // answer to describe — see GATED below.
-const TICKS: TicksPayload = { config: { haltAfter: 3, source: 'default' }, projects: [] };
+const TICKS: TicksPayload = { config: { haltAfter: 3, maxPlans: 3, maxPrs: 2, source: 'default' }, projects: [] };
 
 const AGENTS: AgentsStatus = {
   enabled: true,

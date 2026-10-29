@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-import { fetchTicks, resetTicks, updateTickConfig } from '../lib/ticks';
+import { fetchTicks, resetTicks, updateTickConfig, type TickConfigPatch } from '../lib/ticks';
 import { useMountedRef } from './useMountedRef';
 import { useRefreshing } from './useRefreshing';
 import type { TicksPayload } from '../../../shared/types';
@@ -29,7 +29,7 @@ export function useTicks(opts: { live?: boolean } = {}): {
   error: string | null;
   saveError: string | null;
   reload: () => Promise<void>;
-  save: (haltAfter: number) => Promise<void>;
+  save: (patch: TickConfigPatch) => Promise<void>;
   reset: (project: string) => Promise<void>;
 } {
   const { live = true } = opts;
@@ -74,7 +74,7 @@ export function useTicks(opts: { live?: boolean } = {}): {
     [mountedRef]
   );
 
-  const save = useCallback((haltAfter: number) => write(() => updateTickConfig(haltAfter), 'failed to save tick config'), [write]);
+  const save = useCallback((patch: TickConfigPatch) => write(() => updateTickConfig(patch), 'failed to save tick config'), [write]);
   const reset = useCallback((project: string) => write(() => resetTicks(project), 'failed to reset ticks'), [write]);
 
   return { data, error, saveError, reload, save, reset };
