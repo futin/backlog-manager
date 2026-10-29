@@ -28,6 +28,10 @@ and each project's `backlog/` directory are the data.
 **CI is the full-suite gate — never re-run the whole `pnpm test` locally just before a push.** Push and let CI run it; locally run only the suites the change
 (or a merge of `main`) touched. Why: `~/.claude/session-analytics-log.md`, 2026-10-15. A docs-only or skills-only PR gets a scoped run instead, picked by
 `scripts/ci-scope.mjs`; every code PR and every push to `main` still runs everything ([ci.md](docs/workflows/ci.md#scoped-checks)).
+**"Touched" includes the source guards.** Many `test/` suites read the client or server tree and count symbols — `run-pulse.test.ts` pins every
+`useOrchestratorRuns()` caller — so a diff that adds a caller of a shared hook, poller or helper is not covered by its own suites alone. Before pushing,
+`grep -l <symbol> test/` for each symbol the diff adds a caller of, and add every hit to the scoped run. Why: `~/.claude/session-analytics-log.md`,
+2026-10-29 — a new view went red in CI twice on that one guard after green local runs.
 
 Ports: API `4322`, Vite `5177` (guide-manager holds 4321/5175/5176 on this machine). Only the host side moves, via `BM_API_PORT` / `BM_WEB_PORT` in `.env` —
 inside the compose stack they are fixed. `pnpm run tailnet` reads `BM_WEB_PORT` from that same `.env` and serves the tailnet on the same number.
