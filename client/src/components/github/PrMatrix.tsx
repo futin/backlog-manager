@@ -3,6 +3,7 @@ import { useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Dot } from '../ui/Dot';
 import { Ledger } from '../ui/Ledger';
 import { Pill } from '../ui/Pill';
+import { Sheet } from '../ui/Sheet';
 import { PrActions } from './PrActions';
 import { PrOutcomeLine, hasOutcomeLine } from './PrOutcomeLine';
 import { PrRepoNotes } from './PrRepoNotes';
@@ -33,9 +34,11 @@ import { isUpdating } from '../../lib/prs';
  * sits among the Quiet rows with a red Checks cell, counted in that header. Colour is for a problem only: `.prs-cell-ok` and `-na` are ink, and the tone word
  * is always the cell's text too, so colour is never the only carrier. The header count is the number of rows whose cell in that column is bad or meh.
  *
- * **A real `<table>` inside `Ledger`'s overflow box** (§8.4: every table scrolls inside its own sheet). `Ledger` is used without `columns`, as Runs ›
- * Watchdog's feed is: a grid template would lay the columns out and the table's own semantics would fight it. Matrix is wide-only (`drawableLayout`), but the
- * box stays because a long title or a many-repo window can still overflow it.
+ * **A real `<table>` inside `Ledger`'s overflow box, inside a `Sheet`** (§8.4: every table scrolls inside its own sheet). The sheet is the card the
+ * dashboard's Management matrices sit on, which this layout was ported from; without it the table lay bare on the well and read as a different page from
+ * its source. `Ledger` is used without `columns`, as Runs › Watchdog's feed is: a grid template would lay the columns out and the table's own semantics would
+ * fight it. Matrix is wide-only (`drawableLayout`) and its title column ellipsizes, but the box stays because the evidence columns alone can still outgrow
+ * a window just wide enough to offer Matrix.
  *
  * **One row open at a time, and the closed one is UNMOUNTED.** The open row is one key held here; opening another replaces it. The expansion is not drawn
  * `hidden` when closed: a `Confirm` joins `useDialogEscape`'s stack while it is mounted, and one left in a hidden subtree would swallow the next Escape unseen
@@ -157,43 +160,45 @@ export function PrMatrix(props: PrLayoutProps) {
         <p className="prs-status">no open pull requests</p>
       ) : (
         <>
-          <Ledger label="Pull requests">
-            <table className="prs-matrix-table">
-              <thead>
-                <tr>
-                  <th scope="col" className="prs-matrix-dot">
-                    <span className="sr-only">Level</span>
-                  </th>
-                  <th scope="col">Pull request</th>
-                  {MATRIX_COLUMNS.map((column) => (
-                    <th key={column} scope="col">
-                      {MATRIX_LABEL[column]}
-                      {counts[column] > 0 && (
-                        <>
-                          {' '}
-                          <span className="prs-matrix-count">{counts[column]}</span>
-                        </>
-                      )}
+          <Sheet>
+            <Ledger label="Pull requests">
+              <table className="prs-matrix-table">
+                <thead>
+                  <tr>
+                    <th scope="col" className="prs-matrix-dot">
+                      <span className="sr-only">Level</span>
                     </th>
-                  ))}
-                  <th scope="col">Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ranked.map((r) => (
-                  <MatrixRow key={r.key} r={r} props={props} open={openKey === r.key} onToggle={() => setOpenKey((cur) => (cur === r.key ? null : r.key))} />
-                ))}
-                {failures.map((repo) => (
-                  <tr key={repo.repo} className="prs-matrix-fail" data-testid={`pr-mfail-${repo.repo}`}>
-                    <td className="prs-matrix-dot" />
-                    <td className="prs-matrix-pr">{repo.repo}</td>
-                    <td colSpan={MATRIX_COLUMNS.length}>{repo.detail ?? repo.access}</td>
-                    <td />
+                    <th scope="col">Pull request</th>
+                    {MATRIX_COLUMNS.map((column) => (
+                      <th key={column} scope="col">
+                        {MATRIX_LABEL[column]}
+                        {counts[column] > 0 && (
+                          <>
+                            {' '}
+                            <span className="prs-matrix-count">{counts[column]}</span>
+                          </>
+                        )}
+                      </th>
+                    ))}
+                    <th scope="col">Updated</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </Ledger>
+                </thead>
+                <tbody>
+                  {ranked.map((r) => (
+                    <MatrixRow key={r.key} r={r} props={props} open={openKey === r.key} onToggle={() => setOpenKey((cur) => (cur === r.key ? null : r.key))} />
+                  ))}
+                  {failures.map((repo) => (
+                    <tr key={repo.repo} className="prs-matrix-fail" data-testid={`pr-mfail-${repo.repo}`}>
+                      <td className="prs-matrix-dot" />
+                      <td className="prs-matrix-pr">{repo.repo}</td>
+                      <td colSpan={MATRIX_COLUMNS.length}>{repo.detail ?? repo.access}</td>
+                      <td />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Ledger>
+          </Sheet>
           <p className="prs-matrix-legend" data-testid="pr-matrix-legend">
             {LEGEND.map(({ tone, word }) => (
               <span key={tone} className={`prs-cell-${tone}`}>

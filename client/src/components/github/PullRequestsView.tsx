@@ -189,7 +189,7 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
           ) : (
             <>
               <div className="prs-toolbar" data-testid="pr-toolbar">
-                <Segmented<PrLayout> label="Layout" value={layout} options={layoutOptions(narrow)} onChange={setStored} />
+                <Segmented<PrLayout> label="Layout" value={layout} options={layoutOptions(narrow)} onChange={setStored} track />
                 {hidden.length > 0 && (
                   <p className="prs-toolbar-note">
                     {`${hidden.length} ${hidden.length === 1 ? 'repo' : 'repos'} hidden — no access`}

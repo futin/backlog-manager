@@ -72,4 +72,18 @@ describe('Segmented', () => {
     expect(screen.getByRole('group', { name: 'Density' })).toHaveClass('ui-seg');
     expect(screen.getByRole('group', { name: 'Density' })).toHaveClass('ui-seg-pill');
   });
+
+  /**
+   * The `track` variant (DESIGN.md §8.11) — the dashboard's `.seg`, which GitHub › PRs' layout switch draws. Beside the base class like `pill`, and never
+   * together with it: the two skins set the same properties to different radii, so a group carrying both would be whichever rule came last in the sheet.
+   */
+  it('adds the track class beside the base one, and pill wins when both are asked', () => {
+    const { rerender } = render(<Segmented value="cosy" options={OPTIONS} onChange={jest.fn()} label="Layout" track />);
+    expect(screen.getByRole('group', { name: 'Layout' })).toHaveClass('ui-seg', 'ui-seg-track');
+    expect(screen.getByRole('group', { name: 'Layout' })).not.toHaveClass('ui-seg-pill');
+
+    rerender(<Segmented value="cosy" options={OPTIONS} onChange={jest.fn()} label="Layout" track pill />);
+    expect(screen.getByRole('group', { name: 'Layout' })).toHaveClass('ui-seg-pill');
+    expect(screen.getByRole('group', { name: 'Layout' })).not.toHaveClass('ui-seg-track');
+  });
 });
