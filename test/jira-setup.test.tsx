@@ -885,8 +885,9 @@ describe('the Repositories card — a path\'s defaults', () => {
   it('draws ONE defaults line for a path mapped to two projects — the defaults belong to the path', async () => {
     statusAnswer = status({ projects: PROJECTS, repos: { PAY: ['/home/ada/shared'], OPS: ['/home/ada/shared'] } });
     await renderSetup();
-    // Awaited: the Repositories rows draw after the page's own `/api/jira/projects` read, which `renderSetup`'s Boards heading does not wait for.
-    expect(await within(reposCard()).findAllByRole('textbox', { name: 'Default base for ~/shared' })).toHaveLength(1);
+    // Awaited: the Repositories rows draw after the page's own `/api/jira/projects` read, which `renderSetup`'s Boards heading does not wait for. By label,
+    // not role, as `baseField` does: the field is a textbox until the refs read lands and a combobox after (`list=`), so a role query raced that read.
+    expect(await within(reposCard()).findAllByLabelText('Default base for ~/shared')).toHaveLength(1);
     expect(urls('/api/jira/refs')).toHaveLength(1);
     fireEvent.change(baseField('~/shared'), { target: { value: 'develop' } });
     await userEvent.click(saveButton('~/shared'));
