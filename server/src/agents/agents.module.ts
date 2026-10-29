@@ -7,6 +7,7 @@ import { DashboardsController } from './dashboards/dashboards.controller';
 import { DashboardsService } from './dashboards/dashboards.service';
 import { MachinesService } from './dashboards/machines.service';
 import { OffersService } from './dashboards/offers.service';
+import { OrchestrateArgsService } from './orchestrate-args.service';
 import { UsageService } from './dashboards/usage.service';
 import { ItemsAbortController } from './items-abort.controller';
 import { ItemsAbortService } from './items-abort.service';
@@ -92,6 +93,7 @@ import { JiraModule } from '../jira/jira.module';
     JiraLiveReconciler,
     MachinesService,
     OffersService,
+    OrchestrateArgsService,
     SameOriginPostGuard,
     UsageService,
     WatchdogService

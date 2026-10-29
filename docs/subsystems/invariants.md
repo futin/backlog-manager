@@ -778,7 +778,7 @@ shapes, each recorded there with the reason it is HEAD-independent, and anything
 falls on. That is the honest generality available here, and it is the one that catches the command nobody has written yet — the first version of the guard
 looked for `$PWD` lines mentioning `HEAD`, which the reverted `branch -d` passed.
 
-Both halves of the base's own validity are checked twice, in the same order, by `resolveBase` (`agents.service.ts`) on the way in and `assertUsableBase`
+Both halves of the base's own validity are checked twice, in the same order, by `resolveBase` (`orchestrate-args.service.ts`) on the way in and `assertUsableBase`
 (`orchestrate.mjs`) at `init`. Neither copy is redundant: the endpoint's exists to refuse a bad request **before** it spawns a headless session, and the tool's
 exists because a terminal is not the endpoint. The order is deliberate, and the honest reason is a downstream one: `git check-ref-format --branch` runs first
 **not** because `git show-ref --verify` would otherwise read the value as an option — it interpolates into `refs/heads/<base>`, which can never begin with a
@@ -1635,7 +1635,7 @@ true of two flags out of three and is true of two out of four. Each is appended 
 before any of these fields existed composes the byte-identical prompt it always did. The board's Orchestrate sheet can narrow a run to a subset of the queue, which means the
 spawned session has to be told `/backlog-orchestrate task-3 bug-7` rather than the bare trigger — `--ids` is a flag `orchestrate.mjs`'s own `init` and `plan`
 have always taken, and `SKILL.md` documents the trigger as `/backlog-orchestrate [ids…] [--max N] [--base <ref>] [--merge-mode branch|pr] [--question-mode decide]`. What makes that safe is that the server never _accepts_
-prompt text, it _composes_ the prompt out of the constant plus values that have passed two independent checks (`resolveIds`, `agents.service.ts`):
+prompt text, it _composes_ the prompt out of the constant plus values that have passed two independent checks (`resolveIds`, `orchestrate-args.service.ts`):
 
 1. **Shape** — `isItemId` (`shared/agent.ts`), the same `^[a-z]+-\d+$` `backlog.mjs`'s own `ID_SHAPE` enforces. What survives is a bare identifier: no
    whitespace, no path separator, no shell metacharacter, and no newline to split the one-line prompt with.
@@ -4508,7 +4508,7 @@ in 58 ms while `/api/items` waits 1.1 s on a fake `git` that sleeps for a second
 Each call site already had exactly one failure branch, and each degrades rather than throws, so `runGit` answers `null` for a timeout, a non-zero exit, a spawn
 error (`ENOENT`, a `cwd` that is not a directory) and an oversized output alike, and a timeout lands in whatever that site did with `null` before:
 `lastCommitDates` → the empty map (every caller reads it as "fall back to `created`"), `uncommittedItemPaths` → `known: false`, `originRepo` → `null`,
-`resolveBaseBranch` → the same 400 a missing branch gets, `AgentsService.branches` → an empty list, and `ReleasesService`'s four reads (2026-10-16, the release
+`resolveBaseBranch` → the same 400 a missing branch gets, `OrchestrateArgsService.branches` → an empty list, and `ReleasesService`'s four reads (2026-10-16, the release
 chip) — `for-each-ref` → the empty shape, `describe` → `current: null` with the releases kept, `remote get-url` → no `url`, `rev-parse` → the answer is not
 memoised. A command that succeeds and prints nothing answers `''`, not `null`, so `show-ref --quiet` callers test `!== null`. Nobody added a "timed out" branch,
 because none of the nine has a reason to treat a slow repository

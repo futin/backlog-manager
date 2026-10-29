@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpException, Post, Query, UseGuards } from '@nestjs/common';
 
 import { AgentsService, type AgentOrchestrateRequest } from './agents.service';
+import { OrchestrateArgsService } from './orchestrate-args.service';
 import { SameOriginPostGuard } from './origin.guard';
 import { WatchdogService } from './watchdog.service';
 import { StartingRunsService } from '../orchestrator/starting-runs.service';
@@ -21,7 +22,9 @@ export class AgentsController {
     private readonly watchdog: WatchdogService,
     private readonly starting: StartingRunsService,
     /** Multi-dashboard task 6 — a remote orchestrate's "starting on <machine>" mark, the remote counterpart of `starting` above. */
-    private readonly remoteStarting: RemoteStartingService
+    private readonly remoteStarting: RemoteStartingService,
+    /** #388 — the Orchestrate sheet's two reads, `mergeCheck` and `branches`, which moved out of `AgentsService` with the request resolvers. */
+    private readonly orchestrateArgs: OrchestrateArgsService
   ) {}
 
   /**
@@ -528,7 +531,7 @@ export class AgentsController {
   mergeCheck(@Query('project') project: string | undefined): MergeCheckResult {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
-    return this.agents.mergeCheck(trimmed);
+    return this.orchestrateArgs.mergeCheck(trimmed);
   }
 
   /**
@@ -550,6 +553,6 @@ export class AgentsController {
   branches(@Query('project') project: string | undefined): Promise<AgentBranchesPayload> {
     const trimmed = typeof project === 'string' ? project.trim() : '';
     if (trimmed === '') throw new HttpException({ error: 'project is required' }, 400);
-    return this.agents.branches(trimmed);
+    return this.orchestrateArgs.branches(trimmed);
   }
 }

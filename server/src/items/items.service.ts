@@ -174,7 +174,7 @@ export class ItemsService {
    * showing. Deliberately not "which ones the run cannot see": half of them
    * it can, and `uncommitted.util.ts`'s header carries both fates.
    *
-   * Registry-gated exactly like `AgentsService.mergeCheck`: a RAW STRING
+   * Registry-gated exactly like `OrchestrateArgsService.mergeCheck`: a RAW STRING
    * compare against the registry's own `path` field, deliberately not
    * `samePath`'s realpath compare, matching the "deliberately not realpath"
    * rule CLAUDE.md pins on `dispatchGate`'s membership check. That choice is
