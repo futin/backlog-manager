@@ -1,9 +1,15 @@
 import {
+  columnCounts,
+  compactKeys,
   departedOutcomes,
   drawableLayout,
   isNoAccess,
+  LEVEL_DOT,
   layoutOptions,
   levelCounts,
+  MATRIX_COLUMNS,
+  MATRIX_LABEL,
+  matrixCells,
   newestPolledAt,
   parseLayout,
   prLevel,
@@ -15,7 +21,7 @@ import {
   splitReach,
   transientFailures
 } from '../client/src/lib/pr-layouts';
-import type { PrOutcome } from '../client/src/lib/prs';
+import { mergeBlock, type PrOutcome } from '../client/src/lib/prs';
 import type { PrRepoView, PullRequestRow } from '../shared/types';
 
 /**
@@ -274,5 +280,103 @@ describe('page-level readings', () => {
   it('departedOutcomes does not match a repo whose name is a prefix of another', () => {
     const shown = [repo({ repo: 'a/x' })];
     expect(departedOutcomes({ 'a/xy#1': { text: 'merged', kind: 'ok' } }, shown)).toEqual([]);
+  });
+});
+
+describe('compactKeys', () => {
+  it('a behind PR on an auto-merge repo offers update first, then merge and auto-merge', () => {
+    const pr = row({ mergeState: 'behind', canUpdateBranch: true });
+    expect(compactKeys(pr, repo({ autoMergeAllowed: true }))).toEqual({ keys: ['update', 'merge', 'auto-merge'], primary: 'update' });
+  });
+
+  it('a ready quiet PR on a repo without auto-merge offers merge alone, as the primary', () => {
+    expect(compactKeys(row({ review: 'approved', checks: 'success' }), repo({ autoMergeAllowed: false }))).toEqual({ keys: ['merge'], primary: 'merge' });
+  });
+
+  it('a PR merge would refuse has no primary, and the refusal is the one the action strip already says', () => {
+    const failing = row({ checks: 'failure' });
+    const r = repo();
+    expect(mergeBlock(failing, r)).toBe('checks failing');
+    expect(compactKeys(failing, r).primary).toBeNull();
+    expect(compactKeys(failing, r).keys).toEqual(['merge', 'auto-merge']);
+  });
+
+  it('a draft has no primary', () => {
+    expect(compactKeys(row({ draft: true }), repo()).primary).toBeNull();
+  });
+
+  it('a quiet PR that is not ready for a person (worth a look) has no primary either, unless it is behind', () => {
+    expect(compactKeys(row({ review: 'review-required' }), repo()).primary).toBeNull();
+  });
+
+  it('armed auto-merge still offers auto-merge on a repo whose setting is now off, so it can be disarmed', () => {
+    const armed = row({ autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } });
+    expect(compactKeys(armed, repo({ autoMergeAllowed: false })).keys).toContain('auto-merge');
+  });
+
+  it('a repo with no allowed method has no merge primary', () => {
+    expect(compactKeys(row({ review: 'approved', checks: 'success' }), repo({ methods: [] })).primary).toBeNull();
+  });
+});
+
+describe('matrixCells', () => {
+  it('names the columns and their labels', () => {
+    expect(MATRIX_COLUMNS).toEqual(['checks', 'review', 'mergeable', 'base', 'autoMerge']);
+    expect(MATRIX_LABEL).toEqual({ checks: 'Checks', review: 'Review', mergeable: 'Mergeable', base: 'Base', autoMerge: 'Auto-merge' });
+  });
+
+  it('reads checks and review from their own facts', () => {
+    expect(matrixCells(row({ checks: 'success' }), false).checks).toEqual({ text: 'passing', tone: 'ok' });
+    expect(matrixCells(row({ checks: 'pending' }), false).checks).toEqual({ text: 'running', tone: 'live' });
+    expect(matrixCells(row({ checks: 'none' }), false).checks).toEqual({ text: '—', tone: 'na' });
+    expect(matrixCells(row({ review: 'approved' }), false).review).toEqual({ text: 'approved', tone: 'ok' });
+    expect(matrixCells(row({ review: 'changes-requested' }), false).review).toEqual({ text: 'changes', tone: 'bad' });
+    expect(matrixCells(row({ review: 'review-required' }), false).review).toEqual({ text: 'required', tone: 'meh' });
+    expect(matrixCells(row({ review: null }), false).review).toEqual({ text: '—', tone: 'na' });
+  });
+
+  it('a cell ignores draft: failing checks on a draft are a red Checks cell', () => {
+    expect(matrixCells(row({ draft: true, checks: 'failure' }), false).checks).toEqual({ text: 'failing', tone: 'bad' });
+  });
+
+  it('mergeable: conflicts, computing, an unnamed block, and otherwise mergeable', () => {
+    expect(matrixCells(row({ mergeable: 'conflicting' }), false).mergeable).toEqual({ text: 'conflicts', tone: 'bad' });
+    expect(matrixCells(row({ mergeable: 'unknown' }), false).mergeable).toEqual({ text: 'computing', tone: 'live' });
+    expect(matrixCells(row({ mergeState: 'blocked' }), false).mergeable).toEqual({ text: 'blocked', tone: 'meh' });
+    expect(matrixCells(row({ mergeState: 'unstable' }), false).mergeable).toEqual({ text: 'unstable', tone: 'meh' });
+    expect(matrixCells(row(), false).mergeable).toEqual({ text: 'mergeable', tone: 'ok' });
+  });
+
+  it('a block with a name (a review is required) is not shown as blocked in Mergeable', () => {
+    expect(matrixCells(row({ mergeState: 'blocked', review: 'review-required' }), false).mergeable).toEqual({ text: 'mergeable', tone: 'ok' });
+  });
+
+  it('base: updating wins over behind, behind is meh, otherwise up to date', () => {
+    expect(matrixCells(row({ mergeState: 'behind' }), true).base).toEqual({ text: 'updating…', tone: 'live' });
+    expect(matrixCells(row({ mergeState: 'behind' }), false).base).toEqual({ text: 'behind', tone: 'meh' });
+    expect(matrixCells(row(), false).base).toEqual({ text: 'up to date', tone: 'ok' });
+  });
+
+  it('autoMerge: the armed method, else not applicable', () => {
+    expect(matrixCells(row({ autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } }), false).autoMerge).toEqual({ text: 'squash', tone: 'live' });
+    expect(matrixCells(row(), false).autoMerge).toEqual({ text: '—', tone: 'na' });
+  });
+});
+
+describe('columnCounts', () => {
+  it('counts the rows whose cell is bad or meh, per column', () => {
+    const r = repo({ prs: [row({ number: 1, checks: 'failure' }), row({ number: 2, review: 'review-required' }), row({ number: 3, review: 'approved', checks: 'success' })] });
+    expect(columnCounts(rankPrs([r]), () => false)).toEqual({ checks: 1, review: 1, mergeable: 0, base: 0, autoMerge: 0 });
+  });
+
+  it('reads the updating mark by key: an updating behind row is in motion, not behind', () => {
+    const r = repo({ prs: [row({ number: 1, mergeState: 'behind' }), row({ number: 2, mergeState: 'behind' })] });
+    expect(columnCounts(rankPrs([r]), (key) => key === 'futin/x#1').base).toBe(1);
+  });
+});
+
+describe('LEVEL_DOT', () => {
+  it('maps the two loud levels to Dot tones and leaves Quiet toneless', () => {
+    expect(LEVEL_DOT).toEqual({ 'needs-you': 'crashed', 'worth-a-look': 'paused', quiet: undefined });
   });
 });

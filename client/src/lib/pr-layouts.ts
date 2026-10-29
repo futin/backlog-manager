@@ -1,4 +1,5 @@
-import { prChips, type PrOutcome } from './prs';
+import { prChips, mergeBlock, type PrOutcome } from './prs';
+import type { DotTone } from '../components/ui/Dot';
 import type { PrRepoView, PullRequestRow } from '../../../shared/types';
 
 /**
@@ -213,3 +214,109 @@ export function departedOutcomes(outcomes: Record<string, PrOutcome>, shown: rea
     .filter(([key, outcome]) => outcome.kind !== 'updating' && !listed.has(key) && shown.some((repo) => key.startsWith(`${repo.repo}#`)))
     .map(([key, outcome]) => ({ key, outcome }));
 }
+
+/** A key on a row's compact action strip: the three writes `PrActions` offers, which `lib/prs.ts`' `*Block`s disable with a reason. */
+export type PrKey = 'merge' | 'update' | 'auto-merge';
+
+/**
+ * Which keys a PR's compact strip offers and which one is the primary (the filled one). This only PICKS: whether a key is disabled, and the reason it says,
+ * stays `mergeBlock` / `updateBlock` / `autoMergeBlock`'s, so a compact strip and the full one cannot disagree about what is refused.
+ *
+ * `merge` is always offered. `update` is offered when GitHub says the PR is behind. `auto-merge` is offered when the repo allows it OR the PR already has it
+ * armed — an armed PR on a repo whose setting was turned off since must still offer the way to disarm it (`autoMergeBlock`'s own rule).
+ *
+ * The primary is the one thing a person most likely wants to do: update a behind PR (nothing else is sensible until it has), else merge a PR that is Quiet,
+ * not a draft and not blocked by this page's own reasons. A PR with anything wrong has no primary — the row's verdict is what the eye should land on, not a
+ * bright Merge button. The primary is listed first; the rest keep `merge, update, auto-merge` order.
+ */
+export function compactKeys(pr: PullRequestRow, repo: PrRepoView): { keys: PrKey[]; primary: PrKey | null } {
+  const offered: PrKey[] = ['merge'];
+  if (pr.mergeState === 'behind') offered.push('update');
+  if (repo.autoMergeAllowed || pr.autoMerge !== null) offered.push('auto-merge');
+  let primary: PrKey | null = null;
+  if (pr.mergeState === 'behind') primary = 'update';
+  else if (prLevel(pr) === 'quiet' && !pr.draft && mergeBlock(pr, repo) === null) primary = 'merge';
+  const keys = primary === null ? offered : [primary, ...offered.filter((k) => k !== primary)];
+  return { keys, primary };
+}
+
+/** How a Matrix cell is drawn: healthy, needs you, worth a look, in motion (pending / computing / updating), and not applicable. Colour is for failure only. */
+export type CellTone = 'ok' | 'bad' | 'meh' | 'live' | 'na';
+
+export interface MatrixCell {
+  text: string;
+  tone: CellTone;
+}
+
+export const MATRIX_COLUMNS = ['checks', 'review', 'mergeable', 'base', 'autoMerge'] as const;
+export type MatrixColumn = (typeof MATRIX_COLUMNS)[number];
+
+export const MATRIX_LABEL: Record<MatrixColumn, string> = {
+  checks: 'Checks',
+  review: 'Review',
+  mergeable: 'Mergeable',
+  base: 'Base',
+  autoMerge: 'Auto-merge'
+};
+
+const NA: MatrixCell = { text: '—', tone: 'na' };
+
+/**
+ * A PR's five Matrix cells. Each cell reports ITS OWN fact and ignores `draft` and the row's level (spec, Matrix): a draft with failing checks has a red Checks
+ * cell — the dot says Quiet, because the dot is the triage and the cells are the evidence. `updating` is the page's mark (`isUpdating`), which Base shows in
+ * place of `behind` because the update has been asked for.
+ *
+ * Mergeable carries the one fact no other column can: a `blocked` / `unstable` state nothing else names. That is `levelFacts`' own unnamed-block test, so the
+ * cell and the level cannot disagree about whether a block has a name.
+ */
+export function matrixCells(pr: PullRequestRow, updating: boolean): Record<MatrixColumn, MatrixCell> {
+  const checks: MatrixCell =
+    pr.checks === 'success'
+      ? { text: 'passing', tone: 'ok' }
+      : pr.checks === 'failure'
+        ? { text: 'failing', tone: 'bad' }
+        : pr.checks === 'pending'
+          ? { text: 'running', tone: 'live' }
+          : NA;
+  const review: MatrixCell =
+    pr.review === 'approved'
+      ? { text: 'approved', tone: 'ok' }
+      : pr.review === 'changes-requested'
+        ? { text: 'changes', tone: 'bad' }
+        : pr.review === 'review-required'
+          ? { text: 'required', tone: 'meh' }
+          : NA;
+  const unnamedBlock = levelFacts(pr).some((f) => f.kind === 'blocked');
+  const mergeable: MatrixCell =
+    pr.mergeable === 'conflicting'
+      ? { text: 'conflicts', tone: 'bad' }
+      : pr.mergeable === 'unknown'
+        ? { text: 'computing', tone: 'live' }
+        : unnamedBlock
+          ? { text: pr.mergeState, tone: 'meh' }
+          : { text: 'mergeable', tone: 'ok' };
+  const base: MatrixCell = updating
+    ? { text: 'updating…', tone: 'live' }
+    : pr.mergeState === 'behind'
+      ? { text: 'behind', tone: 'meh' }
+      : { text: 'up to date', tone: 'ok' };
+  const autoMerge: MatrixCell = pr.autoMerge === null ? NA : { text: pr.autoMerge.method, tone: 'live' };
+  return { checks, review, mergeable, base, autoMerge };
+}
+
+/** Per column, how many rows' cells are `bad` or `meh` — the number a Matrix header shows. `updating` is asked by key, the way the rows themselves ask it. */
+export function columnCounts(ranked: readonly RankedPr[], updating: (key: string) => boolean): Record<MatrixColumn, number> {
+  const counts: Record<MatrixColumn, number> = { checks: 0, review: 0, mergeable: 0, base: 0, autoMerge: 0 };
+  for (const r of ranked) {
+    const cells = matrixCells(r.pr, updating(r.key));
+    for (const column of MATRIX_COLUMNS) if (cells[column].tone === 'bad' || cells[column].tone === 'meh') counts[column] += 1;
+  }
+  return counts;
+}
+
+/** A level's `Dot` tone. Quiet is `undefined` on purpose: `Dot` draws no tone as a toneless grey, which is the level's own look. */
+export const LEVEL_DOT: Record<PrLevel, DotTone | undefined> = {
+  'needs-you': 'crashed',
+  'worth-a-look': 'paused',
+  quiet: undefined
+};
