@@ -6,8 +6,8 @@ import { PrActions } from './PrActions';
 import { PrOutcomeLine } from './PrOutcomeLine';
 import { PrRepoNotes } from './PrRepoNotes';
 import type { PrLayoutProps } from './pr-layout-props';
-import { elapsedSince } from '../../lib/item-age';
 import {
+  ageText,
   LEVELS,
   LEVEL_DOT,
   LEVEL_LABEL,
@@ -51,12 +51,6 @@ import { isUpdating } from '../../lib/prs';
  * stop offering a merge — and gets one extra line with its `detail`. The notes (`PrRepoNotes`) carry what is not a PR: outcomes of merged ones, the sync-off
  * sentence, `showing n of total`.
  */
-
-/** `3h ago`, `just now`; `null` when the timestamp cannot be aged, in which case the meta line leaves the age out. */
-function ageText(updatedAt: string, now: number): string | null {
-  const age = elapsedSince(updatedAt, now);
-  return age === null ? null : age === 'now' ? 'just now' : `${age} ago`;
-}
 
 /** `author · head → base · age` — the line under a loud item's verdict. */
 function ItemMeta({ r, now }: { r: RankedPr; now: number }) {

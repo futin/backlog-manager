@@ -1,3 +1,4 @@
+import { elapsedSince } from './item-age';
 import { prChips, mergeBlock, type PrOutcome } from './prs';
 import type { DotTone } from '../components/ui/Dot';
 import type { PrRepoView, PullRequestRow } from '../../../shared/types';
@@ -320,3 +321,9 @@ export const LEVEL_DOT: Record<PrLevel, DotTone | undefined> = {
   'worth-a-look': 'paused',
   quiet: undefined
 };
+
+/** `3h ago`, `just now`; `null` when the timestamp cannot be aged, in which case the caller leaves the age out. Inbox's meta line and Matrix's Updated column share it. */
+export function ageText(updatedAt: string, now: number): string | null {
+  const age = elapsedSince(updatedAt, now);
+  return age === null ? null : age === 'now' ? 'just now' : `${age} ago`;
+}

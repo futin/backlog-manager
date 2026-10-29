@@ -3546,3 +3546,32 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    appended to the file — the single likeliest way a page comes to restate a
    primitive's look — would have read as part of the block and passed. The
    marker is what makes the check catch an offender on BOTH sides. */
+
+/* GitHub › PRs, Matrix layout (§8.11; spec 2026-10-29-prs-layouts-design.md, "Matrix"). One `<table>` inside `ui/Ledger`'s overflow box, one row per PR, one
+   column per check. Colour is for a problem only: ok and na stay in ink (--ink2 / --ink3), bad is --red, meh --amber-ink and live --live-ink — the §8.2 TEXT
+   tokens, never the --amber / --green marks, which do not clear 4.5:1 as text on paper. The cell's word is always printed, so a tone is never the only carrier.
+   A row is the toggle that opens the expansion under it, so it takes the pointer and a focus ring. Own `.prs-matrix*` / `.prs-cell-*` classes only — design
+   guard 7 forbids restyling a `.ui-*` primitive from here. */
+.prs-matrix { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+.prs-matrix-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink2) }
+.prs-matrix-table th {
+  text-align: left; font-size: 12px; font-weight: 500; color: var(--ink3); padding: 0 12px 8px 0; white-space: nowrap
+}
+.prs-matrix-table td { padding: 10px 12px 10px 0; border-top: 1px solid var(--hairline); vertical-align: top }
+.prs-matrix-count { color: var(--ink); font-weight: 600 }
+.prs-matrix-dot { width: 22px; padding-right: 0 }
+.prs-matrix-row { cursor: pointer }
+.prs-matrix-row:hover td { background: var(--strip-hi) }
+.prs-matrix-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
+.prs-matrix-pr { min-width: 260px; max-width: 480px }
+.prs-matrix-pr .prs-meta { margin-top: 4px; font-size: 12px; color: var(--ink3) }
+.prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
+.prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
+.prs-matrix-expand-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 0 6px 22px }
+.prs-matrix-fail td { color: var(--ink3) }
+.prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
+.prs-cell-ok { color: var(--ink2) }
+.prs-cell-bad { color: var(--red) }
+.prs-cell-meh { color: var(--amber-ink) }
+.prs-cell-live { color: var(--live-ink) }
+.prs-cell-na { color: var(--ink3) }
