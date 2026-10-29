@@ -240,37 +240,113 @@ const STAMPS = (start) => ({
   merged: start
 });
 
-test('a session joins the latest run that dispatched its item, and the collision is a caveat', (t) => {
-  const fx = retroFixture(t);
+// Two runs that both dispatched `bug-1`: R1 archived as `runs/R1.json`, R2 live as `run.json`. `usage` is a list of `[runId, costUsd]` pairs giving each
+// run's bug-1 a usage entry; omitted, neither has one.
+function seedTwoRuns(fx, usage = []) {
+  const entry = (runId) => {
+    const hit = usage.find(([id]) => id === runId);
+    return hit ? { usage: [{ sessionId: `s-${runId}`, kind: 'execute', costUsd: hit[1], turns: 10 }] } : {};
+  };
   seedRun(
     fx,
     PROJECT_A,
     {
       runId: 'R1',
       startedAt: '2026-09-01T10:00:00Z',
-      queue: [queueItem('bug-1', { stageAt: STAMPS('2026-09-01T10:00:00Z') })]
+      queue: [queueItem('bug-1', { stageAt: STAMPS('2026-09-01T10:00:00Z'), ...entry('R1') })]
     },
     { archived: true }
   );
   seedRun(fx, PROJECT_A, {
     runId: 'R2',
     startedAt: '2026-09-02T10:00:00Z',
-    queue: [queueItem('bug-1', { stageAt: STAMPS('2026-09-02T10:00:00Z') })]
+    queue: [queueItem('bug-1', { stageAt: STAMPS('2026-09-02T10:00:00Z'), ...entry('R2') })]
   });
+}
+
+// #345. Since task-31 a transcript's own location names the run that wrote it — the live run writes flat, and `init` moves that into `runs/<stem>/` beside
+// `runs/<stem>.json` — so the run whose sidecar root holds the log owns it outright, and there is no ambiguity left to report.
+test('a session in the live logs/ joins the live run by its location, with no collision', (t) => {
+  const fx = retroFixture(t);
+  seedTwoRuns(fx);
   seedLog(fx, PROJECT_A, 'bug-1.jsonl', { contexts: [1000], result: okResult(1) });
 
   const sweep = sweepJson(fx);
   assert.equal(sweep.sessions.length, 1);
   assert.equal(sweep.sessions[0].runId, 'R2');
   assert.equal(sweep.sessions[0].kind, 'execute');
+  assert.deepEqual(
+    sweep.caveats.filter((c) => c.kind === 'collision'),
+    []
+  );
+  // The item the session was attributed to carries it back.
+  const later = sweep.items.find((i) => i.runId === 'R2');
+  assert.deepEqual(later.sessionKeys, [sweep.sessions[0].key]);
+});
+
+test('each run’s transcript of a reused item id joins its own run, and nothing reads as unjoined', (t) => {
+  const fx = retroFixture(t);
+  seedTwoRuns(fx, [
+    ['R1', 1],
+    ['R2', 2]
+  ]);
+  seedLog(fx, PROJECT_A, 'bug-1.jsonl', { sessionId: 's-R1', contexts: [1000], result: okResult(1), under: path.join('runs', 'R1') });
+  seedLog(fx, PROJECT_A, 'bug-1.jsonl', { sessionId: 's-R2', contexts: [1000], result: okResult(2) });
+
+  const sweep = sweepJson(fx);
+  const byRun = Object.fromEntries(sweep.sessions.map((s) => [s.runId, s]));
+  assert.equal(byRun.R1.result.costUsd, 1);
+  assert.equal(byRun.R2.result.costUsd, 2);
+  assert.equal(byRun.R1.joinedBy, 'usage');
+  assert.equal(byRun.R2.joinedBy, 'usage');
+  for (const kind of ['unjoined', 'usage-mismatch', 'collision']) {
+    assert.deepEqual(
+      sweep.caveats.filter((c) => c.kind === kind),
+      [],
+      kind
+    );
+  }
+  assert.equal(sweep.totals.costUsd.measured, 3);
+});
+
+// The fallback: an archive directory whose stem names no run file — a run archived before task-31 swept its logs into whichever archive came next, so the
+// location proves nothing and the old rule (latest dispatching run, reported) still applies.
+test('a session whose location names no run joins the latest run that dispatched its item, and the collision is a caveat', (t) => {
+  const fx = retroFixture(t);
+  seedTwoRuns(fx);
+  seedLog(fx, PROJECT_A, 'bug-1.jsonl', { contexts: [1000], result: okResult(1), under: path.join('runs', 'run-pre-task-31') });
+
+  const sweep = sweepJson(fx);
+  assert.equal(sweep.sessions.length, 1);
+  assert.equal(sweep.sessions[0].runId, 'R2');
   const collision = sweep.caveats.filter((c) => c.kind === 'collision');
   assert.equal(collision.length, 1);
   assert.ok(collision[0].detail.includes('bug-1'), collision[0].detail);
   assert.ok(collision[0].detail.includes('R1'), collision[0].detail);
   assert.ok(collision[0].detail.includes('R2'), collision[0].detail);
-  // The item the session was attributed to carries it back.
-  const later = sweep.items.find((i) => i.runId === 'R2');
-  assert.deepEqual(later.sessionKeys, [sweep.sessions[0].key]);
+});
+
+// An archive that IS a known run's, but that run never dispatched the item: the file was already in place when that archive was cut, so no run started
+// after it can have written it.
+test('a session in a known run’s archive that run never dispatched joins a run started no later than it', (t) => {
+  const fx = retroFixture(t);
+  seedRun(
+    fx,
+    PROJECT_A,
+    { runId: 'R1', startedAt: '2026-09-01T10:00:00Z', queue: [queueItem('bug-1', { stageAt: STAMPS('2026-09-01T10:00:00Z') })] },
+    { archived: true }
+  );
+  seedRun(fx, PROJECT_A, { runId: 'R2', startedAt: '2026-09-02T10:00:00Z', queue: [queueItem('bug-2')] }, { archived: true });
+  seedRun(fx, PROJECT_A, {
+    runId: 'R3',
+    startedAt: '2026-09-03T10:00:00Z',
+    queue: [queueItem('bug-1', { stageAt: STAMPS('2026-09-03T10:00:00Z') })]
+  });
+  seedLog(fx, PROJECT_A, 'bug-1.jsonl', { contexts: [1000], result: okResult(1), under: path.join('runs', 'R2') });
+
+  const sweep = sweepJson(fx);
+  assert.equal(sweep.sessions.length, 1);
+  assert.equal(sweep.sessions[0].runId, 'R1');
 });
 
 test('a task-27 usage entry takes the join, and a disagreement is a caveat the run file wins', (t) => {

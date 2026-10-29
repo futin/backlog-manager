@@ -188,9 +188,12 @@ correct answer that is not a new word.
 **One thing the design predates.** The spec describes the sidecar directories as flat, one set per project, a later run's files replacing an earlier run's.
 task-31 landed between the spec and the build: a finished run's sidecars are now archived into `runs/<archiveStem>/` beside its run file, so a sweep that read
 only the project directory's own `logs/` would see the live run's sessions and nothing else. The tool reads both locations. What it does NOT do is treat an
-archive directory as an attribution — the first archive after task-31 swept 74 transcripts belonging to a dozen runs into one stem — so a session is still
-joined to an item by `(project, itemId)`, still attributed to the latest run that dispatched it, and an item two runs dispatched still produces the `collision`
-caveat.
+archive directory as "only that run's" — the first archive after task-31 swept 74 transcripts belonging to a dozen runs into one stem — so a session is still
+joined to an item by `(project, itemId)`. Among the runs that dispatched that item, the one whose own sidecar root holds the transcript owns it (#345): the live
+run writes flat and `init` moves that into `runs/<stem>/`, so that run wrote the surviving bytes, and no `collision` is reported. Only when no candidate's root
+holds it — a pre-task-31 archive, or older runs' logs swept into a later run's stem — is it attributed to the latest dispatching run, bounded by the archive's
+own run start when the archive is a known run's, and only then does an item two runs dispatched produce the `collision` caveat. Attributing every transcript to
+the latest run had filed an older run's cost against a newer one and read the older usage entry as `unjoined`.
 
 Spec: [2026-09-06-backlog-retro-design.md](../superpowers/specs/2026-09-06-backlog-retro-design.md).
 

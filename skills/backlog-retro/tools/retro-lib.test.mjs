@@ -545,6 +545,69 @@ test('readDriver leaves the cost unpriced when there is no fit', async (t) => {
   assert.equal(d.estimatedCostUsd, null);
 });
 
+// #345. Claude Code writes one API turn as one record PER CONTENT BLOCK (thinking, text, tool_use), each repeating the request's `usage` verbatim, so a
+// per-record sum counted a three-block turn three times. One request is one turn, keyed `requestId ?? uuid` — `sumFreshTokens`' rule in backlog.mjs.
+function writeDriver(t, name, records) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bm-retro-cc-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const project = '/Users/a/p';
+  const dir = path.join(root, claudeProjectKey(project));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${name}.jsonl`), `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
+  return { root, run: { runId: 'R1', project, driverSessionId: name } };
+}
+
+function usage(input, output, cacheRead, cacheCreation) {
+  return { input_tokens: input, output_tokens: output, cache_read_input_tokens: cacheRead, cache_creation_input_tokens: cacheCreation };
+}
+
+test('readDriver counts a turn split across records once, by requestId', async (t) => {
+  const { readDriver } = await import('./lib/driver.mjs');
+  const split = usage(10, 20, 100, 5);
+  const { root, run } = writeDriver(t, 'd3', [
+    { type: 'assistant', requestId: 'req_1', uuid: 'u1', message: { content: [{ type: 'thinking' }], usage: split } },
+    { type: 'assistant', requestId: 'req_1', uuid: 'u2', message: { content: [{ type: 'text' }], usage: split } },
+    { type: 'assistant', requestId: 'req_1', uuid: 'u3', message: { content: [{ type: 'tool_use', name: 'Bash' }], usage: split } },
+    { type: 'assistant', requestId: 'req_2', uuid: 'u4', message: { content: [{ type: 'text' }], usage: usage(1, 2, 3, 4) } }
+  ]);
+  const d = readDriver(run, root, TEST_RATES);
+  // cache_read stays IN: the driver is priced, and cache reads are billed — only the double counting goes.
+  assert.deepEqual(d.tokens, { input: 11, output: 22, cacheRead: 103, cacheCreation: 9 });
+  assert.equal(d.turns, 2);
+  assert.equal(d.context.max, 115);
+  assert.equal(d.context.avg, Math.round((115 + 8) / 2));
+});
+
+test('readDriver falls back to uuid when a record has no requestId, and counts a record with neither', async (t) => {
+  const { readDriver } = await import('./lib/driver.mjs');
+  const one = usage(1, 0, 0, 0);
+  const { root, run } = writeDriver(t, 'd4', [
+    { type: 'assistant', uuid: 'a', message: { usage: one } },
+    { type: 'assistant', uuid: 'b', message: { usage: one } },
+    { type: 'assistant', uuid: 'c', message: { usage: one } },
+    { type: 'assistant', uuid: 'c', message: { usage: one } },
+    { type: 'assistant', message: { usage: one } },
+    { type: 'assistant', message: { usage: one } }
+  ]);
+  const d = readDriver(run, root, TEST_RATES);
+  // a, b, c once, and both keyless records — nothing to dedupe them on, so each is counted (sumFreshTokens' rule).
+  assert.equal(d.tokens.input, 5);
+  assert.equal(d.turns, 5);
+});
+
+test('readDriver still counts an Agent dispatched in a later record of a split turn', async (t) => {
+  const { readDriver } = await import('./lib/driver.mjs');
+  const split = usage(1, 1, 1, 1);
+  const { root, run } = writeDriver(t, 'd5', [
+    { type: 'assistant', requestId: 'req_1', uuid: 'u1', message: { content: [{ type: 'text' }], usage: split } },
+    { type: 'assistant', requestId: 'req_1', uuid: 'u2', message: { content: [{ type: 'tool_use', name: 'Agent', input: {} }], usage: split } }
+  ]);
+  const d = readDriver(run, root, TEST_RATES);
+  assert.equal(d.turns, 1);
+  // Each content block lives in exactly one record, so the Agent count stays per record — counting only a request's first record would drop this one.
+  assert.equal(d.subagents.count, 1);
+});
+
 // --- Task 6: deltas ------------------------------------------------------
 
 // A record as `record` writes one: the sweep verbatim under `sweep`, the

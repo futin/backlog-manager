@@ -58,6 +58,17 @@ export function readDriver(run, projectsRoot, rates) {
   const contexts = [];
   let turns = 0;
   let agentCount = 0;
+  // One API request is one turn, however many records it was written as.
+  // Claude Code writes a turn as one record PER CONTENT BLOCK (thinking,
+  // text, tool_use), each repeating the request's `usage` verbatim — 25 of
+  // 28 measured turns were split — so a per-record sum counted the driver
+  // two to three times over, and the dollar figure and `allIn` with it
+  // (#345). The key is `requestId ?? uuid` and a record with neither is
+  // counted: the rule `sumFreshTokens` in skills/backlog/tools/backlog.mjs
+  // already ships. It is a twin, not an import — the retro depends on no
+  // other skill's tool, and that function also drops cache reads and
+  // windows by time, neither of which a priced driver may do.
+  const seen = new Set();
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (trimmed === '') continue;
@@ -68,9 +79,17 @@ export function readDriver(run, projectsRoot, rates) {
       continue;
     }
     if (!event || event.type !== 'assistant' || !event.message) continue;
+    // Before the dedupe, on every record: each content block lives in
+    // exactly one record of a split turn, so counting only a request's first
+    // record would drop an Agent dispatched in a later block of it.
     agentCount += countAgentBlocks(event.message);
     const u = event.message.usage;
     if (!u) continue;
+    const key = event.requestId ?? event.uuid;
+    if (key !== undefined && key !== null) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
     turns += 1;
     tokens.input += finite(u.input_tokens);
     tokens.output += finite(u.output_tokens);

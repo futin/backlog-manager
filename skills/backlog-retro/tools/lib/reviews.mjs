@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { sidecarFiles } from './paths.mjs';
+import { sidecarFiles, sidecarRunRoot } from './paths.mjs';
 
 // `<id>-<pass>.md`. Anything else in the directory is not a review. `<id>`
 // is a files project's `bug-21` or a tracker project's bare issue number,
@@ -94,7 +94,7 @@ export function readReviews(projectDirPath, project) {
 // — so it reads `null`, "not derivable here", which is honest where borrowing a status from a neighbouring run was not.
 export function readVerifyStatus(projectDirPath, itemId, run) {
   if (!run || typeof run.file !== 'string') return null;
-  const root = run.current ? projectDirPath : run.file.replace(/\.json$/, '');
+  const root = sidecarRunRoot(projectDirPath, run);
   let text;
   try {
     text = fs.readFileSync(path.join(root, 'verify', `${itemId}.status`), 'utf8');

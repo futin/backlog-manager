@@ -114,13 +114,16 @@ export function readRegistryNames(file) {
 // would see the CURRENT run's sessions and nothing else — on this machine,
 // 36 of 116 logs.
 //
-// Note what an archive directory is NOT: it is not "that run's sessions".
-// The move sweeps whatever had accumulated flat, which for the first
-// archive after task-31 was 74 logs belonging to a dozen runs. So the
-// archive stem is a STORAGE location and never an attribution; sessions and
-// reviews are still joined to items by `(project, itemId)` exactly as the
-// spec specifies, and the `collision` caveat still reports an item that two
-// runs dispatched.
+// Note what an archive directory is NOT: it is not "only that run's
+// sessions". The move sweeps whatever had accumulated flat, which for the
+// first archive after task-31 was 74 logs belonging to a dozen runs. So
+// sessions and reviews are still joined to items by `(project, itemId)`
+// exactly as the spec specifies. What the location DOES prove is narrower
+// (#345): a log under the sidecar root of a run that dispatched its item
+// was last written by that run, since each run writes flat and overwrites
+// any earlier log of the same name — so the session join prefers that run,
+// and the `collision` caveat is left for the cases the location cannot
+// settle (sessions.mjs, `chooseRun`).
 //
 // Ordered project-directory-first so a caller that de-duplicates by
 // basename prefers the live run's copy.
@@ -137,6 +140,17 @@ export function sidecarRoots(projectDirPath) {
     if (entry.isDirectory()) roots.push(path.join(runsDir, entry.name));
   }
   return roots;
+}
+
+// The ONE sidecar root a given run wrote into, derived the way
+// orchestrate.mjs's `archiveStem` mints it: the live run writes flat under
+// the project directory, and an archived `runs/<stem>.json` has its
+// sidecars in the sibling `runs/<stem>/`. `run` is a run row
+// (`{ file, current }`). One derivation for both readers that ask "which
+// run's file is this" — `readVerifyStatus` (#270) and the session join
+// (#345) — so the two can never disagree about where a run's sidecars are.
+export function sidecarRunRoot(projectDirPath, run) {
+  return run.current ? projectDirPath : run.file.replace(/\.json$/, '');
 }
 
 // Every `<root>/<sub>/<file>` across `sidecarRoots`, as
