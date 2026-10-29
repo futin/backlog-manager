@@ -1,6 +1,6 @@
 # Source sections: Files, GitHub and Jira at the rail's root
 
-Status: draft, awaiting approval. Date: 2026-10-29.
+Status: approved (autopilot, after two review rounds). Date: 2026-10-29.
 
 ## Intent
 
@@ -47,10 +47,12 @@ the Jira rule states them: **unknown** (no answer yet, or every read failed) dra
   their actions differ (Jira Run vs execute/groom). The `leavesBoard` split between Board and Archive is unchanged within each source.
 - **GitHub › PRs lists all open PRs** on the registered GitHub repos — forks and other authors included.
 - **A PR whose branch a live or paused run, a starting entry or a live claim is still working is warned about, not refused**: the row shows a run-in-progress
-  chip and the actions stay enabled. Run files carry no PR branch and claims carry no branch, so the link is derived by ONE `lib/` function from the branch
-  naming conventions: `backlog/<id>` (an orchestrator item branch) and `execute/<id>` (an execute or tick PR) name an item — warned while a live or paused run
-  holds that item, a starting entry names it, or a live claim is on it; `backlog/run-*` (a PR-mode run branch) is warned while that repo's run is live or
-  paused. Any other head is never warned.
+  chip and the actions stay enabled. Claims carry no branch and item branches are not recorded, so the link is derived by ONE `lib/` function from the
+  branch naming conventions: `backlog/<id>` (an orchestrator item branch) and `execute/<id>` (an execute or tick PR) name an item by its BARE issue number
+  (runs record `42`, `tick.mjs` strips the `#`) — warned while a live or paused run's items include that bare id, or a starting entry or a live claim names
+  `#<id>` (the board's id shape, `shared/agent.ts`). A `backlog/run-*` head (a PR-mode run branch) is warned only while it equals EXACTLY the `base` of a live or
+  paused run on that repo — under `pr` a run file's `base` is its run branch (`prTarget` holds the real target) — so an earlier run's still-open PR is not
+  warned because a later run is live. Any other head is never warned.
 - **GitHub › Settings** takes the `Trackers` card (each repo's sync interval) off Shared Settings.
 - **GitHub › PRs** lists open pull requests of **GitHub-registered projects only** (repos whose project has `source: github`). Actions: **merge**, **enable /
   disable auto-merge**, **update branch**. PRs for Jira-related work may come later; not now.
@@ -101,7 +103,8 @@ the Jira rule states them: **unknown** (no answer yet, or every read failed) dra
   homes.
 - **A repo whose sync is off refuses every write path.** PR writes on that repo are refused too (they go through `syncOffBlock`); the PR list is still read, with
   the actions disabled and labelled `sync off`. Reading on demand while the page is open means an `off` repo needs no cadence of its own. `syncOffBlock` is
-  keyed by project path, so a PR write reads `intervalFor(repo) === 'off'` directly; its serialisation key is `<repo>#<number>`, not an item urn. The new
+  keyed by project path and is the ONE server home of the sentence (`.claude/rules/tracker.md`), so a PR write resolves its repo to the registered github
+  project's path and calls `syncOffBlock(path)` — no second home of the sentence; its serialisation key is `<repo>#<number>`, not an item urn. The new
   routes join the guarded set in `test/agents-origin-guard.test.ts`.
 - **Token permissions.** Today's docs (`.env.example`) understate even the current token, which writes issues since task-46. PRs need Pull requests and Contents write (merge, update-branch), Checks and
   Statuses read (the checks chip), and arming auto-merge goes through GraphQL. The person widens the token; `docs/` and `.env.example` say what it needs. A
@@ -145,19 +148,23 @@ the Jira rule states them: **unknown** (no answer yet, or every read failed) dra
   no GitHub project is registered.
 - **Old `?section=board` / `?section=archive` deep links** need no migration: `readDeepLink` ignores an unknown section and the load opens normally.
 - **Docs that name the Trackers card's home** follow it: `.env.example`, `docs/subsystems/board.md`, and CLAUDE.md's Layout bullet.
-- **Fallback**: `FALLBACK_SECTION` and the Jira row's fall (`change('board')` in `App.tsx`) go to the first drawn source row (Files, then GitHub), else Runs. A
+- **Fallback**: `FALLBACK_SECTION` stays a constant (it is read in the initializer and as the persisted default, before any answer) and becomes `github` —
+  a provisional landing. Every provisional landing (the constant, a legacy `board`/`archive`, an unrecognised stored value) settles on the first projects
+  answer to the first drawn source row (Files, then GitHub), else Runs; the Jira row's fall (`change('board')` in `App.tsx`) uses that same rule. A
   machine with nothing registered opens on Runs; the Sources card on Shared says what to connect.
 - **Migrating stored values**: `resolveSection` runs in a `useState` initializer, before the projects answer exists, so it cannot pick a source. It maps a
   stored legacy `board` or `archive` to `github` provisionally, remembering which page (Board or Archive) was meant; on the FIRST projects answer the shell
   settles it — GitHub's page while the GitHub row is drawn, else Files' same page while the Files row is drawn, else the Fallback above — and writes the settled
-  value back. The `Opens on` preference clamps the same way. A deep link to an item resolves to the section of that item's project's source, on the same
-  first answer.
+  value back. The `Opens on` preference clamps the same way. (There are no item deep links today — `readDeepLink` reads only `section`, `runs` and
+  `settings` — and adding them is out of scope.)
 - **PR list freshness**: the server keeps a per-repo PR cache filled on demand — a `GET` for a repo whose entry is older than a 60 s TTL re-reads it, else
   serves the entry with its `polledAt`. No background sweep: nothing reads PRs while nobody is on the page, which is what keeps "the poller is armed only while
   something is connected" true. One read per repo is ONE GraphQL query (open PRs with head/base refs, author, draft, `mergeable`, `mergeStateStatus`,
   `reviewDecision`, the head commit's rollup check state, `autoMergeRequest`, and the repo's allowed merge methods and auto-merge setting) — REST would be N+1
-  per PR, and review decision is GraphQL-only. `GithubClient` gains one GraphQL call beside its REST ones, under the same token and the same rate-limit
-  handling (a 403/429 rate-limit answer sleeps until reset rather than retrying). The client polls the page through `useCoalescedFetch` at a fixed 60 s,
+  per PR, and review decision is GraphQL-only. `GithubClient` gains one GraphQL call beside its REST ones, under the same token; like its REST calls it
+  returns `retryAfter`/`secondary`/`rate` as values and never sleeps itself. The PR cache keeps its own per-repo `sleepUntil`, set by the poller's
+  `handleFailure` rule from the GraphQL answer (GraphQL's primary limit is a separate pool from REST's; a secondary limit sleeps both), and a repo asleep is
+  served from its entry with the sleep shown as the row's detail. The client polls the page through `useCoalescedFetch` at a fixed 60 s,
   armed only while the PRs page is mounted; a write re-reads the PR it touched.
 - **Write outcomes** — each is one line in the PR's row, and the row re-reads after every outcome:
   - **update-branch** answers `202` and runs asynchronously: the immediate re-read can still show the old head and `mergeable: null`, so the row shows
