@@ -158,6 +158,40 @@ export function apiUsage(platform: Pick<TrackerPlatform, 'limit' | 'remaining' |
   };
 }
 
+/**
+ * `as futin · 4,812 of 5,000 left · resets 14:32`, or the sentence that says what to do about an absent token — the Sources card's GitHub line. The fix
+ * rather than the symptom, for the reason `accessReason` gives: this is the one state an operator can clear from the machine they are sitting at. `token
+ * set` rather than a login while the poller has not read one, which is always the case while no github project is registered: the login is read inside a
+ * sweep, and the poller is disarmed with nothing to sweep (source-sections spec, "A token without projects"). Moved here from the old Trackers card.
+ */
+export function platformLine(platform: TrackerPlatform, zone: string): string {
+  if (!platform.hasToken) return 'no token — set BM_GITHUB_TOKEN in .env and restart';
+  const parts = [platform.login === null ? 'token set' : `as ${platform.login}`];
+  if (platform.remaining !== null && platform.limit !== null) {
+    parts.push(`${platform.remaining.toLocaleString()} of ${platform.limit.toLocaleString()} left`);
+  }
+  if (platform.reset !== null) parts.push(`resets ${resetClock(platform.reset, zone)}`);
+  // Nothing about the budget before the first request of this process: the numbers are read off response headers, so "0 of 0 left" would be a reading
+  // rather than an absence.
+  return parts.join(' · ');
+}
+
+/**
+ * Whether the token reaches each registered github repo — `futin/x · polled 12 s ago`, or the access reason in its place — one line per REPO, in the
+ * payload's order. Per repo rather than per project because reach is a fact of the repo: two checkouts of one repo share the poller's one cache entry, so
+ * two lines would print one reading twice.
+ */
+export function reachLines(projects: readonly TrackerProjectRow[], now: number): { repo: string; line: string }[] {
+  const seen = new Set<string>();
+  const lines: { repo: string; line: string }[] = [];
+  for (const p of projects) {
+    if (p.source !== 'github' || p.repo === null || seen.has(p.repo)) continue;
+    seen.add(p.repo);
+    lines.push({ repo: p.repo, line: `${p.repo} · ${trackerState(p, now)}` });
+  }
+  return lines;
+}
+
 /** GitHub sends the reset as Unix SECONDS; the board shows it as a wall clock, because the question it answers is "how long do I wait". In the board's
  *  shared zone (#241) and hand-shaped `HH:MM` by `formatZonedClock` — the same clock `formatClock` prints for a run, where this used to be the locale's own
  *  time string and so the one clock on the board that could read `2:05 PM`. Moved here from `TrackersGroup.tsx` when the strip chip became its second
@@ -250,7 +284,7 @@ export function rowReading(row: TrackerProjectRow, now: number): PollReading {
  */
 export function syncOffReason(project: Pick<ProjectSummary, 'repo' | 'interval'>): string | null {
   if (project.interval !== 'off' || project.repo === null) return null;
-  return `sync is off for ${project.repo} — turn it on in Settings › Shared › Trackers`;
+  return `sync is off for ${project.repo} — turn it on in GitHub › Settings`;
 }
 
 /**
@@ -263,9 +297,9 @@ export function itemSyncOff(item: Pick<BacklogItem, 'projectPath'>, projects: re
 }
 
 /**
- * The state half of a tracker's line — everything after the repo — shared by the item modal's `trackerLine` and the Trackers card's row, which print one
- * connection the same way. Precedence: an access reason (a broken token is the more urgent reading, and the fix it names is the one owed first), then
- * `sync off` beside the age of the last poll, then the age alone.
+ * The state half of a tracker's line — everything after the repo — shared by the item modal's `trackerLine` and the Sources card's reach lines
+ * (`reachLines`), which print one connection the same way. Precedence: an access reason (a broken token is the more urgent reading, and the fix it
+ * names is the one owed first), then `sync off` beside the age of the last poll, then the age alone.
  */
 export function trackerState(project: Pick<ProjectSummary, 'access' | 'detail' | 'polledAt' | 'interval'>, now: number): string {
   const reason = accessReason(project);

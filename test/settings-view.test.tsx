@@ -299,7 +299,9 @@ describe('SettingsView', () => {
     it('renders only the host-backed cards on Shared — and not the Dashboards card, which is a page of its own', () => {
       renderView('shared');
 
-      for (const title of ['Orchestrator watchdog', 'Backlog tick', 'Trackers']) expect(groupTitles()).toContain(title);
+      for (const title of ['Sources', 'Orchestrator watchdog', 'Backlog tick']) expect(groupTitles()).toContain(title);
+      // The Trackers card was split by subject (source-sections spec): its sync pickers live on GitHub › Settings, the rest on the Sources card.
+      expect(groupTitles()).not.toContain('Trackers');
       for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Dashboards']) expect(groupTitles()).not.toContain(title);
     });
 
@@ -314,7 +316,7 @@ describe('SettingsView', () => {
       await waitFor(() => expect(document.querySelectorAll('.dash-page-row').length).toBeGreaterThan(0));
 
       expect(groupTitles()).toContain('Suggest');
-      for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Orchestrator watchdog', 'Backlog tick', 'Trackers'])
+      for (const title of ['Display', 'Board', 'Orchestrator', 'Dispatch', 'Orchestrator watchdog', 'Backlog tick', 'Sources'])
         expect(groupTitles()).not.toContain(title);
     });
 
@@ -943,8 +945,10 @@ describe('SettingsView', () => {
       // `Dashboards` joined in multi-dashboard task 11, absorbed `Claude Agents` (whose dispatch report became its Home row) and then left for a
       // Settings page of its own, which is why Shared draws no dispatch line at all.
       // `Time zone` joined in #241, under the tick breaker in the same column — the third host control.
-      expect(groupTitles()).toEqual(['Orchestrator watchdog', 'Backlog tick', 'Time zone', 'Trackers']);
-      expect(groupScopes()).toEqual(['this server', 'this machine', 'this server', 'this machine']);
+      // `Sources` replaced `Trackers` in the source-sections change and comes FIRST: the spec puts it at the page's top, so the one host report now
+      // opens the left column and the three controls moved to the right. `Trackers` is gone from this page — its pickers are GitHub › Settings'.
+      expect(groupTitles()).toEqual(['Sources', 'Orchestrator watchdog', 'Backlog tick', 'Time zone']);
+      expect(groupScopes()).toEqual(['this machine', 'this server', 'this machine', 'this server']);
     });
 
     /** And the same rows inside them — the three cards this file owns outright.

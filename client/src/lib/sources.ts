@@ -24,6 +24,17 @@ export function drawnSources(projects: readonly ProjectSummary[]): DrawnSources 
 }
 
 /**
+ * How many registered projects each source row owns — the Sources card's `n projects` (Settings › Shared). The same `sourceSectionOf` grouping the rail
+ * draws its rows by, so the card never counts a project under one source while the rail shows it under the other. Typed on `source` alone because the card
+ * counts the tracker payload's rows (`TrackerProjectRow`), which carry the same field as `ProjectSummary` over the same registry.
+ */
+export function projectsPerSource(projects: readonly Pick<ProjectSummary, 'source'>[]): Record<SourceSection, number> {
+  const counts: Record<SourceSection, number> = { files: 0, github: 0 };
+  for (const p of projects) counts[sourceSectionOf(p.source)] += 1;
+  return counts;
+}
+
+/**
  * The first row the rail draws, in rail order (`files`, `github`), else `runs` — the section that needs no project to exist. It is where a shell lands
  * when the section it was on has just lost its row.
  */

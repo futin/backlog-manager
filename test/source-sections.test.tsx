@@ -13,7 +13,7 @@ import { SETTINGS_STORAGE_KEY } from '../client/src/lib/settings';
   a legacy name or a landing pin opens on, how that settles on the projects answer, and how a section whose row vanishes falls.
 
   The views are stubbed, as `nav.test.tsx` stubs them: the subject is which section and page the SHELL picks, and each stub's whole content is a findable
-  string. GitHub › Settings is left real — it is this change's own page, and its landmark is the Trackers card it holds until Task 6 replaces it.
+  string. GitHub › Settings is left real — it is this change's own page, and its landmark is its `Sync` card (each repo's sync interval).
   `/api/projects` is answered per case: an array, a 500, or a promise the case resolves by hand; `/api/jira` answers the unconfigured status only where a
   case asks for it, and every other URL a 200 no hook accepts as its payload.
 */
@@ -290,7 +290,7 @@ describe('each source page renders its view', () => {
     ['files', FILES_PAGE_KEY, 'archive', 'archive stub'],
     ['github', GITHUB_PAGE_KEY, 'board', 'board stub'],
     ['github', GITHUB_PAGE_KEY, 'archive', 'archive stub'],
-    ['github', GITHUB_PAGE_KEY, 'settings', 'Trackers']
+    ['github', GITHUB_PAGE_KEY, 'settings', 'Sync']
   ])('%s › %s', async (section, key, page, landmark) => {
     store(SECTION_KEY, section);
     store(key, page);

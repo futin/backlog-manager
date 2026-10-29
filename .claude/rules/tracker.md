@@ -104,7 +104,7 @@ paths: ["server/src/tracker/**"]
   /api/jira/boards/:id/issues`. The issue detail, the roots search, the project list and the JQL check are fresh reads and never cached. Why:
   [invariants.md](docs/subsystems/invariants.md#the-tracker-and-jira-caches-are-the-two-caches-in-this-server-whose-age-is-a-rendered-value)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.** `TrackerPollerService.syncOffBlock(path)` is
-  the ONE server home of the sentence `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` (tracker projects only, `null` otherwise);
+  the ONE server home of the sentence `sync is off for <owner/name> — turn it on in GitHub › Settings` (tracker projects only, `null` otherwise);
   `syncOffReason` (`client/src/lib/tracker.ts`) is the client's copy, and both are pinned to the same literal in a test, never an import. It answers 409
   `{ error }` from the ten `GithubSource` writes — through `writeChain`, inside the per-item serialisation, after the no-token 503 and the id check, before
   any GitHub request (`create` checks it after `ready()`) — from `AgentsService`'s `dispatch`, `orchestrate` and `resume`, before any spawn, and from `ItemsAbortService.abort` before its dashboard stop; `plan()` puts

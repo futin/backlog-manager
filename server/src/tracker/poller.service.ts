@@ -520,7 +520,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
     if (resolved.kind !== 'tracker') return null;
     const repo = resolved.marker.repo;
     if (!isRepo(repo) || intervalFor(repo) !== 'off') return null;
-    return `sync is off for ${repo} — turn it on in Settings › Shared › Trackers`;
+    return `sync is off for ${repo} — turn it on in GitHub › Settings`;
   }
 
   /** The repos the registry currently resolves to `github`, de-duplicated.

@@ -4012,7 +4012,7 @@ test('API mode: a sync-off refusal prints the server-s sentence verbatim and exi
   const { dir } = trackerFixture()
   const bodyFile = path.join(dir, 'body.md')
   fs.writeFileSync(bodyFile, 'x\n')
-  const sentence = 'sync is off for futin/x — turn it on in Settings › Shared › Trackers'
+  const sentence = 'sync is off for futin/x — turn it on in GitHub › Settings'
 
   const { out } = await withApi({ '/api/items/create': { status: 409, body: { error: sentence } } }, async (port) =>
     await runNode(dir, apiEnv(port), 'new', 'tasks', 't', '--body', bodyFile),

@@ -469,7 +469,7 @@ describe('the board’s own poll', () => {
  * about one project, not about the environment (CLAUDE.md's "environment-level blocks hide, per-item ones disable").
  */
 describe('a tracker project whose sync is off (#17)', () => {
-  const SENTENCE = 'sync is off for futin/x — turn it on in Settings › Shared › Trackers';
+  const SENTENCE = 'sync is off for futin/x — turn it on in GitHub › Settings';
 
   it('disables the card’s dispatch control with the server’s sentence, and leaves the files card alone', async () => {
     await renderBoard([item({}), issueItem({ groomed: true })], projects({ interval: 'off' }));

@@ -7,7 +7,7 @@ import { SideRail } from './components/SideRail';
 import { JiraChip } from './components/JiraChip';
 import { TrackerChip } from './components/TrackerChip';
 import type { Section } from './lib/sections';
-import { FALLBACK_SECTION, resolveLegacySection } from './lib/source-page';
+import { FALLBACK_SECTION, resolveLegacySection, type GithubPage } from './lib/source-page';
 import { firstDrawn, settleSection } from './lib/sources';
 import { SETTINGS_STORAGE_KEY } from './lib/settings';
 import { readDeepLink, withoutDeepLink } from './lib/deep-link';
@@ -63,7 +63,8 @@ function isSourceSection(s: Section): s is 'files' | 'github' {
 export function App() {
   return (
     <SettingsProvider>
-      {/* The shell's one `useTrackers` (the tracker strip spec, §4): the strip chip and Settings' Trackers card read one answer on one clock. */}
+      {/* The shell's one `useTrackers` (the tracker strip spec, §4): the strip chip, Settings' Sources card and GitHub › Settings read one answer on
+          one clock. */}
       <TrackersProvider>
         {/* The board's one shared time zone (#241), beside the trackers' for the same reason: every clock, day group and week window reads one answer. */}
         <TimeZoneProvider>
@@ -274,6 +275,15 @@ function AppShell() {
   };
 
   /*
+    The GitHub section's pair, the same shape for the same reason: the Sources card's `GitHub › Settings` link (Settings › Shared) is this, never a
+    `change('github')` of its own — a section set without its page would open whichever GitHub page was last stored, not the one the link names.
+  */
+  const onOpenGithubPage = (p: GithubPage): void => {
+    setGithubPage(p);
+    change('github');
+  };
+
+  /*
     The tracker chip has ONE home at a time, chosen here from the same `useNarrow` reading the rail uses (§8.0; the tracker strip spec, §1.2): the
     shell strip at desktop width, the rail's phone bar below 700 px, where the strip is not drawn. Never both, hidden by CSS — two mounted chips would
     be two one-second clocks and two popovers able to join the Escape stack. A change of home remounts it, which is what closes an open popover
@@ -375,6 +385,8 @@ function AppShell() {
                       setRunsMode('watchdog');
                       change('runs');
                     }}
+                    onOpenGithubPage={onOpenGithubPage}
+                    onOpenJiraPage={onOpenJiraPage}
                   />
                 )}
               </Suspense>

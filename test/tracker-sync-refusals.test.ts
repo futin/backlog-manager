@@ -28,7 +28,7 @@ import type { OrchestratorRun } from '../shared/types';
 
 const GITHUB_MARKER = JSON.stringify({ kind: 'github', repo: FAKE_REPO });
 const TOKEN = 'ghp_issue17SyncOffSentinel';
-const SENTENCE = `sync is off for ${FAKE_REPO} — turn it on in Settings › Shared › Trackers`;
+const SENTENCE = `sync is off for ${FAKE_REPO} — turn it on in GitHub › Settings`;
 const GROOMED_BUG = item('bug-2', 'a known bug', '## Symptom\n\nx\n\n## Cause\n\na typo\n\n## Fix\n\nfix it\n');
 const fixture = rawFixture as OrchestratorRun;
 

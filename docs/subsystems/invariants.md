@@ -3421,7 +3421,7 @@ slower one once its interval has elapsed since its last sync, stamped on failure
 #17, [spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md) §6 and §8. An `off` repo's cache is not refreshed, so everything this server
 knows about its issues and claims is as old as the last sync — and every write path decides something from that cache: whether a claim is held, what the body
 was, which label to remove. A write against a frozen view is the same class of failure bug-55's phantom claim was, reached on purpose instead of by accident.
-So `off` refuses them all, with one sentence naming the repo and the fix — `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers` —
+So `off` refuses them all, with one sentence naming the repo and the fix — `sync is off for <owner/name> — turn it on in GitHub › Settings` —
 composed in exactly one server place (`TrackerPollerService.syncOffBlock`) and pinned byte for byte against the client's copy (`syncOffReason`), since the
 client cannot import the server's composer.
 
