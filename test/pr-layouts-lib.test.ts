@@ -21,7 +21,7 @@ import {
   splitReach,
   transientFailures
 } from '../client/src/lib/pr-layouts';
-import { mergeBlock, type PrOutcome } from '../client/src/lib/prs';
+import { mergeBlock, updateBlock, type PrOutcome } from '../client/src/lib/prs';
 import type { PrRepoView, PullRequestRow } from '../shared/types';
 
 /**
@@ -312,6 +312,27 @@ describe('compactKeys', () => {
   it('armed auto-merge still offers auto-merge on a repo whose setting is now off, so it can be disarmed', () => {
     const armed = row({ autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } });
     expect(compactKeys(armed, repo({ autoMergeAllowed: false })).keys).toContain('auto-merge');
+  });
+
+  it('a behind PR whose update the strip would refuse has no primary — a filled key that is disabled would be the opposite of the merge rule', () => {
+    const behind = row({ mergeState: 'behind', canUpdateBranch: false });
+    expect(updateBlock(behind, repo())).toBe('no permission to update');
+    expect(compactKeys(behind, repo()).primary).toBeNull();
+    expect(compactKeys(behind, repo()).keys).toEqual(['merge', 'update', 'auto-merge']);
+    const synced = repo({ syncOff: 'sync is off for futin/x — turn it on in GitHub › Settings' });
+    expect(compactKeys(row({ mergeState: 'behind', canUpdateBranch: true }), synced).primary).toBeNull();
+  });
+
+  it('a draft that is behind still makes update the primary, because updateBlock does not refuse a draft', () => {
+    const draftBehind = row({ draft: true, mergeState: 'behind', canUpdateBranch: true });
+    expect(updateBlock(draftBehind, repo())).toBeNull();
+    expect(compactKeys(draftBehind, repo()).primary).toBe('update');
+  });
+
+  it('a quiet PR whose auto-merge is armed and whose checks are pending has no merge primary: GitHub will merge it itself', () => {
+    const armed = row({ autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' }, checks: 'pending', mergeState: 'blocked' });
+    expect(prLevel(armed)).toBe('quiet');
+    expect(compactKeys(armed, repo({ autoMergeAllowed: true })).primary).toBeNull();
   });
 
   it('a repo with no allowed method has no merge primary', () => {

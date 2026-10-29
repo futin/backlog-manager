@@ -671,7 +671,8 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   auto-merge, update branch), `PrOutcomeLine` and `PrRepoNotes`; `PrRow`, one open pull request; `components/settings/SourcesGroup.tsx` is the Shared report.
 - `lib/prs.ts`, `lib/pr-run.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three blocks, the default method,
   `isUpdating`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read; `lib/pr-layouts.ts` is the layout key, its
-  stored choice and `splitReach`, which hides the repos the token cannot read.
+  stored choice, `splitReach` (which hides the repos the token cannot read), and every Inbox and Matrix derivation: a PR's level, severity, verdict and rank,
+  `compactKeys`, the Matrix cells, tones and column counts.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.

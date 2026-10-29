@@ -123,18 +123,20 @@ function QuietLine({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
   return (
     <li className="prs-inbox-quiet" data-testid={`pr-quiet-${key}`}>
       <div className="prs-inbox-quiet-row">
-        <Dot size={10} tone={LEVEL_DOT[r.level]} />
-        <a className="prs-num" href={pr.url} target="_blank" rel="noreferrer noopener">
-          #{pr.number}
-        </a>
-        <span className="prs-title">{pr.title}</span>
-        <span className="prs-inbox-repo">{repo.repo}</span>
-        {facts !== '' && <span className="prs-inbox-facts">{facts}</span>}
-        {warning !== null && <Pill tone="warn">{warning}</Pill>}
+        <span className="prs-inbox-quiet-text">
+          <Dot size={10} tone={LEVEL_DOT[r.level]} />
+          <a className="prs-num" href={pr.url} target="_blank" rel="noreferrer noopener">
+            #{pr.number}
+          </a>
+          <span className="prs-title">{pr.title}</span>
+          <span className="prs-inbox-repo">{repo.repo}</span>
+          {facts !== '' && <span className="prs-inbox-facts">{facts}</span>}
+          {warning !== null && <Pill tone="warn">{warning}</Pill>}
+        </span>
         {/* The visible word is part of the accessible name (label-in-name); `aria-expanded` carries open versus folded, so the word never has to change. */}
         <button
           type="button"
-          className="prs-inbox-toggle"
+          className="prs-textlink prs-inbox-toggle"
           aria-expanded={expanded}
           aria-label={`Actions for #${pr.number}`}
           onClick={() => setExpanded((open) => !open)}
@@ -166,8 +168,10 @@ export function PrInbox(props: PrLayoutProps) {
   return (
     <div className="prs-inbox" data-testid="pr-inbox">
       <PrRepoNotes repos={repos} outcomes={outcomes} part="above" />
+      {/* With nothing ranked there are no tiles to draw. `no open pull requests` claims a read nobody got while a shown repo failed, so it waits for a clean
+          read (Matrix says the same, `PrMatrix`); the `Can't read` list below is then the page's whole answer. */}
       {ranked.length === 0 ? (
-        <p className="prs-status">no open pull requests</p>
+        failures.length === 0 && <p className="prs-status">no open pull requests</p>
       ) : (
         <>
           <div className="prs-inbox-tiles">

@@ -45,7 +45,9 @@ export function PrActions({
   /** Runs one write for this PR and resolves once its outcome is recorded and the page has re-read. Never rejects. */
   onWrite: (call: () => Promise<PrWriteResult>) => Promise<void>;
   variant: 'full' | 'compact';
-  /** Called once when the compact strip's `Merge…` opens the full one, so a layout can give the opened strip the room it needs (Inbox: the item's full width). */
+  /**
+   * Called once when the compact strip's `Merge…` opens the full one, so a layout can give the opened strip the room it needs (Inbox: the item's full width).
+   */
   onOpen?: () => void;
   /**
    * The page's own word that a write of THIS PR is still running, OR'd with the local one. The local `busy` dies with this component — an Inbox fold, a Matrix
@@ -90,14 +92,20 @@ export function PrActions({
   const runUpdate = (): void => run(() => updateBranch({ repo: repo.repo, number: pr.number, headSha: pr.headSha }));
   const runAutoMerge = (): void =>
     run(() =>
-      setAutoMerge(armed ? { repo: repo.repo, number: pr.number, enable: false } : { repo: repo.repo, number: pr.number, enable: true, method: method ?? undefined })
+      setAutoMerge(
+        armed ? { repo: repo.repo, number: pr.number, enable: false } : { repo: repo.repo, number: pr.number, enable: true, method: method ?? undefined }
+      )
     );
   const autoLabel = armed ? 'Disable auto-merge' : 'Enable auto-merge';
 
   if (variant === 'compact' && !expanded) {
     const { keys, primary } = compactKeys(pr, repo);
     const spec: Record<PrKey, { label: string; reason: string | null; suffix: string; onClick: () => void }> = {
-      merge: { label: 'Merge…', reason: merge, suffix: 'merge', onClick: () => {
+      merge: {
+        label: 'Merge…',
+        reason: merge,
+        suffix: 'merge',
+        onClick: () => {
           setExpanded(true);
           onOpen?.();
         }

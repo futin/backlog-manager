@@ -114,6 +114,13 @@ describe('PrInbox — tiles, order and filter', () => {
     expect(screen.getByText('no open pull requests')).toBeInTheDocument();
     expect(screen.queryByText('No pull request at this level.')).not.toBeInTheDocument();
   });
+
+  it('does not claim no open pull requests while a shown repo could not be read, and draws no tiles over nothing', () => {
+    render(<PrInbox {...props([repo('a/x', []), repo('a/y', [], { access: 'rate-limited', detail: 'slow down' })])} />);
+    expect(screen.queryByText('no open pull requests')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('pr-tile-needs-you')).not.toBeInTheDocument();
+    expect(screen.getByTestId('pr-cantread-a/y')).toHaveTextContent('a/y — slow down');
+  });
 });
 
 describe('PrInbox — items', () => {

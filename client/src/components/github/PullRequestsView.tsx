@@ -27,7 +27,7 @@ const WARNING_CLOCK_MS = 15_000;
 
 /**
  * GitHub › PRs (.claude/DESIGN.md §8.11; source-sections spec, Goal 2 and "Left to the builder"): the open pull requests of every registered GitHub repo,
- * grouped by repo, with merge, auto-merge and update branch.
+ * with merge, auto-merge and update branch — grouped by repo in Cards, ranked across repos in Inbox and Matrix.
  *
  * **Reads.** `usePullRequests` is the page's one read of `GET /api/prs`, and this page is one of its two mounts (the other is GitHub › Settings' `Access` card)
  * — leaving both is what stops PR reads, because the server's PR cache has no timer of its own. The run-in-progress warning (`prRunWarning`) is derived from
@@ -36,8 +36,8 @@ const WARNING_CLOCK_MS = 15_000;
  * reports the same reading Board and Archive do: a run on this machine working, not the page loading — a cursor that blinked on a page read would say a run
  * started when none had.
  *
- * **Order.** `groupRepos`: repos with open PRs first, most recently touched on top, then the empty ones by name; each repo's PRs newest update first. The
- * payload's own order is never what is drawn.
+ * **Order.** Cards draws `groupRepos`' order: repos with open PRs first, most recently touched on top, then the empty ones by name; each repo's PRs newest
+ * update first. Inbox and Matrix rank across repos instead (`rankPrs`). The payload's own order is never what is drawn.
  *
  * **Layouts and reach.** Three layouts — Inbox (the default), Matrix and Cards — behind a `Segmented` in the toolbar, the choice stored per device
  * (`PR_LAYOUT_KEY`, read through `parseLayout` so a hand-edited value is Inbox). Matrix is wide-only: a narrow window DRAWS a stored `matrix` as Inbox
@@ -45,7 +45,7 @@ const WARNING_CLOCK_MS = 15_000;
  * window. A repo the token cannot read (`splitReach`: `forbidden`, `not-found`) is never handed to a layout, never counted in `N open`, and is named only by
  * the toolbar's `N repos hidden — no access · GitHub › Settings`, the link being `onOpenSettings` (threaded from `App` like the Sources card's, so the rail's
  * tree stays the only switch). Empty states, in order: the PAYLOAD has no repo → `no GitHub repo registered`; it has repos but none is shown → `no repo this
- * token can read`; otherwise the layout, which says `no open pull requests` itself.
+ * token can read`; otherwise the layout, which says `no open pull requests` itself (Inbox and Matrix, and only while every shown repo read cleanly).
  *
  * **Repo heading (Cards).** The repo, `polled N s ago`, a `sync off` pill beside the server's full sentence (`repo.syncOff`, `syncOffBlock`'s one home — never
  * a client copy) when the repo's sync is off, the read's `detail` when its last read was not `ok`, and `showing <n> of <total>` when GitHub had more than one
@@ -196,8 +196,9 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
                     {onOpenSettings !== undefined && (
                       <>
                         {' · '}
-                        {/* A button, not an anchor: the destination is the shell's own state (the Sources card's `GitHub › Settings ↗` is the precedent). */}
-                        <button type="button" className="set-link" onClick={onOpenSettings}>
+                        {/* A button, not an anchor: the destination is the shell's own state (the Sources card's `GitHub › Settings ↗` is the precedent). `prs-textlink`, not
+                            `set-link`: that is §8.6's bordered row control and reads as a button inside a sentence. */}
+                        <button type="button" className="prs-textlink" onClick={onOpenSettings}>
                           GitHub › Settings
                         </button>
                       </>

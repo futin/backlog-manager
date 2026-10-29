@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react';
 
 import { Dot } from '../ui/Dot';
 import { Ledger } from '../ui/Ledger';
@@ -196,9 +196,9 @@ export function PrMatrix(props: PrLayoutProps) {
           </Ledger>
           <p className="prs-matrix-legend" data-testid="pr-matrix-legend">
             {LEGEND.map(({ tone, word }) => (
-              <Fragment key={tone}>
-                <span className={`prs-cell-${tone}`}>{word}</span>
-              </Fragment>
+              <span key={tone} className={`prs-cell-${tone}`}>
+                {word}
+              </span>
             ))}
           </p>
         </>

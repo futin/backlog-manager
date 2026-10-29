@@ -3,8 +3,8 @@ import type { PrOutcome } from '../../lib/prs';
 import type { PrRepoView } from '../../../../shared/types';
 
 /**
- * The page-level notes Inbox and Matrix share (.claude/DESIGN.md §8.11, "What every layout carries"; spec `2026-10-29-prs-layouts-design.md`). Cards says all of
- * this in each repo's own card; the two list layouts have no card per repo, so these lines are drawn once, here, and a layout that re-wrote them would be a
+ * The page-level notes Inbox and Matrix share (.claude/DESIGN.md §8.11, "What every layout carries"; spec `2026-10-29-prs-layouts-design.md`). Cards says all
+ * of this in each repo's own card; the two list layouts have no card per repo, so these lines are drawn once, here, and a layout that re-wrote them would be a
  * second place to forget one.
  *
  * `part="above"` is what a person should read before the list: the outcome of every PR a write took off it (`a/x#12 merged` — `departedOutcomes`, because the
@@ -34,7 +34,12 @@ export function PrRepoNotes({ repos, outcomes, part }: { repos: readonly PrRepoV
   return (
     <div className="prs-notes">
       {departed.map(({ key, outcome }) => (
-        <p key={key} className={outcome.kind === 'error' ? 'prs-notes-line prs-notes-error' : 'prs-notes-line'} role="status" data-testid={`pr-departed-${key}`}>
+        <p
+          key={key}
+          className={outcome.kind === 'error' ? 'prs-notes-line prs-notes-error' : 'prs-notes-line'}
+          role="status"
+          data-testid={`pr-departed-${key}`}
+        >
           {`${key} ${outcome.text}`}
         </p>
       ))}

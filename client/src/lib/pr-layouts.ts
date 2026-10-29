@@ -1,12 +1,12 @@
 import { elapsedSince } from './item-age';
-import { prChips, mergeBlock, type PrOutcome } from './prs';
+import { prChips, mergeBlock, updateBlock, type PrOutcome } from './prs';
 import type { DotTone } from '../components/ui/Dot';
 import type { PrRepoView, PullRequestRow } from '../../../shared/types';
 
 /**
  * What the GitHub › PRs layouts (Inbox, Matrix, Cards) say about a pull request, derived once (`.claude/DESIGN.md` §8.11; spec
- * `docs/superpowers/specs/2026-10-29-prs-layouts-design.md`: "Level of a PR", "Problems and the verdict", "Rank", "Layout key"). Pure and clock-free: the level a
- * row sits in, the sentence that says why, the order of the page and the layout a device draws all come from here, so the three layouts cannot triage one PR
+ * `docs/superpowers/specs/2026-10-29-prs-layouts-design.md`: "Level of a PR", "Problems and the verdict", "Rank", "Layout key"). Pure and clock-free: the level
+ * a row sits in, the sentence that says why, the order of the page and the layout a device draws all come from here, so the three layouts cannot triage one PR
  * three ways. `prChips` (`lib/prs.ts`) stays the one reading of a PR's facts for Cards and for a quiet line; nothing here re-describes them.
  *
  * **One fact list drives everything.** `levelFacts` lists the facts that put a PR in Needs you or Worth a look, in the spec's severity order — checks failure,
@@ -226,8 +226,11 @@ export type PrKey = 'merge' | 'update' | 'auto-merge';
  * `merge` is always offered. `update` is offered when GitHub says the PR is behind. `auto-merge` is offered when the repo allows it OR the PR already has it
  * armed — an armed PR on a repo whose setting was turned off since must still offer the way to disarm it (`autoMergeBlock`'s own rule).
  *
- * The primary is the one thing a person most likely wants to do: update a behind PR (nothing else is sensible until it has), else merge a PR that is Quiet,
- * not a draft and not blocked by this page's own reasons. A PR with anything wrong has no primary — the row's verdict is what the eye should land on, not a
+ * The primary is the one thing a person most likely wants to do: update a behind PR (nothing else is sensible until it has) — but only when `updateBlock`
+ * would let the click through, since a filled key that is disabled is the opposite of a primary; a draft that is behind still qualifies, because
+ * `updateBlock` does not refuse a draft. Else merge a PR that is Quiet, not a draft, not blocked by this page's own reasons and whose checks are not still
+ * running: a Quiet PR with checks pending is one whose auto-merge is armed (an unarmed one is Worth a look), and GitHub will merge that one itself — a
+ * manual merge is likely refused while required checks run. A PR with anything wrong has no primary — the row's verdict is what the eye should land on, not a
  * bright Merge button. The primary is listed first; the rest keep `merge, update, auto-merge` order.
  */
 export function compactKeys(pr: PullRequestRow, repo: PrRepoView): { keys: PrKey[]; primary: PrKey | null } {
@@ -235,8 +238,8 @@ export function compactKeys(pr: PullRequestRow, repo: PrRepoView): { keys: PrKey
   if (pr.mergeState === 'behind') offered.push('update');
   if (repo.autoMergeAllowed || pr.autoMerge !== null) offered.push('auto-merge');
   let primary: PrKey | null = null;
-  if (pr.mergeState === 'behind') primary = 'update';
-  else if (prLevel(pr) === 'quiet' && !pr.draft && mergeBlock(pr, repo) === null) primary = 'merge';
+  if (pr.mergeState === 'behind' && updateBlock(pr, repo) === null) primary = 'update';
+  else if (prLevel(pr) === 'quiet' && !pr.draft && pr.checks !== 'pending' && mergeBlock(pr, repo) === null) primary = 'merge';
   const keys = primary === null ? offered : [primary, ...offered.filter((k) => k !== primary)];
   return { keys, primary };
 }
@@ -322,7 +325,10 @@ export const LEVEL_DOT: Record<PrLevel, DotTone | undefined> = {
   quiet: undefined
 };
 
-/** `3h ago`, `just now`; `null` when the timestamp cannot be aged, in which case the caller leaves the age out. Inbox's meta line and Matrix's Updated column share it. */
+/**
+ * `3h ago`, `just now`; `null` when the timestamp cannot be aged, in which case the caller leaves the age out. Inbox's meta line and Matrix's Updated column
+ * share it.
+ */
 export function ageText(updatedAt: string, now: number): string | null {
   const age = elapsedSince(updatedAt, now);
   return age === null ? null : age === 'now' ? 'just now' : `${age} ago`;
