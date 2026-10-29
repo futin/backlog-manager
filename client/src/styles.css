@@ -507,8 +507,16 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .board-run-chip:hover { background: var(--strip-hi) }
 .board-run-chip-line { font-size: 12px; font-weight: 500; white-space: nowrap }
 .board-run-chip-mark { font-size: 12px; line-height: 1; color: var(--ink3) }
-/* #367 — the band's plan-review reading: RunChip's geometry without its affordance, since it opens nothing (§8.3). */
-.board-plan-chip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; color: var(--ink) }
+/* #367/#387 — the band's plan-review chip: RunChip's geometry AND its affordance, since a click flips the Board's `Awaiting review` filter (§8.3). The
+   pressed state reads as the hover fill too, so "on" stays visible with the pointer elsewhere. */
+.board-plan-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 10px; border-radius: 12px;
+  font-family: inherit; color: var(--ink);
+  background: none; border: 0; cursor: pointer;
+  transition: background .15s;
+}
+.board-plan-chip:hover, .board-plan-chip[aria-pressed="true"] { background: var(--strip-hi) }
 
 /* A centred flex line, not plain centred text: the loading fallback puts an icon
    beside the word, and `vertical-align` would not align it — an inline SVG's

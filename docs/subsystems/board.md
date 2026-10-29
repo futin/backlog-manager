@@ -129,7 +129,7 @@ last two so that no page draws a section heading or a project chip of its own. I
 ### Board
 
 A `Band` titled with the scope — `All projects`, or the picked project's name, since the picker is behind a popover — and no count line, then search, the
-filter track (`FilterBar`: a `Filters` popover holding the Project picks and the Status switch, with `Clear all`; a `Sort by` popover holding the three
+filter track (`FilterBar`: a `Filters` popover holding the Project picks, the Status switch and the `Awaiting review` toggle (#387), with `Clear all`; a `Sort by` popover holding the three
 keys and an `Ascending`/`Descending` switch, each key arriving in its natural direction) and the Orchestrate chip, then four fixed columns
 (refactors/ideas/bugs/tasks). Out-of-scope has no Board column at all; it belongs to Archive. A click on a card opens the **item modal** — `ItemModal`
 composing `Modal`: a facts column (project dot and name, id, section, the created / updated / last-commit stamps, `groomed`, tags, the `in progress since`
@@ -511,7 +511,13 @@ a `Copy prompt` for a Claude session, because the board never writes item files 
 approval, BoardView hands it the FRESH item — found in the payload by project and id during render, the click's snapshot only when the payload no longer has
 it — never an effect that calls `setOpen`; ArchiveView, the other host of `ItemModal`, derives its open item the same way (#350). The band adds `PlanReviewChip` after the run chip: `N plans awaiting review`, with the tick's `--max-plans` cap and
 ` · tick blocked` once a tick has recorded its caps (`TickProject.lastDecide`, read through `useTicks({ live: false })`); `planReviewTally` and
-`planReviewReading` are the arithmetic. Runs › Ticks prints the same caps per project row: `plans awaiting review N/M · open PRs N/M · as of HH:MM`, and
+`planReviewReading` are the arithmetic, and `awaitsPlanReview` — open and carrying the mark — is the one rule they, `PlanApprove` and the Board's filter all
+call. Since #387 the chip is also the way into that pile: a click flips the Board's `Awaiting review` filter, the third section of the Filters panel
+(`Plan review`, one pick chip beside Project and Status, not a fifth Status pill), which narrows the board to `awaitsPlanReview` items and composes with the
+project, the status and the search. Both hands flip one `useState` in `BoardView`, and the chip is `aria-pressed` while it is on. It counts in the Filters
+badge and Clear all turns it off, but it is deliberately NOT persisted: the pile is transient, and a remembered toggle would reload into a board narrowed to
+plans someone has since approved. With it on and nothing left, the empty state reads `no plans awaiting review`. `leavesBoard` still applies on top, so a
+plan-review bug aged into Archive stays there and the chip can read one more than the filtered board shows. Runs › Ticks prints the same caps per project row: `plans awaiting review N/M · open PRs N/M · as of HH:MM`, and
 ` · grooming blocked` at the plan cap.
 
 **The toolbar's Orchestrate control is drawn for a tracker project too, since task-47 (phase 4a).** Task-46 kept it off with a fifth condition,

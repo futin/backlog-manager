@@ -1,4 +1,4 @@
-import { planApprovePrompt, planReviewReading, planReviewTally, planReviewTitle } from '../client/src/lib/plan-review';
+import { awaitsPlanReview, planApprovePrompt, planReviewReading, planReviewTally, planReviewTitle } from '../client/src/lib/plan-review';
 import type { PlanReviewTally } from '../client/src/lib/plan-review';
 import type { BacklogItem, TickProject } from '../shared/types';
 
@@ -59,6 +59,19 @@ const ITEMS: BacklogItem[] = [
   item(B, 'b-proj', 'task-5', { status: 'terminal' })
 ];
 const TICKS: TickProject[] = [tick(A, 'a-proj', 2), tick(B, 'b-proj', 3)];
+
+// #387 — the one rule the chip's count, the Board's `Awaiting review` filter and PlanApprove all call.
+describe('awaitsPlanReview', () => {
+  it('is true for an open item carrying the mark', () => {
+    expect(awaitsPlanReview(item(A, 'a-proj', 'task-1'))).toBe(true);
+  });
+  it('is false for an open item with no mark', () => {
+    expect(awaitsPlanReview(item(A, 'a-proj', 'task-1', { planReview: undefined }))).toBe(false);
+  });
+  it('is false for a done item carrying the mark', () => {
+    expect(awaitsPlanReview(item(A, 'a-proj', 'task-1', { status: 'done' }))).toBe(false);
+  });
+});
 
 describe('planReviewTally', () => {
   it('counts open marked items per project, caps from the tick row of the same root, sorted by name', () => {
