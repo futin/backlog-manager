@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { GithubClient } from './github.client';
 import { TrackerPollerService } from './poller.service';
+import { PullRequestsService } from './pulls.service';
 import { TrackerController } from './tracker.controller';
 import { RegistryModule } from '../registry/registry.module';
 
@@ -23,11 +24,14 @@ import { RegistryModule } from '../registry/registry.module';
  *
  * The dependency runs one way only — items depend on the tracker, never the
  * reverse — which is what keeps the adapter a plain reader over a cache.
+ *
+ * `PullRequestsService` (the PRs page's on-demand cache) lives here because it is a GitHub caller like the poller, sharing the one client — so GraphQL's
+ * rate bookkeeping is one reading too — and the poller, whose secondary sleep it reads and sets. Exported for the PRs routes.
  */
 @Module({
   imports: [RegistryModule],
   controllers: [TrackerController],
-  providers: [TrackerPollerService, { provide: GithubClient, useFactory: () => new GithubClient() }],
-  exports: [TrackerPollerService, GithubClient]
+  providers: [TrackerPollerService, PullRequestsService, { provide: GithubClient, useFactory: () => new GithubClient() }],
+  exports: [TrackerPollerService, PullRequestsService, GithubClient]
 })
 export class TrackerModule {}

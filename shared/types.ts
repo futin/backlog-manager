@@ -628,6 +628,40 @@ export interface PullRequestRow {
   canUpdateBranch: boolean;
 }
 
+/**
+ * One registered GitHub repo's slice of the PRs page, from the server's per-repo, on-demand PR cache (`server/src/tracker/pulls.service.ts`). One view per
+ * DISTINCT repo: two checkouts of one repo are one view, because they are one list on GitHub and reading it twice would spend twice the budget.
+ */
+export interface PrRepoView {
+  repo: string;
+  /** When the rows below were last read successfully — the age the page renders. `null` before the first successful read. A failed read leaves it where
+   *  it was, together with the rows, so the page keeps drawing the last answer beside the failure rather than an empty list. */
+  polledAt: string | null;
+  /** The last read's connection state, `ProjectSummary.access`'s vocabulary (`no-token` never appears here: no token is `token: false` on the payload). */
+  access: NonNullable<ProjectSummary['access']>;
+  /** The human half of `access` — the error text, or the sleep a rate limit put the repo under, naming when it ends. */
+  detail: string | null;
+  /** `sync is off for <repo> — …` when the repo's sync is `off` (the poller's `syncOffBlock`, verbatim), else `null`. A field, never a filter: the rows
+   *  are still read and drawn, and the page disables the writes with this as the reason. */
+  syncOff: string | null;
+  /** The merge methods the repo allows, in `MERGE_METHODS` order — the first is the page's default. Empty until the first successful read. */
+  methods: MergeMethod[];
+  /** The repo's own auto-merge setting; the page disables auto-merge where it is off. `false` until the first successful read. */
+  autoMergeAllowed: boolean;
+  /** Open PRs, newest update first, at most 100 (one GraphQL page). */
+  prs: PullRequestRow[];
+  /** How many open PRs the repo has in all. */
+  total: number;
+  /** `total > prs.length` — the page says how many it left out rather than paginating. */
+  truncated: boolean;
+}
+
+/** `GET /api/prs`'s answer. `token: false` means `BM_GITHUB_TOKEN` is unset, and then `repos` is empty and no request was made. */
+export interface PullRequestsPayload {
+  token: boolean;
+  repos: PrRepoView[];
+}
+
 // ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 typed two fields at their empty value so phase 5 could widen them without a
 // rename: `JiraIssueDetail.session` is now `JiraLiveSession | null` and `JiraStatusPayload.live` a key → `JiraLiveSession` map, both filled by the controller from

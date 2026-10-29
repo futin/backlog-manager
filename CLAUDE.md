@@ -157,8 +157,8 @@ of them, and to be opened by hand before editing through any other route (`Write
   Why: [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.**
   Why: [invariants.md](docs/subsystems/invariants.md#a-repo-whose-sync-is-off-refuses-every-write-path-and-cannot-be-switched-off-under-a-live-or-paused-run)
-- **The tracker and Jira caches are the two caches in this server whose age is a rendered value.**
-  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-and-jira-caches-are-the-two-caches-in-this-server-whose-age-is-a-rendered-value)
+- **The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value.**
+  Why: [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
 - **`~/.backlog-manager/settings/jira.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**
   Why: [invariants.md](docs/subsystems/invariants.md#jirajson-has-exactly-one-writer-and-a-file-that-cannot-be-read-is-never-replaced)
 - **`~/.backlog-manager/settings/tick.json` has exactly one writer, the server, and a file that cannot be read is never replaced.**

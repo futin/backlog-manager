@@ -3505,13 +3505,21 @@ slowing a live run's sync costs latency, and that is the user's call. The route 
 the starting entries, and hosting it in `TrackerModule` would be a module cycle. Remote runs are the read-side twin: an `off` repo derives none, because a
 frozen comment cache would otherwise show another machine's run as live for as long as sync stays off.
 
-## The tracker and Jira caches are the two caches in this server whose age is a rendered value
+## The tracker, Jira and pull-request caches are the three caches in this server whose age is a rendered value
 
 `TrackerPollerService` holds every connected repo's issues in memory, per repo, lost on restart and rebuilt by the first sync (task-45, spec §5.1). Every other
 read in this server is per request and uncached — the registry, each project's source marker, the run files, `uncommitted` — and those rules are untouched: this
 poller re-reads all of them on every tick. What it keeps is the one thing behind a network call with an hourly budget.
 The Jira board cache is the second (`JiraPollerService`, one list per board, `polledAt` per board in `GET /api/jira`), allowed for the same reason and kept
 honest the same way; everything below is about the tracker's.
+
+**The pull-request cache is the third, and the only one with no clock of its own** (`PullRequestsService`, Plan B of the source-sections change). It is per
+repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because nothing but the
+PRs page reads pull requests — a background read would spend GraphQL budget on a list nobody is drawing, and would keep a poll alive after the page closed,
+which is exactly what "the poller is armed only while something is connected" forbids. The page's own 60 s fetch is the cadence, and it stops when the page
+unmounts. It is kept honest the same way as the other two: `polledAt` rides on every repo's view and the PRs page renders it, and it moves only on a
+successful read. A failure keeps the last answer — the previous rows, their `polledAt` — beside the failure's `access` and `detail`, because a stale list
+labelled with its age is more use than an empty one, and an emptied list would read as "no open PRs", which is a claim about the repo the cache cannot make.
 
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip

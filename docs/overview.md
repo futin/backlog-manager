@@ -83,9 +83,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
   then the remote dashboards and the remote boards named in `~/.backlog-manager/settings/dashboards.json`, still this one module, and with no such file nothing
   about a launch changes ([setup](workflows/remote-machine.md)).
 - **`tracker/`** — the second of three outbound-calling modules: a GitHub client, a poller armed only while a project is connected and `BM_GITHUB_TOKEN` is set,
-  the in-memory issue cache the `github` adapter answers from (one of the two caches in this server whose age is rendered, as `polledAt`), the eleven-label
-  bootstrap, the claim protocol's pure half (`claim.ts` — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for
-  Settings. The token is read per call from the environment and reaches no payload.
+  the in-memory issue cache the `github` adapter answers from (one of the three caches in this server whose age is rendered, as `polledAt`), the PRs page's
+  per-repo pull-request cache (the third: read on demand with a 60 s TTL, no timer), the eleven-label bootstrap, the claim protocol's pure half (`claim.ts`
+  — what a claim IS, and why the lowest live comment id wins), and a read-only `trackers` route for Settings. The token is read per call from the
+  environment and reaches no payload.
 - **`jira/`** — the third outbound-calling module, and only while `BM_JIRA_SITE`, `BM_JIRA_EMAIL` and `BM_JIRA_TOKEN` are all set: a Jira Cloud client on
   Atlassian's gateway, a poller that sweeps the boards in `~/.backlog-manager/settings/jira.json` into in-memory caches (the second cache whose age is
   rendered), and nine read routes under `/api/jira` (`/prompt` composes a Run session's prompt; `/refs` and
