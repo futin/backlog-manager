@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useWhatsNew } from 'ui-kit';
 
 import { SectionBoundary } from './components/SectionBoundary';
@@ -142,6 +142,15 @@ function AppShell() {
   });
   const [section, setSection] = useState<Section>(initial.section);
   const [pending, setPending] = useState<{ page: 'board' | 'archive' | null; fromPin: boolean } | null>(initial.pending);
+  /*
+    The section and `pending` as last WRITTEN, ahead of the render that will show them — written in the same breath as each `setSection`/`setPending`, read
+    by the two effects below to tell whether their closure is behind. It is: a click can land between a commit and that commit's passive effects (a
+    default-lane commit hands its effects to the scheduler, and a busy frame splits the two), and React flushes those effects ahead of the click's render,
+    with the closure that still holds the old values. The settle then saw `pending` the click had already cleared, and its `change('files')` overtook the
+    click's `change('runs')` (test/section-settle-race.test.tsx). An effect that finds itself behind does nothing: the writes that made it stale queued a
+    render, and that render runs it again with the values it should have seen.
+  */
+  const intent = useRef({ section: initial.section, pending: initial.pending });
   const [filesPage] = useFilesPage();
   const [githubPage] = useGithubPage();
   /*
@@ -203,6 +212,7 @@ function AppShell() {
   // first projects answer from being yanked back to wherever the settle below would have put the guess.
   const change = (s: Section): void => {
     if (s !== section) setPulse(null);
+    intent.current = { section: s, pending: null };
     setSection(s);
     setStored(s);
     setPending(null);
@@ -226,6 +236,7 @@ function AppShell() {
   const drawn = useProjectsContext().drawn;
   useEffect(() => {
     if (drawn === null) return;
+    if (intent.current.section !== section || intent.current.pending !== pending) return;
     if (pending !== null) {
       const settled = pending.page === null ? firstDrawn(drawn) : settleSection(section, drawn);
       change(settled);
@@ -257,14 +268,16 @@ function AppShell() {
   */
   const jiraConfigured = useJiraContext().data?.configured;
   useEffect(() => {
-    if (jiraConfigured !== false || section !== 'jira') return;
+    if (jiraConfigured !== false || section !== 'jira' || intent.current.section !== section) return;
     if (drawn !== null) {
       change(firstDrawn(drawn));
       return;
     }
     // No projects answer yet: land on the provisional fallback, exactly as an absent stored section would, and let the settle above correct it.
     change(FALLBACK_SECTION);
-    setPending({ page: null, fromPin: false });
+    const fallback = { page: null, fromPin: false };
+    intent.current = { section: FALLBACK_SECTION, pending: fallback };
+    setPending(fallback);
   }, [jiraConfigured, section]);
 
   /*

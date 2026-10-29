@@ -112,10 +112,10 @@ stack's server container builds into the same bind-mounted tree as the user that
 already-ignored directory). Deleting `dist/` does not fix it: the next `docker compose up` recreates it as root. Nothing in the image runs `typecheck`, so the
 flag only ever affects the host.
 
-Suites run in band, on a pinned timezone, with `BM_WATCHDOG=off` defaulted for every suite (`test/helpers/env.ts`, wired through `setupFiles`). That default is
-not tidiness: any suite that builds `AppModule` arms the watchdog's bootstrap scan, which reads the developer's real orchestrator state directory unless the
-suite overrode `BM_ORCH_HOME` — and with `BM_AGENTS` genuinely on in that shell, a crashed run sitting there would have `pnpm test` start a real agent session
-against the developer's own repo.
+Suites run on jest's worker pool (one worker per core, less one), on a pinned timezone, with `BM_WATCHDOG=off` defaulted for every suite (`test/helpers/env.ts`,
+wired through `setupFiles`). That default is not tidiness: any suite that builds `AppModule` arms the watchdog's bootstrap scan, which reads the developer's
+real orchestrator state directory unless the suite overrode `BM_ORCH_HOME` — and with `BM_AGENTS` genuinely on in that shell, a crashed run sitting there would
+have `pnpm test` start a real agent session against the developer's own repo.
 
 Every fixture either runner creates lands in one per-run temp root, not in `/tmp` itself: jest's `globalSetup` points `TMPDIR` at a `bm-jest-<pid>-…`
 directory and `globalTeardown` removes it (`test/helpers/tmp-root.ts`), and `test:skills` goes through `scripts/test-tmpdir.mjs`, which does the same around
