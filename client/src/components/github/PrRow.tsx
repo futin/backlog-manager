@@ -22,7 +22,8 @@ export function PrRow({
   warning,
   outcome,
   updating,
-  onWrite
+  onWrite,
+  busy
 }: {
   repo: PrRepoView;
   pr: PullRequestRow;
@@ -33,6 +34,8 @@ export function PrRow({
   updating: boolean;
   /** Runs one write for this PR and resolves once its outcome is recorded and the page has re-read. Never rejects. */
   onWrite: (call: () => Promise<PrWriteResult>) => Promise<void>;
+  /** The page's in-flight set says a write of this PR is running (`PrActions`' `busy`), so a row drawn after a layout switch is born disabled. */
+  busy?: boolean;
 }) {
   const key = `${repo.repo}#${pr.number}`;
 
@@ -59,7 +62,7 @@ export function PrRow({
           {warning !== null && <Pill tone="warn">{warning}</Pill>}
         </div>
       )}
-      <PrActions repo={repo} pr={pr} onWrite={onWrite} variant="full" />
+      <PrActions repo={repo} pr={pr} onWrite={onWrite} variant="full" busy={busy} />
       <PrOutcomeLine outcome={outcome} updating={updating} />
     </li>
   );

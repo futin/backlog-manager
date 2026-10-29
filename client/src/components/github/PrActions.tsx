@@ -28,14 +28,17 @@ import type { MergeMethod, PrRepoView, PrWriteResult, PullRequestRow } from '../
  * While a write is in flight every action is disabled, until the page's re-read after it lands: a second click would send the head SHA the first write may
  * already have moved, and GitHub's 409 for that is a refusal the page caused itself. The write and its outcome are the page's (`onWrite`) — this component
  * hands it the call and records nothing — so an outcome outlives a row the re-read removed. `busy`, `confirming` and the picked method live here and survive
- * the compact strip opening into the full one, so a click on `Merge…` never forgets a write already in flight.
+ * the compact strip opening into the full one, so a click on `Merge…` never forgets a write already in flight. They do NOT survive this component unmounting,
+ * which is why the page's in-flight set arrives as the `busy` prop: a fold, a collapse or a layout switch drops the local state and the page's answer holds
+ * the keys until its re-read lands.
  */
 export function PrActions({
   repo,
   pr,
   onWrite,
   variant,
-  onOpen
+  onOpen,
+  busy: pending = false
 }: {
   repo: PrRepoView;
   pr: PullRequestRow;
@@ -44,10 +47,17 @@ export function PrActions({
   variant: 'full' | 'compact';
   /** Called once when the compact strip's `Merge…` opens the full one, so a layout can give the opened strip the room it needs (Inbox: the item's full width). */
   onOpen?: () => void;
+  /**
+   * The page's own word that a write of THIS PR is still running, OR'd with the local one. The local `busy` dies with this component — an Inbox fold, a Matrix
+   * collapse and a layout switch each unmount the strip — and a key that came back while its write was still in flight would send a head SHA the write may
+   * already have moved. The page owns the in-flight set (`PrLayoutProps.inFlight`), so a strip drawn after the write started is born disabled.
+   */
+  busy?: boolean;
 }) {
   const ids = useId();
   const mounted = useMountedRef();
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const busy = localBusy || pending;
   const [confirming, setConfirming] = useState(false);
   /* The compact strip's `Merge…` opens the full strip in place; nothing closes it again, because the page's re-read is what changes a PR's keys. */
   const [expanded, setExpanded] = useState(false);

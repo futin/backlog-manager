@@ -39,8 +39,8 @@ import { isUpdating } from '../../lib/prs';
  *
  * **One row open at a time, and the closed one is UNMOUNTED.** The open row is one key held here; opening another replaces it. The expansion is not drawn
  * `hidden` when closed: a `Confirm` joins `useDialogEscape`'s stack while it is mounted, and one left in a hidden subtree would swallow the next Escape unseen
- * ("Escape has one owner, and the topmost dialog is the only one that closes", `.claude/rules/board.md`). The price — a close forgets a write's busy state —
- * is the page's re-read's to answer. The open row is a KEY, not an index, so a re-read that reorders the list leaves the expansion on its own PR.
+ * ("Escape has one owner, and the topmost dialog is the only one that closes", `.claude/rules/board.md`). The price — a close forgets the strip's own busy state — is paid by the
+ * page's in-flight set (`PrLayoutProps.inFlight`), which holds the keys disabled until its re-read lands. The open row is a KEY, not an index, so a re-read that reorders the list leaves the expansion on its own PR.
  *
  * **Every element is keyed by `<repo>#<number>`, never by index.** Two repos can each have a `#7`, and a re-read reorders the rows; a row that remounted
  * because its position changed would drop the `Confirm` a person is reading.
@@ -127,7 +127,7 @@ function MatrixRow({ r, props, open, onToggle }: { r: RankedPr; props: PrLayoutP
         <tr className="prs-matrix-expand" data-testid={`pr-expand-${key}`}>
           <td colSpan={COLUMN_COUNT}>
             <div className="prs-matrix-expand-body">
-              <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="full" />
+              <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="full" busy={props.inFlight.has(key)} />
               <a className="prs-open" href={pr.url} target="_blank" rel="noreferrer noopener">
                 Open on GitHub ↗
               </a>

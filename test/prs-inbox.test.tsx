@@ -62,7 +62,7 @@ function repo(name: string, prs: PullRequestRow[], over: Partial<PrRepoView> = {
 const EMPTY_CTX: PrLayoutProps['ctx'] = { projects: [], items: [], runs: [], remote: [], remoteStarting: [] };
 
 function props(repos: PrRepoView[], over: Partial<PrLayoutProps> = {}): PrLayoutProps {
-  return { repos, outcomes: {}, marks: {}, now: NOW, ctx: EMPTY_CTX, write: jest.fn(() => Promise.resolve()), ...over };
+  return { repos, outcomes: {}, marks: {}, now: NOW, ctx: EMPTY_CTX, write: jest.fn(() => Promise.resolve()), inFlight: new Set(), ...over };
 }
 
 /** A failing, a behind and a clean PR on one repo — one per tile. */

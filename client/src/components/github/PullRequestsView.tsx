@@ -1,34 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { PrRow } from './PrRow';
+import { PolledAge, PrCards } from './PrCards';
+import { PrInbox } from './PrInbox';
+import { PrMatrix } from './PrMatrix';
+import type { PrLayoutProps } from './pr-layout-props';
 import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
-import { Sheet, SheetHead } from '../ui/Sheet';
+import { Segmented } from '../ui/Segmented';
 import { useBoard } from '../../hooks/useBoard';
+import { useNarrow } from '../../hooks/useNarrow';
 import { useNow } from '../../hooks/useNow';
 import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import { usePullRequests } from '../../hooks/usePullRequests';
 import { useReportWorking } from '../../hooks/useReportWorking';
-import { prRunWarning, type PrRunContext } from '../../lib/pr-run';
-import { groupRepos, isUpdating, outcomeLine, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
-import { pollAge } from '../../lib/tracker';
-import type { PrRepoView, PrWriteResult } from '../../../../shared/types';
+import { drawableLayout, layoutOptions, newestPolledAt, parseLayout, PR_LAYOUT_KEY, splitReach, type PrLayout } from '../../lib/pr-layouts';
+import type { PrRunContext } from '../../lib/pr-run';
+import { groupRepos, outcomeLine, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
+import type { PrWriteResult } from '../../../../shared/types';
 
 /** The page's own words for the token-less server — an instruction, because the only fix is on the host. */
 const NO_TOKEN = 'no token — set BM_GITHUB_TOKEN in .env and restart';
 
 /** How often the run-in-progress warning's clock moves. A live claim goes stale in minutes, so a quarter-minute is ample, and the run poll re-renders anyway. */
 const WARNING_CLOCK_MS = 15_000;
-
-/**
- * `polled 12 s ago`, on a one-second clock of its own: the age is the only reading on the page that moves every second, so it owns its own `useNow` and
- * re-renders a span, not every row of every repo.
- */
-function PolledAge({ polledAt }: { polledAt: string | null }) {
-  const now = useNow(polledAt !== null, 1_000);
-  const age = pollAge(polledAt, now);
-  return age === null ? null : <span>{`polled ${age} ago`}</span>;
-}
 
 /**
  * GitHub › PRs (.claude/DESIGN.md §8.11; source-sections spec, Goal 2 and "Left to the builder"): the open pull requests of every registered GitHub repo,
@@ -43,9 +38,17 @@ function PolledAge({ polledAt }: { polledAt: string | null }) {
  * **Order.** `groupRepos`: repos with open PRs first, most recently touched on top, then the empty ones by name; each repo's PRs newest update first. The
  * payload's own order is never what is drawn.
  *
- * **Repo heading.** The repo, `polled N s ago`, a `sync off` pill beside the server's full sentence (`repo.syncOff`, `syncOffBlock`'s one home — never a client
- * copy) when the repo's sync is off, the read's `detail` when its last read was not `ok`, and `showing <n> of <total>` when GitHub had more than one page.
- * Each repo is a `Sheet`, Settings' card ground, so two repos never read as one list.
+ * **Layouts and reach.** Three layouts — Inbox (the default), Matrix and Cards — behind a `Segmented` in the toolbar, the choice stored per device
+ * (`PR_LAYOUT_KEY`, read through `parseLayout` so a hand-edited value is Inbox). Matrix is wide-only: a narrow window DRAWS a stored `matrix` as Inbox
+ * (`drawableLayout`) and the switcher offers no Matrix, but the stored word is only ever written by a click, never by a draw, so the choice returns with the
+ * window. A repo the token cannot read (`splitReach`: `forbidden`, `not-found`) is never handed to a layout, never counted in `N open`, and is named only by the
+ * toolbar's `N repos hidden — no access · GitHub › Settings`, the link being `onOpenSettings` (threaded from `App` like the Sources card's, so the rail's tree
+ * stays the only switch). Empty states, in order: the PAYLOAD has no repo → `no GitHub repo registered`; it has repos but none is shown → `no repo this token
+ * can read`; otherwise the layout, which says `no open pull requests` itself.
+ *
+ * **Repo heading (Cards).** The repo, `polled N s ago`, a `sync off` pill beside the server's full sentence (`repo.syncOff`, `syncOffBlock`'s one home — never a
+ * client copy) when the repo's sync is off, the read's `detail` when its last read was not `ok`, and `showing <n> of <total>` when GitHub had more than one
+ * page. Each repo is a `Sheet`, Settings' card ground, so two repos never read as one list. Inbox and Matrix say the same things once, in `PrRepoNotes`.
  *
  * **Writes and their outcomes.** A row asks the page to run a write (`write`); the page records the one-line outcome under `<repo>#<number>` — the server's
  * own word through `outcomeLine`, or a refusal's sentence verbatim (`prs-api`'s `errorOf`) — then re-reads, after success AND failure, because a refusal
@@ -54,14 +57,19 @@ function PolledAge({ polledAt }: { polledAt: string | null }) {
  *
  * **`updating…`.** GitHub answers update-branch with 202 and merges later, so the page marks the PR at the head SHA it asked from (`UpdateMark`) and the row
  * says `updating…` while `isUpdating` — until a read shows a new head, or `UPDATING_MS` pass. At that moment the page re-reads once (a timer per mark), so the
- * row is not left on a head the update has long since moved; a read that shows the head moved first drops the mark and its timer.
+ * row is not left on a head the update has long since moved; a read that shows the head moved first drops the mark and its timer. Marks, outcomes and the
+ * clock are this page's, not a layout's, so switching layout mid-update keeps the mark.
+ *
+ * **In flight.** A strip's own busy state dies when the strip unmounts — an Inbox fold, a Matrix collapse, a layout switch — and a key that came back while its
+ * write still ran would send a head SHA the write may already have moved. So `write` also holds `<repo>#<number>` in `inFlight` from before the call until the
+ * re-read after it has settled (success AND failure), and every layout hands it to `PrActions` as `busy`.
  *
  * No Escape handler here (`Confirm` joins `useDialogEscape` itself) and no page switch (the rail's GitHub tree is the only one). The page scrolls in the well
  * like Settings and reserves no height, so it reads no strip token at all.
  *
  * Default export, because `App` loads it lazily like every other page.
  */
-export default function PullRequestsView({ onWorking }: { onWorking?: (working: boolean) => void }) {
+export default function PullRequestsView({ onWorking, onOpenSettings }: { onWorking?: (working: boolean) => void; onOpenSettings?: () => void }) {
   const { data, error, refresh } = usePullRequests();
   const { items, projects } = useBoard();
   const { runs, starting, remote, remoteStarting } = useOrchestratorRuns();
@@ -70,6 +78,7 @@ export default function PullRequestsView({ onWorking }: { onWorking?: (working: 
 
   const [outcomes, setOutcomes] = useState<Record<string, PrOutcome>>({});
   const [marks, setMarks] = useState<Record<string, UpdateMark>>({});
+  const [inFlight, setInFlight] = useState<ReadonlySet<string>>(() => new Set());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const dropMark = useCallback((key: string) => {
@@ -121,16 +130,25 @@ export default function PullRequestsView({ onWorking }: { onWorking?: (working: 
 
   const write = useCallback(
     async (key: string, sha: string, call: () => Promise<PrWriteResult>): Promise<void> => {
-      let outcome: PrOutcome;
+      setInFlight((prev) => new Set(prev).add(key));
       try {
-        const result = await call();
-        outcome = { text: outcomeLine(result), kind: result.outcome === 'update-requested' ? 'updating' : 'ok' };
-        if (result.outcome === 'update-requested') markUpdating(key, sha);
-      } catch (e) {
-        outcome = { text: e instanceof Error ? e.message : String(e), kind: 'error' };
+        let outcome: PrOutcome;
+        try {
+          const result = await call();
+          outcome = { text: outcomeLine(result), kind: result.outcome === 'update-requested' ? 'updating' : 'ok' };
+          if (result.outcome === 'update-requested') markUpdating(key, sha);
+        } catch (e) {
+          outcome = { text: e instanceof Error ? e.message : String(e), kind: 'error' };
+        }
+        setOutcomes((prev) => ({ ...prev, [key]: outcome }));
+        await refresh();
+      } finally {
+        setInFlight((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
       }
-      setOutcomes((prev) => ({ ...prev, [key]: outcome }));
-      await refresh();
     },
     [markUpdating, refresh]
   );
@@ -139,8 +157,13 @@ export default function PullRequestsView({ onWorking }: { onWorking?: (working: 
     () => ({ projects: projects ?? [], items: items?.items ?? [], runs, remote, remoteStarting }),
     [projects, items, runs, remote, remoteStarting]
   );
-  const repos = useMemo(() => (data === null ? [] : groupRepos(data.repos)), [data]);
-  const open = repos.reduce((n, r) => n + r.total, 0);
+  const { shown, hidden } = useMemo(() => splitReach(data === null ? [] : groupRepos(data.repos)), [data]);
+  const open = shown.reduce((n, r) => n + r.total, 0);
+
+  const [stored, setStored] = usePersistedState<PrLayout>(PR_LAYOUT_KEY, 'inbox');
+  const narrow = useNarrow();
+  const layout = drawableLayout(parseLayout(stored), narrow);
+  const props: PrLayoutProps = { repos: shown, outcomes, marks, now, ctx, write, inFlight };
 
   return (
     <div className="prs">
@@ -160,85 +183,43 @@ export default function PullRequestsView({ onWorking }: { onWorking?: (working: 
               {`refresh failed — ${error}`}
             </p>
           )}
-          {repos.length === 0 && <p className="prs-status">no GitHub repo registered</p>}
-          {repos.map((repo) => (
-            <RepoSheet key={repo.repo} repo={repo} outcomes={outcomes} marks={marks} now={now} ctx={ctx} write={write} />
-          ))}
+          {data.repos.length === 0 ? (
+            <p className="prs-status">no GitHub repo registered</p>
+          ) : (
+            <>
+              <div className="prs-toolbar" data-testid="pr-toolbar">
+                <Segmented<PrLayout> label="Layout" value={layout} options={layoutOptions(narrow)} onChange={setStored} />
+                {hidden.length > 0 && (
+                  <p className="prs-toolbar-note">
+                    {`${hidden.length} ${hidden.length === 1 ? 'repo' : 'repos'} hidden — no access`}
+                    {onOpenSettings !== undefined && (
+                      <>
+                        {' · '}
+                        {/* A button, not an anchor: the destination is the shell's own state (the Sources card's `GitHub › Settings ↗` is the precedent). */}
+                        <button type="button" className="set-link" onClick={onOpenSettings}>
+                          GitHub › Settings
+                        </button>
+                      </>
+                    )}
+                  </p>
+                )}
+                <span className="prs-toolbar-age">
+                  <PolledAge polledAt={newestPolledAt(shown)} />
+                </span>
+              </div>
+              {shown.length === 0 ? (
+                <p className="prs-status">no repo this token can read</p>
+              ) : layout === 'inbox' ? (
+                <PrInbox {...props} />
+              ) : layout === 'matrix' ? (
+                <PrMatrix {...props} />
+              ) : (
+                <PrCards {...props} />
+              )}
+            </>
+          )}
         </>
       )}
     </div>
-  );
-}
-
-/** One repo's card: its heading and its rows, plus a line for each PR a write of this page took off the list. */
-function RepoSheet({
-  repo,
-  outcomes,
-  marks,
-  now,
-  ctx,
-  write
-}: {
-  repo: PrRepoView;
-  outcomes: Record<string, PrOutcome>;
-  marks: Record<string, UpdateMark>;
-  now: number;
-  ctx: PrRunContext;
-  write: (key: string, sha: string, call: () => Promise<PrWriteResult>) => Promise<void>;
-}) {
-  const listed = new Set(repo.prs.map((pr) => `${repo.repo}#${pr.number}`));
-  // A PR a write of this page took off the list (merged) keeps its line; an `updating…` one does not, since there is no row left to be updating.
-  const departed = Object.entries(outcomes).filter(
-    ([key, outcome]) => key.startsWith(`${repo.repo}#`) && !listed.has(key) && outcome.kind !== 'updating'
-  );
-  const readings = [
-    repo.truncated ? `showing ${repo.prs.length} of ${repo.total}` : null,
-    repo.polledAt !== null && repo.prs.length === 0 ? 'no open pull requests' : null
-  ].filter((r): r is string => r !== null);
-
-  return (
-    <Sheet as="section" className="prs-repo">
-      <div className="prs-repo-inner" data-testid={`pr-repo-${repo.repo}`}>
-        <div className="prs-repo-head" data-testid={`pr-head-${repo.repo}`}>
-          <SheetHead
-            title={repo.repo}
-            sub={
-              <span className="prs-repo-sub">
-                <PolledAge polledAt={repo.polledAt} />
-                {readings.map((r) => (
-                  <span key={r}>{r}</span>
-                ))}
-              </span>
-            }
-            right={repo.syncOff !== null ? <Pill tone="warn">sync off</Pill> : undefined}
-          />
-          {repo.syncOff !== null && <p className="prs-note">{repo.syncOff}</p>}
-          {repo.access !== 'ok' && repo.detail !== null && <p className="prs-note prs-note-bad">{repo.detail}</p>}
-        </div>
-        {repo.prs.length > 0 && (
-          <ul className="prs-list" aria-label={`${repo.repo} pull requests`}>
-            {repo.prs.map((pr) => {
-              const key = `${repo.repo}#${pr.number}`;
-              return (
-                <PrRow
-                  key={pr.number}
-                  repo={repo}
-                  pr={pr}
-                  warning={prRunWarning(pr, repo.repo, ctx, now)}
-                  outcome={outcomes[key]}
-                  updating={isUpdating(marks[key], pr, now)}
-                  onWrite={(call) => write(key, pr.headSha, call)}
-                />
-              );
-            })}
-          </ul>
-        )}
-        {departed.map(([key, outcome]) => (
-          <p key={key} className={outcome.kind === 'error' ? 'prs-outcome prs-outcome-error' : 'prs-outcome'}>
-            {`#${key.slice(repo.repo.length + 1)} ${outcome.text}`}
-          </p>
-        ))}
-      </div>
-    </Sheet>
   );
 }

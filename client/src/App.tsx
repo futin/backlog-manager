@@ -370,7 +370,7 @@ function AppShell() {
                     {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} onWorking={report.filesBoard} />}
                     {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" onWorking={report.filesArchive} />}
                     {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} onWorking={report.githubBoard} />}
-                    {section === 'github' && githubPage === 'prs' && <PullRequestsView onWorking={report.githubPrs} />}
+                    {section === 'github' && githubPage === 'prs' && <PullRequestsView onWorking={report.githubPrs} onOpenSettings={() => onOpenGithubPage('settings')} />}
                     {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" onWorking={report.githubArchive} />}
                     {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
                   </>

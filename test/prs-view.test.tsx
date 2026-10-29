@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import PullRequestsView from '../client/src/components/github/PullRequestsView';
+import { PR_LAYOUT_KEY } from '../client/src/lib/pr-layouts';
 import { UPDATING_MS } from '../client/src/lib/prs';
 import type { OrchestratorRun, PrRepoView, PullRequestRow, PullRequestsPayload, RunQueueItem } from '../shared/types';
 
@@ -125,7 +126,11 @@ let answerPost: (url: string, body: unknown) => { status: number; body: unknown 
 const respond = (status: number, body: unknown) =>
   Promise.resolve({ ok: status < 300, status, json: () => Promise.resolve(JSON.parse(JSON.stringify(body)) as unknown) } as Response);
 
+/** The layout is a stored per-device choice (`PR_LAYOUT_KEY`); a case that asserts one layout's anatomy pins it before it renders. */
+const storeLayout = (layout: 'inbox' | 'matrix' | 'cards'): void => localStorage.setItem(PR_LAYOUT_KEY, JSON.stringify(layout));
+
 beforeEach(() => {
+  localStorage.clear();
   jest.useFakeTimers();
   jest.setSystemTime(NOW);
   payload = basePayload();
@@ -164,9 +169,9 @@ async function flush(): Promise<void> {
   }
 }
 
-async function mount() {
+async function mount(props: { onOpenSettings?: () => void } = {}) {
   const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
-  const view = render(<PullRequestsView />);
+  const view = render(<PullRequestsView {...props} />);
   await flush();
   return { user, ...view };
 }
@@ -176,6 +181,8 @@ const action = (key: string, name: string | RegExp): HTMLElement => within(row(k
 const keysIn = (root: ParentNode = document): string[] => [...root.querySelectorAll('[data-testid^="pr-row-"]')].map((el) => el.getAttribute('data-testid') ?? '');
 
 describe('PullRequestsView — grouping and the rows', () => {
+  beforeEach(() => storeLayout('cards'));
+
   it('orders repos and PRs by groupRepos, not by the payload', async () => {
     await mount();
     const repos = [...document.querySelectorAll('[data-testid^="pr-repo-"]')].map((el) => el.getAttribute('data-testid'));
@@ -238,6 +245,8 @@ describe('PullRequestsView — grouping and the rows', () => {
 });
 
 describe('PullRequestsView — merge', () => {
+  beforeEach(() => storeLayout('cards'));
+
   it('asks before merging, sends nothing on dismiss, and one POST on accept', async () => {
     const { user } = await mount();
     await user.click(action('futin/y#12', 'Merge'));
@@ -303,6 +312,8 @@ describe('PullRequestsView — merge', () => {
 });
 
 describe('PullRequestsView — blocked actions', () => {
+  beforeEach(() => storeLayout('cards'));
+
   it('sync-off repo disables all three actions', async () => {
     payload.repos[1] = { ...payload.repos[1], syncOff: SYNC_OFF_Y };
     payload.repos[0] = { ...payload.repos[0], autoMergeAllowed: true };
@@ -357,6 +368,8 @@ describe('PullRequestsView — blocked actions', () => {
 });
 
 describe('PullRequestsView — auto-merge and update branch', () => {
+  beforeEach(() => storeLayout('cards'));
+
   it('arms auto-merge with the picked method', async () => {
     answerPost = () => ({ status: 200, body: { ok: true, outcome: 'auto-merge-enabled', pr: null, reread: true } });
     const { user } = await mount();
@@ -417,6 +430,8 @@ describe('PullRequestsView — auto-merge and update branch', () => {
 });
 
 describe('PullRequestsView — run-in-progress warning', () => {
+  beforeEach(() => storeLayout('cards'));
+
   it('warns on the PR whose branch a live run holds, and leaves its actions enabled', async () => {
     mockRuns.runs = [
       {
@@ -434,5 +449,265 @@ describe('PullRequestsView — run-in-progress warning', () => {
     expect(row('futin/x#7')).not.toHaveTextContent('run in progress');
     expect(action('futin/y#12', 'Merge')).toBeEnabled();
     expect(action('futin/y#12', 'Update branch')).toBeEnabled();
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------------------------------------------------------------------
+   The layout switcher and the no-access repos (spec `2026-10-29-prs-layouts-design.md`, "The page"). The cases above pin Cards; these say which layout is
+   drawn, what the toolbar reads, which repos never reach a layout, and that a write belongs to the page and not to the layout that started it.
+   ------------------------------------------------------------------------------------------------------------------------------------------------------- */
+
+const switcher = (): HTMLElement => screen.getByRole('group', { name: 'Layout' });
+const stored = (): unknown => JSON.parse(localStorage.getItem(PR_LAYOUT_KEY) ?? 'null');
+const FORBIDDEN_Z = repo({ repo: 'futin/z', access: 'forbidden', detail: 'the token cannot read futin/z', polledAt: ago(5_000), prs: [pr({ number: 31, title: 'Hidden by reach' })], total: 4 });
+
+/** Answers `window.matchMedia` as a phone (`useNarrow`'s query), for the one case that needs it. */
+function stubNarrow(): void {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })
+  });
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'matchMedia');
+});
+
+describe('PullRequestsView — the layout switcher', () => {
+  it('draws Inbox by default, with the three layouts on offer', async () => {
+    await mount();
+    expect(screen.getByTestId('pr-inbox')).toBeInTheDocument();
+    expect(screen.queryByTestId('pr-matrix')).toBeNull();
+    expect(document.querySelectorAll('[data-testid^="pr-repo-"]')).toHaveLength(0);
+    expect(within(switcher()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Inbox', 'Matrix', 'Cards']);
+    expect(within(switcher()).getByRole('button', { name: 'Inbox' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('stores the choice, and a fresh render draws it', async () => {
+    const { user, unmount } = await mount();
+    await user.click(within(switcher()).getByRole('button', { name: 'Matrix' }));
+    expect(stored()).toBe('matrix');
+    expect(screen.getByTestId('pr-matrix')).toBeInTheDocument();
+    expect(screen.queryByTestId('pr-inbox')).toBeNull();
+    unmount();
+
+    await mount();
+    expect(screen.getByTestId('pr-matrix')).toBeInTheDocument();
+    expect(within(switcher()).getByRole('button', { name: 'Matrix' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('draws a stored Matrix as Inbox on a narrow window, offers no Matrix, and leaves the stored choice alone', async () => {
+    storeLayout('matrix');
+    stubNarrow();
+    await mount();
+    expect(screen.getByTestId('pr-inbox')).toBeInTheDocument();
+    expect(screen.queryByTestId('pr-matrix')).toBeNull();
+    expect(within(switcher()).queryByRole('button', { name: 'Matrix' })).toBeNull();
+    expect(within(switcher()).getByRole('button', { name: 'Inbox' })).toHaveAttribute('aria-pressed', 'true');
+    expect(stored()).toBe('matrix');
+  });
+
+  it('reads an unknown stored word as Inbox', async () => {
+    localStorage.setItem(PR_LAYOUT_KEY, JSON.stringify('wall'));
+    await mount();
+    expect(screen.getByTestId('pr-inbox')).toBeInTheDocument();
+  });
+
+  it("states the toolbar's polled age from the newest shown repo", async () => {
+    await mount();
+    expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('polled 12 s ago');
+  });
+});
+
+describe('PullRequestsView — repos the token cannot read', () => {
+  it.each(['inbox', 'matrix', 'cards'] as const)('keeps a no-access repo out of %s, out of N open, and says so in the toolbar', async (layout) => {
+    storeLayout(layout);
+    payload.repos.push(FORBIDDEN_Z);
+    const onOpenSettings = jest.fn();
+    const { user } = await mount({ onOpenSettings });
+    expect(document.body).not.toHaveTextContent('futin/z');
+    expect(document.body).not.toHaveTextContent('Hidden by reach');
+    expect(screen.getByText('3 open')).toBeInTheDocument();
+    const toolbar = screen.getByTestId('pr-toolbar');
+    expect(toolbar).toHaveTextContent('1 repo hidden — no access');
+    expect(toolbar).not.toHaveTextContent('polled 5 s ago');
+    await user.click(within(toolbar).getByRole('button', { name: /GitHub › Settings/ }));
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts hidden repos in the plural, and treats not-found like forbidden', async () => {
+    payload.repos.push(FORBIDDEN_Z, repo({ repo: 'futin/gone', access: 'not-found', detail: 'no such repo' }));
+    await mount();
+    expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('2 repos hidden — no access');
+  });
+
+  it('keeps a rate-limited repo shown, with its detail', async () => {
+    storeLayout('cards');
+    payload.repos[1] = { ...payload.repos[1], access: 'rate-limited', detail: 'rate limited — retrying at 12:30' };
+    await mount();
+    expect(screen.getByTestId('pr-repo-futin/y')).toHaveTextContent('rate limited — retrying at 12:30');
+    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('hidden');
+  });
+
+  it('brings a hidden repo back on the next read that says ok, and drops the note', async () => {
+    payload.repos.push(FORBIDDEN_Z);
+    await mount();
+    expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('1 repo hidden');
+    expect(document.body).not.toHaveTextContent('Hidden by reach');
+
+    payload.repos[2] = { ...FORBIDDEN_Z, access: 'ok', detail: null };
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    await flush();
+    expect(screen.getByTestId('pr-toolbar')).not.toHaveTextContent('hidden');
+    expect(document.body).toHaveTextContent('Hidden by reach');
+    expect(screen.getByText('7 open')).toBeInTheDocument();
+  });
+
+  it('says no repo this token can read when every repo is hidden, and still offers the way to Settings', async () => {
+    payload.repos = [FORBIDDEN_Z, repo({ repo: 'futin/gone', access: 'not-found' })];
+    await mount({ onOpenSettings: () => {} });
+    expect(screen.getByText('no repo this token can read')).toBeInTheDocument();
+    expect(screen.queryByText('no GitHub repo registered')).toBeNull();
+    expect(screen.getByTestId('pr-toolbar')).toHaveTextContent('2 repos hidden — no access');
+    expect(screen.getByText('0 open')).toBeInTheDocument();
+  });
+
+  it('says no GitHub repo registered when the payload has none', async () => {
+    payload.repos = [];
+    await mount();
+    expect(screen.getByText('no GitHub repo registered')).toBeInTheDocument();
+    expect(screen.queryByText('no repo this token can read')).toBeNull();
+  });
+
+  it('draws no toolbar for a server with no token', async () => {
+    payload = { token: false, repos: [] };
+    await mount();
+    expect(screen.getByText('no token — set BM_GITHUB_TOKEN in .env and restart')).toBeInTheDocument();
+    expect(screen.queryByTestId('pr-toolbar')).toBeNull();
+  });
+});
+
+describe('PullRequestsView — the page owns marks, outcomes and writes', () => {
+  const switchTo = async (user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> => {
+    await user.click(within(switcher()).getByRole('button', { name }));
+  };
+
+  it('keeps an updating… mark set in Cards when the layout changes', async () => {
+    storeLayout('cards');
+    answerPost = () => ({ status: 202, body: { ok: true, outcome: 'update-requested', pr: null, reread: false } });
+    const { user } = await mount();
+    await user.click(action('futin/y#12', 'Update branch'));
+    await flush();
+    expect(row('futin/y#12')).toHaveTextContent('updating…');
+
+    await switchTo(user, 'Inbox');
+    expect(screen.getByTestId('pr-quiet-futin/y#12')).toHaveTextContent('updating…');
+    await switchTo(user, 'Matrix');
+    expect(screen.getByTestId('pr-mrow-futin/y#12')).toHaveTextContent('updating…');
+    expect(screen.getByTestId('pr-outcome')).toHaveTextContent('updating…');
+  });
+
+  type Layout = 'cards' | 'inbox' | 'matrix';
+  type Kind = 'merge' | 'auto-merge' | 'update';
+
+  /** Opens whatever holds the strip for futin/y#12 in this layout and runs one write through it, by clicks alone. */
+  async function runWrite(user: ReturnType<typeof userEvent.setup>, layout: Layout, kind: Kind): Promise<void> {
+    let strip: HTMLElement;
+    if (layout === 'cards') strip = row('futin/y#12');
+    else if (layout === 'matrix') {
+      await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
+      strip = screen.getByTestId('pr-expand-futin/y#12');
+    } else if (kind === 'update') {
+      // A behind PR is a loud item: its compact keys are drawn without opening anything.
+      strip = screen.getByTestId('pr-item-futin/y#12');
+    } else {
+      await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
+      strip = screen.getByTestId('pr-quiet-futin/y#12');
+      if (kind === 'merge') await user.click(within(strip).getByRole('button', { name: 'Merge…' }));
+    }
+    if (kind === 'update') await user.click(within(strip).getByRole('button', { name: 'Update branch' }));
+    else if (kind === 'auto-merge') await user.click(within(strip).getByRole('button', { name: 'Enable auto-merge' }));
+    else {
+      await user.click(within(strip).getByRole('button', { name: 'Merge' }));
+      await user.click(within(strip).getByTestId('pr-merge-confirm-accept'));
+    }
+    await flush();
+  }
+
+  const WRITES: Record<Kind, { url: string; body: unknown; answer: unknown; says: string }> = {
+    merge: {
+      url: '/api/prs/merge',
+      body: { repo: 'futin/y', number: 12, method: 'squash', headSha: SHA12 },
+      answer: { ok: true, outcome: 'merged', pr: null, reread: true },
+      says: 'merged'
+    },
+    'auto-merge': {
+      url: '/api/prs/auto-merge',
+      body: { repo: 'futin/y', number: 12, enable: true, method: 'squash' },
+      answer: { ok: true, outcome: 'auto-merge-enabled', pr: null, reread: true },
+      says: 'auto-merge armed'
+    },
+    update: {
+      url: '/api/prs/update-branch',
+      body: { repo: 'futin/y', number: 12, headSha: SHA12 },
+      answer: { ok: true, outcome: 'update-requested', pr: null, reread: false },
+      says: 'updating…'
+    }
+  };
+
+  const CASES = (['cards', 'inbox', 'matrix'] as const).flatMap((layout) => (['merge', 'auto-merge', 'update'] as const).map((kind) => [layout, kind] as const));
+
+  it.each(CASES)('%s: %s sends the same POST and leaves the same outcome line', async (layout, kind) => {
+    storeLayout(layout);
+    const w = WRITES[kind];
+    answerPost = () => ({ status: w.answer && kind === 'update' ? 202 : 200, body: w.answer });
+    if (kind === 'update') payload.repos[1].prs = [{ ...PR12, mergeState: 'behind' }];
+    const { user } = await mount();
+    await runWrite(user, layout, kind);
+    expect(posts).toEqual([{ url: w.url, body: w.body }]);
+    const lines = screen.getAllByTestId('pr-outcome');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toHaveTextContent(w.says);
+  });
+
+  it("keeps a PR's keys disabled in whatever layout is drawn while its write is still running", async () => {
+    storeLayout('matrix');
+    let release: (v: Response) => void = () => {};
+    global.fetch = jest.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/prs' && init?.method !== 'POST') return respond(200, payload);
+      return new Promise<Response>((r) => {
+        release = r;
+      });
+    }) as unknown as typeof fetch;
+    const { user } = await mount();
+
+    await user.click(screen.getByTestId('pr-mrow-futin/y#12'));
+    await user.click(within(screen.getByTestId('pr-expand-futin/y#12')).getByRole('button', { name: 'Update branch' }));
+
+    // Cards: a full strip drawn after the write started — every key of that PR is still off, the neighbour's are not.
+    await switchTo(user, 'Cards');
+    for (const name of ['Merge', 'Enable auto-merge', 'Update branch']) expect(action('futin/y#12', name)).toBeDisabled();
+    expect(action('futin/x#9', 'Merge')).toBeEnabled();
+
+    // Inbox: the quiet line's strip is unmounted when folded, and a fold must not forget the write.
+    await switchTo(user, 'Inbox');
+    await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
+    const quiet = screen.getByTestId('pr-quiet-futin/y#12');
+    expect(within(quiet).getByRole('button', { name: 'Merge…' })).toBeDisabled();
+    expect(within(quiet).getByRole('button', { name: 'Enable auto-merge' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
+    await user.click(screen.getByRole('button', { name: 'Actions for #12' }));
+    expect(within(screen.getByTestId('pr-quiet-futin/y#12')).getByRole('button', { name: 'Merge…' })).toBeDisabled();
+
+    await act(async () => {
+      release({ ok: true, status: 202, json: () => Promise.resolve({ ok: true, outcome: 'update-requested', pr: null, reread: false }) } as Response);
+    });
+    await flush();
+    const after = screen.getByTestId('pr-quiet-futin/y#12');
+    expect(within(after).getByRole('button', { name: 'Merge…' })).toBeEnabled();
+    expect(within(after).getByRole('button', { name: 'Enable auto-merge' })).toBeEnabled();
   });
 });

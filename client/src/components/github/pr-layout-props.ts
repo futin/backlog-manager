@@ -18,4 +18,10 @@ export interface PrLayoutProps {
   now: number;
   ctx: PrRunContext;
   write: (key: string, sha: string, call: () => Promise<PrWriteResult>) => Promise<void>;
+  /**
+   * The `<repo>#<number>` of every PR with a write still running. The page adds a key before the call and removes it once the re-read after the outcome has
+   * settled, so a strip a layout draws LATER (an unfolded Inbox line, a re-opened Matrix row, a switched layout) is disabled from its first paint — a strip's own
+   * busy state dies with the strip.
+   */
+  inFlight: ReadonlySet<string>;
 }

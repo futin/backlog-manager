@@ -43,8 +43,8 @@ import { isUpdating } from '../../lib/prs';
  * `backlog/<id>` PR an orchestrator run has not finished with is exactly a Quiet PR. Its actions are one click further: a separate toggle button
  * (`aria-expanded`) beside the link, NOT a button wrapping it, because a link inside a button is invalid interactive nesting. The strip is UNMOUNTED when the
  * line is folded: an open `Confirm` joins `useDialogEscape`'s stack while it is drawn, and one that stayed mounted under `hidden` would swallow the next Escape
- * unseen ("Escape has one owner, and the topmost dialog is the only one that closes"). The price is that a fold forgets a write's busy state, which the
- * page's own re-read answers. The outcome line is drawn whether or not the line is open —
+ * unseen ("Escape has one owner, and the topmost dialog is the only one that closes"). The fold forgets the strip's own busy state, so the page's in-flight set
+ * (`PrLayoutProps.inFlight`) holds the keys disabled until its re-read lands. The outcome line is drawn whether or not the line is open —
  * a collapsed part never hides the result of a write (spec, "What every layout carries").
  *
  * **Can't read.** A shown repo whose last read was `rate-limited` or `error` keeps its rows — still ranked, still actionable, a failed refresh is no reason to
@@ -101,7 +101,14 @@ function LoudItem({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
         <ItemMeta r={r} now={props.now} />
       </div>
       <div className={stripOpen ? 'prs-inbox-keys prs-inbox-keys-open' : 'prs-inbox-keys'}>
-        <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" onOpen={() => setStripOpen(true)} />
+        <PrActions
+          repo={repo}
+          pr={pr}
+          onWrite={(call) => props.write(key, pr.headSha, call)}
+          variant="compact"
+          onOpen={() => setStripOpen(true)}
+          busy={props.inFlight.has(key)}
+        />
       </div>
       <PrOutcomeLine outcome={props.outcomes[key]} updating={isUpdating(props.marks[key], pr, props.now)} />
     </li>
@@ -138,7 +145,7 @@ function QuietLine({ r, props }: { r: RankedPr; props: PrLayoutProps }) {
       <PrOutcomeLine outcome={props.outcomes[key]} updating={isUpdating(props.marks[key], pr, props.now)} />
       {expanded && (
         <div className="prs-inbox-quiet-actions">
-          <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" />
+          <PrActions repo={repo} pr={pr} onWrite={(call) => props.write(key, pr.headSha, call)} variant="compact" busy={props.inFlight.has(key)} />
         </div>
       )}
     </li>
