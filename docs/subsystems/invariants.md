@@ -3756,7 +3756,7 @@ That block stopped being source-blind in #227, and the asymmetry is deliberate. 
 the tracker claim can be aged: `progressBlock` lets dispatch through over a STALE hand claim, because the protocol already lets any `start` retire it with no
 confirm and the spawned session's own `start` does exactly that, while a files stamp still blocks on ANY stamp, fresh or stale. Two stale tracker holders keep
 the block — a run (a stale run claim is a crashed run, the watchdog's and `--resume`'s) and a session this server dispatched (a `claude -p` waiting on a reply
-sends no heartbeat, so its age says nothing). And the server now re-checks a tracker item's claim at dispatch (`itemClaimBlock`, `agents.service.ts`, in
+sends no heartbeat, so its age says nothing). And the server now re-checks a tracker item's claim at dispatch (`itemClaimBlock`, `dashboard-sessions.util.ts`, in
 `progressBlock`'s order, a stale claim going through `staleClaimProbe`), because the sheet's plan was read once and the claim moves under it; a files item is
 not re-checked there, since its stamp has no heartbeat to age and no holder to name, and refusing it is `start`'s job.
 
@@ -3860,7 +3860,7 @@ the `release` route never parses — so no HTTP body can reach it, and the one c
 `not claimed` on the reasoning that the protocol retires it at the next `start` — while the board went on showing it held and offered no way to let go of it.
 A stale claim is forfeit by protocol: any `start`, on any machine, retires it with no confirm, so the board doing the same behind a confirm adds no authority.
 A holder this server dispatched still goes through case A, because its heartbeat age says nothing. Any other goes through `staleClaimProbe`
-(`agents.service.ts`), which refuses only on a POSITIVE answer — the claim's `host` is this machine's and the dashboard reports the holder `working` or
+(`dashboard-sessions.util.ts`), which refuses only on a POSITIVE answer — the claim's `host` is this machine's and the dashboard reports the holder `working` or
 `question`, a late heartbeat rather than a dead session — and proceeds on every unknown, agents off included: case B releases a LIVE claim, so every unknown
 there must refuse; here the claim is already forfeit and the probe is only a guard. The release is `reason: 'stale'`, `by: 'board'`, with no `authority`
 (`release` refuses only a live claim held by somebody else), and it unassigns the issue like `aborted` does, since nothing replaces the assignee after it. The

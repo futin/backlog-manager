@@ -7,7 +7,7 @@ import { writable } from '../items/write-gate.util';
 import { isLive } from '../tracker/claim';
 import { TrackerPollerService } from '../tracker/poller.service';
 import { readAgentsConfig } from './config.util';
-import { dashboardSessionStatus, staleClaimProbe } from './agents.service';
+import { dashboardSessionStatus, staleClaimProbe } from './dashboard-sessions.util';
 import { stopDashboardSession } from './session-stop.util';
 import { DashboardsService, type Machine } from './dashboards/dashboards.service';
 import type { ItemAbortResult } from '../../../shared/types';

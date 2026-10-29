@@ -1,5 +1,4 @@
 import { homedir } from 'node:os';
-import { basename } from 'node:path';
 import { HttpException, Injectable } from '@nestjs/common';
 
 import { RegistryService } from '../registry/registry.service';
@@ -13,8 +12,8 @@ import { BASE_BRANCH_SHAPE, proveBaseBranch, resolveBaseBranch } from '../items/
 import { parseUrn } from '../tracker/map-issue';
 import { runGit } from '../git-run.util';
 import { authHeaders, dashboardError, readAgentsConfig, type AgentsConfig } from './config.util';
-// Re-exported so every importer from before multi-dashboard task 4 moved them into config.util.ts (to break a module cycle) is untouched.
-export { authHeaders, dashboardError, message } from './config.util';
+import { itemClaimBlock } from './dashboard-sessions.util';
+import { machineChoiceBlock, remoteDefaultModel, remoteGateBlock } from './machine-choice.util';
 import { DashboardStatusService } from './dashboard-status.service';
 import { DashboardsService, type Machine } from './dashboards/dashboards.service';
 import { filesBackedReason, OffersService, REMOTE_BUDGET } from './dashboards/offers.service';
@@ -39,12 +38,12 @@ import {
   MODELS,
   DEFAULT_MODEL
 } from '../../../shared/agent';
-import { appendFinishClause, composePrompt, sessionName } from './prompt.util';
+import { appendFinishClause, composePrompt, orchestrateSessionName, resumeSessionName, sessionName, stopSessionName } from './prompt.util';
 import { clearPauseRequest, controlHome, pauseRequestEffective, readPauseRequest, stopRequestEffective, writePauseRequest } from '../orchestrator/pause-control.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
 import { RemoteStartingService } from '../orchestrator/remote-starting.service';
 import { RemoteRunsService } from '../orchestrator/remote-runs.service';
-import { CLAIM_STALE_MS, MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
+import { MERGE_MODES, RESUME_LOCKED_CODE, RUN_IN_PROGRESS_CODE, RUN_STALE_MS } from '../../../shared/types';
 import type {
   AgentBranchesPayload,
   AgentDispatchRequest,
@@ -2159,174 +2158,4 @@ export class AgentsService {
   private async findItem(requestPath: string): Promise<BacklogItem | null> {
     return this.items.find(requestPath);
   }
-
-}
-
-/** The dashboard's session list is a scan of `~/.claude/projects/`, the same order of work as the management index, and gets that call's budget. */
-const SESSIONS_TIMEOUT_MS = 15_000;
-
-/**
- * The dashboard's session list as `id → status` — `'unknown'` for an entry with no status string — or a 502 when it cannot be read. One fetch and one parse
- * for every reader: #225's case B and #227's stale probe ask for one session's status (`dashboardSessionStatus`), and Jira's live-map reconciler asks for all
- * of them at once, so none of them can disagree with another about what the list said.
- */
-export async function dashboardSessions(cfg: AgentsConfig): Promise<Map<string, string>> {
-  let res: Response;
-  try {
-    res = await fetch(`${cfg.url}/api/sessions`, { headers: authHeaders(cfg), signal: AbortSignal.timeout(SESSIONS_TIMEOUT_MS) });
-  } catch (e) {
-    throw new HttpException({ error: dashboardError(e, 'the dashboard session list', SESSIONS_TIMEOUT_MS) }, 502);
-  }
-  if (!res.ok) throw new HttpException({ error: `the dashboard session list answered ${res.status}` }, 502);
-  const body = (await res.json().catch(() => null)) as { sessions?: unknown } | null;
-  if (!Array.isArray(body?.sessions)) throw new HttpException({ error: 'the dashboard session list carried no sessions' }, 502);
-  const out = new Map<string, string>();
-  for (const s of body.sessions as { id?: unknown; status?: unknown }[]) {
-    // The first entry for an id wins, as `Array.find` did before this was a map.
-    if (typeof s?.id === 'string' && !out.has(s.id)) out.set(s.id, typeof s.status === 'string' ? s.status : 'unknown');
-  }
-  return out;
-}
-
-/**
- * A session's status in the dashboard's session list — `null` when the list does not carry it, `'unknown'` for an entry with no status string — or a
- * 502 when the list cannot be read. #225's case B asked this first (`ItemsAbortService`); #227's stale probe asks it too, through `staleClaimProbe` below,
- * and there is one copy so the two can never disagree about what the list said.
- */
-export async function dashboardSessionStatus(cfg: AgentsConfig, session: string): Promise<string | null> {
-  return (await dashboardSessions(cfg)).get(session) ?? null;
-}
-
-/**
- * #227's guard for a STALE claim nobody dispatched: the refusal sentence when this machine can show the holder is still running, else `null`. Never throws.
- *
- * A stale claim is forfeit by protocol — any `start`, on any machine, retires it with no confirm — so this is only an extra guard, and it refuses on a
- * POSITIVE answer alone: the claim was taken on this machine (`host` equals `BM_MACHINE_NAME`, both non-empty — the `sameHost` rule, absence never
- * matches) and the dashboard reports the holder `working` or `question`. That is a late heartbeat, not a dead session. Every other outcome — agents off,
- * no machine name, a foreign or absent host, a dashboard that is unreachable or does not know the session, any other status — answers `null` and the
- * protocol's own rule stands. The opposite default from #225's case B on purpose: that one releases a LIVE claim, so every unknown there must refuse.
- */
-export async function staleClaimProbe(holder: { session: string; host?: string }): Promise<string | null> {
-  const cfg = readAgentsConfig();
-  const machine = (process.env.BM_MACHINE_NAME ?? '').trim();
-  if (!cfg.enabled || machine === '' || typeof holder.host !== 'string' || holder.host === '' || holder.host !== machine) return null;
-  let status: string | null;
-  try {
-    status = await dashboardSessionStatus(cfg, holder.session);
-  } catch {
-    return null;
-  }
-  return status === 'working' || status === 'question'
-    ? `session ${holder.session} is ${status} on this machine — its heartbeat is late, not stopped; stop it before taking its claim`
-    : null;
-}
-
-/**
- * A remote launch's model/effort refusal (multi-dashboard task 5), `null` to proceed. On a REMOTE machine any value outside that machine's list is a 400,
- * unknown names included: the remote dashboard drops a name outside its own fixed list without a word, and a name inside that list but outside what the
- * account can run would start a session that fails — either way nobody would hear about it (spec, "Models and efforts are per machine"). `undefined` and
- * `''` are "no pick" — the two spellings `pickFrom` documents as the sheet's Default — and are not refused. Never called for home, whose `pickFrom` drop
- * is unchanged. Exported for `orchestrate`'s remote launch to share one wording with this one.
- */
-export function machineChoiceBlock(m: Machine, model: unknown, effort: unknown): string | null {
-  const outside = (value: unknown, list: readonly string[]): boolean =>
-    value !== undefined && value !== '' && !(typeof value === 'string' && list.includes(value));
-  if (outside(model, m.models)) return `model "${String(model)}" is not in ${m.label}'s list (${m.models.join(', ')})`;
-  if (outside(effort, m.efforts)) return `effort "${String(effort)}" is not in ${m.label}'s list (${m.efforts.join(', ')})`;
-  return null;
-}
-
-/**
- * The model a remote launch with no pick runs on: `DEFAULT_MODEL`, as home's does, when the machine lists it — otherwise the machine's first listed model,
- * because sending `DEFAULT_MODEL` to an account whose list leaves it out is exactly the silent failure the list exists to prevent. Never `undefined`: home
- * never sends a spawn without a model either (`DEFAULT_MODEL`'s own comment), and a remote must not fall to the CLI's own default instead.
- */
-function remoteDefaultModel(m: Machine): string {
-  return m.models.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : (m.models[0] ?? DEFAULT_MODEL);
-}
-
-/** `dispatchBlock`'s flattening of the gate, for a remote: the same `projectDispatchGate`, asked about the project's path on THAT machine. */
-function remoteGateBlock(status: AgentsStatus, remotePath: string): string | null {
-  const gate = projectDispatchGate(status, remotePath);
-  return gate.control === 'enabled' ? null : gate.reason;
-}
-
-/**
- * The dispatch route's item-claim refusal for a tracker item (#227), `null` to proceed. The server half of the client's `progressBlock`
- * (`client/src/lib/item-progress.ts`), in the same order:
- *
- * - a run holds it — the run owns its items for the whole item, stale or not: a stale run claim is a crashed run, the watchdog's and `--resume`'s;
- * - the board dispatched the holder — its `claude -p` waiting on a reply has no process and sends no heartbeat, so staleness alone must not unblock it;
- * - a live claim — somebody is on it;
- * - a stale one — `staleClaimProbe`; the spawned session's own `start` retires the claim when it proceeds.
- */
-export async function itemClaimBlock(id: string, holder: { session: string; host?: string; heartbeat: string; run?: string }, dispatched: boolean): Promise<string | null> {
-  if (holder.run !== undefined) return `${id} is held by orchestrator run ${holder.run} — stop the run, not the item`;
-  if (dispatched) return `the board's own session ${holder.session} holds this item — Stop & release it first`;
-  const beat = Date.parse(holder.heartbeat);
-  if (!Number.isNaN(beat) && Date.now() - beat < CLAIM_STALE_MS) return `${id} is in progress — session ${holder.session} holds its claim`;
-  return staleClaimProbe(holder);
-}
-
-/**
- * The `-n` name an orchestrate run's dashboard row is labelled with —
- * `sessionName`'s (prompt.util.ts) counterpart for a whole project rather
- * than one item, needed because `orchestrate()` has no `BacklogItem` to
- * build that one from. Same dashboard constraint, same reason:
- * `sessionName`'s own comment explains that the dashboard's
- * `NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/` allows neither `:` nor `/`,
- * and a name that fails it is not rejected but silently dropped to
- * `undefined` — the exact failure mode `sessionName` itself was rewritten
- * once to fix, after an earlier `bl:<project>/<id>` spelling was discarded
- * on 100% of dispatches without a single request actually failing. Space-
- * separated for that reason, not the more obvious `orchestrate:<project>`.
- * Sliced to the same 60-character cap `sessionName` uses, for the same
- * reason: over the cap is the same silent drop. Exported for test/agents-prompt.test.ts, which pins the cap beside `resumeSessionName`'s.
- */
-export function orchestrateSessionName(projectPath: string): string {
-  return `orchestrate ${basename(projectPath)}`.slice(0, 60);
-}
-
-/**
- * `orchestrateSessionName`'s counterpart for a resumed run — same
- * `basename(projectPath)`, same 60-character cap for the same silent-drop
- * reason (see that function's own comment), and the same reason to exist at
- * all: `resume()` has no `BacklogItem` to build a name from either. The one
- * addition is the `origin` prefix, and it is the whole reason `resume()`
- * takes an `origin` parameter in the first place — the dashboard's session
- * list is the one durable trail this feature leaves behind (this app writes
- * nothing to `run.json`; see the class doc comment on `resume()`), so a row
- * reading "watchdog resume alpha" versus "resume alpha" is the only place a
- * reader can later tell "the sweeper did this while nobody was watching"
- * apart from "I clicked the button" — see the design's own §3 for why that
- * distinction is worth a name change rather than a fifth field on the
- * run-payload's `RunWatchdog`.
- *
- * The prefix-to-basename separator is a plain space, not the middle dot
- * (`·`, U+00B7) the design doc originally wrote it with. `orchestrateSessionName`
- * above already tells this story once for `:` and `/`; it applies just as
- * exactly to `·`, which is also outside `NAME_RE`'s
- * `[A-Za-z0-9][A-Za-z0-9 ._-]*` character class. A name that fails that
- * regex is not rejected — `parseSpawnRequest` on the dashboard side drops it
- * to `undefined` and the row falls back to the bare project name, silently,
- * with no failed request anywhere to notice. That is exactly the failure
- * this field exists to prevent (see the comment above): a middle-dot name
- * would make every resumed session's row indistinguishable from a
- * hand-started one, defeating `origin`'s only purpose without ever
- * producing an error. Do not "restore" the middle dot for readability — a
- * space reads fine and, unlike `·`, the dashboard actually keeps it.
- */
-export function resumeSessionName(projectPath: string, origin: 'watchdog' | 'board'): string {
-  const prefix = origin === 'watchdog' ? 'watchdog resume' : 'resume';
-  return `${prefix} ${basename(projectPath)}`.slice(0, 60);
-}
-
-/**
- * The abort session's row name (bug-39) — `resumeSessionName`'s sibling, with
- * no `origin` because there is only one: a stop is always a person's, and
- * nothing automated ever sends one. Same `slice(0, 60)` and same plain-space
- * separator, for the reasons that function's comment gives at length.
- */
-export function stopSessionName(projectPath: string): string {
-  return `stop ${basename(projectPath)}`.slice(0, 60);
 }

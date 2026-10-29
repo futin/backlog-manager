@@ -1,8 +1,8 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import type { OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 
-import { AgentsService, message } from './agents.service';
-import { readAgentsConfig } from './config.util';
+import { AgentsService } from './agents.service';
+import { message, readAgentsConfig } from './config.util';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { readWatchdogConfig, watchdogEnvOff } from '../orchestrator/watchdog-config.util';
 import { WatchdogStateService } from '../orchestrator/watchdog-state.service';
