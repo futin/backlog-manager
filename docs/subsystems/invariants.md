@@ -2367,7 +2367,7 @@ Three phases, and no standing interval backs any of them:
 
 - **Armed** — a `setTimeout` chain is pending because at least one `run.json` reads `status: "running"`, fresh or crashed alike. Arms on a boot-time scan, on
   every `GET /api/orchestrator/runs` whose payload already holds a `running` run (the read the board already makes on mount, focus and its own poll), on a
-  successful `orchestrate`/`resume` spawn, and on every `POST /api/agents/watchdog/config` save (`agents.controller.ts`'s `watchdogConfig`), which calls `arm()`
+  successful `orchestrate`/`resume` spawn, and on every `POST /api/agents/watchdog/config` save (`WatchdogService.configure`, since #388), which calls `arm()`
   and then an unawaited `tick()` regardless of which field changed or what it changed to. That fourth trigger is not a restatement of the first three: `arm()`
   alone is a no-op whenever a timer is already pending (`watchdog.service.ts`'s own guard, `if (this.timer !== null || this.inFlight !== null) return;`), which
   is exactly the state a watchdog already watching a crashed-but-disabled run sits in — so an operator flipping `enabled` back on in Settings for an
