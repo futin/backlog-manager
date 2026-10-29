@@ -8,6 +8,7 @@ import type { ComponentType } from 'react';
 
 import { App } from '../client/src/App';
 import { JiraProvider } from '../client/src/hooks/JiraContext';
+import { ProjectsProvider } from '../client/src/hooks/ProjectsContext';
 import { JIRA_STATUS_FLOOR_MS } from '../client/src/hooks/useJira';
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { JIRA_PAGE_KEY } from '../client/src/lib/jira-page';
@@ -17,7 +18,7 @@ import type { JiraStatusPayload } from '../shared/types';
 /*
   The Jira section in the shell (Jira phase 2; spec §6.1; DESIGN.md §8.0 and §8.9): `jira` in `SECTIONS`, its rail row drawn only while
   `GET /api/jira` says `configured: true`, its Board/Setup tree, and the shell's hold-and-fall — a held `jira` section stays put while the status is unknown
-  or failing, and only an answer that says `configured: false` moves the shell to `board`.
+  or failing, and only an answer that says `configured: false` moves the shell — to the first drawn source row (source-sections spec, Fallback).
 
   Board and Settings are stubbed for `nav.test.tsx`'s reason: the subject is the shell, and the real views would bring their own fetches and clocks to
   assert nothing about it. The two Jira PAGES are stubbed too, for the same reason — this suite owns which page the section picks and that the section's
@@ -25,8 +26,9 @@ import type { JiraStatusPayload } from '../shared/types';
   `JiraView` itself — the section, its loading and unavailable shapes — is real. The one Settings case that needs the real `Opens on` select reaches it
   through `jest.requireActual`.
 
-  `/api/jira` is answered per case: a payload, a 500, a network error, or a promise that never settles. Every other URL gets a 200 that no hook accepts as
-  its payload, which lands them on their own `error` path and nothing else.
+  `/api/jira` is answered per case: a payload, a 500, a network error, or a promise that never settles. `/api/projects` answers one files and one github
+  project, so the shell's source rows are both drawn and a provisional landing settles on Files. Every other URL gets a 200 that no hook accepts as its
+  payload, which lands them on their own `error` path and nothing else.
 */
 jest.mock('../client/src/components/board/BoardView', () => ({
   __esModule: true,
@@ -72,6 +74,16 @@ function status(over: Partial<JiraStatusPayload> = {}): JiraStatusPayload {
   };
 }
 
+const project = (name: string, source: 'files' | 'github') => ({
+  name,
+  path: `/abs/${name}`,
+  createdAt: '2026-08-26T00:00:00.000Z',
+  missing: false,
+  counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+  source
+});
+const PROJECTS = [project('alpha', 'files'), project('beta', 'github')];
+
 const UNCONFIGURED = status({ configured: false, site: null, me: null, tokenKind: null, access: 'unconfigured', home: null });
 
 type JiraAnswer = JiraStatusPayload | 500 | 'network' | 'pending';
@@ -90,6 +102,7 @@ beforeEach(() => {
       if (jiraAnswer === 500) return answer({ error: 'boom' }, false, 500);
       return answer(jiraAnswer);
     }
+    if (String(input) === '/api/projects') return answer(PROJECTS);
     return answer({ ok: true });
   }) as unknown as typeof fetch;
 });
@@ -128,21 +141,21 @@ describe('the Jira rail entry', () => {
     render(<App />);
     await screen.findByText('board stub');
     await flush();
-    expect(railLinks()).toEqual(['Board', 'Runs', 'Archive', 'Settings']);
+    expect(railLinks()).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
   });
 
-  it('is drawn between Archive and Settings while the status says configured: true', async () => {
+  it('is drawn between the sources and Runs while the status says configured: true', async () => {
     render(<App />);
     await screen.findByText('board stub');
     await flush();
-    expect(railLinks()).toEqual(['Board', 'Runs', 'Archive', 'Jira', 'Settings']);
+    expect(railLinks()).toEqual(['Files', 'GitHub', 'Jira', 'Runs', 'Settings']);
   });
 
   it('is absent while the status has not answered and Jira is not the section', async () => {
     jiraAnswer = 'pending';
     render(<App />);
     await screen.findByText('board stub');
-    expect(railLinks()).toEqual(['Board', 'Runs', 'Archive', 'Settings']);
+    expect(railLinks()).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
   });
 });
 
@@ -183,13 +196,13 @@ describe('the Jira section and its tree', () => {
 });
 
 describe("the shell's hold-and-fall", () => {
-  it('falls to the Board when the status says configured: false under a stored jira section', async () => {
+  it('falls to the first drawn source when the status says configured: false under a stored jira section', async () => {
     storeSection('jira');
     jiraAnswer = UNCONFIGURED;
     render(<App />);
     expect(await screen.findByText('board stub')).toBeInTheDocument();
-    expect(storedSection()).toBe('board');
-    expect(railLinks()).toEqual(['Board', 'Runs', 'Archive', 'Settings']);
+    expect(storedSection()).toBe('files');
+    expect(railLinks()).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
   });
 
   it('holds Jira in its loading state while the status has not answered', async () => {
@@ -228,7 +241,7 @@ describe("the shell's hold-and-fall", () => {
     jiraAnswer = UNCONFIGURED;
     await advance(JIRA_STATUS_FLOOR_MS);
     expect(screen.getByText('board stub')).toBeInTheDocument();
-    expect(storedSection()).toBe('board');
+    expect(storedSection()).toBe('files');
     expect(within(rail()).queryByRole('button', { name: 'Jira' })).toBeNull();
   });
 
@@ -248,13 +261,13 @@ describe("the shell's hold-and-fall", () => {
     expect(within(rail()).getByRole('button', { name: 'Jira' })).toBeInTheDocument();
   });
 
-  it('a pinned jira landing on a machine whose status says configured: false opens on the Board', async () => {
+  it('a pinned jira landing on a machine whose status says configured: false opens on the first drawn source', async () => {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ landing: 'jira' }));
     storeSection('runs');
     jiraAnswer = UNCONFIGURED;
     render(<App />);
     expect(await screen.findByText('board stub')).toBeInTheDocument();
-    expect(storedSection()).toBe('board');
+    expect(storedSection()).toBe('files');
   });
 
   it('a pinned jira landing on a configured machine opens on Jira', async () => {
@@ -271,7 +284,9 @@ describe('Settings › Local › Opens on', () => {
     render(
       <SettingsProvider>
         <JiraProvider>
-          <RealSettingsView />
+          <ProjectsProvider>
+            <RealSettingsView />
+          </ProjectsProvider>
         </JiraProvider>
       </SettingsProvider>
     );
@@ -285,7 +300,7 @@ describe('Settings › Local › Opens on', () => {
   it('offers Jira, in rail order, while the status says configured', async () => {
     renderSettings();
     await flush();
-    expect(options()).toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Jira', 'Settings']);
+    expect(options()).toEqual(['Last used', 'Files', 'GitHub', 'Jira', 'Runs', 'Settings']);
     await userEvent.selectOptions(screen.getByLabelText('Opens on'), 'jira');
     expect(JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}').landing).toBe('jira');
   });
@@ -293,9 +308,10 @@ describe('Settings › Local › Opens on', () => {
   it('does not offer Jira while the status says configured: false, or before it answers', async () => {
     jiraAnswer = UNCONFIGURED;
     renderSettings();
-    expect(options()).toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Settings']);
+    // Before any answer the source options are withheld too, for the same reason Jira's is (source-sections spec).
+    expect(options()).toEqual(['Last used', 'Runs', 'Settings']);
     await flush();
-    expect(options()).toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Settings']);
+    expect(options()).toEqual(['Last used', 'Files', 'GitHub', 'Runs', 'Settings']);
   });
 
   it('keeps a stored jira landing visible on an unconfigured machine rather than drawing a blank select', async () => {
@@ -303,7 +319,7 @@ describe('Settings › Local › Opens on', () => {
     jiraAnswer = UNCONFIGURED;
     renderSettings();
     await flush();
-    expect(options()).toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Jira', 'Settings']);
+    expect(options()).toEqual(['Last used', 'Files', 'GitHub', 'Jira', 'Runs', 'Settings']);
     expect(screen.getByLabelText('Opens on')).toHaveValue('jira');
   });
 });

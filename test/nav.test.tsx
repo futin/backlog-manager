@@ -5,9 +5,10 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
-import { App, resolveSection } from '../client/src/App';
+import { App } from '../client/src/App';
 import { daysAgoDate } from './helpers/dates';
 import { SECTIONS } from '../client/src/lib/sections';
+import { GITHUB_PAGE_KEY, resolveLegacySection } from '../client/src/lib/source-page';
 import { RUNS_MODE_KEY } from '../client/src/lib/runs-mode';
 import { SETTINGS_STORAGE_KEY, clampSettings } from '../client/src/lib/settings';
 
@@ -74,6 +75,12 @@ const storeSettings = (patch: object): void => localStorage.setItem(SETTINGS_STO
 
 const railTabs = (): HTMLElement[] => within(screen.getByRole('navigation', { name: 'Sections' })).getAllByRole('button');
 const markedTabs = (): HTMLElement[] => railTabs().filter((t) => t.getAttribute('aria-current') === 'page');
+/** A section ROW by its label — not `getByRole('button', { name })`, because GitHub's tree has a `Settings` page of its own beside the Settings row. */
+const row = (label: string): HTMLElement => {
+  const found = railTabs().find((t) => t.classList.contains('rail-link') && t.textContent === label);
+  if (!found) throw new Error(`no rail row named ${label}`);
+  return found;
+};
 
 /**
  * The Archive marker these cases wait on: its Out of scope column heading,
@@ -140,7 +147,17 @@ describe('the section rail', () => {
                   path: '/abs/alpha',
                   createdAt: '2026-08-26T00:00:00.000Z',
                   missing: false,
-                  counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 1 }
+                  counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 1 },
+                  source: 'files'
+                },
+                // A second project from the other source, so the rail draws both source rows (source-sections spec).
+                {
+                  name: 'beta',
+                  path: '/abs/beta',
+                  createdAt: '2026-08-26T00:00:00.000Z',
+                  missing: false,
+                  counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+                  source: 'github'
                 }
               ]
             : { items: [ARCHIVE_ITEM], errors: [] };
@@ -157,7 +174,7 @@ describe('the section rail', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent('this section failed to load');
       // The rail is outside the boundary, so the reader can still leave.
-      await userEvent.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name: /Board/ }));
+      await userEvent.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('button', { name: 'GitHub' }));
       expect(await screen.findByText('board stub')).toBeInTheDocument();
       expect(screen.queryByRole('alert')).toBeNull();
     } finally {
@@ -166,37 +183,46 @@ describe('the section rail', () => {
     }
   });
 
-  it('resolves the legacy stored "projects" onto Board, not onto a blank main area', async () => {
-    // What every install that predates this change has in localStorage.
+  /*
+    The pre-Board name `projects`, and anything else that is not a section, is a provisional landing (source-sections spec, Fallback): nothing is marked
+    and no section is drawn until the projects answer, which settles it on the first drawn source row — Files here — rather than on a blank main area.
+  */
+  it('settles the legacy stored "projects" on the first drawn source, not on a blank main area', async () => {
+    // What every install that predates the Board name has in localStorage.
     storeSection('projects');
     render(<App />);
 
-    expect(markedTabs()[0]).toHaveTextContent('Board');
+    expect(markedTabs()).toHaveLength(0);
     expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(markedTabs()[0]).toHaveTextContent('Files');
+    expect(storedSection()).toBe('files');
   });
 
-  it('resolves a hand-edited garbage section onto Board', async () => {
+  it('settles a hand-edited garbage section the same way', async () => {
     storeSection('not-a-section');
     render(<App />);
 
-    expect(markedTabs()[0]).toHaveTextContent('Board');
     expect(await screen.findByText('board stub')).toBeInTheDocument();
+    expect(markedTabs()[0]).toHaveTextContent('Files');
   });
 
-  it('opens on Archive when landing pins it, with no flash of another section', async () => {
-    // Stored section is Board on purpose: if `landing` were ignored, or applied
-    // a render late, the board is what would paint first and this would catch it.
-    storeSection('board');
-    storeSettings({ landing: 'archive' });
+  it('opens on GitHub when landing pins it, with no flash of another section', async () => {
+    // Stored section is Files on purpose: if `landing` were ignored, or applied
+    // a render late, the Files board is what would paint first and this would catch it.
+    storeSection('files');
+    storeSettings({ landing: 'github' });
+    localStorage.setItem(GITHUB_PAGE_KEY, JSON.stringify('archive'));
     render(<App />);
 
     /*
       Synchronous, before the awaits below let the lazy chunk resolve. The rail
       is not lazy, so what it says here IS the first paint — and it already says
-      Archive, which is the whole claim: the landing override is resolved in the
+      GitHub, which is the whole claim: the landing override is resolved in the
       useState initializer, not in an effect that would repaint a frame later.
+      A real `github` pin is a section the reader chose, so it is held and drawn
+      before the projects answer, unlike a provisional guess.
     */
-    expect(markedTabs()[0]).toHaveTextContent('Archive');
+    expect(markedTabs()[0]).toHaveTextContent('GitHub');
     expect(screen.queryByText('board stub')).not.toBeInTheDocument();
 
     expect(await screen.findByText(ARCHIVE_MARK)).toBeInTheDocument();
@@ -204,19 +230,20 @@ describe('the section rail', () => {
   });
 
   it('keeps recording the last section under a landing pin, and finds it when the pin comes off', async () => {
-    storeSection('board');
-    storeSettings({ landing: 'archive' });
+    storeSection('files');
+    storeSettings({ landing: 'github' });
+    localStorage.setItem(GITHUB_PAGE_KEY, JSON.stringify('archive'));
     const pinned = render(<App />);
     expect(await screen.findByText(ARCHIVE_MARK)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await userEvent.click(row('Settings'));
     expect(await screen.findByText('settings stub')).toBeInTheDocument();
     // The switch wrote through even though `landing` was pinning the section —
     // `stored` records underneath the override rather than being frozen by it.
     expect(storedSection()).toBe('settings');
 
     // Reload with the pin taken off. 'last' has to find Settings, the section
-    // genuinely left last, and not Archive, the one the pin had it sitting on.
+    // genuinely left last, and not GitHub, the one the pin had it sitting on.
     pinned.unmount();
     storeSettings({ landing: 'last' });
     render(<App />);
@@ -227,35 +254,37 @@ describe('the section rail', () => {
 
   it('marks exactly one tab as the current page, and moves the mark on a switch', async () => {
     render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
 
-    expect(railTabs().map((t) => t.textContent)).toEqual(['Board', 'Runs', 'Archive', 'Settings']);
+    expect(railTabs().filter((t) => t.classList.contains('rail-link')).map((t) => t.textContent)).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
     expect(markedTabs()).toHaveLength(1);
-    expect(markedTabs()[0]).toHaveTextContent('Board');
+    expect(markedTabs()[0]).toHaveTextContent('Files');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Archive' }));
+    await userEvent.click(row('GitHub'));
+    await userEvent.click(within(screen.getByRole('group', { name: 'GitHub pages' })).getByRole('button', { name: 'Archive' }));
 
     expect(markedTabs()).toHaveLength(1);
-    expect(markedTabs()[0]).toHaveTextContent('Archive');
+    expect(markedTabs()[0]).toHaveTextContent('GitHub');
     expect(await screen.findByText(ARCHIVE_MARK)).toBeInTheDocument();
   });
 
   /*
     Its own test, separate from the order assertion folded into "marks
     exactly one tab" above, because that one's subject is the *mark* moving
-    and this one's subject is the *rail* itself — Board's companions first,
-    per the design spec, with Runs seated between Board and Archive rather
-    than after Settings where a careless append would have landed it.
+    and this one's subject is the *rail* itself — the sources first, then
+    Runs, then Settings (source-sections spec, "The rail after the change").
   */
-  it('shows four tabs in order: Board, Runs, Archive, Settings', () => {
+  it('shows four rows in order: Files, GitHub, Runs, Settings', async () => {
     render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
 
-    expect(railTabs().map((t) => t.textContent)).toEqual(['Board', 'Runs', 'Archive', 'Settings']);
+    expect(railTabs().filter((t) => t.classList.contains('rail-link')).map((t) => t.textContent)).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
   });
 
   it('clicking Runs renders the runs view', async () => {
     render(<App />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Runs' }));
+    await userEvent.click(row('Runs'));
 
     expect(markedTabs()[0]).toHaveTextContent('Runs');
     // Exact match, not a loose phrase like ARCHIVE_MARK: this is the shell's whole
@@ -282,8 +311,8 @@ describe('the section rail', () => {
     render(<App />);
     expect(await screen.findByText('board stub')).toBeInTheDocument();
 
-    for (const label of ['Board', 'Runs', 'Archive', 'Settings']) {
-      await userEvent.click(screen.getByRole('button', { name: label }));
+    for (const label of ['Files', 'GitHub', 'Runs', 'Settings']) {
+      await userEvent.click(row(label));
       expect(document.querySelector('.main > div')).toHaveClass('wrap', 'wide');
     }
   });
@@ -293,9 +322,9 @@ describe('the section rail', () => {
 
     // A button that only navigates must not announce a panel it does not hold.
     // Narrowing the board to one project is a board control, not a rail one.
-    for (const tab of railTabs()) expect(tab).not.toHaveAttribute('aria-expanded');
-    // Lets the lazy chunk land inside act() before the test ends.
+    // Awaited first, so the source rows the projects answer draws are among the tabs checked.
     expect(await screen.findByText('board stub')).toBeInTheDocument();
+    for (const tab of railTabs()) expect(tab).not.toHaveAttribute('aria-expanded');
   });
   /**
    * task-39 — Settings' watchdog card carries a `Live view` link to Runs ›
@@ -343,19 +372,33 @@ describe('the wordmark cursor', () => {
   });
 
   it('blinks on the Board’s report and stops the moment the section switches to Settings', async () => {
-    storeSection('board');
+    // GitHub, a real section: it is held and drawn while the projects answer is unknown, which this describe's fetch never gives. Only while it is the
+    // section on screen, though — so this case answers the registry, or the GitHub row would be gone once Settings is open and there is no way back.
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const beta = {
+        name: 'beta',
+        path: '/abs/beta',
+        createdAt: '2026-08-26T00:00:00.000Z',
+        missing: false,
+        counts: { bugs: 0, ideas: 0, tasks: 0, refactors: 0, 'out-of-scope': 0 },
+        source: 'github'
+      };
+      const body = String(input) === '/api/projects' ? [beta] : { runs: [], starting: [], remote: [], remoteStarting: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
+    }) as jest.Mock;
+    storeSection('github');
     render(<App />);
     expect(cursor()).not.toHaveClass('blink');
 
     await userEvent.click(await screen.findByRole('button', { name: 'report working' }));
     expect(cursor()).toHaveClass('blink');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await userEvent.click(row('Settings'));
     expect(await screen.findByText('settings stub')).toBeInTheDocument();
     expect(cursor()).not.toHaveClass('blink');
 
     // And coming back does not resurrect it: the Board that reported is gone, and the new one has said nothing yet.
-    await userEvent.click(screen.getByRole('button', { name: 'Board' }));
+    await userEvent.click(row('GitHub'));
     expect(await screen.findByText('board stub')).toBeInTheDocument();
     expect(cursor()).not.toHaveClass('blink');
   });
@@ -363,16 +406,16 @@ describe('the wordmark cursor', () => {
   /* A click on the section already open is not a section change: the view stays mounted, its report effect has no reason to run again, and a reset here
      would leave the cursor solid over a run that is still working until the next poll happened to change the answer. */
   it('keeps the report through a click on the section that is already open', async () => {
-    storeSection('board');
+    storeSection('github');
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'report working' }));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Board' }));
+    await userEvent.click(row('GitHub'));
     expect(cursor()).toHaveClass('blink');
   });
 
   it('leaves exactly one h1 in the document, named Backlog Manager', async () => {
-    storeSection('board');
+    storeSection('github');
     render(<App />);
     expect(await screen.findByText('board stub')).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
@@ -380,25 +423,22 @@ describe('the wordmark cursor', () => {
   });
 });
 
-describe('resolveSection', () => {
+describe('the section list', () => {
   it('passes every section the rail actually has straight through', () => {
-    // Runs sits between Board and Archive here too — this list is read
-    // straight off SideRail's TABS, so an out-of-order entry here would mean
-    // the rail itself drifted, not just this test. Jira (Jira phase 2) sits
-    // between Archive and Settings; whether the rail DRAWS it is the status's
-    // call, which test/jira-sections.test.tsx owns.
-    expect(SECTIONS).toEqual(['board', 'runs', 'archive', 'jira', 'settings']);
-    for (const s of SECTIONS) expect(resolveSection(s)).toBe(s);
+    // Sources first (Files, GitHub, Jira), then Runs, then Settings — Archive is no longer a root section (source-sections spec). Whether the rail DRAWS
+    // a source or Jira row is the projects answer's and the status's call, which test/source-sections.test.tsx and test/jira-sections.test.tsx own.
+    expect(SECTIONS).toEqual(['files', 'github', 'jira', 'runs', 'settings']);
+    for (const s of SECTIONS) expect(resolveLegacySection(s).section).toBe(s);
   });
 
-  it('maps the legacy name, and anything else that is not a section, onto Board', () => {
+  it('maps the legacy names, and anything else that is not a section, onto the provisional GitHub', () => {
     // 'Board' is in here for the case: the compare is exact, not case-folded.
-    const strays = ['projects', 'guides', 'Board', '', null, undefined, 7, { section: 'archive' }];
-    for (const raw of strays) expect(resolveSection(raw)).toBe('board');
+    const strays = ['projects', 'guides', 'Board', '', null, undefined, 7, { section: 'archive' }, 'board', 'archive'];
+    for (const raw of strays) expect(resolveLegacySection(raw)).toMatchObject({ section: 'github', provisional: true });
   });
 
   /*
-    Not exercised by the loop above: that one calls `resolveSection`, not
+    Not exercised by the loop above: that one calls `resolveLegacySection`, not
     `clampSettings`, and the two guard different things — a stored *section*
     versus a stored *landing preference*. This is the "settings' LANDINGS
     all derive from it too" half of SideRail's own comment on SECTIONS: the

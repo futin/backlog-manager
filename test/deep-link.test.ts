@@ -12,19 +12,22 @@ describe('readDeepLink', () => {
   });
 
   it('reads a section alone', () => {
-    expect(readDeepLink('?section=archive')).toEqual({ section: 'archive', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=github')).toEqual({ section: 'github', runsMode: null, settingsScope: null });
     expect(readDeepLink('?section=runs')).toEqual({ section: 'runs', runsMode: null, settingsScope: null });
   });
 
   it('is empty without a search, or with an unknown section', () => {
     expect(readDeepLink('')).toEqual({ section: null, runsMode: null, settingsScope: null });
     expect(readDeepLink('?section=projects')).toEqual({ section: null, runsMode: null, settingsScope: null });
+    // The root sections the source rows replaced: an old link opens the app the way a plain load does (source-sections spec).
+    expect(readDeepLink('?section=board')).toEqual({ section: null, runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=archive')).toEqual({ section: null, runsMode: null, settingsScope: null });
     expect(readDeepLink('?other=1')).toEqual({ section: null, runsMode: null, settingsScope: null });
   });
 
   it('takes a Runs page only with the Runs section, and never the internal name of History', () => {
     expect(readDeepLink('?runs=watchdog')).toEqual({ section: null, runsMode: null, settingsScope: null });
-    expect(readDeepLink('?section=board&runs=watchdog')).toEqual({ section: 'board', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=files&runs=watchdog')).toEqual({ section: 'files', runsMode: null, settingsScope: null });
     expect(readDeepLink('?section=runs&runs=runs')).toEqual({ section: 'runs', runsMode: null, settingsScope: null });
   });
 });
@@ -39,7 +42,7 @@ describe('the Settings page', () => {
   it('ignores `machines`, a name the page never had, and a Dashboards scope beside no Settings section', () => {
     expect(readDeepLink('?section=settings&settings=machines')).toEqual({ section: 'settings', runsMode: null, settingsScope: null });
     expect(readDeepLink('?settings=dashboards')).toEqual({ section: null, runsMode: null, settingsScope: null });
-    expect(readDeepLink('?section=board&settings=dashboards')).toEqual({ section: 'board', runsMode: null, settingsScope: null });
+    expect(readDeepLink('?section=files&settings=dashboards')).toEqual({ section: 'files', runsMode: null, settingsScope: null });
   });
 
   it('ignores a scope beside any other section, or beside none', () => {

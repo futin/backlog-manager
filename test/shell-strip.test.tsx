@@ -118,6 +118,9 @@ describe('the shell strip', () => {
   it('keeps the strip in the tree when there is no tracker', async () => {
     installMatchMedia(false);
     stubFetch(healthy([row({ source: 'files', repo: null, polledAt: null })]));
+    // A real stored section, held while the projects answer is unknown (this fetch gives no array): no stored key would be a provisional landing, drawn as
+    // the loading shape until an answer settles it, and the board stub is this case's sign that the shell has painted.
+    localStorage.setItem('backlog-manager.section', JSON.stringify('github'));
     render(<App />);
     await screen.findByText('board stub');
     await act(async () => {

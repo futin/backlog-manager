@@ -17,21 +17,21 @@
  * label, which is the same guarantee the old derivation gave from the other
  * direction.
  *
- * "Board" rather than the "Projects" this tab shipped as, and rather than
- * "Tasks": a nav entry names a place, not a type, and the place holds bugs,
- * ideas and refactors alongside tasks. Narrowing to one project is a board
- * control and lives in the board toolbar, which is what made "Projects" the
- * wrong word for a section switch in the first place.
+ * The order is rail order, and the rail renders in it.
  *
- * The order is rail order, and the rail renders in it: Board's companions
- * first, with Runs seated between Board and Archive rather than after Settings
- * where a careless append would land it.
+ * `files` and `github` (source-sections spec) replaced the root `board` and `archive` rows: Board and Archive are now PAGES under each source row, because a
+ * board that mixed a files project's cards with a GitHub project's issues gave the two different write paths, different freshness and different controls
+ * one undifferentiated surface, and the source a card came from was the first thing a reader had to work out. A source row is a member here
+ * unconditionally, although the rail draws it only while the shell's projects answer says that source owns a project — the same split `jira` has, for the
+ * same reason: the stored section is read in a `useState` initializer, before any answer exists. The conditional half is the shell's (`App`'s settle and
+ * hold-and-fall, `SideRail`'s row). A stored `board`/`archive` from before this change is no longer a section; `resolveLegacySection`
+ * (`lib/source-page.ts`) is the one place that reads it.
  *
- * `jira` (Jira phase 2, spec §6.1) sits between Archive and Settings for the same reason: it is about the work, and Settings — under its rule — is about the
- * board. It is a member here unconditionally, although the rail draws its row only while `GET /api/jira` says `configured: true`: `resolveSection` runs in a
- * `useState` initializer, before that answer exists, and a stored `jira` it refused would throw away the section a reader left on a configured machine. The
- * conditional half is the shell's — `App`'s hold-and-fall and `SideRail`'s row — never this list's.
+ * `jira` (Jira phase 2, spec §6.1) sits between the sources and Runs: it is about the work, and Settings — under its rule — is about the board. It is a
+ * member here unconditionally, although the rail draws its row only while `GET /api/jira` says `configured: true`: the stored section is read in a
+ * `useState` initializer, before that answer exists, and a stored `jira` it refused would throw away the section a reader left on a configured machine.
+ * The conditional half is the shell's — `App`'s hold-and-fall and `SideRail`'s row — never this list's.
  */
-export const SECTIONS = ['board', 'runs', 'archive', 'jira', 'settings'] as const;
+export const SECTIONS = ['files', 'github', 'jira', 'runs', 'settings'] as const;
 
 export type Section = (typeof SECTIONS)[number];

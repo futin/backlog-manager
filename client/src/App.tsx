@@ -6,13 +6,17 @@ import { ReleasesDrawer } from './components/ReleasesDrawer';
 import { SideRail } from './components/SideRail';
 import { JiraChip } from './components/JiraChip';
 import { TrackerChip } from './components/TrackerChip';
-import { SECTIONS, type Section } from './lib/sections';
+import type { Section } from './lib/sections';
+import { FALLBACK_SECTION, resolveLegacySection } from './lib/source-page';
+import { firstDrawn, settleSection } from './lib/sources';
+import { SETTINGS_STORAGE_KEY } from './lib/settings';
 import { readDeepLink, withoutDeepLink } from './lib/deep-link';
 import type { JiraPage } from './lib/jira-page';
 import { JiraProvider, useJiraContext } from './hooks/JiraContext';
 import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
-import { ProjectsProvider } from './hooks/ProjectsContext';
+import { ProjectsProvider, useProjectsContext } from './hooks/ProjectsContext';
+import { setFilesPage, setGithubPage, useFilesPage, useGithubPage } from './hooks/useSourcePage';
 import { TrackersProvider } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
@@ -25,9 +29,10 @@ const RunsView = lazy(() => import('./components/runs/RunsView'));
 const ArchiveView = lazy(() => import('./components/archive/ArchiveView'));
 const JiraView = lazy(() => import('./components/jira/JiraView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
+const GithubSettingsView = lazy(() => import('./components/github/GithubSettingsView'));
 
-/** Where an unrecognised section name lands. See `resolveSection`. */
-const FALLBACK_SECTION: Section = 'board';
+/** The stored section's key. Read raw once, in the shell's initializer, as well as through `usePersistedState` — see `readRaw`. */
+const SECTION_KEY = 'backlog-manager.section';
 
 /**
  * The What's new drawer's last-seen key in `localStorage` — this board's since the chip shipped, and handed to ui-kit's `useWhatsNew` rather than replaced by
@@ -36,31 +41,23 @@ const FALLBACK_SECTION: Section = 'board';
 export const RELEASES_LAST_SEEN_KEY = 'backlog-manager.releases-last-seen';
 
 /**
- * Coerce a section name that came from outside this build into one the rail
- * actually has.
- *
- * Both of its inputs are untrusted in the same way: the stored
- * `backlog-manager.section` key and the `landing` preference are strings this
- * build reads back out of a localStorage some *other* build wrote. The name
- * that matters right now is `'projects'` — what the Board tab was called
- * before the rail grew Archive, and therefore what sits in the section key of
- * every install that existed before this change. Mapping it onto Board rather
- * than dropping it is the whole reason this function exists: an upgrade must
- * not open on a blank main area.
- *
- * Anything else unrecognised lands on Board too — a value typed into
- * localStorage by hand, or a section some later release removes. There is no
- * safe "leave it alone" branch here: `main` renders exactly one of the three
- * sections, so a name outside them renders nothing at all, and Board is the
- * section this app is for.
- *
- * This replaces `section === 'settings' ? 'settings' : 'projects'`, which was
- * a two-way clamp and could not express a third section — left in place it
- * would have collapsed Archive to Board on every render, making the new tab
- * look wired up and do nothing.
+ * A stored value exactly as some build wrote it, or `undefined` when the key is absent or unreadable. The initializer needs the difference `usePersistedState`
+ * hides: that hook answers an absent key with its fallback, and an absent key is a PROVISIONAL landing (nothing was chosen) where a stored `github` is not.
+ * The same is true of the `landing` pin, which `clampSettings` has already mapped from a legacy `board`/`archive` to `github` by the time `useSettings`
+ * hands it over — so a real `github` pin and a legacy one are told apart only here, on the raw blob.
  */
-export function resolveSection(raw: unknown): Section {
-  return SECTIONS.includes(raw as Section) ? (raw as Section) : FALLBACK_SECTION;
+function readRaw(key: string): unknown {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as unknown) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a section is one of the two source rows, the only sections whose row the projects answer decides. */
+function isSourceSection(s: Section): s is 'files' | 'github' {
+  return s === 'files' || s === 'github';
 }
 
 export function App() {
@@ -93,7 +90,7 @@ function AppShell() {
   const { settings, update } = useSettings();
   // Remembered across loads: reopening on the section you left is what you want
   // from a board you come back to.
-  const [stored, setStored] = usePersistedState<Section>('backlog-manager.section', FALLBACK_SECTION);
+  const [, setStored] = usePersistedState<Section>(SECTION_KEY, FALLBACK_SECTION);
   /*
     A `landing` other than 'last' pins the opening section. Resolved once, in the
     initializer, so there is no flash of the previously-open section — and only
@@ -101,11 +98,13 @@ function AppShell() {
     change underneath, so switching the setting back to 'last' finds a real last
     section rather than whatever was current when the override was turned on.
 
-    `resolveSection` wraps both arms rather than just the stored one. `landing`
-    is clamped by `clampSettings` already, so in practice it arrives valid — but
-    running one guard over whichever value wins is what makes "the section this
-    renders is always a real section" true by construction here, instead of true
-    only as long as two files keep agreeing about it.
+    `resolveLegacySection` (`lib/source-page.ts`) wraps both arms rather than just
+    the stored one, and reads each RAW (`readRaw`): a legacy `board`/`archive`, an
+    unrecognised value and an absent key all land on the constant fallback,
+    GitHub, as a PROVISIONAL section the projects answer settles below, while a
+    real section — stored, or pinned — is held like any other. A pin falls back
+    to its clamped value when the raw blob cannot be read: that is still a real
+    section, just never a provisional one.
   */
   /*
     A deep link (`lib/deep-link.ts`, Lookout's Orchestrator tile) beats both, and is read once, here, for the same no-flash reason. Its Runs page is written
@@ -117,7 +116,27 @@ function AppShell() {
     if (read.runsMode !== null) setRunsMode(read.runsMode);
     return read;
   });
-  const [section, setSection] = useState<Section>(() => link.section ?? resolveSection(settings.landing === 'last' ? stored : settings.landing));
+  /*
+    `pending` is the provisional landing, or `null` once there is none: the page a legacy `board`/`archive` meant, or `null` inside for a landing that
+    named no page. It is written into BOTH page stores here, before either source page mounts, so whichever source the section settles on opens on it —
+    StrictMode's second run of the initializer writes the same values again. Held in state rather than derived, because what clears it is an event (the
+    first projects answer, or the reader picking a section), not a value.
+  */
+  const [initial] = useState(() => {
+    if (link.section !== null) return { section: link.section, pending: null };
+    const raw =
+      settings.landing === 'last' ? readRaw(SECTION_KEY) : ((readRaw(SETTINGS_STORAGE_KEY) as { landing?: unknown } | undefined)?.landing ?? settings.landing);
+    const r = resolveLegacySection(raw);
+    if (r.page !== null) {
+      setFilesPage(r.page);
+      setGithubPage(r.page);
+    }
+    return { section: r.section, pending: r.provisional ? { page: r.page } : null };
+  });
+  const [section, setSection] = useState<Section>(initial.section);
+  const [pending, setPending] = useState<{ page: 'board' | 'archive' | null } | null>(initial.pending);
+  const [filesPage] = useFilesPage();
+  const [githubPage] = useGithubPage();
   /*
     A deep link's Settings page (`&settings=shared`) goes through `update({ settingsScope })`, the setter the rail's scope switch calls — never an in-page control.
     It cannot sit in the initializer above as the Runs page does: `update` is a state setter on the provider, and calling one while this component renders is a
@@ -150,25 +169,66 @@ function AppShell() {
     pending, React flushes it after the click's own update is queued, and the old view's `true` lands on top of the reset. Tagged, it lands and is
     ignored.
   */
-  const [pulse, setPulse] = useState<{ section: Section; working: boolean } | null>(null);
-  const working = pulse !== null && pulse.section === section ? pulse.working : undefined;
-  // One stable callback per reporting section: the views' report effect lists `onWorking` as a dependency, and an inline arrow would re-run it on
+  /*
+    Since the source rows a report is tagged by VIEW — the section, and for a source section its page — not by section alone: GitHub › Board and
+    GitHub › Archive are one section now, and a pick in the GitHub tree swaps the view without a section change, so `change` has no reset to make there.
+    The tag is what keeps the Board's last `true` from standing over the Archive that replaced it.
+  */
+  const view = section === 'files' ? `files:${filesPage}` : section === 'github' ? `github:${githubPage}` : section;
+  const [pulse, setPulse] = useState<{ view: string; working: boolean } | null>(null);
+  const working = pulse !== null && pulse.view === view ? pulse.working : undefined;
+  // One stable callback per reporting view: the views' report effect lists `onWorking` as a dependency, and an inline arrow would re-run it on
   // every render of this shell.
   const report = useMemo(() => {
-    const reportFor = (from: Section) => (w: boolean) => setPulse({ section: from, working: w });
-    return { board: reportFor('board'), runs: reportFor('runs'), archive: reportFor('archive') };
+    const reportFor = (from: string) => (w: boolean) => setPulse({ view: from, working: w });
+    return {
+      filesBoard: reportFor('files:board'),
+      filesArchive: reportFor('files:archive'),
+      githubBoard: reportFor('github:board'),
+      githubArchive: reportFor('github:archive'),
+      runs: reportFor('runs')
+    };
   }, []);
 
+  // A section the reader (or a link, or the shell's own fall) moved to is never provisional: clearing `pending` here is what keeps a click made before the
+  // first projects answer from being yanked back to wherever the settle below would have put the guess.
   const change = (s: Section): void => {
     if (s !== section) setPulse(null);
     setSection(s);
     setStored(s);
+    setPending(null);
   };
+
+  /*
+    The source sections' settle and hold-and-fall (source-sections spec, Fallback). Nothing moves while the projects answer is unknown (`drawn` null: not
+    answered yet, or every read so far failed) — a guess stays a guess, drawn as the loading shape below, and a section the reader chose is held, its row
+    drawn by the rail's own hold. Once an answer exists:
+
+    - a PROVISIONAL landing settles, once, through `change`, so the section key records where it landed. One that named a page (a legacy `board`/`archive`)
+      goes to GitHub when this machine has a GitHub project and to the first drawn source otherwise (`settleSection`), opening the page the initializer
+      already wrote into both stores; one that named nothing (no key, an unrecognised value, the Jira fall below while unknown) goes to the first drawn
+      row, Files before GitHub (`firstDrawn`) — the rail's own order, since nobody chose GitHub. Neither has a project? Runs, the section that needs none.
+    - a source section whose row the answer no longer draws falls the same way, to the first drawn row: a GitHub repo disconnected on another machine, the
+      last files project unregistered. Keyed on the state, like the Jira fall, so a focus reload that drops the row is the same case as a first answer that
+      never had it.
+
+    `change` is left out of the dependencies for the Jira fall's reason: a fresh closure every render, reading the values listed.
+  */
+  const drawn = useProjectsContext().drawn;
+  useEffect(() => {
+    if (drawn === null) return;
+    if (pending !== null) {
+      change(pending.page === null ? firstDrawn(drawn) : settleSection(section, drawn));
+      return;
+    }
+    if (isSourceSection(section) && !drawn[section]) change(firstDrawn(drawn));
+  }, [drawn, section, pending]);
 
   /*
     The Jira section's hold-and-fall (Jira phase 2, spec §6.1). `resolveSection` takes a stored `jira` like any section — it runs in the initializer above,
     long before `GET /api/jira` has answered — so whether Jira is really there is decided here, on the status, and only one answer decides it: an answer
-    that says `configured: false` while Jira is the section moves the shell to Board, through `change`, so the section key records `board` too. Nothing
+    that says `configured: false` while Jira is the section moves the shell to the first drawn source row (Runs when there is none; the provisional
+    GitHub, settled by the effect above, while the projects answer is unknown), through `change`, so the section key records it too. Nothing
     else moves it. While the status is unknown (not answered yet, or every read so far failed: `data` null) the section is HELD, drawn in `JiraView`'s
     loading or unavailable shape, and the rail keeps its row — a network blip at load must not throw away the section a reader left on a configured
     machine (Review Focus 5). A failure after a `configured: true` keeps that answer (`useJira` keeps the last payload), so it holds as well.
@@ -183,7 +243,14 @@ function AppShell() {
   */
   const jiraConfigured = useJiraContext().data?.configured;
   useEffect(() => {
-    if (jiraConfigured === false && section === 'jira') change('board');
+    if (jiraConfigured !== false || section !== 'jira') return;
+    if (drawn !== null) {
+      change(firstDrawn(drawn));
+      return;
+    }
+    // No projects answer yet: land on the provisional fallback, exactly as an absent stored section would, and let the settle above correct it.
+    change(FALLBACK_SECTION);
+    setPending({ page: null });
   }, [jiraConfigured, section]);
 
   /*
@@ -232,7 +299,14 @@ function AppShell() {
   */
   return (
     <div className="shell">
-      <SideRail section={section} onChange={change} chipSlot={narrow ? chip : undefined} working={working} releases={releaseChip} />
+      <SideRail
+        section={section}
+        onChange={change}
+        chipSlot={narrow ? chip : undefined}
+        working={working}
+        releases={releaseChip}
+        provisional={pending !== null}
+      />
       {whatsNew.open && whatsNew.data && <ReleasesDrawer data={whatsNew.data} onClose={whatsNew.close} />}
       {/* The strip over the well (§8.0). `.maincol` is the rail's paper, so the rail and the strip are one white L and the well's 24 px top-left
           curve is drawn against white — it was grey on grey while `.main` made its own gap with a margin, because `body` is --board and stays so.
@@ -251,8 +325,10 @@ function AppShell() {
             `contentWidth: 'full'`, which is a stylesheet rule keyed off
             `<html>` and nothing this expression has to know about. */}
           <div className="wrap wide">
-            {/* Keyed by section so a switch clears one section's failure rather than carrying it onto the next (#270, `SectionBoundary`). */}
-            <SectionBoundary key={section}>
+            {/* Keyed by view — section, and a source section's page — so a switch clears one page's failure rather than carrying it onto the next (#270,
+                `SectionBoundary`). By section alone, GitHub › Board's crash would follow the reader to GitHub › Archive, which was a section of its own
+                before the source rows and so never shared a boundary with it. */}
+            <SectionBoundary key={view}>
               <Suspense fallback={<SectionLoading />}>
                 {/* The board's run chip (DESIGN.md §8.3) navigates, and this is
                   the setter it navigates with — the same `change` the rail's own
@@ -260,9 +336,19 @@ function AppShell() {
                   two cannot come to disagree about what opening Runs does (and
                   so the chip's click is recorded in `backlog-manager.section`
                   exactly as the rail's is). */}
-                {section === 'board' && <BoardView onOpenRuns={() => change('runs')} onWorking={report.board} />}
+                {/* A provisional landing paints nothing the projects answer could take back: the section's loading shape until it settles. */}
+                {pending !== null && drawn === null ? (
+                  <SectionLoading />
+                ) : (
+                  <>
+                    {section === 'files' && filesPage === 'board' && <BoardView onOpenRuns={() => change('runs')} onWorking={report.filesBoard} />}
+                    {section === 'files' && filesPage === 'archive' && <ArchiveView onWorking={report.filesArchive} />}
+                    {section === 'github' && githubPage === 'board' && <BoardView onOpenRuns={() => change('runs')} onWorking={report.githubBoard} />}
+                    {section === 'github' && githubPage === 'archive' && <ArchiveView onWorking={report.githubArchive} />}
+                    {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
+                  </>
+                )}
                 {section === 'runs' && <RunsView onWorking={report.runs} />}
-                {section === 'archive' && <ArchiveView onWorking={report.archive} />}
                 {section === 'jira' && <JiraView onOpenJiraPage={onOpenJiraPage} />}
                 {/* Settings' watchdog card carries a `Live view` link to Runs ›
                   Watchdog (DESIGN.md §8.6), and this is what it opens with — the

@@ -3,12 +3,15 @@ import { VersionChip } from 'ui-kit';
 
 import { useJiraContext } from '../hooks/JiraContext';
 import { useJiraPage } from '../hooks/useJiraPage';
+import { useProjectsContext } from '../hooks/ProjectsContext';
+import { useFilesPage, useGithubPage } from '../hooks/useSourcePage';
 import { useNarrow } from '../hooks/useNarrow';
 import { useRunsMode } from '../hooks/useRunsMode';
 import { useSettings } from '../hooks/useSettings';
 import { JIRA_PAGES, type JiraPage } from '../lib/jira-page';
 import { RUNS_MODES, type RunsMode } from '../lib/runs-mode';
 import { SECTIONS, type Section } from '../lib/sections';
+import { FILES_PAGES, GITHUB_PAGES, type FilesPage, type GithubPage } from '../lib/source-page';
 import { SETTINGS_SCOPES, type SettingsScope } from '../lib/settings';
 
 /**
@@ -23,10 +26,10 @@ import { SETTINGS_SCOPES, type SettingsScope } from '../lib/settings';
  * `lib/sections.ts` for why the halves parted.
  */
 const RAIL_LABEL: Record<Section, string> = {
-  board: 'Board',
-  runs: 'Runs',
-  archive: 'Archive',
+  files: 'Files',
+  github: 'GitHub',
   jira: 'Jira',
+  runs: 'Runs',
   settings: 'Settings'
 };
 
@@ -59,12 +62,21 @@ interface Props {
    * `position: fixed` panel, and the phone rail hides with a transform). Absent, no chip: the checkout has no version, or the read has not answered.
    */
   releases?: { label: string; dot: boolean; onOpen: () => void };
+  /**
+   * Whether `section` is the shell's GUESS rather than a section the reader chose (source-sections spec, Fallback): a legacy `board`/`archive`, an
+   * unrecognised stored value, or no stored value at all, all landing on GitHub before the projects answer exists. `App` owns it and clears it when it
+   * settles. Required rather than defaulted, because it changes what an unknown answer draws: a held section the reader chose keeps its row, a guess draws
+   * none — a GitHub row that appeared on a guess and vanished on the answer would be the rail flickering on every load of a files-only machine.
+   */
+  provisional: boolean;
 }
 
 /**
- * Top-level section switch: board · runs · archive · jira · settings (jira only
- * while the site is configured — see `drawn` below), and — for each section
- * that has sub-views — the tree under it.
+ * Top-level section switch: files · github · jira · runs · settings (each source
+ * row only while a registered project has that source, jira only while the
+ * site is configured — see `drawn` below), and — for each section that has
+ * sub-views — the tree under it. Board and Archive are pages under each source
+ * row since the source-sections change, never rows of their own.
  *
  * .claude/DESIGN.md §8.0 is the whole specification of this component: the
  * dashboard's own rail — 240 px, 24 px padding, 36 px rows 4 px apart at 14/500
@@ -82,7 +94,7 @@ interface Props {
  * belongs beside the board, in the board toolbar, not in the switch that
  * decides which section is showing.
  */
-export function SideRail({ section, onChange, chipSlot, working, releases }: Props) {
+export function SideRail({ section, onChange, chipSlot, working, releases, provisional }: Props) {
   const narrow = useNarrow();
   const [menuOpen, setMenuOpen] = useState(false);
   const hidden = useRailHidden(narrow, menuOpen);
@@ -113,7 +125,22 @@ export function SideRail({ section, onChange, chipSlot, working, releases }: Pro
     a row that appeared on a guess and vanished on the answer would be the rail flickering on every load of an unconfigured machine.
   */
   const jira = useJiraContext().data;
-  const drawn = (id: Section): boolean => id !== 'jira' || jira?.configured === true || (jira === null && section === 'jira');
+  /*
+    The two source rows (source-sections spec) follow the Jira row's rule over the shell's projects answer: drawn while a registered project has that
+    source, and — while the answer is unknown (`drawn` null: not answered yet, or every read so far failed) — only for the section on screen, which is the
+    shell's hold. One more condition the Jira row has no need of: not while that section is `provisional`. A provisional GitHub is the shell's guess for a
+    legacy or absent stored value, not a section anybody chose; drawing its row on the guess would show a GitHub row on a files-only machine for as long
+    as the first read takes, and take it back on the answer. Read from the context directly rather than threaded through `App`, as `useJiraContext` is.
+  */
+  const sources = useProjectsContext().drawn;
+  const drawn = (id: Section): boolean => {
+    if (id === 'jira') return jira?.configured === true || (jira === null && section === 'jira');
+    if (id === 'files' || id === 'github') return sources?.[id] === true || (sources === null && section === id && !provisional);
+    return true;
+  };
+  // Each source's page — `useJiraPage`'s module store, for its reason: this tree and the shell (which settles a legacy landing onto a page) both write it.
+  const [filesPage, setFilesPage] = useFilesPage();
+  const [githubPage, setGithubPage] = useGithubPage();
 
   /*
     The wordmark (§8.0): a `BACKLOG` kicker over `› manager▌`, a terminal prompt in the one UI face — the dashboard's own, so the two neighbouring tabs
@@ -169,6 +196,32 @@ export function SideRail({ section, onChange, chipSlot, working, releases }: Pro
               <RailIcon section={id} />
               {RAIL_LABEL[id]}
             </button>
+            {id === 'files' && treeOpen('files') && (
+              <RailTree
+                label="Files pages"
+                section="files"
+                current={section}
+                items={FILES_PAGES}
+                value={filesPage}
+                labelFor={(p) => RAIL_SOURCE_LABEL[p]}
+                onPick={setFilesPage}
+                onChange={onChange}
+                closeMenu={() => setMenuOpen(false)}
+              />
+            )}
+            {id === 'github' && treeOpen('github') && (
+              <RailTree
+                label="GitHub pages"
+                section="github"
+                current={section}
+                items={GITHUB_PAGES}
+                value={githubPage}
+                labelFor={(p) => RAIL_SOURCE_LABEL[p]}
+                onPick={setGithubPage}
+                onChange={onChange}
+                closeMenu={() => setMenuOpen(false)}
+              />
+            )}
             {id === 'runs' && treeOpen('runs') && (
               <RailTree
                 label="Runs views"
@@ -402,19 +455,39 @@ const RAIL_SCOPE_LABEL: Record<SettingsScope, string> = {
  * draws a switch of its own at any width. `Open board` on Setup and the empty board's chip to Setup are this tree's own navigation handed down through
  * `App` (`onOpenJiraPage`), not second controls with wording of their own to keep in step.
  *
- * `Board` repeats the top-level Board row's word on purpose: under the `Jira` row it reads as Jira's board, and the page it opens is a board — three
- * columns of cards — in the same sense the section above it is.
+ * `Board` repeats the source trees' word on purpose: under the `Jira` row it reads as Jira's board, and the page it opens is a board — three columns of
+ * cards — in the same sense Files › Board and GitHub › Board are.
  */
 const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
   board: 'Board',
   setup: 'Setup'
 };
 
+/**
+ * Both source trees' labels (source-sections spec), one map because the two trees name the same pages the same way — Board and Archive are the views the
+ * root rows of those names used to open, now one per source, and GitHub's Settings is the tracker settings that lived on Shared Settings. `RAIL_SUB_LABEL`'s
+ * rule: these are the only labels the pages have, because no source page draws a switch of its own.
+ */
+const RAIL_SOURCE_LABEL: Record<FilesPage | GithubPage, string> = {
+  board: 'Board',
+  archive: 'Archive',
+  settings: 'Settings'
+};
+
 const ICON_PATHS: Record<Section, ReactNode> = {
-  // Three columns — the board's own shape.
-  board: (
+  // Three columns — the board's own shape, which was the root Board row's icon: Files is where a plain backlog's board lives now.
+  files: (
     <>
       <path d="M2.5 2.5h3v11h-3zM6.5 2.5h3v7h-3zM10.5 2.5h3v11h-3z" />
+    </>
+  ),
+  // A branch — two commits on one line and a third forked off it: what a git host deals in, drawn as a shape rather than any product's mark.
+  github: (
+    <>
+      <circle cx="5" cy="3.75" r="1.5" />
+      <circle cx="5" cy="12.25" r="1.5" />
+      <circle cx="11" cy="5.5" r="1.5" />
+      <path d="M5 5.25v5.5M11 7c0 2.5-6 2-6 3.75" />
     </>
   ),
   // A play triangle inside a circle: a run is something that is going.
@@ -422,13 +495,6 @@ const ICON_PATHS: Record<Section, ReactNode> = {
     <>
       <circle cx="8" cy="8" r="5.75" />
       <path d="M6.75 5.75 10.5 8l-3.75 2.25z" />
-    </>
-  ),
-  // A lidded box.
-  archive: (
-    <>
-      <path d="M2 4.5h12v2.5H2zM3 7v6.5h10V7" />
-      <path d="M6.5 9.5h3" />
     </>
   ),
   // A ticket — a notched stub and a tear line: the unit an issue tracker deals in, drawn as a shape rather than any product's mark.

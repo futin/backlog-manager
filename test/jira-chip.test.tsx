@@ -66,7 +66,7 @@ function wrap(data: JiraStatusPayload | null, section: Section) {
   );
 }
 
-function renderChip(data: JiraStatusPayload | null, section: Section = 'board') {
+function renderChip(data: JiraStatusPayload | null, section: Section = 'github') {
   const utils = render(wrap(data, section));
   return { ...utils, update: (next: JiraStatusPayload | null, nextSection: Section = section) => utils.rerender(wrap(next, nextSection)) };
 }
@@ -236,6 +236,8 @@ describe('the Jira chip’s homes', () => {
   it('draws no chip anywhere while unconfigured', async () => {
     installMatchMedia(false);
     stubFetch(status({ configured: false, site: null, me: null, access: 'unconfigured', boards: [], home: null }));
+    // A real stored section, held while the projects answer is unknown (this fetch gives no array) — no stored key would paint the loading shape instead.
+    localStorage.setItem('backlog-manager.section', JSON.stringify('github'));
     render(<App />);
     await screen.findByText('board stub');
     await act(async () => {

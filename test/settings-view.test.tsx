@@ -14,6 +14,8 @@ import SettingsView, { SWATCHES } from '../client/src/components/settings/Settin
 import { SettingsProvider } from '../client/src/hooks/useSettings';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { JiraContext } from '../client/src/hooks/JiraContext';
+import { ProjectsContext } from '../client/src/hooks/ProjectsContext';
+import type { DrawnSources } from '../client/src/lib/sources';
 import type { JiraState } from '../client/src/hooks/useJira';
 import { SETTINGS_STORAGE_KEY, type SettingsScope } from '../client/src/lib/settings';
 import type { AgentsStatus, JiraSkill, JiraStatusPayload } from '../shared/types';
@@ -227,21 +229,53 @@ describe('SettingsView', () => {
     expect(document.documentElement.dataset.width).toBe('full');
   });
 
-  it('offers every rail section as a landing choice, plus Last used', async () => {
-    renderView();
-    const picker = screen.getByLabelText('Opens on');
-    expect(
-      within(picker)
-        .getAllByRole('option')
-        .map((o) => o.textContent)
-    ).toEqual(['Last used', 'Board', 'Runs', 'Archive', 'Settings']);
+  /*
+    The source options follow the rail (source-sections spec): `Files` and `GitHub` are offered while their row is drawn — the shell's projects answer,
+    supplied here straight through `ProjectsContext` — withheld while it is unknown, and a stored pin keeps its own option, Jira's rule.
+  */
+  function renderWithSources(drawn: DrawnSources | null) {
+    render(
+      <SettingsProvider>
+        <TrackersProvider>
+          <ProjectsContext.Provider value={{ data: null, drawn, reload: () => {} }}>
+            <SettingsView />
+          </ProjectsContext.Provider>
+        </TrackersProvider>
+      </SettingsProvider>
+    );
+  }
+  const landingOptions = (): (string | null)[] =>
+    within(screen.getByLabelText('Opens on'))
+      .getAllByRole('option')
+      .map((o) => o.textContent);
 
-    // Archive rather than Board, because Board is what an unrecognised value
+  it('offers every rail section as a landing choice, plus Last used', async () => {
+    renderWithSources({ files: true, github: true });
+    expect(landingOptions()).toEqual(['Last used', 'Files', 'GitHub', 'Runs', 'Settings']);
+
+    // Files rather than GitHub, because GitHub is what an unrecognised section
     // resolves to anyway — picking it could pass on a picker that stored
     // nothing at all.
-    await userEvent.selectOptions(picker, 'archive');
+    await userEvent.selectOptions(screen.getByLabelText('Opens on'), 'files');
     const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) ?? '{}');
-    expect(stored.landing).toBe('archive');
+    expect(stored.landing).toBe('files');
+  });
+
+  it('offers only the sources whose row is drawn, and none while the answer is unknown', () => {
+    renderWithSources({ files: true, github: false });
+    expect(landingOptions()).toContain('Files');
+    expect(landingOptions()).not.toContain('GitHub');
+    cleanup();
+
+    renderWithSources(null);
+    expect(landingOptions()).toEqual(['Last used', 'Runs', 'Settings']);
+  });
+
+  it('keeps a stored github pin its GitHub option on a machine with no github project', () => {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ landing: 'github' }));
+    renderWithSources({ files: true, github: false });
+    expect(landingOptions()).toEqual(['Last used', 'Files', 'GitHub', 'Runs', 'Settings']);
+    expect(screen.getByLabelText('Opens on')).toHaveValue('github');
   });
 
   /*

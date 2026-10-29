@@ -12,6 +12,8 @@ import { TimeZoneGroup } from './TimeZoneGroup';
 import { TrackersGroup } from './TrackersGroup';
 import { WatchdogGroup } from './WatchdogGroup';
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useProjectsContext } from '../../hooks/ProjectsContext';
+import type { DrawnSources } from '../../lib/sources';
 import { useSettings } from '../../hooks/useSettings';
 import { EXECUTE_FINISH_OPTIONS } from '../../lib/agents';
 import { jiraSettingOf, resolveJiraAction } from '../../lib/jira';
@@ -71,10 +73,10 @@ const CONTENT_WIDTH_OPTIONS = [
  */
 const LANDINGS: { value: Landing; label: string }[] = [
   { value: 'last', label: 'Last used' },
-  { value: 'board', label: 'Board' },
-  { value: 'runs', label: 'Runs' },
-  { value: 'archive', label: 'Archive' },
+  { value: 'files', label: 'Files' },
+  { value: 'github', label: 'GitHub' },
   { value: 'jira', label: 'Jira' },
+  { value: 'runs', label: 'Runs' },
   { value: 'settings', label: 'Settings' }
 ];
 
@@ -86,9 +88,17 @@ const LANDINGS: { value: Landing; label: string }[] = [
  * One exception, and it is not an offer: a STORED `jira` landing keeps its option on an unconfigured machine. A native select whose value matches no option
  * renders blank (the reason `lib/settings.ts` clamps the dispatch defaults rather than keeping an unknown name), so the row would hide the very preference
  * that is in force; drawn, it says what is stored and can be changed. Nothing is rewritten — the machine may get its credentials back, and the pin with them.
+ *
+ * `Files` and `GitHub` (source-sections spec) take the same rule over the shell's projects answer: offered while a registered project has that source, the
+ * rows the rail draws, withheld while the answer is unknown (`drawn` null), and a stored pin keeps its option for the same blank-select reason. A legacy
+ * `board`/`archive` pin reaches here already clamped to `github`, so it shows as `GitHub` — the section it settles on when this machine has one.
  */
-function landingOptions(jiraConfigured: boolean, current: Landing): { value: Landing; label: string }[] {
-  return LANDINGS.filter((o) => o.value !== 'jira' || jiraConfigured || current === 'jira');
+function landingOptions(jiraConfigured: boolean, drawn: DrawnSources | null, current: Landing): { value: Landing; label: string }[] {
+  return LANDINGS.filter((o) => {
+    if (o.value === 'jira') return jiraConfigured || current === 'jira';
+    if (o.value === 'files' || o.value === 'github') return drawn?.[o.value] === true || current === o.value;
+    return true;
+  });
 }
 
 /**
@@ -198,6 +208,7 @@ function SharedPage({ onOpenWatchdog }: { onOpenWatchdog?: () => void }) {
 function LocalPage() {
   const { settings, update } = useSettings();
   const jiraConfigured = useJiraContext().data?.configured === true;
+  const sources = useProjectsContext().drawn;
 
   return (
     /* Two hand-balanced columns (§8.6), placed by hand rather than reflowed: a
@@ -295,7 +306,7 @@ function LocalPage() {
               <Select
                 label="Opens on"
                 value={settings.landing}
-                options={landingOptions(jiraConfigured, settings.landing)}
+                options={landingOptions(jiraConfigured, sources, settings.landing)}
                 onChange={(landing) => update({ landing })}
               />
             </SettingsRow>
