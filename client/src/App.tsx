@@ -30,6 +30,7 @@ const ArchiveView = lazy(() => import('./components/archive/ArchiveView'));
 const JiraView = lazy(() => import('./components/jira/JiraView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 const GithubSettingsView = lazy(() => import('./components/github/GithubSettingsView'));
+const PullRequestsView = lazy(() => import('./components/github/PullRequestsView'));
 
 /** The stored section's key. Read raw once, in the shell's initializer, as well as through `usePersistedState` — see `readRaw`. */
 const SECTION_KEY = 'backlog-manager.section';
@@ -163,7 +164,8 @@ function AppShell() {
 
   /*
     Whether a run on this machine is working, for the rail's wordmark cursor (§8.0). Reported up by whichever of Board, Runs and Archive is mounted
-    (`useReportWorking`) rather than polled here: each of the three already runs a `useOrchestratorRuns()`, every call is its own 5 s poller, and a fourth
+    (`useReportWorking`) — and GitHub › PRs, which runs one for its run-in-progress warning (§8.11) — rather than polled here: each of the three already
+    runs a `useOrchestratorRuns()`, every call is its own 5 s poller, and a fourth
     in the shell would double the requests on all three pages to learn what the page on screen already knows. `undefined` is "nobody has said" — Settings,
     which polls nothing, and any view before its first report — and the rail reads it as not working.
 
@@ -191,6 +193,7 @@ function AppShell() {
       filesBoard: reportFor('files:board'),
       filesArchive: reportFor('files:archive'),
       githubBoard: reportFor('github:board'),
+      githubPrs: reportFor('github:prs'),
       githubArchive: reportFor('github:archive'),
       runs: reportFor('runs')
     };
@@ -367,6 +370,7 @@ function AppShell() {
                     {section === 'files' && filesPage === 'board' && <BoardView source="files" onOpenRuns={() => change('runs')} onWorking={report.filesBoard} />}
                     {section === 'files' && filesPage === 'archive' && <ArchiveView source="files" onWorking={report.filesArchive} />}
                     {section === 'github' && githubPage === 'board' && <BoardView source="github" onOpenRuns={() => change('runs')} onWorking={report.githubBoard} />}
+                    {section === 'github' && githubPage === 'prs' && <PullRequestsView onWorking={report.githubPrs} />}
                     {section === 'github' && githubPage === 'archive' && <ArchiveView source="github" onWorking={report.githubArchive} />}
                     {section === 'github' && githubPage === 'settings' && <GithubSettingsView />}
                   </>

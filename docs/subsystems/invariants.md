@@ -3365,7 +3365,7 @@ entry, gives GitHub a Settings page beside its Board and Archive, and leaves Sha
 
 ### The tree rule, applied to two more sections
 
-Files (Board, Archive) and GitHub (Board, Archive, Settings) are pages under one rail entry, so the tree is the switch at every width and no page draws one of
+Files (Board, Archive) and GitHub (Board, PRs, Archive, Settings) are pages under one rail entry, so the tree is the switch at every width and no page draws one of
 its own. The one link that lands on a source page from outside — the Sources card's `GitHub › Settings ↗` — is `onOpenGithubPage`, built once in `App` as
 `setGithubPage(p)` then `change('github')` and threaded down, for the reason Jira's links are: a link built inside the card out of its own store write would
 mean what the tree entry means only until one of them changed. The page values live in module stores (`hooks/useSourcePage.ts`) because the tree, the link and

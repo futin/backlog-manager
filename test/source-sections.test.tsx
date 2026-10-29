@@ -33,6 +33,10 @@ jest.mock('../client/src/components/settings/SettingsView', () => ({
   __esModule: true,
   default: () => require('react').createElement('div', null, 'settings stub')
 }));
+jest.mock('../client/src/components/github/PullRequestsView', () => ({
+  __esModule: true,
+  default: () => require('react').createElement('div', null, 'prs stub')
+}));
 
 const SECTION_KEY = 'backlog-manager.section';
 const store = (key: string, value: unknown): void => localStorage.setItem(key, JSON.stringify(value));
@@ -289,6 +293,7 @@ describe('each source page renders its view', () => {
     ['files', FILES_PAGE_KEY, 'board', 'board stub'],
     ['files', FILES_PAGE_KEY, 'archive', 'archive stub'],
     ['github', GITHUB_PAGE_KEY, 'board', 'board stub'],
+    ['github', GITHUB_PAGE_KEY, 'prs', 'prs stub'],
     ['github', GITHUB_PAGE_KEY, 'archive', 'archive stub'],
     ['github', GITHUB_PAGE_KEY, 'settings', 'Sync']
   ])('%s › %s', async (section, key, page, landmark) => {
@@ -302,6 +307,21 @@ describe('each source page renders its view', () => {
       .getAllByRole('button')
       .filter((b) => b.getAttribute('aria-current') === 'true')
       .map((b) => b.textContent);
-    expect(marked).toEqual([page[0].toUpperCase() + page.slice(1)]);
+    expect(marked).toEqual([page === 'prs' ? 'PRs' : page[0].toUpperCase() + page.slice(1)]);
+  });
+
+  it('picking PRs in the GitHub tree renders the PRs view and stores the page', async () => {
+    store(SECTION_KEY, 'github');
+    store(GITHUB_PAGE_KEY, 'board');
+    render(<App />);
+    expect(await screen.findByText('board stub')).toBeInTheDocument();
+    await flush();
+    const tree = screen.getByRole('group', { name: 'GitHub pages' });
+    act(() => {
+      within(tree).getByRole('button', { name: 'PRs' }).click();
+    });
+    expect(await screen.findByText('prs stub')).toBeInTheDocument();
+    expect(screen.queryByText('board stub')).toBeNull();
+    expect(stored(GITHUB_PAGE_KEY)).toBe('prs');
   });
 });

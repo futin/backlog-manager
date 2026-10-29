@@ -57,7 +57,7 @@ The wordmark is a prompt, `BACKLOG` over `› manager▌`, whose cursor blinks w
 source's Board and Archive, and Runs, already run a `useOrchestratorRuns()` and report it up through `useReportWorking`; `App` keeps the report tagged with the
 view that made it (`files:board`, `github:archive`, `runs`, …) and drops it on a view change, so Settings, which reports nothing, always shows a solid cursor.
 
-Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, Archive, Settings), Jira (Board, Setup), Runs (History, Watchdog, Ticks)
+Every section has a sub-nav tree under its row: Files (Board, Archive), GitHub (Board, PRs, Archive, Settings), Jira (Board, Setup), Runs (History, Watchdog, Ticks)
 and Settings (Local, Shared, Dashboards). All five are drawn by one component, `RailTree`, because the markup carries three details that must not drift — the
 `rail-sub`/`rail-sublink` classes, `aria-current="true"` rather than `"page"`, and closing the phone menu on a pick. What each call site supplies is only what
 legitimately differs: the item list, which of them is current, and what a pick writes. In every case the tree is the **only** control that switches between the
@@ -477,6 +477,21 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   `runBlock` after the run block, never hidden, since it is a per-project block rather than an environment one — and so is the toolbar's Orchestrate chip,
   whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
   on `GatedChip`'s one rule.
+- **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2; DESIGN.md §8.11). `PullRequestsView` lists every
+  open pull request of the registered GitHub repos — forks and other authors included — one `Sheet` per repo in `groupRepos` order (repos with open PRs first,
+  most recently touched on top, then the empty ones by name; PRs newest update first). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
+  last answer, plus mount and focus), mounted by this page alone: the server's PR cache has no timer, so nobody on the page means no PR reads at all. A repo's
+  heading carries `polled N s ago` (`pollAge`), a `sync off` pill beside the server's full sentence (`syncOff`, `syncOffBlock`'s one home) when its sync is
+  off, the last read's `detail` when it was not `ok`, `showing 100 of N` when GitHub had more than one page, or `no open pull requests`; a token-less server
+  reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row (`PrRow`) is `#<n>` (to github.com, a new tab), the title, the author, `head → base`, the
+  `prChips` and — while a live or paused run, a remote launch or a live claim is still working the branch (`prRunWarning`, from what the Board already polls)
+  — a warn-toned warning that leaves every action enabled. Its actions are a method `Select` (the repo's allowed methods, seeded by `defaultMethod`), `Merge`
+  behind an inline `Confirm` (`Merge #<n> into <base> (<method>)?`), `Enable`/`Disable auto-merge` and `Update branch`; a blocked one is disabled with its
+  reason (`mergeBlock`, `updateBlock`, `autoMergeBlock` — `sync off` on each for a sync-off repo) in text beside it and as its `aria-describedby`, never a
+  tooltip alone. A write disables the row's actions until the page has re-read, after success and failure alike; its outcome is one line — `outcomeLine`, or
+  the server's refusal verbatim — held by the page per `<repo>#<number>`, so a merged PR that left the list keeps a `#12 merged` line under its repo. An
+  update-branch's 202 marks the PR at the head SHA it was asked from: the row reads `updating…` while `isUpdating`, until a read shows a new head or
+  `UPDATING_MS` (30 s) pass, and at that moment the page re-reads once. The page reports the rail cursor as Board and Archive do (`useReportWorking`).
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live
@@ -639,8 +654,10 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   Files.
 - `lib/source-page.ts` and `hooks/useSourcePage.ts` — `FILES_PAGES`/`GITHUB_PAGES` with their keys and guards, `FALLBACK_SECTION` and `resolveLegacySection`;
   and `useFilesPage`/`useGithubPage` with their setters, module stores on `useJiraPage`'s shape.
-- `components/github/` — `GithubSettingsView` (GitHub › Settings) and `GithubSyncGroup`, its one `Sync` card; `components/settings/SourcesGroup.tsx` is the
-  Shared report.
+- `components/github/` — `GithubSettingsView` (GitHub › Settings) and `GithubSyncGroup`, its one `Sync` card; `PullRequestsView` (GitHub › PRs) and
+  `PrRow`, one open pull request; `components/settings/SourcesGroup.tsx` is the Shared report.
+- `lib/prs.ts`, `lib/pr-run.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three blocks, the default method,
+  `isUpdating`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.

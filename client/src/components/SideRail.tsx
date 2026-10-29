@@ -466,11 +466,13 @@ const RAIL_JIRA_LABEL: Record<JiraPage, string> = {
 
 /**
  * Both source trees' labels (source-sections spec), one map because the two trees name the same pages the same way — Board and Archive are the views the
- * root rows of those names used to open, now one per source, and GitHub's Settings is the tracker settings that lived on Shared Settings. `RAIL_SUB_LABEL`'s
+ * root rows of those names used to open, now one per source, GitHub's Settings is the tracker settings that lived on Shared Settings, and GitHub's PRs is
+ * its open pull requests (§8.11) — `PRs`, the word GitHub's own tabs use, not `Pull requests`, which would be the tree's one two-word label. `RAIL_SUB_LABEL`'s
  * rule: these are the only labels the pages have, because no source page draws a switch of its own.
  */
 const RAIL_SOURCE_LABEL: Record<FilesPage | GithubPage, string> = {
   board: 'Board',
+  prs: 'PRs',
   archive: 'Archive',
   settings: 'Settings'
 };

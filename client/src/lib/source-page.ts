@@ -21,9 +21,12 @@ export function isFilesPage(v: unknown): v is FilesPage {
   return typeof v === 'string' && (FILES_PAGES as readonly string[]).includes(v);
 }
 
-/** GitHub's pages; Plan B adds `prs` between Board and Archive. Declaration order is the rail tree's order. */
-export type GithubPage = 'board' | 'archive' | 'settings';
-export const GITHUB_PAGES: readonly GithubPage[] = ['board', 'archive', 'settings'];
+/**
+ * GitHub's pages. Declaration order is the rail tree's order: `prs` (the open pull requests of the registered GitHub repos, `.claude/DESIGN.md` §8.11)
+ * sits between Board and Archive because it is live work like the Board, and Archive is what has gone quiet.
+ */
+export type GithubPage = 'board' | 'prs' | 'archive' | 'settings';
+export const GITHUB_PAGES: readonly GithubPage[] = ['board', 'prs', 'archive', 'settings'];
 export const GITHUB_PAGE_KEY = 'backlog-manager.github-page';
 
 export function isGithubPage(v: unknown): v is GithubPage {

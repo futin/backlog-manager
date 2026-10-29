@@ -341,13 +341,13 @@ describe('SideRail · the source rows', () => {
     expect(rows()).toEqual(['Files', 'GitHub', 'Runs', 'Settings']);
   });
 
-  it("names Files' tree Board, Archive and GitHub's Board, Archive, Settings", () => {
+  it("names Files' tree Board, Archive and GitHub's Board, PRs, Archive, Settings", () => {
     const { rerenderRail } = renderRail('files');
     expect(labels(filesTree())).toEqual(['Board', 'Archive']);
     expect(githubTree()).toBeNull();
 
     rerenderRail('github');
-    expect(labels(githubTree())).toEqual(['Board', 'Archive', 'Settings']);
+    expect(labels(githubTree())).toEqual(['Board', 'PRs', 'Archive', 'Settings']);
     expect(filesTree()).toBeNull();
   });
 

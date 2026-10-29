@@ -30,9 +30,9 @@ describe('resolveLegacySection', () => {
 });
 
 describe('the page stores', () => {
-  it('lists Files as Board, Archive and GitHub as Board, Archive, Settings, in tree order', () => {
+  it('lists Files as Board, Archive and GitHub as Board, PRs, Archive, Settings, in tree order', () => {
     expect(FILES_PAGES).toEqual(['board', 'archive']);
-    expect(GITHUB_PAGES).toEqual(['board', 'archive', 'settings']);
+    expect(GITHUB_PAGES).toEqual(['board', 'prs', 'archive', 'settings']);
   });
 
   it('keys each source under its own name', () => {
@@ -44,7 +44,9 @@ describe('the page stores', () => {
     expect(isFilesPage('archive')).toBe(true);
     expect(isFilesPage('settings')).toBe(false);
     expect(isGithubPage('settings')).toBe(true);
-    for (const bad of ['prs', 'Board', '', null, undefined, 3, {}]) {
+    expect(isGithubPage('prs')).toBe(true);
+    expect(isFilesPage('prs')).toBe(false);
+    for (const bad of ['pulls', 'Board', '', null, undefined, 3, {}]) {
       expect(isFilesPage(bad)).toBe(false);
       expect(isGithubPage(bad)).toBe(false);
     }

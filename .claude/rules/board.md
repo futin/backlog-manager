@@ -16,7 +16,7 @@ paths: ["client/src/**"]
   surfaces themselves: `Modal`'s composers are `ItemModal` and `JiraIssueModal`, `FormSheet`'s are `LaunchSheet`, `OrchestrateSheet`, `JiraBoardSheet`, `JiraLaunchSheet` and `DashboardSheet`,
   so the three Jira surfaces and the Dashboards sheet joined by construction (`JiraLaunchSheet` is hosted once, in `JiraView`, and ranks above the issue modal because it MOUNTS later — it always opens while the modal is up — not because of its place in the JSX). `ReleasesDrawer` is the exception: its shell is ui-kit's since #298, so the wrapper calls the hook itself
   and passes `closeOnEscape={false}`, and ui-kit's drawer binds no key of its own. One further entry is not a dialog: `ui/Confirm.tsx` (bug-53), the inline confirmation the run's Stop, the
-  item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`) and the Jira modal's `Stop session` open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
+  item modal's claim release (#225), the board sheet's `Delete board`, the Skills card's `×` (`JiraSkillsGroup`), the Jira modal's `Stop session` and GitHub › PRs' `Merge` (`PrRow`) open, joins the stack while it is drawn, so Escape dismisses it and nothing under it
   — it paints no scrim and is not counted. The second is `ui/Popover.tsx`, with seven composers — the tracker's (`components/TrackerChip.tsx`), the band's
   Filters and Sort, the Jira chip's (`components/JiraChip.tsx`), the Jira board's picker (`components/jira/JiraBoardView.tsx`), the board sheet's roots
   search (`components/jira/JiraBoardSheet.tsx`) and `Run ▾`'s panel (`components/jira/JiraRunMenu.tsx`); the Jira board's Filters are `FilterBar`'s own — mounted only while open, which joins the same way and closes
@@ -76,7 +76,7 @@ paths: ["client/src/**"]
   `drawn` is null; once it is known a provisional landing settles once, through `change` (`settleSection` for a page-named one, `firstDrawn` — Files, then
   GitHub, else Runs — otherwise), a legacy pin is rewritten to where it settled with `update({ landing })`, and a source section whose row is gone falls to
   `firstDrawn`; a provisional landing renders `SectionLoading` until it settles. The pages are `FILES_PAGES` (`board | archive`) and `GITHUB_PAGES` (`board |
-  archive | settings`), each with its key and guard, held by `useFilesPage`/`useGithubPage` (`hooks/useSourcePage.ts`), module stores like `useJiraPage`'s; the
+  prs | archive | settings`), each with its key and guard, held by `useFilesPage`/`useGithubPage` (`hooks/useSourcePage.ts`), module stores like `useJiraPage`'s; the
   Sources card's `GitHub › Settings ↗` link is `onOpenGithubPage` (`setGithubPage(p)` then `change('github')`, built once in `App`), drawn only while
   `useProjectsContext().drawn?.github` — the rail's answer, never the tracker counts. Board and Archive take a required `source` and cut the index with
   `narrowToSource`, which routes each index error by `errorSource`: a `gh:` issue URN to GitHub, a registered project's path (longest, on a `/` or `:`
