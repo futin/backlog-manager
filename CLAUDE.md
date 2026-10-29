@@ -63,7 +63,7 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   → [docs/subsystems/api.md](docs/subsystems/api.md)
 - `client/src/` — React SPA: five lazy sections behind a side rail (Files, GitHub, Jira, Runs, Settings — Files and GitHub each drawn only while a registered
   project has that source, with Board and Archive under each; GitHub's tree is Board, PRs, Archive, Settings — PRs being the open pull requests of the
-  registered GitHub repos, with merge, auto-merge and update branch) that ends in a version chip opening the What's new
+  registered GitHub repos, drawn as Inbox, Matrix or Cards, with merge, auto-merge and update branch) that ends in a version chip opening the What's new
   drawer ([releases](docs/subsystems/releases.md)), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and

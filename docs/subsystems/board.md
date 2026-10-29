@@ -478,9 +478,19 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
   on `GatedChip`'s one rule.
 - **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2; DESIGN.md §8.11). `PullRequestsView` lists every
-  open pull request of the registered GitHub repos — forks and other authors included — one `Sheet` per repo in `groupRepos` order (repos with open PRs first,
-  most recently touched on top, then the empty ones by name; PRs newest update first). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
-  last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the server's PR cache has no timer, so with neither open there are no PR reads at all. A repo's
+  open pull request of the registered GitHub repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
+  last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the server's PR cache has no timer, so with neither open there are no PR reads at all. A repo the token cannot
+  read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of `N open`: the toolbar says `N repos hidden — no
+  access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card (`GithubAccessGroup`, the hook's second mount) lists each
+  with GitHub's `detail` and the token fix; a rate-limited or `error` repo is transient and stays. The layout is a `Segmented` in the toolbar, stored per device
+  (`PR_LAYOUT_KEY`; an unknown word is Inbox; Matrix is wide-only — a narrow window draws a stored `matrix` as Inbox and keeps the word, `drawableLayout`).
+  **Inbox** (default) ranks every shown PR across repos (`rankPrs`: level, severity, newest) under three filtering count tiles; a loud PR (Needs you, Worth a
+  look) is an item with a verdict, steps and the compact keys `compactKeys` picks (`Merge…` swaps them for the full strip in place), a Quiet one a line with its
+  own `Actions` toggle beside the `#n` link; failing repos add a `Can't read` line. **Matrix** is a table, a column per check with a failure count in its
+  header, whose row toggles one expansion holding the full strip. **Cards** is the per-repo page described next. All three draw the same `PrActions` and
+  `PrOutcomeLine`, and `PrRepoNotes` says the merged outcomes, `sync off` sentence and `showing n of total` once for Inbox and Matrix; a PR's keys stay
+  disabled while its write runs in any layout, because the page owns an in-flight set keyed `<repo>#<number>`, and a folded or collapsed strip is unmounted so
+  its Confirm leaves the Escape stack. In Cards a repo's
   heading carries `polled N s ago` (`pollAge`), a `sync off` pill beside the server's full sentence (`syncOff`, `syncOffBlock`'s one home) when its sync is
   off, the last read's `detail` when it was not `ok`, `showing 100 of N` when GitHub had more than one page, or `no open pull requests`; a token-less server
   reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row (`PrRow`) is `#<n>` (to github.com, a new tab), the title, the author, `head → base`, the
