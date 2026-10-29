@@ -179,7 +179,7 @@ const ITEMS: BacklogItem[] = [
  */
 async function renderArchive(items: BacklogItem[] = ITEMS, errors: string[] = [], runs: RunPayload[] = [], starting: StartingRun[] = []) {
   stubItems(items, errors, runs, starting);
-  render(<ArchiveView />);
+  render(<ArchiveView source="files" />);
   await waitFor(() => expect(screen.queryByText('loading…')).not.toBeInTheDocument());
 }
 
@@ -388,7 +388,7 @@ describe('ArchiveView', () => {
   // The Board's fail-open rule, restated here: a stored path whose project has since been unregistered reads as All projects on the badge, the pressed
   // chip and the count line alike, and the surface is not emptied by it.
   it('a stale stored project path reads as All projects: no badge, All projects pressed, no suffix', async () => {
-    localStorage.setItem('backlog-manager.project', JSON.stringify('/abs/gone'));
+    localStorage.setItem('backlog-manager.project.files', JSON.stringify('/abs/gone'));
     await renderArchive();
     const button = screen.getByRole('button', { name: 'Filters' });
     expect(button.querySelector('.filter-bar-badge')).toBeNull();
@@ -634,5 +634,61 @@ describe('ArchiveView', () => {
     // exactly the four, with `tasks` absent.
     const sections = [...src.matchAll(/\{ section: '([a-z-]+)', label:/g)].map((m) => m[1]);
     expect(sections).toEqual(['refactors', 'ideas', 'bugs', 'out-of-scope']);
+  });
+});
+
+/*
+ * Source sections (Task 5): one ArchiveView draws ONE source. A `files`, B `github`, C `unsupported`, each with one archived item under a distinct title.
+ */
+describe('ArchiveView source filter', () => {
+  const summary = (name: string, source: ProjectSummary['source']): ProjectSummary => ({ ...PROJECTS[0], name, path: `/abs/${name}`, source });
+  const SRC_PROJECTS = [summary('fileproj', 'files'), summary('ghproj', 'github'), summary('oddproj', 'unsupported')];
+  const SRC_ITEMS = [
+    fakeItem({ id: 'bug-1', title: 'files stale', project: 'fileproj', projectPath: '/abs/fileproj' }),
+    fakeItem({ id: 'bug-2', title: 'github stale', project: 'ghproj', projectPath: '/abs/ghproj', source: 'github' }),
+    fakeItem({ id: 'bug-3', title: 'odd stale', project: 'oddproj', projectPath: '/abs/oddproj' })
+  ];
+
+  function stubSources(): void {
+    global.fetch = jest.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/orchestrator/runs')
+          ? ({ runs: [], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload)
+          : url.includes('/api/projects')
+            ? SRC_PROJECTS
+            : ({ items: SRC_ITEMS, errors: ['/abs/fileproj/backlog/ideas/open/idea-9-broken.md: bad'] } satisfies ItemsIndex);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    }) as jest.Mock;
+  }
+
+  it('files lists the files and unsupported projects archived items, and the count line names that set', async () => {
+    stubSources();
+    render(<ArchiveView source="files" />);
+    await waitFor(() => expect(screen.getByText('files stale')).toBeInTheDocument());
+    expect(screen.getByText('odd stale')).toBeInTheDocument();
+    expect(screen.queryByText('github stale')).not.toBeInTheDocument();
+    expect(screen.getByText('2 archived across 2 projects')).toBeInTheDocument();
+    expect(screen.getByTestId('board-warn')).toHaveTextContent('idea-9-broken.md: bad');
+  });
+
+  it('github lists only the github archived items, with no files warnings', async () => {
+    stubSources();
+    render(<ArchiveView source="github" />);
+    await waitFor(() => expect(screen.getByText('github stale')).toBeInTheDocument());
+    expect(screen.queryByText('files stale')).not.toBeInTheDocument();
+    expect(screen.queryByText('odd stale')).not.toBeInTheDocument();
+    expect(screen.getByText('1 archived across 1 project')).toBeInTheDocument();
+    expect(screen.queryByTestId('board-warn')).not.toBeInTheDocument();
+  });
+
+  it('a stored project pick that belongs to the other source falls open to all on this page', async () => {
+    localStorage.setItem('backlog-manager.project.github', JSON.stringify('/abs/fileproj'));
+    stubSources();
+    render(<ArchiveView source="github" />);
+    await waitFor(() => expect(screen.getByText('github stale')).toBeInTheDocument());
+    expect(screen.getByText('1 archived across 1 project')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filters' }).querySelector('.filter-bar-badge')).toBeNull();
   });
 });

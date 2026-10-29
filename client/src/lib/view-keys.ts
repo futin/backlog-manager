@@ -1,3 +1,5 @@
+import type { SourceSection } from './sources';
+
 /**
  * view-keys.ts — the localStorage keys more than one surface reads.
  *
@@ -17,9 +19,19 @@
  */
 
 /**
- * Which project the reader is looking at — shared by Board and Archive on
+ * Which project the reader is looking at — shared by a source's Board and Archive on
  * purpose. "Which project's backlog is this" is a question about the corpus,
  * not about a surface, so narrowing to one project on the Board and then
  * opening Archive should not silently widen back to all of them.
+ *
+ * One value PER SOURCE (`projectKey`, source-sections): Files and GitHub each draw
+ * only their own projects, so a single stored path would be a pick the other page
+ * cannot honour and would fight it for the slot. The bare `PROJECT_KEY` is the
+ * prefix only — a value stored under it by a build that had one board is never
+ * read, and the first visit to each source reads as All projects.
  */
 export const PROJECT_KEY = 'backlog-manager.project';
+
+export function projectKey(source: SourceSection): string {
+  return `${PROJECT_KEY}.${source}`;
+}

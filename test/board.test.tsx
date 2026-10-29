@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
@@ -198,7 +198,7 @@ beforeEach(() => {
 });
 
 async function renderBoard() {
-  render(<BoardView />);
+  render(<BoardView source="files" />);
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
 }
 
@@ -218,7 +218,7 @@ async function renderBoard() {
 async function renderBoardWithSettings() {
   render(
     <SettingsProvider>
-      <BoardView />
+      <BoardView source="files" />
     </SettingsProvider>
   );
   await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
@@ -675,7 +675,7 @@ describe('BoardView', () => {
      back. The board has no columns to wait on here — it renders the no-matches state — so the render waits on that instead of `renderBoard`. */
   it('a stored unrecognised status lights no Status option, counts as one set, and Clear all recovers', async () => {
     localStorage.setItem('backlog-manager.status', JSON.stringify('stale'));
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     expect(await screen.findByText('no matches')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Filters, 1 set' })).toBeInTheDocument();
 
@@ -712,7 +712,7 @@ describe('BoardView', () => {
   // Review Focus 3: a stored path whose project has since been unregistered fails open — and the badge, the pressed chip and the title all read
   // the fail-open value, so none of them claims a filter the board is not applying.
   it('a stale stored project path reads as All projects: no badge, All projects pressed, All projects titled', async () => {
-    localStorage.setItem('backlog-manager.project', JSON.stringify('/abs/gone'));
+    localStorage.setItem('backlog-manager.project.files', JSON.stringify('/abs/gone'));
     await renderBoard();
     const button = screen.getByRole('button', { name: 'Filters' });
     expect(button.querySelector('.filter-bar-badge')).toBeNull();
@@ -1173,7 +1173,7 @@ describe('BoardView', () => {
         json: () => Promise.resolve({ statusCode: 500, message: 'Internal Server Error' })
       } as Response)
     );
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('board unavailable')).toBeInTheDocument());
     expect(screen.queryByText('nothing registered yet')).not.toBeInTheDocument();
   });
@@ -1184,7 +1184,111 @@ describe('BoardView', () => {
       const payload = url.includes('/api/projects') ? [] : { items: [], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     });
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('nothing registered yet')).toBeInTheDocument());
+  });
+});
+
+/*
+ * Source sections (Task 5): one BoardView draws ONE source. Three projects, one per source shape — A `files`, B `github`, C `unsupported` (and
+ * unreachable) — with distinct names and item titles, so every assertion below names which page it is on and which project it must not see.
+ */
+describe('BoardView source filter', () => {
+  const summary = (name: string, source: ProjectSummary['source'], over: Partial<ProjectSummary> = {}): ProjectSummary => ({
+    ...PROJECTS[0],
+    name,
+    path: `/abs/${name}`,
+    source,
+    ...over
+  });
+  const SRC_PROJECTS: ProjectSummary[] = [
+    summary('fileproj', 'files'),
+    summary('ghproj', 'github', { repo: 'futin/ghproj', interval: 'off' }),
+    summary('oddproj', 'unsupported', { missing: true })
+  ];
+  const SRC_ITEMS: BacklogItem[] = [
+    fakeItem({ id: 'bug-1', title: 'files item', project: 'fileproj', projectPath: '/abs/fileproj' }),
+    fakeItem({ id: 'bug-2', title: 'github item', project: 'ghproj', projectPath: '/abs/ghproj', source: 'github' }),
+    fakeItem({ id: 'bug-3', title: 'odd item', project: 'oddproj', projectPath: '/abs/oddproj' })
+  ];
+  const SRC_ERRORS = ['/abs/fileproj/backlog/ideas/open/idea-9-broken.md: frontmatter has no closing --- line'];
+
+  function stubSources(): void {
+    (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/orchestrator/runs')
+          ? NO_RUNS
+          : url.includes('/api/projects')
+            ? SRC_PROJECTS
+            : { items: SRC_ITEMS, errors: SRC_ERRORS };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+  }
+  const pickNames = async (): Promise<string[]> => {
+    await userEvent.click(screen.getByRole('button', { name: /^Filters/ }));
+    const group = within(screen.getByRole('dialog', { name: 'Filters' })).getByRole('group', { name: 'Project' });
+    return within(group)
+      .getAllByRole('button')
+      .map((b) => b.textContent ?? '');
+  };
+
+  it('github draws only the github project: its items and its one project pick', async () => {
+    stubSources();
+    render(<BoardView source="github" />);
+    await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
+    expect(screen.queryByText('files item')).not.toBeInTheDocument();
+    expect(screen.queryByText('odd item')).not.toBeInTheDocument();
+    const names = await pickNames();
+    expect(names.join('|')).toContain('ghproj');
+    expect(names.join('|')).not.toContain('fileproj');
+    expect(names.join('|')).not.toContain('oddproj');
+  });
+
+  it('files draws the files and unsupported projects, and lists exactly those two picks', async () => {
+    stubSources();
+    render(<BoardView source="files" />);
+    await waitFor(() => expect(screen.getByText('files item')).toBeInTheDocument());
+    expect(screen.getByText('odd item')).toBeInTheDocument();
+    expect(screen.queryByText('github item')).not.toBeInTheDocument();
+    const names = await pickNames();
+    expect(names.join('|')).toContain('fileproj');
+    expect(names.join('|')).toContain('oddproj');
+    expect(names.join('|')).not.toContain('ghproj');
+  });
+
+  it('unreachable and index errors only on files', async () => {
+    stubSources();
+    const { unmount } = render(<BoardView source="files" />);
+    await waitFor(() => expect(screen.getByTestId('board-warn')).toBeInTheDocument());
+    expect(screen.getByTestId('board-warn')).toHaveTextContent('unreachable: oddproj');
+    expect(screen.getByTestId('board-warn')).toHaveTextContent('frontmatter has no closing');
+    unmount();
+
+    render(<BoardView source="github" />);
+    await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
+    expect(screen.queryByTestId('board-warn')).not.toBeInTheDocument();
+  });
+
+  it('a stored project pick that belongs to the other source falls open to All projects on this page', async () => {
+    localStorage.setItem('backlog-manager.project.github', JSON.stringify('/abs/fileproj'));
+    stubSources();
+    render(<BoardView source="github" />);
+    await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
+    expect(bandTitle()).toBe('All projects');
+  });
+
+  it('each source keeps its own project pick: one board does not read the other one`s key', async () => {
+    localStorage.setItem('backlog-manager.project.files', JSON.stringify('/abs/oddproj'));
+    stubSources();
+    render(<BoardView source="github" />);
+    await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
+    expect(bandTitle()).toBe('All projects');
+    cleanup();
+    render(<BoardView source="files" />);
+    await waitFor(() => expect(screen.getByText('odd item')).toBeInTheDocument());
+    expect(bandTitle()).toBe('oddproj');
+    expect(screen.queryByText('files item')).not.toBeInTheDocument();
   });
 });

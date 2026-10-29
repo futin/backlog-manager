@@ -148,7 +148,7 @@ describe('BoardView: card live strips', () => {
   }
 
   async function renderBoard(): Promise<void> {
-    render(<BoardView />);
+    render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('Bugs')).toBeInTheDocument());
   }
 

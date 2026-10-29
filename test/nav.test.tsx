@@ -114,6 +114,10 @@ const ARCHIVE_ITEM = {
   path: '/abs/alpha/backlog/out-of-scope/oos-1.md'
 };
 
+/** The same rejection in the github project: each source's Archive draws only its own projects (source-sections), so the page a case lands on needs an
+ *  archived item of its own to render the `Out of scope` column the cases wait on. */
+const GITHUB_ARCHIVE_ITEM = { ...ARCHIVE_ITEM, id: '#7', title: 'declined issue', project: 'beta', projectPath: '/abs/beta', path: 'gh:futin/x#7' };
+
 /**
  * RunsView's empty state — final copy, not a placeholder, so this is matched
  * exactly rather than by a loose phrase the way ARCHIVE_MARK is: there is no
@@ -160,7 +164,7 @@ describe('the section rail', () => {
                   source: 'github'
                 }
               ]
-            : { items: [ARCHIVE_ITEM], errors: [] };
+            : { items: [ARCHIVE_ITEM, GITHUB_ARCHIVE_ITEM], errors: [] };
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
     }) as jest.Mock;
   });

@@ -12,7 +12,9 @@ import { leavesBoard } from '../../lib/item-stale';
 import { buildProjectHues } from '../../lib/project-hue';
 import { projectName } from '../../lib/project-label';
 import { itemSyncOff } from '../../lib/tracker';
-import { PROJECT_KEY } from '../../lib/view-keys';
+import { inSource, projectsIn } from '../../lib/sources';
+import type { SourceSection } from '../../lib/sources';
+import { projectKey } from '../../lib/view-keys';
 import { runClaimBlock } from '../../../../shared/agent';
 import { FilterBar, ProjectPicks } from '../FilterBar';
 import { Band } from '../ui/Band';
@@ -88,10 +90,25 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
   { section: 'out-of-scope', label: 'Out of scope', slug: 'out-of-scope' }
 ];
 
-/** `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this view's run poll is the one the shell reads, so `App` adds none. */
-export default function ArchiveView({ onWorking }: { onWorking?: (working: boolean) => void } = {}) {
+/**
+ * `onWorking` is the rail cursor's report (§8.0, `useReportWorking`) — this view's run poll is the one the shell reads, so `App` adds none.
+ *
+ * `source` (source-sections) is REQUIRED and narrows the fetched index exactly as `BoardView`'s does — items, project picks and warnings, before any other
+ * derivation, through `inSource` — so Files › Archive and GitHub › Archive are one component drawing two disjoint sets. The run payload stays machine-wide.
+ */
+export default function ArchiveView({ source, onWorking }: { source: SourceSection; onWorking?: (working: boolean) => void }) {
   const { zone } = useTimeZone();
-  const { items: index, projects, loading, error } = useBoard();
+  const { items: fullIndex, projects: fullProjects, loading, error } = useBoard();
+  /* BoardView's split, verbatim in meaning: `projects` stays `null` until the first answer, and index errors ride only with Files (they name no project, and
+     Files owns the `unsupported` and `missing` ones whose reasons they carry). */
+  const projects = useMemo(() => (fullProjects === null ? null : projectsIn(fullProjects, source)), [fullProjects, source]);
+  const index = useMemo(
+    () =>
+      fullIndex === null
+        ? null
+        : { items: fullIndex.items.filter((i) => inSource(i.projectPath, fullProjects ?? [], source)), errors: source === 'files' ? fullIndex.errors : [] },
+    [fullIndex, fullProjects, source]
+  );
   /* Only `staleDays` is read, but the whole control comes back — `useSettings`
      falls back to the defaults outside a provider (see its own comment), which
      is what lets a test that never mounts one still get the documented 30-day
@@ -135,7 +152,7 @@ export default function ArchiveView({ onWorking }: { onWorking?: (working: boole
   const [open, setOpen] = useState<BacklogItem | null>(null);
   const [dispatching, setDispatching] = useState<BacklogItem | null>(null);
 
-  /* Persisted project filter, sharing the Board's key (lib/view-keys.ts). The
+  /* Persisted project filter, sharing its source's Board key (`projectKey`, lib/view-keys.ts). The
      query is plain useState and deliberately not remembered, for the reason
      BoardView states: a remembered query is a surface that opens showing three
      cards out of forty for no visible reason. The project survives that
@@ -143,7 +160,7 @@ export default function ArchiveView({ onWorking }: { onWorking?: (working: boole
      filter button is raised and carries a count, and the count line names the
      picked project. */
   const [query, setQuery] = useState('');
-  const [project, setProject] = usePersistedState<string>(PROJECT_KEY, ALL);
+  const [project, setProject] = usePersistedState<string>(projectKey(source), ALL);
 
   const all = index?.items ?? [];
   /* #350 — the modal draws the FRESH copy of the item it was opened on, found in the payload by project and id during render, and the snapshot only when
@@ -152,11 +169,11 @@ export default function ArchiveView({ onWorking }: { onWorking?: (working: boole
   const openItem = open === null ? null : (all.find((i) => i.projectPath === open.projectPath && i.id === open.id) ?? open);
   const registered = projects ?? [];
 
-  /* Keyed on `projects`, not on `registered` — see BoardView's identical memo:
+  /* Keyed on `fullProjects` (the whole registry, so a colour is the same on both sources' pages), not on `registered` — see BoardView's identical memo:
      `registered` is a fresh [] on every render while the fetch is in flight,
      which would make the memo a no-op and hand every card a new prop object on
      each keystroke in the search box. */
-  const hues = useMemo(() => buildProjectHues(projects ?? []), [projects]);
+  const hues = useMemo(() => buildProjectHues(fullProjects ?? []), [fullProjects]);
 
   /* Fail-open on a stale stored project, same as the Board: an unmatched filter
      that emptied the surface would look like the server broke. The fallback

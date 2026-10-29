@@ -1,4 +1,4 @@
-import { drawnSources, firstDrawn, settleSection, sourceSectionOf } from '../client/src/lib/sources';
+import { drawnSources, firstDrawn, inSource, settleSection, sourceSectionOf } from '../client/src/lib/sources';
 import type { ProjectSummary } from '../shared/types';
 
 /** Only `source` is read by the derivations; the rest of a summary is filler the cast papers over. */
@@ -62,5 +62,29 @@ describe('settleSection', () => {
   });
   it('passes settings through untouched', () => {
     expect(settleSection('settings', { files: false, github: false })).toBe('settings');
+  });
+});
+
+describe('inSource', () => {
+  const projects: ProjectSummary[] = [
+    { name: 'a', path: '/a', source: 'files' } as ProjectSummary,
+    { name: 'b', path: '/b', source: 'github' } as ProjectSummary,
+    { name: 'c', path: '/c', source: 'unsupported' } as ProjectSummary,
+    { name: 'd', path: '/d', source: null } as ProjectSummary
+  ];
+  it('is true for a project under the source it belongs to, false under the other', () => {
+    expect(inSource('/b', projects, 'github')).toBe(true);
+    expect(inSource('/b', projects, 'files')).toBe(false);
+    expect(inSource('/a', projects, 'files')).toBe(true);
+    expect(inSource('/a', projects, 'github')).toBe(false);
+  });
+  it('folds unsupported and null-source projects into files', () => {
+    expect(inSource('/c', projects, 'files')).toBe(true);
+    expect(inSource('/d', projects, 'files')).toBe(true);
+    expect(inSource('/c', projects, 'github')).toBe(false);
+  });
+  it('is false for a path no project carries, under either source', () => {
+    expect(inSource('/nope', projects, 'files')).toBe(false);
+    expect(inSource('/nope', projects, 'github')).toBe(false);
   });
 });

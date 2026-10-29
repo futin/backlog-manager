@@ -45,3 +45,19 @@ export function settleSection<S extends string>(section: S, drawn: DrawnSources)
   if (key === 'files' || key === 'github') return drawn[key] ? section : firstDrawn(drawn);
   return section;
 }
+
+/**
+ * Whether the project at `projectPath` is drawn under `source` — what `BoardView` and `ArchiveView` ask of every item before any other derivation, so a
+ * count, a filter, a warning and the Orchestrate sheet's project list all read ONE source's set. Matched by path, the registry's own key (two checkouts of
+ * a repo share a name and never a path). A path no registered project carries is in NO source: an item whose project has just been unregistered would
+ * otherwise land on whichever page asked, and the board's fail-open rule is about a stored PICK going stale, not about a row with no home.
+ */
+export function inSource(projectPath: string, projects: readonly ProjectSummary[], source: SourceSection): boolean {
+  const project = projects.find((p) => p.path === projectPath);
+  return project !== undefined && sourceSectionOf(project.source) === source;
+}
+
+/** The registered projects drawn under `source`, in registry order — the half of `inSource` a page needs as a list (its project picks, its warnings). */
+export function projectsIn(projects: readonly ProjectSummary[], source: SourceSection): ProjectSummary[] {
+  return projects.filter((p) => sourceSectionOf(p.source) === source);
+}
