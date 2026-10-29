@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { useAction } from '../../hooks/useAction';
 import { approvePlan } from '../../lib/agents';
-import { planApprovePrompt } from '../../lib/plan-review';
+import { awaitsPlanReview, planApprovePrompt } from '../../lib/plan-review';
 import { Chip } from '../ui/Chip';
 import { Confirm } from '../ui/Confirm';
 import type { BacklogItem } from '../../../../shared/types';
@@ -23,7 +23,8 @@ import type { BacklogItem } from '../../../../shared/types';
  * - **Files** — no request at all. A line saying why, and `Copy prompt`, which copies a sentence a Claude session can act on (`planApprovePrompt`). It reads
  *   `Copied` for 2 s; with no clipboard API, or a refused write, the prompt is drawn below so it can be selected by hand — `WorktreeRow`'s posture.
  *
- * Drawn only for an open item that carries the mark; anything else renders nothing, so the modal can mount it unconditionally.
+ * Drawn only for an item `awaitsPlanReview` answers true for — open and carrying the mark, the rule the band chip counts and the Board's `Awaiting review`
+ * filter narrows by; anything else renders nothing, so the modal can mount it unconditionally.
  */
 export function PlanApprove({ item, onApproved }: { item: BacklogItem; onApproved?: () => void }) {
   const [stage, setStage] = useState<'idle' | 'confirm' | 'done'>('idle');
@@ -39,7 +40,7 @@ export function PlanApprove({ item, onApproved }: { item: BacklogItem; onApprove
       </p>
     );
   }
-  if (item.status !== 'open' || item.planReview !== true) return null;
+  if (!awaitsPlanReview(item)) return null;
   if (item.source === 'files') return <PlanApprovePrompt item={item} />;
 
   // The confirm closes at once and the chip comes back disabled while the request is out; a refusal lands back at `idle` with the message under the chip.
