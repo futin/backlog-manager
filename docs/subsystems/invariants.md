@@ -3374,8 +3374,8 @@ the shell's own legacy-landing initializer are separate writers.
 ### The answer is the registry's, read once by the shell
 
 Whether a row is drawn is a question about the registry, not the tracker. `ProjectsProvider` reads `GET /api/projects` once for the shell and hands
-`drawnSources` out, rather than deriving it from `TrackersPayload.projects`, which knows only tracker-backed projects and would leave Files with no answer at
-all. It reads on mount and focus and never polls — the registry moves on a `register`, not on a clock — and keeps its last answer on a failure, so a blip cannot
+`drawnSources` out, rather than deriving it from `TrackersPayload.projects`. That payload does list every registered project, but it is the tracker's view of
+them — it calls a GitHub marker with an invalid repo `unsupported` where `/api/projects` says `github` — and the rail's rows must agree with the registry. It reads on mount and focus and never polls — the registry moves on a `register`, not on a clock — and keeps its last answer on a failure, so a blip cannot
 take a row away. An `unsupported` project and one with no source sit under Files as display grouping only, never as a source of their own: what they have to
 show is file errors, and Files is the source with a place to show them. The index's `errors` are split the same way, by what each one names
 (`errorSource`): every error the server sends starts with its subject, so a `gh:<owner/name>#<n>` URN — a warning about one GitHub issue — goes to GitHub, an
