@@ -39,12 +39,12 @@ export function prChips(pr: PullRequestRow): PrChip[] {
 }
 
 /**
- * Why Merge is disabled, or `null`. `sync off` is the repo's own sentence, verbatim — the server's `syncOffBlock` is its one home and the field is the
- * reason the page is meant to draw, so no second copy of the sentence exists here. `checks failing` is the page's courtesy, not GitHub's rule: a repo whose
- * branch protection lets a red PR through still gets the reason before the click rather than after it.
+ * Why Merge is disabled, or `null`. `sync off` is a short label, not the repo's sentence: the view draws `repo.syncOff` (the server's `syncOffBlock`, its
+ * one home) once in the repo's heading, so three copies of it per row would only repeat the fix. `checks failing` is the page's courtesy, not GitHub's rule:
+ * a repo whose branch protection lets a red PR through still gets the reason before the click rather than after it.
  */
 export function mergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null {
-  if (repo.syncOff !== null) return repo.syncOff;
+  if (repo.syncOff !== null) return 'sync off';
   if (pr.draft) return 'draft';
   if (pr.mergeable === 'conflicting') return 'not mergeable';
   if (pr.checks === 'failure') return 'checks failing';
@@ -52,9 +52,12 @@ export function mergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null 
   return null;
 }
 
-/** Why Update branch is disabled, or `null`. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, which is false for "already up to date" and for "this token may not" alike. */
+/**
+ * Why Update branch is disabled, or `null`. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, which is false for "already up to date" and for "this
+ * token may not" alike.
+ */
 export function updateBlock(pr: PullRequestRow, repo: PrRepoView): string | null {
-  if (repo.syncOff !== null) return repo.syncOff;
+  if (repo.syncOff !== null) return 'sync off';
   if (pr.crossRepository && !pr.maintainerCanModify) return 'fork does not allow edits';
   if (!pr.canUpdateBranch) return 'already up to date';
   return null;
@@ -65,7 +68,7 @@ export function updateBlock(pr: PullRequestRow, repo: PrRepoView): string | null
  * the repo setting off, or a PR would be left armed with no way to take it back from this page. `sync off` blocks both directions, as it blocks every write.
  */
 export function autoMergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null {
-  if (repo.syncOff !== null) return repo.syncOff;
+  if (repo.syncOff !== null) return 'sync off';
   if (pr.autoMerge === null && !repo.autoMergeAllowed) return 'auto-merge not enabled on the repo';
   return null;
 }

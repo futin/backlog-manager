@@ -87,7 +87,7 @@ describe('prChips', () => {
 
 describe('the write blocks', () => {
   it('mergeBlock: first match wins, in order', () => {
-    expect(mergeBlock(pr({ draft: true, mergeable: 'conflicting', checks: 'failure' }), repo({ syncOff: SYNC_OFF, methods: [] }))).toBe(SYNC_OFF);
+    expect(mergeBlock(pr({ draft: true, mergeable: 'conflicting', checks: 'failure' }), repo({ syncOff: SYNC_OFF, methods: [] }))).toBe('sync off');
     expect(mergeBlock(pr({ draft: true, mergeable: 'conflicting', checks: 'failure' }), repo({ methods: [] }))).toBe('draft');
     expect(mergeBlock(pr({ mergeable: 'conflicting', checks: 'failure' }), repo({ methods: [] }))).toBe('not mergeable');
     expect(mergeBlock(pr({ checks: 'failure' }), repo({ methods: [] }))).toBe('checks failing');
@@ -96,7 +96,7 @@ describe('the write blocks', () => {
   });
 
   it('updateBlock: sync off, then a fork that forbids edits, then up to date', () => {
-    expect(updateBlock(pr({ crossRepository: true, maintainerCanModify: false, canUpdateBranch: false }), repo({ syncOff: SYNC_OFF }))).toBe(SYNC_OFF);
+    expect(updateBlock(pr({ crossRepository: true, maintainerCanModify: false, canUpdateBranch: false }), repo({ syncOff: SYNC_OFF }))).toBe('sync off');
     expect(updateBlock(pr({ crossRepository: true, maintainerCanModify: false, canUpdateBranch: false }), repo())).toBe('fork does not allow edits');
     expect(updateBlock(pr({ crossRepository: true, maintainerCanModify: true, canUpdateBranch: false }), repo())).toBe('already up to date');
     expect(updateBlock(pr({ canUpdateBranch: false }), repo())).toBe('already up to date');
@@ -108,8 +108,8 @@ describe('the write blocks', () => {
     expect(autoMergeBlock(pr(), repo({ autoMergeAllowed: false }))).toBe('auto-merge not enabled on the repo');
     expect(autoMergeBlock(armed, repo({ autoMergeAllowed: false }))).toBeNull();
     expect(autoMergeBlock(pr(), repo())).toBeNull();
-    expect(autoMergeBlock(armed, repo({ syncOff: SYNC_OFF }))).toBe(SYNC_OFF);
-    expect(autoMergeBlock(pr(), repo({ syncOff: SYNC_OFF, autoMergeAllowed: false }))).toBe(SYNC_OFF);
+    expect(autoMergeBlock(armed, repo({ syncOff: SYNC_OFF }))).toBe('sync off');
+    expect(autoMergeBlock(pr(), repo({ syncOff: SYNC_OFF, autoMergeAllowed: false }))).toBe('sync off');
   });
 });
 
