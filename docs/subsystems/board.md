@@ -491,7 +491,8 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   tooltip alone. A write disables the row's actions until the page has re-read, after success and failure alike; its outcome is one line — `outcomeLine`, or
   the server's refusal verbatim — held by the page per `<repo>#<number>`, so a merged PR that left the list keeps a `#12 merged` line under its repo. An
   update-branch's 202 marks the PR at the head SHA it was asked from: the row reads `updating…` while `isUpdating`, until a read shows a new head or
-  `UPDATING_MS` (30 s) pass, and at that moment the page re-reads once. The page reports the rail cursor as Board and Archive do (`useReportWorking`).
+  `UPDATING_MS` (30 s, `PR_UPDATING_MS` in `shared/types.ts`) pass, and at that moment the page re-reads once — a read the server answers from GitHub,
+  because the update made the repo due at that same moment. `updateBlock` reads `no permission to update` for a PR that cannot be updated while behind. The page reports the rail cursor as Board and Archive do (`useReportWorking`).
 
 **A claim control in the item modal (#225, #227).** `claimControl` (`lib/tracker.ts`) reads `BacklogItem.holder` and answers `'stop-release'` for a claim
 whose session the board dispatched, live or stale (a `claude -p` waiting on a reply sends no heartbeat, so its age says nothing); `'release'` for any other live

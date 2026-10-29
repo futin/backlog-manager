@@ -1,4 +1,4 @@
-import { MERGE_METHODS } from '../../../shared/types';
+import { MERGE_METHODS, PR_UPDATING_MS } from '../../../shared/types';
 import type { PillTone } from '../components/ui/Pill';
 import type { MergeMethod, PrRepoView, PrWriteResult, PullRequestRow } from '../../../shared/types';
 
@@ -54,12 +54,13 @@ export function mergeBlock(pr: PullRequestRow, repo: PrRepoView): string | null 
 
 /**
  * Why Update branch is disabled, or `null`. `canUpdateBranch` is GitHub's `viewerCanUpdateBranch`, which is false for "already up to date" and for "this
- * token may not" alike.
+ * token may not" alike — so the row's `mergeState` tells them apart: a PR GitHub says is BEHIND its base is not up to date, and the only reason left is
+ * that this token may not update it. Any other state reads up to date, which is what it almost always is.
  */
 export function updateBlock(pr: PullRequestRow, repo: PrRepoView): string | null {
   if (repo.syncOff !== null) return 'sync off';
   if (pr.crossRepository && !pr.maintainerCanModify) return 'fork does not allow edits';
-  if (!pr.canUpdateBranch) return 'already up to date';
+  if (!pr.canUpdateBranch) return pr.mergeState === 'behind' ? 'no permission to update' : 'already up to date';
   return null;
 }
 
@@ -80,9 +81,10 @@ export function defaultMethod(methods: readonly MergeMethod[]): MergeMethod | nu
 
 /**
  * How long a row says `updating…` after an update-branch was accepted. GitHub answers 202 and does the merge later; the row stays marked until the head SHA
- * moves (the poll saw it land) or this runs out, whichever is first, so a slow update does not leave the spinner up forever.
+ * moves (the poll saw it land) or this runs out, whichever is first, so a slow update does not leave the spinner up forever. The number lives in `shared/`
+ * (`PR_UPDATING_MS`) because the server makes the repo's cache entry due again at the same moment — the page's one re-read must reach GitHub, not the TTL.
  */
-export const UPDATING_MS = 30_000;
+export const UPDATING_MS = PR_UPDATING_MS;
 
 /** Is this PR still waiting on an update-branch it asked for? The mark is keyed by the head SHA it was made at, so a head that moved clears it by itself. */
 export function isUpdating(mark: { sha: string; until: number } | undefined, pr: PullRequestRow, now: number): boolean {

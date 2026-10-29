@@ -103,6 +103,12 @@ describe('the write blocks', () => {
     expect(updateBlock(pr({ crossRepository: true, maintainerCanModify: true }), repo())).toBeNull();
   });
 
+  it('updateBlock: a PR that cannot be updated reads up to date only when it is not behind its base', () => {
+    expect(updateBlock(pr({ mergeState: 'behind', canUpdateBranch: false }), repo())).toBe('no permission to update');
+    expect(updateBlock(pr({ mergeState: 'clean', canUpdateBranch: false }), repo())).toBe('already up to date');
+    expect(updateBlock(pr({ mergeState: 'behind', canUpdateBranch: true }), repo())).toBeNull();
+  });
+
   it('autoMergeBlock: enabling needs the repo setting; disabling an armed one never does', () => {
     const armed = pr({ autoMerge: { method: 'squash', enabledAt: '2026-10-29T09:00:00Z' } });
     expect(autoMergeBlock(pr(), repo({ autoMergeAllowed: false }))).toBe('auto-merge not enabled on the repo');

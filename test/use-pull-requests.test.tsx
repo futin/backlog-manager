@@ -4,7 +4,7 @@
 import { act, renderHook } from '@testing-library/react';
 
 import { PRS_POLL_MS, usePullRequests } from '../client/src/hooks/usePullRequests';
-import { fetchPullRequests, mergePr } from '../client/src/lib/prs-api';
+import { fetchPullRequests, mergePr, updateBranch } from '../client/src/lib/prs-api';
 import type { PullRequestsPayload } from '../shared/types';
 
 /**
@@ -174,5 +174,17 @@ describe('prs-api', () => {
     const ok = { ok: true, outcome: 'merged', pr: null, reread: true };
     global.fetch = jest.fn(() => Promise.resolve(res(200, ok))) as unknown as typeof fetch;
     await expect(mergePr({ repo: 'futin/y', number: 3, method: 'merge', headSha: 'b'.repeat(40) })).resolves.toEqual(ok);
+  });
+
+  it('a 200 whose body is not a write result goes down the error path, never resolving a garbage outcome', async () => {
+    // A proxy's HTML page: the body does not parse as JSON at all.
+    global.fetch = jest.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token <')) } as Response)
+    ) as unknown as typeof fetch;
+    await expect(mergePr({ repo: 'futin/x', number: 17, method: 'squash', headSha: 'a'.repeat(40) })).rejects.toThrow('merge failed (200)');
+
+    // JSON, but not ours: an outcome this page has no word for.
+    global.fetch = jest.fn(() => Promise.resolve(res(200, { ok: true, outcome: 'exploded', pr: null, reread: true }))) as unknown as typeof fetch;
+    await expect(updateBranch({ repo: 'futin/y', number: 3, headSha: 'b'.repeat(40) })).rejects.toThrow('update branch failed (200)');
   });
 });
