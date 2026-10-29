@@ -583,6 +583,51 @@ export function isSyncInterval(value: unknown): value is SyncInterval {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SYNC_INTERVALS, value);
 }
 
+// ── Pull requests (GitHub › PRs) ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// Spec: docs/superpowers/specs/2026-10-29-source-sections-design.md, Goal 2 and "Left to the builder". One row per OPEN pull request of a registered GitHub
+// repo, read by ONE GraphQL query per repo (`server/src/tracker/pulls.query.ts`, which holds the mapping from GitHub's enums to these words). The PR's GraphQL
+// node id is deliberately absent: the auto-merge mutation needs it, the server reads it fresh for that one call, and it never leaves the server — a write names
+// a PR as `<repo>#<number>`, which is also the write's serialisation key.
+
+/** GitHub's three merge methods, in lower case. */
+export type MergeMethod = 'squash' | 'merge' | 'rebase';
+
+/** Every merge method, in the order a PR's default is picked from: the repo's first ALLOWED one in this order (spec, "Merge method"). */
+export const MERGE_METHODS: readonly MergeMethod[] = ['squash', 'merge', 'rebase'];
+
+/** One open pull request, as the PRs page draws it. Every enum is GitHub's, lower-cased or narrowed in `toRow`; nothing here is derived from two fields. */
+export interface PullRequestRow {
+  number: number;
+  title: string;
+  /** Where a person opens the PR on github.com. */
+  url: string;
+  /** The author's login, or `null` for a deleted account ("ghost") — GitHub answers `author: null` for one. */
+  author: string | null;
+  draft: boolean;
+  /** The head branch's name (`headRefName`) — what the run-in-progress warning matches against `backlog/<id>` and `execute/<id>`. */
+  head: string;
+  /** The head commit's SHA. A merge and an update-branch both send it back, so a head that moved since the read is GitHub's 409/422, never a surprise. */
+  headSha: string;
+  base: string;
+  /** The head lives in a fork. With `maintainerCanModify` false, GitHub refuses update-branch with a 422, so the page disables it with a reason. */
+  crossRepository: boolean;
+  maintainerCanModify: boolean;
+  updatedAt: string;
+  /** `UNKNOWN` is GitHub still computing it — common for a few seconds after a push or an update-branch, so it is a state, not an error. */
+  mergeable: 'mergeable' | 'conflicting' | 'unknown';
+  /** `mergeStateStatus` lower-cased (`clean`, `behind`, `blocked`, `dirty`, `unstable`, `has_hooks`, `draft`, `unknown`) — kept as GitHub's open word list
+   *  rather than narrowed, because GitHub has added values to it before and an unknown one should still render. */
+  mergeState: string;
+  /** `reviewDecision`; `null` when the repo requires no review. */
+  review: 'approved' | 'changes-requested' | 'review-required' | null;
+  /** The head commit's `statusCheckRollup.state`; `none` when the commit has no checks at all. */
+  checks: 'success' | 'failure' | 'pending' | 'none';
+  /** Armed auto-merge, or `null`. `enabledAt` is `''` in the one case GitHub's nullable `DateTime` comes back empty. */
+  autoMerge: { method: MergeMethod; enabledAt: string } | null;
+  /** GitHub's own `viewerCanUpdateBranch`: false when the head is already up to date with its base OR this token may not update it. */
+  canUpdateBranch: boolean;
+}
+
 // ── Jira ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // Spec §4 (docs/superpowers/specs/2026-10-15-jira-integration-design.md). Phase 1 typed two fields at their empty value so phase 5 could widen them without a
 // rename: `JiraIssueDetail.session` is now `JiraLiveSession | null` and `JiraStatusPayload.live` a key → `JiraLiveSession` map, both filled by the controller from
