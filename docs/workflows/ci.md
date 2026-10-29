@@ -9,7 +9,7 @@ did, by release-kit's README §Adopting it in an app.
 | Context         | What it does                                                                                                              | When it is green without running anything |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | `ci / checks`   | `pnpm install --frozen-lockfile`, then `node scripts/ci-scope.mjs`: `pnpm typecheck`, `pnpm build`, `pnpm test`, or a scoped subset (below) | never                                     |
-| `ci / pr-title` | the PR title must match the Conventional Commits rule in release-kit's `scripts/pr-title.mjs`                             | on `push` (no title)                      |
+| `ci / pr-title` | the PR title must match the Conventional Commits rule in release-kit's `scripts/pr-title.mjs`; a `feat`/`fix`/`perf` PR also needs its What's new notes (§Releases) | on `push` (no title)                      |
 | `ci / skills`   | nothing here — no `skills-command` is passed, because `ci-scope.mjs` already runs the node skills suite whenever skills change | always                                    |
 
 The full run is the three checks an orchestrated item's verification step resolves to off `package.json`, so a code PR is held to the same bar an orchestrator
@@ -93,18 +93,24 @@ Every direct push to `main` is refused, and in this repo that is more than habit
 
 ## Releases
 
-`.github/workflows/release.yml` is a thin caller of release-kit's reusable `release.yml` (`@v1`, with `kit-ref: v1` kept equal to that ref), run on every
-push to `main` and on `workflow_dispatch` — the same caller the dashboard has, byte for byte but for its header comment. Design: this repo's
+`.github/workflows/release.yml` is a thin caller of release-kit's reusable `release.yml` (`@v1`, with `kit-ref: v1` kept equal to that ref) in
+`mode: rollup`, run each night at 04:00 UTC (`schedule`, `0 4 * * *`) and on `workflow_dispatch` — the same caller the dashboard has, but for its header
+comment. A merge into `main` releases nothing by itself. Design: this repo's
 `docs/superpowers/specs/2026-10-16-release-versioning-design.md`, which adopts the dashboard's `2026-10-15-release-pipeline-design.md` §Phase C unchanged. It
 needs both `contents: write` (the tag push and the Release) and `pull-requests: read` — setting `contents` alone drops `pull-requests` to none and the PR
-lookup then fails on a private repo. The group is `release` with `cancel-in-progress: false`; GitHub still drops an older *pending* run when a newer one
-queues, so a run releases every unreleased commit since the last tag, not only its own.
+lookup then fails on a private repo. The group is `release` with `cancel-in-progress: false`, so a dispatch and the nightly run never tag at once.
 
-**The tag is the record.** The version exists only as an annotated `vX.Y.Z` tag whose message carries the PR title, the notes and `Release-*` trailers.
+**One version per run.** A run gathers every releasing PR merged since the newest version tag into a single release: the bump is the largest among their
+types (below), and the notes hold one `### <Scope>` section per title scope, oldest PR first, with unscoped PRs under `### Other`. A night with only `docs`,
+`chore` and the like, or no merges at all, cuts nothing and ends green. Tags cut before the switch keep their one-PR shape; the reader handles both.
+
+**The tag is the record.** The version exists only as an annotated `vX.Y.Z` tag whose message carries the grouped notes and `Release-*` trailers; a
+`Release-Items` trailer lists each PR with its type, scope and breaking flag.
 `package.json` `version` is not read and is not bumped, and `.claude-plugin/plugin.json` keeps its own hand-bumped version; the same tags feed the GitHub
 Release.
 
-**What cuts one.** The PR title decides, and the version is bumped from the newest `vX.Y.Z` tag reachable from the commit:
+**What cuts one.** Each PR's title decides its type; the run takes the largest, and the version is bumped from the newest `vX.Y.Z` tag reachable from
+the run's target:
 
 | Title | While major = 0 | From 1.0.0 |
 |---|---|---|
@@ -119,7 +125,10 @@ that merged a bug or a `feat` task releases, and a run of `chore`-only items doe
 
 **Where the notes come from.** The `## What's new` section of the PR body (`.github/pull_request_template.md` carries it above `## Why this shape`; a
 `pr`-mode run's body opens with it, one line per merged item), up to the next `## ` heading, with HTML comments stripped first. A missing or empty section,
-which is what the untouched template yields, means the title alone is the entry. Delete the section from PRs with nothing user-visible.
+which is what the untouched template yields, means the title alone is the entry. `require-notes: true` in `ci.yml` makes `ci / pr-title` fail a
+`feat`/`fix`/`perf` PR while that section is missing, empty or only the template comment; `ci.yml` triggers on `edited`, so filling in the body re-runs it.
+A releasing PR with nothing worth saying writes `None` (any case, optionally `None — <reason>`) as the section's only content: the check passes and the
+PR's entry falls back to its title, with the `None` never shown. `docs`, `chore` and the other silent types are never asked for notes.
 
 **Baseline.** Until a `vX.Y.Z` tag exists the workflow releases nothing and ends green with the warning `no baseline tag — see Baseline`. `v0.1.0` is tagged
 once, by hand, on the `main` commit that contains the workflow (`git pull`, then `git tag -a v0.1.0 <sha> -m "Baseline — versioning starts here"
@@ -128,7 +137,7 @@ once, by hand, on the `main` commit that contains the workflow (`git pull`, then
 **Re-running.** `gh workflow run release.yml -f sha=<sha>` releases that commit and every unreleased commit before it; with no `sha` it uses the branch head.
 It is idempotent: a commit with its tag and its Release is left alone, and a tag whose Release is missing only gets the Release. That is also how the
 baseline gets its GitHub Release. A dispatch whose target has a later version tag fails with `a newer release exists: <tag>`, since versions are never
-assigned out of order; a push run in the same state ends green with `a newer release exists: <tag> — nothing to do`, because it can only be a superseded run.
+assigned out of order; a scheduled run in the same state ends green with `a newer release exists: <tag> — nothing to do`, because it can only be a superseded run.
 A dispatch `sha` must be a commit on `main`; any other commit fails with `target <sha> is not on origin/main` and nothing is tagged.
 
 <!-- docs-sync:
