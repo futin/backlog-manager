@@ -2949,6 +2949,45 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
 
+/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The tiles are plain bordered buttons — a selected one takes the ink border, never a fill, so a level's dot stays
+   the only colour on it. Items are boxless with a hairline BETWEEN them, as `.prs-row` is; the compact keys sit on the right and wrap under on a narrow window.
+   Muted steps use --ink3, the calm ones a step down from the problems, which stay --ink2. Own `.prs-inbox*`, `.prs-tile*` and `.prs-notes*` classes only — a
+   `.ui-*` primitive is never restyled from here (guard 7). */
+.prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+.prs-inbox-tiles { display: flex; flex-wrap: wrap; gap: 8px }
+.prs-tile {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--hairline); background: var(--strip); color: var(--ink2); font-size: 14px
+}
+.prs-tile:hover { color: var(--ink) }
+.prs-tile[aria-pressed="true"] { border-color: var(--ink); color: var(--ink) }
+.prs-tile-n { color: var(--ink); font-weight: 600 }
+.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
+.prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
+.prs-inbox-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 16px 0; min-width: 0 }
+.prs-inbox-item + .prs-inbox-item, .prs-inbox-quiet + .prs-inbox-quiet { border-top: 1px solid var(--hairline) }
+.prs-inbox-item:first-child { padding-top: 0 }
+.prs-inbox-main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; min-width: 0 }
+.prs-inbox-keys { flex: 0 1 auto; min-width: 0 }
+.prs-inbox-item > .prs-outcome { flex: 1 0 100% }
+.prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
+.prs-inbox-verdict { font-size: 14px; color: var(--ink); line-height: 1.45 }
+.prs-inbox-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
+.prs-inbox-step { font-size: 13px; color: var(--ink2); line-height: 1.45 }
+.prs-inbox-step-calm { color: var(--ink3) }
+.prs-inbox-quiet { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; min-width: 0 }
+.prs-inbox-quiet-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; font-size: 14px; color: var(--ink) }
+.prs-inbox-facts { font-size: 13px; color: var(--ink3) }
+.prs-inbox-toggle {
+  margin-left: auto; border: 0; background: none; padding: 0 4px; cursor: pointer; font-size: 13px; color: var(--ink2); text-decoration: underline
+}
+.prs-inbox-toggle:hover { color: var(--ink) }
+.prs-inbox-quiet-actions[hidden] { display: none }
+.prs-inbox-cantread { padding: 4px 0; font-size: 13px; color: var(--ink2) }
+.prs-notes { display: flex; flex-direction: column; gap: 4px }
+.prs-notes-line { font-size: 13px; color: var(--ink2); line-height: 1.45 }
+.prs-notes-error { color: var(--red) }
+
 /* ── ui primitives ────────────────────────────────────────────────────────────
    Every class family owned by a component in client/src/components/ui/, and
    nothing else. The design spec's §12.1 rule, restated where it is enforced:
