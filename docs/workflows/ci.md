@@ -28,7 +28,7 @@ merge is. `ci / skills` still reports: the ruleset in release-kit requires all t
 | anything else — `server/`, `client/`, `shared/`, configs, the lockfile, and always `scripts/**`, `test/**`, `.github/**` | everything: `pnpm typecheck`, `pnpm build`, `pnpm test`                                               |
 
 - **Docs are not test-free here.** `claude-rules.test.ts` and `dialog-count-docs.test.ts` hold `CLAUDE.md`, `.claude/rules/` and `invariants.md` to each
-  other, and `backlog.test.mjs` / `orchestrate.test.mjs` read the repo's own `CLAUDE.md` and `invariants.md`. A docs-only PR still runs those, so a
+  other, and `backlog.test.mjs` / `orchestrate-prompts.test.mjs` read the repo's own `CLAUDE.md` and `invariants.md`. A docs-only PR still runs those, so a
   doc that breaks a guard is red on the PR, not on `main`.
 - **Which suites "name" a file** is found by scanning the suites' source at run time — no hand-kept list to drift. A path piece counts when it is bounded
   by quotes or slashes on code lines (comment lines are dropped, so a header citing `.claude/DESIGN.md` reads nothing). It is a heuristic, generous on

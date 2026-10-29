@@ -46,7 +46,7 @@ export function scopeOf(files) {
 
 // The names a suite could reach a changed file by. `rooted` are paths from the repo root: under `wide`, every leading directory (`skills`,
 // `skills/backlog`, …) — a skills change is run broadly, since the whole node suite runs beside it anyway; otherwise only the parent directory and the
-// file itself, because a docs PR is where the saving is, and `docs` alone names every doc (it picked orchestrate.test.mjs for any docs/ edit).
+// file itself, because a docs PR is where the saving is, and `docs` alone names every doc (it picked orchestrate's whole suite for any docs/ edit).
 // `base` is the basename. `parent` is the parent directory's own name, narrow mode only — what a suite reading a whole directory spells
 // (`join(ROOT, '.claude', 'rules')`, then a readdir); under `wide` it would be a skill's name like `backlog`, which half the suites use as a fixture dir.
 export function pathTokens(file, { wide = false } = {}) {

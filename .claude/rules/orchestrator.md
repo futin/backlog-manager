@@ -96,7 +96,7 @@ paths: ["skills/backlog-orchestrate/**", "server/src/orchestrator/**", "shared/a
   settles which. The line is whether a command **depends on** the HEAD of the tree it runs in, NEVER whether it names it — `branch -d` names no HEAD and is
   wholly HEAD-relative, as are `branch --merged`, `branch --contains`, a bare `diff` and a `status`, so a "names HEAD" criterion would reinstate this bug. The
   three shapes that may stay at the project root are HEAD-independent by construction: `show-ref --verify refs/heads/…`, the `worktree` verbs, and a
-  `diff`/`log` given an explicit `<base>...backlog/<id>` range. `orchestrate.test.mjs` pins exactly that list as a closed allowlist — a text guard cannot
+  `diff`/`log` given an explicit `<base>...backlog/<id>` range. `orchestrate-prompts.test.mjs` pins exactly that list as a closed allowlist — a text guard cannot
   decide HEAD-dependence, so it fails closed and a new `git -C "$PWD"` line goes red until someone adds it with its reason. `base` is required on
   `OrchestratorRun`, carried spawn → prompt → `init` → run file, and an older run file's absent `base` is resolved to `'main'` **once**, in
   `sanitizeMergeFields`. Validity is checked twice, same
