@@ -260,7 +260,7 @@ the toolbar, and hands one props bundle to whichever layout component is drawn. 
   registered`; an `updating…` mark set in Cards survives switching to Inbox and Matrix; the three write cases (merge confirm, auto-merge, update branch)
   re-run from Inbox and from Matrix produce the same POST bodies and `pr-outcome` text as from Cards.
 - [ ] **Step 3: Implement.** **Step 4: Run** `test/prs-view.test.tsx`, `test/prs-inbox.test.tsx`, `test/prs-matrix.test.tsx`, `test/design-guards.test.ts` —
-  PASS; typecheck clean. Find `App`'s own suite(s) that render `PullRequestsView` (`grep -l PullRequestsView test/`) and run them too.
+  PASS; typecheck clean. Also run `test/source-sections.test.tsx` (it mounts `App`'s GitHub pages, so the new prop and default layout reach it).
 - [ ] **Step 5: Commit** `feat(client): PRs layout switcher and hidden no-access repos`.
 
 ### Task 7: GitHub › Settings › Access card, and the mount-fact rewrite
@@ -276,7 +276,7 @@ the toolbar, and hands one props bundle to whichever layout component is drawn. 
 **Interfaces:**
 - Consumes: `usePullRequests`, `splitReach`.
 - Produces: `GithubAccessGroup()` — renders nothing until data arrives, when `token` is false, or when hidden is empty. Otherwise a card in §8.6's
-  language matching `GithubSyncGroup` (same `Sheet`/head primitives): title `Access`, bad `Pill` `<N> without access`; lead (spec wording, builder's
+  language matching `GithubSyncGroup` (same `SettingsGroup` / `SettingsRow` primitives from `ui/SettingsRow`, `scope="this machine"`): title `Access`, bad `Pill` `<N> without access`; lead (spec wording, builder's
   sentence); one row per hidden repo: name + `detail` in the `--red` text class; fix note naming fine-grained token repository access, **Pull requests:
   Read and write** (list, update branch, auto-merge) and **Contents: Read and write** (merge), and `BM_GITHUB_TOKEN`; muted `<N> repos readable.` (count
   of shown repos).
@@ -287,14 +287,16 @@ the toolbar, and hands one props bundle to whichever layout component is drawn. 
   details, pill `2 without access`, footer `1 repo readable.` for one shown repo; the card's text contains `BM_GITHUB_TOKEN`, `Pull requests: Read and
   write`, `Contents: Read and write` and does not match `/gh[pousr]_[A-Za-z0-9]{10,}|github_pat_/`; `token: false` → no card.
 - [ ] **Step 2: Run** — FAIL. **Step 3: Implement** the card and the five text edits. **Step 4: Run** `test/github-settings.test.tsx`,
-  `test/claude-rules.test.ts`, `test/design-guards.test.ts` — PASS; typecheck clean.
+  `test/source-sections.test.tsx` (its fetch stub may need an `/api/prs` answer now that Settings reads it), `test/claude-rules.test.ts`,
+  `test/design-guards.test.ts` — PASS; typecheck clean.
 - [ ] **Step 5: Commit** `feat(client): GitHub › Settings › Access card for repos the token cannot read`.
 
 ### Task 8: Docs
 
 **Files:**
 - Modify: `.claude/DESIGN.md` §8.11 (rewrite for three layouts: switcher, toolbar, hidden note, Inbox, Matrix, Cards, shared actions/outcome line, empty
-  states) and the GitHub Settings subsection of §8.6 or wherever `Sync` is described (grep `GithubSyncGroup` / `Sync` card) — add the Access card;
+  states) and §8.6's paragraph that describes GitHub › Settings' `Sync` card (DESIGN.md ~line 396, "a `Settings` band with a `this machine` pill over one
+  `Sync` card") — add the Access card beside it;
   `docs/subsystems/board.md` PRs paragraph (layouts, hidden repos, Access card); `CLAUDE.md` Layout line for `client/src/` — "PRs being the open pull
   requests of the registered GitHub repos, with merge, auto-merge and update branch" gains "drawn as Inbox, Matrix or Cards" (keep it one clause; CLAUDE.md
   bullets have an 80-word cap enforced by `test/claude-rules.test.ts` for unlinked bullets — check that bullet's kind first).
