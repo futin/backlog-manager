@@ -8,7 +8,7 @@ import type { BacklogItem, OrchestratorRun, ProjectSummary, SyncInterval, Tracke
  * What the board says about a connected tracker (task-45, spec §5.5) — the
  * poll age, and the access reason in its place when the connection is not
  * `ok`. One home for the derivation, like every other in `lib/`: the tracker
- * chip, the item modal and the Trackers card all print the same two sentences, and three
+ * chip, the item modal and the Sources card all print the same two sentences, and three
  * copies of "is this `ok`, and if not what do I say" is three chances to
  * describe one connection two ways on one screen.
  *

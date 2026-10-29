@@ -8,8 +8,8 @@ import { RegistryService, registryProjectsOr503 } from '../registry/registry.ser
 import type { TrackerProjectRow, TrackersPayload } from '../../../shared/types';
 
 /**
- * `GET /api/trackers` — the Shared Settings page's Trackers card (task-45,
- * spec §5.6). Read-only: there is no connections file, and connecting a
+ * `GET /api/trackers` — the Shared Settings page's Sources card and GitHub ›
+ * Settings' Sync card (task-45, spec §5.6; split by the source-sections change). Read-only: there is no connections file, and connecting a
  * project is `backlog.mjs connect` writing a marker someone then commits. The
  * card's one write — a repo's sync interval (#17) — is `POST /api/trackers/sync`,
  * which lives in `orchestrator/tracker-sync.controller.ts` for the module-cycle

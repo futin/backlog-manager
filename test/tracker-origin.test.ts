@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { originRepo, parseGithubRemote } from '../server/src/tracker/origin.util';
 
 /**
- * The Trackers card's "here is the command to connect this project" read
+ * The Sources card's "here is the command to connect this project" read
  * (task-45, spec §5.6): a files project's `origin`, resolved to `owner/name`,
  * per request and memoised nowhere.
  *
@@ -85,7 +85,7 @@ describe('the two parsers of one rule', () => {
   /**
    * `parseGithubRemote` here and `parseOriginRepo` in
    * `skills/backlog/tools/backlog.mjs` answer the same question for two
-   * surfaces — the Trackers card's suggested command, and `connect`'s own
+   * surfaces — the Sources card's suggested command, and `connect`'s own
    * default — and they CANNOT be one implementation: a skill's `tools/` is
    * installed as a standalone copy of what was pushed, with no build step and
    * no path back into `server/`, which is the same boundary `labels.ts`

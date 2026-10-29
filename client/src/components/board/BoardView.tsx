@@ -225,14 +225,11 @@ export default function BoardView({ source, onOpenRuns, onWorking }: { source: S
      the dispatch chip above it cannot. Derived here, never an effect that calls `setOpen`: an effect paints one stale frame and then a second render. */
   const openItem = open === null ? null : (all.find((i) => i.projectPath === open.projectPath && i.id === open.id) ?? open);
 
-  /* One assignment for the whole board, built here rather than per card: the
-     hue a project gets depends on which projects were registered before it, so
-     it is a property of the registry and not of any one item. Keyed on
-     `fullProjects` (the WHOLE registry, not this source's slice — a project keeps its colour on the page of the other source, because a hue depends on which projects were
-     registered before it, so a slice would recolour it) and not on `registered` — the pass is cheap either way, but
-     `registered` is a fresh [] on every render while the fetch is in flight,
-     which would make the memo a no-op and hand every card a new prop object on
-     each keystroke in the search box. */
+  /* One assignment for the whole board, built here rather than per card: the hue a project gets depends on which projects were registered before it, so it is a
+     property of the registry and not of any one item. Keyed on `fullProjects` (the WHOLE registry, not this source's slice — a project keeps its colour on the
+     page of the other source, because a hue depends on which projects were registered before it, so a slice would recolour it) and not on `registered` — the
+     pass is cheap either way, but `registered` is a fresh [] on every render while the fetch is in flight, which would make the memo a no-op and hand every
+     card a new prop object on each keystroke in the search box. */
   const hues = useMemo(() => buildProjectHues(fullProjects ?? []), [fullProjects]);
 
   /* Fail-open on a stale stored project (unregistered since): an unmatched

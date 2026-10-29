@@ -7,7 +7,7 @@ import { RegistryModule } from '../registry/registry.module';
 
 /**
  * The tracker seam's own module (task-45): the poller, the client it calls
- * through, and the read-only route the Trackers card draws.
+ * through, and the read-only route the Sources card and GitHub › Settings draw.
  *
  * `GithubClient` is provided as a value rather than a decorated class — it has
  * no Nest decorators on purpose (see its header: a test constructs one with a
@@ -19,7 +19,7 @@ import { RegistryModule } from '../registry/registry.module';
  * poller for every read (the cache IS the read side) and, since task-46, the
  * client for every write. ONE client instance across the process is what makes
  * the rate-limit headers a single reading — two would each report half the
- * budget and the Trackers card would show whichever was asked last.
+ * budget and the Sources card would show whichever was asked last.
  *
  * The dependency runs one way only — items depend on the tracker, never the
  * reverse — which is what keeps the adapter a plain reader over a cache.

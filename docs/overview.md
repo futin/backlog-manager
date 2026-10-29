@@ -113,9 +113,10 @@ Nest, composed in [`app.module.ts`](../server/src/app.module.ts), every route un
 
 ### The client — [full doc](subsystems/board.md)
 
-A React SPA, five sections behind a side rail ([`App.tsx`](../client/src/App.tsx)) and each one its own lazy chunk: Board, Runs, Archive, Jira (drawn only when
-configured), Settings. The server returns whole corpora, so most of what you see is decided in the browser — whether an item is groomed, whether it belongs on
-the Board or in Archive, how long an item's work took, what a run's cost was. Those derivations live in `client/src/lib/` as one implementation each, precisely
+A React SPA, five sections behind a side rail ([`App.tsx`](../client/src/App.tsx)) — Files and GitHub (each drawn only while a registered project has that
+source, with Board and Archive under each and GitHub's own Settings page), Jira (drawn only when configured), Runs, Settings — and each page its own lazy chunk.
+The server returns whole corpora, so most of what you see is decided in the browser — whether an item is groomed, whether it belongs on the Board or in Archive,
+how long an item's work took, what a run's cost was. Those derivations live in `client/src/lib/` as one implementation each, precisely
 so two surfaces cannot disagree about the same item; the ones the server needs too live in [`shared/`](../shared/agent.ts) beside the wire types. The
 rail ends in a version chip that opens a What's new drawer of every release, read from the checkout's own tags ([releases](subsystems/releases.md)).
 

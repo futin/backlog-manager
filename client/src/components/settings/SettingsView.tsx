@@ -84,8 +84,8 @@ const LANDINGS: { value: Landing; label: string }[] = [
 
 /**
  * The `Opens on` list this machine can honour (Jira phase 2, spec §6.1): `Jira` only while `GET /api/jira` says `configured: true`, because the rail draws no
- * Jira row otherwise and a pin to it would open on Board anyway — `App` falls a `jira` section to Board on that same answer. Before the status has answered
- * the option is withheld too: offering it on a guess would let a reader pin a section this machine may not have.
+ * Jira row otherwise and a pin to it would open elsewhere anyway — `App` falls a `jira` section to the first drawn source row (Runs when there is none) on that
+ * same answer. Before the status has answered the option is withheld too: offering it on a guess would let a reader pin a section this machine may not have.
  *
  * One exception, and it is not an offer: a STORED `jira` landing keeps its option on an unconfigured machine. A native select whose value matches no option
  * renders blank (the reason `lib/settings.ts` clamps the dispatch defaults rather than keeping an unknown name), so the row would hide the very preference
@@ -255,8 +255,8 @@ function LocalPage() {
        hang under `Orchestrator` for the same kind of reason, and that pairing
        is gone by design — the watchdog is the server's and this page is the
        browser's, and the split is what says so. Shared is the other shape
-       entirely: the watchdog's long card over the tick breaker against the
-       tracker report (see `SharedPage`).
+       entirely: the Sources report alone against the watchdog's long card,
+       the tick breaker and the time zone (see `SharedPage`).
 
        Folds to one column under 1100 px, which is Settings' own breakpoint and
        deliberately NOT the 700 px phone break every other split on this board

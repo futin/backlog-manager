@@ -56,7 +56,8 @@ One line per seam. The mechanism lives in the subsystem docs linked below; the r
   time zone), `registry/`, `static.ts` (serves `client/dist` only when built), `security.ts`, `allowed-hosts.ts` (the Host allowlist every
   route is gated by), `git-run.util.ts` (`runGit`, the one way this server runs git).
   → [docs/subsystems/api.md](docs/subsystems/api.md)
-- `client/src/` — React SPA: five lazy sections behind a side rail (Board, Runs, Archive, Jira, Settings) that ends in a version chip opening the What's new
+- `client/src/` — React SPA: five lazy sections behind a side rail (Files, GitHub, Jira, Runs, Settings — Files and GitHub each drawn only while a registered
+  project has that source, with Board and Archive under each and GitHub › Settings under GitHub) that ends in a version chip opening the What's new
   drawer ([releases](docs/subsystems/releases.md)), one run chip in the board's band, and the three-step
 Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figure strip, a 420 px Live+History list column, one always-visible detail sheet — and,
   on a board 1400 px or wider, that strip standing as a 320 px right rail instead) and
@@ -64,7 +65,8 @@ Orchestrate sheet. Runs is THREE pages under one rail entry — History (a figur
   Watchdog, Ticks — switched by the rail's sub-nav tree alone, never by an in-page control. Every derivation has one home in `lib/`, and every look more than one
   surface draws has one home in `components/ui/`. A connected tracker adds one shell-level chip — POLL and API meters in the strip above the well, or in
   the rail bar below 700 px — and two item readings: the card's `untyped`/assignee/link-out/`queued` badge, and the item modal's age beside the cached body —
-  all derived in `lib/tracker.ts`, plus the `Trackers` card on Shared Settings, whose one control is each repo's sync interval. Jira is drawn only
+  all derived in `lib/tracker.ts`, plus GitHub › Settings' `Sync` card, whose one control is each repo's sync interval, and the read-only `Sources` card on
+  Shared Settings (token, reach, connect commands, the Jira row). Jira is drawn only
   while `GET /api/jira` says configured: a second shell chip beside the tracker's, and two pages under its rail entry — Board and Setup, switched by the tree
   alone — all derived in `lib/jira.ts`. → [docs/subsystems/board.md](docs/subsystems/board.md)
 - [`.claude/DESIGN.md`](.claude/DESIGN.md) — the client's visual language: §1–7 copied from the dashboard, §8 how this board applies it; every component must
@@ -237,6 +239,9 @@ of them, and to be opened by hand before editing through any other route (`Write
 - **The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only
   when `GET /api/jira` says configured.**
   Why: [invariants.md](docs/subsystems/invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
+- **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded
+  down from it.**
+  Why: [invariants.md](docs/subsystems/invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree)
 - **`contentWidth` is stamped before first paint, and the CSP hash travels with the script that stamps it.**
   Why: [invariants.md](docs/subsystems/invariants.md#contentwidth-is-stamped-before-first-paint-and-the-csp-hash-travels-with-it)
 - **The served build carries a CSP (`server/src/security.ts`); dev does not.** `script-src` pins the pre-paint theme script's sha256 — edit that script and

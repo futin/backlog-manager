@@ -445,7 +445,7 @@ describe('rate limits', () => {
     expect(p.summary('futin/x').access).toBe('ok');
     delete process.env[GITHUB_TOKEN_ENV];
     // The credential is read per call, so removing it is visible at once —
-    // a stale `ok` would be a lie the Trackers card renders.
+    // a stale `ok` would be a lie the Sources card renders.
     expect(p.summary('futin/x').access).toBe('no-token');
     p.disarm();
   });

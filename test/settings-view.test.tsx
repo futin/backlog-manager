@@ -445,8 +445,8 @@ describe('SettingsView', () => {
       global.fetch = jest.fn(() => new Promise(() => {})) as jest.Mock;
 
       renderView('dashboards');
-      // `getAllBy`, not `getBy`: the Trackers card beside this one (task-45)
-      // says `checking…` in the same frame and for the same reason — its own
+      // `getAllBy`, not `getBy`: the page's other unanswered reads (the list,
+      // each machine's health) say `checking…` in the same frame and for the same reason — its own
       // fetch has not answered either. What this case is about is the SETUP
       // PANEL below the status line, which must not appear while the answer is
       // still outstanding.

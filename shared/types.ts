@@ -490,15 +490,15 @@ export interface ProjectSummary {
   detail: string | null;
   /**
    * The connected repo's effective sync interval on this machine (#17) — the settings file's value after its defaults, so never absent for a `github`
-   * project — and `null` for everything else, the same total-shape rule as the four fields above. Carried here, not only on the Trackers rows, because the
+   * project — and `null` for everything else, the same total-shape rule as the four fields above. Carried here, not only on the `/api/trackers` rows, because the
    * board's band line and the dispatch gate read this payload: an `off` repo reads `sync off` and its project refuses dispatch.
    */
   interval: SyncInterval | null;
 }
 
 /**
- * `GET /api/trackers` — everything the Shared Settings page's Trackers card
- * draws (task-45, spec §5.6), and deliberately nothing else. There is no
+ * `GET /api/trackers` — everything the Shared Settings page's Sources card and
+ * GitHub › Settings' Sync card draw (task-45, spec §5.6), and deliberately nothing else. There is no
  * connections file — a project is connected by committing `backlog/source.json`,
  * which is `backlog.mjs connect`'s job and nobody else's. The card's one write,
  * a repo's sync interval (#17), is `POST /api/trackers/sync`; its answer is a
@@ -559,7 +559,7 @@ export interface TrackerProjectRow {
 
 /**
  * How often the tracker poller syncs one repo, on THIS machine (#17). The one home of the enumeration: the server's validator, the poller's due-check and
- * the Trackers card's picker all read this record, and the picker's labels are its KEYS — there is no second list to drift. Declaration order is the picker's
+ * GitHub › Settings' sync picker all read this record, and the picker's labels are its KEYS — there is no second list to drift. Declaration order is the picker's
  * order. Every value is a whole multiple of the poller's 15 s base tick (`TRACKER_POLL_MS`), so the tick is the resolution and no repo needs a timer of its
  * own; `off` has no milliseconds because it has no schedule — one cold-boot sync per process, then nothing.
  *

@@ -248,7 +248,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   private readonly repos = new Map<string, RepoState>();
 
   /**
-   * The authenticated login, for the Trackers card's platform row, and the
+   * The authenticated login, for the Sources card's GitHub row, and the
    * token it was read with. Fetched at most ONCE per token per process, inside
    * a sweep that already holds the credential — not per card render, which
    * would spend a request of the hourly budget every time someone opened
@@ -334,7 +334,7 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   }
 
   /**
-   * What the Trackers card draws in its platform row (spec §5.6): whether a
+   * What the Sources card draws in its GitHub row (spec §5.6): whether a
    * token is configured, who it authenticates as, and how much of the hourly
    * budget is left. **Never the token itself** — this is the payload the
    * browser receives, and the credential is process-only.

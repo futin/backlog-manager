@@ -83,7 +83,7 @@ paths: ["server/src/tracker/**"]
   [invariants.md](docs/subsystems/invariants.md#the-github-token-never-leaves-the-server-and-the-poller-is-armed-only-while-something-is-connected)
 - **The tracker and Jira caches are the two caches in this server whose age is a rendered value.** In memory, per repo, lost on restart, rebuilt by the
   first sync; it
-  exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal, on the Trackers card and — since
+  exists because the hourly rate limit makes a per-request fetch impossible, and `polledAt` on the board, in the item modal, on the Sources card and — since
   bug-41 — beside every tracker queue `orchestrate.mjs plan`/`init` builds is what keeps it honest. **A named `--ids` entry the cache has not polled yet buys
   ONE re-read, timed off `polledAt`, and only a second miss is refused** — never a fresh per-id `GET` to GitHub, which was weighed and rejected. Every other read stays per request — the registry's and `resolveSource`'s rules are untouched. A `304` leaves the cache unchanged and MOVES
   `polledAt`: the rendered age means "since we last successfully checked", and a conditional request that came back `304` is a successful check (settled

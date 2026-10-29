@@ -16,7 +16,7 @@
  *    by reading one file.
  * 2. **Every response's rate-limit headers are recorded**, including a `304`'s
  *    and a failure's. A `304` costs no budget, but it still REPORTS the
- *    budget, and the Trackers card's "4,812 of 5,000 left" would otherwise
+ *    budget, and the Sources card's "4,812 of 5,000 left" would otherwise
  *    freeze at whatever the last changed poll happened to see.
  * 3. **Nothing here throws on an HTTP status.** Every response comes back as a
  *    value the caller branches on, because every one of them is a state the
@@ -84,7 +84,7 @@ export class GithubClient {
   }
 
   /**
-   * The authenticated user, for the Trackers card's platform row. `null` data
+   * The authenticated user, for the Sources card's GitHub row. `null` data
    * on any non-200, which the card renders as the access state it already has
    * — a login it cannot fetch is not a second kind of failure.
    */
@@ -334,7 +334,7 @@ export class GithubClient {
     let secondary = false;
     let error: string | null = null;
     // A body is read for every other status, including the failures: GitHub's
-    // error bodies carry the sentence the Trackers card shows, and the
+    // error bodies carry the sentence the Sources card shows, and the
     // secondary-limit bit can only be read from the message.
     try {
       const text = await res.text();

@@ -46,22 +46,42 @@ paths: ["client/src/**"]
   [invariants.md](docs/subsystems/invariants.md#board-versus-archive-is-derived-and-last-touched-has-three-rungs)
 - **Settings is three pages, the page is the scope, and the rail is the only thing that switches them.** `settingsScope` (`client/src/lib/settings.ts`) is
   `local | shared | dashboards`: Local is this browser's `localStorage`, Shared and Dashboards are what the API reads off the host (Dashboards is the machine
-  list and each machine's health and usage, its own page since they outgrew a card; its scope pill reads `this machine`, as Shared's does). No card mixes
-  local and host — which is why `Claude Agents` was two cards and why `open dashboard ↗` sits beside the per-device field supplying its href — and there is no
-  in-page switch at any width, the same rule Runs' three pages follow, and Jira's since phase 2. One `RailTree` renders every tree — Runs, Jira and Settings,
-  three call sites; `SECTIONS`/`Section` live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
+  list and each machine's health and usage, its own page since they outgrew a card; its scope pill reads `this machine`, as Shared's does). No card mixes local
+  and host — which is why `Claude Agents` was two cards and why `open dashboard ↗` sits beside the per-device field supplying its href — and there is no in-page
+  switch at any width, the same rule Runs' three pages follow, and Jira's since phase 2. A host card may also sit on a source's own settings page — GitHub ›
+  Settings' `Sync` (each repo's sync interval), as Jira › Setup holds `jira.json`'s — and Shared draws the read-only `Sources` card alone in its left column,
+  Watchdog, Tick and Time zone in its right. One `RailTree` renders every tree — Files, GitHub, Jira, Runs and Settings, five call sites; `SECTIONS`/`Section`
+  live in `client/src/lib/sections.ts` because the rail reading `useSettings` closed a cycle with `lib/settings.ts`. Why:
   [invariants.md](docs/subsystems/invariants.md#settings-is-three-pages-the-page-is-the-scope)
-- **The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only
-  when `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `archive` and `settings` UNCONDITIONALLY — `resolveSection`
-  runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips the row unless the
-  shell's one `useJira` (`JiraProvider`) says `configured: true`, or the status is unknown (`data` null) while `jira` is the section on screen. `App`'s
-  hold-and-fall effect moves a `jira` section to `board`, through `change`, on `configured === false` and on nothing else; unknown holds, drawn in
-  `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in `lib/jira-page.ts`,
-  held by `hooks/useJiraPage.ts` — `useRunsMode`'s module store, because the rail's `RailTree` and the in-page links are two mounted writers. The links
-  (`Open board` on Setup's Boards rows, `Open Setup` on the empty board) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then `change('jira')`
-  and handed down through `JiraView`; no page, the chip's popover or the Trackers row's `Jira › Setup` text draws a switch of its own. Settings' `Opens on`
-  offers `Jira` only while configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
+- **The Jira section's two pages are switched by the rail's tree, or a link threaded down from it, never by an in-page control; the section is drawn only when
+  `GET /api/jira` says configured.** `jira` sits in `SECTIONS` (`lib/sections.ts`) between `github` and `runs` UNCONDITIONALLY — `resolveLegacySection`
+  (`lib/source-page.ts`) runs in a `useState` initializer, before the status exists — and the conditional half is the shell's alone. `SideRail`'s `drawn` skips
+  the row unless the shell's one `useJira` (`JiraProvider`) says `configured: true`, or the status is unknown (`data` null) while `jira` is the section on
+  screen. `App`'s hold-and-fall effect moves a `jira` section, through `change`, on `configured === false` and on nothing else — to `firstDrawn`
+  (`lib/sources.ts`) of the projects answer, or to the provisional `FALLBACK_SECTION` while that answer is unknown, for the settle to correct; unknown holds,
+  drawn in `JiraView`'s `loading…` or `Jira unavailable` shape. The page is `JIRA_PAGES` (`board | setup`), `JIRA_PAGE_KEY` and `isJiraPage` in
+  `lib/jira-page.ts`, held by `hooks/useJiraPage.ts` — `useRunsMode`'s module store, because the rail's `RailTree` and the in-page links are two mounted
+  writers. The links (`Open board` on Setup's Boards rows, `Open Setup` on the empty board) are `onOpenJiraPage`, built once in `App` as `setJiraPage(p)` then
+  `change('jira')` and handed down through `JiraView`; the Sources card's `Jira › Setup ↗` link is the same pair, threaded `App` → `SettingsView` → `SharedPage`
+  → `SourcesGroup` and drawn only while configured; no page or the chip's popover draws a switch of its own. Settings' `Opens on` offers `Jira` only while
+  configured (`landingOptions`), keeping a stored `jira` pin's option; a `landing: 'jira'` takes the same fall. Why:
   [invariants.md](docs/subsystems/invariants.md#the-jira-sections-two-pages-are-switched-by-the-rails-tree-and-the-section-is-drawn-only-when-configured)
+- **A source row (Files, GitHub) is drawn only while a registered project has that source, and its pages are switched by the rail's tree or a link threaded down
+  from it.** `files` and `github` sit in `SECTIONS` UNCONDITIONALLY and whether a row draws is the projects answer's: `ProjectsProvider`
+  (`hooks/ProjectsContext.tsx`) is the shell's one read of `GET /api/projects`, through `useRefreshing` with no `armed` (mount + focus), keeping the last answer
+  on a failure, and its `drawn` (`drawnSources`, `lib/sources.ts`) is `null` while unknown. `sourceSectionOf` puts `github` under GitHub and `files`,
+  `unsupported` and a null source under Files — display grouping only, never a source of its own. `SideRail`'s `drawn` takes a source row when `drawn[id]` is
+  true, or while the answer is unknown and that section is on screen and not `provisional`. `resolveLegacySection` (`lib/source-page.ts`) maps a stored
+  `board`/`archive` to `github` with that page and anything unrecognised to `FALLBACK_SECTION` (`github`) with none, both provisional. `App` moves nothing while
+  `drawn` is null; once it is known a provisional landing settles once, through `change` (`settleSection` for a page-named one, `firstDrawn` — Files, then
+  GitHub, else Runs — otherwise), a legacy pin is rewritten to where it settled with `update({ landing })`, and a source section whose row is gone falls to
+  `firstDrawn`; a provisional landing renders `SectionLoading` until it settles. The pages are `FILES_PAGES` (`board | archive`) and `GITHUB_PAGES` (`board |
+  archive | settings`), each with its key and guard, held by `useFilesPage`/`useGithubPage` (`hooks/useSourcePage.ts`), module stores like `useJiraPage`'s; the
+  Sources card's `GitHub › Settings ↗` link is `onOpenGithubPage` (`setGithubPage(p)` then `change('github')`, built once in `App`), drawn only while
+  `counts.github > 0`. Board and Archive take a required `source` and cut the index with `narrowToSource`, which keeps `errors` on Files alone; hues come from
+  the whole registry, and the project filter key is per source (`projectKey`, `lib/view-keys.ts`). Settings' `Opens on` offers Files and GitHub only while drawn
+  (`landingOptions`), keeping a stored pin's option. Why:
+  [invariants.md](docs/subsystems/invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree)
 - **`contentWidth` is stamped before first paint, and the CSP hash travels with the script that stamps it.** `data-width` on `<html>`, written twice — by
   `client/index.html`'s inline script and by `useSettings`, whose dependency list must carry it or the setting works on reload and not on the click. One CSS
   block releases `.wrap` **and** `.wrap.wide`; the cap goes, the `margin: 0` stays. Editing that script invalidates `THEME_SCRIPT_SHA256`
@@ -119,8 +139,8 @@ paths: ["client/src/**"]
 - **A client poller built on `useCoalescedFetch` never has two of its own requests in flight: its timer is armed by an answer, and a trigger that lands
   mid-flight folds into one follow-up (`useTrackers` and `useJira` are the deliberate exceptions, #231).** `lib/coalesced-poll.ts` (`createCoalescedPoll`, pure
   of React) is the one home of poll scheduling and `hooks/useCoalescedFetch.ts` is its React shell; `hooks/useRefreshing.ts` (#285) is the layer every board
-  poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive` and `TimeZoneProvider` (#241;
-  no `armed`: neither polls) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) — owning the
+  poller enters through — `useBoard`, `useAgents`, `useOrchestratorRuns`, `useWatchdog`, `useTicks`, `useOrchestratorArchive`, `TimeZoneProvider` (#241) and
+  `ProjectsProvider` (no `armed`: none of the three polls) and `useMachines` (60 s, mounted only by Settings › Dashboards, so its `armed` is constant `true`) — owning the
   mount + window-focus triggers once; no board poller is a `setInterval` (`useNow`'s clock tick is a display, not a request). `trigger()` while idle starts the task; while one is in flight it starts nothing and returns ONE queued follow-up's promise, shared
   by every trigger that arrived meanwhile and run when the flight settles, so its answer was requested after the caller asked. The timer is a `setTimeout`
   re-armed `intervalMs` after the LAST request of a chain settles, at most one pending, cleared the moment `armed` goes false (an in-flight request finishes;

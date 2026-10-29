@@ -136,7 +136,7 @@ leaves this process in no payload, log line or URL.
 `TRACKER_POLL_MS`; `sweep` syncs only the repos that are DUE — a `15s` repo every tick with no clock check, a slower one once its interval has elapsed since
 its last sync (success or failure), an `off` one never, except the one cold-boot sync a never-filled cache is owed. `shouldPoll` narrows to "a token, and some
 connected repo that is not `off` or still owes that cold sync". `TrackerPollerService.syncOffBlock(projectPath)` is the ONE server home of the refusal
-sentence, `sync is off for <owner/name> — turn it on in Settings › Shared › Trackers`, and `RemoteRunsService` derives nothing for an `off` repo. Both
+sentence, `sync is off for <owner/name> — turn it on in GitHub › Settings`, and `RemoteRunsService` derives nothing for an `off` repo. Both
 `ProjectSummary` and `TrackerProjectRow` carry `interval` — the effective token for a `github` row, `null` for every other.
 
 `POST /api/trackers/sync` (`{ repo, interval }`) is `orchestrator/tracker-sync.controller.ts`, in `OrchestratorModule` rather than beside `GET /api/trackers`

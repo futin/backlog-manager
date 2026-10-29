@@ -118,11 +118,12 @@ export function SideRail({ section, onChange, chipSlot, working, releases, provi
   // `onOpenJiraPage`) are two mounted writers of one value, and a `usePersistedState` per caller would leave the other looking at a stale page.
   const [jiraPage, setJiraPage] = useJiraPage();
   /*
-    The Jira row (Jira phase 2, spec §6.1) is drawn while `GET /api/jira` says `configured: true`, and in ONE other case: the status is still unknown
-    (`data` null — not answered yet, or every read so far failed) and Jira is the section on screen. That is the shell's hold (`App`): a stored `jira` is
-    kept until an answer says `configured: false`, and a held section with no row of its own would leave the reader on a page the rail does not name. An
-    answer of `configured: false` hides the row at once, and the shell falls to Board on the same answer. Unknown with another section open draws nothing:
-    a row that appeared on a guess and vanished on the answer would be the rail flickering on every load of an unconfigured machine.
+    The Jira row (Jira phase 2, spec §6.1) is drawn while `GET /api/jira` says `configured: true`, and in ONE other case: the status is still unknown (`data`
+    null — not answered yet, or every read so far failed) and Jira is the section on screen. That is the shell's hold (`App`): a stored `jira` is kept until an
+    answer says `configured: false`, and a held section with no row of its own would leave the reader on a page the rail does not name. An answer of
+    `configured: false` hides the row at once, and the shell falls on the same answer — to the first drawn source row, or Runs when there is none. Unknown with
+    another section open draws nothing: a row that appeared on a guess and vanished on the answer would be the rail flickering on every load of an unconfigured
+    machine.
   */
   const jira = useJiraContext().data;
   /*

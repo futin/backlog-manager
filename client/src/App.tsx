@@ -236,13 +236,13 @@ function AppShell() {
   }, [drawn, section, pending]);
 
   /*
-    The Jira section's hold-and-fall (Jira phase 2, spec §6.1). `resolveSection` takes a stored `jira` like any section — it runs in the initializer above,
-    long before `GET /api/jira` has answered — so whether Jira is really there is decided here, on the status, and only one answer decides it: an answer
-    that says `configured: false` while Jira is the section moves the shell to the first drawn source row (Runs when there is none; the provisional
-    GitHub, settled by the effect above, while the projects answer is unknown), through `change`, so the section key records it too. Nothing
-    else moves it. While the status is unknown (not answered yet, or every read so far failed: `data` null) the section is HELD, drawn in `JiraView`'s
-    loading or unavailable shape, and the rail keeps its row — a network blip at load must not throw away the section a reader left on a configured
-    machine (Review Focus 5). A failure after a `configured: true` keeps that answer (`useJira` keeps the last payload), so it holds as well.
+    The Jira section's hold-and-fall (Jira phase 2, spec §6.1). `resolveLegacySection` takes a stored `jira` like any section — it runs in the initializer
+    above, long before `GET /api/jira` has answered — so whether Jira is really there is decided here, on the status, and only one answer decides it: an answer
+    that says `configured: false` while Jira is the section moves the shell to the first drawn source row (Runs when there is none; the provisional GitHub,
+    settled by the effect above, while the projects answer is unknown), through `change`, so the section key records it too. Nothing else moves it. While the
+    status is unknown (not answered yet, or every read so far failed: `data` null) the section is HELD, drawn in `JiraView`'s loading or unavailable shape, and
+    the rail keeps its row — a network blip at load must not throw away the section a reader left on a configured machine (Review Focus 5). A failure after a
+    `configured: true` keeps that answer (`useJira` keeps the last payload), so it holds as well.
 
     Keyed on the STATE (`configured === false` with `jira` current) rather than on a remembered previous value: it fires on the transition into
     `configured: false`, which is the case the spec names, and also covers the one other way the pair could arise — a `change('jira')` landing while the
