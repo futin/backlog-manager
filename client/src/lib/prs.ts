@@ -12,6 +12,21 @@ import type { MergeMethod, PrRepoView, PrWriteResult, PullRequestRow } from '../
  * off) is told that, not the narrower thing behind it.
  */
 
+/** The one line a row says about its last write: a finished outcome, the server's refusal verbatim, or the `updating…` an update-branch leaves. */
+export interface PrOutcome {
+  text: string;
+  kind: 'ok' | 'error' | 'updating';
+}
+
+/**
+ * An `update-requested` mark: the head SHA the update was asked at, and when the row stops saying `updating…` if that head never moved. Here rather than in the
+ * page because every layout reads it through `isUpdating`, and a layout switch mid-update must keep the mark.
+ */
+export interface UpdateMark {
+  sha: string;
+  until: number;
+}
+
 /** A chip a row draws: the label is the whole claim, the tone is `Pill`'s vocabulary. */
 export interface PrChip {
   label: string;

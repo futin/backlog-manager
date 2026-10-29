@@ -8,7 +8,7 @@ import '@testing-library/jest-dom';
 import GithubSettingsView from '../client/src/components/github/GithubSettingsView';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import { SYNC_INTERVALS } from '../shared/types';
-import type { SyncInterval, TrackerProjectRow, TrackersPayload } from '../shared/types';
+import type { PrRepoView, PullRequestsPayload, SyncInterval, TrackerProjectRow, TrackersPayload } from '../shared/types';
 
 /**
  * GitHub › Settings (source-sections spec, "Parts of the how"): each registered github project's sync picker, moved here off Settings › Shared's old
@@ -36,6 +36,7 @@ function row(over: Partial<TrackerProjectRow> = {}): TrackerProjectRow {
 const files = row({ name: 'beta', path: '/abs/beta', source: 'files', repo: null, polledAt: null, access: null, interval: null, connect: 'connect beta' });
 
 let rows: TrackerProjectRow[];
+let prs: PullRequestsPayload;
 let posts: { body: unknown; contentType: string | undefined }[];
 let answerPost: (body: { repo: string; interval: SyncInterval }) => { status: number; body: unknown };
 
@@ -49,6 +50,7 @@ function stubFetch(): void {
       const res = answerPost(body);
       return Promise.resolve({ ok: res.status < 300, status: res.status, json: () => Promise.resolve(res.body) } as Response);
     }
+    if (url === '/api/prs') return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(prs) } as Response);
     const payload: TrackersPayload = {
       platforms: [{ kind: 'github', hasToken: true, login: 'futin', limit: 5000, remaining: 4930, reset: null }],
       projects: rows
@@ -80,8 +82,25 @@ const pillOf = (name: string): HTMLElement => within(rowOf(name)).getByRole('gro
 const selected = (name: string): string | null => within(pillOf(name)).getByRole('button', { pressed: true }).textContent;
 const hintOf = (name: string): string | null => rowOf(name).querySelector('.set-hint')?.textContent ?? null;
 
+function prRepo(repo: string, over: Partial<PrRepoView> = {}): PrRepoView {
+  return {
+    repo,
+    polledAt: '2026-10-29T10:00:00Z',
+    access: 'ok',
+    detail: null,
+    syncOff: null,
+    methods: ['squash'],
+    autoMergeAllowed: true,
+    prs: [],
+    total: 0,
+    truncated: false,
+    ...over
+  };
+}
+
 beforeEach(() => {
   rows = [row(), files];
+  prs = { token: true, repos: [prRepo('futin/x')] };
   serverWrites();
 });
 
@@ -200,5 +219,69 @@ describe('GitHub › Settings: the sync card', () => {
     await act(async () => {
       await Promise.resolve();
     });
+  });
+});
+
+/**
+ * The `Access` card (PRs-layouts spec, "GitHub › Settings › Access"): the repos GitHub PRs hides because the token cannot read them, with the error GitHub
+ * gave and the fix. It reads `usePullRequests` — the PRs page's own read — so it draws nothing until that answers and nothing when every repo reads.
+ */
+describe('GitHub › Settings: the Access card', () => {
+  const card = (): HTMLElement => screen.getByText('Access').closest('.set-group') as HTMLElement;
+
+  it('draws no Access card while every repo reads', async () => {
+    await renderPage();
+    await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([u]) => u === '/api/prs')).toBe(true));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Access')).toBeNull();
+  });
+
+  it('lists exactly the repos the token cannot read, with GitHub’s detail, a count pill and the readable count', async () => {
+    prs = {
+      token: true,
+      repos: [
+        prRepo('futin/x'),
+        prRepo('futin/z', { access: 'forbidden', detail: 'Resource not accessible by personal access token' }),
+        prRepo('futin/w', { access: 'not-found', detail: 'Could not resolve to a Repository with the name futin/w' })
+      ]
+    };
+    await renderPage();
+    await waitFor(() => expect(screen.getByText('Access')).toBeInTheDocument());
+
+    const c = card();
+    expect(within(c).getByText('2 without access')).toHaveClass('ui-pill-bad');
+    expect(within(c).getByText('this machine')).toBeInTheDocument();
+    const z = within(c).getByText('futin/z').closest('.set-row') as HTMLElement;
+    expect(within(z).getByText('Resource not accessible by personal access token')).toHaveClass('set-error');
+    const w = within(c).getByText('futin/w').closest('.set-row') as HTMLElement;
+    expect(within(w).getByText('Could not resolve to a Repository with the name futin/w')).toHaveClass('set-error');
+    // A readable repo is not listed, only counted.
+    expect(within(c).queryByText('futin/x')).toBeNull();
+    expect(within(c).getByText('1 repo readable.')).toBeInTheDocument();
+  });
+
+  it('names the fix — repository access, both permissions and BM_GITHUB_TOKEN — and never a token value', async () => {
+    prs = { token: true, repos: [prRepo('futin/z', { access: 'forbidden', detail: 'nope' })] };
+    await renderPage();
+    await waitFor(() => expect(screen.getByText('Access')).toBeInTheDocument());
+
+    const text = card().textContent ?? '';
+    expect(text).toContain('BM_GITHUB_TOKEN');
+    expect(text).toContain('Pull requests: Read and write');
+    expect(text).toContain('Contents: Read and write');
+    expect(text).toMatch(/repository access/i);
+    expect(text).not.toMatch(/gh[pousr]_[A-Za-z0-9]{10,}|github_pat_/);
+  });
+
+  it('draws no card with no token, even when repos say forbidden', async () => {
+    prs = { token: false, repos: [prRepo('futin/z', { access: 'forbidden', detail: 'nope' })] };
+    await renderPage();
+    await waitFor(() => expect((global.fetch as jest.Mock).mock.calls.some(([u]) => u === '/api/prs')).toBe(true));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('Access')).toBeNull();
   });
 });

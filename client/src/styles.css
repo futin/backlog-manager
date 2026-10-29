@@ -2943,9 +2943,92 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* An action and its reason travel together, so a wrap never strands a reason under the wrong button. */
 .prs-action { display: inline-flex; align-items: center; gap: 6px }
 .prs-why { font-size: 12px; color: var(--ink3) }
+.prs-open { font-size: 13px; color: var(--ink2); text-decoration: none }
+.prs-open:hover { text-decoration: underline }
 .prs-outcome { font-size: 13px; color: var(--ink2); line-height: 1.45 }
 .prs-outcome-error { color: var(--red) }
 .prs-repo-inner > .prs-outcome { margin-top: 12px }
+
+/* GitHub › PRs, Inbox layout (DESIGN.md §8.11). The tiles are plain bordered buttons — a selected one takes the ink border, never a fill, so a level's dot stays
+   the only colour on it. Items are boxless with a hairline BETWEEN them, as `.prs-row` is; the compact keys sit on the right and wrap under on a narrow window.
+   Muted steps use --ink3, the calm ones a step down from the problems, which stay --ink2. Own `.prs-inbox*`, `.prs-tile*` and `.prs-notes*` classes only — a
+   `.ui-*` primitive is never restyled from here (guard 7). */
+.prs-inbox { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+.prs-inbox-tiles { display: flex; flex-wrap: wrap; gap: 8px }
+.prs-tile {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--hairline); background: var(--strip); color: var(--ink2); font-size: 14px
+}
+.prs-tile:hover { color: var(--ink) }
+.prs-tile[aria-pressed="true"] { border-color: var(--ink); color: var(--ink) }
+.prs-tile-n { color: var(--ink); font-weight: 600 }
+.prs-inbox-list { list-style: none; margin: 0; padding: 0; min-width: 0 }
+.prs-inbox-heading { margin: 0; font-size: 13px; font-weight: 500; color: var(--ink2) }
+.prs-inbox-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 16px 0; min-width: 0 }
+.prs-inbox-item + .prs-inbox-item, .prs-inbox-quiet + .prs-inbox-quiet { border-top: 1px solid var(--hairline) }
+.prs-inbox-item:first-child { padding-top: 0 }
+.prs-inbox-main { display: flex; flex-direction: column; gap: 6px; flex: 1 1 320px; min-width: 0 }
+.prs-inbox-keys { flex: 0 1 auto; min-width: 0 }
+.prs-inbox-keys-open { flex: 1 0 100% }
+.prs-inbox-item > .prs-outcome { flex: 1 0 100% }
+.prs-inbox-repo { flex: none; font-size: 13px; font-weight: 400; color: var(--ink3) }
+.prs-inbox-verdict { font-size: 14px; color: var(--ink); line-height: 1.45 }
+.prs-inbox-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px }
+.prs-inbox-step { font-size: 13px; color: var(--ink2); line-height: 1.45 }
+.prs-inbox-step-calm { color: var(--ink3) }
+.prs-inbox-quiet { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; min-width: 0 }
+/* A quiet line is two columns, not one wrapping row: in a single `flex-wrap` row each item breaks on its max-content size before anything shrinks, so a long
+   title forced the `Actions` toggle onto a line of its own at every width. The text column wraps INSIDE itself (`flex: 1 1 auto; min-width: 0`) and the toggle
+   stays `flex: none` beside it, at the top right of the first line on a desktop and on a 375 px phone alike. */
+.prs-inbox-quiet-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 14px; color: var(--ink) }
+.prs-inbox-quiet-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; flex: 1 1 auto; min-width: 0 }
+.prs-inbox-facts { font-size: 13px; color: var(--ink3) }
+/* One text-link look for the page's two inline controls — the toolbar's `GitHub › Settings` and a quiet line's `Actions` toggle. `.set-link` is §8.6's 36 px
+   bordered row control and reads as a button inside a sentence, so this page keeps its own (a PRs class, not a restyle of `.set-link`). */
+.prs-textlink {
+  border: 0; background: none; padding: 0; font: inherit; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; cursor: pointer
+}
+.prs-textlink:hover { color: var(--ink) }
+.prs-inbox-toggle { flex: none; padding: 0 4px; font-size: 13px }
+.prs-inbox-cantread { padding: 4px 0; font-size: 13px; color: var(--ink2) }
+.prs-notes { display: flex; flex-direction: column; gap: 4px }
+.prs-notes-line { font-size: 13px; color: var(--ink2); line-height: 1.45 }
+.prs-notes-error { color: var(--red) }
+
+/* GitHub › PRs toolbar (.claude/DESIGN.md §8.11): the layout switcher on the left, the hidden-repos note beside it, the newest read's age pushed to the right.
+   Own classes only — the Segmented's `.ui-*` look is never restyled here (design guard 7); this lays the three out in a row that wraps on a narrow window. */
+.prs-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px }
+.prs-toolbar-note { margin: 0; font-size: 13px; color: var(--ink2) }
+.prs-toolbar-age { margin-left: auto; font-size: 13px; color: var(--ink2) }
+
+/* GitHub › PRs, Matrix layout (§8.11; spec 2026-10-29-prs-layouts-design.md, "Matrix"). One `<table>` inside `ui/Ledger`'s overflow box, one row per PR, one
+   column per check. Colour is for a problem only: ok and na stay in ink (--ink2 / --ink3), bad is --red, meh --amber-ink and live --live-ink — the §8.2 TEXT
+   tokens, never the --amber / --green marks, which do not clear 4.5:1 as text on paper. The cell's word is always printed, so a tone is never the only carrier.
+   A row is the toggle that opens the expansion under it, so it takes the pointer and a focus ring. Own `.prs-matrix*` / `.prs-cell-*` classes only — design
+   guard 7 forbids restyling a `.ui-*` primitive from here. */
+.prs-matrix { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+.prs-matrix-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink2) }
+.prs-matrix-table th {
+  text-align: left; font-size: 12px; font-weight: 500; color: var(--ink3); padding: 0 12px 8px 0; white-space: nowrap
+}
+.prs-matrix-table td { padding: 10px 12px 10px 0; border-top: 1px solid var(--hairline); vertical-align: top }
+.prs-matrix-count { color: var(--ink); font-weight: 600 }
+.prs-matrix-table .prs-matrix-dot { width: 22px; padding-right: 0 }
+.prs-matrix-row { cursor: pointer }
+.prs-matrix-row:hover td { background: var(--strip-hi) }
+.prs-matrix-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
+.prs-matrix-pr { min-width: 260px; max-width: 480px }
+.prs-matrix-pr .prs-meta { margin-top: 4px; font-size: 12px; color: var(--ink3) }
+.prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
+.prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
+.prs-matrix-expand-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 0 6px 22px }
+.prs-matrix-fail td { color: var(--ink3) }
+.prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
+.prs-cell-ok { color: var(--ink2) }
+.prs-cell-bad { color: var(--red) }
+.prs-cell-meh { color: var(--amber-ink) }
+.prs-cell-live { color: var(--live-ink) }
+.prs-cell-na { color: var(--ink3) }
 
 /* ── ui primitives ────────────────────────────────────────────────────────────
    Every class family owned by a component in client/src/components/ui/, and
