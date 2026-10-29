@@ -96,7 +96,7 @@ test('makePlan: skills runs the whole node suite and the jest suites that name s
   assert.equal(scope, 'skills');
   assert.deepEqual(
     steps.map((s) => [s.cmd, ...s.args].join(' ')),
-    ['pnpm exec jest --runInBand --runTestsByPath test/a.test.ts', 'pnpm run test:skills']
+    ['pnpm exec jest --runTestsByPath test/a.test.ts', 'pnpm run test:skills']
   );
 });
 
@@ -107,7 +107,7 @@ test('makePlan: docs runs only the suites of either runner that name the changed
   assert.equal(both.scope, 'docs');
   assert.deepEqual(
     both.steps.map((s) => [s.cmd, ...s.args].join(' ')),
-    ['pnpm exec jest --runInBand --runTestsByPath test/rules.test.ts', 'node scripts/test-tmpdir.mjs skills/x/tools/x.test.mjs']
+    ['pnpm exec jest --runTestsByPath test/rules.test.ts', 'node scripts/test-tmpdir.mjs skills/x/tools/x.test.mjs']
   );
   assert.deepEqual(makePlan(['README.md'], { jest, node }).steps, []);
 });
@@ -186,7 +186,7 @@ test('the CLI prints the plan under --dry-run and runs nothing', () => {
   const docs = spawnSync(process.execPath, [CLI, '--dry-run', '--files', 'CLAUDE.md'], { encoding: 'utf8', env });
   assert.equal(docs.status, 0, docs.stderr);
   assert.match(docs.stdout, /ci-scope: docs-only/);
-  assert.match(docs.stdout, /would run: pnpm exec jest --runInBand --runTestsByPath .*test\/claude-rules\.test\.ts/);
+  assert.match(docs.stdout, /would run: pnpm exec jest --runTestsByPath .*test\/claude-rules\.test\.ts/);
   assert.doesNotMatch(docs.stdout, /pnpm typecheck/);
 
   const full = spawnSync(process.execPath, [CLI, '--dry-run'], { encoding: 'utf8', env });

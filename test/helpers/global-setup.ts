@@ -14,8 +14,11 @@ import { claimTmpRoot } from './tmp-root';
  *
  * `globalSetup` runs in jest's own process before any of that, so the
  * assignment here hits the REAL `process.env` and the cache invalidation it
- * carries; every suite then inherits the pinned zone (`--runInBand`, so there
- * is one process, and `pnpm test` sets that flag).
+ * carries; every suite then inherits the pinned zone. That holds under jest's
+ * worker pool too: the workers are forked AFTER `globalSetup` returns, and a
+ * fork copies the parent's real environment, so each worker boots with this
+ * `TZ` (and the `TMPDIR` below) already set. Verified when `--runInBand` was
+ * dropped: run-range's DST cases pass with `-w 4`.
  *
  * `America/New_York` because its transition rules are rule-derived and stable
  * across tzdata releases ("second Sunday in March, first Sunday in November"
