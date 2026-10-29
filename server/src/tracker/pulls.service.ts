@@ -416,10 +416,12 @@ export class PullRequestsService {
     const entry = this.entryOf(repo);
     entry.attemptedAt = now;
     // A read that started at or after the due time answers it; one that started before (a `dueAt` set while it was out) does not — its answer predates
-    // the update it was meant to see.
-    if (entry.dueAt !== null && entry.dueAt <= now) entry.dueAt = null;
+    // the update it was meant to see. It is answered by a read that FAILED (retrying a failing repo on every GET is what the TTL exists to stop) or one
+    // whose rows were stored — never by one dropped for a splice below, which leaves the page holding the pre-update head it was due to replace.
+    const answersDue = entry.dueAt !== null && entry.dueAt <= now;
     const verdict = failureVerdict(res, now);
     if (verdict !== null || res.data === null) {
+      if (answersDue) entry.dueAt = null;
       // `data` null on a 2xx cannot happen through `readPullList` (it maps a missing repository to a 404) — counted as an error rather than trusted.
       const v = verdict ?? { access: 'error' as const, detail: res.error ?? 'empty answer from GitHub', sleepUntil: null, secondary: false };
       entry.access = v.access;
@@ -441,6 +443,7 @@ export class PullRequestsService {
     // A write spliced this repo while the read was out: its rows predate that write, so they are dropped and `polledAt` — the age of the rows held —
     // stays where it was. The attempt above still counts, so the next read waits the TTL like any other.
     if (entry.splices !== splices) return;
+    if (answersDue) entry.dueAt = null;
     entry.polledAt = now;
     entry.prs = list.rows;
     entry.total = list.totalCount;

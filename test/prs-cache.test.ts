@@ -390,6 +390,34 @@ describe('PullRequestsService freshness around writes', () => {
     expect(due.polledAt).toBe(new Date(clock).toISOString());
   });
 
+  it("a due read that is discarded for a splice leaves the repo due, so the update's head still reaches the page on the next GET", async () => {
+    const { gh, prs } = rig();
+    await prs.list(NOW);
+    const seven = fakePr(gh, FAKE_REPO, 7);
+    const nine = fakePr(gh, FAKE_REPO, 9);
+
+    clock = NOW + 5_000;
+    expect(await prs.updateBranch({ repo: FAKE_REPO, number: 7, headSha: seven.headRefOid })).toMatchObject({ ok: true, status: 202 });
+    seven.headRefOid = C;
+
+    // The due read goes out, and a merge of ANOTHER PR splices the repo while it is held: the read lands and is dropped.
+    clock = NOW + 5_000 + PR_UPDATING_MS;
+    const release = gh.holdAnswers('PullRequests');
+    const reading = prs.list(clock);
+    await settle();
+    expect(lists(gh, FAKE_REPO)).toBe(2);
+    expect(await prs.merge({ repo: FAKE_REPO, number: 9, method: 'squash', headSha: nine.headRefOid })).toMatchObject({ ok: true, status: 200 });
+    release();
+    await reading;
+
+    // Still due: the next GET reads again, inside the TTL, and shows the head GitHub moved #7 to.
+    clock += 1_000;
+    const next = view((await prs.list(clock)).repos, FAKE_REPO);
+    expect(lists(gh, FAKE_REPO)).toBe(3);
+    expect(next.prs.find((p) => p.number === 7)?.headSha).toBe(C);
+    expect(numbers(next)).toEqual([7]);
+  });
+
   it('a list read in flight does not put back a PR a merge spliced out while it was out', async () => {
     const { gh, prs } = rig();
     await prs.list(NOW);
