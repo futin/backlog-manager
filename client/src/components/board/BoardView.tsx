@@ -123,7 +123,8 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
 export default function BoardView({ source, onOpenRuns, onWorking }: { source: SourceSection; onOpenRuns?: () => void; onWorking?: (working: boolean) => void }) {
   const { items: fullIndex, projects: fullProjects, loading, error, refetch } = useBoard();
   /* The source split, once per fetch. `projects` stays `null` until the first answer, exactly as the hook hands it, because `hasTracker` and the hue memo
-     below read the absence; `index` is `narrowToSource`'s cut (`lib/sources.ts`, which also owns the rule that index errors ride only with Files). */
+     below read the absence; `index` is `narrowToSource`'s cut (`lib/sources.ts`, which also owns the rule that routes each index error to the source it
+     names). */
   const projects = useMemo(() => (fullProjects === null ? null : projectsIn(fullProjects, source)), [fullProjects, source]);
   const index = useMemo(() => narrowToSource(fullIndex, fullProjects, source), [fullIndex, fullProjects, source]);
   /* #367 — the tick's recorded caps, for the band's plan-review reading. `live: false`: a tick records its caps at most once per scheduled run, so the
@@ -731,8 +732,10 @@ export default function BoardView({ source, onOpenRuns, onWorking }: { source: S
       ) : all.length === 0 ? (
         /* Two distinct empty states: an empty registry is fixed by running a
            backlog skill in some project; an empty RESULT is fixed by the
-           controls two inches above the message. */
-        <div className="board-empty">nothing registered yet</div>
+           controls two inches above the message. Since the source split, `all` is ONE source's items, so an empty one no longer means an empty
+           registry: a freshly connected repo with no open issues, or a files project whose store is empty, is a registered project of this source —
+           the very thing the rail drew this page for — and `nothing registered yet` would contradict the rail. `registered` is the same narrowed list. */
+        <div className="board-empty">{registered.length === 0 ? 'nothing registered yet' : 'no items yet'}</div>
       ) : visible.length === 0 ? (
         /* With `Awaiting review` on, the empty result names the pile rather than the controls: the likely reason is the last plan was just approved. */
         <div className="board-empty">{awaitingReview ? 'no plans awaiting review' : 'no matches'}</div>

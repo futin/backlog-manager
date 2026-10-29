@@ -74,13 +74,43 @@ export function projectsIn(projects: readonly ProjectSummary[], source: SourceSe
 }
 
 /**
- * The one narrowing both pages share: an index cut to the items `source` draws, with `errors` kept ONLY on Files. An index error names no project, only a
- * file, so it cannot be attributed finer than the source that owns the unreadable projects (`unsupported` and `missing`), and that source is Files — the
- * rule lives here, once, so Board and Archive cannot drift apart on it. `null` (not fetched yet) passes through, and a `null` registry reads as empty, which
- * keeps every item out until the projects arrive rather than showing them under whichever page asked.
+ * The URN prefix a GitHub issue's row carries in place of a file path — `gh:<owner>/<name>#<n>`, minted by the server's `issueUrn`
+ * (`server/src/tracker/map-issue.ts`, `URN_PREFIX`). A hand copy because the client imports nothing from `server/`; `test/sources-lib.test.ts` builds its
+ * URN through the server's own `issueUrn`, so a change to the prefix there turns that suite red instead of quietly sending every GitHub warning to Files.
+ */
+const ISSUE_URN_PREFIX = 'gh:';
+
+/**
+ * Which source's page shows one `ItemsIndex.errors` entry, read off what the error names — every error the server sends starts with the thing it is about,
+ * then `: `:
+ * - `gh:<owner/name>#<n>: …` — a warning about one GitHub issue (`mapIssue`'s several-type-labels note). Only the GitHub adapter mints a URN, so it is
+ *   GitHub's, without asking the registry — which also keeps it on GitHub before the projects read has answered.
+ * - `<project path>: …` or `<a path inside it>: …` — a project's own complaint (the GitHub adapter's `names no valid "repo"`, the files scanner's unreadable
+ *   item file, the resolver's unreadable `backlog/source.json`). It goes where that project is drawn, by `sourceSectionOf` — so a github project's bad
+ *   marker is GitHub's, and an `unsupported` one's is Files', beside the project the rail files it under. Matched on the path plus a `/` or `:` boundary, so
+ *   `/w/bb` is never claimed by `/w/b`, and the longest registered path wins, so a project nested inside another's checkout keeps its own errors.
+ * - anything else — no project to attribute it to — goes to Files, the page that showed every error before the split.
+ */
+export function errorSource(error: string, projects: readonly ProjectSummary[]): SourceSection {
+  if (error.startsWith(ISSUE_URN_PREFIX)) return 'github';
+  let owner: ProjectSummary | undefined;
+  for (const p of projects) {
+    const names = error.startsWith(`${p.path}/`) || error.startsWith(`${p.path}:`);
+    if (names && (owner === undefined || p.path.length > owner.path.length)) owner = p;
+  }
+  return owner === undefined ? 'files' : sourceSectionOf(owner.source);
+}
+
+/**
+ * The one narrowing both pages share: an index cut to the items `source` draws, and to the errors `errorSource` routes to it — the rule lives here, once, so
+ * Board and Archive cannot drift apart on it, and every error lands on exactly one page. `null` (not fetched yet) passes through, and a `null` registry reads
+ * as empty, which keeps every item out until the projects arrive rather than showing them under whichever page asked.
  */
 export function narrowToSource(index: ItemsIndex | null, projects: readonly ProjectSummary[] | null, source: SourceSection): ItemsIndex | null {
   if (index === null) return null;
   const registry = projects ?? [];
-  return { items: index.items.filter((i) => inSource(i.projectPath, registry, source)), errors: source === 'files' ? index.errors : [] };
+  return {
+    items: index.items.filter((i) => inSource(i.projectPath, registry, source)),
+    errors: index.errors.filter((e) => errorSource(e, registry) === source)
+  };
 }

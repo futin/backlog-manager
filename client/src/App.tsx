@@ -356,8 +356,11 @@ function AppShell() {
                   two cannot come to disagree about what opening Runs does (and
                   so the chip's click is recorded in `backlog-manager.section`
                   exactly as the rail's is). */}
-                {/* A provisional landing paints nothing the projects answer could take back: the section's loading shape until it settles. */}
-                {pending !== null && drawn === null ? (
+                {/* A provisional landing paints nothing the projects answer could take back: the section's loading shape until it settles. Gated on
+                    `pending` alone, not on `drawn` too: in the render where the first answer lands, `drawn` is set and `pending` still is, and the settle
+                    effect that clears it runs after that commit — gating on both rendered the guessed page for that one commit (and fetched its chunk). The
+                    settle always ends in `change`, which clears `pending`, so this never holds past the answer. */}
+                {pending !== null ? (
                   <SectionLoading />
                 ) : (
                   <>

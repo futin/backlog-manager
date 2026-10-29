@@ -3377,8 +3377,11 @@ Whether a row is drawn is a question about the registry, not the tracker. `Proje
 `drawnSources` out, rather than deriving it from `TrackersPayload.projects`, which knows only tracker-backed projects and would leave Files with no answer at
 all. It reads on mount and focus and never polls — the registry moves on a `register`, not on a clock — and keeps its last answer on a failure, so a blip cannot
 take a row away. An `unsupported` project and one with no source sit under Files as display grouping only, never as a source of their own: what they have to
-show is file errors, and Files is the source with a place to show them. That is also why `narrowToSource` keeps the index's `errors` on Files alone — an index
-error names a file, not a project, so it cannot be attributed any finer than the source that owns the unreadable projects.
+show is file errors, and Files is the source with a place to show them. The index's `errors` are split the same way, by what each one names
+(`errorSource`): every error the server sends starts with its subject, so a `gh:<owner/name>#<n>` URN — a warning about one GitHub issue — goes to GitHub, an
+error starting with a registered project's path goes wherever that project is drawn (a github project's invalid-repo marker to GitHub, an `unsupported`
+project's unreadable marker to Files), and only an error naming nothing registered falls to Files. Keeping every error on Files, as the first cut did, showed
+GitHub's warnings on a page that does not draw their items — and on a machine with only GitHub projects, where the Files row is never drawn, nowhere at all.
 
 ### Three states, and hold-and-fall
 

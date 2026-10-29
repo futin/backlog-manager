@@ -99,8 +99,8 @@ const COLUMNS: { section: Section; label: string; slug: BoardColumnSlug }[] = [
 export default function ArchiveView({ source, onWorking }: { source: SourceSection; onWorking?: (working: boolean) => void }) {
   const { zone } = useTimeZone();
   const { items: fullIndex, projects: fullProjects, loading, error } = useBoard();
-  /* BoardView's split: `projects` stays `null` until the first answer, and `index` is `narrowToSource`'s cut (index errors ride only with Files, once, in
-     `lib/sources.ts`). */
+  /* BoardView's split: `projects` stays `null` until the first answer, and `index` is `narrowToSource`'s cut (each index error routed to the source it
+     names, once, in `lib/sources.ts`). */
   const projects = useMemo(() => (fullProjects === null ? null : projectsIn(fullProjects, source)), [fullProjects, source]);
   const index = useMemo(() => narrowToSource(fullIndex, fullProjects, source), [fullIndex, fullProjects, source]);
   /* Only `staleDays` is read, but the whole control comes back — `useSettings`
@@ -295,7 +295,8 @@ export default function ArchiveView({ source, onWorking }: { source: SourceSecti
       ) : error && all.length === 0 ? (
         <div className="board-empty">board unavailable</div>
       ) : all.length === 0 ? (
-        <div className="board-empty">nothing registered yet</div>
+        // BoardView's pair, for its reason: `all` is one source's items, so an empty one under a drawn row is a registered project with no items yet.
+        <div className="board-empty">{registered.length === 0 ? 'nothing registered yet' : 'no items yet'}</div>
       ) : archived.length === 0 ? (
         /* Three empty states, not two, and the third is this one: the Board's
            pair distinguishes "nothing registered" from "your filters matched

@@ -149,7 +149,9 @@ last two so that no page draws a section heading or a project chip of its own. I
 
 Drawn once per source: Files › Board and GitHub › Board are one `BoardView` with a required `source` prop. The index is cut by `narrowToSource` and the project
 list by `projectsIn` (`lib/sources.ts`), hues stay keyed on the whole registry so a project keeps its colour on either page, and the project filter is stored
-per source (`projectKey(source)`, `lib/view-keys.ts`).
+per source (`projectKey(source)`, `lib/view-keys.ts`). The warnings strip shows only the index errors `errorSource` routes to this source. An empty cut reads
+`nothing registered yet` only when this source has no registered project; with one, it reads `no items yet` — a freshly connected repo with no open issues,
+or an empty files store — since the rail draws the row because that project is registered. Archive has the same pair.
 
 A `Band` titled with the scope — `All projects`, or the picked project's name, since the picker is behind a popover — and no count line, then search, the
 filter track (`FilterBar`: a `Filters` popover holding the Project picks, the Status switch and the `Awaiting review` toggle (#387), with `Clear all`; a `Sort by` popover holding the three
@@ -379,7 +381,8 @@ boards`, `not configured`, `checking…` or `unavailable`) — plus a `Last read
 committing `backlog/source.json`, so what the card offers instead of a button is the `backlog.mjs connect github <owner>/<repo>` command as copyable text, with
 the repo read off that project's `origin` per request. It never shows the token — only whether one is set, and whose login it is. Its two links, `GitHub ›
 Settings ↗` and `Jira › Setup ↗`, are the shell's pairs (`onOpenGithubPage`, `onOpenJiraPage`) threaded down through `SettingsView` and `SharedPage`, and each
-is drawn only while the section it opens is drawn — GitHub's while a GitHub project is registered, Jira's while configured. The sync interval the old `Trackers`
+is drawn only while the section it opens is drawn — GitHub's while the rail's projects answer draws its row (`useProjectsContext().drawn`, not the tracker
+counts, which call an invalid-repo marker `unsupported`), Jira's while configured. The sync interval the old `Trackers`
 card carried (#17) is GitHub › Settings' now (below).
 
 **Dashboards** is the one page that writes the machine list (`DashboardsPage`, drawn to `.claude/DESIGN.md` §8.6): the Suggest card (`SuggestCard` — the three
@@ -631,8 +634,9 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   mount and window focus, never a poll), keeping the last answer on a failure, and `useProjectsContext()`: `{ data, drawn, reload }`, `drawn` being
   `drawnSources(data)` or `null` while unknown. A component mounted without the provider reads the unknown state and never fetches.
 - `lib/sources.ts` — the source split, pure: `sourceSectionOf` (display grouping: `github` under GitHub, everything else under Files), `drawnSources`,
-  `projectsPerSource`, `firstDrawn`, `settleSection`, `inSource`, `projectsIn`, and `narrowToSource`, the one cut Board and Archive share, which keeps the
-  index's `errors` on Files alone.
+  `projectsPerSource`, `firstDrawn`, `settleSection`, `inSource`, `projectsIn`, `errorSource` and `narrowToSource`, the one cut Board and Archive share,
+  which sends each index error to the source it names — a `gh:` issue URN to GitHub, a registered project's path to that project's source, anything else to
+  Files.
 - `lib/source-page.ts` and `hooks/useSourcePage.ts` — `FILES_PAGES`/`GITHUB_PAGES` with their keys and guards, `FALLBACK_SECTION` and `resolveLegacySection`;
   and `useFilesPage`/`useGithubPage` with their setters, module stores on `useJiraPage`'s shape.
 - `components/github/` — `GithubSettingsView` (GitHub › Settings) and `GithubSyncGroup`, its one `Sync` card; `components/settings/SourcesGroup.tsx` is the

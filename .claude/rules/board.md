@@ -78,9 +78,11 @@ paths: ["client/src/**"]
   `firstDrawn`; a provisional landing renders `SectionLoading` until it settles. The pages are `FILES_PAGES` (`board | archive`) and `GITHUB_PAGES` (`board |
   archive | settings`), each with its key and guard, held by `useFilesPage`/`useGithubPage` (`hooks/useSourcePage.ts`), module stores like `useJiraPage`'s; the
   Sources card's `GitHub › Settings ↗` link is `onOpenGithubPage` (`setGithubPage(p)` then `change('github')`, built once in `App`), drawn only while
-  `counts.github > 0`. Board and Archive take a required `source` and cut the index with `narrowToSource`, which keeps `errors` on Files alone; hues come from
-  the whole registry, and the project filter key is per source (`projectKey`, `lib/view-keys.ts`). Settings' `Opens on` offers Files and GitHub only while drawn
-  (`landingOptions`), keeping a stored pin's option. Why:
+  `useProjectsContext().drawn?.github` — the rail's answer, never the tracker counts. Board and Archive take a required `source` and cut the index with
+  `narrowToSource`, which routes each index error by `errorSource`: a `gh:` issue URN to GitHub, a registered project's path (longest, on a `/` or `:`
+  boundary) to that project's source, anything else to Files; an empty cut reads `nothing registered yet` only with no project of that source, else
+  `no items yet`. Hues come from the whole registry, and the project filter key is per source (`projectKey`, `lib/view-keys.ts`). Settings' `Opens on` offers
+  Files and GitHub only while drawn (`landingOptions`), keeping a stored pin's option. Why:
   [invariants.md](docs/subsystems/invariants.md#a-source-row-is-drawn-only-while-a-registered-project-has-that-source-and-its-pages-are-switched-by-the-rails-tree)
 - **`contentWidth` is stamped before first paint, and the CSP hash travels with the script that stamps it.** `data-width` on `<html>`, written twice — by
   `client/index.html`'s inline script and by `useSettings`, whose dependency list must carry it or the setting works on reload and not on the click. One CSS

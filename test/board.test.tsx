@@ -1187,6 +1187,14 @@ describe('BoardView', () => {
     render(<BoardView source="files" />);
     await waitFor(() => expect(screen.getByText('nothing registered yet')).toBeInTheDocument());
   });
+
+  it('says `no items yet`, not `nothing registered yet`, when the source has registered projects and no items (final review I2)', async () => {
+    // The rail draws this page only because a project of this source is registered, so telling the reader to register one would contradict it.
+    stubItems([]);
+    render(<BoardView source="files" />);
+    await waitFor(() => expect(screen.getByText('no items yet')).toBeInTheDocument());
+    expect(screen.queryByText('nothing registered yet')).not.toBeInTheDocument();
+  });
 });
 
 /*
@@ -1269,6 +1277,34 @@ describe('BoardView source filter', () => {
     render(<BoardView source="github" />);
     await waitFor(() => expect(screen.getByText('github item')).toBeInTheDocument());
     expect(screen.queryByTestId('board-warn')).not.toBeInTheDocument();
+  });
+
+  it('an error naming a GitHub issue or a github project warns on GitHub, never on Files (final review I1)', async () => {
+    const urn = 'gh:futin/ghproj#4: 2 type labels (bug, task) — using bug';
+    const badRepo = '/abs/ghproj: backlog/source.json names no valid "repo" (expected "owner/name")';
+    (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload: unknown = url.includes('/api/agents/status')
+        ? AGENTS_STATUS
+        : url.includes('/api/orchestrator/runs')
+          ? NO_RUNS
+          : url.includes('/api/projects')
+            ? SRC_PROJECTS
+            : { items: SRC_ITEMS, errors: [...SRC_ERRORS, urn, badRepo] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+    const { unmount } = render(<BoardView source="github" />);
+    await waitFor(() => expect(screen.getByTestId('board-warn')).toBeInTheDocument());
+    expect(screen.getByTestId('board-warn')).toHaveTextContent('2 type labels');
+    expect(screen.getByTestId('board-warn')).toHaveTextContent('names no valid "repo"');
+    expect(screen.getByTestId('board-warn')).not.toHaveTextContent('frontmatter has no closing');
+    unmount();
+
+    render(<BoardView source="files" />);
+    await waitFor(() => expect(screen.getByTestId('board-warn')).toBeInTheDocument());
+    expect(screen.getByTestId('board-warn')).toHaveTextContent('frontmatter has no closing');
+    expect(screen.getByTestId('board-warn')).not.toHaveTextContent('2 type labels');
+    expect(screen.getByTestId('board-warn')).not.toHaveTextContent('names no valid');
   });
 
   it('a stored project pick that belongs to the other source falls open to All projects on this page', async () => {

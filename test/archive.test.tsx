@@ -522,9 +522,28 @@ describe('ArchiveView', () => {
     expect(screen.queryByText('nothing archived yet')).not.toBeInTheDocument();
   });
 
-  it('says "nothing registered yet" for an empty index', async () => {
+  it('says "no items yet", not "nothing registered yet", when the source has registered projects and no items (final review I2)', async () => {
+    // `PROJECTS` registers a files project, so this page's rail row is drawn: the registry is not what is empty, the project's store is.
     await renderArchive([]);
-    expect(screen.getByText('nothing registered yet')).toBeInTheDocument();
+    expect(screen.getByText('no items yet')).toBeInTheDocument();
+    expect(screen.queryByText('nothing registered yet')).not.toBeInTheDocument();
+  });
+
+  it('says "nothing registered yet" only when the source has no registered project', async () => {
+    stubItems([]);
+    (global.fetch as jest.Mock).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload: unknown = url.includes('/api/orchestrator/runs')
+        ? ({ runs: [], starting: [], remote: [], remoteStarting: [] } satisfies OrchestratorRunsPayload)
+        : url.includes('/api/projects')
+          ? []
+          : url.includes('/api/agents/status')
+            ? AGENTS_STATUS
+            : ({ items: [], errors: [] } satisfies ItemsIndex);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) } as Response);
+    });
+    render(<ArchiveView source="files" />);
+    await waitFor(() => expect(screen.getByText('nothing registered yet')).toBeInTheDocument());
   });
 
   it("reports the registry's own warnings, since Archive can be the landing section", async () => {

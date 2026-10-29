@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 
 import { SettingsGroup, SettingsRow } from '../ui/SettingsRow';
 import { useJiraContext } from '../../hooks/JiraContext';
+import { useProjectsContext } from '../../hooks/ProjectsContext';
 import { useTimeZone } from '../../hooks/TimeZoneContext';
 import { useTrackersContext } from '../../hooks/TrackersContext';
 import type { JiraPage } from '../../lib/jira-page';
@@ -25,15 +26,18 @@ import type { TrackerProjectRow } from '../../../../shared/types';
  *
  * **The links are the shell's pair, never a switch of this card's own.** `onOpenGithubPage` and `onOpenJiraPage` are built once in `App` (page store first,
  * then `change`) and threaded down through `SettingsView`, the one allowance the rail's tree rule makes; without them the row names no destination. Each is
- * drawn only while the section it opens is drawn — GitHub with a registered github project, Jira while configured — because a link into a section
+ * drawn only while the section it opens is drawn — GitHub while the rail draws its row (`useProjectsContext().drawn`), Jira while configured — because a link into a section
  * the rail does not draw would land on a page the shell immediately falls away from.
  *
- * It owns no fetch: the shell's `TrackersProvider` and `JiraProvider` do, so this card, GitHub › Settings and the strip chips read one answer each.
+ * It owns no fetch: the shell's `TrackersProvider`, `JiraProvider` and `ProjectsProvider` do, so this card, GitHub › Settings, the rail and the strip chips
+ * read one answer each.
  */
 export function SourcesGroup({ onOpenGithubPage, onOpenJiraPage }: { onOpenGithubPage?: (p: GithubPage) => void; onOpenJiraPage?: (p: JiraPage) => void }) {
   const { zone } = useTimeZone();
   const { data, loading, error } = useTrackersContext();
   const jira = useJiraContext();
+  // The rail's own answer (`GET /api/projects`), read for the GitHub link's gate alone — see the comment on the link.
+  const drawn = useProjectsContext().drawn;
   // One instant for the whole card, read here and passed down, because `lib/tracker.ts` reads no clock: every age on one surface is aged against one moment.
   // The card has no ticking clock of its own — it re-renders when the shell's `useTrackers` answers — so "now" is the moment it rendered.
   const now = Date.now();
@@ -71,7 +75,10 @@ export function SourcesGroup({ onOpenGithubPage, onOpenJiraPage }: { onOpenGithu
           )
         }
       >
-        {counts !== null && counts.github > 0 && onOpenGithubPage && (
+        {/* Gated on the rail's `drawn`, never on `counts`: the counts read `/api/trackers`, which calls a github marker with an invalid repo
+            `unsupported` while `/api/projects` — the rail — calls it `github` and draws the row. "Drawn only while the section it opens is drawn" is
+            the rail's fact, so it is read where the rail reads it; unknown (`null`) draws no link, as the rail draws no row on a guess. */}
+        {drawn?.github === true && onOpenGithubPage && (
           // A button, not an anchor: the destination is the shell's own state, not an href (the watchdog card's `Runs › Watchdog ↗` is the precedent).
           <button type="button" className="set-link" onClick={() => onOpenGithubPage('settings')}>
             GitHub › Settings ↗

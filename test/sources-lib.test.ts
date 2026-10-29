@@ -1,4 +1,5 @@
-import { drawnSources, firstDrawn, inSource, narrowToSource, settleSection, sourceSectionOf } from '../client/src/lib/sources';
+import { drawnSources, errorSource, firstDrawn, inSource, narrowToSource, settleSection, sourceSectionOf } from '../client/src/lib/sources';
+import { issueUrn } from '../server/src/tracker/map-issue';
 import type { ItemsIndex, ProjectSummary } from '../shared/types';
 
 /** Only `source` is read by the derivations; the rest of a summary is filler the cast papers over. */
@@ -104,12 +105,59 @@ describe('narrowToSource', () => {
     expect(narrowToSource(index, projects, 'files')!.items.map((i) => i.id)).toEqual(['1', '3']);
     expect(narrowToSource(index, projects, 'github')!.items.map((i) => i.id)).toEqual(['2']);
   });
-  it('lets the index errors ride only with Files', () => {
+  it('cuts the index errors by source too', () => {
     expect(narrowToSource(index, projects, 'files')!.errors).toEqual(index.errors);
     expect(narrowToSource(index, projects, 'github')!.errors).toEqual([]);
   });
   it('passes the not-yet-fetched null through, and reads a null registry as empty', () => {
     expect(narrowToSource(null, projects, 'files')).toBeNull();
     expect(narrowToSource(index, null, 'files')!.items).toEqual([]);
+  });
+});
+
+/*
+ * Index errors, routed by what they name (final review I1). Every string is distinct and built in the server's own format — the URN through the server's
+ * own `issueUrn`, so a change to the prefix there turns this red rather than silently sending every GitHub warning to Files — and each list is asserted in
+ * full, so an error routed to the wrong page fails on both sides.
+ */
+describe('errorSource', () => {
+  const projects = [
+    { name: 'a', path: '/w/a', source: 'files', repo: null },
+    { name: 'b', path: '/w/b', source: 'github', repo: 'futin/b' },
+    { name: 'bb', path: '/w/bb', source: 'files', repo: null },
+    { name: 'c', path: '/w/c', source: 'unsupported', repo: null },
+    { name: 'nested', path: '/w/a/vendor/n', source: 'github', repo: 'futin/n' }
+  ] as ProjectSummary[];
+
+  const URN_WARNING = `${issueUrn('futin/b', 7)}: 2 type labels (bug, task) — using bug`;
+  const BAD_REPO = '/w/b: backlog/source.json names no valid "repo" (expected "owner/name")';
+  const BAD_FILE = '/w/a/backlog/bugs/open/bug-3-x.md: frontmatter has no closing --- line';
+  const PREFIX_TWIN = '/w/bb/backlog/ideas/open/idea-1-y.md: frontmatter has no closing --- line';
+  const BAD_MARKER = '/w/c/backlog/source.json: invalid JSON (Unexpected token)';
+  const NESTED = '/w/a/vendor/n: backlog/source.json names no valid "repo" (expected "owner/name")';
+  const NOBODY = 'registry.json: something nobody owns';
+
+  it.each([
+    ['a GitHub issue URN goes to GitHub', URN_WARNING, 'github'],
+    ['a github project path goes to GitHub', BAD_REPO, 'github'],
+    ['a file inside a files project goes to Files', BAD_FILE, 'files'],
+    ['a path that only shares a prefix with a github project goes to its own project, not that one', PREFIX_TWIN, 'files'],
+    ['an unsupported marker goes to Files, where its project is drawn', BAD_MARKER, 'files'],
+    ['the longest registered path wins for a nested project', NESTED, 'github'],
+    ['an error naming nothing registered goes to Files', NOBODY, 'files']
+  ] as const)('%s', (_name, error, section) => {
+    expect(errorSource(error, projects)).toBe(section);
+  });
+
+  it('narrowToSource splits a mixed error list between the two pages, order kept', () => {
+    const index = { items: [], errors: [BAD_FILE, URN_WARNING, NOBODY, BAD_REPO, BAD_MARKER] } as unknown as ItemsIndex;
+    expect(narrowToSource(index, projects, 'files')!.errors).toEqual([BAD_FILE, NOBODY, BAD_MARKER]);
+    expect(narrowToSource(index, projects, 'github')!.errors).toEqual([URN_WARNING, BAD_REPO]);
+  });
+
+  it('routes a URN to GitHub before the registry has answered, and a path to Files', () => {
+    const index = { items: [], errors: [URN_WARNING, BAD_REPO] } as unknown as ItemsIndex;
+    expect(narrowToSource(index, null, 'github')!.errors).toEqual([URN_WARNING]);
+    expect(narrowToSource(index, null, 'files')!.errors).toEqual([BAD_REPO]);
   });
 });

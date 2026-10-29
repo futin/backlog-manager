@@ -1,12 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 
 import { SourcesGroup } from '../client/src/components/settings/SourcesGroup';
 import { JiraContext } from '../client/src/hooks/JiraContext';
+import { ProjectsContext } from '../client/src/hooks/ProjectsContext';
+import type { DrawnSources } from '../client/src/lib/sources';
 import type { JiraState } from '../client/src/hooks/useJira';
 import { TrackersProvider } from '../client/src/hooks/TrackersContext';
 import type { JiraBoardStatus, JiraStatusPayload, TrackerPlatform, TrackerProjectRow, TrackersPayload } from '../shared/types';
@@ -77,14 +79,20 @@ const UNCONFIGURED = jiraStatus({ configured: false, site: null, me: null, acces
 let onOpenGithubPage: jest.Mock;
 let onOpenJiraPage: jest.Mock;
 
-async function renderCard(jira: JiraStatusPayload | null = UNCONFIGURED): Promise<void> {
+/*
+ * `drawn` is the shell's projects answer, handed in through `ProjectsContext` the way `settings-view.test.tsx` does — the GitHub link's gate reads THAT, the
+ * rail's own fact, and never the tracker payload's counts, so the two are set independently here and a case can make them disagree.
+ */
+async function renderCard(jira: JiraStatusPayload | null = UNCONFIGURED, drawn: DrawnSources | null = { files: true, github: true }): Promise<void> {
   stubFetch();
   const state: JiraState = { data: jira, loading: jira === null, error: false, reload: () => {} };
   render(
     <JiraContext.Provider value={state}>
-      <TrackersProvider>
-        <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
-      </TrackersProvider>
+      <ProjectsContext.Provider value={{ data: null, drawn, reload: () => {} }}>
+        <TrackersProvider>
+          <SourcesGroup onOpenGithubPage={onOpenGithubPage} onOpenJiraPage={onOpenJiraPage} />
+        </TrackersProvider>
+      </ProjectsContext.Provider>
     </JiraContext.Provider>
   );
   await waitFor(() => expect(linesOf('GitHub')[0]).not.toBe('checking…'));
@@ -178,9 +186,27 @@ describe('the GitHub row', () => {
     expect(onOpenJiraPage).not.toHaveBeenCalled();
   });
 
-  it('draws no link while no github project is registered — the section it would open is not drawn', async () => {
+  it('draws no link while the GitHub row is not drawn — the section it would open is not there', async () => {
     payload = { platforms: [TOKEN], projects: [beta] };
-    await renderCard();
+    await renderCard(UNCONFIGURED, { files: true, github: false });
+    expect(within(rowOf('GitHub')).queryByRole('button')).toBeNull();
+  });
+
+  it('gates the link on the rail`s drawn answer, not the tracker counts (final review M3)', async () => {
+    // A github marker with an invalid repo: `/api/trackers` calls it `unsupported` (counted under Files, `0 projects` here) while `/api/projects` — the
+    // rail — calls it `github` and draws the row. The link follows the rail, because the rail is what it lands on.
+    payload = { platforms: [TOKEN], projects: [beta] };
+    await renderCard(UNCONFIGURED, { files: true, github: true });
+    expect(within(rowOf('GitHub')).getByRole('button', { name: /GitHub › Settings/ })).toBeInTheDocument();
+    cleanup();
+
+    // And the other way: tracker rows that count a github project, under a rail that does not draw GitHub (or has not answered yet), draw no link.
+    payload = { platforms: [TOKEN], projects: [row(), beta, gamma] };
+    await renderCard(UNCONFIGURED, { files: true, github: false });
+    expect(within(rowOf('GitHub')).queryByRole('button')).toBeNull();
+    cleanup();
+
+    await renderCard(UNCONFIGURED, null);
     expect(within(rowOf('GitHub')).queryByRole('button')).toBeNull();
   });
 });
