@@ -106,8 +106,12 @@ paths: ["server/src/tracker/**"]
   or sweep; a read happens only inside `GET /api/prs` or a write's re-read — served while younger than `PR_TTL_MS` (60 s), with one in-flight read per repo
   shared by concurrent callers. `polledAt` moves on a successful read only; a failure keeps the last rows and sets `access`/`detail` from `failureVerdict`.
   An hourly-limit verdict sleeps that repo's entry (`noteSleep`, which a write's verdict reaches too, creating an empty entry); a secondary one also calls
-  `poller.noteSecondary`, and the poller's `secondaryUntil` sleeps the entry in turn. `splice` puts a write's re-read row in place without moving `polledAt`.
-  Why:
+  `poller.noteSecondary`, and the poller's `secondaryUntil` sleeps the entry in turn — `noteSecondary` also sets the poller's repo `access: 'rate-limited'`
+  and the secondary detail, as its own verdict does. A typed GraphQL `RATE_LIMITED` is a limit whatever `remaining` says (`GithubResponse.rateLimited`).
+  `splice` puts a write's re-read row in place without moving `polledAt`, counts down `total` on a removal and up only on a complete list, and bumps the
+  entry's `splices`: a list read that lands with a different count drops its rows (the attempt still counts), and a successful read clears `sleepUntil` only
+  when it has run out. An `update-requested` sets `dueAt = now + PR_UPDATING_MS` (`shared/types.ts`, also the client's `UPDATING_MS`): `refresh` reads an
+  entry past its `dueAt` inside the TTL too, still joining a read in flight. Each write reads its clock when its serialised turn comes. Why:
   [invariants.md](docs/subsystems/invariants.md#the-tracker-jira-and-pull-request-caches-are-the-three-caches-in-this-server-whose-age-is-a-rendered-value)
 - **A repo whose sync is off refuses every write path, and cannot be switched off under a live or paused run.** `TrackerPollerService.syncOffBlock(path)` is
   the ONE server home of the sentence `sync is off for <owner/name> — turn it on in GitHub › Settings` (tracker projects only, `null` otherwise);

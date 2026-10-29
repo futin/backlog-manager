@@ -14,7 +14,7 @@ import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { FAKE_REPO, FakeGithub } from './helpers/github';
 import { listenLoopback } from './helpers/app';
 import { makeProject, makeRegistry } from './helpers/store';
-import type { PrRepoView, PullRequestsPayload } from '../shared/types';
+import type { PrRepoView, PullRequestsPayload, TrackersPayload } from '../shared/types';
 
 /**
  * The PRs page's routes (Plan B, task 4): `GET /api/prs` and the three guarded writes — merge, auto-merge, update-branch — each serialised per
@@ -192,6 +192,28 @@ describe('POST /api/prs/merge', () => {
     gh.failNext = { fragment: '/graphql', operation: 'PullRequest', status: 502, message: 'Bad gateway' };
     const res = await post('merge', { repo: FAKE_REPO, number: 7, method: 'squash', headSha: A }).expect(200);
     expect(res.body).toEqual({ ok: true, outcome: 'merged', pr: null, reread: false });
+  });
+
+  it('a merge whose re-read fails still takes the PR off the cached list, with no list query', async () => {
+    expect(view(await list(), FAKE_REPO).prs.map((p) => p.number)).toEqual([7]);
+    gh.failNext = { fragment: '/graphql', operation: 'PullRequest', status: 502, message: 'Bad gateway' };
+    const res = await post('merge', { repo: FAKE_REPO, number: 7, method: 'squash', headSha: A }).expect(200);
+    expect(res.body).toEqual({ ok: true, outcome: 'merged', pr: null, reread: false });
+
+    const after = await list();
+    expect(view(after, FAKE_REPO).prs).toEqual([]);
+    expect(view(after, 'futin/y').prs.map((p) => p.number)).toEqual([12]);
+    expect(lists(FAKE_REPO)).toBe(1);
+  });
+
+  it("a secondary limit a PR write meets shows on the repo's tracker row, not only as the poller's silent backoff", async () => {
+    gh.failNext = { fragment: '/pulls/7/merge', status: 403, message: 'You have exceeded a secondary rate limit' };
+    await post('merge', { repo: FAKE_REPO, number: 7, method: 'squash', headSha: A }).expect(429);
+
+    const res = await request(app.getHttpServer()).get('/api/trackers').expect(200);
+    const rows = (res.body as TrackersPayload).projects;
+    expect(rows.find((r) => r.repo === FAKE_REPO)).toMatchObject({ access: 'rate-limited', detail: 'secondary rate limit — backing off 60 s' });
+    expect(rows.find((r) => r.repo === 'futin/y')).toMatchObject({ access: 'ok', detail: null });
   });
 
   it('accepts a tailnet Host with its matching origin', async () => {

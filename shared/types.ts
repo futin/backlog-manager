@@ -690,6 +690,14 @@ export interface PrUpdateBranchRequest {
 export type PrWriteOutcome = 'merged' | 'already-merged' | 'auto-merge-enabled' | 'auto-merge-disabled' | 'noop' | 'update-requested';
 
 /**
+ * How long after an accepted update-branch (`update-requested`) the PR's row says `updating…`, and when the page re-reads once. ONE number for two
+ * processes: the client's mark (`UPDATING_MS`, `client/src/lib/prs.ts`) times its re-read by it, and the server makes that repo's PR-cache entry due again
+ * at the same moment although its 60 s TTL has not run out — two literals would let the re-read land inside the TTL and be served the head the update
+ * has since moved, with the row's actions enabled on it.
+ */
+export const PR_UPDATING_MS = 30_000;
+
+/**
  * The answer of the three PR writes (`200`, or `202` for update-branch). The write landed — that is what the status says. `pr` is the PR as the write's own
  * single-PR re-read found it, or `null` when the PR is no longer open (merged, closed) or the re-read failed; `reread` says which. A failed re-read is never
  * an error, for the same reason as `JiraIssueWriteResult`'s: the write cannot be un-happened, and an error would invite a retry of one that already stood.

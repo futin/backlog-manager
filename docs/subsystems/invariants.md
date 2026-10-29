@@ -3521,6 +3521,13 @@ unmounts. It is kept honest the same way as the other two: `polledAt` rides on e
 successful read. A failure keeps the last answer — the previous rows, their `polledAt` — beside the failure's `access` and `detail`, because a stale list
 labelled with its age is more use than an empty one, and an emptied list would read as "no open PRs", which is a claim about the repo the cache cannot make.
 
+Two rules keep a write and the TTL from contradicting each other (the Plan B fix wave). An accepted update-branch makes the repo due again `PR_UPDATING_MS`
+(30 s, `shared/types.ts`, the one number the page's `updating…` mark also reads) after the write, although its TTL has not run out: GitHub merges the base in
+after it answers, so the page re-reads once when the mark ends — and a re-read served from the 60 s TTL would bring back the head the update has since
+moved, with the row's actions enabled on it, which is the self-caused 409 the row's busy rule exists to prevent. And a list read that lands after a write
+spliced the repo drops its rows (it still counts as an attempt): it carries GitHub's state from before the write, and storing it would put a merged PR back
+on the page for a whole TTL. A successful read likewise clears only a sleep that has run out — one a write recorded while the read was out is newer news.
+
 The cache is allowed to exist because a per-request fetch is impossible: one board render would be one GitHub request per project, and a person watching the
 board would exhaust 5,000 requests an hour in minutes. It is kept honest by being VISIBLE — `polledAt` travels in `ProjectSummary`, the shell's tracker chip
 counts the sweep down on its POLL meter (#228 — the board's band printed `futin/x · polled 12 s ago` before that), the item modal prints it beside the body it drew from that same cache, and the Sources card prints it per repo. A cache

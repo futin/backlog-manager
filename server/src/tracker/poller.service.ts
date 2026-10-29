@@ -73,6 +73,10 @@ export const TRACKER_POLL_MS = 15_000;
  *  GitHub's own guidance is to wait at least a minute (spec §5.1). */
 export const SECONDARY_BACKOFF_MS = 60_000;
 
+/** The sentence a secondary limit leaves on a repo — one home, because the poller's own verdict and a sleep the PR cache hands over (`noteSecondary`) must
+ *  read alike on the board. */
+const SECONDARY_DETAIL = `secondary rate limit — backing off ${SECONDARY_BACKOFF_MS / 1000} s`;
+
 /**
  * How long the SWEEP waits before asking `GET /user` again after a read that did not answer a login (#270). A failure is never cached — that was the
  * bug: one blip stored `login: null` for the process lifetime and no won claim ever set an assignee again — but the sweep runs every tick, and against a
@@ -170,14 +174,18 @@ export function failureVerdict(res: GithubResponse<unknown>, now: number): Failu
   if ((res.status >= 200 && res.status < 300) || res.status === 304) return null;
 
   if (res.secondary) {
-    return { access: 'rate-limited', detail: `secondary rate limit — backing off ${SECONDARY_BACKOFF_MS / 1000} s`, sleepUntil: now + SECONDARY_BACKOFF_MS, secondary: true };
+    return { access: 'rate-limited', detail: SECONDARY_DETAIL, sleepUntil: now + SECONDARY_BACKOFF_MS, secondary: true };
   }
 
   // The hourly limit, which GitHub signals as a 403 or a 429 with
   // `x-ratelimit-remaining: 0`, or with a `Retry-After`. Both are honoured:
   // `remaining` alone would miss a 429 that carries only the header, and
-  // `retry-after` alone would miss the far more common 403.
-  const limited = (res.status === 403 || res.status === 429) && (res.rate.remaining === 0 || res.retryAfter !== null);
+  // `retry-after` alone would miss the far more common 403. A typed GraphQL
+  // `RATE_LIMITED` is a limit whatever `remaining` says: GitHub refuses a query
+  // that would cost more points than are left, with points still left, and
+  // reading that as `error` would retry it every TTL into the same refusal.
+  const limited =
+    (res.status === 403 || res.status === 429) && (res.rate.remaining === 0 || res.retryAfter !== null || res.rateLimited === true);
   if (limited) {
     const resetMs = res.retryAfter !== null ? now + res.retryAfter * 1000 : res.rate.reset !== null ? res.rate.reset * 1000 : now + SECONDARY_BACKOFF_MS;
     // The reset TIME, not a duration: the card is read minutes after the
@@ -986,9 +994,16 @@ export class TrackerPollerService implements OnApplicationBootstrap, OnApplicati
   /**
    * Put a repo to sleep under a secondary limit somebody else met (the PR cache's GraphQL or write calls): the sweep makes no request for it before
    * `untilMs`. Creates the repo's state when this poller has not met it yet, so the sleep is not lost to ordering. Never shortens an existing sleep.
+   * Sets `access`/`detail` as this poller's own secondary verdict does: the sweep skips the repo from now on, and a tracker row still reading `ok` while
+   * nothing is being read would say only through its ageing `polledAt` what the row should say outright. The next successful sync clears it as usual.
    */
   noteSecondary(repo: string, untilMs: number): void {
-    this.sleepSecondary(this.stateOf(repo), untilMs);
+    const state = this.stateOf(repo);
+    this.sleepSecondary(state, untilMs);
+    // An hourly limit this poller met itself and that outlasts the backoff stays the sentence: it is the one that says when reads resume.
+    if (state.sleepUntil !== null && state.sleepUntil >= untilMs && state.access === 'rate-limited') return;
+    state.access = 'rate-limited';
+    state.detail = SECONDARY_DETAIL;
   }
 
   /** Epoch ms until which a secondary limit keeps `repo` quiet, or `null` when none is ahead — what the PR cache reads before its own request. */

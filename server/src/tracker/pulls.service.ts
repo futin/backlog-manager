@@ -8,6 +8,7 @@ import { resolveSource } from '../items/sources/resolve.util';
 import { RegistryService, registryProjectsOr503 } from '../registry/registry.service';
 import {
   MERGE_METHODS,
+  PR_UPDATING_MS,
   type MergeMethod,
   type PrAutoMergeRequest,
   type PrMergeRequest,
@@ -47,6 +48,19 @@ import {
  * of either outcome. Without it a repo answering 502 would be re-queried on every `GET` — two tabs, two queries a minute each — which is exactly the cost the
  * TTL exists to cap; a failing repo is retried once a minute like a healthy one.
  *
+ * One thing makes an entry due BEFORE its TTL: an accepted update-branch sets `dueAt` to `PR_UPDATING_MS` after the write. GitHub merges the base in
+ * asynchronously, the write's own re-read usually still shows the old head, and the page's row says `updating…` for exactly that long and then re-reads
+ * once (`shared/types.ts`, the one home of the number). Served from a 60 s TTL, that re-read would bring back the old head with the row's actions enabled on
+ * it — and a `Merge` clicked then sends a stale SHA into a self-caused 409. `dueAt` only ever makes a read happen sooner; the in-flight join still holds,
+ * so it never causes a second concurrent read.
+ *
+ * ## A read in flight never undoes a write
+ *
+ * A list read started before a write and landing after it carries GitHub's state from before the write. Stored, it would put a merged PR back on the page
+ * for a whole TTL. So `splice` counts its changes (`splices`), a read notes the count when it starts, and a read that lands after a splice keeps its
+ * verdict and its attempt time but not its rows — the rows the cache holds are the read's minus nothing it can prove, plus the write's re-read. Likewise a
+ * successful read clears only a sleep that has run out: one a write recorded while the read was out is younger than the read's answer, not refuted by it.
+ *
  * ## Rate limits
  *
  * Values, never sleeps inside a request. An hourly-limit verdict puts this repo's ENTRY to sleep until the reset; GraphQL's primary budget is a separate pool
@@ -74,6 +88,11 @@ interface PrEntry {
   detail: string | null;
   /** Epoch ms before which this repo gets no PR request — a rate limit's reset or a secondary backoff this cache met itself. */
   sleepUntil: number | null;
+  /** Epoch ms at which the entry is due again although its TTL has not run out — set by an accepted update-branch (`PR_UPDATING_MS`); cleared by a read
+   *  that started at or after it. `null` when only the TTL decides. */
+  dueAt: number | null;
+  /** How many splices this entry has taken — a read that lands with a different count than it started with drops its rows. */
+  splices: number;
   prs: PullRequestRow[];
   total: number;
   methods: MergeMethod[];
@@ -155,13 +174,16 @@ export class PullRequestsService {
 
   /**
    * Put one re-read PR into the cached list (task 4's writes call this after the write's own single-PR read): replace the row with this number, add it
-   * when absent, or — `row` null, the re-read said `MERGED` or `CLOSED` — remove it. `total` follows an add or a removal so `truncated` stays true to the
-   * list; `polledAt` does NOT move, because it is the age of the list read and a splice re-read one row. A repo with no successful read yet is left alone:
-   * one row would draw as the whole list.
+   * when absent, or — `row` null, the re-read said `MERGED` or `CLOSED` — remove it. `total` follows so `truncated` stays true to the list: a removal of a
+   * held row counts down, and an add counts up only when the list was COMPLETE — on a list truncated at 100, a PR absent from the page is one GitHub's
+   * `totalCount` already counted, and counting it again would overshoot. `polledAt` does NOT move, because it is the age of the list read and a splice
+   * re-read one row. A repo with no successful read yet is left alone: one row would draw as the whole list.
    */
   splice(repo: string, row: PullRequestRow | null, number: number): void {
     const entry = this.entries.get(repo);
     if (entry === undefined || entry.polledAt === null) return;
+    // Counted before anything else, a no-op removal included: a read in flight may still hold the row this splice found absent.
+    entry.splices += 1;
     const at = entry.prs.findIndex((p) => p.number === number);
     if (row === null) {
       if (at === -1) return;
@@ -170,8 +192,9 @@ export class PullRequestsService {
       return;
     }
     if (at === -1) {
+      const complete = entry.total <= entry.prs.length;
       entry.prs.push(row);
-      entry.total += 1;
+      if (complete) entry.total += 1;
     } else {
       entry.prs[at] = row;
     }
@@ -198,8 +221,8 @@ export class PullRequestsService {
    * person wanted, not an error — and any other refusal is answered after its re-read is spliced, so a `409` (head moved) leaves the cache holding the head
    * the page must now show. A successful merge splices the PR out even when its re-read fails, because GitHub's `200` already said it is merged.
    */
-  merge(req: PrMergeRequest, now: number = Date.now()): Promise<PrWriteAnswer> {
-    return this.write(req.repo, req.number, now, async (token) => {
+  merge(req: PrMergeRequest, at?: number): Promise<PrWriteAnswer> {
+    return this.write(req.repo, req.number, at, async (token, now) => {
       const res = await this.client.mergePull(req.repo, req.number, { merge_method: req.method, sha: req.headSha }, { token });
       if (succeeded(res)) {
         const re = await this.reread(req.repo, req.number, token, now);
@@ -219,8 +242,8 @@ export class PullRequestsService {
    * armed — and that read is spliced. A disarm of a PR with nothing armed is `200 noop` with no mutation sent. GitHub's refusal of the mutation (auto-merge
    * off on the repo, a PR already clean to merge) is a typed GraphQL error on a `200`, answered `409` with its text.
    */
-  autoMerge(req: PrAutoMergeRequest, now: number = Date.now()): Promise<PrWriteAnswer> {
-    return this.write(req.repo, req.number, now, async (token) => {
+  autoMerge(req: PrAutoMergeRequest, at?: number): Promise<PrWriteAnswer> {
+    return this.write(req.repo, req.number, at, async (token, now) => {
       const before = await readPull(this.client, req.repo, req.number, { token });
       if (!succeeded(before) || before.data === null) return this.refusal(req.repo, before, now);
       this.splice(req.repo, openRow(before.data), req.number);
@@ -239,12 +262,17 @@ export class PullRequestsService {
 
   /**
    * `POST /api/prs/update-branch`. GitHub's `202` is `update-requested`: the update runs asynchronously on GitHub, so the immediate re-read may still show the
-   * old head — the page shows `updating…` until a read shows a new one. A `422` (head moved, a fork that does not allow edits) is a `409` with GitHub's text.
+   * old head — the page shows `updating…` until a read shows a new one, or `PR_UPDATING_MS` pass and it re-reads once. That re-read must reach GitHub, so
+   * the repo's entry is made due at the same moment (`dueAt`). A `422` (head moved, a fork that does not allow edits) is a `409` with GitHub's text.
    */
-  updateBranch(req: PrUpdateBranchRequest, now: number = Date.now()): Promise<PrWriteAnswer> {
-    return this.write(req.repo, req.number, now, async (token) => {
+  updateBranch(req: PrUpdateBranchRequest, at?: number): Promise<PrWriteAnswer> {
+    return this.write(req.repo, req.number, at, async (token, now) => {
       const res = await this.client.updatePullBranch(req.repo, req.number, req.headSha, { token });
-      if (succeeded(res)) return answered(202, 'update-requested', await this.reread(req.repo, req.number, token, now));
+      if (succeeded(res)) {
+        const re = await this.reread(req.repo, req.number, token, now);
+        this.dueBy(req.repo, now + PR_UPDATING_MS);
+        return answered(202, 'update-requested', re);
+      }
       const refusal = this.refusal(req.repo, res, now);
       if (refusal.status !== 429) await this.reread(req.repo, req.number, token, now);
       return refusal;
@@ -257,19 +285,35 @@ export class PullRequestsService {
    * waiting changes. Inside `serialise('<repo>#<number>')`, re-judged when the write's turn comes rather than when it was queued: `409` sync off (the
    * poller's `syncOffBlock` sentence, its one home), `429` while the repo is asleep — this cache's own sleep or the poller's secondary one — and only then
    * `fn`, the GitHub calls. Nothing before `fn` makes an outbound call.
+   *
+   * The clock is read when the write's turn comes, not when it was queued: a write behind another waits one GitHub round trip or more, and a `now` from
+   * before that wait would judge the asleep check — and the sleep its own answer sets — against a moment already past. `at` pins it for a case.
    */
-  private async write(repo: string, number: number, now: number, fn: (token: string) => Promise<PrWriteAnswer>): Promise<PrWriteAnswer> {
+  private async write(
+    repo: string,
+    number: number,
+    at: number | undefined,
+    fn: (token: string, now: number) => Promise<PrWriteAnswer>
+  ): Promise<PrWriteAnswer> {
     const path = this.registeredRepos().get(repo);
     if (path === undefined) return { ok: false, status: 404, error: `${repo} is not the repo of a registered GitHub project` };
     const token = githubToken();
     if (token === null) return { ok: false, status: 503, error: NO_TOKEN };
     return this.serialise(`${repo}#${number}`, async () => {
+      const now = at ?? Date.now();
       const off = this.poller.syncOffBlock(path);
       if (off !== null) return { ok: false, status: 409, error: off };
       const asleep = this.asleepDetail(repo, now);
       if (asleep !== null) return { ok: false, status: 429, error: asleep };
-      return fn(token);
+      return fn(token, now);
     });
+  }
+
+  /** Make `repo`'s entry due no later than `until`, whatever its TTL says — never later than a due time already set. An entry never read is due anyway. */
+  private dueBy(repo: string, until: number): void {
+    const entry = this.entries.get(repo);
+    if (entry === undefined) return;
+    if (entry.dueAt === null || until < entry.dueAt) entry.dueAt = until;
   }
 
   /**
@@ -351,11 +395,13 @@ export class PullRequestsService {
     return repos;
   }
 
-  /** Read `repo` unless its entry is fresh or it is asleep; join the read already in flight when there is one. */
+  /** Read `repo` unless its entry is fresh or it is asleep; join the read already in flight when there is one. Fresh is "inside the TTL and not past a
+   *  `dueAt`". */
   private refresh(repo: string, now: number, token: string): Promise<void> {
     const entry = this.entries.get(repo);
     const last = Math.max(entry?.polledAt ?? -Infinity, entry?.attemptedAt ?? -Infinity);
-    if (now - last < PR_TTL_MS) return Promise.resolve();
+    const due = entry?.dueAt != null && now >= entry.dueAt;
+    if (now - last < PR_TTL_MS && !due) return Promise.resolve();
     if (this.sleepingUntil(repo, now) !== null) return Promise.resolve();
     const inFlight = this.reading.get(repo);
     if (inFlight !== undefined) return inFlight;
@@ -365,9 +411,13 @@ export class PullRequestsService {
   }
 
   private async read(repo: string, now: number, token: string): Promise<void> {
+    const splices = this.entries.get(repo)?.splices ?? 0;
     const res = await readPullList(this.client, repo, { token });
     const entry = this.entryOf(repo);
     entry.attemptedAt = now;
+    // A read that started at or after the due time answers it; one that started before (a `dueAt` set while it was out) does not — its answer predates
+    // the update it was meant to see.
+    if (entry.dueAt !== null && entry.dueAt <= now) entry.dueAt = null;
     const verdict = failureVerdict(res, now);
     if (verdict !== null || res.data === null) {
       // `data` null on a 2xx cannot happen through `readPullList` (it maps a missing repository to a 404) — counted as an error rather than trusted.
@@ -378,15 +428,22 @@ export class PullRequestsService {
       return;
     }
     const list = res.data;
-    entry.polledAt = now;
-    entry.access = 'ok';
-    entry.detail = null;
-    entry.sleepUntil = null;
-    entry.prs = list.rows;
-    entry.total = list.totalCount;
+    // A sleep set while this read was out (a write's limit, R4) is still ahead and still the repo's state; only one that has run out is cleared.
+    if (entry.sleepUntil === null || entry.sleepUntil <= now) {
+      entry.sleepUntil = null;
+      entry.access = 'ok';
+      entry.detail = null;
+    }
+    // The repo's merge settings are not something a splice touches, so they are taken either way.
     const allowed: Record<MergeMethod, boolean> = { squash: list.squashMergeAllowed, merge: list.mergeCommitAllowed, rebase: list.rebaseMergeAllowed };
     entry.methods = MERGE_METHODS.filter((m) => allowed[m]);
     entry.autoMergeAllowed = list.autoMergeAllowed;
+    // A write spliced this repo while the read was out: its rows predate that write, so they are dropped and `polledAt` — the age of the rows held —
+    // stays where it was. The attempt above still counts, so the next read waits the TTL like any other.
+    if (entry.splices !== splices) return;
+    entry.polledAt = now;
+    entry.prs = list.rows;
+    entry.total = list.totalCount;
   }
 
   /** The later of this cache's own sleep and the poller's secondary one, when either is still ahead of `now`; else `null`. */
@@ -400,7 +457,19 @@ export class PullRequestsService {
   private entryOf(repo: string): PrEntry {
     let entry = this.entries.get(repo);
     if (entry === undefined) {
-      entry = { polledAt: null, attemptedAt: null, access: 'ok', detail: null, sleepUntil: null, prs: [], total: 0, methods: [], autoMergeAllowed: false };
+      entry = {
+        polledAt: null,
+        attemptedAt: null,
+        access: 'ok',
+        detail: null,
+        sleepUntil: null,
+        dueAt: null,
+        splices: 0,
+        prs: [],
+        total: 0,
+        methods: [],
+        autoMergeAllowed: false
+      };
       this.entries.set(repo, entry);
     }
     return entry;

@@ -181,8 +181,9 @@ export class FakeGithub {
   readonly maxConcurrent = new Map<string, number>();
   private inFlight = new Map<string, number>();
 
-  /** While set, every `/graphql` call and every PR write waits for it before being answered. */
+  /** While set, every `/graphql` call and every PR write waits for it before being answered — or, with `gateOperation`, only that one operation. */
   private gate: Promise<void> | null = null;
+  private gateOperation: string | undefined;
   private nextPrNumber = 7;
   private prSeq = 0;
   private shaSeq = 0;
@@ -284,12 +285,15 @@ export class FakeGithub {
   }
 
   /** Hold every `/graphql` answer and every PR write until the returned function is called — how a case starts several requests and asks what overlapped
-   *  (`maxConcurrent`) or which ones were made at all before any answered. */
-  holdAnswers(): () => void {
+   *  (`maxConcurrent`) or which ones were made at all before any answered. `operation` narrows the hold to that one GraphQL operation, so a case can keep
+   *  a list read (`PullRequests`) out while a write and its re-read go through — the race between a read in flight and a write's splice. */
+  holdAnswers(operation?: string): () => void {
     let release!: () => void;
     this.gate = new Promise<void>((resolve) => (release = resolve));
+    this.gateOperation = operation;
     return () => {
       this.gate = null;
+      this.gateOperation = undefined;
       release();
     };
   }
@@ -420,7 +424,15 @@ export class FakeGithub {
       this.maxConcurrent.set(key, Math.max(this.maxConcurrent.get(key) ?? 0, now));
     }
     try {
-      if (this.gate !== null && (target !== undefined || /\/pulls\//.test(url))) await this.gate;
+      // A narrowed hold answers FIRST and delivers late: the answer is GitHub's state when the request arrived, which is what a read in flight while a
+      // write lands really carries back. The broad hold answers after the wait, as it always has — its cases ask what overlapped, not what was seen.
+      if (this.gate !== null && this.gateOperation !== undefined && target?.operation === this.gateOperation) {
+        const gate = this.gate;
+        const early = this.answer(method, url, body, headers, target);
+        await gate;
+        return early;
+      }
+      if (this.gate !== null && this.gateOperation === undefined && (target !== undefined || /\/pulls\//.test(url))) await this.gate;
       return this.answer(method, url, body, headers, target);
     } finally {
       if (key !== null) this.inFlight.set(key, (this.inFlight.get(key) ?? 1) - 1);

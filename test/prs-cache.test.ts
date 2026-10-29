@@ -10,7 +10,8 @@ import { GITHUB_TOKEN_ENV } from '../server/src/tracker/token.util';
 import { FAKE_REPO, FakeGithub } from './helpers/github';
 import { makeProject } from './helpers/store';
 import type { RegistryService } from '../server/src/registry/registry.service';
-import type { PrRepoView, PullRequestRow } from '../shared/types';
+import { PR_UPDATING_MS, type PrRepoView, type PullRequestRow } from '../shared/types';
+import type { FakePr } from './helpers/github';
 
 /**
  * `PullRequestsService` (Plan B, task 3) — the PRs page's per-repo, on-demand cache. It has no timer: a read happens only inside `list()` (and, from task 4,
@@ -91,6 +92,17 @@ function view(repos: PrRepoView[], repo: string): PrRepoView {
 
 const numbers = (v: PrRepoView): number[] => v.prs.map((p) => p.number);
 const lists = (gh: FakeGithub, repo?: string): number => gh.graphqlCalls('PullRequests', repo).length;
+const C = 'c'.repeat(40);
+
+/** The fake's own PR, so a case can read the head SHA it was given or move it the way GitHub's asynchronous update-branch does. */
+function fakePr(gh: FakeGithub, repo: string, number: number): FakePr {
+  const found = gh.pulls.get(repo)?.find((p) => p.number === number);
+  if (found === undefined) throw new Error(`no fake PR ${repo}#${number}`);
+  return found;
+}
+
+/** Let every request a call has started reach the fake. */
+const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 describe('PullRequestsService.list', () => {
   it('lists each repo once', async () => {
@@ -319,6 +331,26 @@ describe('PullRequestsService.splice', () => {
     expect(view(after.repos, 'futin/y')).toEqual(y);
   });
 
+  it('keeps `total` true on a list truncated at 100: a removal counts down, a row GitHub already counted never counts up', async () => {
+    const { gh, prs } = rig();
+    for (let n = 100; n < 239; n++) gh.addPr('futin/y', { number: n });
+    const before = view((await prs.list(NOW)).repos, 'futin/y');
+    expect(before).toMatchObject({ total: 140, truncated: true });
+    expect(before.prs).toHaveLength(100);
+    const shown = new Set(numbers(before));
+    // Open on GitHub and counted in its `totalCount`, but past the one page the cache holds.
+    const beyond = gh.pulls.get('futin/y')!.find((p) => !shown.has(p.number))!;
+
+    prs.splice('futin/y', null, before.prs[0].number);
+    prs.splice('futin/y', { ...before.prs[1], title: 'renamed' }, before.prs[1].number);
+    prs.splice('futin/y', { ...before.prs[1], number: beyond.number, title: `futin/y change ${beyond.number}` }, beyond.number);
+
+    const after = view((await prs.list(NOW + 1_000)).repos, 'futin/y');
+    expect(after.prs).toHaveLength(100);
+    expect(after).toMatchObject({ total: 139, truncated: true });
+    expect(lists(gh, 'futin/y')).toBe(1);
+  });
+
   it('a removal of a PR the cache does not hold changes nothing', async () => {
     const { prs } = rig();
     await prs.list(NOW);
@@ -326,5 +358,132 @@ describe('PullRequestsService.splice', () => {
     const out = await prs.list(NOW + 1_000);
     expect(view(out.repos, FAKE_REPO)).toMatchObject({ total: 2 });
     expect(numbers(view(out.repos, FAKE_REPO))).toEqual([9, 7]);
+  });
+});
+
+describe('PullRequestsService freshness around writes', () => {
+  it("an update-branch makes the repo due again at PR_UPDATING_MS, so the page's one re-read after `updating…` reaches GitHub", async () => {
+    const { gh, prs } = rig();
+    expect(PR_UPDATING_MS).toBe(30_000);
+    await prs.list(NOW);
+    const seven = fakePr(gh, FAKE_REPO, 7);
+
+    clock = NOW + 5_000;
+    const updated = await prs.updateBranch({ repo: FAKE_REPO, number: 7, headSha: seven.headRefOid });
+    expect(updated).toMatchObject({ ok: true, status: 202 });
+    // The write's own re-read spliced the head GitHub reported then; GitHub's asynchronous merge lands afterwards and moves it again.
+    const spliced = seven.headRefOid;
+    seven.headRefOid = C;
+
+    // Inside the update's window the entry is still served as it is: no list query, the spliced head.
+    clock = NOW + 20_000;
+    const early = view((await prs.list(clock)).repos, FAKE_REPO);
+    expect(lists(gh, FAKE_REPO)).toBe(1);
+    expect(early.prs.find((p) => p.number === 7)?.headSha).toBe(spliced);
+
+    // At the update's mark — 35 s after the list read, well inside the 60 s TTL — the repo is read again and shows the head GitHub moved to.
+    clock = NOW + 5_000 + PR_UPDATING_MS;
+    const due = view((await prs.list(clock)).repos, FAKE_REPO);
+    expect(lists(gh, FAKE_REPO)).toBe(2);
+    expect(lists(gh, 'futin/y')).toBe(1);
+    expect(due.prs.find((p) => p.number === 7)?.headSha).toBe(C);
+    expect(due.polledAt).toBe(new Date(clock).toISOString());
+  });
+
+  it('a list read in flight does not put back a PR a merge spliced out while it was out', async () => {
+    const { gh, prs } = rig();
+    await prs.list(NOW);
+    const seven = fakePr(gh, FAKE_REPO, 7);
+
+    clock = NOW + 60_000;
+    // The list query is answered as GitHub stood when it arrived — #7 still open — and delivered only on release.
+    const release = gh.holdAnswers('PullRequests');
+    const reading = prs.list(clock);
+    await settle();
+    expect(lists(gh, FAKE_REPO)).toBe(2);
+
+    const merged = await prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: seven.headRefOid });
+    expect(merged).toMatchObject({ ok: true, status: 200 });
+    release();
+    const landed = view((await reading).repos, FAKE_REPO);
+    expect(numbers(landed)).toEqual([9]);
+
+    // The discarded read still counted as an attempt: the next GET is served, not re-read, and still has no #7.
+    clock = NOW + 61_000;
+    const later = view((await prs.list(clock)).repos, FAKE_REPO);
+    expect(numbers(later)).toEqual([9]);
+    expect(lists(gh, FAKE_REPO)).toBe(2);
+    // The other repo's read, which no write touched, is stored as usual.
+    expect(lists(gh, 'futin/y')).toBe(2);
+  });
+
+  it("a write's rate limit met while a list read is out survives that read's success", async () => {
+    const { gh, prs } = rig();
+    await prs.list(NOW);
+    const seven = fakePr(gh, FAKE_REPO, 7);
+
+    clock = NOW + 60_000;
+    const release = gh.holdAnswers('PullRequests');
+    const reading = prs.list(clock);
+    await settle();
+
+    gh.failNext = { fragment: '/pulls/7/merge', status: 429, message: 'API rate limit exceeded', headers: { 'retry-after': '600' } };
+    const refused = await prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: seven.headRefOid });
+    expect(refused).toMatchObject({ ok: false, status: 429 });
+    release();
+    const landed = view((await reading).repos, FAKE_REPO);
+    expect(landed).toMatchObject({ access: 'rate-limited', detail: (refused as { error: string }).error });
+
+    // Past the TTL, still before the write's reset: no list query and no write go out.
+    clock = NOW + 125_000;
+    const xCalls = (): number => gh.calls.filter((c) => c.repo === FAKE_REPO || c.url.includes(`/repos/${FAKE_REPO}/`)).length;
+    const sent = xCalls();
+    expect(await prs.updateBranch({ repo: FAKE_REPO, number: 7, headSha: seven.headRefOid })).toMatchObject({ ok: false, status: 429 });
+    await prs.list(clock);
+    expect(xCalls()).toBe(sent);
+  });
+
+  it('a typed GraphQL RATE_LIMITED is a limit even with points left, slept on until the pool resets', async () => {
+    const { gh, prs } = rig();
+    const reset = NOW / 1000 + 900;
+    gh.failNext = {
+      fragment: '/graphql',
+      repo: FAKE_REPO,
+      graphqlError: { type: 'RATE_LIMITED', message: 'This query would cost more points than are left' },
+      headers: { 'x-ratelimit-remaining': '5', 'x-ratelimit-reset': String(reset) }
+    };
+    const first = view((await prs.list(NOW)).repos, FAKE_REPO);
+    expect(first).toMatchObject({ access: 'rate-limited', detail: `rate limit reached — resets ${new Date(reset * 1000).toISOString()}` });
+
+    clock = NOW + 120_000;
+    await prs.list(clock);
+    expect(lists(gh, FAKE_REPO)).toBe(1);
+    expect(lists(gh, 'futin/y')).toBe(2);
+  });
+
+  it('a write reads the clock when its turn comes, so the limit its predecessor met is judged from then', async () => {
+    const { gh, prs } = rig();
+    await prs.list(NOW);
+    const seven = fakePr(gh, FAKE_REPO, 7);
+    const head = seven.headRefOid;
+
+    // An auto-merge holds #7's chain (its first read is held); a merge queues behind it at NOW.
+    const release = gh.holdAnswers();
+    const holding = prs.autoMerge({ repo: FAKE_REPO, number: 7, enable: true, method: 'squash' });
+    const first = prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: head });
+    await settle();
+
+    // The queue waits 100 s; a second merge is asked for then, behind the first.
+    clock = NOW + 100_000;
+    const second = prs.merge({ repo: FAKE_REPO, number: 7, method: 'squash', headSha: head });
+    gh.failNext = { fragment: '/pulls/7/merge', status: 403, message: 'You have exceeded a secondary rate limit' };
+    release();
+
+    expect(await holding).toMatchObject({ ok: true });
+    // The first merge's secondary limit is a 60 s backoff from when its turn came (NOW + 100 s), not from when it was queued — so the second, at
+    // NOW + 100 s, is refused as asleep and sends nothing.
+    expect(await first).toMatchObject({ ok: false, status: 429 });
+    expect(await second).toMatchObject({ ok: false, status: 429 });
+    expect(gh.matching('/pulls/7/merge', 'PUT')).toHaveLength(1);
   });
 });

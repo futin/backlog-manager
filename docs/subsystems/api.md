@@ -156,7 +156,9 @@ the `error` verbatim and exits `1` through its generic non-2xx path — not `5`:
 into GraphQL's own rate pool (`graphqlRate`), never REST's. `pulls.service.ts` (`PullRequestsService`) is the per-repo, on-demand cache: no timer, a read only
 inside `GET /api/prs` or a write; an entry is re-read once the later of its last success (`polledAt`) and its last attempt is `PR_TTL_MS` (60 s) old, so a
 failing repo is retried once a minute too; a failure keeps the last rows and their `polledAt`; a limit sleeps the entry, and a secondary one the poller's
-repo as well. `pulls.controller.ts` serves the routes:
+repo as well (marking it `rate-limited` there too). An accepted update-branch makes the entry due again `PR_UPDATING_MS` (30 s) later, inside the TTL, so the
+page's one re-read after `updating…` reaches GitHub; a list read that lands after a write spliced the repo keeps its attempt time but drops its rows; a
+successful read clears only a sleep that has run out. `pulls.controller.ts` serves the routes:
 
 - `GET /api/prs` → `PullRequestsPayload`, one view per distinct registered GitHub repo, `syncOff` a field and never a filter. Unguarded. No token is
   `{ token: false, repos: [] }`; an unreadable registry is the 503 `/api/trackers` answers.

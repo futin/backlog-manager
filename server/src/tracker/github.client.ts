@@ -71,6 +71,9 @@ export interface GithubResponse<T> {
   /** The transport error's message, for `status: 0`. */
   error: string | null;
   rate: RateLimit;
+  /** A typed GraphQL `RATE_LIMITED` (`graphql()` only; absent everywhere else). GitHub sends it when a query would cost MORE points than are left, so
+   *  `remaining` can still be above zero — and `failureVerdict` reads this bit, not `remaining`, as the limit it is. */
+  rateLimited?: boolean;
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -139,7 +142,7 @@ export class GithubClient {
     const status = typed === undefined ? 200 : GRAPHQL_STATUS[typed.type as string];
     // REST tells a secondary limit apart by its sentence (`request()`); GraphQL sends that same sentence under `RATE_LIMITED`, so it is read the same way.
     const secondary = typed?.type === 'RATE_LIMITED' && /secondary rate limit/i.test(message);
-    return { ...res, status, data: null, error: message, secondary };
+    return { ...res, status, data: null, error: message, secondary, ...(typed?.type === 'RATE_LIMITED' ? { rateLimited: true } : {}) };
   }
 
   /**
