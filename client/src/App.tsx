@@ -12,6 +12,7 @@ import type { JiraPage } from './lib/jira-page';
 import { JiraProvider, useJiraContext } from './hooks/JiraContext';
 import { setJiraPage } from './hooks/useJiraPage';
 import { SettingsProvider, useSettings } from './hooks/useSettings';
+import { ProjectsProvider } from './hooks/ProjectsContext';
 import { TrackersProvider } from './hooks/TrackersContext';
 import { TimeZoneProvider } from './hooks/TimeZoneContext';
 import { useNarrow } from './hooks/useNarrow';
@@ -72,7 +73,11 @@ export function App() {
           {/* The shell's one `useJira` (Jira phase 2, spec §6.1), beside the trackers' for the same reason: the rail's Jira row, the shell's hold-and-fall
               below, the chip and both Jira pages read one answer on one clock. Above `AppShell`, because the fall is decided there. */}
           <JiraProvider>
-            <AppShell />
+            {/* The shell's one projects answer (source-sections spec): the rail's Files and GitHub rows are drawn from it, and the shell settles a section
+                whose row has vanished. Inside `JiraProvider` only so the three shell-level answers nest in one place; it reads neither. */}
+            <ProjectsProvider>
+              <AppShell />
+            </ProjectsProvider>
           </JiraProvider>
         </TimeZoneProvider>
       </TrackersProvider>
