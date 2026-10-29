@@ -166,7 +166,9 @@ the toolbar, and hands one props bundle to whichever layout component is drawn. 
     reason as visible `.prs-why` text. Plus an `Open ↗` link (new tab, `rel="noreferrer"`) in compact mode only.
   - `PrOutcomeLine({ outcome, updating }: { outcome: PrOutcome | undefined; updating: boolean })` — today's `PrRow` outcome rule (an `updating` outcome shows
     only while `updating`), `data-testid="pr-outcome"`, `role="status"`, error class as today. Renders nothing when there is no line.
-- [ ] **Step 1: Failing tests** in `test/prs-actions.test.tsx` (render `PrActions` directly with a `jest.fn` `onWrite` that awaits the call):
+- [ ] **Step 1: Failing tests** in `test/prs-actions.test.tsx` (render `PrActions` directly with a `jest.fn` `onWrite` that awaits the `call` it is
+  handed — the call is `prs-api`'s `mergePr`/`updateBranch`/`setAutoMerge`, so it POSTs; stub `global.fetch` the way `test/prs-view.test.tsx`'s
+  `beforeEach` does and record the POSTs):
   compact on a behind PR shows `Update branch` first and clicking it sends `/api/prs/update-branch` once; compact `Merge…` click shows the method select
   and Merge, and no POST is made until `Confirm` is accepted; compact on a failing-checks PR shows `Merge…` disabled with visible text `checks failing`;
   while a write is in flight every key is disabled; `PrOutcomeLine` with an `updating` outcome and `updating=false` renders nothing.
@@ -187,18 +189,22 @@ the toolbar, and hands one props bundle to whichever layout component is drawn. 
 - Produces: the layout props every layout takes, exported from `PrInbox.tsx`'s sibling `client/src/components/github/pr-layout-props.ts`:
   `interface PrLayoutProps { repos: PrRepoView[]; outcomes: Record<string, PrOutcome>; marks: Record<string, UpdateMark>; now: number; ctx: PrRunContext;
   write: (key: string, sha: string, call: () => Promise<PrWriteResult>) => Promise<void> }` — `repos` are the SHOWN repos only; the view never hands a
-  hidden one down. `PrInbox(props: PrLayoutProps)` default-free named export. `PrRepoNotes({ repos, outcomes })` draws, for Inbox and Matrix: departed
+  hidden one down. `PrInbox(props: PrLayoutProps)` default-free named export. Test ids (key = `<repo>#<number>`): `pr-tile-<level>` per tile,
+  `pr-item-<key>` per loud item, `pr-quiet-<key>` per quiet line, `pr-cantread-<repo>` per Can't read line; Matrix (Task 5) uses `pr-mrow-<key>` per PR
+  row, `pr-expand-<key>` for its expansion row, `pr-mfail-<repo>` for a transient-failure row. `PrRepoNotes({ repos, outcomes })` draws, for Inbox and Matrix: departed
   outcome lines (`<repo>#<n> <text>`, above the list), each sync-off repo's `syncOff` sentence once, and each truncated repo's `<repo>: showing n of total`
   (under the list) — the builder may split it into above/below parts.
 - Behaviour (spec §Inbox): three tiles as buttons with `aria-pressed`, each `Dot` (LEVEL_DOT) + count + label; click filters, click again clears. Loud
   items (needs-you, worth-a-look): dot, `#n` link, title, repo; verdict; steps (calm ones muted); `author ?? 'ghost' · head → base · age`; `PrActions
-  variant="compact"` on the right; `PrOutcomeLine` under the item. Quiet heading then one line per quiet PR (dot, `#n`, title, repo, `quietFacts`); the
+  variant="compact"` on the right; `PrOutcomeLine` under the item. Quiet heading then one line per quiet PR (dot, `#n`, title, repo, `quietFacts`, and
+  `prRunWarning`'s text in the warn tone when non-null — a clean `backlog/<id>` PR an orchestrator run is still working is exactly a Quiet PR); the
   line is a button-like toggle (`aria-expanded`) that opens `PrActions variant="compact"` beneath it; its `PrOutcomeLine` is always drawn. `Can't read`
   heading + one line per `transientFailures` repo (`<repo> — <detail>`). Empty: no ranked PR at all → `no open pull requests`; tile selected and empty →
   `No pull request at this level.`.
 - [ ] **Step 1: Failing tests** (render `PrInbox` with fixture props and a `jest.fn` write): tiles read `1 Needs you`, `1 Worth a look`, `1 Quiet` for a
   failing / behind / clean trio; order of items is failing then behind then the quiet line; clicking `Needs you` hides the behind item and quiet line,
   clicking again restores; re-render with the failing PR now clean while the `Needs you` filter is on → `No pull request at this level.` (Review Focus 3);
+  a clean approved PR on head `backlog/42` with a running run for item 42 in `ctx` → its `pr-quiet-<key>` line contains `prRunWarning`'s text;
   `Merge…` on the quiet PR (expand line first) opens `pr-merge-confirm` after Merge is clicked, then re-render with a fresh props object holding the same PR
   → the confirm is still there (Review Focus 4); two repos each with `#7` both drawn (Review Focus 2); a `rate-limited` repo with rows keeps its rows ranked
   AND draws a `Can't read` line with its detail; a ghost author renders `ghost`; zero PRs → `no open pull requests`; a departed outcome key renders
