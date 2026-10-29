@@ -53,7 +53,9 @@ const RUNNERS = [
 const results = RUNNERS.map(({ name, script }) => {
   // Inherited stdio: each runner's output reaches the terminal unbuffered and
   // unwrapped, which is why they run sequentially rather than concurrently —
-  // jest is `--runInBand` on purpose, and interleaved output from two runners
+  // each runner already parallelises its own files (jest's workers, node
+  // --test's default concurrency), so running the two side by side would buy
+  // little on a 4-core CI runner, and interleaved output from two runners
   // makes "reports both" unreadable in a real failure log.
   const run = spawnSync('pnpm', ['run', script], { stdio: 'inherit', shell: process.platform === 'win32' });
   // A runner that could not be spawned at all (`error`) or died on a signal

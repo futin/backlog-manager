@@ -307,7 +307,7 @@ in [the board doc](docs/subsystems/board.md#what-leaves-the-board).
 
 ```bash
 pnpm test             # both runners: jest, then node --test
-pnpm run test:jest    # jest --runInBand alone
+pnpm run test:jest    # jest alone, on its worker pool
 pnpm run test:skills  # node --test alone, the skills' own unit tests
 pnpm run typecheck    # tsc --noEmit
 pnpm run build        # nest build + vite build
