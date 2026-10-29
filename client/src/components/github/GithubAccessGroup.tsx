@@ -47,7 +47,8 @@ export function GithubAccessGroup() {
               auto-merge) and <strong>Contents: Read and write</strong> (merge).
             </span>
             <span className="set-hint-line">
-              The token is the <code>BM_GITHUB_TOKEN</code> variable in this machine&apos;s <code>.env</code>; restart the stack after changing it.
+              A permission or repository-access change on github.com applies to the same token with no restart. Only a new token value goes in{' '}
+              <code>BM_GITHUB_TOKEN</code> in this machine&apos;s <code>.env</code>, and that needs the stack recreated.
             </span>
           </>
         }

@@ -3524,12 +3524,13 @@ The Jira board cache is the second (`JiraPollerService`, one list per board, `po
 honest the same way; everything below is about the tracker's.
 
 **The pull-request cache is the third, and the only one with no clock of its own** (`PullRequestsService`, Plan B of the source-sections change). It is per
-repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because nothing but the
-PRs page reads pull requests — a background read would spend GraphQL budget on a list nobody is drawing, and would keep a poll alive after the page closed,
-which is exactly what "the poller is armed only while something is connected" forbids. The page's own 60 s fetch is the cadence, and it stops when the page
-unmounts. It is kept honest the same way as the other two: `polledAt` rides on every repo's view and the PRs page renders it, and it moves only on a
-successful read. A failure keeps the last answer — the previous rows, their `polledAt` — beside the failure's `access` and `detail`, because a stale list
-labelled with its age is more use than an empty one, and an emptied list would read as "no open PRs", which is a claim about the repo the cache cannot make.
+repo and on demand: a `GET /api/prs` re-reads a repo whose entry is older than 60 s and serves it otherwise, and there is no sweep, because nothing but two
+pages reads pull requests — GitHub › PRs and GitHub › Settings' Access card, both through `usePullRequests`. A background read would spend GraphQL budget on a
+list nobody is drawing, and would keep a poll alive after the page closed, which is exactly what "the poller is armed only while something is connected"
+forbids. Each page's own 60 s fetch is the cadence, and it stops when that page unmounts. It is kept honest the same way as the other two: `polledAt` rides on
+every repo's view and the PRs page renders it, and it moves only on a successful read. A failure keeps the last answer — the previous rows, their `polledAt` —
+beside the failure's `access` and `detail`, because a stale list labelled with its age is more use than an empty one, and an emptied list would read as "no open
+PRs", which is a claim about the repo the cache cannot make.
 
 Two rules keep a write and the TTL from contradicting each other (the Plan B fix wave). An accepted update-branch makes the repo due again `PR_UPDATING_MS`
 (30 s, `shared/types.ts`, the one number the page's `updating…` mark also reads) after the write, although its TTL has not run out: GitHub merges the base in

@@ -411,8 +411,9 @@ before its `try` — a fresh browser, a corrupt blob or blocked storage paints D
 
 Since #17 ([spec](../superpowers/specs/2026-09-22-tracker-sync-interval-design.md)) the sync interval is the one thing this board sets about a tracker, and
 since the source-sections change it lives on **GitHub › Settings** (`GithubSettingsView`: a `Settings` band, `how often this machine asks GitHub about each
-repo`, with a `this machine` pill): one `Sync` card (`GithubSyncGroup`) holding a `Segmented` pill per `github` repo (`15s`, `1m`, `5m`, `off` —
-`SYNC_INTERVALS`' keys, never a second list) in the row's right slot, or `nothing registered yet`. It is a host card on a page outside Settings, which the scope
+repo`, with a `this machine` pill): a `Sync` card (`GithubSyncGroup`) holding a `Segmented` pill per `github` repo (`15s`, `1m`, `5m`, `off` —
+`SYNC_INTERVALS`' keys, never a second list) in the row's right slot, or `nothing registered yet`, with an `Access` card (`GithubAccessGroup`) beside it that
+appears only when the token cannot read some repo. It is a host card on a page outside Settings, which the scope
 rule allows: the control governs one source, so it lives in that source's section
 ([invariants.md](invariants.md#a-sources-own-settings-page-may-hold-a-host-card)). Connecting stays read-only; the interval is how often THIS machine asks
 GitHub, so it is the machine's, in `settings/tracker-sync.json`. `useTrackers().saveInterval` posts `POST /api/trackers/sync` and refetches, so the pill shows
@@ -478,19 +479,19 @@ One shell-level chip and two item readings (task-45, [spec](../superpowers/specs
   whose click re-asks nothing for this reason because no status refetch could clear it — alone, or beside a visibility block, since #272 put both controls
   on `GatedChip`'s one rule.
 - **The PRs page** (GitHub › PRs, [spec](../superpowers/specs/2026-10-29-source-sections-design.md) Goal 2; DESIGN.md §8.11). `PullRequestsView` lists every
-  open pull request of the registered GitHub repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is `usePullRequests` (`GET /api/prs`, every 60 s after the
-  last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the server's PR cache has no timer, so with neither open there are no PR reads at all. A repo the token cannot
-  read (`forbidden` or `not-found`, `splitReach` in `lib/pr-layouts.ts`) is handed to no layout and left out of `N open`: the toolbar says `N repos hidden — no
-  access` and links `GitHub › Settings` (`onOpenSettings`, threaded from `App`), whose `Access` card (`GithubAccessGroup`, the hook's second mount) lists each
-  with GitHub's `detail` and the token fix; a rate-limited or `error` repo is transient and stays. The layout is a `Segmented` in the toolbar, stored per device
-  (`PR_LAYOUT_KEY`; an unknown word is Inbox; Matrix is wide-only — a narrow window draws a stored `matrix` as Inbox and keeps the word, `drawableLayout`).
-  **Inbox** (default) ranks every shown PR across repos (`rankPrs`: level, severity, newest) under three filtering count tiles; a loud PR (Needs you, Worth a
-  look) is an item with a verdict, steps and the compact keys `compactKeys` picks (`Merge…` swaps them for the full strip in place), a Quiet one a line with its
-  own `Actions` toggle beside the `#n` link; failing repos add a `Can't read` line. **Matrix** is a table, a column per check with a failure count in its
-  header, whose row toggles one expansion holding the full strip. **Cards** is the per-repo page described next. All three draw the same `PrActions` and
-  `PrOutcomeLine`, and `PrRepoNotes` says the merged outcomes, `sync off` sentence and `showing n of total` once for Inbox and Matrix; a PR's keys stay
-  disabled while its write runs in any layout, because the page owns an in-flight set keyed `<repo>#<number>`, and a folded or collapsed strip is unmounted so
-  its Confirm leaves the Escape stack. In Cards a repo's
+  open pull request of the registered GitHub repos — forks and other authors included — drawn as Inbox, Matrix or Cards (below). Its one read is
+  `usePullRequests` (`GET /api/prs`, every 60 s after the last answer, plus mount and focus), mounted by this page and by GitHub › Settings' Access card: the
+  server's PR cache has no timer, so with neither open there are no PR reads at all. A repo the token cannot read (`forbidden` or `not-found`, `splitReach` in
+  `lib/pr-layouts.ts`) is handed to no layout and left out of `N open`: the toolbar says `N repos hidden — no access` and links `GitHub › Settings`
+  (`onOpenSettings`, threaded from `App`), whose `Access` card (`GithubAccessGroup`, the hook's second mount) lists each with GitHub's `detail` and the token
+  fix; a rate-limited or `error` repo is transient and stays. The layout is a `Segmented` in the toolbar, stored per device (`PR_LAYOUT_KEY`; an unknown word is
+  Inbox; Matrix is wide-only — a narrow window draws a stored `matrix` as Inbox and keeps the word, `drawableLayout`). **Inbox** (default) ranks every shown PR
+  across repos (`rankPrs`: level, severity, newest) under three filtering count tiles; a loud PR (Needs you, Worth a look) is an item with a verdict, steps and
+  the compact keys `compactKeys` picks (`Merge…` swaps them for the full strip in place), a Quiet one a line with its own `Actions` toggle beside the `#n` link;
+  failing repos add a `Can't read` line. **Matrix** is a table, a column per check with a failure count in its header, whose row toggles one expansion holding
+  the full strip. **Cards** is the per-repo page described next. All three draw the same `PrActions` and `PrOutcomeLine`, and `PrRepoNotes` says the merged
+  outcomes, `sync off` sentence and `showing n of total` once for Inbox and Matrix; a PR's keys stay disabled while its write runs in any layout, because the
+  page owns an in-flight set keyed `<repo>#<number>`, and a folded or collapsed strip is unmounted so its Confirm leaves the Escape stack. In Cards a repo's
   heading carries `polled N s ago` (`pollAge`), a `sync off` pill beside the server's full sentence (`syncOff`, `syncOffBlock`'s one home) when its sync is
   off, the last read's `detail` when it was not `ok`, `showing 100 of N` when GitHub had more than one page, or `no open pull requests`; a token-less server
   reads `no token — set BM_GITHUB_TOKEN in .env and restart`. A row (`PrRow`) is `#<n>` (to github.com, a new tab), the title, the author, `head → base`, the
@@ -665,10 +666,12 @@ The sheet needed no change to follow: its `uncommitted` column already renders n
   Files.
 - `lib/source-page.ts` and `hooks/useSourcePage.ts` — `FILES_PAGES`/`GITHUB_PAGES` with their keys and guards, `FALLBACK_SECTION` and `resolveLegacySection`;
   and `useFilesPage`/`useGithubPage` with their setters, module stores on `useJiraPage`'s shape.
-- `components/github/` — `GithubSettingsView` (GitHub › Settings) and `GithubSyncGroup`, its one `Sync` card; `PullRequestsView` (GitHub › PRs) and
-  `PrRow`, one open pull request; `components/settings/SourcesGroup.tsx` is the Shared report.
+- `components/github/` — `GithubSettingsView` (GitHub › Settings), `GithubSyncGroup`, its `Sync` card, and `GithubAccessGroup`, its `Access` card;
+  `PullRequestsView` (GitHub › PRs) and the three layouts it switches between — `PrInbox`, `PrMatrix`, `PrCards` — over the shared `PrActions` (merge,
+  auto-merge, update branch), `PrOutcomeLine` and `PrRepoNotes`; `PrRow`, one open pull request; `components/settings/SourcesGroup.tsx` is the Shared report.
 - `lib/prs.ts`, `lib/pr-run.ts`, `lib/prs-api.ts` and `hooks/usePullRequests.ts` — the PRs page's derivations (chips, the three blocks, the default method,
-  `isUpdating`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read.
+  `isUpdating`, `groupRepos`, `outcomeLine`), its run-in-progress warning, its four fetchers and its one 60 s read; `lib/pr-layouts.ts` is the layout key, its
+  stored choice and `splitReach`, which hides the repos the token cannot read.
 - `hooks/useProjectSources.ts` — one read of `/api/projects` on mount, failing soft to an empty map: the Runs page needs each project's `source` for one
   explanatory line, and a committed marker changes on a commit rather than on a poll.
 - [`shared/`](../../shared/agent.ts) — the derivations the server needs too, beside the wire types. `shared/` never imports from `client/`.
