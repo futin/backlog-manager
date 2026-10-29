@@ -20,7 +20,8 @@ export function Segmented<T extends string | number>({
   onChange,
   disabled,
   label,
-  pill
+  pill,
+  track
 }: {
   value: T;
   options: { value: T; label: string }[];
@@ -42,9 +43,20 @@ export function Segmented<T extends string | number>({
    * family would let drift.
    */
   pill?: boolean;
+  /**
+   * The track skin (DESIGN.md §8.11): the dashboard's own `.seg` — a recessed
+   * `--hairline2` ground at 12 px radius under a raised `--strip` option at 9 —
+   * the shape `FilterBar` already draws on the Board's band. A third value of
+   * the same prop question rather than a restyle of `pill`: §8.6 asks Settings
+   * for the pill because it must read like `Switch`, while GitHub › PRs' layout
+   * switch must read like the dashboard page it was ported from, and those two
+   * looks are different radii on purpose. `pill` wins if both are passed.
+   */
+  track?: boolean;
 }) {
+  const cls = pill ? 'ui-seg ui-seg-pill' : track ? 'ui-seg ui-seg-track' : 'ui-seg';
   return (
-    <div className={pill ? 'ui-seg ui-seg-pill' : 'ui-seg'} role="group" aria-label={label}>
+    <div className={cls} role="group" aria-label={label}>
       {options.map((o) => (
         <button
           key={String(o.value)}

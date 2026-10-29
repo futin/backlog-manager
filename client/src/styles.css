@@ -3007,21 +3007,38 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    A row is the toggle that opens the expansion under it, so it takes the pointer and a focus ring. Own `.prs-matrix*` / `.prs-cell-*` classes only — design
    guard 7 forbids restyling a `.ui-*` primitive from here. */
 .prs-matrix { display: flex; flex-direction: column; gap: 16px; min-width: 0 }
+/* The cell geometry is the dashboard's Management matrices' (`.git-mx`), which this layout was ported from: 14 px rows, cells centred on the row, the header
+   in `--ink2` at 400 over a hairline, and the PR column taking every spare pixel (`width: 100%`) while its two lines ellipsize rather than wrap — so a long
+   title never pushes the evidence columns out of the sheet's scroll box. The sheet (`Sheet`, §8.4's "every table scrolls inside its own sheet") is the card. */
 .prs-matrix-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ink2) }
 .prs-matrix-table th {
-  text-align: left; font-size: 12px; font-weight: 500; color: var(--ink3); padding: 0 12px 8px 0; white-space: nowrap
+  text-align: left; font-size: 12px; font-weight: 400; color: var(--ink2); padding: 0 12px 12px 0; white-space: nowrap;
+  border-bottom: 1px solid var(--hairline)
 }
-.prs-matrix-table td { padding: 10px 12px 10px 0; border-top: 1px solid var(--hairline); vertical-align: top }
+.prs-matrix-table td { padding: 14px 12px 14px 0; border-top: 1px solid var(--hairline); vertical-align: middle }
+.prs-matrix-table tbody tr:first-child td { border-top: 0 }
+.prs-matrix-table th:last-child, .prs-matrix-table td:last-child { padding-right: 0 }
 .prs-matrix-count { color: var(--ink); font-weight: 600 }
-.prs-matrix-table .prs-matrix-dot { width: 22px; padding-right: 0 }
+/* Width as padding, not `width`: a table squeezed below its columns' sum shrinks a cell to its min-content, and a `width` is not min-content — padding is.
+   Without this the dot sat flush against `#n` on a window just wide enough to offer Matrix. The left 12 px keeps the dot clear of the open row's ink bar. */
+.prs-matrix-table .prs-matrix-dot { width: 10px; padding-left: 12px; padding-right: 12px }
 .prs-matrix-row { cursor: pointer }
 .prs-matrix-row:hover td { background: var(--strip-hi) }
 .prs-matrix-row:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px }
-.prs-matrix-pr { min-width: 260px; max-width: 480px }
-.prs-matrix-pr .prs-meta { margin-top: 4px; font-size: 12px; color: var(--ink3) }
+/* The open row and its expansion read as one block, as the dashboard's do: one `--strip-hi` ground under both, and an inset ink bar on the left edge. */
+.prs-matrix-row[aria-expanded="true"] td, .prs-matrix-expand td { background: var(--strip-hi) }
+.prs-matrix-row[aria-expanded="true"] td:first-child, .prs-matrix-expand td { box-shadow: inset 3px 0 0 var(--ink) }
+.prs-matrix-pr { width: 100%; min-width: 200px }
+/* `width: 0; min-width: 100%` takes both lines out of the column's min-content, so the table sizes the column from the room left and the text ellipsizes
+   inside it — the dashboard's `.git-mx-rn` trick. Without it a long title IS the column's min-content and the table overflows instead. */
+.prs-matrix-pr .prs-row-title, .prs-matrix-pr .prs-meta { width: 0; min-width: 100%; flex-wrap: nowrap }
+.prs-matrix-pr .prs-row-title { font-size: 14px }
+.prs-matrix-pr .prs-title, .prs-matrix-pr .prs-branches { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.prs-matrix-pr .prs-meta { margin-top: 3px; font-size: 12px; color: var(--ink3) }
 .prs-matrix-cell, .prs-matrix-age { white-space: nowrap }
 .prs-matrix-outcome td, .prs-matrix-expand td { border-top: 0; padding-top: 0 }
-.prs-matrix-expand-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 0 6px 22px }
+/* 34 px is the dot column's 12 + 10 + 12, so the strip starts under the PR's `#n` rather than under the dot. */
+.prs-matrix-expand-body { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 0 0 6px 34px }
 .prs-matrix-fail td { color: var(--ink3) }
 .prs-matrix-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; font-size: 12px }
 .prs-cell-ok { color: var(--ink2) }
@@ -3363,6 +3380,13 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-seg-pill button { height: 28px; border-radius: 999px; background: none; border-color: transparent }
 .ui-seg-pill button:hover:not(:disabled) { background: none }
 .ui-seg-pill button.on { background: var(--strip); border-color: transparent; box-shadow: 0 1px 2px var(--shadow) }
+/* The track variant (§8.11) — `Segmented`'s `track` prop, the dashboard's `.seg` at its own figures: a recessed `--hairline2` ground at 12 px radius and 3 px
+   padding under options at 9 px radius, the chosen one raised on `--strip`. The same ground `.filter-bar` draws on the Board's band, so the two read as one
+   kind of control. 3 + 30 + 3 is the 36 px the control family stands at; there is no stroke, so the option is the full 30. */
+.ui-seg-track { gap: 0; padding: 3px; border-radius: 12px; background: var(--hairline2) }
+.ui-seg-track button { height: 30px; padding: 0 12px; border: 0; border-radius: 9px; background: none }
+.ui-seg-track button:hover:not(:disabled) { background: none }
+.ui-seg-track button.on { background: var(--strip); box-shadow: 0 1px 2px var(--shadow) }
 
 /* Select and NumberField — the other two of the 36 px family (§8.6). */
 .ui-select {
