@@ -5,15 +5,9 @@ import { Confirm } from '../ui/Confirm';
 import { Pill } from '../ui/Pill';
 import { Select } from '../ui/Select';
 import { useMountedRef } from '../../hooks/useMountedRef';
-import { autoMergeBlock, defaultMethod, mergeBlock, prChips, updateBlock } from '../../lib/prs';
+import { autoMergeBlock, defaultMethod, mergeBlock, prChips, updateBlock, type PrOutcome } from '../../lib/prs';
 import { mergePr, setAutoMerge, updateBranch } from '../../lib/prs-api';
 import type { MergeMethod, PrRepoView, PrWriteResult, PullRequestRow } from '../../../../shared/types';
-
-/** The one line a row says about its last write: a finished outcome, the server's refusal verbatim, or the `updating…` an update-branch leaves. */
-export interface PrOutcome {
-  text: string;
-  kind: 'ok' | 'error' | 'updating';
-}
 
 /**
  * One open pull request on GitHub › PRs (.claude/DESIGN.md §8.11, "Row anatomy").

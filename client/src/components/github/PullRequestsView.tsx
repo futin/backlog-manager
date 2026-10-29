@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { PrRow, type PrOutcome } from './PrRow';
+import { PrRow } from './PrRow';
 import { Band } from '../ui/Band';
 import { Pill } from '../ui/Pill';
 import { Sheet, SheetHead } from '../ui/Sheet';
@@ -10,7 +10,7 @@ import { useOrchestratorRuns } from '../../hooks/useOrchestratorRuns';
 import { usePullRequests } from '../../hooks/usePullRequests';
 import { useReportWorking } from '../../hooks/useReportWorking';
 import { prRunWarning, type PrRunContext } from '../../lib/pr-run';
-import { groupRepos, isUpdating, outcomeLine, UPDATING_MS } from '../../lib/prs';
+import { groupRepos, isUpdating, outcomeLine, UPDATING_MS, type PrOutcome, type UpdateMark } from '../../lib/prs';
 import { pollAge } from '../../lib/tracker';
 import type { PrRepoView, PrWriteResult } from '../../../../shared/types';
 
@@ -19,12 +19,6 @@ const NO_TOKEN = 'no token — set BM_GITHUB_TOKEN in .env and restart';
 
 /** How often the run-in-progress warning's clock moves. A live claim goes stale in minutes, so a quarter-minute is ample, and the run poll re-renders anyway. */
 const WARNING_CLOCK_MS = 15_000;
-
-/** An `update-requested` mark: the head SHA the update was asked at, and when the row stops saying `updating…` if that head never moved. */
-interface UpdateMark {
-  sha: string;
-  until: number;
-}
 
 /**
  * `polled 12 s ago`, on a one-second clock of its own: the age is the only reading on the page that moves every second, so it owns its own `useNow` and
