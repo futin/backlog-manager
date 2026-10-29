@@ -135,7 +135,8 @@ GitHub › PRs; this plan leaves the GitHub page list open to that one extra mem
   `board`/`archive`. The landing clamp maps a legacy `board`/`archive` to `github` before `pickOne`, so `Opens on` keeps a legacy pin; update the long
   comment at `settings.ts:340` to say so. `sections.ts`'s header gains a paragraph on why Board/Archive became per-source rows (spec Intent).
   The `Opens on` OFFER (`landingOptions`, `SettingsView.tsx:90-92`) mirrors Jira's: `files`/`github` are offered while their row is drawn, withheld while
-  `drawn` is unknown, and a stored pin keeps its own option; `SettingsView` reads `useProjectsContext` for it. Add to `settings-view.test.tsx`: with
+  `drawn` is unknown, and a stored pin keeps its own option; `SettingsView` reads `useProjectsContext` for it. Update the existing Opens-on case in `settings-view.test.tsx` (≈ :230-245, pins
+  `Board/Runs/Archive/Settings` and selects `archive`) to the new options, and add: with
   `{files:true, github:false}` the options include `Files` and not `GitHub`; a stored `github` pin keeps its `GitHub` option.
 - [ ] **Step 4: Run** — PASS. Tasks 3 and 4 share ONE commit (App.tsx does not compile against the new `SECTIONS` until Task 4); typecheck is the gate at
   that commit.
@@ -170,7 +171,11 @@ GitHub › PRs; this plan leaves the GitHub page list open to that one extra mem
   - `deep-link-app.test.tsx`: `?section=runs&runs=history` unchanged; `?section=board` is ignored (plain load).
 - [ ] **Step 2: Run** — FAIL.
 - [ ] **Step 3: Implement.** `FALLBACK_SECTION = 'github'` (provisional, constant — spec Fallback). The initializer uses `resolveLegacySection` and keeps
-  its `provisional` in shell state (a section from a landing pin of `files`/`github` is provisional too); it writes a legacy page into BOTH page stores, so
+  its `provisional` in shell state. A landing pin is provisional only when it was a LEGACY `board`/`archive`: `clampSettings` returns `github` for a legacy
+  pin and a real `github` pin alike, so the initializer resolves the RAW stored `landing` (`localStorage['backlog-manager.settings']`, read in a try/catch)
+  through `resolveLegacySection` — a real `github`/`files` pin is a section the reader chose and holds like a stored section (RF2). Test in
+  `source-sections.test.tsx`: `legacy board pin settles; real github pin holds` — raw landing `board` + projects `[files]` → Files; raw landing `github` +
+  projects `500` → GitHub section with its row drawn. It writes a legacy page into BOTH page stores, so
   whichever source the section settles on opens that page. Settling is an effect keyed on `drawn` and `section`: once `drawn` is non-null it calls
   `change(settleSection(section, drawn))` when the result differs and clears `provisional` either way (unknown holds). While `provisional && drawn === null`,
   `main` renders the section's loading shape and `SideRail` gets `provisional`. The Jira fall becomes `change(drawn === null ? 'github' :
@@ -219,7 +224,7 @@ GitHub › PRs; this plan leaves the GitHub page list open to that one extra mem
 - Test: `test/settings-view.test.tsx`, `test/sources-group.test.tsx` (new), `test/github-settings.test.tsx` (new — `GithubSettingsView`),
   `test/tracker-sync-interval.test.ts`, `test/tracker-lib.test.ts`, `test/tracker-sync-refusals.test.ts`, `test/tracker-board.test.tsx`,
   `test/tracker-abort.test.ts`, `test/settings-trackers.test.tsx` (today's `TrackersGroup` suite — deleted; its picker/refusal cases (≈ :92-214) move to
-  `github-settings.test.tsx`, its token/connect/Jira cases to `sources-group.test.tsx`)
+  `github-settings.test.tsx`, its Jira-row cases (≈ :216-246) to `sources-group.test.tsx`; the token/connect cases are new there)
 
 **Interfaces:**
 - Consumes: `useProjectsContext`, `useTrackers` context, `useJiraContext`; `onOpenGithubPage` and `onOpenJiraPage` from `App` (Task 4).
@@ -233,8 +238,10 @@ GitHub › PRs; this plan leaves the GitHub page list open to that one extra mem
     `<repo> · <trackerState>` (`lib/tracker.ts:270`, from `TrackerProjectRow.access`/`.detail`) — tested with TWO repos in different `access` states so a
     swapped or unscoped line fails; Jira row `configured · <site> · n boards` or `not configured`; a link on the GitHub row calls
     `onOpenGithubPage('settings')`, on the Jira row `onOpenJiraPage('setup')`.
-  - `github-settings.test.tsx`: each github project's sync picker; changing one POSTs `/api/trackers/sync` exactly as before; a 409 replaces that repo's
-    line with its refusal hint (the cases moved from `settings-trackers.test.tsx`); `nothing registered yet` with no github project.
+  - `github-settings.test.tsx`: one row per github project — name `project.name`, hint `<repo>` (the sync key; two checkouts of one repo share it and
+    both rows move), the sync picker; changing one POSTs `/api/trackers/sync` exactly as before; a 409 replaces that repo's `<repo>` hint with the refusal
+    sentence and the next pick for that repo clears it (the cases moved from `settings-trackers.test.tsx`); `nothing registered yet` with no github project
+    (reachable only while the section is held).
   - `settings-view.test.tsx`: Shared shows `Sources` first and no `Trackers` (the group-title lists at ≈ :268, :283, :912 change).
   - The five tracker suites: the old sentence becomes `sync is off for <repo> — turn it on in GitHub › Settings` — a `SENTENCE` constant in some, inline
     in `tracker-abort.test.ts` (≈ :211) and `tracker-sync-interval.test.ts` (≈ :269).
