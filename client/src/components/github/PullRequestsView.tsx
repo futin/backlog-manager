@@ -196,8 +196,8 @@ export default function PullRequestsView({ onWorking, onOpenSettings }: { onWork
                     {onOpenSettings !== undefined && (
                       <>
                         {' · '}
-                        {/* A button, not an anchor: the destination is the shell's own state (the Sources card's `GitHub › Settings ↗` is the precedent). `prs-textlink`, not
-                            `set-link`: that is §8.6's bordered row control and reads as a button inside a sentence. */}
+                        {/* A button, not an anchor: the destination is the shell's own state (the Sources card's `GitHub › Settings ↗` is the
+                            precedent). `prs-textlink`, not `set-link`: that is §8.6's bordered row control and reads as a button inside a sentence. */}
                         <button type="button" className="prs-textlink" onClick={onOpenSettings}>
                           GitHub › Settings
                         </button>
