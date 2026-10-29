@@ -653,7 +653,7 @@ export function queueItemIs(queueId: string, item: BacklogItem): boolean {
  * `test/agents-shared.test.ts` asserts the three-way partition against a
  * `Record<RunStage, true>` literal in any case.
  */
-const RUN_HELD_STAGES: readonly RunStage[] = [...RUN_CLAIMED_STAGES, ...ATTENTION_RUN_STAGES];
+export const RUN_HELD_STAGES: readonly RunStage[] = [...RUN_CLAIMED_STAGES, ...ATTENTION_RUN_STAGES];
 
 /**
  * Is a fresh orchestrator run holding this item — working it, or stopped on it
