@@ -495,8 +495,11 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 /* The run chip (§8.3) — everything the Board still says about orchestrator
    runs. Flat: it sits in a band beside the filter track and an ink chip, and a
    stroke there would read as one more filter rather than as the one thing on
-   the row that navigates. `--strip-hi` on hover is the same "a fill
-   is the affordance" move the rail's rows make. */
+   the row that navigates. A fill on hover is the same "a fill is the
+   affordance" move the rail's rows make, but it is `--tile-hover`, not the
+   rail's `--strip-hi`: the chip has no paper of its own and sits straight on
+   `--board`, and on daylight `--strip-hi` is 1.02:1 against that — the hover
+   painted nothing anybody could see. */
 .board-run-chip {
   display: inline-flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 10px; border-radius: 12px;
@@ -504,11 +507,12 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   background: none; border: 0; cursor: pointer;
   transition: background .15s;
 }
-.board-run-chip:hover { background: var(--strip-hi) }
+.board-run-chip:hover { background: var(--tile-hover) }
 .board-run-chip-line { font-size: 12px; font-weight: 500; white-space: nowrap }
 .board-run-chip-mark { font-size: 12px; line-height: 1; color: var(--ink3) }
 /* #367/#387 — the band's plan-review chip: RunChip's geometry AND its affordance, since a click flips the Board's `Awaiting review` filter (§8.3). The
-   pressed state reads as the hover fill too, so "on" stays visible with the pointer elsewhere. */
+   pressed state reads as the hover fill too, so "on" stays visible with the pointer elsewhere — `--tile-hover`, for the run chip's reason: on daylight a
+   `--strip-hi` "on" was as invisible as its hover. */
 .board-plan-chip {
   display: inline-flex; align-items: center; gap: 8px;
   height: 32px; padding: 0 10px; border-radius: 12px;
@@ -516,7 +520,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   background: none; border: 0; cursor: pointer;
   transition: background .15s;
 }
-.board-plan-chip:hover, .board-plan-chip[aria-pressed="true"] { background: var(--strip-hi) }
+.board-plan-chip:hover, .board-plan-chip[aria-pressed="true"] { background: var(--tile-hover) }
 
 /* A centred flex line, not plain centred text: the loading fallback puts an icon
    beside the word, and `vertical-align` would not align it — an inline SVG's
@@ -3072,10 +3076,14 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
    except the rail: landing them first is what lets tasks 2–5 compose rather
    than invent (the design spec's §12.1). */
 
-/* Band — the page header (§8.2). Sits on --board, no card, no stroke. */
+/* Band — the page header (§8.2). Sits on --board, no card, no stroke.
+   Which is why it re-points `--hover-fill` (shared/theme.css) at `--tile-hover`: every `Chip` and `Segmented` it holds is drawn on the board, and their
+   hover reads that token, so on daylight they hover to a grey a step below the board rather than to `--strip-hi`, which is the board's own tone there.
+   `.ui-popover` points it back, for the panels that hang from these controls and are paper. */
 .ui-band {
   display: flex; align-items: flex-end; justify-content: space-between;
   flex-wrap: wrap; gap: 12px 16px; margin-bottom: 16px;
+  --hover-fill: var(--tile-hover);
 }
 .ui-band-text { min-width: 0; display: flex; flex-direction: column; gap: 4px }
 .ui-band-title { font-size: 19px; font-weight: 500; line-height: 1.3; letter-spacing: -.01em; color: var(--ink) }
@@ -3139,7 +3147,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 }
 .ui-chip-28 { height: 28px; padding: 0 10px }
 .ui-chip-icon { display: inline-flex; align-items: center; font-size: 11px; line-height: 1 }
-.ui-chip:hover:not(:disabled) { background: var(--strip-hi) }
+.ui-chip:hover:not(:disabled) { background: var(--hover-fill) }
 .ui-chip:disabled { cursor: default; opacity: .45 }
 /* Pressed is a STATE, so the fill moves and the label does not change colour
    (§8's standing rule: a raised control marks a state, never a button). */
@@ -3147,7 +3155,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
 .ui-chip-ink { color: var(--on-accent); background: var(--ink); border-color: var(--ink) }
 .ui-chip-ink:hover:not(:disabled) { background: var(--ink); opacity: .88 }
 .ui-chip-flat { border-color: transparent; background: none }
-.ui-chip-flat:hover:not(:disabled) { background: var(--strip-hi) }
+.ui-chip-flat:hover:not(:disabled) { background: var(--hover-fill) }
 .ui-chip-danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--hairline2)) }
 /* `Confirm` (bug-53) — the question and its two answers, drawn in the row the clicked control came from rather than floating over it (§8.7: nothing
    else on this board floats but `Popover`'s panels). Full `--ink` for the question rather than `.run-controls-note`'s quiet `--ink2`: that tone says "a state,
@@ -3359,7 +3367,7 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   border: 1px solid var(--hairline2); cursor: pointer;
   transition: color .15s, background .15s, border-color .15s;
 }
-.ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--strip-hi) }
+.ui-seg button:hover:not(:disabled) { color: var(--ink); background: var(--hover-fill) }
 .ui-seg button:disabled { cursor: default; opacity: .4 }
 .ui-seg button.on { color: var(--ink); background: var(--strip-hi); border-color: var(--ink3) }
 /* The pill variant (§8.6) — `Segmented`'s `pill` prop, a variant on the
@@ -3545,6 +3553,8 @@ button, input, select, textarea { font-family: inherit; font-variant-numeric: in
   padding: 16px; border-radius: 12px; border: 1px solid var(--hairline);
   background: var(--strip); color: var(--ink); text-align: left;
   box-shadow: 0 8px 24px var(--shadow2);
+  /* Paper again, though it hangs inside `.ui-band` — the chips in the Filters panel hover the way chips on any sheet do. */
+  --hover-fill: var(--strip-hi);
 }
 /* On a phone the control lives in the rail bar, and the narrow `.rail` is a scroll container (`overflow-x: hidden` computes `overflow-y` to auto), so an
    absolute panel is clipped to the 53 px bar and paints nothing — and right-anchored under a control beside ☰ it would start off-screen besides. Fixed
