@@ -70,6 +70,9 @@ update-branch.
 
 **Files:**
 - Modify: `server/src/tracker/poller.service.ts` (`handleFailure` ≈ :927-983 applies the new function; `RepoState` ≈ :200-240 gains `secondaryUntil`)
+- Modify: `test/helpers/github.ts` — `FakeGithub.route` pins every REST path to `FAKE_REPO` (≈ :238-243) and 404s any other repo (≈ :340); add
+  `addRepo(repo)` so a second registered repo's REST reads (`labels`, `issues`, `issues/comments`) answer `200` with empty lists — `FAKE_REPO` keeps its
+  issues, an unregistered repo still 404s. Task 2 extends the same helper with PR routes.
 - Test: `test/tracker-failure-verdict.test.ts` (new); `test/tracker-poll.test.ts` (unchanged; run to prove behaviour held)
 
 **Interfaces:**
@@ -117,7 +120,7 @@ update-branch.
 - Produces (server): `GithubClient.graphql<T>(query: string, variables: Record<string, unknown>, opts: { token: string }): Promise<GithubResponse<T>>` —
   POSTs `https://api.github.com/graphql`; never throws. A 200 whose body carries `errors` sets `error` to the first message joined; an error of
   `type: 'RATE_LIMITED'` is reported as `status: 429`; `type: 'FORBIDDEN'` as `403`; `type: 'NOT_FOUND'` as `404`; other typed errors keep `200` with
-  `error` set (the caller treats `error !== undefined` as a failure). `client.graphqlRate` holds GraphQL's `x-ratelimit-*`; `client.rate` is untouched by
+  `error` set (the caller treats `error !== null` as a failure — `GithubResponse.error` is `string | null`). `client.graphqlRate` holds GraphQL's `x-ratelimit-*`; `client.rate` is untouched by
   it.
 - `FakeGithub` gains: `pulls: Map<repo, FakePr[]>` with an `addPr(repo, partial)` helper, a `/graphql` route answering the list query (open PRs of the
   requested repo, ordered by `updatedAt` desc, `first: 100`, `totalCount`), the single-PR query (any state), and both mutations; `PUT .../pulls/:n/merge`
@@ -137,7 +140,8 @@ update-branch.
 - [ ] **Step 2: Run** `pnpm run test:jest -- test/github-graphql.test.ts` — FAIL.
 - [ ] **Step 3: Implement.** Verify `viewerCanUpdateBranch` against GitHub's GraphQL schema before relying on it (parked question #2); if absent, derive
   `canUpdateBranch` as `mergeState === 'behind'` and say so in the task report. Record GraphQL headers in their own field; reuse `request()`'s
-  normalisation so `retryAfter`/`secondary` arrive as values. `refuseRepo` guards the repo argument as the REST calls do.
+  normalisation so `retryAfter`/`secondary` arrive as values. `graphql` stays repo-agnostic (no repo argument); the list and single-PR builders in `pulls.query.ts` take `repo` and refuse a malformed one with `isRepo`
+  (`github.client.ts` ≈ :38) before the owner/name split, as the REST calls refuse theirs.
 - [ ] **Step 4: Run** — PASS; `test/tracker-client-write.test.ts` still PASS; typecheck clean.
 - [ ] **Step 5: Commit** `feat(server): GitHub GraphQL call and pull-request queries`.
 
