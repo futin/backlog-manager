@@ -13,7 +13,9 @@
  *    reach; nothing in a request shape names a host, and `repo` is validated
  *    (`isRepo`) before it is interpolated into a path. Spec §11: the server
  *    now holds a credential, so "where can this call go" has to be answerable
- *    by reading one file.
+ *    by reading one file. Since the PRs page, one GraphQL endpoint too
+ *    (`graphql()`), on the same host; its repo travels as a variable, checked by
+ *    `pulls.query.ts` with the same `isRepo` before it is split.
  * 2. **Every response's rate-limit headers are recorded**, including a `304`'s
  *    and a failure's. A `304` costs no budget, but it still REPORTS the
  *    budget, and the Sources card's "4,812 of 5,000 left" would otherwise
@@ -118,7 +120,8 @@ export class GithubClient {
    * Keeps this file's three rules. The host is `API`; the response's headers are recorded into the GraphQL pool (`graphqlRate`) and handed back as THIS
    * answer's `rate`, so `failureVerdict` reads GraphQL's own remaining/reset; nothing throws. A non-200 (a secondary limit's 403, a 502) is normalised by
    * `request()` exactly as REST's is, so `retryAfter` and `secondary` arrive as values. A 200 whose body carries `errors` sets `error` to their messages
-   * joined, `data` to `null`, and restates the first typed error `GRAPHQL_STATUS` knows as that status.
+   * joined, `data` to `null`, and restates the first typed error `GRAPHQL_STATUS` knows as that status. A 200 with neither `errors` nor `data` comes back
+   * as `status: 200, error: null, data: null` — a success with nothing in it, which every caller null-checks.
    */
   async graphql<T>(query: string, variables: Record<string, unknown>, opts: { token: string }): Promise<GithubResponse<T>> {
     const res = await this.request<{ data?: T | null; errors?: GraphqlError[] }>('POST', `${API}/graphql`, {
@@ -132,7 +135,9 @@ export class GithubClient {
     const message = errors.map((e) => (typeof e?.message === 'string' ? e.message : 'GraphQL error')).join('; ');
     const typed = errors.find((e) => typeof e?.type === 'string' && GRAPHQL_STATUS[e.type] !== undefined);
     const status = typed === undefined ? 200 : GRAPHQL_STATUS[typed.type as string];
-    return { ...res, status, data: null, error: message };
+    // REST tells a secondary limit apart by its sentence (`request()`); GraphQL sends that same sentence under `RATE_LIMITED`, so it is read the same way.
+    const secondary = typed?.type === 'RATE_LIMITED' && /secondary rate limit/i.test(message);
+    return { ...res, status, data: null, error: message, secondary };
   }
 
   /**

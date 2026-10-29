@@ -45,6 +45,22 @@ describe('GithubClient.graphql', () => {
     expect(client.graphqlRate.remaining).toBe(0);
   });
 
+  it('a failed GraphQL answer still records into its own pool only', async () => {
+    const client = new GithubClient(
+      byUrl((url) =>
+        url.endsWith('/graphql')
+          ? { status: 502, body: { message: 'Bad Gateway' }, headers: { 'x-ratelimit-remaining': '17' } }
+          : { status: 200, body: [], headers: { 'x-ratelimit-remaining': '4000' } }
+      )
+    );
+    await client.issues('futin/x', { token: TOKEN });
+    const res = await client.graphql('query Q { x }', {}, { token: TOKEN });
+    expect(res.status).toBe(502);
+    expect(res.rate.remaining).toBe(17);
+    expect(client.rate.remaining).toBe(4000);
+    expect(client.graphqlRate.remaining).toBe(17);
+  });
+
   it('POSTs the query and variables to the one host', async () => {
     const gh = new FakeGithub();
     const client = new GithubClient(gh.fetch);
@@ -72,6 +88,13 @@ describe('GithubClient.graphql', () => {
       const verdict = failureVerdict(res, Date.now());
       expect(verdict?.access).toBe('rate-limited');
       expect(verdict?.secondary).toBe(false);
+    });
+
+    it('a RATE_LIMITED secondary limit is tagged secondary', async () => {
+      const res = await answer({ type: 'RATE_LIMITED', message: 'You have exceeded a secondary rate limit. Please wait a few minutes before you try again.' });
+      expect(res.status).toBe(429);
+      expect(res.secondary).toBe(true);
+      expect(failureVerdict(res, Date.now())?.secondary).toBe(true);
     });
 
     it('FORBIDDEN is a 403', async () => {
@@ -122,7 +145,11 @@ describe('GithubClient.graphql', () => {
   });
 });
 
-/** Two nodes with every field distinct, so a mapping that reads one field into another — or one node's into the other's row — fails. */
+/**
+ * Three nodes with every field distinct, so a mapping that reads one field into another — or one node's into another's row — fails. The four booleans are
+ * laid out so no two columns share a pattern and none is constant across the three rows (draft T/F/F, crossRepository F/T/F, maintainerCanModify F/F/T,
+ * canUpdateBranch T/T/F): reading any boolean from another, or hard-coding one, breaks at least one row.
+ */
 const NODE_7: GqlPullRequest = {
   number: 7,
   title: 'feat: seven',
@@ -132,7 +159,7 @@ const NODE_7: GqlPullRequest = {
   headRefOid: 'a'.repeat(40),
   baseRefName: 'main',
   isCrossRepository: false,
-  maintainerCanModify: true,
+  maintainerCanModify: false,
   updatedAt: '2026-10-20T10:00:00Z',
   mergeable: 'CONFLICTING',
   mergeStateStatus: 'BEHIND',
@@ -157,10 +184,30 @@ const NODE_12: GqlPullRequest = {
   mergeable: 'MERGEABLE',
   mergeStateStatus: 'CLEAN',
   reviewDecision: 'APPROVED',
-  viewerCanUpdateBranch: false,
+  viewerCanUpdateBranch: true,
   author: { login: 'bob' },
   autoMergeRequest: null,
   commits: { nodes: [{ commit: { statusCheckRollup: { state: 'EXPECTED' } } }] }
+};
+
+const NODE_19: GqlPullRequest = {
+  number: 19,
+  title: 'chore: nineteen',
+  url: 'https://github.com/futin/x/pull/19',
+  isDraft: false,
+  headRefName: 'execute/44',
+  headRefOid: 'c'.repeat(40),
+  baseRefName: 'release',
+  isCrossRepository: false,
+  maintainerCanModify: true,
+  updatedAt: '2026-10-25T07:15:00Z',
+  mergeable: 'UNKNOWN',
+  mergeStateStatus: 'BLOCKED',
+  reviewDecision: 'REVIEW_REQUIRED',
+  viewerCanUpdateBranch: false,
+  author: { login: 'carol' },
+  autoMergeRequest: { mergeMethod: 'MERGE', enabledAt: '2026-10-25T07:20:00Z' },
+  commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] }
 };
 
 describe('toRow', () => {
@@ -175,7 +222,7 @@ describe('toRow', () => {
       headSha: 'a'.repeat(40),
       base: 'main',
       crossRepository: false,
-      maintainerCanModify: true,
+      maintainerCanModify: false,
       updatedAt: '2026-10-20T10:00:00Z',
       mergeable: 'conflicting',
       mergeState: 'behind',
@@ -201,6 +248,25 @@ describe('toRow', () => {
       review: 'approved',
       checks: 'pending',
       autoMerge: null,
+      canUpdateBranch: true
+    });
+    expect(toRow(NODE_19)).toEqual({
+      number: 19,
+      title: 'chore: nineteen',
+      url: 'https://github.com/futin/x/pull/19',
+      author: 'carol',
+      draft: false,
+      head: 'execute/44',
+      headSha: 'c'.repeat(40),
+      base: 'release',
+      crossRepository: false,
+      maintainerCanModify: true,
+      updatedAt: '2026-10-25T07:15:00Z',
+      mergeable: 'unknown',
+      mergeState: 'blocked',
+      review: 'review-required',
+      checks: 'success',
+      autoMerge: { method: 'merge', enabledAt: '2026-10-25T07:20:00Z' },
       canUpdateBranch: false
     });
   });
@@ -258,6 +324,17 @@ describe('the PR queries against the fake', () => {
     ]);
     expect(res.data?.totalCount).toBe(2);
     expect(res.data).toMatchObject({ squashMergeAllowed: true, mergeCommitAllowed: false, rebaseMergeAllowed: true, autoMergeAllowed: false });
+  });
+
+  it('totalCount counts past the 100 rows the list returns', async () => {
+    const gh = new FakeGithub();
+    for (let n = 1; n <= 101; n++) gh.addPr('futin/y', { number: 1000 + n });
+    const res = await readPullList(new GithubClient(gh.fetch), 'futin/y', { token: TOKEN });
+    expect(res.data?.rows).toHaveLength(100);
+    expect(res.data?.totalCount).toBe(101);
+    // Newest first: the last seeded PR is the newest, and the first seeded one is the one cut.
+    expect(res.data?.rows[0].number).toBe(1101);
+    expect(res.data?.rows.some((r) => r.number === 1001)).toBe(false);
   });
 
   it('refuses a malformed repo without a request', async () => {
