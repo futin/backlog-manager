@@ -241,6 +241,11 @@ except the tracker release in §7's shape (comment, plain `stop`), because there
 
 The PR body, written to `<tmp>/pr.md`:
 
+- first, a `## What's new` section: one to three lines in the target app's user terms saying what someone using it can now do — no file paths, flags or
+  function names — or `None — <reason>` on its own line when the change has nothing user-visible. The commit is `feat:` or `fix:`, so the PR cuts a
+  release and this section is its release note; a repo whose CI passes release-kit's `require-notes: true` fails `ci / pr-title` while it is missing or
+  empty, which would leave an auto-merge PR waiting forever. Where the target repo's `.github/pull_request_template.md` carries its own guide in that
+  section's comment, follow it. The section ends at the next `## ` heading, so everything below goes under a `## Outcome` heading;
 - the Outcome summary — what was done, the verification command and the lines of its output that show it passing, the `Contract sweep:` and `Red proof:`
   lines;
 - the review verdict, the number of fix rounds, and the one-line summary of every Critical/Important finding the rounds fixed — never a local report path;

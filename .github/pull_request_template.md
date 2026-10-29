@@ -17,8 +17,9 @@ Spec: `docs/superpowers/specs/YYYY-MM-DD-<name>-design.md` · Plan: `docs/superp
 
 ## What's new
 
-<!-- 1–3 lines in user terms: what someone using the board or the skills can now do. These lines become the release notes (docs/workflows/ci.md
-     §Releases). Delete this section for PRs with nothing user-visible. -->
+<!-- Required on feat / fix / perf, and `ci / pr-title` fails while it is empty: these lines become the release notes (docs/workflows/ci.md §Releases).
+     1–3 lines in user terms: what someone using the board or the skills can now do. Nothing user-visible on a feat / fix / perf? Write `None` (or
+     `None — <reason>`) on its own line; it is never shown. Other types may delete this section. -->
 
 ## Why this shape
 
