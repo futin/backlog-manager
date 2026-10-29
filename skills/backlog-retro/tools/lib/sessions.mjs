@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { sidecarFiles } from './paths.mjs';
+import { sidecarFiles, sidecarRunRoot } from './paths.mjs';
 
 // `<id>.jsonl` | `<id>-fix-<n>.jsonl` | `<id>-retry-<n>.jsonl`, and nothing
 // else. The FILE NAME is the only thing that can classify these: `claude -p
@@ -148,12 +148,26 @@ export function readSessions(projectDirPath, project) {
 // Which run a transcript belongs to.
 //
 // The sidecar directories are keyed by item id and nothing else, so an item
-// two runs dispatched has ONE transcript name with two candidate owners.
-// The rule is the latest run that actually dispatched it — a later run's
-// session overwrote the earlier one's file, so the surviving bytes are the
-// later run's — and the ambiguity is reported rather than hidden, because a
-// reader who sees a $6 session against a run that never ran it deserves to
-// know why.
+// two runs dispatched has one transcript name per storage location and
+// several candidate owners. Since task-31 the location answers most of it:
+// the live run writes flat under the project directory, and `init` moves
+// that into `runs/<stem>/` beside the `runs/<stem>.json` it archives. So a
+// log under the sidecar root of a candidate run is that run's — it wrote
+// the surviving bytes — and nothing is ambiguous enough to report (#345).
+// Before this, every transcript went to the latest dispatching run, so an
+// id reused across runs filed the older run's cost against the newer one,
+// read the older usage entry as `unjoined` and compared each log against
+// the wrong run's entry.
+//
+// The location settles nothing when no candidate's root holds the log: a
+// run archived before task-31 left no directory of its own, and an archive
+// can hold older runs' logs that had accumulated flat. There the rule is
+// still the latest dispatching run — a later run's session overwrote an
+// earlier one's file — bounded, when the archive is a known run's, by that
+// run's start: the file was already in place when its archive was cut, so
+// no run started after it can have written it. The ambiguity is reported
+// rather than hidden, because a reader who sees a $6 session against a run
+// that never ran it deserves to know why.
 function dispatchIndex(items) {
   const index = new Map();
   for (const item of items) {
@@ -175,9 +189,60 @@ function matchUsage(item, session) {
   return item.usage.find((u) => u && u.kind === session.kind && (u.loop ?? null) === (session.loop ?? null)) ?? null;
 }
 
+// The project directory a session was read from, recovered from its own
+// row: `readSessions` keys it `<project>/<path relative to the project
+// directory>`, so the file path minus that relative part is the directory.
+// No filesystem read — the join stays a pure function of the rows. `null`
+// for a row that was not keyed that way, which simply skips the root match.
+function sessionProjectDir(session) {
+  if (typeof session.key !== 'string' || typeof session.file !== 'string') return null;
+  const prefix = `${session.project}/`;
+  if (!session.key.startsWith(prefix)) return null;
+  const rel = session.key.slice(prefix.length).split('/').join(path.sep);
+  const tail = `${path.sep}${rel}`;
+  return session.file.endsWith(tail) ? session.file.slice(0, -tail.length) : null;
+}
+
+// `{ chosen, ambiguous }` for one session among the runs that dispatched
+// its item — the rule is the comment above `dispatchIndex`. `ambiguous` is
+// what raises the `collision` caveat: more than one candidate was left and
+// the location did not pick between them.
+function chooseRun(candidates, session, runsById, runsByFile) {
+  const projectDirPath = sessionProjectDir(session);
+  // The directory holding `logs/`: the project directory for a live log,
+  // `runs/<stem>/` for an archived one.
+  const root = path.dirname(path.dirname(session.file));
+  if (projectDirPath !== null) {
+    const owner = candidates.find((c) => {
+      const run = runsById.get(runKey(c.project, c.runId));
+      return run && typeof run.file === 'string' && sidecarRunRoot(projectDirPath, run) === root;
+    });
+    if (owner) return { chosen: owner, ambiguous: false };
+  }
+
+  let pool = candidates;
+  const archivedBy = runsByFile.get(`${root}.json`);
+  if (archivedBy && archivedBy.project === session.project) {
+    const cut = Date.parse(archivedBy.startedAt ?? '');
+    const bounded = Number.isFinite(cut) ? candidates.filter((c) => startedMs(runsById, c) <= cut) : [];
+    if (bounded.length > 0) pool = bounded;
+  }
+  const chosen = pool
+    .slice()
+    .sort((a, b) => startedMs(runsById, a) - startedMs(runsById, b))
+    .at(-1);
+  return { chosen, ambiguous: pool.length > 1 };
+}
+
 export function attachSessions(items, sessions, runsById) {
   const caveats = [];
   const index = dispatchIndex(items);
+  // Archived run rows by their file, so a session under `runs/<stem>/` can
+  // find the run that archive was cut for (`chooseRun`'s fallback bound).
+  const runsByFile = new Map();
+  for (const run of runsById.values()) {
+    if (run && !run.current && typeof run.file === 'string') runsByFile.set(run.file, run);
+  }
   const collisionsReported = new Set();
   // Every usage entry a transcript matched, so the walk after the loop can
   // name the ones none did. Keyed by the entry object itself: `matchUsage`
@@ -201,14 +266,11 @@ export function attachSessions(items, sessions, runsById) {
       // its cost is still real money this machine spent.
       continue;
     }
-    const chosen = candidates
-      .slice()
-      .sort((a, b) => startedMs(runsById, a) - startedMs(runsById, b))
-      .at(-1);
+    const { chosen, ambiguous } = chooseRun(candidates, session, runsById, runsByFile);
     session.runId = chosen.runId;
     chosen.sessionKeys.push(session.key);
 
-    if (candidates.length > 1 && !collisionsReported.has(key)) {
+    if (ambiguous && !collisionsReported.has(key)) {
       collisionsReported.add(key);
       const ids = candidates.map((c) => c.runId).join(', ');
       caveats.push({
