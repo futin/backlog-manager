@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { ruleBlock } from './helpers/css-rule';
 
 /**
  * Daylight's status colours hold WCAG AA, and the four dark themes do not move to get there.
@@ -418,5 +419,62 @@ describe('the split reaches every rule', () => {
       .filter(([, l]) => l.includes('var(--amber)'))
       .map(([n, l]) => `styles.css:${n}: ${l.trim()}`);
     expect(lines).toEqual([]);
+  });
+});
+
+/**
+ * A control on `--board` under the pointer must not fade into the board. The hover fill of everything drawn straight on the page — the Board band's run
+ * and plan-review chips, and every `Chip` and `Segmented` a `Band` holds — was `--strip-hi`, which on the four dark palettes is lighter than the paper, so
+ * the control lifts; on daylight it is #f2f2f1, a tint between the white paper and the #f4f4f3 board, 1.02:1 against the board, so a hovered white chip
+ * looked transparent. `--tile-hover` is the token those rules read now: `--strip-hi`'s own value on the dark palettes, its own grey on daylight.
+ * `--strip-hi` is not retuned, because it also fills the rail's active row, popover rows and pressed chips — all on paper, where it reads.
+ */
+describe('a hovered control on the board stays distinct from it', () => {
+  const PALETTES = [...DARK, 'daylight'] as const;
+
+  it('on every palette --tile-hover sits at least as far from --board as a resting control’s --strip does', () => {
+    const fails: string[] = [];
+    for (const id of PALETTES) {
+      const tokens = cascade(id);
+      const board = color('var(--board)', tokens);
+      const hovered = ratio(board, color('var(--tile-hover)', tokens));
+      const resting = ratio(board, color('var(--strip)', tokens));
+      if (hovered < resting) fails.push(`${id}: --tile-hover is ${hovered.toFixed(3)}:1 on --board, --strip is ${resting.toFixed(3)}:1`);
+    }
+    expect(fails).toEqual([]);
+  });
+
+  it('on the four dark palettes --tile-hover is --strip-hi’s own value, so they do not move', () => {
+    for (const id of DARK) {
+      const tokens = cascade(id);
+      expect({ id, hover: color('var(--tile-hover)', tokens) }).toEqual({ id, hover: color('var(--strip-hi)', tokens) });
+    }
+  });
+
+  it('the rules that hover on the board read it, and the paper panels that hang from a band point the context token back', () => {
+    const decl = (selector: string, prop: string): string | null => {
+      const body = ruleBlock(STYLES, selector);
+      const m = body && new RegExp(`(?<![-\\w])${prop}\\s*:\\s*([^;}]+)`).exec(body);
+      return m ? m[1].trim() : null;
+    };
+    expect({
+      runChip: decl('.board-run-chip:hover', 'background'),
+      planChip: decl('.board-plan-chip[aria-pressed="true"]', 'background'),
+      band: decl('.ui-band', '--hover-fill'),
+      popover: decl('.ui-popover', '--hover-fill'),
+      chip: decl('.ui-chip:hover:not(:disabled)', 'background'),
+      flatChip: decl('.ui-chip-flat:hover:not(:disabled)', 'background'),
+      segment: decl('.ui-seg button:hover:not(:disabled)', 'background'),
+      root: cascade('daylight')['--hover-fill']
+    }).toEqual({
+      runChip: 'var(--tile-hover)',
+      planChip: 'var(--tile-hover)',
+      band: 'var(--tile-hover)',
+      popover: 'var(--strip-hi)',
+      chip: 'var(--hover-fill)',
+      flatChip: 'var(--hover-fill)',
+      segment: 'var(--hover-fill)',
+      root: 'var(--strip-hi)'
+    });
   });
 });
